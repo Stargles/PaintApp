@@ -9,11 +9,28 @@ Measured for this pass: 55,393 lines of app, 45,427 of tests, **15,762 doc-comme
 app is `///`**. `CanvasManager` is 12 files / 7,382 lines / 91 `@Published`. `CanvasView.swift` is
 3,213.
 
+**Status, checked 2026-08-27: finding 1 is closed** — `CanvasTouchOwner` shipped in `38b6fed`, the same
+day this file was written (commit `6e1f9ce`), a few commits later. Marked in place at §1.1 and in §4.
+Findings 2–4 are unchanged and still open, reverified against `main` at this later date rather than
+carried forward from this file's original text — their proposed remedies (`FrameInputs`, a
+`writeAtomically` return value, undefaulting `LayerManifest.init`) are not in the tree.
+
 ---
 
 ## 1. What will actually hurt, ranked
 
-### 1. Nothing answers "who owns this canvas touch" — and this is where the bugs are
+### 1. Nothing answers "who owns this canvas touch" — and this is where the bugs are — CLOSED, `38b6fed`
+
+**Closed, 2026-08-22 (same day, later): `CanvasTouchOwner` shipped as proposed below.** It is a pure
+enum in `Models/CanvasTouchOwner.swift`, computed by `owner(in:)`, and it is now what the five
+container recognizers in `CanvasView.swift` consult before acting — exactly the "one rule in one
+place" the remedy paragraph asks for, replacing the thirteen bespoke guards. Commit `38b6fed` shipped
+two behaviour changes the enumeration surfaced beyond the fix itself: 1,678 reachable combinations
+where two things acted on one touch (a guide drag that also flooded a fill, a caret placement that
+also flooded, the pick tool's colour changing under a fill press), and 118 combinations owned by
+nobody, all on a vector layer, closed by a new `.moveBoxCommit` case that puts a floating piece down on
+a tap outside it. The analysis below is kept as written — it is the reasoning the type exists to
+answer — and is history, not a live task list.
 
 One canvas touch is arbitrated by **fourteen independent decisions across three unrelated mechanisms**,
 each spelling its own predicate over the same four inputs (`selectedTool`, `activePanel`,
@@ -184,14 +201,14 @@ site then must state every field. Nine call sites to update; no behaviour change
 
 ## 4. The owner's question, answered
 
-**Yes — large features can be added safely, with one caveat and one thing to do first.** The parts that
-are expensive to get right are right: the render path is pure and snapshot-driven, the save is atomic
-and backed up, undo is one budgeted place, the tool and layer-kind switches force the next case to
-answer, and the reasoning behind every hard decision is written next to it. Three of today's four
-findings are additive fixes measured in tens of lines, not restructurings.
+**Yes — large features can be added safely, with one caveat and one thing to do first** (the caveat is
+resolved as of `38b6fed`, same day — see below). The parts that are expensive to get right are right:
+the render path is pure and snapshot-driven, the save is atomic and backed up, undo is one budgeted
+place, the tool and layer-kind switches force the next case to answer, and the reasoning behind every
+hard decision is written next to it. Three of today's four findings are additive fixes measured in tens
+of lines, not restructurings — findings 2–4 remain open (status note at the top of this file).
 
-The caveat is the touch layer, and it is narrow: **the app has no single place that says who owns a
-canvas touch**, and three of the last week's defects were exactly that. Before the next large feature
-adds a fifteenth gate, extract `CanvasTouchOwner` (§1.1) — one enum, one pure function, one test file.
-It is a day's work, it retires a class of bug the owner has personally reported three times, and every
-tool added after it inherits the answer instead of re-deriving it.
+The caveat was the touch layer, and it was narrow: **the app had no single place that said who owns a
+canvas touch**, and three of the last week's defects were exactly that. **This is done** — `CanvasTouchOwner`
+(§1.1) shipped the same day as this review, `38b6fed`, and every tool added after it inherits the
+answer instead of re-deriving it.

@@ -13,9 +13,11 @@ forward include one whose only job is to hand it back to the box that wrote it. 
 defects that are properties of the indirection itself and cannot be fixed while it stands — one of
 which silently discards ink the artist just drew.
 
-The changes are: **the bit width is not the justification and must not be promised** (§6 — the honest
-answer is that TODO item (8)'s already-settled 24 bits stays 24 bits), and **deleting the field is a
-separate, optional decision that should be taken after the baking lands, not with it** (§7).
+The changes are: **the bit width is not the justification, even though it did move on account of this
+ruling** (§6, corrected below — TODO item (8) was 24 bits when this file was written and has since
+settled narrower, at 16, and this ruling is part of why; see TODO.md's Canvas geometry section for the
+current number and the rest of its rulings), and **deleting the field is a separate, optional decision
+that should be taken after the baking lands, not with it** (§7).
 
 ---
 
@@ -35,11 +37,14 @@ the answer is worth:
 1. **It is a *cel* transform, not a layer transform**, and the codebase already knows this — see §4.
    Every name in the app says "layer" and the storage says "cel". The load-bearing consequence is that
    baking rewrites **one drawing, not the animation**.
-2. **TODO item (8) is not open.** It was decided on 2026-08-27 (commit `f44a2e9`, TODO.md:69-84):
-   **fixed width, 24 signed bits an axis at quarter-pixel.** The owner's 15-bit arithmetic was already
-   overtaken, and it was overtaken by CANVAS_RESIZE.md §2's finding that **the layer transform is only
-   one of three independent reasons a stored coordinate leaves `[0, extent)`**. Adopting this ruling
-   removes one of the three. It does not restore 15 bits, and it does not change the 24.
+2. **TODO item (8) is not open — correction: it was reopened the same day, after this was written.**
+   It was decided on 2026-08-27 (commit `f44a2e9`, TODO.md:69-84): **fixed width, 24 signed bits an
+   axis at quarter-pixel.** The owner's 15-bit arithmetic was already overtaken, and it was overtaken
+   by CANVAS_RESIZE.md §2's finding that **the layer transform is only one of three independent reasons
+   a stored coordinate leaves `[0, extent)`**. Adopting this ruling removes one of the three. It does
+   not restore the owner's original 15 bits — but it did not leave the 24 standing either: a few hours
+   later the owner settled item (8) at **16 bits**, with this ruling as part of why. See the correction
+   in §6.
 3. **`ImageRef`'s synthesized `Codable` does not "break every existing document."** ADD_TEXT stage 2's
    per-element decode (`VectorCanvasData.LossySlot`, `VectorLayer.swift:2810-2830`) contains a failed
    element to *that element*. A new non-optional field on `ImageRef` would therefore **silently drop
@@ -382,34 +387,62 @@ the 24 pt import cascade by the layer scale (`:673-677`), and `localText(fromCan
 
 ---
 
-## 6. The bit-width outcome — the honest number
+## 6. The bit-width outcome — the honest number, corrected
 
-**The owner's 15/16-bit hope is not reached, and the ruling should not be sold on it.**
+**Correction, added after the fact.** This section was current for about half a day. It argued the
+ruling buys nothing on the bit width and concluded item (8) should not be re-opened over it. A few
+hours later, the same day, the owner reopened it anyway and settled narrower: **item (8) is now 16
+bits an axis, quarter-pixel, origin at the canvas centre, plus 8 bits of pressure — 5 bytes a sample**
+(TODO.md, Canvas geometry; commits `c267322`, `35b541c`, `69d1492`). TODO.md's own dependency line
+says why: *"(12) is what narrows (8)'s field from 24 bits to 16."* The analysis below is kept because
+its diagnosis held up even where its conclusion did not — the correction is at the end of this
+section, and it does not change the verdict.
+
+**This ruling alone does not reach the owner's 15/16-bit hope, and should not be sold on it** — the
+paragraph that follows is what this section knew at the time. It reads oddly now only because the
+owner reached 16 anyway, later the same day, by a route this section had not yet seen.
 
 TODO item (8) settled 24 signed bits an axis at quarter-pixel on 2026-08-27, because
 `ceil(log2(extent)) + 2` bounds a coordinate **only if stored coordinates lie inside `[0, extent)`**,
 and CANVAS_RESIZE.md §2 found three independent reasons they do not. Adopting this ruling retires
 exactly one of the three:
 
-| reason a coordinate leaves `[0, extent)` | after the ruling |
-|---|---|
-| **1. Layer-local storage.** `8192 / 0.02 = 409,600 pt` (TODO.md:73-78) | **Gone.** There is no local space, so there is no `1/k` term. |
-| **2. Touches keep being delivered outside the view.** Nothing clamps a sample to the canvas rect | **Unchanged**, and worse than it looks: I could find **no clamp on canvas zoom anywhere in `CanvasView.swift`** — no `minimumZoomScale`, no clamp in `handlePinch` (`:3129`) — and five overlays guard with `max(canvasScale, 0.01)`, which is the code contemplating 1 screen point = 100 canvas points. A drag across a 1366 pt screen at that zoom records ~136,600 canvas points. (INFERRED — an absence of evidence; a clamp may live somewhere I did not find, and this is §9's fourth question.) |
-| **3. A shrink parks content outside the bounds.** `setCanvasPadding` crops the raster tiers and leaves vector elements where they are | **Unchanged.** Bounded by the *old* extent, so ≤ 8192. |
-| **4. (not in that list, and it should be) The lasso float's scale has a floor and no ceiling.** `uniformlyScaled` clamps with `max(…, minimumScale)` and nothing above (`ObjectTransformFrame.swift:312`); `stretched` the same per axis (`:340-341`) | **Unchanged**, and it already writes into element geometry today. Repeated grow gestures are unbounded in principle. |
+| reason a coordinate leaves `[0, extent)` | after this ruling | after item (8)'s final ruling |
+|---|---|---|
+| **1. Layer-local storage.** `8192 / 0.02 = 409,600 pt` (TODO.md:73-78) | **Gone.** There is no local space, so there is no `1/k` term. | Gone, same as before — and this is the reason the final field can be sized to the addressable canvas at all, rather than to some multiple of it. |
+| **2. Touches keep being delivered outside the view.** Nothing clamps a sample to the canvas rect | **Unchanged**, and worse than it looks: I could find **no clamp on canvas zoom anywhere in `CanvasView.swift`** — no `minimumZoomScale`, no clamp in `handlePinch` (`:3129`) — and five overlays guard with `max(canvasScale, 0.01)`, which is the code contemplating 1 screen point = 100 canvas points. A drag across a 1366 pt screen at that zoom records ~136,600 canvas points. (INFERRED — an absence of evidence; a clamp may live somewhere I did not find, and this is §9's fourth question.) | Still unclamped in the tree (§9.4, and filed to BUGS.md per TODO.md), but no longer a bit-width problem: the encoder **saturates instead of wrapping** at the field boundary (TODO.md — *"if you draw outside the 16k, it should not wrap but rather clamp"*), so an out-of-range sample flattens against ±8,192 pt instead of demanding more bits to represent it. |
+| **3. A shrink parks content outside the bounds.** `setCanvasPadding` crops the raster tiers and leaves vector elements where they are | **Unchanged.** Bounded by the *old* extent, so ≤ 8192. | Unchanged, and already inside the field: the old extent is ≤ 8192 by construction, and the centred field covers ±8,192 exactly. |
+| **4. (not in that list, and it should be) The lasso float's scale has a floor and no ceiling.** `uniformlyScaled` clamps with `max(…, minimumScale)` and nothing above (`ObjectTransformFrame.swift:312`); `stretched` the same per axis (`:340-341`) | **Unchanged**, and it already writes into element geometry today. Repeated grow gestures are unbounded in principle. | Still unbounded in principle, same as reason 2 — the saturating clamp is what makes an unbounded reason survivable without an unbounded field. |
 
-**The honest bound.** Retiring reason 1 takes the *accidentally* reachable worst case from 409,600 pt
-— one corner drag — down to whatever reason 2 allows, which on the evidence above is ~137,000 pt and
-is not provably bounded at all. Reasons 2 and 4 are both unbounded-in-principle, so **no field width
-is safe without a saturating clamp at encode time**, and nothing in the tree clamps today.
+**The honest bound, and it held up.** Retiring reason 1 takes the *accidentally* reachable worst case
+from 409,600 pt — one corner drag — down to whatever reason 2 allows, which on the evidence above is
+~137,000 pt and is not provably bounded at all. Reasons 2 and 4 are both unbounded-in-principle, so
+**no field width is safe without a saturating clamp at encode time**, and nothing in the tree clamps
+today. That diagnosis is exactly what the owner's later ruling answered — clamp, don't wrap, at the
+encode boundary — so the field never has to be wide enough to *represent* reasons 2 and 4's worst
+case, only wide enough to hold the ordinary case, which is what reason 1's removal buys.
 
-**The honest field width.** If reason 2 were clamped to, say, 4× the extent (32,768 pt), a signed
-quarter-pixel field would need 18 bits; 20 bits (±131,072 pt) would restore 4× headroom. Against
-today's settled 24, that saves **one byte of a seven-byte sample — 14%** — and costs the byte
-alignment that made 24 the choice. It is not a reason to do anything.
+**Correction to "the honest field width," below — this section was too conservative.** It assumed the
+clamp would need headroom: room to represent a few multiples of the extent before saturating, so an
+out-of-range coordinate degrades gracefully instead of pinning immediately at the edge. Under that
+assumption (4× headroom, 32,768 pt), a signed quarter-pixel field needs 18 bits; 20 bits (±131,072 pt)
+restores 4× headroom, and against the then-settled 24 that saves **one byte of a seven-byte sample —
+14%** — and costs the byte alignment that made 24 the choice. That was the honest number *this
+section* could support. **The owner's actual ruling asked for no headroom at all**: saturate *at the
+field's own boundary*, accepting that a canvas at exactly 16k loses its off-canvas margin entirely — a
+caveat the owner accepted on the ground that such a canvas *"will likely never be used for
+animation"* (TODO.md). Zero headroom, plus centring the origin to buy back the sign bit, is what
+reaches **16 bits an axis — 5 bytes a sample**, against the 7 this section computed above.
 
-**Stated plainly: the ruling is worth adopting for §2's three defects and §1's eleven inversions. It is
-worth nothing for the bit width, and TODO item (8) should not be re-opened on account of it.**
+**Stated plainly, corrected: the ruling is worth adopting for §2's three defects and §1's eleven
+inversions — that remains the reason, not the bytes.** Item (8) *was* re-opened on the strength of
+this ruling and settled narrower, because removing reason 1 is what makes a zero-headroom clamp on
+reasons 2–4 survivable as an edge case rather than a routine, silent loss on every shrunk layer. But by
+this section's own accounting — the only accounting available before the owner chose to accept zero
+headroom — what this ruling alone is worth is the 14%, one-byte figure above; the rest of the drop to
+16 bits is owed to the separate clamp-and-centre rulings, a judgement about acceptable edge-case loss,
+not a consequence of removing the layer transform. The saving is smaller than the 24-to-16 headline
+suggests, and it was never the point.
 
 ---
 
@@ -455,7 +488,9 @@ in §2 item 8 that deliberately exercise non-identity transforms, which mostly b
 **Judge this stage after stage 1 has been on the iPad for a week.** It buys clarity, not behaviour, and
 it is the churn.
 
-**Stage 4 — narrow the coordinate field. Not owed, and §6 says do not.**
+**Stage 4 — narrow the coordinate field. Not owed by this document** — item (8)'s width is TODO.md's
+decision, settled independently at 16 bits (§6, corrected), and shipping it is not gated on any stage
+here.
 
 **Total, honestly: about a week including a device pass**, of which stages 0–2 are two and a half days
 and carry all of the value. Stage 3 is the other half and carries none of it. That is not a small
@@ -505,8 +540,10 @@ owner's instinct reacted to, without having seen the count.
 
 1. **Adopt** the storage rule: display lists are canvas coordinates; a cel transform is baked, never
    stored.
-2. **Do not** promise the bit width (§6). TODO item (8)'s 24 bits stands, and the encoder needs a
-   saturating clamp regardless.
+2. **Do not** promise the bit width off this document (§6, corrected) — TODO item (8) has since
+   settled at 16 bits, not 24, on the strength of this ruling plus the owner's later clamp and centring
+   rulings; the encoder needs a saturating clamp regardless of which document gets credit for the
+   number.
 3. **Stage 3 is optional** and should be decided after stage 1 has been used (§7).
 4. **The `stampSpacing` disclosure needs a ruling** before stage 1 merges (§9.1).
 
@@ -525,11 +562,15 @@ owner's instinct reacted to, without having seen the count.
    (§4). `isVectorTransforming`, `setVectorTransform`, `beginLiveLayerTransform` and
    `LiveLayerTransform` all mislead a reader about what a Move touches. Cosmetic, and cheap while the
    file is open.
-4. **Is there a clamp on canvas zoom?** §6 reason 2 turns on it and I could not find one. If the answer
-   is no, that is worth its own BUGS.md entry independent of everything here — an unclamped zoom makes
-   the stored-coordinate domain unbounded whatever the storage model is.
-5. **Should the fixed-point encoder saturate, refuse, or assert?** Not answered by item (8), and it has
-   to be answered before that item ships.
+4. **Is there a clamp on canvas zoom?** §6 reason 2 turns on it and I could not find one. **Answered:
+   no.** TODO.md confirms nothing in the tree clamps zoom today and files it to BUGS.md as its own
+   issue, independent of the coordinate-field width — an unclamped zoom makes the stored-coordinate
+   domain unbounded whatever the storage model is, which is why item (8) clamps the *encoder* rather
+   than relying on zoom being bounded.
+5. **Should the fixed-point encoder saturate, refuse, or assert?** **Answered: saturate.** The owner's
+   ruling (TODO.md) is explicit — *"if you draw outside the 16k, it should not wrap but rather
+   clamp"* — implemented at the encode boundary only, so nothing above the storage layer changes
+   behaviour.
 6. **Where did 8,714 samples come from?** The figure is load-bearing for §4 and is not in this repo.
    It belongs in PERFORMANCE.md labelled MEASURED with its provenance, beside the 190 strokes that
    already is (TODO.md:121).

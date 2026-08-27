@@ -532,22 +532,37 @@ domain rather than to any document's extent. *Cost:* a handful of bits per sampl
 tightest possible packing.
 
 **RECOMMENDATION — (C), and the coupling then dissolves entirely: a resize touches no sample, and item
-(8) and item (9) can ship in either order.** The concrete shape, if it helps the ruling:
+(8) and item (9) can ship in either order.** **(C) is what shipped** — TODO item (8) settled as a
+format constant, not a document field, exactly as recommended here — but the concrete numbers below
+are superseded; see the correction that follows the table.
 
-| | today | proposed |
-|---|---|---|
-| `VectorSample.x`, `.y` | `CGFloat`, 64 bits each | **20 bits each, signed, ¼-pixel** → ±131,072 pt, sixteen times the app's own 8192 cap (`CanvasSizePickerView.swift:16`), which is the off-canvas headroom reasons 1–3 above require |
-| `VectorSample.pressure` | `CGFloat`, 64 bits | **8 bits**, 0…1 |
-| per sample | **192 bits / 24 bytes** | **48 bits / 6 bytes** |
+| | today | proposed here (superseded) | TODO item (8), settled |
+|---|---|---|---|
+| `VectorSample.x`, `.y` | `CGFloat`, 64 bits each | 20 bits each, signed, ¼-pixel → ±131,072 pt, sixteen times the app's own 8192 cap (`CanvasSizePickerView.swift:16`) | **16 bits each, signed, ¼-pixel, origin at the canvas centre** → ±8,192 pt |
+| `VectorSample.pressure` | `CGFloat`, 64 bits | 8 bits, 0…1 | **8 bits**, 0…1 |
+| per sample | **192 bits / 24 bytes** | 48 bits / 6 bytes | **40 bits / 5 bytes** |
 
-That is **4× exactly**, against the ~5× the ask claims for a two-coordinate comparison, and it is the
-honest number for the three-component struct this app actually stores. (TODO item (8) already corrects
-one arithmetic slip in the ask — 2048 is 2¹¹, not 2¹⁰ — and this is the second: `VectorSample` is
-three `CGFloat`, so the baseline is 192 bits, not 128.) The owner's ruling that a reversible transform
-decodes to `Double`, works there, and re-encodes at the bake is unaffected and stays exactly as
-written; under (C) a canvas resize is simply not one of the events that re-encodes.
+**Correction.** This recommendation sized the field with headroom — 20 bits, ±131,072 pt, "sixteen
+times the app's own 8192 cap" — on the ground that reasons 1–3 above need off-canvas margin to degrade
+into. The owner's actual ruling carries **no headroom at all**: the field is sized to exactly the
+addressable canvas (±8,192 pt, 16 bits centred) and the encoder saturates rather than wraps at that
+boundary (TODO.md — *"if you draw outside the 16k, it should not wrap but rather clamp"*). That yields
+**4.8× exactly**, a bigger win than the 4× here, against the ~5× the ask claims for a two-coordinate
+comparison — but the point of recording the difference is not the ratio, it's that the two designs
+disagree about what should happen at the edge: headroom degrades gracefully into slop, a zero-headroom
+clamp degrades by flattening ink against the boundary. **The off-canvas-headroom argument in reasons
+1–3 above is weakened by this, not wrong.** The owner accepted the loss of margin explicitly, and only
+at the canvas's own ceiling: a canvas of exactly 16k has no room left for ink that wanders off it,
+which the owner accepted on the ground that such a canvas *"will likely never be used for animation"*
+(TODO.md). At any ordinary canvas the margin is large — TODO.md's own figure is 8× in x and 16× in y
+at 2048×1024. (TODO item (8) also corrects one arithmetic slip in the ask this section already fixed
+once — 2048 is 2¹¹, not 2¹⁰ — and the three-`CGFloat` baseline of 192 bits stands unchanged.) The
+owner's ruling that a reversible transform decodes to `Double`, works there, and re-encodes at the
+bake is unaffected and stays exactly as written; under (C) a canvas resize is simply not one of the
+events that re-encodes.
 
-**This is a recommendation, not a decision.** It is §6's first question.
+**This was a recommendation, not a decision — it has since been settled.** See §6, question 1, and
+TODO.md's Canvas geometry section for the current number and the rest of its rulings.
 
 ---
 
@@ -679,13 +694,16 @@ mapper.
 
 ## 6. Open questions for the owner
 
-1. **The fixed-point encoding (TODO item 8).** §2 recommends **(C)**: the coordinate width is a
-   property of the *format* — 20 signed bits per axis at quarter-pixel, ±131,072 pt, 4× smaller than
-   today's three `CGFloat` — rather than derived from the canvas extent. The reason is that stored
-   coordinates already leave `[0, extent)` routinely (layer-local space, off-canvas drags, and every
-   shrink), so the extent was never a bound on the data. Under (C) a resize re-encodes nothing and the
-   two items are independent. **Confirm, or rule for (A) re-encode-on-resize / (B) width-per-document,
-   both of which make the resize lossy for vector.**
+1. **The fixed-point encoding (TODO item 8). ANSWERED — (C), as recommended, but not at the width
+   proposed here.** §2 recommends **(C)**: the coordinate width is a property of the *format* — this
+   section proposed 20 signed bits per axis at quarter-pixel, ±131,072 pt, 4× smaller than today's
+   three `CGFloat` — rather than derived from the canvas extent. The reason is that stored coordinates
+   already leave `[0, extent)` routinely (layer-local space, off-canvas drags, and every shrink), so
+   the extent was never a bound on the data. Under (C) a resize re-encodes nothing and the two items
+   are independent. The owner confirmed (C) but settled narrower: TODO item (8) is **16 signed bits per
+   axis, ¼-pixel, origin at the canvas centre — ±8,192 pt**, once TODO item (12) removed the layer-local
+   reason and the owner ruled the encoder should saturate rather than carry headroom. See §2's
+   correction and TODO.md's Canvas geometry section for the number and the rest of its rulings.
 
 2. **Undo of a resize with raster content.** Vector is exactly invertible; raster is not — a downscale
    discards pixels and the undo restores a resample. Options: (a) undo it anyway and say so in a banner
