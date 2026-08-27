@@ -55,7 +55,10 @@ commits rather than vanishing (`StrokeGiveUp.interrupted`).
 interpolate (`:470`), sitting 260 and 300 lines below the sink written to fix exactly this class of bug,
 which hard-codes `timelineMenu = nil`.
 
-**Version 2 — five `.popover`s hung off the layer rail and its options panels.** View selector
+**Version 2 — five `.popover`s hung off the layer rail and its options panels.** *(Three of the five,
+since 2026-08-27: the two `EffectSection` rows moved to the bottom bar with the knobs they belong to —
+see "Where two panels present *from* changed", below. They are still registered and still closed
+centrally; only the anchor moved.)* View selector
 (`LayerPanel.swift:90`), canvas background colour (`:188`), value-layer colour (`:494`), effect outline
 colour (`EffectSection.swift:438`), gradient-stop colour (`EffectSection.swift:833`). These *look*
 protected because `activePanel = .none` deletes their host view — but that is a teardown caused **by** the
@@ -116,9 +119,46 @@ the select dock, the layer/folder options panel (transitively, via `onChange(of:
 `DrawingView.swift:143`). The Move bar, the notice pill, the perf HUD and the REC badge have no
 outside-tap dismissal at all. The in-place row swaps in `LayerPanel` (mask and effect sub-menus, layer and
 folder) replace content rather than presenting. Everything in `GalleryView` is safe because no canvas
-exists on that screen (`ContentView.swift:19-25` switches screens). The five panels `SelectPanel`,
-`TextSettingsPanel`, `StrokeSettingsPanel`, `MaskTuningSection` and `InterpolatePanel` contain no
-presentations at all.
+exists on that screen (`ContentView.swift:19-25` switches screens). Four of the five panels this
+paragraph used to name — `SelectPanel`, `StrokeSettingsPanel`, `MaskTuningSection` and
+`InterpolatePanel` — contain no presentations at all.
+
+**The fifth, `TextSettingsPanel`, grew three, and the sentence that said otherwise was false from Add
+Text's later stages until 2026-08-27.** Found by `tools/presentation-census.sh`, logged in
+[BUGS.md](BUGS.md), and corrected here: the font-family `Menu`, the face `Menu` and a stock
+`ColorPicker`. All three are in the count of fourteen the script prints — they were never missing from
+the tooling, only from this file's prose.
+
+## Where two panels present *from* changed, 2026-08-27, and what that did and did not move
+
+The effect knobs and the Add Text settings are now bottom bars (`EffectSettingsBar`,
+`DrawingView.bottomDock`) rather than a sub-panel in the layer rail and a dropdown under the top
+toolbar. Six of this document's sites therefore present from a new anchor. **None of them changed
+class**, and the reasoning is the mechanism rather than the geometry:
+
+- **The two registered `.popover`s in the effect bar** — the outline colour swatch and the per-stop
+  gradient colour, Version 2's last two rows — are still declared through `View.canvasPresentation`
+  with their same `CanvasPresentation` cases, so `dismissPresentationsOverLiveCanvas()` still closes
+  them on a canvas touch. What changed is only that Version 2's heading, "hung off the layer rail and
+  its options panels", is now true of three of its five rather than all five.
+- **Version 3's "effect picker" moved with them**, and is worth naming precisely because the label is
+  misleading: it is `pickerRow`'s `Menu` — the Posterize effect's Screen dropdown, *inside* the
+  settings panel — not the catalogue menu that chooses an effect, which is `valueBlendModeRow`'s and
+  `nodeOperationRow`'s and stayed in the rail. It is a `Menu`, so the paragraph below applies to it.
+- **The three unregisterable presentations in `TextSettingsPanel`** now open upward from near the
+  bottom of the screen instead of downward from the top-leading dropdown. Both anchors put them over
+  live canvas, so this is not a presentation that is *newly* able to overlap the artwork — it is the
+  same overlap in a different place. The two `Menu`s are SAFE for the reason every other `Menu` in
+  this app is (below), and that reason is about `UIMenu`'s dismiss region, which does not depend on
+  where the menu is anchored. **Spot-checked on iPad Pro 13" (M4) / iOS 26.5, 2026-08-27**: with the
+  font `Menu` open from the bottom bar and the text tool armed, one tap on the canvas dismissed the
+  menu and placed **no** text box — the dismiss region absorbed it, exactly as
+  `MenuInterruptionUITests` measured for the blend-mode menu.
+- **The stock `ColorPicker` is still the open question**, unchanged and unanswered. One tap outside it
+  also dismissed it without placing a box in the same session, which is *not* the measurement
+  [BUGS.md](BUGS.md) asks for: `.popover`'s failure mode is a **drag**, where the outside touch begins
+  a stroke and the teardown lands mid-sequence, and a tap cannot distinguish that. Treat this row as
+  UNKNOWN until somebody runs `MenuInterruptionUITests`' shape against it.
 
 ## The question the source could not answer — MEASURED 2026-08-20, and the answer is no
 

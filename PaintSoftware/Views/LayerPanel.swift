@@ -222,6 +222,13 @@ struct LayerPanel: View {
 struct LayerOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let layerID: UUID
+    /// Whether this node's effect knobs are open — **`DrawingView`'s state, not this panel's**, since
+    /// 2026-08-27. The knobs are `EffectSettingsBar` now and they dock at the bottom of the screen
+    /// instead of replacing these rows, so the flag that raises them has to be visible to the view
+    /// that owns that slot. It stays a `Bool` rather than becoming part of `layerOptionsID` because it
+    /// answers a different question: *which* node's options are open, and *whether* its grade is being
+    /// tuned.
+    @Binding var showingEffectSettings: Bool
     var onClose: () -> Void
 
     @State private var draftName: String = ""
@@ -229,12 +236,15 @@ struct LayerOptionsPanel: View {
     /// Whether the Mask row's menu has replaced the edit rows. Reset when `layerID` changes — the
     /// menu belongs to the node whose row was tapped, so opening layer A's mask menu, going back, and
     /// then opening layer B must not land on B's.
+    ///
+    /// **The mask menu stayed in the rail when the effect knobs left it**, and that is a decision
+    /// rather than an omission: picking a mask's *sources* is the rail's own rows (`maskRow` — "having
+    /// the options menu open *is* the mask-edit session"), so a mask menu docked at the bottom would
+    /// be a menu whose main control is in the panel it just dismissed. `MaskTuningSection` inside it
+    /// also cannot be judged against the live canvas at all — its own doc records that a change is
+    /// visible only on the *next* soft-brush stroke — so the "let me see what the slider is changing"
+    /// complaint that moved the effect knobs does not reach it.
     @State private var showingMaskMenu = false
-    /// `showingMaskMenu`'s twin for the effect knobs. Two booleans rather than one `enum SubMenu`,
-    /// matching what the panel already had: the pair is mutually exclusive by construction because
-    /// only one row can be tapped to open one, and an enum would be a third state ("neither") that
-    /// the pair already expresses.
-    @State private var showingEffectSettings = false
     @State private var showingValueColorPicker = false
     /// The fill as it stood when the colour picker opened, so the whole picking session lands as one
     /// undo step and a picker opened and dismissed unchanged records none. See `valueColorRow`.
@@ -255,20 +265,12 @@ struct LayerOptionsPanel: View {
                     maskMenu(canvasManager: canvasManager, target: .layer(canvasManager.layers[index].id),
                              mask: canvasManager.layers[index].alphaMask,
                              onBack: { showingMaskMenu = false }, onClose: onClose)
-                } else if showingEffectSettings, let effect = canvasManager.layers[index].layerEffect {
-                    // `layerEffect` rather than `effect`, so the sub-menu closes itself if the layer
-                    // stops being in effect mode underneath it — an undo of the pick that opened it
-                    // is the ordinary way that happens, and rendering knobs for a grade that is no
-                    // longer applied would be a panel editing nothing.
-                    EffectSettingsMenu(
-                        effect: effect,
-                        canvasManager: canvasManager,
-                        onChange: { canvasManager.setLayerEffect(layerIndex: index, to: $0) },
-                        onEditBegan: { canvasManager.beginStructureGesture() },
-                        onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
-                        onBack: { showingEffectSettings = false },
-                        onClose: onClose)
                 } else {
+                    // **No effect branch here any more.** The knobs are `EffectSettingsBar`, docked at
+                    // the bottom of the screen by `DrawingView`, which also stands this whole rail down
+                    // while they are up — so there is nothing for this panel to render in that state
+                    // and rendering it anyway would put a second host under the bar for the same
+                    // `.effectOutlineColour` presentation.
                     editRows(index: index)
                 }
             } else {
@@ -285,9 +287,11 @@ struct LayerOptionsPanel: View {
         // The panel is reused in place when the artist opens another row's options (`DrawingView`
         // swaps the id, not the view), so the sub-menu has to be closed here rather than relying on
         // the state being torn down.
+        // `showingEffectSettings` is *not* reset here any more: it belongs to `DrawingView` now, which
+        // clears it in its own `onChange(of: layerOptionsID)` — the one place that sees the id change
+        // whether this panel is on screen or standing down behind the effect bar.
         .onChange(of: layerID) { _, _ in
             showingMaskMenu = false
-            showingEffectSettings = false
         }
         // **The hand-written `.onDisappear` that used to sit here is gone, and its job is done for
         // it.** A panel torn down with the colour picker still open would leave `valueColorRow`'s
@@ -755,7 +759,7 @@ private func maskRow(mask: AlphaMask?, onOpen: @escaping () -> Void) -> some Vie
 private func maskMenu(canvasManager: CanvasManager, target: MaskSource, mask: AlphaMask?,
                       onBack: @escaping () -> Void, onClose: @escaping () -> Void) -> some View {
     Group {
-        // Shared with `EffectSettingsMenu` (see `optionsSubMenuHeader`) rather than kept as this
+        // Shared with `EffectSettingsBar` (see `optionsSubMenuHeader`) rather than kept as this
         // menu's own copy, so the two sub-menus have one Back in one place at one size — the rail
         // now has two depths to come out of and an artist should not have to learn each one's exit.
         // The two identifiers are passed rather than defaulted because this menu shipped first and
@@ -809,6 +813,10 @@ private func maskSubtitle(_ mask: AlphaMask?) -> String {
 struct FolderOptionsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
     let folderID: UUID
+    /// `LayerOptionsPanel.showingEffectSettings`'s twin, for the same reason: §4.4's grade sits on
+    /// `LayerFolder` exactly as it sits on `Layer`, so a node's knobs are the same bar — and since
+    /// that bar moved to the bottom of the screen, the same `DrawingView` state raises it.
+    @Binding var showingEffectSettings: Bool
     var onClose: () -> Void
 
     @State private var draftName: String = ""
@@ -816,9 +824,6 @@ struct FolderOptionsPanel: View {
     /// `LayerOptionsPanel.showingMaskMenu`'s twin — the mask menu is reachable from a folder's and a
     /// node's options too, since §6.2 gives all three the same `alphaMask`.
     @State private var showingMaskMenu = false
-    /// `LayerOptionsPanel.showingEffectSettings`'s twin, for the same reason: §4.4's grade sits on
-    /// `LayerFolder` exactly as it sits on `Layer`, so a node's knobs are the same panel.
-    @State private var showingEffectSettings = false
 
     private var folderIndex: Int? { canvasManager.folders.firstIndex { $0.id == folderID } }
     private var folder: LayerFolder? { canvasManager.folders.first { $0.id == folderID } }
@@ -829,18 +834,8 @@ struct FolderOptionsPanel: View {
                 maskMenu(canvasManager: canvasManager, target: .folder(canvasManager.folders[index].id),
                          mask: canvasManager.folders[index].alphaMask,
                          onBack: { showingMaskMenu = false }, onClose: onClose)
-            } else if showingEffectSettings, let effect = folder?.effect {
-                // Closes itself if the node stops carrying a grade — `LayerOptionsPanel`'s rule, and
-                // here it is reachable two ways rather than one: undo, or picking a blend mode,
-                // which `setMixBlendMode` clears the effect for.
-                EffectSettingsMenu(
-                    effect: effect,
-                    canvasManager: canvasManager,
-                    onChange: { canvasManager.setNodeEffect(folderID, to: $0) },
-                    onEditBegan: { canvasManager.beginStructureGesture() },
-                    onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
-                    onBack: { showingEffectSettings = false },
-                    onClose: onClose)
+            // No effect branch here either — see `LayerOptionsPanel`. `DrawingView` docks
+            // `EffectSettingsBar` and stands this rail down while it is up.
             } else if let index = folderIndex, canvasManager.folders.indices.contains(index) {
                 header(for: index)
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
@@ -947,10 +942,10 @@ struct FolderOptionsPanel: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
         // `LayerOptionsPanel`'s rule: the panel is reused in place when another node's options open,
-        // so the sub-menu closes here rather than with the view.
+        // so the sub-menu closes here rather than with the view. `showingEffectSettings` is
+        // `DrawingView`'s now and is cleared there, for the reason given at the layer panel's twin.
         .onChange(of: folderID) { _, _ in
             showingMaskMenu = false
-            showingEffectSettings = false
         }
         .alert("Rename Folder", isPresented: $isRenaming) {
             TextField("Name", text: $draftName)

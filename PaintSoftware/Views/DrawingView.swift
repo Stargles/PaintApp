@@ -15,6 +15,19 @@ struct DrawingView: View {
     @State private var activePanel: ActivePanel = .none
     /// Layer whose options menu is open, shown to the left of the layer panel.
     @State private var layerOptionsID: UUID?
+    /// Whether `layerOptionsID`'s grade is being tuned — i.e. whether `EffectSettingsBar` is docked.
+    ///
+    /// **It lives here rather than in the options panel because the bar it raises does too.** Until
+    /// 2026-08-27 this was one `@State` inside `LayerOptionsPanel` and a second inside
+    /// `FolderOptionsPanel`, each swapping that panel's own rows for the knobs; the knobs are now a
+    /// bottom bar in this view's ZStack, and the flag had to come with them. Both panels still write
+    /// it — through a `Binding` — so the row that opens the knobs is still the row beside the grade.
+    ///
+    /// **Not folded into `layerOptionsID`.** They answer different questions (*which* node's options
+    /// are open versus *whether* its grade is being tuned), and keeping them apart is what lets Back
+    /// put the rail back with the same options panel still open, rather than dumping the artist at the
+    /// bare stack.
+    @State private var showingEffectSettings = false
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
@@ -88,10 +101,23 @@ struct DrawingView: View {
                 // The layer panel is its own thing: a tall translucent rail down the trailing edge,
                 // wide enough to show nesting and thumbnails, with the per-layer options menu
                 // hanging off its left edge.
-                if activePanel == .layers {
+                //
+                // **It stands down while the effect bar is up**, which is the Select-panel rule one
+                // surface over and the larger half of the owner's 2026-08-27 complaint: the rail and
+                // the options panel hanging off it are ~700 of the ~1,280 points of canvas width, and
+                // moving only the 240pt knob panel to the bottom would have left the artist looking at
+                // a grade through the thing that raised it. Same mechanism as Select's, deliberately:
+                // the *presentation* is suppressed and `activePanel` is left at `.layers`, so Back
+                // returns the artist to the rail with the same node's options still open — and
+                // `CanvasTouchInputs.panel` is fed the value it always was, so `CanvasTouchOwner`'s
+                // answer is bit-for-bit unchanged in every one of these states. (`.layers` is not a
+                // term in any of the fourteen gates anyway — `ActivePanel`'s doc records that only
+                // `.select` is load-bearing to that question — so this could not have moved it even by
+                // accident.)
+                if activePanel == .layers && effectBeingEdited == nil {
                     layerPanelRail
                         .transition(.move(edge: .trailing).combined(with: .opacity))
-                } else if activePanel != .none {
+                } else if activePanel != .none && activePanel != .layers {
                     // Other tool menus drop down directly under the toolbar, aligned to the side
                     // their icon sits on (leading tools on the left, brush/fill/color on the right)
                     // rather than sliding in as a full-height rail from the screen edge.
@@ -108,46 +134,7 @@ struct DrawingView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                // The Move menu lives in a bottom bar (not the trailing panel) and is keyed off whether
-                // anything is actually floating, not off which panel is open — tapping the canvas to
-                // commit, or Duplicate from the Select panel, both surface it.
-                //
-                // **`isAnyPieceFloating`, not `floatingPiece != nil`.** Until 2026-08-22 this read the
-                // raster piece alone, so a lassoed *vector* region — which is what Move does on the
-                // default layer kind — came up with a transform box, six grips and no menu at all.
-                if canvasManager.isAnyPieceFloating {
-                    VStack {
-                        Spacer()
-                        MoveTransformBottomBar(canvasManager: canvasManager)
-                            .padding(.bottom, 100)
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                // The Select tool's menu docks at the bottom (Procreate reference) instead of dropping
-                // down from the top toolbar, so it never covers the upper canvas while lassoing.
-                //
-                // **It stands down while anything is floating** — owner, 2026-08-22: "when moving,
-                // there should be an option menu on the bottom instead of still keeping the select
-                // menu". The two dock at the same place and used to be able to be up at once.
-                //
-                // **Suppressing the presentation, not clearing `activePanel`**, and the difference is
-                // the artist's place in their own tools: Select is still their open panel, so when the
-                // piece bakes the menu comes back by itself rather than leaving them on a bare canvas
-                // wondering which button they were last in. It also keeps this change out of the
-                // touch-arbitration entirely — `CanvasTouchInputs.panel` is fed the same
-                // `activePanel` it always was, so `CanvasTouchOwner`'s answer for every one of these
-                // states is bit-for-bit what it was before (and the overlay was already not capturing:
-                // `selectionOverlayIsCapturing` has required `!hasFloatingPiece && !hasVectorFloat`
-                // since it was written).
-                if activePanel == .select && !canvasManager.isAnyPieceFloating {
-                    VStack {
-                        Spacer()
-                        SelectPanel(canvasManager: canvasManager)
-                            .padding(.bottom, 100)
-                    }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                bottomDock
 
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
                 // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
@@ -189,6 +176,9 @@ struct DrawingView: View {
         // One flag drives both docked bars now — the Move menu arriving and the Select menu standing
         // down are the same transition, so they have to be keyed on the same value or they cross.
         .animation(.easeInOut(duration: 0.2), value: canvasManager.isAnyPieceFloating)
+        // Same argument again for the effect bar: the rail sliding out and the bar sliding up are one
+        // transition, so they are keyed on the one value that drives both.
+        .animation(.easeInOut(duration: 0.2), value: showingEffectSettings)
         // Keyed on the whole notice, not on `notice != nil`: re-raising while one is already up
         // swaps the value rather than crossing nil, and only the full value is different enough for
         // SwiftUI to re-run the transition.
@@ -229,6 +219,12 @@ struct DrawingView: View {
         // `CanvasManager`, where the rows and the canvas dim both read it.
         .onChange(of: layerOptionsID) { _, id in
             canvasManager.syncMaskEditSession(toOptionsTarget: id)
+            // The knobs belong to the node whose row was tapped, so opening layer A's grade, going
+            // Back, and then opening layer B must not land straight in B's — `LayerOptionsPanel`'s own
+            // rule, moved here with the flag. This is the one place that sees the id change whether
+            // the options panel is on screen or standing down behind the bar; the panel's
+            // `.onChange(of: layerID)` cannot see it while the panel is not being rendered.
+            if showingEffectSettings { showingEffectSettings = false }
         }
         // **The dismissal timer, and why it is the view's.**
         //
@@ -265,6 +261,126 @@ struct DrawingView: View {
             guard !Task.isCancelled else { return }
             canvasManager.lassoFillDiagnostic = nil
         }
+    }
+
+    // MARK: - The bottom dock
+
+    /// Everything that docks above the timeline, in one column.
+    ///
+    /// **One column rather than four independent overlays**, which is what this was until 2026-08-27:
+    /// each docked bar was its own `VStack { Spacer(); bar.padding(.bottom, 100) }` in the ZStack, so
+    /// any two that were up at once landed on exactly the same 100pt-from-the-bottom line and drew on
+    /// top of each other. Select and Move already had an explicit rule making them exclusive (below);
+    /// the effect bar and the text bar have no such rule and need none, because a column stacks what a
+    /// pile of overlays would have hidden. A lassoed piece floating while a grade is being tuned is a
+    /// reachable state, and it now reads as two bars rather than one bar with another underneath it.
+    ///
+    /// Ordered least-transient first, so the bar the artist is actively dragging a slider in is the one
+    /// nearest their hand and the one that does not move when another arrives above it.
+    @ViewBuilder
+    private var bottomDock: some View {
+        VStack(spacing: 10) {
+            Spacer()
+
+            // The effect knobs (`EffectSettingsBar`) — the owner's 2026-08-27 ask. Raised by the Effect
+            // Settings row in a value layer's or a compositor node's options menu, and while it is up
+            // the layer rail that raised it stands down; see the rail's own comment above.
+            //
+            // Keyed on the *resolved* grade rather than on `showingEffectSettings` alone, and the two
+            // readers are the same expression, so the bar and the rail's suppression cannot disagree.
+            // That matters: an undo of the pick that created the grade — or, on a node, choosing a
+            // blend mode, which `setMixBlendMode` clears the effect for — takes the effect away while
+            // the bar is open. The old rail version fell back to its own edit rows in that state; here,
+            // a flag-driven bar would leave the rail suppressed with nothing on screen to bring it back.
+            if let editing = effectBeingEdited {
+                EffectSettingsBar(
+                    effect: editing.effect,
+                    canvasManager: canvasManager,
+                    onChange: editing.onChange,
+                    onEditBegan: { canvasManager.beginStructureGesture() },
+                    onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
+                    onBack: { showingEffectSettings = false },
+                    onClose: { layerOptionsID = nil })
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // Add Text's settings, the second half of the same ask — *"Same for the add text menu, make
+            // it the same type of menu."* It is still `activePanel == .text` and still opened from the
+            // Actions menu's Add Text row; only the slot changed, from a 300pt dropdown under the top
+            // toolbar to this. Nothing about touch arbitration moves with it: `CanvasTouchInputs.panel`
+            // is handed the same `.text` it always was, and `ActivePanel`'s doc records that only
+            // `.select` is a term in any of the fourteen gates.
+            if activePanel == .text {
+                TextSettingsPanel(canvasManager: canvasManager)
+                    .frame(width: EffectSettingsBar.width)
+                    .frame(maxHeight: Self.textBarHeight)
+                    .background(Color.black.opacity(0.9))
+                    .cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // The Move menu, keyed off whether anything is actually floating rather than off which
+            // panel is open — tapping the canvas to commit, or Duplicate from the Select panel, both
+            // surface it.
+            //
+            // **`isAnyPieceFloating`, not `floatingPiece != nil`.** Until 2026-08-22 this read the
+            // raster piece alone, so a lassoed *vector* region — which is what Move does on the
+            // default layer kind — came up with a transform box, six grips and no menu at all.
+            if canvasManager.isAnyPieceFloating {
+                MoveTransformBottomBar(canvasManager: canvasManager)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // The Select tool's menu (Procreate reference) instead of a dropdown from the top toolbar,
+            // so it never covers the upper canvas while lassoing.
+            //
+            // **It stands down while anything is floating** — owner, 2026-08-22: "when moving,
+            // there should be an option menu on the bottom instead of still keeping the select
+            // menu". The two dock at the same place and used to be able to be up at once.
+            //
+            // **Suppressing the presentation, not clearing `activePanel`**, and the difference is
+            // the artist's place in their own tools: Select is still their open panel, so when the
+            // piece bakes the menu comes back by itself rather than leaving them on a bare canvas
+            // wondering which button they were last in. It also keeps this change out of the
+            // touch-arbitration entirely — `CanvasTouchInputs.panel` is fed the same
+            // `activePanel` it always was, so `CanvasTouchOwner`'s answer for every one of these
+            // states is bit-for-bit what it was before (and the overlay was already not capturing:
+            // `selectionOverlayIsCapturing` has required `!hasFloatingPiece && !hasVectorFloat`
+            // since it was written).
+            if activePanel == .select && !canvasManager.isAnyPieceFloating {
+                SelectPanel(canvasManager: canvasManager)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .padding(.bottom, 100)
+    }
+
+    /// The text bar's cap. Taller than `EffectSettingsBar`'s scroll because this panel is one fixed
+    /// list of eleven controls rather than one of thirteen shapes, and shorter than the 420pt dropdown
+    /// it replaces because it is now sitting on the artwork rather than beside it — the same trade the
+    /// effect bar makes, and the reason both scroll.
+    private static let textBarHeight: CGFloat = 360
+
+    /// The grade whose knobs are docked, and where an edit to it goes — nil whenever the effect bar
+    /// should not be on screen at all.
+    ///
+    /// **The two branches are `LayerOptionsPanel`'s and `FolderOptionsPanel`'s old sub-menu conditions,
+    /// unchanged and now in one place**, which is what lets `bottomDock` and the rail's suppression ask
+    /// the same question. `layerEffect` rather than `effect` on the layer side is load-bearing and was
+    /// so before this moved: it is nil unless the layer is a value layer in effect mode, so an undo
+    /// that takes the grade away closes the bar rather than leaving knobs over a layer that no longer
+    /// has one. The folder side reads `effect` because §4.4 puts the grade straight on `LayerFolder`.
+    private var effectBeingEdited: (effect: Effect, onChange: (Effect) -> Void)? {
+        guard showingEffectSettings, let id = layerOptionsID else { return nil }
+        if let folder = canvasManager.folders.first(where: { $0.id == id }) {
+            guard let effect = folder.effect else { return nil }
+            return (effect, { canvasManager.setNodeEffect(id, to: $0) })
+        }
+        guard let index = canvasManager.layers.firstIndex(where: { $0.id == id }),
+              let effect = canvasManager.layers[index].layerEffect else { return nil }
+        return (effect, { canvasManager.setLayerEffect(layerIndex: index, to: $0) })
     }
 
     /// Runs a notice's one-tap fix. These are the actions the modal alerts carried, kept verbatim:
@@ -308,8 +424,11 @@ struct DrawingView: View {
     /// is transient, it is only ever open while the artist is already looking at the panel, and
     /// reserving room for it would shove the notice well off-centre in the common case where it is
     /// shut.
+    ///
+    /// Zero while the effect bar has the rail stood down, for the same reason it is zero when the rail
+    /// is shut: the expression has to mirror what is actually on screen, not what `activePanel` says.
     private func layerRailClearance(canvasWidth: CGFloat) -> CGFloat {
-        guard activePanel == .layers else { return 0 }
+        guard activePanel == .layers, effectBeingEdited == nil else { return 0 }
         return min(canvasWidth * 0.46, 460)
     }
 
@@ -328,12 +447,14 @@ struct DrawingView: View {
                 // shown at a time and both close the same way.
                 if let layerOptionsID {
                     if canvasManager.folders.contains(where: { $0.id == layerOptionsID }) {
-                        FolderOptionsPanel(canvasManager: canvasManager, folderID: layerOptionsID) {
+                        FolderOptionsPanel(canvasManager: canvasManager, folderID: layerOptionsID,
+                                           showingEffectSettings: $showingEffectSettings) {
                             self.layerOptionsID = nil
                         }
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     } else {
-                        LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID) {
+                        LayerOptionsPanel(canvasManager: canvasManager, layerID: layerOptionsID,
+                                          showingEffectSettings: $showingEffectSettings) {
                             self.layerOptionsID = nil
                         }
                         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -358,13 +479,15 @@ struct DrawingView: View {
 
     /// Which side of the toolbar the open menu's icon lives on, so the dropdown lands under it. The
     /// gallery/actions icons are leading; brush/fill/layers/color are trailing.
+    ///
+    /// **`.text` is no longer one of these.** It used to be the one leading-aligned *tool* panel,
+    /// because it has no toolbar icon to sit under and dropping it on the leading side kept it near the
+    /// Actions row that opened it. As of 2026-08-27 it docks at the bottom instead (`bottomDock`) and
+    /// this function never sees it.
     private var panelAlignment: Alignment {
         switch activePanel {
-        // Text is a *tool* settings panel and every other one of those is trailing, but it is the
-        // only panel with no icon on either side of the toolbar: its entry point is the Actions
-        // menu's "Add Text" row. Leading keeps it where the row the artist just tapped was, instead
-        // of the panel flying across the screen at the moment of entering the mode.
-        case .actions, .text:
+        // The Actions menu's icon is on the leading side; brush/fill/layers/colour are trailing.
+        case .actions:
             return .topLeading
         default:
             return .topTrailing
@@ -396,7 +519,7 @@ struct DrawingView: View {
         case .fill:
             FillSettingsPanel(canvasManager: canvasManager)
         case .text:
-            TextSettingsPanel(canvasManager: canvasManager)
+            EmptyView() // Add Text's settings are a bottom bar as of 2026-08-27 — see `bottomDock`.
         // Interpolate has no case here: its options are a popover on the timeline's own interpolate
         // button (`AnimationTimeline.interpolateButton`), not a top-toolbar dropdown.
         }

@@ -68,7 +68,7 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// every case an `onDismiss` that runs on host deletion as well as on the flag going false.
     case valueLayerColour
 
-    /// An effect's outline colour swatch, in `EffectSettingsMenu`. Brackets `onEditBegan`/`onEditEnded`
+    /// An effect's outline colour swatch, in `EffectSettingsBar`. Brackets `onEditBegan`/`onEditEnded`
     /// over its lifetime, same as `valueLayerColour`.
     case effectOutlineColour
 

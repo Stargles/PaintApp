@@ -504,6 +504,63 @@ final class LayerPanelUITests: PaintUITestCase {
                        "The banner names the blocker by `CanvasNotice.Kind`, not by its wording")
     }
 
+    /// The owner's 2026-08-27 ask, as behaviour: *"the effect settings menu right now takes beside
+    /// the layers menu. Those two things take up about 80% of the canvas, making it hard to see what
+    /// you are editing … the menu is on the bottom, like the same kind of menu that the lasso or move
+    /// tool uses."*
+    ///
+    /// **Three assertions, and the second is the one that would be forgotten.** That the knobs are
+    /// *there* is the easy half; that the layer rail has stood down is the half that makes the change
+    /// worth anything, because the rail and its options panel are the larger part of what the artist
+    /// could not see past. The third is the return trip — the rail comes back, with the same node's
+    /// options still open, which is the whole reason `showingEffectSettings` is kept apart from
+    /// `layerOptionsID` rather than folded into it.
+    ///
+    /// **The geometry assertion is deliberately coarse.** "In the bottom half of the window" is what
+    /// an XCUITest can honestly say about a layout; the exact 560×300 card is a design decision that
+    /// should be free to change without a red test. What must not change silently is which end of the
+    /// screen it is at.
+    func testEffectSettingsOpenAsABottomBarAndStandTheLayerRailDown() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+
+        let rail = app.tables["layerPanel.list"]
+        XCTAssertTrue(rail.waitForExistence(timeout: 5), "Sanity: the rail is up and holding the options panel")
+
+        let openKnobs = app.buttons["layerOptions.effectSettings"]
+        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5),
+                      "A value layer in effect mode offers the Effect Settings row")
+        openKnobs.tap()
+
+        // Brightness / Contrast is what `addEffectLayerFromAddMenu` creates, so these are its knobs.
+        let brightness = app.sliders["effectSettings.brightness"]
+        XCTAssertTrue(brightness.waitForExistence(timeout: 5), "The row opens the grade's knobs")
+        XCTAssertTrue(app.sliders["effectSettings.contrast"].exists)
+
+        XCTAssertFalse(rail.exists, """
+            The layer rail is still up behind the effect bar. Moving the 240pt knob panel to the \
+            bottom while leaving the ~440pt rail over the artwork does not answer the complaint the \
+            change is for — see DrawingView's rail, which stands down while `effectBeingEdited` is \
+            non-nil exactly as the Select panel stands down for the Move bar.
+            """)
+        XCTAssertFalse(openKnobs.exists, "…and the options panel went with it")
+
+        let window = app.windows.element(boundBy: 0).frame
+        XCTAssertGreaterThan(brightness.frame.minY, window.midY, """
+            The knobs are not in the bottom half of the window, so they are not the "same kind of \
+            menu that the lasso or move tool uses" the owner asked for.
+            """)
+
+        app.buttons["layerOptions.subMenuBack"].tap()
+
+        XCTAssertTrue(rail.waitForExistence(timeout: 5), "Back brings the rail back…")
+        XCTAssertTrue(openKnobs.waitForExistence(timeout: 5),
+                      "…with the same node's options still open, rather than at the bare stack")
+        XCTAssertFalse(brightness.exists)
+    }
+
     /// §4.5's value layer, same story — plus the one control it needs to be worth creating: the
     /// colour it *is*. The swatch carries the hex as its accessibility value (`blendModeRow`'s
     /// convention) so a test can tell a real fill from a control that renders a default.

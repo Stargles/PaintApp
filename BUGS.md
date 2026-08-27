@@ -93,8 +93,16 @@ about whether a stroke can start under it the way `.popover` demonstrably could 
 fix.
 
 Not fixed here — it needs the same kind of measurement `MenuInterruptionUITests` already did for
-`Menu`, not a guess, and `MENU_PRESENTATION_CENSUS.md` needs its SAFE list and its "contains no
-presentations" sentence updated once that measurement exists.
+`Menu`, not a guess.
+
+**Half of this is now done, 2026-08-27.** `MENU_PRESENTATION_CENSUS.md` no longer says the panel
+contains no presentations; the correction went in with the change that moved the panel to a bottom bar,
+because that change made the sentence's *other* half stale too. What is still open is the measurement,
+and moving the panel did not alter it: the `ColorPicker` opened over live canvas from the top-leading
+dropdown and opens over live canvas from the bottom bar, so it is the same hazard at a different anchor.
+One tap outside it dismissed it and placed no text box, which is worth knowing and is **not** the answer
+— `.popover`'s failure mode is a drag, and a tap cannot tell the two apart. The two `Menu`s were spot-
+checked the same way and behaved as the census's `Menu` finding predicts.
 
 ## A vector cel holding warped text re-warps it on every invalidation, not once per commit (2026-08-26)
 

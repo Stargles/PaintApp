@@ -103,12 +103,43 @@ func effectMenuSlug(_ effect: Effect) -> String {
     effect.displayName.lowercased().filter { $0.isLetter || $0.isNumber }
 }
 
-// MARK: - The settings sub-panel
+// MARK: - The settings bar
 
-/// The chosen effect's knobs, as a sub-panel that replaces the edit rows — the same shape the Mask
-/// row already opens, with the same Back button, for the same reason: Levels alone is five sliders,
-/// and five sliders inline would push Delete off the bottom of a 240pt-wide rail panel.
-struct EffectSettingsMenu: View {
+/// The chosen effect's knobs, as a **bottom bar** docked above the timeline — `MoveTransformBottomBar`'s
+/// slot and `MoveTransformBottomBar`'s card, raised by the Effect Settings row in a value layer's or a
+/// node's options menu.
+///
+/// **It used to sit in the rail, and the owner's complaint is why it does not** (2026-08-27): *"the
+/// effect settings menu right now takes beside the layers menu. Those two things take up about 80% of
+/// the canvas, making it hard to see what you are editing … the menu is on the bottom, like the same
+/// kind of menu that the lasso or move tool uses."* That is a "I can't see my work while I'm editing
+/// it" report, and a grade is the worst possible thing to tune blind: every slider here changes the
+/// whole canvas at once, so the artwork *is* the readout. Moving the knobs alone would not have fixed
+/// it — the 240pt options panel was the smaller half of the 700pt the two panels took together — so
+/// `DrawingView` also stands the layer rail down for as long as this bar is up, the way the Select
+/// panel stands down for the Move bar. Same rule as there, and for the same reason: the *presentation*
+/// is suppressed and `activePanel` is left alone, so Back puts the artist back exactly where they were.
+///
+/// **One effect, never a list.** A node carries at most one grade — `Layer.layerEffect` is a single
+/// `Effect?` and `setLayerEffect`/`setLayerBlendMode` each clear what the other sets — so there is no
+/// paging, no tab strip and no "which effect am I looking at". What varies is how *tall* one effect's
+/// knobs are: two sliders for Sharpen, five for Levels, a 196pt square for Curves, and a row per stop
+/// for Gradient Map, which is the only unbounded one. The bar is therefore a fixed card whose rows
+/// scroll — wider than the rail was, so the sliders gained travel rather than losing it, and capped in
+/// height so it can never grow to eat the canvas it was moved to uncover. Levels fits without
+/// scrolling; Curves and a many-stop Gradient Map scroll. The alternative — reflowing the rows into
+/// columns to use the extra width — is a change to the controls themselves and was deliberately not
+/// made here.
+struct EffectSettingsBar: View {
+    /// Wide enough that a slider has real travel (the rail gave it 212pt; this gives 532) and narrow
+    /// enough that the canvas either side of it stays visible. Public so `DrawingView` docks it at the
+    /// same width the text bar uses.
+    static let width: CGFloat = 560
+
+    /// The scroll's cap. Sized so Levels — five slider rows, the tallest all-slider effect — fits with
+    /// nothing to scroll, and everything taller scrolls rather than growing.
+    private static let maxRowsHeight: CGFloat = 300
+
     let effect: Effect
     /// Carried purely so the two colour popovers below can be declared through
     /// `View.canvasPresentation` — this panel reads nothing else off the manager. Threaded rather
@@ -129,7 +160,12 @@ struct EffectSettingsMenu: View {
     @State private var showingColorPicker = false
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
+            // The mask menu's header verbatim, identifiers included. The two sub-menus no longer live
+            // in the same place — that one is still in the rail, this one is at the bottom — but Back
+            // still means "put the rail back where it was" and × still means "close the options menu",
+            // which is what the two buttons meant before. Forking the chrome to say the same thing
+            // twice would only give the artist a second exit to learn.
             optionsSubMenuHeader(title: effect.displayName, onBack: onBack, onClose: onClose)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
@@ -138,10 +174,20 @@ struct EffectSettingsMenu: View {
                     rows
                 }
             }
-            // Bounded rather than free: Levels and Gradient Map are the tall ones, and a panel that
-            // grew past the rail would clip its own Back button off the bottom.
-            .frame(maxHeight: 340)
+            // Bounded rather than free: Curves and Gradient Map are the tall ones, and a bar that grew
+            // with its content would climb the canvas it was moved here to uncover.
+            .frame(maxHeight: Self.maxRowsHeight)
         }
+        .frame(width: Self.width)
+        .background(Color.black.opacity(0.9))
+        .cornerRadius(14)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+        // **No identifier on this card.** An accessibility identifier on a container propagates to its
+        // descendants and beats their own — the mistake `MaskTuningSection` records at the foot of its
+        // body, and the reason `slider` below puts its name on the `Slider` rather than the row — so
+        // one here would rename every control in the bar after the bar. `layerOptions.subMenuTitle` in
+        // the header is what a test should look for to say this is on screen.
     }
 
     @ViewBuilder
@@ -403,7 +449,7 @@ struct EffectSettingsMenu: View {
     /// rather than a second colour UI. `CodableColor` is what `Outline` stores and what the manifest
     /// already speaks, so nothing here needs a new representation.
     ///
-    /// **The bracket is the popover's lifetime, not the write's**, which is `EffectSettingsMenu`'s
+    /// **The bracket is the popover's lifetime, not the write's**, which is `EffectSettingsBar`'s
     /// whole undo rule applied to the one control that has no `onEditingChanged`. A picker on a
     /// `Binding` writes on every tick of its own sliders, so wrapping each write in
     /// `onEditBegan`/`onEditEnded` would record an undo step per tick — the exact failure the
@@ -765,7 +811,7 @@ struct CurveEditor: View {
 /// drag a slider past its neighbour would shuffle the list under their finger for no rendering gain.
 struct GradientStopsEditor: View {
     let stops: [GradientStop]
-    /// See `EffectSettingsMenu`'s field of the same name: carried only so the per-stop colour
+    /// See `EffectSettingsBar`'s field of the same name: carried only so the per-stop colour
     /// popover can be declared through `View.canvasPresentation`.
     @ObservedObject var canvasManager: CanvasManager
     var onChange: ([GradientStop]) -> Void
@@ -773,7 +819,7 @@ struct GradientStopsEditor: View {
     var onEditEnded: () -> Void
 
     /// Which stop's colour popover is open, if any — the swatch-opens-a-picker bracket
-    /// `EffectSettingsMenu.colorRow` explains, one row at a time.
+    /// `EffectSettingsBar.colorRow` explains, one row at a time.
     @State private var colorPickerIndex: Int?
 
     var body: some View {

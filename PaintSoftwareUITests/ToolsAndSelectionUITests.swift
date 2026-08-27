@@ -10,6 +10,36 @@ import XCTest
 
 final class ToolPanelsUITests: PaintUITestCase {
 
+    /// The second half of the owner's 2026-08-27 ask — *"Same for the add text menu, make it the same
+    /// type of menu"* — as behaviour rather than as a layout constant.
+    ///
+    /// **What this pins and what it deliberately does not.** It pins the end of the screen the panel
+    /// is at, which is the whole of the request, and the fact that Add Text still reaches it. It does
+    /// not pin the card's size: 560×360 is a judgement about how much artwork a bar may cover, and a
+    /// test that failed when that judgement was revised would be a test defending an arbitrary number.
+    ///
+    /// The probe is `textPanel.fontButton`, not the panel's own `panel.textSettings`: that identifier
+    /// sits on a plain SwiftUI container, which UIKit does not surface as an element of any queryable
+    /// type — the sibling test in `SelectionAndMoveUITests` records the same finding at its own probe.
+    func testAddTextSettingsOpenAsABottomBar() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let addText = app.buttons["actions.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5))
+        addText.tap()
+
+        let fontButton = app.buttons["textPanel.fontButton"]
+        XCTAssertTrue(fontButton.waitForExistence(timeout: 5), "Add Text opens the text settings panel")
+
+        let window = app.windows.element(boundBy: 0).frame
+        XCTAssertGreaterThan(fontButton.frame.minY, window.midY, """
+            The text settings are still a dropdown under the top toolbar. The owner asked for the \
+            same bottom-docked bar the lasso and Move tools raise — see DrawingView.bottomDock.
+            """)
+    }
+
     /// Task 3: the fill tool's settings menu only opens on the *second* tap of its icon; the first tap
     /// just selects the tool (so switching tools never pops a menu over the canvas).
     func testFillMenuOpensOnlyOnSecondTap() throws {
