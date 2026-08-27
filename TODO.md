@@ -93,38 +93,42 @@ staying a fill. All three want the owner's eye on real artwork rather than anoth
 ## The owner's seven device reports, 2026-08-26
 
 Found on their iPad testing the Move/text pass. Their words are quoted verbatim; their *observations*
-are evidence, their *causes* are hypotheses. **(1), (2), (5), (7) and (3)'s small-box half are done —
-see "Done this pass". (3)'s distort half, (4) and (6) are still open.**
+are evidence, their *causes* are hypotheses. **(1), (2), (3), (5) and (7) are done — see "Done this
+pass". (4) is diagnosed and being built. (6) is parked awaiting a reproduction.**
 
-- [ ] **(3) distort half — text is invisible in distort mode.** Carries a ruling: *"The box should
-      never be allowed to be smaller than the text size unless in distort mode."* The small-box half of
-      this report is fixed (see Done this pass); distort is not. **Experiment**: distort a box, then tap
-      into it. `isFlatEditing` swaps the layer to `setAffineTransform` while the caret is live — words
-      reappear flat and vanish on tapping away means the fault is the perspective assignment; invisible
-      in both states means the glyph bitmap, sharing a cause with the small-box bug just fixed. Also
-      check whether the nine grips followed the box into perspective: grips in perspective + no glyphs =
-      a CALayer/render-server fault; a box blank *before* the drag = a raster fault. The first distort
-      drag flips `autoSize` true→false, which flips `clip:` in the RenderKey and forces a re-render — the
-      one provable change to the glyph raster at the moment text disappears. The CALayer *software-path*
-      hypothesis (`CALayer.render(in:)` refusing 3D transforms) is refuted — that path is in-process and
-      the symptom belongs to the render server.
-- [ ] **(4) A pencil tap spawns the text box but does not raise the keyboard.** *"I need to click again on
-      the box with my finger to bring it up."* The app-side path is verified clean: `beginTextSession` has
-      exactly one non-test caller and no branch a pencil can take that a finger cannot, so if the box
-      appeared, `becomeFirstResponder()` was called — the owner's Scribble theory is unproven, and
-      removing `UIScribbleInteraction` in `init(frame:)` is likely a no-op since UIKit attaches those
-      interactions lazily. **Experiment**: turn pencil-only OFF in Actions first (else a finger tap is
-      refused at `CanvasView.swift:2869` and the test proves nothing), then Add Text → tap empty canvas
-      with a **finger**. Keyboard comes up → a real pencil/finger split; stays down → the responder is
-      refused for everyone and the pencil is innocent. `focusEditor()`'s return value does not
-      discriminate (true under the Scribble story too) — add `ActionRecorder` hooks for `textIsFocused`
-      and `textGestureActive` (`CanvasManager.swift:2227`/`:2234`, plain vars today) before spending a
-      device pass; those plus `keyboardWillShowNotification` are what separates the theories.
+- [x] **(3) DONE — text is visible in distort, and both halves were one bug.** Owner confirmed on device
+      2026-08-27: *"text seems to show up in distort now."* The small-box fix (`TextLayout.draw` no longer
+      blanking when `CTFrameGetLines` returns zero lines) cured the distort case too, which is the shared-cause
+      hypothesis the experiment was designed to test — and it was the *second* of the two branches, not the
+      CALayer/render-server one. **Worth keeping**: the elaborate distort experiment (tap into the box, watch
+      whether words reappear flat) was never needed, because fixing the cheaper, better-understood half first
+      resolved the expensive one. The refuted CALayer *software-path* hypothesis stays refuted. The ruling
+      *"the box should never be allowed to be smaller than the text size unless in distort mode"* shipped with
+      the small-box fix and the distort exemption is honoured on both paths.
+- [ ] **(4) A pencil tap raises Scribble instead of the keyboard — CAUSE CONFIRMED, fix in flight.** The
+      experiment was run and it settled it. Owner, 2026-08-27: *"yes, clicking with finger yields correct
+      behaviour. Clicking with pencil however brings up that write to text thing which is annoying."*
+      **"That write to text thing" is iPadOS Scribble.** So the app-side path is clean exactly as the
+      verification pass insisted — `beginTextSession` has one non-test caller, no pencil/finger branch, and
+      `becomeFirstResponder()` *was* called; iOS then suppresses the software keyboard for pencil input on a
+      text input view and offers handwriting instead. **Both earlier theories were wrong in instructive ways**:
+      the original `allowedTouchTypes`-gate guess was refuted by reading, and the counter-claim that the
+      responder was refused *for everyone* is refuted by the finger working. The owner's own instinct — the
+      pencil is treated as writing — was right, in a more specific sense than they stated.
+      **Being built**: prefer a seam where a pencil *tap* focuses and raises the keyboard while pencil
+      *writing* still scribbles; fall back to switching Scribble off on the canvas text overlay. The API trap
+      is that the wrong call compiles, runs and silently does nothing, so the fix must prove it engages.
 - [x] **(5) Freeform / Uniform / Distort greyed out in Move — intentional, not a defect.** Confirmed in the
       code: `MoveTransformBottomBar.swift:24-27` says the picker is live only for a raster piece because a
       lassoed vector piece scales uniformly, and **Move stage 3 is what turns it on**. Distort is stage 5.
       Both are designed and unstarted (HANDOFF.md). Nothing to fix; the ask is to *build stage 3*.
-- [ ] **(6) The UI freeze is back.** *"it seems like it happens when your in the edit text keyboard menu,
+- [ ] **(6) PARKED — the UI freeze, awaiting a reproduction the owner can trigger.** Owner, 2026-08-27:
+      *"I'll tell you when I am able to recreate the freeze."* Do not spend another investigation pass on it
+      until then; the candidate below is unproven in *reachability*, not in mechanism, and only the device can
+      settle that. **The one question that splits the diagnosis in half, to ask the moment it locks: does the
+      timeline still animate and do the marching ants still march?** Yes → a dead-input overlay. No → a real
+      main-thread hang. Those have nothing in common as fixes. Original report: *"it seems like it happens when
+      your in the edit text keyboard menu,
       then select pencil brush or try to resize the canvas in some kind of sequence of actions ... a
       previous session reportedly fixed the UI freezing canvas move bug, and somehow its still here."*
       Confirmed **not** the earlier bug: `CanvasTransformFreezeUITests`' defect (a stroke begun under an
