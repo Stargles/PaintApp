@@ -118,7 +118,7 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
       **`VectorSample` is three `CGFloat`, not two** — the third is pressure/force, a 0…1 quantity where
       8–10 bits is generous.
 
-      **SETTLED, 2026-08-27 — 16 bits an axis, unsigned, origin at the canvas centre, quarter-pixel; 8
+      **SETTLED, 2026-08-27 — 16 bits an axis, signed, origin at the canvas centre, quarter-pixel; 8
       bits of pressure. 40 bits = 5 bytes a sample against today's 24, a 4.8× win**, and far more on disk
       against the 89 bytes/sample the JSON currently spends.
       The centring is the owner's, and it is what buys the sign bit back for free: *"have something like
