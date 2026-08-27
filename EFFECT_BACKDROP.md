@@ -90,22 +90,47 @@ and one of the two placements is silently lost.**
 Scope is wider than effect layers, because engagement is `needsCompositorOnCanvas` — any non-normal
 blend mode, any alpha mask, any clip-to-below, any buffered group. One multiply shadow layer is enough.
 
-**RULED 2026-08-27, second ruling on the same subject, and it overrides the literal reading of the
-first.** Shown the three options in behavioural terms, the owner chose **(b): Behind keeps meaning
-behind.** The layers *above* the active one must still cover the ghost, so the two placements stay two
-things. The other two are recorded so they are not silently re-adopted: (a) accepting that Behind and
-In Front coincide whenever the compositor engages was the cheapest reading of the first ruling and
-loses a placement; (c) compositing the ghost into the request is what the first ruling deleted, and it
-would let an effect layer *grade the ghost* — a brightness layer brightening the previous frame.
+**RULED 2026-08-27, and it took three passes, because the first two rulings were made against a cost
+nobody had measured yet. The answer is (a): the ghost always draws on top, and Behind and In Front
+coincide whenever the compositor engages.**
 
-**What (b) costs, and it is the whole of the work.** At rest the sandwich collapses to one image:
-`belowView.image = images.full`, `aboveView.image = nil` and hidden, every layer host blanked. A ghost
-fronted above `belowView` therefore has nothing over it. (b) means the at-rest presentation must
-*stay split* — `below` = the active layer and everything under it, `above` = everything over it — for
-exactly the documents where it matters: **onion skin on, placement `.behind`, and the compositor
-engaged**. Outside that gate the single-image at-rest path is unchanged and pays nothing, which is
-what keeps this from being a general cost. The gate is three booleans and it belongs beside
-`needsCompositorOnCanvas`, not inside the compositor.
+The sequence is worth keeping, because each step was reasonable on what was known and each was wrong:
+
+1. *"Onion skin goes over compositing so user can see it clearly."* Correct about visibility, and it
+   is what deleted the compositor change this document once called mandatory.
+2. Shown that the literal reading collapses two placements into one, the owner chose **(b)**, keep
+   Behind meaning behind. This document then described (b)'s cost as "a little extra compositing work"
+   — and that description was wrong twice over. It is not extra compositing work at all (`full`,
+   `below` and `above` are all three composited on every rebuild already, so the split *swaps* rather
+   than adds), and the cost it does have was not compositing time, it was **the picture**.
+3. Shown a rendered comparison, the owner chose **(a)**. That is this section's ruling.
+
+**What the picture showed, and it is the fact both earlier rulings were made without.** `CanvasView`'s
+own design note states the guarantee outright: at rest the canvas is `composite(full)` in one image,
+*"exact for every mode and every nesting, byte-identical to the thumbnail"*, and **"lift is what snaps
+it back"** — the mid-stroke approximation is tolerable precisely because stopping returns the artist to
+the truth. Drawing the canvas in two pieces so a ghost can sit between them costs the **selected**
+layer its backdrop, so its blend mode degrades to normal: `blendOver`'s `mix(cs, B(cb,cs), da)` sees
+`da == 0` inside a half composited onto transparency. MEASURED on a multiply layer over a painted
+floor: **max channel delta 121**, and it does not read as a 121 — a correctly-multiplied dark navy
+blob renders as raw saturated blue. The layer *above* the active one measured **0**, so the loss is
+narrow and total rather than broad and slight. Under (b) that would have been the **default** state,
+because `isOnionSkinEnabled` defaults to true and `OnionSkinSettings.placement` defaults to `.behind`.
+
+**So the z-order change stays and the at-rest split does not.** The ghost is fronted above
+`sandwichBelow`, which mid-stroke puts it under the active layer's host and over the layers below —
+`.behind` still means behind while a stroke is down. At rest the whole tree is in the lower view, so
+the ghost is over everything and `.behind` reads as `.inFront`. **That collapse is now the accepted
+behaviour, not a defect**, and it is scoped to documents `needsCompositorOnCanvas` answers true for —
+any non-normal blend mode, alpha mask, clip-to-below or buffered group. A document with none of those
+keeps both placements exactly as it always had them.
+
+**The third option, and why it is recorded rather than taken.** Painting the ghost onto the paper
+before the walk would restore the original meaning of Behind — under all the artwork, visible because
+the paper is opaque — and would keep the at-rest composite a single exact image. It was offered and
+declined, because it makes the ghost part of the picture *beneath* the artist's layers: an effect
+layer would grade it and a multiply layer would multiply against it. Do not re-adopt it without
+re-asking.
 
 ### 2.2 Once the paper is in the accumulator, alpha stops meaning coverage
 
@@ -275,10 +300,11 @@ independent reviewers found four defects, all measured rather than argued.
    *unrounded* value. **Neither existing parity test catches it**: both use integer padding, so the only
    case the change altered is the only case nothing covers. Fix in one place — return an integral rect,
    not merely an integral inset.
-4. **The onion skin at rest** — §2.1 above. **Ruled 2026-08-27: option (b), Behind keeps meaning
-   behind.** The z-order commit already on the branch is correct and stays; what it is missing is the
-   at-rest split, without which `.behind` is pixel-identical to `.inFront` in any document the
-   compositor engages for. See §2.1 for the gate.
+4. **The onion skin at rest** — §2.1 above. **Ruled 2026-08-27, on the third pass and against a
+   rendered comparison: option (a).** The z-order commit already on the branch is correct and is all
+   there is. `.behind` reading as `.inFront` at rest, in a document the compositor engages for, is
+   accepted behaviour. The at-rest split was built, measured, shown to the owner and reverted; §2.1
+   carries the measurement so it is not rebuilt. See §2.1 for the gate.
 
 **Two smaller things worth carrying**, both from the build agent rather than the reviewers, and both
 now settled. `Effect.reshapesCoverage` is **not** exhaustive (it has a `default:`), so this document
