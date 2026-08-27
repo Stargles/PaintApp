@@ -20,8 +20,7 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-Nothing yet — the seven device reports below are being root-caused, and an item enters this
-section when a branch exists, not when it is understood.
+Nothing in flight.
 
 ## Queued
 
@@ -94,18 +93,33 @@ staying a fill. All three want the owner's eye on real artwork rather than anoth
 ## The owner's seven device reports, 2026-08-26
 
 Found on their iPad testing the Move/text pass. Their words are quoted verbatim; their *observations*
-are evidence, their *causes* are hypotheses. **(5) is answered and is not a defect.**
+are evidence, their *causes* are hypotheses. **(1), (2), (5), (7) and (3)'s small-box half are done —
+see "Done this pass". (3)'s distort half, (4) and (6) are still open.**
 
-- [ ] **(1) The live unbaked Move preview disappears sometimes.** *"I think it happens when there are
-      compositing layers over it like brightness/contrast."*
-- [ ] **(2) No marching ants while the lasso is being drawn.** *"while I am actively drawing the lasso or
-      even lasso fill, I cannot see the lasso outline marching ants. Make it the same blue and white as
-      when the pen is lifted."* Covers lasso *select* and lasso *fill*.
-- [ ] **(3) Text is invisible in distort mode, and invisible when the box is too small for it.** Carries a
-      ruling: *"The box should never be allowed to be smaller than the text size unless in distort mode."*
+- [ ] **(3) distort half — text is invisible in distort mode.** Carries a ruling: *"The box should
+      never be allowed to be smaller than the text size unless in distort mode."* The small-box half of
+      this report is fixed (see Done this pass); distort is not. **Experiment**: distort a box, then tap
+      into it. `isFlatEditing` swaps the layer to `setAffineTransform` while the caret is live — words
+      reappear flat and vanish on tapping away means the fault is the perspective assignment; invisible
+      in both states means the glyph bitmap, sharing a cause with the small-box bug just fixed. Also
+      check whether the nine grips followed the box into perspective: grips in perspective + no glyphs =
+      a CALayer/render-server fault; a box blank *before* the drag = a raster fault. The first distort
+      drag flips `autoSize` true→false, which flips `clip:` in the RenderKey and forces a re-render — the
+      one provable change to the glyph raster at the moment text disappears. The CALayer *software-path*
+      hypothesis (`CALayer.render(in:)` refusing 3D transforms) is refuted — that path is in-process and
+      the symptom belongs to the render server.
 - [ ] **(4) A pencil tap spawns the text box but does not raise the keyboard.** *"I need to click again on
-      the box with my finger to bring it up."* Their theory — the pencil is treated as drawing — is the
-      thing to test, not to assume.
+      the box with my finger to bring it up."* The app-side path is verified clean: `beginTextSession` has
+      exactly one non-test caller and no branch a pencil can take that a finger cannot, so if the box
+      appeared, `becomeFirstResponder()` was called — the owner's Scribble theory is unproven, and
+      removing `UIScribbleInteraction` in `init(frame:)` is likely a no-op since UIKit attaches those
+      interactions lazily. **Experiment**: turn pencil-only OFF in Actions first (else a finger tap is
+      refused at `CanvasView.swift:2869` and the test proves nothing), then Add Text → tap empty canvas
+      with a **finger**. Keyboard comes up → a real pencil/finger split; stays down → the responder is
+      refused for everyone and the pencil is innocent. `focusEditor()`'s return value does not
+      discriminate (true under the Scribble story too) — add `ActionRecorder` hooks for `textIsFocused`
+      and `textGestureActive` (`CanvasManager.swift:2227`/`:2234`, plain vars today) before spending a
+      device pass; those plus `keyboardWillShowNotification` are what separates the theories.
 - [x] **(5) Freeform / Uniform / Distort greyed out in Move — intentional, not a defect.** Confirmed in the
       code: `MoveTransformBottomBar.swift:24-27` says the picker is live only for a raster piece because a
       lassoed vector piece scales uniformly, and **Move stage 3 is what turns it on**. Distort is stage 5.
@@ -113,11 +127,18 @@ are evidence, their *causes* are hypotheses. **(5) is answered and is not a defe
 - [ ] **(6) The UI freeze is back.** *"it seems like it happens when your in the edit text keyboard menu,
       then select pencil brush or try to resize the canvas in some kind of sequence of actions ... a
       previous session reportedly fixed the UI freezing canvas move bug, and somehow its still here."*
-      The earlier one is pinned by `CanvasTransformFreezeUITests` — a stroke begun under an open timeline
-      popover kills pan/pinch/rotate until the project is reopened. Whether this is that bug's second site
-      or a different mechanism wearing the same face is the question.
-- [ ] **(7) Funky behaviour adding two images to a vector layer.** Unspecified; the symptom list has to be
-      derived from the code and then put back to the owner.
+      Confirmed **not** the earlier bug: `CanvasTransformFreezeUITests`' defect (a stroke begun under an
+      open timeline popover) was real and is fixed, and nothing in that path is text-specific. Strongest
+      live candidate: `CanvasManager.selectBrush(_:)` (`CanvasManager.swift:557-568`) omits `.text` from
+      its `selectedTool != .eraser && selectedTool != .fill` exclusion list, so picking a brush preset
+      flips the tool off `.text` without `commitAllInteractiveState()`, leaving `textGestureActive` true
+      while `reconcileLayers` re-enables the layer host — the same hand-maintained-list shape
+      `Tool.paintsOnCanvas`'s own doc comment exists to prevent. **Reachability is unproven**:
+      `BrushSettingsPanel.swift:20` is the only caller and needs `activePanel == .brush`, which the
+      committing toolbar route (`TopToolbar.swift:174-182`) appears to block whenever `.text` is active.
+      **The discriminating question for the owner, which no run can answer: when it locks, does the
+      timeline still animate and do the marching ants still march?** Yes → a dead-input overlay. No → a
+      real main-thread hang. A single `ActionRecorder` capture names it outright.
 
 
 ## Queued
@@ -160,4 +181,70 @@ Nothing — the owner's list is empty. Two things are *carried*, both deliberate
 
 ## Done this pass
 
-Empty. Filled as this pass merges.
+- **(2) The lasso's live outline is now visible while dragging** (`043f219`). Two independent causes,
+  not one: `liveShadowLayer.isHidden = true` permanently hid the blue half of the preview, leaving a
+  1.5pt white dash invisible on white paper, and separately `liveLayer` never had the marching-ants
+  animation added at all. Also wrapped the live path assignment in a `CATransaction` with actions
+  disabled so the preview stops trailing the stylus (precedent: `ShapeOverlayView.swift:218-222`,
+  `GuideOverlayView.swift:155-158`). Select and lasso-fill share one renderer, so both are covered.
+  **No test**: `SelectionOverlayView` type-checks under `@testable import` but fails to *link* in the
+  UI-test target, and is not among the pure Foundation/CoreGraphics sources compiled a second time
+  into it. Pinned by the owner's eye only.
+
+- **(1) The unbaked Move preview no longer disappears under an effect layer** (`81fe14d`).
+  `isSandwichEngaged` (`CanvasView.swift:973`) had an escape hatch for the raster `floatingPiece`,
+  written 2026-08-12 (`389876b`), before the vector lasso move existed; `vectorFloat` was never added
+  beside it. Any effect/mask/blend/group-buffer anywhere in the tree makes
+  `RenderTree.needsCompositorOnCanvas` true, which engages the sandwich, which blanks every layer host
+  at rest — including the one holding the float's pixels. The hole is punched correctly
+  (`suppressedElementIDs`); it was the float being dropped underneath it. **Two corrections to the
+  owner's report, both in the fix's favour**: it is not "sometimes" — it happens on *every* move with
+  any effect/mask/blend/group-buffer in the tree — and it is not specific to layers *over* the moved
+  one, since `needsCompositorOnCanvas` walks the whole tree. Cost recorded in the doc comment:
+  disengaging also does `setContentMask(nil)`, so alpha-mask clipping is lost while a piece floats.
+  **No test** — `isSandwichEngaged` is private on the coordinator, unreachable from the fast tier; a
+  real pin needs an XCUITest over a document with an effect layer and a live lasso move.
+
+- **A stale canvas-touch comment, found and corrected before it caused a fourth defect** (`3e19624`).
+  `handleTextPress` was the app's one bare `interactionBegan.send()`, against a capitalised "Do not
+  send this directly" contract. **The archaeology was inverted in the brief and corrected**: the
+  contract commit (`3a68adb`) was authored *before* Add Text stage 1 (`6d404d0`) by 23 minutes, but
+  landed *after* it on `main` because the contract branch was rebased on top — proof: the contract's
+  parent tree held five bare calls and converted four, leaving `handleTextPress`, so its "all four
+  canvas-touch sites" comment was accurate on its own pre-rebase base and stale by the time it landed.
+  A distinct hazard from the two-branches-that-cannot-see-each-other shape already in CLAUDE.md — one
+  branch whose own count expired underneath it during a rebase. The same stale miscount in
+  `CanvasPresentationLogicTests.swift:168` was fixed too. **This fix is not the owner's freeze (6)** —
+  with `.text` selected the stroke recognizer receives no touches, so there was nothing to strand.
+
+- **(7) Two images on a vector layer no longer collide** (`8336165`). Both imports were hard-coded to
+  the canvas centre, so image 2 landed at a bit-identical `CGPoint` on image 1 — and
+  `splitForLassoMove` decides membership purely by stored centre, so no lasso loop could ever contain
+  one without the other. Fixed with `VectorCanvas.addImage(canvasSpaceElement:canvasPosition:canvasFit:)`
+  (`VectorLayer.swift:670`, beside `addStroke`/`addFill`), mapping the canvas centre through
+  `_transform.inverted()` and cascading 24pt per existing image in *local* units, all under one lock.
+  **The first draft's arithmetic was wrong**: adding 24pt to a canvas-space centre that is then stored
+  as local coordinates leaves the larger misplacement in place. **Appending was considered and
+  rejected** — `addImage`'s kind-sorted insert is documented at `insertionIndex`'s header and pinned by
+  `testAddingElementsKeepsTheKindOrderExceptForAFillWhichGoesOnTop`; it also would not have fixed the
+  collision. 4 tests, verified non-vacuous: 3 of 4 fail against pre-fix code, the 4th correctly still
+  passes (pins an invariant the original already satisfied).
+
+- **(3) small-box half — a box shorter than one line of text now draws it, instead of nothing**
+  (`daa6fac`, `3314086`, `ef64506`). `TextLayout.draw` fed CoreText `CGPath(rect:)` of the raw box,
+  which drops any line that doesn't fit *entirely* — a box shorter than one line yields zero lines, a
+  blackout, not a clip. MEASURED: a 64pt line needs a 76.7pt path. Fixed by anchoring the layout rect
+  on the box's *top* so overflow hangs below, and by giving the box per-axis floors: height >= one
+  measured line (via `measure`, never `font.lineHeight`, short by 3x at the top of the range), width >=
+  the run CoreText will not subdivide. **A brief premise was empirically wrong and was corrected**: the
+  brief said floor the width at "the widest unbreakable word", but MEASURED, CoreText's
+  `.byWordWrapping` *breaks inside* an overlong word, one character per line — that floor would have
+  pinned a one-URL box open at full width. The shipped floor asks the framesetter what it actually
+  refuses to subdivide: 46.2pt for "Hello world", 86.2pt at 40pt tracking, 55.4pt for a Japanese
+  sentence with no spaces. A literal "never smaller than its wrapped text" floor was rejected because
+  it chases itself — narrowing increases required height — and would make boxes un-narrowable. Distort
+  is exempted on both paths; the floor latches on `TextFrameDrag` at touch-down so a 60Hz drag runs no
+  layout. 12 tests (5 + 7). The distort *half* of report (3) is still open — see above.
+
+1725 fast-tier tests (1722 passed, 0 failed, 3 skipped) = 1709 + 16, static `func test` 1826 → 1842,
+matching.

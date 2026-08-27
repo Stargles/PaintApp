@@ -4,6 +4,35 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
+## `TextSettingsPanel` grew three presentations the census says it doesn't have (2026-08-27)
+
+Found running `tools/presentation-census.sh` while closing out session 69 — not a report, just the
+routine check. It prints **14** unregisterable presentations; `MENU_PRESENTATION_CENSUS.md`'s
+"SETTLED SAFE" list names twelve and, at line 119-121, says outright: *"The five panels `SelectPanel`,
+`TextSettingsPanel`, `StrokeSettingsPanel`, `MaskTuningSection` and `InterpolatePanel` contain no
+presentations at all."* That sentence is now false. Add Text's later stages gave
+`TextSettingsPanel.swift` three presentations the census never saw: the font-family `Menu` (`:115`),
+the face `Menu` (`:150`), and a stock `ColorPicker` (`:202`).
+
+The two `Menu`s are almost certainly safe by the census's own finding — `MenuInterruptionUITests`
+measured that a SwiftUI `Menu`'s dismiss region absorbs the whole touch sequence and never passes a
+drag through to the canvas, which is what makes every other `Menu` in the app SAFE rather than
+BROKEN. Nobody has run that measurement against these two specifically.
+
+The `ColorPicker` is the more interesting one: it is the first stock `ColorPicker` in the app whose
+*parent* is not itself a registered presentation. The other stock `ColorPicker` (`OnionSkinPanel.swift:326`)
+sits inside a popover that is a `CanvasPresentation` case (`showOnionSkinOptions`) — a registered,
+`isPresented`-bound presentation the census could reason about. `TextSettingsPanel` is reached through
+`activePanel` (`DrawingView.swift:399`), the same top-level mechanism the census calls safe for the
+*panel's own* teardown (line 114-116) — but the `ColorPicker`'s own system presentation, once it is
+open, is a second thing on top of that, with no `isPresented` binding to register and nothing measured
+about whether a stroke can start under it the way `.popover` demonstrably could before the 2026-08-20
+fix.
+
+Not fixed here — it needs the same kind of measurement `MenuInterruptionUITests` already did for
+`Menu`, not a guess, and `MENU_PRESENTATION_CENSUS.md` needs its SAFE list and its "contains no
+presentations" sentence updated once that measurement exists.
+
 ## A vector cel holding warped text re-warps it on every invalidation, not once per commit (2026-08-26)
 
 Found reviewing ADD_TEXT.md stage 5 and **deliberately not fixed** — the fix is a cache in a budget
