@@ -33,16 +33,30 @@ extension CanvasManager {
 
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
-                layers[layerIndex].cels[celIndex].raster =
-                    layers[layerIndex].cels[celIndex].raster.resized(to: newSize, offset: offset)
-                if let fill = layers[layerIndex].cels[celIndex].fillImage {
-                    layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, offset: offset)
-                }
-                if let baked = layers[layerIndex].cels[celIndex].bakedImage {
-                    layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, offset: offset)
-                }
-                if let vector = layers[layerIndex].cels[celIndex].vector {
-                    layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, offset: offset)
+                // **One pool per cel, and it is the difference between a slow operation and a
+                // jetsam.** Each cel autoreleases at least two canvas-sized images here — the
+                // `renderToUIImage()` inside `resized`, and the `UIGraphicsImageRenderer` output —
+                // and without a pool none of them drain until the whole double loop returns, so the
+                // intermediates for *every* cel in the document are resident at once. MEASURED
+                // 2026-08-27 (`PerfBaselineTests.testWhatTheCanvasPaddingResizeCosts`): 32 cels at
+                // 2048×1024 peaked at 3.5 GB on a document that is 256 MiB at rest. The cost is
+                // linear in cel count by construction, so the 300–1000-cel document the owner
+                // intends (TODO.md) does not get slow on a 3 GB iPad, it gets killed.
+                //
+                // `flipCanvas` below is the same loop with the same omission and is deliberately not
+                // changed here — see CANVAS_RESIZE.md §0.
+                autoreleasepool {
+                    layers[layerIndex].cels[celIndex].raster =
+                        layers[layerIndex].cels[celIndex].raster.resized(to: newSize, offset: offset)
+                    if let fill = layers[layerIndex].cels[celIndex].fillImage {
+                        layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, offset: offset)
+                    }
+                    if let baked = layers[layerIndex].cels[celIndex].bakedImage {
+                        layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, offset: offset)
+                    }
+                    if let vector = layers[layerIndex].cels[celIndex].vector {
+                        layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, offset: offset)
+                    }
                 }
             }
         }

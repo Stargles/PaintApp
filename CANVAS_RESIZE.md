@@ -54,17 +54,46 @@ Actions-menu control is the "Canvas Padding" slider,
 [`ActionsMenu.swift:217-240`](PaintSoftware/Views/ActionsMenu.swift), range `0...512`
 ([`CanvasManager.swift:30`](PaintSoftware/Models/CanvasManager.swift)).
 
-**This is almost certainly what the owner's freeze report (6) means by *"try to resize the canvas"*** —
-it is the only control in the Actions menu that changes the canvas extent. Two properties of the code
-above are worth holding next to that report, neither of which proves anything on its own: the loop is
-**synchronous on the main actor over every cel in the document**, and it ends in
-`regenerateAllThumbnails()`, whose own doc comment (`CanvasManager.swift:1519-1522`) names *"canvas
-resize"* as one of its two callers and states that it is *deliberately not debounced*. Each thumbnail
-is a full `PixelOps.rasterize` of the cel. On the 1–4-cel documents actually on the owner's iPad
-(PERFORMANCE.md item 14, read off the device) that is imperceptible; on the 300–1000-cel document the
-owner intends it is a multi-second main-thread block with no spinner. **That is a hypothesis, not a
-finding** — the sequence in report (6) also involves the text keyboard, and §4's stage 1 fixes the
-block regardless of whether it was ever the cause.
+**It is NOT what the owner's freeze report (6) meant, and that was settled by asking (2026-08-27).**
+The owner: *"by 'try to resize the canvas' I meant moving the canvas with two fingers if I recall
+correctly."* This slider is off that hook entirely — see TODO.md (6). What remains is a real cost, now
+measured rather than supposed, and §4's stage 1 fixes it regardless of whether it was ever a freeze.
+
+**MEASURED 2026-08-27**, `PerfBaselineTests.testWhatTheCanvasPaddingResizeCosts`, 4 layers × 8 cels at
+2048×1024, best of three, simulator. **Taken on a contended machine — 35% idle, another session's
+suite running — so every figure is a ceiling, not a floor**, which is the safe direction for a cost
+that is being called too large:
+
+| | 32 cels, before | 32 cels, after | at 300 (INFERRED) | at 1000 (INFERRED) |
+|---|---|---|---|---|
+| whole `setCanvasPadding` | 497 ms | **390 ms** | 3.7 s | 12.2 s |
+| of which `regenerateAllThumbnails()` | 86 ms (17%) | 84 ms (**22%**) | | |
+| of which the buffer walk | 411 ms (83%) | 306 ms (**78%**) | | |
+| peak resident during it | 3.5 GB | **1.8 GB** | | |
+
+"after" is with the per-cel `autoreleasepool` described below, which is the only change made here.
+
+**The thumbnail pass is the small half, and that inverts the guess this section used to carry.** Four
+fifths of the cost is the per-cel buffer walk itself, so debouncing or deferring the thumbnails — the
+obvious fix, and the one `startThumbnailBackfill` already exists for — would take about 17% off. The
+walk is what stage 1 has to move.
+
+**The memory number is the headline, and it is a code fact rather than an accident of the fixture.**
+The loop at `:34-48` has **no `autoreleasepool` per cel**. Each cel autoreleases two canvas-sized
+images (`renderToUIImage()`, then the `UIGraphicsImageRenderer` output), and nothing drains until the
+whole loop returns — so the intermediates for *every* cel are resident at once. 32 cels peak at 3.5 GB
+on a document that is 256 MiB at rest. At 300 cels that is tens of gigabytes of un-drained
+intermediates (INFERRED, linear in cel count by construction), and on a 3 GB iPad 9 the operation does
+not get slow, it gets **jetsammed**. A per-cel `autoreleasepool` is one line, it is
+**done** (`CanvasManager+Document.swift:34`), and it takes the peak from 3.5 GB to 1.8 GB and the wall
+clock from 497 ms to 390 ms — the time falls as well because a gigabyte of un-drained intermediates is
+a gigabyte of page faults. **`flipCanvas` (`:73-88`) is the same loop with the same omission and was
+deliberately left alone**: it is the neighbour rather than the thing measured, nothing pins its
+behaviour, and it should be changed by whoever is already in it.
+
+**What is still not done, and is stage 1's actual job**: 1.8 GB at 32 cels is still linear in cel
+count, and the walk is still synchronous on the main actor. The pool bought a factor of two, not a
+different shape.
 
 ### The three resize primitives, and what each can and cannot do
 
