@@ -300,7 +300,10 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
 
 - [ ] The owner, 2026-08-27: *"the canvas plus the padding should have the maximum size of 16k, so the
       padding should hit a maximum limit when the canvas is set close to that 16k. The 16k canvas (or near
-      it) will likely never be used for animation so it doesnt need canvas padding. Right now canvas padding
+      it) will likely never be used for animation Their fuller rationale, given in
+      conversation 2026-08-27 and recorded here because it existed nowhere in the repo: *"a max size canvas
+      would have no off canvas stroke room, but that's a very minor concern, since again, the 16k canvas would
+      only ever be used for big concept art boards."* so it doesnt need canvas padding. Right now canvas padding
       just has a set maximum of something like 500px, I kind of want to make that maximum a bit higher like
       1000, unless of course it is bounded by the 16k canvas+padding limit."*
       **Their memory was nearly exact**: `CanvasManager.canvasPaddingRange` is `0...512`
