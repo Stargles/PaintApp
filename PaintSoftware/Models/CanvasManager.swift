@@ -276,10 +276,16 @@ final class CanvasManager: ObservableObject {
         return layers[currentLayerIndex].kind
     }
 
-    /// Imports an image onto the active vector layer as a movable element (centered, scaled to fit),
-    /// participating in the layer's overall transform. Returns false if the active layer isn't a
-    /// vector layer (`insertImage` below falls back to creating one). Shapes and video slot in here
-    /// the same way in future.
+    /// Imports an image onto the active vector layer as a movable element (centered, scaled to fit,
+    /// cascaded off whatever is already there), participating in the layer's overall transform.
+    /// Returns false if the active layer isn't a vector layer (`insertImage` below falls back to
+    /// creating one). Shapes and video slot in here the same way in future.
+    ///
+    /// Placement and the cascade both happen inside `VectorCanvas.addImage(canvasSpaceElement:...)`,
+    /// under one lock acquisition, rather than here: this method would need `vector.transformScale`
+    /// to convert `canvasSize`-derived numbers into local units, and reading that and then calling
+    /// `addImage` separately is two lock acquisitions around a value that only `VectorCanvas` itself
+    /// can be sure hasn't changed in between.
     @discardableResult
     func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
         beginCanvasEdit()
@@ -289,10 +295,10 @@ final class CanvasManager: ObservableObject {
               let vector = layers[currentLayerIndex].cels[celIdx].vector,
               image.size.width > 0, image.size.height > 0 else { return false }
         let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
-        let element = VectorImageElement(image: image,
-                                         transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2), scale: fit, rotation: 0))
         let imagesBefore = vector.images
-        vector.addImage(element)
+        let element = vector.addImage(canvasSpaceElement: image,
+                                      canvasPosition: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2),
+                                      canvasFit: fit)
         scheduleThumbnailRegen(layerIndex: currentLayerIndex, celIndex: celIdx)
         // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
         objectWillChange.send()

@@ -487,6 +487,115 @@ final class BrushEngineLogicTests: XCTestCase {
                        + "there — while the other two adds still sort by kind")
     }
 
+    // MARK: - Display list: importing two images (owner report 7)
+    //
+    // `addImageToActiveVectorLayer` used to hard-code every import to the canvas centre with no
+    // cascade, so a second image landed exactly on the first — same stored `position`, same `fit` for
+    // same-aspect images — and nothing in the app could separate them afterwards: Move only carries the
+    // whole cel, and `splitForLassoMove` (below) selects an image purely by its stored centre, so two
+    // bit-identical centres can never be told apart by any loop. `VectorCanvas.addImage(canvasSpaceElement:)`
+    // fixes both halves at once: it maps the canvas-space centre through `_transform.inverted()` before
+    // storing (storage is local, like every other element on this canvas) and cascades by a step
+    // converted to local units, both under the one lock acquisition that reads `_transform`.
+
+    /// The bug as the owner saw it: two imports, one canvas, no separation. Not a magic-number check —
+    /// just that the two stored positions cannot be the same point, which is the one thing that made
+    /// the second image unrecoverable.
+    func testAddingTwoImagesToAVectorLayerPlacesThemAtDistinctPositions() {
+        let canvas = VectorCanvas(size: Self.canvasSize)
+        let first = canvas.addImage(canvasSpaceElement: solidImage(.red),
+                                    canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
+        let second = canvas.addImage(canvasSpaceElement: solidImage(.green),
+                                     canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
+
+        XCTAssertNotEqual(first.transform.position, second.transform.position,
+                          "A second image centred on the same canvas point as the first must not land "
+                          + "on the exact same stored position, or it is permanently indistinguishable from it")
+    }
+
+    /// The naive fix — adding a step straight to the canvas-centre expression — is wrong because that
+    /// value is local-space storage while the centre is computed in canvas space: on a layer with a
+    /// non-identity transform it both mis-places the image and bakes the space error into the cascade
+    /// too. This pins the correct mapping directly: an imported image's local position, carried back
+    /// through the very `transform` it was imported under, must land exactly on the canvas point the
+    /// artist imported at (for the first image, before any cascade), and its local `scale` must render
+    /// back out at the `fit` it was given.
+    func testAddImageCanvasSpaceElementMapsPositionAndScaleThroughTheLayersTransform() {
+        let transform = CGAffineTransform(translationX: 100, y: 50).scaledBy(x: 2, y: 2)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [], transform: transform)
+        let canvasCentre = CGPoint(x: Self.canvasSize.width / 2, y: Self.canvasSize.height / 2)
+        let fit: CGFloat = 0.8
+
+        let element = canvas.addImage(canvasSpaceElement: solidImage(.blue), canvasPosition: canvasCentre, canvasFit: fit)
+
+        let mappedBackToCanvas = element.transform.position.applying(transform)
+        XCTAssertEqual(mappedBackToCanvas.x, canvasCentre.x, accuracy: 0.001,
+                       "The stored local position must map back to the canvas centre through the layer's own transform")
+        XCTAssertEqual(mappedBackToCanvas.y, canvasCentre.y, accuracy: 0.001,
+                       "The stored local position must map back to the canvas centre through the layer's own transform")
+
+        XCTAssertEqual(element.transform.scale * canvas.transformScale, fit, accuracy: 0.0001,
+                       "The stored local scale must render back out at the canvas-space `fit` it was given")
+    }
+
+    /// The only per-element move path in the app is the lasso: `splitForLassoMove` decides membership
+    /// purely by an element's stored centre (`VectorLayer.swift`, the `.image` case). A loop drawn
+    /// tightly around the first image's own centre must therefore pick up the first image and leave the
+    /// second behind — which is only possible at all because the two centres are no longer identical.
+    func testALassoLoopAroundOneImageDoesNotSelectTheOther() {
+        let canvas = VectorCanvas(size: Self.canvasSize)
+        let first = canvas.addImage(canvasSpaceElement: solidImage(.red),
+                                    canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
+        let second = canvas.addImage(canvasSpaceElement: solidImage(.green),
+                                     canvasPosition: CGPoint(x: 32, y: 32), canvasFit: 0.5)
+        XCTAssertNotEqual(first.transform.position, second.transform.position, "Setup: see the distinct-positions test above")
+
+        let radius: CGFloat = 6
+        let loop = CGPath(ellipseIn: CGRect(x: first.transform.position.x - radius,
+                                            y: first.transform.position.y - radius,
+                                            width: radius * 2, height: radius * 2), transform: nil)
+
+        guard let split = canvas.splitForLassoMove(insideLocalPath: loop) else {
+            return XCTFail("A loop drawn around the first image's own centre should select something")
+        }
+        XCTAssertTrue(split.insideIDs.contains(first.id), "The loop was drawn around the first image's own centre")
+        XCTAssertFalse(split.insideIDs.contains(second.id), "The second image's centre must fall outside a loop drawn only around the first")
+    }
+
+    /// Undo removes the second import; redo must put back the very same element at the very same
+    /// cascaded offset, not reconstruct a fresh one. `addImageToActiveVectorLayer` binds `element` once
+    /// from `VectorCanvas.addImage(canvasSpaceElement:)`'s return value, outside both closures, so redo
+    /// replays that captured value — recomputing the cascade inside the redo closure instead (from the
+    /// cel's live image count, read at redo time rather than at the moment of the original import) would
+    /// still often land on the same number by coincidence, but it would build a *new* `VectorImageElement`
+    /// with a fresh id, which this test also catches.
+    func testUndoThenRedoOfASecondImageImportReplaysTheSameElementAtTheSameOffset() {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        manager.currentLayerIndex = 0
+        XCTAssertTrue(manager.addImageToActiveVectorLayer(solidImage(.red)))
+        XCTAssertTrue(manager.addImageToActiveVectorLayer(solidImage(.green)))
+
+        guard let celIdx = manager.activeCelIndex(inLayer: 0, atFrame: manager.currentFrame),
+              let vector = manager.layers[0].cels[celIdx].vector else {
+            return XCTFail("Setup: expected a vector cel holding the two imported images")
+        }
+        XCTAssertEqual(vector.images.count, 2, "Setup: both imports should have landed")
+        let secondBeforeUndo = vector.images[1]
+
+        manager.undo()
+        XCTAssertEqual(vector.images.count, 1, "Undo should remove only the second import")
+
+        manager.redo()
+        XCTAssertEqual(vector.images.count, 2, "Redo should restore the second import")
+        let secondAfterRedo = vector.images[1]
+
+        XCTAssertEqual(secondAfterRedo.id, secondBeforeUndo.id,
+                       "Redo should replay the very element undo removed, not construct a fresh one")
+        XCTAssertEqual(secondAfterRedo.transform.position, secondBeforeUndo.transform.position,
+                       "Redo must re-place the second image at the identical cascaded offset it had before undo")
+    }
+
     // MARK: - Display list: `StrokeComposite` decoding
 
     /// Encodes `value`, drops `keys` from the resulting JSON object, and hands back the JSON — the way

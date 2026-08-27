@@ -640,6 +640,49 @@ final class VectorCanvas {
         invalidate()
     }
 
+    /// Canvas-point spacing between a freshly-imported image and the one before it — see
+    /// `addImage(canvasSpaceElement:canvasPosition:canvasFit:)`.
+    private static let importCascadeStep: CGFloat = 24
+
+    /// Imports an image whose position/scale were measured in **canvas** space — the import path
+    /// always centers a new image on the canvas the artist is looking at, exactly as a live stroke or
+    /// fill is measured where the finger is — mapping into this canvas's local space before storing,
+    /// for the reason `addStroke(canvasSpaceStroke:)` and `addFill(canvasSpacePath:)` both give:
+    /// storage is local, `render()` applies `transform` on top, and a canvas-space value stored
+    /// unmapped would go through the transform twice. `scale` gets the same correction `size` does in
+    /// `addStroke(canvasSpaceStroke:)`: divided by the transform's own scale so it renders back out at
+    /// the canvas-space size it was given.
+    ///
+    /// **Also cascades**, offsetting by `importCascadeStep` canvas points per image already on this
+    /// canvas — converted to local units the same way `size` is, so the offset is the right number of
+    /// *screen* points regardless of the layer's own zoom/scale — so a second import does not land
+    /// exactly on top of the first. Without this, two images centered on the same canvas at the same
+    /// `fit` (same aspect ratio) are bit-identical `CGPoint`s: `splitForLassoMove` selects by an
+    /// element's stored centre alone, so no lasso loop could ever contain one without the other, and
+    /// Move only carries the whole cel — there is no way to separate them after the fact. Counting
+    /// this canvas's own images (not a running counter kept elsewhere) is what makes undo → redo
+    /// re-place the same element at the same offset instead of drifting on a later import.
+    ///
+    /// Returns the element as actually stored (local space, cascaded, inserted), so the caller can
+    /// bind it once outside its undo/redo closures — recomputing the offset inside redo would replay a
+    /// different value than undo captured whenever another image was imported in between.
+    @discardableResult
+    func addImage(canvasSpaceElement image: UIImage, canvasPosition: CGPoint, canvasFit: CGFloat) -> VectorImageElement {
+        lock.lock()
+        defer { lock.unlock() }
+        let scale = Self.scale(of: _transform)
+        let localScale = scale > 0 ? canvasFit / scale : canvasFit
+        let cascade = CGFloat(_elements.compactMap(\.image).count) * Self.importCascadeStep / (scale > 0 ? scale : 1)
+        var localPosition = canvasPosition.applying(_transform.inverted())
+        localPosition.x += cascade
+        localPosition.y += cascade
+        let element = VectorImageElement(image: image,
+                                         transform: LayerTransform(position: localPosition, scale: localScale, rotation: 0))
+        _elements.insert(.image(element), at: Self.insertionIndex(forKind: .image, in: _elements))
+        invalidate()
+        return element
+    }
+
     /// Puts a fill **on top of everything already on this canvas** — appended to the end of the
     /// display list, not inserted at `Kind.fill`'s index.
     ///
