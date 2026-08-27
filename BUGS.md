@@ -59,6 +59,11 @@ blends against, **and** Outline, Bloom and Sobel get a way to see the ink alone 
 allowed to regress. That second half is a new concept — an effect scoped to the pixels below it rather
 than to the accumulated backdrop — and wants a short specification before it is built.
 
+**[EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) is the specification**, written 2026-08-27: §3 costs the
+four ways to give Outline, Sobel and Bloom an ink-only input and recommends the one that adds no state
+to either backend, §5 is the four questions the owner still has to answer, and §6 stages it so the
+onion-skin change ships and is looked at before the fix that needs it.
+
 ### The blocker a reviewer found, and it is not a tuning problem
 
 **Putting an opaque background into the `full` and `below` requests hides the "Behind" onion skin.**

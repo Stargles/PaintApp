@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-08-27)
 
 ## Corpus Check
-- 259 files · ~931,175 words
+- 259 files · ~932,750 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f5126d89`
+- Built from commit: `34cdc77f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1169,7 +1169,7 @@ Nodes (9): 1. Nothing answers "who owns this canvas touch" — and this is where
 
 ### Community 239 - "Asked 2026-08-27, off the device report"
 Cohesion: 0.29
-Nodes (7): (15) Move with no selection becomes "the whole canvas was lassoed", and the legacy path is deleted, (16) Move with no selection blocks the brush button, (17) Text is transformable — Freeform and Mirror must accept it, (18) The bottom bars should be as tall as their contents, (19) An empty text object is deleted when it bakes, Asked 2026-08-27, off the device report, Chromatic aberration, and possibly every effect, is masked to the layer's own ink
+Nodes (7): (15) Move with no selection becomes "the whole canvas was lassoed", and the legacy path is deleted, (16) Move with no selection blocks the brush button, (17) Text is transformable — Freeform and Mirror must accept it, (18) The bottom bars should be as tall as their contents, (19) An empty text object is deleted when it bakes — ALREADY SHIPPED, closed 2026-08-27, Asked 2026-08-27, off the device report, Chromatic aberration, and possibly every effect, is masked to the layer's own ink
 
 ### Community 241 - "Colouring"
 Cohesion: 0.40
