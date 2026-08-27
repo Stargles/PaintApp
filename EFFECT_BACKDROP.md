@@ -90,14 +90,22 @@ and one of the two placements is silently lost.**
 Scope is wider than effect layers, because engagement is `needsCompositorOnCanvas` — any non-normal
 blend mode, any alpha mask, any clip-to-below, any buffered group. One multiply shadow layer is enough.
 
-**This is now an owner question, not a bug to fix quietly**, because their ruling taken literally —
-*"onion skin goes over compositing so user can see it clearly"* — *is* what the at-rest picture does.
-The choice is between (a) accepting that Behind and In Front coincide whenever the compositor engages,
-which is the cheapest reading of the ruling and loses a placement; (b) keeping the ghost out of the
-composite but splitting the at-rest presentation so something still covers it, which is new work in a
-path this document called untouched; or (c) compositing the onion skin into the request after all,
-which is the branch §2.1 originally called mandatory and the ruling deleted. **Recommendation: (b)** —
-the ruling was about visibility, not about collapsing two features into one.
+**RULED 2026-08-27, second ruling on the same subject, and it overrides the literal reading of the
+first.** Shown the three options in behavioural terms, the owner chose **(b): Behind keeps meaning
+behind.** The layers *above* the active one must still cover the ghost, so the two placements stay two
+things. The other two are recorded so they are not silently re-adopted: (a) accepting that Behind and
+In Front coincide whenever the compositor engages was the cheapest reading of the first ruling and
+loses a placement; (c) compositing the ghost into the request is what the first ruling deleted, and it
+would let an effect layer *grade the ghost* — a brightness layer brightening the previous frame.
+
+**What (b) costs, and it is the whole of the work.** At rest the sandwich collapses to one image:
+`belowView.image = images.full`, `aboveView.image = nil` and hidden, every layer host blanked. A ghost
+fronted above `belowView` therefore has nothing over it. (b) means the at-rest presentation must
+*stay split* — `below` = the active layer and everything under it, `above` = everything over it — for
+exactly the documents where it matters: **onion skin on, placement `.behind`, and the compositor
+engaged**. Outside that gate the single-image at-rest path is unchanged and pays nothing, which is
+what keeps this from being a general cost. The gate is three booleans and it belongs beside
+`needsCompositorOnCanvas`, not inside the compositor.
 
 ### 2.2 Once the paper is in the accumulator, alpha stops meaning coverage
 
@@ -266,7 +274,10 @@ independent reviewers found four defects, all measured rather than argued.
    *unrounded* value. **Neither existing parity test catches it**: both use integer padding, so the only
    case the change altered is the only case nothing covers. Fix in one place — return an integral rect,
    not merely an integral inset.
-4. **The onion skin at rest** — §2.1 above, now an owner question.
+4. **The onion skin at rest** — §2.1 above. **Ruled 2026-08-27: option (b), Behind keeps meaning
+   behind.** The z-order commit already on the branch is correct and stays; what it is missing is the
+   at-rest split, without which `.behind` is pixel-identical to `.inFront` in any document the
+   compositor engages for. See §2.1 for the gate.
 
 **Two smaller things worth carrying**, both from the build agent rather than the reviewers:
 `Effect.reshapesCoverage` is **not** exhaustive (it has a `default:`), so this document was wrong to
