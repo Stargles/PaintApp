@@ -152,6 +152,7 @@ the owner 2026-08-27:
 | Effect | Input | Fixed or chosen |
 |---|---|---|
 | Levels, Curves, Brightness/Contrast, HSV Shift, Gradient Map, Posterize, Noise, Chromatic Aberration, Blur | `.backdrop` | fixed |
+| **Sharpen** | `.backdrop` | fixed — **this table named twelve of thirteen and left it out**, and the build answered it by reasoning about the formula. Confirmed against the kernel instead: `sharpenCombine` (`Composite.metal:684-693`, CPU twin `EffectKernels.swift:455-471`) works on the full premultiplied vector, has no unpremultiply step and **no `alpha > 0` short-circuit**, and clamps `rgb <= a` at the end. Over flat paper `blur == base` exactly, so the difference term is exactly zero and the effect is the identity. At an ink/paper edge it sharpens the real ink-against-paper contrast, where before it sharpened ink against implicit transparent black — a visible improvement, and the only thing an artist sees change |
 | Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
 | **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
 | **Sobel** | `.backdrop` **by default** | **artist's choice.** *"Same with sobel, defaulting this time to taking in the canvas color."* So Sobel's shipped look changes: bright edges on black, which is what an edge detector conventionally is, with today's edges-over-paper available as the other setting |
@@ -279,12 +280,57 @@ independent reviewers found four defects, all measured rather than argued.
    at-rest split, without which `.behind` is pixel-identical to `.inFront` in any document the
    compositor engages for. See §2.1 for the gate.
 
-**Two smaller things worth carrying**, both from the build agent rather than the reviewers:
-`Effect.reshapesCoverage` is **not** exhaustive (it has a `default:`), so this document was wrong to
-call it the model to copy; and **§4's table names twelve of thirteen effects — Sharpen is missing**, in
-this document and in BUGS.md's copy of it. The build answered it `.backdrop`, reasoning that sharpen's
-`x + amount·(x − blur(x))` has a zero second term across flat paper, so a uniform backdrop is the
-identity for it exactly as it is for the blur it is built on. **Confirm that rather than inherit it.**
-And nothing downstream switches on `Input` — all four consumers test `== .ink`, so a third case would
-compile clean and silently take the backdrop path. The exhaustive switch protects the declaration and
-nothing that acts on it.
+**Two smaller things worth carrying**, both from the build agent rather than the reviewers, and both
+now settled. `Effect.reshapesCoverage` is **not** exhaustive (it has a `default:`), so this document
+was wrong to call it the model to copy — though a read of all thirteen kernels found no live defect
+hiding behind that default, only the rot risk. **Sharpen was missing from §4's table and is now in
+it**, confirmed against the kernel rather than inherited from the formula. And nothing downstream
+switches on `Input` — all four consumers test `== .ink`, so a third case would compile clean and
+silently take the backdrop path; the exhaustive switch protected the declaration and nothing that acts
+on it. All four consumers are switches now.
+
+## §8 — What the re-review found, and what it corrected in §7 (2026-08-27)
+
+The four defects went back out to five analysts before a line was rewritten. Three of §7's four
+survived intact; **two of its explanations did not**, and one of its two proposed fixes is wrong.
+
+1. **§7 defect 2's "composite the *difference* the grade made" is REFUTED.** In premultiplied space
+   the difference term is only correct where `graded == ink` — i.e. exactly the pixels that were
+   already fine — and it destroys every pixel the effect *adds*. On a ring pixel the paper is
+   `(255,255,255,255)`, the ink is `(0,0,0,0)` and the outline colour is opaque, so `acc + diff`
+   clamps straight back to the paper and **Outline's ring disappears entirely**. Only §7's second
+   candidate survives: clear the accumulator back to the background fill, draw the graded ink on it,
+   and crossfade against the ungraded accumulator by opacity × mask — which is the backdrop path's
+   own `mix`, reused verbatim rather than reimplemented.
+2. **The 40% figure is right and understated.** Hand-traced through both backends: the ink's effective
+   coverage goes 0.60 to `1 − (1 − 0.6)² = 0.84`, so the composited luminance falls *to* 40.2% of its
+   former value — a ~60% darkening. The measured `[102,102,102]` → `[41,41,41]` is reproduced exactly
+   by arithmetic (`102 × 0.4 = 40.8`), which is what makes it a defect rather than a fixture artefact.
+3. **§7 defect 3's account of `renderSize` was incomplete, and the incompleteness is the whole fix.**
+   `setCanvasPadding` folds the continuous slider value into `canvasSize` *itself*, so a fractional
+   padding is a fractional **canvas**, and `RenderResolution.full` is the one case that does not round
+   it away. Rounding the inset therefore *cannot* make the rect integral — the rect has to be derived
+   from the whole-pixel buffer both backends actually allocate.
+4. **§7 defect 3 blamed `updatePaper` for the on-screen asymmetry, and that is wrong.** `updatePaper`
+   is exactly symmetric; the asymmetry is Metal's, from truncating an extent rather than clamping two
+   edges. What `updatePaper` really causes is a *jump* — the paper's edge moves by up to half a pixel
+   the moment an adjustment layer engages the sandwich, because the view and the composite round
+   differently.
+5. **The branch's own commit message contains a false claim about failure direction.** It argues an
+   under-estimated texture count "makes the pool decline mid-walk and drops the whole frame onto the
+   CPU reference". `ScratchTexturePool.acquire()` allocates on demand with no budget check, so no such
+   decline exists: the real failure mode of an under-estimate is the iPad 9 jetsam crash this whole
+   subsystem was built to prevent. The direction of safety is the same; the mechanism claimed is not
+   real, and a false mechanism is worse than none because it invites tuning.
+6. **A third inherent consequence, belonging beside §2.1 and §2.2.** A non-normal blend mode *below* an
+   ink-input effect loses its blend against the paper: `blendOver`'s `mix(cs, B(cb,cs), da)` sees
+   `da == 1` in the main walk and `da == 0` in the ink sub-walk, so an opaque red `difference` layer
+   reads cyan alone and red under an Outline layer. Under replace-semantics that is the *definition* —
+   those pixels are part of what the adjustment layer replaces — and it is a property of §3's option A
+   however the result is recombined. Option C is the only formulation that preserves it, and §3 priced
+   and rejected it. Pinned by a characterization test rather than left to be rediscovered.
+7. **One load-bearing invariant is unpinned.** The ink path is correct only because an isolated folder
+   holding an effect leaf always buffers, which is what stops `split(atLeaf:)`'s half-group — it copies
+   opacity, mask, blend mode and effect verbatim — from applying a folder's fade twice. That rests on a
+   single clause, `$0.effect != nil` inside `enclosesABlend`. Remove it as an optimisation and a faded
+   folder's opacity is applied twice with nothing failing.
