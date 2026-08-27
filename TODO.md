@@ -124,9 +124,14 @@ requirement was nearly re-derived from scratch this week because it was only in 
       **Quantified, the owner's judgement holds**: on their 2048-wide canvas a full-screen drag exceeds
       ±8,192 pt only below roughly **12%** zoom — the canvas an eighth of the screen — which nobody draws a
       deliberate full-screen stroke at. It is an edge case, not an ordinary one.
-      **Why it is still worth two lines**: unclamped, a 16-bit field **wraps** rather than truncating, so ink
-      does not stop at the boundary, it teleports to the opposite side. A saturating clamp turns a bizarre bug
-      into a boring one. Original finding follows.
+      **SETTLED by the owner, 2026-08-27** — *"If you draw outside the 16k, it should not wrap but rather
+      clamp."* So the encode **saturates**: a coordinate past the field's end stops at the boundary and stays
+      there. This is a ruling, not an implementation choice, and it is the difference between two very
+      different bugs — unclamped, a 16-bit field **wraps**, so ink drawn past the edge does not stop there, it
+      **teleports to the opposite side of the canvas**. Clamping makes the failure boring and local: a stroke
+      that wanders far outside the canvas flattens against the boundary, where it is invisible anyway.
+      Implement it at the **encode boundary only**, so nothing above the storage layer changes behaviour and
+      the in-memory samples stay exactly as they are. Original finding follows.
       **The raw finding — nothing in the tree clamps.** `CanvasView.swift:3074-3075` floors
       canvas zoom at 0.01 of fit and has **no ceiling** — its own comment says so: *"No upper bound on zoom;
       the tiny floor only guards against a pinch's fingers crossing."* A screen-wide drag at minimum zoom
