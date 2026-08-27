@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Pure-logic tests for `VectorCanvas.topmostText(atCanvasPoint:)` — the query that makes a text
@@ -203,5 +204,81 @@ final class TextHitTestLogicTests: XCTestCase {
         let element = rotated45()
         let ink = try XCTUnwrap(TextMeasure.inkBounds(of: element))
         XCTAssertEqual(ink, element.frame.boundingBox)
+    }
+
+    // MARK: - Scribble, which is a hit test iOS runs and we do not
+    //
+    // The other question of "who owns this touch", asked one layer above the app. `ADD_TEXT.md`:208
+    // left it open — *"whether iOS's own Scribble recognizer fights the canvas's"* — and the answer
+    // arrived as a bug report: a pencil tap spawned the box with no keyboard, because iPadOS reads a
+    // pencil over an editable text input as handwriting and offers Scribble in the keyboard's place.
+    // `TextOverlayView.scribbleInteraction(_:shouldBeginAt:)` refuses.
+    //
+    // **What these three can and cannot prove.** They prove the veto is installed on the right view,
+    // that it is the overlay answering, and that the answer is `false` for every location including
+    // the ones a "suppress it only over there" regression would let through. They cannot prove iOS
+    // *asks* — that needs a pencil, and XCUITest cannot synthesise one at all (see
+    // `tools/recording2xcuitest.py`, which refuses to downgrade one to a finger for this reason). The
+    // on-device half is the `scribble.veto` line the delegate writes into an `ActionRecorder` file.
+
+    private func overlay() -> TextOverlayView {
+        TextOverlayView(frame: CGRect(origin: .zero, size: TextHitTestLogicTests.canvasSize))
+    }
+
+    private func installedScribbleInteraction(on overlay: TextOverlayView) throws -> UIScribbleInteraction {
+        let found = overlay.textView.interactions.compactMap { $0 as? UIScribbleInteraction }
+        XCTAssertEqual(found.count, 1, "One veto, on the editor's own text view.")
+        return try XCTUnwrap(found.first)
+    }
+
+    /// The wiring. `UIScribbleInteraction` holds its delegate weakly and the text view holds the
+    /// interaction, so a version of this that forgot to keep the overlay alive would leave a live
+    /// interaction with a nil delegate — which defaults to *allowing* Scribble, silently.
+    ///
+    /// **`interaction.view` is the assertion that UIKit accepted it**, rather than that we appended
+    /// an object to an array: `view` is set by `UIInteraction.willMove(to:)`/`didMove(to:)`, which
+    /// only UIKit calls. The count is `1` and not `2` for a second reason worth stating — iOS's own
+    /// handwriting support is *not* exposed as a `UIScribbleInteraction` on the text view, which is
+    /// why the fix had to add one rather than find and remove one.
+    func testTheEditorsTextViewCarriesAScribbleVeto() throws {
+        let view = overlay()
+        let interaction = try installedScribbleInteraction(on: view)
+        XCTAssertTrue(interaction.delegate === view,
+                      "A nil delegate is not a veto: the callback is optional and defaults to YES.")
+        XCTAssertTrue(interaction.view === view.textView,
+                      "UIKit never adopted the interaction, so it will never ask it anything.")
+    }
+
+    /// Every location, not one. The delegate is handed a point and nothing else — no touch, no
+    /// stroke — so there is no seam on which "a tap keyboards, a scrawl writes" could be built, and a
+    /// location-conditional answer would only make the bug intermittent.
+    func testScribbleIsRefusedAnywhereInsideTheBoxAndOutIt() throws {
+        let view = overlay()
+        let interaction = try installedScribbleInteraction(on: view)
+        let probes = [CGPoint.zero,
+                      CGPoint(x: 1, y: 1),
+                      CGPoint(x: 60, y: 20),
+                      CGPoint(x: 100, y: 100),
+                      CGPoint(x: -40, y: -40),
+                      CGPoint(x: 10_000, y: 10_000)]
+        for point in probes {
+            XCTAssertFalse(view.scribbleInteraction(interaction, shouldBeginAt: point),
+                           "Scribble allowed at \(point) — the pencil is the brush here.")
+        }
+    }
+
+    /// And it still refuses once a session is live, which is the only state the artist ever sees it
+    /// in. `update(isActive:…)` is the whole of the view's public surface and re-runs a good deal of
+    /// setup; the veto is installed once in `init` and must not be a casualty of that.
+    func testTheVetoSurvivesAnActiveEditingSession() throws {
+        let view = overlay()
+        view.update(isActive: true,
+                    frame: TextFrame(origin: CGPoint(x: 20, y: 20),
+                                     size: CGSize(width: 120, height: 40)),
+                    recipe: recipe("Label"),
+                    canvasScale: 1)
+        let interaction = try installedScribbleInteraction(on: view)
+        XCTAssertTrue(interaction.delegate === view)
+        XCTAssertFalse(view.scribbleInteraction(interaction, shouldBeginAt: CGPoint(x: 60, y: 30)))
     }
 }

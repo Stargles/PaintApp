@@ -153,6 +153,7 @@
 		DEC0DE3F0000000000000002 /* PaintSoftware/Engine/InterpolationEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE3F0000000000000001 /* PaintSoftware/Engine/InterpolationEvaluator.swift */; };
 		DEC0DE700000000000000002 /* PaintSoftware/Engine/GuidePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE700000000000000001 /* PaintSoftware/Engine/GuidePath.swift */; };
 		DEC0DE700000000000000006 /* PaintSoftware/Views/GuideOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE700000000000000005 /* PaintSoftware/Views/GuideOverlayView.swift */; };
+		976A5BDDC3FDF0305AB884D9 /* PaintSoftware/Views/TextOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10B8B7F84AF90435CCA1189 /* PaintSoftware/Views/TextOverlayView.swift */; };
 		DEC0DE3F0000000000000004 /* InterpolationRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE3F0000000000000003 /* InterpolationRenderLogicTests.swift */; };
 		DEC0DE400000000000000002 /* InterpolationWorkflowLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE400000000000000001 /* InterpolationWorkflowLogicTests.swift */; };
 		DEC0DE2F000000000000000A /* PaintSoftware/Models/CanvasManager+Interpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE2F0000000000000009 /* PaintSoftware/Models/CanvasManager+Interpolation.swift */; };
@@ -345,6 +346,7 @@
 		DEC0DE3F0000000000000001 /* PaintSoftware/Engine/InterpolationEvaluator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/InterpolationEvaluator.swift; sourceTree = "<group>"; };
 		DEC0DE700000000000000001 /* PaintSoftware/Engine/GuidePath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/GuidePath.swift; sourceTree = "<group>"; };
 		DEC0DE700000000000000005 /* PaintSoftware/Views/GuideOverlayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/GuideOverlayView.swift; sourceTree = "<group>"; };
+		B10B8B7F84AF90435CCA1189 /* PaintSoftware/Views/TextOverlayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TextOverlayView.swift; sourceTree = "<group>"; };
 		DEC0DE3F0000000000000003 /* InterpolationRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationRenderLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE400000000000000001 /* InterpolationWorkflowLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolationWorkflowLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE2F0000000000000009 /* PaintSoftware/Models/CanvasManager+Interpolation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Interpolation.swift"; sourceTree = "<group>"; };
@@ -627,6 +629,7 @@
 				DEC0DE3F0000000000000001 /* PaintSoftware/Engine/InterpolationEvaluator.swift */,
 				DEC0DE700000000000000001 /* PaintSoftware/Engine/GuidePath.swift */,
 				DEC0DE700000000000000005 /* PaintSoftware/Views/GuideOverlayView.swift */,
+				B10B8B7F84AF90435CCA1189 /* PaintSoftware/Views/TextOverlayView.swift */,
 			);
 			name = "App sources shared with PaintSoftwareUITests";
 			sourceTree = "<group>";
@@ -910,6 +913,7 @@
 				DEC0DE3F0000000000000002 /* PaintSoftware/Engine/InterpolationEvaluator.swift in Sources */,
 				DEC0DE700000000000000002 /* PaintSoftware/Engine/GuidePath.swift in Sources */,
 				DEC0DE700000000000000006 /* PaintSoftware/Views/GuideOverlayView.swift in Sources */,
+				976A5BDDC3FDF0305AB884D9 /* PaintSoftware/Views/TextOverlayView.swift in Sources */,
 				DEC0DE3F0000000000000004 /* InterpolationRenderLogicTests.swift in Sources */,
 				DEC0DE400000000000000002 /* InterpolationWorkflowLogicTests.swift in Sources */,
 			);
