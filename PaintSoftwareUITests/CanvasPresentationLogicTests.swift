@@ -165,8 +165,10 @@ final class CanvasPresentationLogicTests: XCTestCase {
         XCTAssertTrue(manager.openPresentations.isEmpty, "Removing what is already gone is a no-op, not an error")
     }
 
-    /// **`canvasInteractionBegan()` has to do both halves.** It is the single entry point the four
-    /// canvas-touch sites in `CanvasView` call, and each half was somebody's whole fix at some point:
+    /// **`canvasInteractionBegan()` has to do both halves.** It is the single entry point the six
+    /// canvas-touch sites in `CanvasView` call — the count read "four" here too until 2026-08-26,
+    /// and `CanvasManager.canvasInteractionBegan`'s own comment names them and says what the
+    /// miscount cost. Each half was somebody's whole fix at some point:
     /// dropping the dismissal brings back the seven broken popovers, dropping the `send()` breaks the
     /// top-bar dropdowns (`DrawingView`'s `activePanel`, which is view `@State` and cannot live on
     /// the manager). Nothing else in the app would notice either loss until an artist did.

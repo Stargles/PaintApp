@@ -795,8 +795,21 @@ final class CanvasManager: ObservableObject {
     ///
     /// Order is deliberate but not load-bearing — both halves are SwiftUI state writes that land in
     /// the same transaction. What *is* load-bearing is that there is one function, called from all
-    /// four canvas-touch sites in `CanvasView`, rather than a `.send()` at each of them and a
-    /// separately-remembered dismissal somewhere else.
+    /// **six** canvas-touch sites in `CanvasView`, rather than a `.send()` at each of them and a
+    /// separately-remembered dismissal somewhere else. Named rather than counted, because a number
+    /// on its own cannot be checked against anything:
+    ///
+    /// `strokeRecognizer.onAnyTouchBegan`, `handleMoveBoxCommit`, `handleTextPress`,
+    /// `handleCatchAllTap`, `handleFillPress`, `handleEyedropperPress`.
+    ///
+    /// **This said "four" until 2026-08-26, and the miscount was itself a live defect.** The commit
+    /// that wrote the contract above counted the sites on the base it was cut from, then rebased
+    /// onto a `main` that had meanwhile gained `handleTextPress` — a fifth site, with a bare
+    /// `.send()` of its own. It converted the four it knew about, git reported the merge clean
+    /// because the two changes touched different lines, and a canvas text press went on signalling
+    /// the top-bar dropdowns while closing no presentation for six days. Anyone auditing the sites
+    /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
+    /// sixth, added 2026-08-22 and correct from the start.
     func canvasInteractionBegan() {
         dismissPresentationsOverLiveCanvas()
         interactionBegan.send()

@@ -2885,7 +2885,12 @@ struct CanvasView: UIViewRepresentable {
         /// resting palm must not do that.
         @objc func handleTextPress(_ recognizer: TouchTypePressRecognizer) {
             guard recognizer.state == .began, let container = containerView else { return }
-            canvasManager.interactionBegan.send()
+            // **Above the pencil-only guard, as every canvas touch is**, and through
+            // `canvasInteractionBegan()` rather than the raw subject: a finger this handler is about
+            // to refuse still has to close whatever popover or dropdown is sitting over the canvas.
+            // This was the app's one bare `interactionBegan.send()` until 2026-08-26 — see that
+            // function's own comment for how a clean merge produced it.
+            canvasManager.canvasInteractionBegan()
             guard !canvasManager.pencilOnlyDrawing || recognizer.lastTouchType == .pencil else { return }
             // container's bounds equal canvasSize, so `location(in:)` there is canvas-pixel space —
             // the same mapping `handleFillPress` uses.
