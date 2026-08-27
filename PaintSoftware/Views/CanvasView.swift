@@ -42,6 +42,21 @@ struct CanvasView: UIViewRepresentable {
         paper.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paper)
 
+        // §5.2's sandwich: two views, three cached images. At rest the lower one carries
+        // `composite(full)` and the upper one is empty; mid-stroke they carry `below` and `above`
+        // with the active layer's own host between them. Added here so the *disengaged* z-order is
+        // already `below < onionSkin < above < chrome`; `reconcileLayers` is what lifts `above` over
+        // the layer hosts once the sandwich engages. See `updateSandwich`.
+        let sandwichBelow = Coordinator.makeSandwichView()
+        container.addSubview(sandwichBelow)
+
+        // **The Behind ghost sits between the two sandwich views, not under both** —
+        // EFFECT_BACKDROP.md §2.1, ruled 2026-08-27. Once an adjustment layer grades the paper the
+        // composite is opaque from that node up, and a ghost under `below` would simply stop
+        // existing. It is not composited into the request and so is never graded by an effect; it
+        // just draws over the composite of the layers beneath the active one, and `above` still
+        // covers it with the artwork on layers over the active one — which is what "Behind" means.
+        //
         // Deliberately left on the default bilinear filter — nearest-neighbor made the onion-skin
         // ghost render as a distractingly pixelated overlay instead of a soft reference. That is
         // doubly true now: `OnionSkinBudget` can composite below canvas resolution on a large canvas,
@@ -49,20 +64,13 @@ struct CanvasView: UIViewRepresentable {
         let onionSkin = Coordinator.makeOnionSkinView()
         container.addSubview(onionSkin)
 
-        // §5.2's sandwich: two views, three cached images. At rest the lower one carries
-        // `composite(full)` and the upper one is empty; mid-stroke they carry `below` and `above`
-        // with the active layer's own host between them. Added here so the *disengaged* z-order is
-        // already `onionSkin < below < above < chrome`; `reconcileLayers` is what lifts `above` over
-        // the layer hosts once the sandwich engages. See `updateSandwich`.
-        let sandwichBelow = Coordinator.makeSandwichView()
-        container.addSubview(sandwichBelow)
         let sandwichAbove = Coordinator.makeSandwichView()
         container.addSubview(sandwichAbove)
         context.coordinator.sandwichBelowView = sandwichBelow
         context.coordinator.sandwichAboveView = sandwichAbove
 
-        // "In Front" is a second view rather than a re-ordering of the one above it. Onion skin has
-        // to sit either under the whole stack or over it, and `reconcileLayers` re-fronts the hosts
+        // "In Front" is a second view rather than a re-ordering of the one below it. Onion skin has
+        // to sit either mid-stack (Behind, above) or over everything, and `reconcileLayers` re-fronts the hosts
         // and `sandwichAbove` whenever the stack changes — so a single view would have to be
         // re-positioned from two places that do not know about each other. Two views, one of which is
         // always hidden, cost one empty `UIImageView` and remove the ordering rule entirely.
@@ -394,7 +402,8 @@ struct CanvasView: UIViewRepresentable {
 
         weak var hostView: CanvasHostView?
         weak var containerView: UIView?
-        /// The "Behind" placement's view — under every layer host, never fronted.
+        /// The "Behind" placement's view — under every layer host, over `sandwichBelow`
+        /// (EFFECT_BACKDROP.md §2.1); `reconcileLayers` re-fronts it into that slot.
         weak var onionSkinView: UIImageView?
         /// The "In Front" placement's view — fronted over `sandwichAbove` by `updateOnionSkin`.
         weak var onionSkinFrontView: UIImageView?
@@ -732,14 +741,22 @@ struct CanvasView: UIViewRepresentable {
             // Engagement is in the gate as well as layer order: the sandwich views have to be lifted
             // into place the pass the compositor takes over, not only when the artist restacks.
             if orderedIDs != lastOrderedLayerIDs || sandwichEngaged != lastOrderedSandwichEngaged {
-                // `below < hosts < above`, which is §5.2's sandwich in z-order. Everything else the
-                // old pass guaranteed still holds: the onion skin stays under the artwork (it is
-                // never fronted here), and the chrome overlays re-front themselves later in
-                // `updateUIView`, so they end up above `above`. `updateFloatingOverlay`'s Move case
-                // inserts the overlay *below* a specific host, which still lands it between the two
-                // sandwich views — correctly, since the layers above the Move source are inside
-                // `above`.
+                // `below < onionSkin < hosts < above`, which is §5.2's sandwich in z-order with
+                // EFFECT_BACKDROP.md §2.1's ghost threaded through it. The Behind skin is fronted
+                // here rather than left where `makeUIView` put it because `sandwichBelowView` is
+                // about to be lifted over it; it stays *under* the layer hosts, so a Behind ghost is
+                // still behind the ink the artist is drawing, and only the composite of the layers
+                // beneath the active one has moved under it. Everything else the old pass guaranteed
+                // still holds: the chrome overlays re-front themselves later in `updateUIView`, so
+                // they end up above `above`. `updateFloatingOverlay`'s Move case inserts the overlay
+                // *below* a specific host, which still lands it between the two sandwich views —
+                // correctly, since the layers above the Move source are inside `above`.
                 if sandwichEngaged, let sandwichBelowView { container.bringSubviewToFront(sandwichBelowView) }
+                // Unconditional: the "In Front" view is a different view (`onionSkinFrontView`) and
+                // this one is hidden whenever that placement is selected, so fronting it costs
+                // nothing and spares this pass a setting it has no other reason to read — the same
+                // trade `updateOnionSkin` names where it fronts the other view.
+                if let onionSkinView { container.bringSubviewToFront(onionSkinView) }
                 for layer in canvasManager.layers {
                     if let host = layerHosts[layer.id] {
                         container.bringSubviewToFront(host)
