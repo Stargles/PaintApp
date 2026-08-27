@@ -16,8 +16,11 @@ to be about a canvas nobody uses.
 ## 1. The recalibration, and what it promotes
 
 Every performance number this project collected before 2026-08-17 was measured at 4096×4096. **The
-owner animates at 2048×1024** — one eighth the pixels. Any cost that scales with canvas area is
-overstated eightfold against the document that actually exists.
+owner animates at 2048×1024** — one eighth the pixels. Asked whether it was that or 1080p, they said
+"likely the former" (2026-08-17). Any cost that scales with canvas area is overstated eightfold
+against the document that actually exists, and a conclusion drawn at 4K may be about a canvas nobody
+uses. **Benchmark at 2048×1024 first and treat 4096² as the stress case, not the baseline** — that
+applies to the 17 fps entry below, the gallery thumbnail and the onion skin composite alike.
 
 Three headline issues shrink to a fraction of their reputation.
 

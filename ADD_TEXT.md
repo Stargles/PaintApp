@@ -307,8 +307,9 @@ should not be re-litigated.
    Stage 6 exists. Slicing letters directly was rejected because it forces an outline conversion on
    first cut, after which the text is no longer text.
 
-5. **A box may not be dragged smaller than its own text, unless it is being distorted.** The owner's
-   ruling of 2026-08-26, alongside the report that text went invisible in a box too small for it.
+5. **A box may not be dragged smaller than its own text, unless it is being distorted.** Verbatim,
+   2026-08-26: *"the box should never be allowed to be smaller than the text size unless in distort
+   mode"* — ruled alongside the report that text went invisible in a box too small for it.
    Implemented per axis, because the ruling read literally is the max-content size and that makes a
    wrapping box un-narrowable — narrowing is *how* a wrap width is set — and on the other axis it
    would contradict §5.3 above. The floor is the smallest unit the layout cannot subdivide: **one
@@ -317,8 +318,9 @@ should not be re-litigated.
    width floor is a *run* rather than a word because MEASURED, `.byWordWrapping` breaks inside a word
    too wide for the box rather than overflowing it — so a word-wide floor would pin a box holding one
    long token open at its full width. The distort keeps the flat `TextFrame.minimumExtent`, which is
-   the owner's own exception. **This settles the box-size half of that report only**; whether text is
-   invisible *in distort mode* is a separate question and is still open.
+   the owner's own exception. **This settles the box-size half of that report only** — but the distort
+   half turned out to have the same cause and closed with it, confirmed on the device 2026-08-27:
+   *"text seems to show up in distort now."*
 
 6. **The font picker gets a favourites strip**, above the full grouped list, in the same shape as the
    brush presets. **Answered 2026-08-21: it ships with sensible defaults the owner can edit later.**
