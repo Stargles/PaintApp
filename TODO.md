@@ -20,34 +20,62 @@ Benchmark at 2048×1024 first and treat 4096² as the stress case, not the basel
 
 ## In flight
 
-- **ADD_TEXT Stage 5 — the projective warp** — `tmp/textwarp`. Unblocks both perspective text and Move's
-  Distort; one `Homography` solver serves both.
+Nothing yet — the seven device reports below are being root-caused, and an item enters this
+section when a branch exists, not when it is understood.
 
 ## Queued
 
 Owner's thoughts, 2026-08-26 — **not asks yet**, recorded so they are not lost (the perspective-text
 requirement was nearly re-derived from scratch this week because it was only in one document):
 
-- [ ] **Narrower sample storage.** The owner: *"are the coordinates for the brushstroke vector points stored
-      as floats? ... if it is 1024 wide you only need to store a 10 bit variable."* **Measured on their own
-      device rather than estimated**: `Untitled.paintproj` carries one cel of **190 strokes / 8,714 samples in
-      776 KB of JSON — 89 bytes per sample on disk**, against 24 bytes in memory (`VectorSample` is three
-      `CGFloat`, and `CGFloat` is `Double` on 64-bit). Extrapolated to the 1000-cel document the owner intends:
-      **204 MB resident, 776 MB on disk.** `Float32` halves the memory for nothing — a 24-bit mantissa is
-      ~2⁻¹³ px at 2048 wide, far finer than anyone can draw — and a packed binary encoding is the *large* win,
-      ~5–8 bytes a sample against 89, because the 89 is JSON writing doubles as full-precision text.
-      **The caveat that decides the design**: fixed-point quantisation collides with the absolute-mapping
-      discipline. Every transform (lasso nudge, scale, rotate, Distort) maps samples **absolutely from the
-      lift** precisely so error cannot accumulate over many small drags. Quantising on every store reintroduces
-      that drift, worst under repeated warps. So: `Float32` in memory is cheap and safe; fixed-point belongs in
-      the *encoded* form, where it is decoded once and never re-quantised.
-- [ ] **Oklab as an alternate colour space.** The owner: *"I kind of like the idea of integrating an alternate
-      mode of color storage like oklab instead of RGB (I think it is currently rgb)."* It is RGB —
-      `CodableColor` is four `Double`s (`ProjectManifest.swift:124`). **This is not a memory argument**: colour
-      is stored per *stroke*, not per sample, so it is 32 bytes × 190 strokes = 6 KB on the cel measured above.
-      It is a quality argument — perceptually uniform blending, better gradients, and better colour
-      interpolation between keyframes, where RGB goes muddy through the middle between two saturated hues.
-      Costs a conversion at stamp time and a decision about whether the picker itself works in Oklab.
+- [ ] **(8) Fixed-point sample coordinates sized to the canvas.** Now a real ask with a design, 2026-08-26,
+      superseding the same item's "thought" form from the previous session. The owner: *"Storing it as a double
+      takes up way too much memory per point. The key is the canvas size: if a canvas is x by y pixels, our
+      variable size only needs to be the canvas size ... add two more bits so it can be placed in 4 places
+      between each pixel ... 12 bits per coordinate is alot better than 64."*
+      **The rule**: bits per axis = `ceil(log2(extent)) + 2`, the +2 buying quarter-pixel placement because a
+      stamp is *not* rounded to the nearest pixel when rasterized (the owner's own caveat, and correct —
+      `BrushStamper` places dabs at sub-pixel positions).
+      **The worked example is off by one in the ask and the design is unaffected**: 2048 is 2¹¹, not 2¹⁰, so a
+      2048×1024 canvas needs **x: 13 bits, y: 12 bits**, not 12 and 11. 25 bits a point against 128 for two
+      `Double`s is still the 5× the ask is really claiming, and the arithmetic should be derived from the canvas
+      extent at encode time rather than written down per size.
+      **`VectorSample` is three `CGFloat`, not two** — the third component needs its own width decision, and
+      pressure/force is a 0…1 quantity where 8–10 bits is generous.
+      **The owner has now ruled on the objection this item carried.** The recorded caveat was that quantising on
+      every store fights the absolute-mapping discipline (every transform maps samples absolutely *from the lift*
+      so error cannot accumulate over many small drags). Their ruling: *"The exception to this data type would be
+      during reversable transformations, in which it would be converted temporarely to a double as to not lose
+      accuracy, then converted back when it bakes."* That is the right shape — decode once, work in `Double`,
+      re-encode at the bake. **The residual drift objection is closed by owner ruling, 2026-08-26** — do not
+      re-open it. It was raised here that a bake still rounds, so repeated lift-bake-lift-bake cycles would
+      random-walk at up to ⅛ px a bake. The owner: *"I dont see any reason why someone would transform, bake,
+      and repeat for that many cycles. The only time that many transformations would happen is before something
+      is baked, so it works out."* That is correct and it is structural rather than a judgement call: the
+      many-transform case lives inside a single unbaked session, where the samples are already `Double`, so the
+      rounding has no path by which to accumulate. One bake, one rounding.
+      **Coupled to (9)**: if the encoding's width is derived from the canvas extent, resizing the canvas changes
+      the domain. Decide together whether a resize re-encodes every sample or the width is stored per document.
+- [ ] **(9) Resize the canvas from the Actions menu.** The owner: *"a resize canvas option in actions would be
+      nice, to which users can resize the canvas however they want. They should be able to control whether it
+      gets cropped/expanded, or if everything gets scaled."* Two controls: a **scale** option that scales the
+      existing artwork, and a **toggle** for it to scale automatically with the new canvas size. **On an aspect
+      change it letterboxes** — *"Not in the conventional sense of adding black, just scaling the stuff so it
+      fits."* i.e. fit the content inside the new extent preserving its own aspect, leaving real empty canvas
+      rather than painted bars.
+      Note this is adjacent to report (6): the owner's freeze sequence names *"try to resize the canvas"*, so
+      whatever exists today on that path is worth understanding before extending it.
+- [ ] **(10) Switch colour storage and processing to Oklab, from the Actions menu.** The owner: *"I also want the
+      option in actions to switch the color storage and processing to oklab or other future models. Oklab may
+      give better compositing."* Supersedes the queued *thought* of the same name — it is now an ask, and it is
+      an ask for a **document-level switch with room for future models**, not a one-way conversion.
+      It is RGB today: `CodableColor` is four `Double`s (`ProjectManifest.swift:124`). **Not a memory argument** —
+      colour is per *stroke*, not per sample (32 bytes × 190 strokes = 6 KB on the cel measured on the owner's
+      own device). The argument is quality: perceptually uniform blending, better gradients, and better colour
+      interpolation between interpolation keyframes, where RGB goes muddy through the middle between two
+      saturated hues. The owner's *"better compositing"* is the sharpest version of it and is the thing to
+      verify: compositing happens in `Composite.metal`, so a real Oklab mode is a shader change, not only a
+      storage change. Costs a conversion at stamp time and a decision about whether the picker works in Oklab.
 
 
 
@@ -62,6 +90,35 @@ Three behaviour questions are still carried, and are **not** defects — each wa
 the Cut eraser across a line thicker than the eraser (visibly does nothing, and always did); a crossing line
 that can flicker during a cut drag, under 10% of what the cut removes; and a fill chunk dropped on blank paper
 staying a fill. All three want the owner's eye on real artwork rather than another run.
+
+## The owner's seven device reports, 2026-08-26
+
+Found on their iPad testing the Move/text pass. Their words are quoted verbatim; their *observations*
+are evidence, their *causes* are hypotheses. **(5) is answered and is not a defect.**
+
+- [ ] **(1) The live unbaked Move preview disappears sometimes.** *"I think it happens when there are
+      compositing layers over it like brightness/contrast."*
+- [ ] **(2) No marching ants while the lasso is being drawn.** *"while I am actively drawing the lasso or
+      even lasso fill, I cannot see the lasso outline marching ants. Make it the same blue and white as
+      when the pen is lifted."* Covers lasso *select* and lasso *fill*.
+- [ ] **(3) Text is invisible in distort mode, and invisible when the box is too small for it.** Carries a
+      ruling: *"The box should never be allowed to be smaller than the text size unless in distort mode."*
+- [ ] **(4) A pencil tap spawns the text box but does not raise the keyboard.** *"I need to click again on
+      the box with my finger to bring it up."* Their theory — the pencil is treated as drawing — is the
+      thing to test, not to assume.
+- [x] **(5) Freeform / Uniform / Distort greyed out in Move — intentional, not a defect.** Confirmed in the
+      code: `MoveTransformBottomBar.swift:24-27` says the picker is live only for a raster piece because a
+      lassoed vector piece scales uniformly, and **Move stage 3 is what turns it on**. Distort is stage 5.
+      Both are designed and unstarted (HANDOFF.md). Nothing to fix; the ask is to *build stage 3*.
+- [ ] **(6) The UI freeze is back.** *"it seems like it happens when your in the edit text keyboard menu,
+      then select pencil brush or try to resize the canvas in some kind of sequence of actions ... a
+      previous session reportedly fixed the UI freezing canvas move bug, and somehow its still here."*
+      The earlier one is pinned by `CanvasTransformFreezeUITests` — a stroke begun under an open timeline
+      popover kills pan/pinch/rotate until the project is reopened. Whether this is that bug's second site
+      or a different mechanism wearing the same face is the question.
+- [ ] **(7) Funky behaviour adding two images to a vector layer.** Unspecified; the symptom list has to be
+      derived from the code and then put back to the owner.
+
 
 ## Queued
 
@@ -103,206 +160,4 @@ Nothing — the owner's list is empty. Two things are *carried*, both deliberate
 
 ## Done this pass
 
-- **Stage 2 of the Move expansion: the lassoed piece gets a menu of its own** (`903cf73`). Lasso on a vector
-  layer, tap Move, and the bottom bar now appears exactly as it does for a raster piece — before, a vector
-  float got a box and six grips and no menu at all, on the layer kind Move lands on by default. **Warp is gone
-  from the picker** (three tabs: Freeform, Uniform, Distort), per the owner's ruling; it was never persisted,
-  so no migration. **Two Rotate 45° buttons** compose onto the current angle and re-quantise onto the
-  eighth-turn grid — measured over a 200,000-angle sweep: without folding whole turns out, eight presses record
-  2π and the pixel comparison goes red; without the re-quantise, **13% of reachable lift angles** come back a
-  few ulps off. **Reset** snaps the piece back to its pick-up pose in **one undoable step** — "undo every
-  nudge" was rejected because the first nudge's step is the one that un-does the split, so it would tear the
-  float down. **Mirror gained a real vector arm** (`VectorFloat.mirror`, folded in front of the absolute map),
-  and the brief's warning about the similarity assert was half wrong in an instructive way: a reflection
-  *passes* the shape test — what it breaks is `atan2` and a text frame's corner order, so the `.image` and
-  `.text` arms now assert a positive determinant and **Mirror is disabled with the reason in the bar** when the
-  piece carries an image or a text box. The mode picker is inert on a vector float with a stated reason —
-  stage 3 turns it on. **While anything floats, the Select menu steps aside** for the Move menu and comes back
-  on Done; `activePanel` is never written, so `CanvasTouchOwner`'s enumeration is untouched and its tests pass
-  unmodified. 1666 fast-tier tests (1663 passed, 0 failed, 3 skipped) = 1655 + 11, static +12 with the twelfth
-  an XCUITest, every mutation watched failing.
-
-
-- **One touch now does one thing, and a tap away from a vector Move box puts the piece down**
-  (`38b6fed`), plus the type that found both (`e0d59b2` and its three parents). This is
-  [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)'s finding 1, which the owner ruled should go **before** the
-  next large features.
-
-  **Deriving the contract before touching a gate is what produced the value.** Enumerating the input space —
-  every tool x every panel x floating-piece x layer state, 3,600 reachable combinations — found **1,678 where
-  two things acted on one touch** and **118 owned by nobody**. Neither was reported by anyone; both were live.
-  Drag a guide grip with Fill selected and the grip moved *and* a flood fill landed under it; with the pick
-  tool armed the brush colour changed too; tap into your own text with Fill selected and the caret placed *and*
-  the layer flooded. **The cause was never a missing check at any one site**: every container recognizer sets
-  `cancelsTouchesInView = false`, so an overlay's `hitTest` claim does not take the touch from the recognizer
-  beneath it. `handleTextPress` was the only handler in the app that compensated, by re-checking the overlays
-  itself — which is exactly why text was absent from the collision list.
-
-  Settled per the owner's rulings: each of the five container recognizers now asks `owner(in:)` and stands down
-  when the answer is not itself — one rule in one place rather than thirteen bespoke guards of the kind that
-  produced the defect — and `.moveBoxCommit` gives a vector float the tap-away commit a raster float always
-  had, sitting **last in the precedence** so it takes only touches that used to do nothing.
-  `contenders(in:)` still reports everything the gates *offer* a touch to; `actors(in:)` is what happens, and
-  is never more than one. `.nobody` is kept as a case with no reachable producer, so a test can assert the
-  empty set — deleting it would turn "the canvas went silent" back into a fallthrough nothing can name.
-
-  **A review nearly cost the refactor its point and was right to.** The tests shipped with 38 hand-maintained
-  expected counts, every one of which would shift the moment a tool was added — the exact event the work exists
-  to make cheap. They are gone, replaced by properties asserted per state, and the replacement was
-  mutation-checked rather than assumed. A second reviewer rebuilt the whole test file as a standalone `swiftc`
-  harness and ran 24 mutations, catching 22, having gone in willing to conclude "not worth merging".
-
-  1646 fast-tier tests (1643 passed, 0 failed, 3 skipped) = 1617 + 19 + 10, matched at every step by a static
-  `func test` count. **An honest gap is recorded rather than papered over**: nothing couples `CanvasTouchInputs`
-  to what `CanvasView` actually gathers, because an out-of-process test target cannot see it, and the type's
-  doc comment names the five fields nothing covers.
-
-  **One hypothesis eliminated on the way**, in [BUGS.md](BUGS.md): the open "two-finger pan is dead while Fill
-  is selected" cannot be `shouldRequireFailure`, because `Tool.fill.paintsOnCanvas` is false so the guard
-  returns before stating any dependency. Two readers reached that independently. **Do not ask the owner to
-  re-test it as a fix check** — a green re-test would mean nothing.
-
-
-- **(a) A lasso selection moves only what is inside it** (`a5fa3b2`). Draw a loop with Select on a vector layer
-  and tap Move: the lassoed ink lifts out in one frame — strokes the loop crosses are **cut at the boundary**,
-  a fill loses the chunk that was inside, text and placed images come whole if their centre is in. Drag at
-  60 fps with the marching ants travelling with the piece; tap Move again, switch tools or save, and it bakes.
-  Undo walks back one drag at a time and one more press rejoins the cut stroke. A loop that caught nothing does
-  nothing — it does **not** fall back to moving the whole drawing.
-
-  **Five owner rulings taken 2026-08-22, on top of §5's six.** The load-bearing one: *"The lasso will only pick
-  up and move whatever is inside of it. If the hole is fully inside, it moves it. If its outside, it wont."* —
-  which **overruled the design's proposal that eraser marks never move and never split**. An erase element now
-  takes exactly the same centre-line test and the same split treatment as a paint stroke, which is both simpler
-  and consistent with this app's own "the eraser is a stroke" decision. Two consequences are handled rather than
-  discovered: a punch-only float renders legitimately blank (a punch lowers alpha on what is beneath it *in the
-  same list*, so alone on transparency it draws nothing) and is latched anyway; and both halves of a split
-  replace the parent **at the parent's index**, so a moved punch keeps its z-position.
-
-  Also settled: undo past the move rejoins the line; an empty lasso does nothing; the raster Move inherits
-  selection-at-bake and travelling ants. **The ants ruling was corrected mid-build** — the design proposed
-  leaving them where drawn, LASSO_MOVE.md §5 had already argued they travel "which is what Photoshop and
-  Illustrator do", and the spec won.
-
-  1617 fast-tier tests (1614 passed, 0 failed, 3 skipped) = 1591 + 26, static `func test` 1730 against 1703
-  with the extra one an XCUITest. The conservation-of-ink test — a lift-and-bake with no drag is pixel-identical
-  to the drawing before it — was watched failing at *"Composites differ at (22, 15) channel A: got 182,
-  expected 255"*.
-
-- **[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md)** (`6e1f9ce`), written for the next session's large
-  features. **Fourteen independent decisions across three unrelated mechanisms** arbitrate one canvas touch —
-  recognizer `isEnabled`, `isUserInteractionEnabled`, and five `hitTest` overrides — with `shouldRequireFailure`
-  reading three of them back. Four defects trace to it, three from this week including today's pick tool and
-  the shape-outline drag (*a different mechanism, same class*). **It is structural, not sloppiness**:
-  `activePanel` is `@State` on `DrawingView` while `selectedTool` and `floatingPiece` are on `CanvasManager`,
-  so no object can see all the inputs and no single function can be written. Also: eleven hand-written cache
-  keys, every save-failure path returning silently, and a persisted layer property living in four hand-kept
-  structs.
-
-
-- **(h) The pick tool works while the Select panel is open** (`dd89769`). Owner: *"The pick tool does not work
-  when the lasso select tool is selected."* Reported first as a fill-tool problem, withdrawn as a false alarm,
-  then reproduced exactly — **the fill tool was never involved.** There is no `.select` case in `Tool`, so "the
-  lasso select tool" is a *panel*: `activePanel == .select` disabled the eyedropper's recognizer while the
-  selection overlay went on capturing, because its own gate never consulted `selectedTool`. Recognizer off,
-  overlay eating the tap, and arming the dropper does not close the panel, so nothing re-enabled it.
-
-  Fixed as **one shared `isEyedropperArmed` read by both sites**, not two edited conditions — the defect was
-  precisely that the two disagreed and left the touch owned by nobody, and separate spellings can drift back
-  into both-live (two recognizers racing one tap) or both-dead.
-
-  **A fourth edit the brief did not ask for, and the first fixed run is what found it.** The pick worked and
-  the run then failed on *"The Select panel is still open after the pick"*: picking sends `interactionBegan`,
-  which closes any open panel, and **the Select panel had been immune to that rule only by accident** — its
-  overlay ate every canvas touch, so no handler ever fired to send it. Letting the pick through exposed the
-  accident. Scoped to Select alone; a brush or fill dropdown still closes on a pick.
-
-  Floating piece: moot — `commitAllInteractiveState()` bakes it one line before the arm — pinned by a test
-  rather than by changing the guard. Text: unreachable, because `ActionsMenu.addTextRow` closes the Select
-  panel on the way in, pinned by a test since the argument would die silently if those two statements were
-  reordered. **Carried for the owner**: entering text mode *first* and then opening Select leaves the text
-  placement tap dead, the mirror of this bug. Left alone deliberately — Select is the more recent word there —
-  and it is the same one-line change if they disagree.
-
-  43 at-risk UI tests green (41 passed, 2 pre-existing skips), all four new ones verified as *executed* in the
-  xcresult. Fast tier unmoved at 1573; XCUITests do not move it.
-
-- **(f) The Cut eraser previews live, and the owner's similarity theory is refuted** (`55f002b`). Owner:
-  *"the to cut eraser does not have live feedback like the to cross eraser"*, then *"refute what I said about
-  to cut eraser being similar to the to cross. I still would like it to be live feedback."*
-
-  **The refutation.** The *plumbing* around the two modes is near-duplicate — Mode 3's splice even carries the
-  comment `// As in Mode 2:` — and `Sweep.mode` was a dead switch, assigned by both and read by nothing (now
-  deleted). But "To Cross is Cut plus one cross feature" is not what the app does. Cut removes the ink under
-  the eraser; To Cross removes it **and keeps going outward along each line until that line hits another**,
-  deleting the line whole if it crosses nothing. `cutRanges` has exactly one caller and `cutToIntersection`
-  exactly one; neither calls the other. **Take the cross feature out of Mode 3 and you get nothing, not Cut.**
-  ~18 lines to save, and merging would put a mode switch inside the shared body — a wash, declined.
-
-  **The finding that changed the design, and it inverted the brief.** The orchestrator briefed that a
-  footprint-shaped preview would show *less* than the cut removes, since the stroke's whole width goes. Wrong:
-  `BrushStamper` gives the two surviving pieces **round end caps that grow back into the gap by the stroke's
-  own radius**. **Cutting a 40pt line with an 8pt eraser changes zero pixels** — MEASURED, asserted at exactly
-  0, with the same test asserting a footprint punch *would* open a 250+ pixel notch, so it cannot pass against
-  a scene that fails to exercise the problem. So the preview erases the doomed spans **and draws the caps**,
-  and carries the accumulated span per stroke across the drag, because the cut boundary walks outward with the
-  finger and stale caps otherwise fill the gap back in behind the eraser. Found by watching a test fail at 99%
-  pop-back, not by reasoning.
-
-  **The cost, all three arms in one run**, 334-sample drag on the 200-stroke layer at 2048² that item 10 used
-  for Mode 3. **CONTENDED** — 25–42% idle, a standing Adobe background load, never came quiet — but three
-  isolated runs agreed to ±0.5%, which a 0.4 ms unit of work can survive where a whole suite cannot:
-
-  | per touch sample (median) | cutting | not cutting |
-  |---|---|---|
-  | Cut as it was — no preview | 0.000 ms | 0.000 ms |
-  | **exact span-and-caps preview — SHIPPED** | **0.439 ms** (p95 0.662) | 0.082 ms |
-  | plain footprint punch | 0.014 ms | ~0 |
-
-  0.439 ms is **3.7% of a 60 Hz frame and 220× cheaper than Mode 3's ~95 ms**, because the preview never
-  mutates the display list and so never pays the cold layer re-render that makes To Cross expensive. Mode 2
-  gets Mode 1's `.replacement` scratch role, not Mode 3's per-sample commit.
-
-  1581 fast-tier tests (1578 passed, 0 failed, 3 skipped) = 1573 + 8, the ninth added test being an XCUITest
-  the fast tier does not select. `VectorCutPreviewLogicTests` is a **new file**, hand-added to `project.pbxproj`
-  — verified as 7 executed cases in the xcresult rather than assumed, and the duplicate-id check prints `[]`.
-
-- **PERFORMANCE.md item 14's cheap half: a cel nobody has drawn on stops paying for a canvas-sized
-  transparent PNG** (`1d7332a`, `5cd6431`). Every cel wrote a `<uuid>_raster.png` on every save whatever its
-  raster tier held; on the owner's live 2048×2048 project all three carry one of exactly 73,558 bytes whose
-  alpha is min = max = 0 — **including the cel on the raster layer**. The save now decides from
-  `RasterLayerTexture.hasContent`, which asks whether the *bitmap exists* and never scans pixels: `context ==
-  nil` implies "no pixels" by construction, and that is the direction that cannot lose artwork. The converse is
-  deliberately not claimed, so a cel erased back to transparency still writes, conservatively.
-  `SaveSnapshot.CelContent.rasterImage` became optional in the same move — asking a blank texture for its image
-  is what *created* the cost, since `renderToUIImage()` mints a canvas-sized transparent `UIImage` and memoizes
-  it where nothing drops it again.
-
-  **MEASURED, 60 vector-only cels at 2048×2048, iOS 26.5 simulator (iPad Pro 13-inch M4), Debug**, three
-  samples each way, machine at 5.2% idle so the *timings* are contended and the byte and footprint figures are
-  not:
-
-  | | before | after |
-  |---|---|---|
-  | package on disk | 6.9 MB | **4.6 MB** |
-  | of which `_raster.png` | 2.3 MB in 60 files | **0 bytes in 0 files** |
-  | `pngsEncoded` per save | 60 | **0** |
-  | save, awaited | 645 / 648 / 540 ms | **188 / 192 / 240 ms** |
-  | `phys_footprint` after a load | 3317.1 / 3317.6 / 3319.5 MB | **1865.1 / 1865.3 / 1865.7 MB** |
-
-  **~1453 MB, ~24.2 MB a cel** — 16 MiB of that is the `CGContext` arithmetic exactly, the rest the decoded
-  `UIImage` the load no longer holds beside it. **Load wall-clock did not move** (4579/4720/5577 → 6183/6010/4939 ms,
-  overlapping ranges): that fixture's load is dominated by rasterizing 60 vector cels for thumbnails, which this
-  does not touch. Reported as unmoved rather than dressed up.
-
-  Two traps decided the shape and both are now pinned by tests. `validateProject` **gates the atomic swap**, so
-  a validator still demanding the file would have moved every staged package to Trash while the save reported
-  success — silent total loss, in an app that looked fine. And `rasterFileName` stays **non-optional**: its
-  absence is what makes PencilKit-era manifests fail to decode, which is what has the gallery skip those
-  projects rather than open them blank. A legacy package heals on load — a blank PNG is scanned exactly, byte
-  by byte with an early exit, and the bitmap released — and one opaque pixel in 2048² survives, with a test
-  that fails if the scan is ever made cheap by sampling. **The owner's existing projects heal on their next
-  open-and-save, not on load alone.**
-
-  1583 fast-tier tests (1580 passed, 0 failed, 3 skipped), = 1573 + 10, matched against a static `func test`
-  count of 1690 against 1680.
+Empty. Filled as this pass merges.
