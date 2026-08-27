@@ -933,10 +933,11 @@ struct CanvasView: UIViewRepresentable {
         /// `effectiveOpacity(ofLayer:)` folded in, no compositor and no cached images. A document
         /// with no blend modes anywhere cannot regress no matter what the rest of this section does.
         ///
-        /// **The two clauses after it narrow engagement further, and each is a case where the
+        /// **The clauses after it narrow engagement further, and each is a case where the
         /// compositor's snapshot is not the whole picture.** `RenderRequest`'s sources are
-        /// `PixelOps.rasterize(cel:)` — the model's pixels — and the live canvas draws two things
-        /// that are in no cel:
+        /// `PixelOps.rasterize(cel:)` — the model's pixels — and **the live canvas draws three
+        /// things that are in no cel. This list being one short is what the bug was**, so it is the
+        /// list to extend the day a fourth thing starts being drawn here:
         ///
         /// - A **floating Move piece**: `bakedImageToDisplay` shows `piece.remainderPreview` (the
         ///   hole) where the cel still holds the un-lifted content, so a composite would show the
@@ -944,15 +945,34 @@ struct CanvasView: UIViewRepresentable {
         /// - An **interpolated in-between**: its pixels come from `interpolatedImage(forCel:)` via
         ///   `setInterpolationImage`, and the cel's own canvas is empty (see
         ///   `StrokeCanvasView.refreshDisplay`), so a composite would drop the in-between entirely.
+        /// - A **lasso move's latched piece**: `updateVectorFloat` renders the lifted elements once
+        ///   into `StrokeCanvasView.floatView` and drags that bitmap under a Core Animation
+        ///   transform, while the model carries `vector.suppressedElementIDs = insideIDs` so the
+        ///   hole really is punched. The piece is therefore in no cel *and* in no composite — which
+        ///   is the opposite failure from the raster float's, and worse. It went unlisted until
+        ///   2026-08-26, and the symptom was the artist's lassoed ink **vanishing for the whole
+        ///   move**: with the sandwich engaged and no stroke in flight, `updateSandwich` blanks
+        ///   *every* host, including the one whose `floatView` holds the piece, and the flatten
+        ///   behind it is honestly empty where the piece used to be. Not "sometimes" — on every
+        ///   move of any document `needsCompositorOnCanvas` answers true for, which is any effect,
+        ///   blend, mask or buffering folder anywhere in the tree, above or below the moved layer.
         ///
-        /// Both are pre-existing gaps in `makeRenderRequest` rather than in the sandwich — the
-        /// project thumbnail has them too — and both want fixing in the model, not here. Until then
-        /// falling back to Core Animation is the safe direction, exactly as the first clause is: the
-        /// artist loses the blend mode on canvas for as long as a piece is floating or the playhead
-        /// sits on an in-between, rather than losing their artwork.
+        /// The fix is this clause and not "skip blanking for the float's host": that host still
+        /// draws its own unsuppressed remainder, so unblanking it would lay the whole layer a
+        /// second time over `full`.
+        ///
+        /// All three are pre-existing gaps in `makeRenderRequest` rather than in the sandwich — the
+        /// project thumbnail has them too — and all three want fixing in the model, not here. Until
+        /// then falling back to Core Animation is the safe direction, exactly as the first clause
+        /// is, **and the price is more than the blend mode**: `updateSandwich`'s disengage branch
+        /// also calls `host.setContentMask(nil)`, so §6.4's alpha-mask *clipping* comes off the
+        /// canvas for as long as a piece floats or the playhead sits on an in-between. A clip lost
+        /// is more visible than a blend lost, and the trade is still the right way round — an
+        /// unclipped picture of the artwork beats no picture of it, which is the same argument the
+        /// first two clauses were already making.
         private func isSandwichEngaged(_ tree: [RenderNode]) -> Bool {
             guard tree.needsCompositorOnCanvas else { return false }
-            guard canvasManager.floatingPiece == nil else { return false }
+            guard canvasManager.floatingPiece == nil, canvasManager.vectorFloat == nil else { return false }
             let frame = canvasManager.currentFrame
             return !canvasManager.layers.indices.contains { index in
                 guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return false }
