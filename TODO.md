@@ -18,74 +18,110 @@ times the pixels. Benchmark at the owner's size first and treat 4K as the stress
 
 ## In flight
 
-Nothing. (11) was the last of this pass and merged as `e0d5e57`; see "Done this pass".
+Nothing yet — this pass has just opened. The four asks below arrived 2026-08-27 with the device
+report and are unstarted.
 
-## Waiting on the owner's device
+## The device answered every open question, 2026-08-27
 
-Five things are blocked on someone holding the iPad, not on more reading. Each already has its
-experiment designed; none of them needs another pass over the source.
+The five things blocked on someone holding the iPad are all answered, and the list is gone rather than
+shortened. What each answer was:
 
-- **(4) The pencil-tap keyboard fix is merged (`ab7f736`) and unconfirmed.** Owner, 2026-08-27:
-  *"yes, clicking with finger yields correct behaviour. Clicking with pencil however brings up that
-  write to text thing which is annoying."* That thing is **iPadOS Scribble**, and the app-side path was
-  clean all along — `beginTextSession` has one non-test caller, no pencil/finger branch, and
-  `becomeFirstResponder()` *was* called; iOS suppresses the software keyboard for pencil input on a text
-  input view and offers handwriting instead. **Both earlier theories were wrong in instructive ways**:
-  the `allowedTouchTypes`-gate guess was refuted by reading, and the counter-claim that the responder was
-  refused *for everyone* is refuted by the finger working. The owner's own instinct — the pencil is
-  treated as writing — was right, in a more specific sense than they stated. The fix adds a
-  `UIScribbleInteraction` that refuses `shouldBeginAt` everywhere; **a pencil tap on a text box should now
-  raise the keyboard.** That is the thing to check.
-- **(6) The UI freeze — one capture answers it for two tools.** Owner, 2026-08-27, correcting the one
-  fact everything rested on: *"by 'try to resize the canvas' I meant moving the canvas with two fingers
-  if I recall correctly."*
-  **So it was never Canvas Padding**, and it is not a main-thread hang either: a synchronous loop would
-  end on its own and would freeze everything, not two-finger canvas movement specifically. The symptom is
-  *this class's* symptom — *"the canvas stops panning / pinching / rotating"* — which is
-  `CanvasTransformFreezeUITests`, whose own fixed bug (`8ae8613`, a popover dismissed by the touch that
-  began a stroke) is confirmed **not** this one.
-  **`.fill` and `.text` are the same state, so this report and [BUGS.md](BUGS.md)'s still-open
-  *"two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device"* are one bug seen from
-  two tools.** `Tool.paintsOnCanvas` is false for exactly `.fill`, `.eyedropper` and `.text` — the
-  eyedropper is momentary, so the two non-momentary members are the two the owner has now reported. That
-  property is what `CanvasView.shouldRequireFailure` reads (through `activeHostIsInteractive`) before
-  staking pan/pinch/rotate on the active layer's stroke recognizer, so **the arbitration layer exonerates
-  itself in both**, exactly as BUGS.md already records for Fill. The question is therefore one question,
-  not two: *is two-finger transform dead whenever `paintsOnCanvas` is false?*
-  **Two nets shipped, and both pass on the simulator** — `testCanvasStillTransformsWithATextBoxOpen` and
-  `testCanvasStillTransformsAfterLeavingTextForTheBrush`, beside the existing Fill one. That is the same
-  non-answer three earlier Fill attempts gave, and is further evidence the split is device-only.
-  `canvas.host`'s label now carries a `text:<none|box|editing>` field so a UI test can see a text session
-  at all; without it both tests passed having placed no box.
-  **`CanvasManager.selectBrush`'s missing `.text` is closed structurally and is NOT the reported defect** —
-  reachability was settled by reading and it is unreachable: `BrushSettingsPanel` is the only caller, it
-  needs `activePanel == .brush`, and `TopToolbar.selectBrushToolAndTogglePanel` only reaches that panel
-  from `.pen`/`.pencil`, having run `commitAllInteractiveState()` on the way. It is now
-  `Tool.followsBrushPresetSelection`, an exhaustive switch, so a seventh tool or a second door into the
-  brush panel cannot open the state.
-  **What the capture has to show**: with the canvas dead, put two fingers on it and read the recording's
-  `recognizer` lines for `canvas.pan` / `canvas.pinch`. If they never leave `.possible`, something is
-  holding them — and the `failureRequirement` lines say what `shouldRequireFailureOf` answered and who it
-  named. If they reach `.began` and the canvas still does not move, the freeze is not in the recognizers at
-  all and the search moves to `applyTransform`. Take it **with the Fill tool as well as from the text
-  keyboard**: the same file answering the same way for both is what turns two reports into one bug.
-- **Does drawing on a shrunk vector cel really throw the ink away?** [BUGS.md](BUGS.md)'s newest entry is
-  INFERRED from source and **has never been seen on a device**, and the whole case for
-  [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) — and therefore for item (12) below — rests on it. Repro:
-  vector layer → Move with no selection → drag a corner to half size → tap away → draw across the canvas.
-  Expected: only the top-left quadrant's worth of the stroke survives.
-- **Freeform (Move stage 3a) has not been reported on.** Shipped 2026-08-27; a corner drag now scales the
-  two axes independently and the ink keeps its round shape at the map's area root, which was the owner's
-  own 2026-08-26 default. Worth an eye before stage 3b is designed on top of it.
-  [LASSO_MOVE.md](LASSO_MOVE.md) §6 lists the other lasso-move behaviours that want a finger rather than a
-  test — the centreline rule at real line weights, the round caps at a cut, a moved punch biting a new
-  backdrop, and whether four presses for four nudges feels right.
-- **Three behaviour questions left over from the 2026-08-22 pass.** That pass's five changes were confirmed
-  — *"five changes are behaving correctly."* — but these three were raised by us, not reported, so nobody
-  has looked at them on real artwork: the Cut eraser across a line thicker than the eraser (visibly does
-  nothing, and always did) and a crossing line that can flicker during a cut drag, both in
-  [BUGS.md](BUGS.md); and a fill chunk dropped on blank paper staying a fill, in
-  [LASSO_MOVE.md](LASSO_MOVE.md) §5's "Still needs a ruling". None is a defect; each is a judgement.
+- **The ink loss is REAL and was seen.** *"After I shrink the entire canvas and put in a line, the line
+  does not bake properly, and only the part of the line in a box around the original object gets baked.
+  This box is likely the canvas borders after it got shrunk, and I suspect that there is some kind of
+  compositor or display think hiding the strokes outside. The only one quarter of it getting shown does
+  not nessesarely seem the case."* So the defect is confirmed and **our predicted shape was wrong in a
+  way worth keeping**: we said the top-left quadrant, the owner saw a box around the original object.
+  BUGS.md's entry is updated from INFERRED to observed. **The whole case for
+  [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) and item (12) now rests on evidence rather than on reading.**
+  **And the owner ruled against fixing it directly** — see (15).
+- **The freeze is not reproducible and is treated as solved.** *"I cant seem to replicate the freezing
+  bug, so I'll let you know if I ever encounter it again. Chances are the new text UI could have fixed
+  it, so treat it like its solved. I will bring it up if i ever see it."* The two reports were argued to
+  be one bug (`Tool.paintsOnCanvas` false for exactly `.fill`, `.eyedropper`, `.text`), so BUGS.md's
+  long-open Fill entry closes with it. The two regression nets stay.
+- **(4) The Scribble fix is confirmed.** *"works pretty much properly now."* A pencil tap on a text box
+  raises the keyboard. `ab7f736` is closed, and it was never verifiable on this Mac.
+- **(5) Freeform is confirmed.** *"freeform works."* The one gap it left is now an ask — see (17).
+- **The blue marching ants are confirmed.** *"lasso works."*
+
+Only the three behaviour questions we raised ourselves are still unlooked-at, and they are judgements
+rather than defects: the Cut eraser across a line thicker than the eraser, the crossing line that can
+flicker during a cut drag (both [BUGS.md](BUGS.md)), and a fill chunk dropped on blank paper staying a
+fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
+
+## Asked 2026-08-27, off the device report
+
+### (15) Move with no selection becomes "the whole canvas was lassoed", and the legacy path is deleted
+
+- [ ] The owner, 2026-08-27, ruling on the ink loss rather than asking for it to be repaired: *"I dont
+      think you should try to fix this, as scaling the entire canvas should transform the objects
+      coordinates in it, not the entire canvas coordinates as per the new proposed system. ... The move
+      tool without the lasso tool would pretty much use the exact same code as if the entire canvas was
+      lassoed around, then move was clicked on. Should be pretty easy to implement, and of course clean
+      up and remove the legacy code cleanly."*
+      **This is item (12) arriving as a behaviour change instead of a storage change**, and it is the
+      cheaper door into it: the lasso-move path already bakes into canvas coordinates on commit
+      (`FloatingPiece`, LASSO_MOVE.md §3), so pointing Move-with-no-selection at it *is* the bake, with
+      no new machinery. It closes the ink loss by removing the path that loses the ink, and it deletes
+      `_transform`'s reason to exist — the indirection LAYER_TRANSFORM.md counted **eleven of sixteen
+      entry points** inverting away again.
+      **It also carries a second reported defect**, see (16) below, which may or may not be subsumed.
+      **The load-bearing unknowns to settle in implementation, not to guess**: whether the lasso path
+      works on **raster** layers as well as vector (Move-with-no-selection works on any layer today);
+      whether "the entire canvas was lassoed" means the canvas rect or the cel's content bounds, and
+      what happens to content sitting outside the canvas; and whether a **saved project already on the
+      owner's iPad** contains a layer transform that must still decode.
+
+### (16) Move with no selection blocks the brush button
+
+- [ ] The owner, 2026-08-27: *"A separate bug is discovered where if I click on move without lassoing
+      first (so a canvas move), I cant click on a brush."* Reported alongside (15) and possibly cured by
+      it — the owner's own read is *"since the canvas layer resize thing is going to be discarded and
+      replaced, I dont think you need it"*. **Do not assume that**: confirm from the source whether the
+      block lives in the whole-layer Move path or in the tool-switch arbitration, and if the latter,
+      fix it on its own. It is a live defect on the shipped build either way.
+
+### (17) Text is transformable — Freeform and Mirror must accept it
+
+- [ ] The owner, 2026-08-27, an explicit ruling: *"when trying to select and move text, freeform is
+      greyed out and i also cant mirror it. I rule text should be able to be transformed. Probably just
+      isnt added yet."* Correct — Move stage 3a shipped with a piece carrying an image or a text box
+      having the picker disabled and the reason shown in the bar, exactly as Mirror already refused
+      (LASSO_MOVE.md §0). **The ruling is about text.** Placed images sit behind the same gate
+      (stage 3c) and the owner has not ruled on them; report whether one change ungates both before
+      ungating both.
+      Two sub-behaviours to settle: what a **mirrored** text box does — reflect the rendered glyphs, not
+      re-lay-out the string, is the recommendation — and whether a non-uniform scale **stretches the
+      glyphs** or re-flows the line breaks. Stretching is what a transform means; ruling 17's area-root
+      rule is for ink and has no text equivalent.
+
+### (18) The bottom bars should be as tall as their contents
+
+- [ ] The owner, 2026-08-27, on (11) as shipped: *"bottom bars are alright. Try to make that menu shorter
+      vertically because alot of them contain only 1 or 2 sliders which covers like half of it. You
+      already added the vertical scrolling thing to the bottom bar for things with more, so it should be
+      good."* So: content-driven height with a cap, and the existing scroll takes over above the cap.
+      The height is the whole point of (11) — 45% → 85% of the paper visible, MEASURED — so this is
+      finishing that change rather than adjusting it.
+
+### (19) An empty text object is deleted when it bakes
+
+- [ ] The owner, 2026-08-27, confirming Add Text and asking for one thing more: *"works pretty much
+      properly now. Just one thing, if there is a text object with nothing in it, delete it when it
+      bakes."* The classic failure here is fixing one exit — a text session can end by tapping away, by
+      switching tool, by switching layer, by the keyboard dismissing, by backgrounding — so the fix wants
+      **one choke point that covers every exit**, not a check at the one the tester used. Two things to
+      settle rather than guess: whether whitespace-only counts as empty, and whether an undo step is
+      pushed at all for a box that never carried content (the recommendation is none).
+
+### Chromatic aberration, and possibly every effect, is masked to the layer's own ink
+
+The owner, 2026-08-27: *"Chromatic abberation seems to for some reason be masked to the objects on the
+layers only. If it is transparent to the canvas, it doesnt affect it. Other effects and blend modes
+might have this error too, so it's worth a check."* Filed in [BUGS.md](BUGS.md) — it is a defect we now
+own, not an ask — but recorded here because **the owner asked for the sweep**, and a per-effect and
+per-blend-mode answer is the deliverable, not a fix to the one effect they happened to notice.
 
 ## Canvas geometry, and how a coordinate is stored
 
@@ -345,29 +381,4 @@ sized to; and **(9)** is independent of all of them *because* the width is fixed
 
 ## Done this pass
 
-- **(4) A pencil tap on a text box raises the keyboard instead of Scribble** (`ab7f736`). Device
-  confirmation still owed — see the waiting-on-the-owner list.
-- **(3) closed on both halves** — the small-box fix cured the distort case too, and the owner confirmed it:
-  *"text seems to show up in distort now."* The refuted CALayer *software-path* hypothesis stays refuted,
-  and the elaborate distort experiment was never needed because fixing the cheaper, better-understood half
-  first resolved the expensive one. The box-size ruling it shipped with is recorded in ADD_TEXT.md §5.
-- **(5) Move stage 3a — Freeform on a lassoed vector piece** (`bd3bddd`, `f44a2e9`). A corner drag scales
-  the two axes independently about the centre; the ink keeps its round shape at the map's area root. No
-  renderer change and nothing new persisted. Stages 3b (the yellow box-only knob) and 3c (placed images
-  holding a stretched shape) are deliberately not in it; a piece carrying an image or a text box has the
-  picker disabled with the reason in the bar, exactly as Mirror already refuses. Written up in
-  LASSO_MOVE.md §0.
-- **Canvas Padding's resize held every cel's intermediates at once — 3.5 GB for 32 cels** (`c6b1b35`).
-  MEASURED, not supposed, and **not** the owner's freeze: the per-cel buffer walk is 83% of it and
-  `regenerateAllThumbnails()` — the thing everyone assumed dominated — is 17%.
-- **(11) The effect-settings and Add Text panels are bottom bars, and the layer rail stands down for
-  them** (`e0d5e57`). MEASURED on iPad Pro 13" / iOS 26.5, portrait, by counting unobstructed paper
-  pixels in one document in three states: **45% of the paper visible before, 85% with the effect bar
-  docked, 83% with the text bar.** The rail is the half that makes it worth anything — moving only the
-  240pt knob panel would have left the ~440pt rail and its options panel over the artwork.
-  `MaskTuningSection` deliberately did not move: its main control *is* the rail's own rows.
-  `MENU_PRESENTATION_CENSUS.md` is true again, and finding 1 gains no fifteenth arbitration site.
-- **The seven device reports and the geometry rulings were written up** (`da96c0c`, `73d0402`, `87ed588`,
-  `1aacb74`, `0164eb3`, `c267322`, `35b541c`, `c919014`, `61ed6fa`, `69d1492`, `6a609ba`) — including
-  [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md), whose review found the ink-loss defect now at the top of
-  BUGS.md.
+Nothing yet — the pass opened 2026-08-27 with the device report above.

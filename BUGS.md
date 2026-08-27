@@ -4,12 +4,64 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## Drawing on a scaled-down vector cel silently discards most of the ink (2026-08-27)
+## Chromatic aberration — and possibly every effect and blend mode — is masked to the layer's own ink (2026-08-27)
+
+**Reported from the iPad, 2026-08-27, and not yet diagnosed.** The owner: *"Chromatic abberation seems to
+for some reason be masked to the objects on the layers only. If it is transparent to the canvas, it doesnt
+affect it. Other effects and blend modes might have this error too, so it's worth a check."*
+
+So an effect applied to a layer changes only the pixels that layer already painted, and leaves the
+transparent parts of the canvas — including whatever other layers show through them — untouched. For a
+displacement-style effect like chromatic aberration that is visibly wrong: the whole point is that it
+shifts what is *behind* it.
+
+**The sweep is the deliverable, not the one effect.** The owner asked explicitly whether other effects and
+blend modes share it, so the answer wanted is a per-effect and per-blend-mode table saying which are
+affected, which are correct as they stand — some effects genuinely should be scoped to their own layer —
+and which are wrong. TODO.md records the ask.
+
+**Do not guess at the mechanism.** The candidates worth ruling in or out by reading are: the effect output
+multiplied by or blended through the source layer's alpha; the shader sampling a texture that holds only
+that layer's content, so the offset samples land on alpha = 0; premultiplied-alpha handling zeroing the
+shifted channels; and a bounds or scissor rect derived from the layer's content. The render tree already
+composites effect nodes over the layers beneath them (`RenderTree.needsCompositorOnCanvas`,
+`node.effect != nil`), which is why the correct semantic has to be established before the fix.
+
+## Move with no selection blocks the brush button (2026-08-27)
+
+**Reported from the iPad, 2026-08-27.** The owner: *"if I click on move without lassoing first (so a canvas
+move), I cant click on a brush."* A whole-canvas Move — Move selected with nothing lassoed — leaves the app
+in a state the brush tool cannot be selected out of.
+
+The owner's own read is that TODO item (15) makes it moot: *"since the canvas layer resize thing is going to
+be discarded and replaced, I dont think you need it."* **That is a hypothesis, not a finding.** If the block
+lives in the whole-layer Move path then (15) removes it; if it lives in the tool-switch arbitration — the
+same neighbourhood as `Tool.followsBrushPresetSelection`, `activePanel`, and the commit-before-switching
+path — then (15) leaves it standing and it needs its own fix. Settle it by reading before deciding, and note
+that it is a live defect on the shipped build either way.
+
+## Drawing on a scaled-down vector cel silently discards most of the ink (2026-08-27) — CONFIRMED ON DEVICE, and the owner ruled it is not to be fixed here
 
 **Found by reading while designing [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md), mechanically confirmed by an
-independent reviewer, and NOT YET SEEN ON A DEVICE.** It is INFERRED from source, and the whole case for
-that document rests on it, so **confirming it on the iPad is the first thing to do** — before any of the
-work it argues for.
+independent reviewer, and SEEN ON THE IPAD 2026-08-27.** The owner: *"After I shrink the entire canvas and
+put in a line, the line does not bake properly, and only the part of the line in a box around the original
+object gets baked. This box is likely the canvas borders after it got shrunk, and I suspect that there is
+some kind of compositor or display think hiding the strokes outside."* Live data loss, on the shipped
+build. It was the whole case for LAYER_TRANSFORM.md and for TODO item (12), and that case now rests on
+evidence rather than on reading.
+
+**Our predicted shape was wrong, and the correction is worth keeping.** We said *"only the top-left
+quadrant's worth of the stroke survives"*; the owner saw a box around the **original object**, and added
+*"The only one quarter of it getting shown does not nessesarely seem the case."* A clip at `[0, size]`
+from the local origin and a clip to the content's own bounds are different rects, and the observation says
+it is the second. Whichever it is, the mechanism below stands — the clip happens in local space before the
+transform — but any fix or test written against "the top-left quadrant" is written against the wrong rect.
+
+**THE OWNER RULED AGAINST FIXING IT IN PLACE**: *"I dont think you should try to fix this, as scaling the
+entire canvas should transform the objects coordinates in it, not the entire canvas coordinates as per the
+new proposed system."* The repair is **TODO item (15)** — Move with no selection becomes a whole-canvas
+lasso move, which bakes into canvas coordinates and deletes the path that loses the ink. Do not patch
+`render()` or `renderLocalContent`; the entry stays open only until (15) lands.
 
 `renderLocalContent` rasterizes into a context of exactly `size` — `UIGraphicsImageRenderer(size: size,
 format: format)`, `VectorLayer.swift:2451` — **in the layer's local space**, and `render()` step 2
@@ -23,8 +75,9 @@ first `size`-worth of it is cropped at render.
 - At `k = 0.5`, three quarters of the canvas stores coordinates the renderer crops.
 - At the `minimumScale = 0.02` floor (`ObjectTransformFrame.swift:260`), **99.96%**.
 
-**Repro**: vector layer → Move with no selection → drag a corner to half size → tap away → draw across
-the canvas. Expected: only the top-left quadrant's worth of the stroke survives.
+**Repro** (the owner's, and it reproduces): vector layer → Move with no selection → shrink → tap away →
+draw across the canvas. Only ink inside a box near the shrunk cel's own extent is kept; the rest is
+silently discarded.
 
 **Two neighbours found in the same pass**, both also inferred rather than observed:
 
@@ -700,7 +753,23 @@ The seven samples are the regression fixture, as literals in `PinchMergeGateLogi
 replaying them merges, replaying them with the vertical motion removed does not, and the old radial rule
 (reproduced in the test file only, so its rejection stays documented) fires on neither.
 
-## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15)
+## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15) — CLOSED 2026-08-27, not reproducible
+
+**The owner cannot reproduce it any more and ruled it solved**, 2026-08-27: *"I cant seem to replicate the
+freezing bug, so I'll let you know if I ever encounter it again. Chances are the new text UI could have
+fixed it, so treat it like its solved. I will bring it up if i ever see it."* That was said of the
+**`.text`** half; this Fill entry closes with it because the two were argued to be **one bug** — see the
+`.text`-is-this-report's-twin paragraph below, which is the argument, and it is the reason a single answer
+settles both. The owner's own guess at the cure, the new text UI, is consistent with that: the bottom-bar
+Add Text panel (`e0d5e57`) replaced the presentation the report was taken against.
+
+**Kept rather than deleted, because nothing was diagnosed.** No mechanism was ever found, no fix was ever
+written, and the capture that would have named it was never taken. If it returns, everything below is the
+investigation to resume — in particular that the two regression nets in `CanvasTransformFreezeUITests`
+still pass on the simulator and always did, so a green suite is not evidence the defect is gone.
+
+The original report and the reading that eliminated the obvious hypothesis follow.
+
 
 The product owner reports it from their iPad: pick Fill and the canvas will not pan, pinch or rotate;
 pick any other tool and it does. **Unexplained and not fixed.**
