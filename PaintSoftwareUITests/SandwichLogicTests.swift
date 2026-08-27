@@ -217,6 +217,27 @@ final class SandwichLogicTests: XCTestCase {
         }.cgImage
     }
 
+    /// **What the live canvas shows *at rest* under EFFECT_BACKDROP.md §2.1's gate**, assembled the
+    /// way the two views assemble it: `below` in the lower view, `aboveInclusive` in the upper one,
+    /// and the Behind onion-skin ghost between them where the artist can see it.
+    ///
+    /// No middle draw, and that is the difference from `sandwichComposite` above: at rest every layer
+    /// host is blanked, so the active layer's pixels come from the upper *composite* rather than from
+    /// its own view — which is what applies its mask and its blend mode instead of losing them.
+    private func atRestSplitComposite(_ manager: CanvasManager, active: Int, atFrame frame: Int = 0) -> CGImage? {
+        guard let canvasSize = manager.canvasSize,
+              let requests = manager.makeSandwichRequests(atFrame: frame, activeLayerIndex: active,
+                                                          alsoAboveInclusive: true),
+              let upper = requests.aboveInclusive,
+              let below = Compositor.composite(requests.below),
+              let above = Compositor.composite(upper) else { return nil }
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        return UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat()).image { _ in
+            UIImage(cgImage: below, scale: 1, orientation: .up).draw(in: bounds)
+            UIImage(cgImage: above, scale: 1, orientation: .up).draw(in: bounds)
+        }.cgImage
+    }
+
     // MARK: - Pruning invariants
 
     /// **The invariant the whole cut rests on: the two halves and the active layer put the stack back
@@ -1001,6 +1022,170 @@ final class SandwichLogicTests: XCTestCase {
         XCTAssertNil(hidden.full.background, "The artist turned the paper off, so there is no paper")
         XCTAssertNil(hidden.below.background)
         XCTAssertNil(hidden.above.background)
+    }
+
+    // MARK: - The at-rest split (EFFECT_BACKDROP.md §2.1 ruling (b))
+
+    /// **The fourth request is nil unless it is asked for, and it carries no paper when it is.**
+    ///
+    /// Both halves matter. Nil by default is what keeps the cost off every document that is not
+    /// looking at a Behind onion skin over a composited stack — it is a fourth canvas-sized composite,
+    /// and at 2048² that is another ~17 MB and another walk per rebuild. `background: nil` is the same
+    /// rule `above` already obeys and for the same reason: this image is drawn *over* the lower one,
+    /// so a paper in it would be an opaque sheet hiding the whole picture rather than a backdrop.
+    func testTheAboveInclusiveRequestIsBuiltOnlyWhenAskedAndCarriesNoPaper() {
+        let manager = stack(3)
+        manager.canvasBackgroundColor = .white
+        manager.isCanvasBackgroundVisible = true
+
+        guard let plain = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+              let asked = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1,
+                                                       alsoAboveInclusive: true) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        XCTAssertNil(plain.aboveInclusive,
+                     "A fourth composite on every rebuild of every document is the regression this flag exists to avoid")
+        XCTAssertNotNil(asked.aboveInclusive)
+        XCTAssertNil(asked.aboveInclusive?.background,
+                     "The upper half composites onto transparency by design — a paper in it hides everything below it")
+        XCTAssertNotNil(asked.below.background, "…and the lower half still carries it, exactly once")
+        XCTAssertEqual(asked.aboveInclusive?.canvasSize, asked.below.canvasSize,
+                       "One render size for the whole request, as `makeSandwichRequests` states")
+    }
+
+    /// **The cut, as leaf order: the upper half gains the active leaf and the lower half does not
+    /// move.** Swept over the same battery as the ordinary split, because the flag changes one index
+    /// inside a recursion that also has to rebuild half-groups around it — a shape where the leaf is
+    /// two folders deep is exactly where "put it in the other half" could quietly drop it.
+    func testTheAboveHalfIncludingTheActiveLeafIsTheOtherHalfPlusIt() {
+        for testCase in battery() {
+            let tree = testCase.manager.renderTree
+            guard let halves = tree.split(atLeaf: testCase.active),
+                  let inclusive = tree.split(atLeaf: testCase.active, includingTheLeafAbove: true) else {
+                XCTFail("\(testCase.name): the active layer is a leaf of its own tree, so both cuts must succeed")
+                continue
+            }
+            XCTAssertEqual(inclusive.below, halves.below,
+                           "\(testCase.name): the flag is about the upper half; the lower one is the same tree")
+            XCTAssertEqual(inclusive.above.leafLayerIndices, [testCase.active] + halves.above.leafLayerIndices,
+                           "\(testCase.name): the active layer joins the upper half at the bottom of it, in evaluation order")
+            XCTAssertEqual(inclusive.below.leafLayerIndices + inclusive.above.leafLayerIndices,
+                           tree.leafLayerIndices,
+                           "\(testCase.name): the two halves are now the whole stack, with nothing drawn twice and nothing dropped")
+        }
+    }
+
+    /// **The at-rest split reassembles to the exact composite wherever nothing blends** — the same
+    /// claim `testTheSandwichReassemblesToTheExactCompositeWhereverNothingAboveBlends` makes about the
+    /// mid-stroke picture, and it has to hold here for a stronger reason: at rest there is no lift
+    /// coming to snap the canvas back to `full`.
+    ///
+    /// It is a *better* approximation than the mid-stroke one on this battery, and that is structural
+    /// rather than lucky: the active layer is inside a composite here instead of being drawn by its
+    /// own host, so its mask and its opacity are applied by the compositor.
+    func testTheAtRestSplitReassemblesToTheExactCompositeWhereverNothingBlends() {
+        var worst = 0
+        for testCase in battery() {
+            guard let requests = testCase.manager.makeSandwichRequests(atFrame: 0,
+                                                                      activeLayerIndex: testCase.active),
+                  let exact = Compositor.composite(requests.full),
+                  let split = atRestSplitComposite(testCase.manager, active: testCase.active) else {
+                XCTFail("\(testCase.name): both sides must composite")
+                continue
+            }
+            let delta = maxChannelDelta(split, exact)
+            worst = max(worst, delta)
+            XCTAssertEqual(delta, 0,
+                           "\(testCase.name): the at-rest split differs from the exact composite by \(delta) on some channel")
+        }
+        print("[sandwich] max channel delta, at-rest split over the exact battery: \(worst)")
+    }
+
+    /// **What the at-rest split costs, measured — and it is the price of ruling (b) rather than a
+    /// bug.** A blend mode above the cut degrades to normal, because the upper half is composited
+    /// onto transparency and then drawn source-over, and there is no backdrop up there to blend
+    /// against. Mid-stroke that is accepted because lift returns the canvas to `full`; under §2.1's
+    /// gate the artist is *already* at rest, so nothing returns and this is what they see for as long
+    /// as the onion skin is on and set to Behind.
+    ///
+    /// The same fixture as `testTheSandwichIsNotExactWhenSomethingAboveTheActiveLayerBlends`: a
+    /// multiplying red square over an opaque mid-grey floor, exact composite (128, 0, 0).
+    ///
+    /// **MEASURED 2026-08-27, and it refuted the expectation this test was written to record.** The
+    /// prediction was that the at-rest split would be the mid-stroke picture exactly — same two
+    /// composites, same degradation — and that a blend would therefore cost 127 whichever layer was
+    /// active. It costs 127 for **one** of the two cuts and **0** for the other, because the at-rest
+    /// split has one degradation boundary where the mid-stroke sandwich has two:
+    ///
+    /// - **active 0** (the blending layer is *above* the cut): split **0**, mid-stroke **127**. The
+    ///   blending layer and the grey floor it multiplies into are both inside `aboveInclusive`, so
+    ///   they blend against each other in one walk. Mid-stroke cannot do that — the active layer's own
+    ///   host sits between them as an opaque wall.
+    /// - **active 1** (the blending layer *is* the active one): split **127**, mid-stroke **127**. Its
+    ///   backdrop is in the other image either way, so the mode has nothing to blend against.
+    ///
+    /// So ruling (b)'s cost is narrower than §2.1 assumes: at rest the only mode that degrades is one
+    /// **on the active layer itself**, not every mode at or above it. The general claim, asserted
+    /// below rather than the two numbers alone, is that the split is never worse than the mid-stroke
+    /// picture the artist already accepts for the duration of a dab.
+    ///
+    /// The fourth composite also buys, over the cheaper "unblank the active host at rest", everything
+    /// that is a property of the tree rather than of the backdrop — the layer's mask and its enclosing
+    /// groups' real opacity. A host at rest has neither: `updateSandwich` clears `liveMaskImage`
+    /// outside a stroke, and a host's fade is `effectiveOpacity(ofLayer:)`, which the faded-group test
+    /// above already records as an approximation.
+    func testTheAtRestSplitIsNeverWorseThanTheMidStrokeSandwich() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(grey, rect: CGRect(origin: .zero,
+                                                                                  size: CanvasFixture.canvasSize)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+
+        var measured: [Int: (split: Int, midStroke: Int)] = [:]
+        for active in 0...1 {
+            guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: active),
+                  let exact = Compositor.composite(requests.full),
+                  let split = atRestSplitComposite(manager, active: active),
+                  let midStroke = sandwichComposite(manager, active: active) else {
+                return XCTFail("Fixture needs a canvas size")
+            }
+            XCTAssertEqual(pixel(exact, 16, 16), [128, 0, 0, 255], "active \(active) — exact: red multiplies the grey floor")
+            measured[active] = (maxChannelDelta(split, exact), maxChannelDelta(midStroke, exact))
+        }
+        print("[sandwich] at-rest split vs mid-stroke against the exact composite: \(measured)")
+
+        XCTAssertEqual(measured[0]?.split, 0,
+                       "A blend above the cut is exact at rest: both operands are inside `aboveInclusive`, and the "
+                       + "active layer's host is not standing between them the way it does mid-stroke")
+        XCTAssertEqual(measured[0]?.midStroke, 127, "…which the mid-stroke picture cannot do, and this is the 127 it costs")
+        XCTAssertEqual(measured[1]?.split, 127,
+                       "The active layer's own mode still has no backdrop — it is the one boundary the split keeps")
+        XCTAssertEqual(measured[1]?.midStroke, 127, "Mid-stroke pays the same 127 there, by a different mechanism")
+
+        for (active, delta) in measured {
+            XCTAssertLessThanOrEqual(delta.split, delta.midStroke,
+                                     "active \(active): the at-rest split must never be a worse picture than the one "
+                                     + "the artist already accepts for the length of a dab — \(delta)")
+        }
+    }
+
+    /// **The active layer being topmost is not a reason to skip the split**, and this is the test for
+    /// the clause that was considered and left out. `aboveInclusive` is *the active layer and*
+    /// everything above it, so even with nothing above it the upper half still holds the artist's own
+    /// ink — which is precisely what a Behind ghost has to sit behind.
+    func testTheSplitStillHasSomethingToCoverTheGhostWhenTheActiveLayerIsTopmost() {
+        let manager = stack(2)
+        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1,
+                                                          alsoAboveInclusive: true),
+              let upper = requests.aboveInclusive else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        XCTAssertEqual(requests.above.tree.leafLayerIndices, [],
+                       "Nothing is above the top layer, which is what makes the naive gate tempting")
+        XCTAssertEqual(upper.tree.leafLayerIndices, [1],
+                       "…and the upper half is still the active layer itself, so the ghost is still covered by it")
     }
 
     func testTheHalvesCarryTheSplitTreesAndTheFrameAndQualityTheyWereAskedFor() {

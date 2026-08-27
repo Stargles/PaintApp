@@ -417,13 +417,17 @@ struct RenderRequest {
     }
 }
 
-/// The three requests §5.2's sandwich is assembled from, over one snapshot.
+/// The requests §5.2's sandwich is assembled from, over one snapshot.
 ///
 /// **`full` is not a spare.** The settled scope for phase 5b is that at rest the canvas shows one
 /// image — `composite(full)`, exact for every mode and every nesting, with every layer host hidden —
 /// and that the two halves appear only for the duration of a dab. So `full` is the picture the artist
 /// looks at almost all of the time, and `below`/`above` are the ones that have to be *fast*, not the
 /// ones that have to be right.
+///
+/// **`aboveInclusive` is the one exception to that, and it is gated to almost nothing** —
+/// EFFECT_BACKDROP.md §2.1 ruling (b). It is nil unless the caller asks, and the caller asks only
+/// where a Behind onion skin would otherwise be indistinguishable from an In Front one.
 struct SandwichRequests {
 
     /// The whole tree, exactly as `makeRenderRequest` would have built it.
@@ -437,6 +441,40 @@ struct SandwichRequests {
     /// backdrop left to blend against. Accepted for this phase, and it snaps correct on lift because
     /// lift is when the canvas goes back to `full`.
     let above: RenderRequest
+
+    /// `above` **with the active layer in it**, or nil when the caller did not ask for one —
+    /// EFFECT_BACKDROP.md §2.1 ruling (b), the at-rest half of the Behind onion skin.
+    ///
+    /// **Optional because it is a whole extra composite.** The gate is three booleans in `CanvasView`
+    /// — onion skin on, placement `.behind`, and the compositor engaged — and outside it the at-rest
+    /// canvas is still the single `full` image it has always been, built by exactly the code that
+    /// built it before. Asked for rather than always produced because two of those three booleans are
+    /// *defaults* (`isOnionSkinEnabled` is true and `placement` is `.behind`), so "always" would have
+    /// meant an extra canvas-sized image on essentially every engaged document.
+    ///
+    /// **Where it is present, `CanvasView` composites no `full` at all**, so the count stays at three
+    /// either way — under the gate `full` is never on screen (at rest the canvas shows `below` +
+    /// this; mid-stroke it shows `below` + `above`). See `Coordinator.sandwichImages`.
+    ///
+    /// **What it buys, and what it costs.** At rest the canvas becomes `below` → ghost →
+    /// `aboveInclusive`, which is the mid-stroke z-order with the active layer's own host folded into
+    /// the upper composite instead of drawn between the two. That is the only arrangement that keeps
+    /// the ghost *behind* the active layer's ink while the host is blanked — and the host has to stay
+    /// blanked, because a host draws its own pixels with no mask, no blend mode and only an
+    /// approximated group opacity, so unblanking it at rest would change how a masked or faded active
+    /// layer looks in order to fix an onion skin.
+    ///
+    /// **The cost is one degradation boundary, and it is narrower than §2.1 assumed.** At rest the
+    /// picture becomes two composites instead of one, so a blend mode that needs a backdrop across
+    /// the cut degrades to normal — but the cut is now only *under* the active layer, not under and
+    /// over it as it is mid-stroke. MEASURED 2026-08-27 on a multiplying layer over an opaque floor
+    /// (`SandwichLogicTests.testTheAtRestSplitIsNeverWorseThanTheMidStrokeSandwich`): with the
+    /// blending layer above the active one the split is **exact** where the mid-stroke sandwich costs
+    /// 127, because both operands are inside this image; only a mode on the **active layer itself**
+    /// still degrades, and there it costs the same 127 mid-stroke already does. Unlike mid-stroke
+    /// there is no lift to snap it back on, which is why the gate is three booleans rather than a
+    /// setting.
+    let aboveInclusive: RenderRequest?
 }
 
 /// What `SandwichRequests.full` depends on — which is everything `CanvasView.SandwichKey` carries
@@ -634,10 +672,15 @@ extension CanvasManager {
     /// not. `CanvasView.updatePaper` owns that half, gated on the composite actually being on screen
     /// rather than on the sandwich merely being engaged (there is a window between the two: see the
     /// "do not blank the hosts until the first composite has landed" trap in `updateSandwich`).
+    ///
+    /// **`alsoAboveInclusive` adds the fourth request and is off by default** — see
+    /// `SandwichRequests.aboveInclusive`. It costs one more tree walk here and one more composite in
+    /// whoever composites the result, so the caller asks for it only under §2.1's gate.
     @MainActor
     func makeSandwichRequests(atFrame frame: Int,
                               activeLayerIndex: Int,
-                              quality: RenderQuality = .full) -> SandwichRequests? {
+                              quality: RenderQuality = .full,
+                              alsoAboveInclusive: Bool = false) -> SandwichRequests? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
         let tree = renderTree
         guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
@@ -710,9 +753,19 @@ extension CanvasManager {
                           background: background, quality: quality)
         }
         let paper = canvasBackground(renderedInto: renderSize)
+        // A second cut of the same tree rather than a second implementation of the cut — the flag is
+        // one index at the leaf (`split(atLeaf:includingTheLeafAbove:)`). It re-walks the tree, which
+        // is array work with no pixels in it and the same order as the walk `renderTree` above
+        // already did; the composite it implies is the expensive half, and that is paid by whoever
+        // asked for this.
+        let aboveInclusive = alsoAboveInclusive
+            ? tree.split(atLeaf: activeLayerIndex, includingTheLeafAbove: true)
+                  .map { request($0.above, background: nil) }
+            : nil
         return SandwichRequests(full: request(tree, background: paper),
                                 below: request(halves.below, background: paper),
-                                above: request(halves.above, background: nil))
+                                above: request(halves.above, background: nil),
+                                aboveInclusive: aboveInclusive)
     }
 
     /// One resolved image per `layers` index, and its content version, or nil where a layer

@@ -682,12 +682,32 @@ extension Array where Element == RenderNode {
     /// need somewhere to hang, and a folder that is empty only at this frame must not blink out of
     /// the tree between frames — and a half that was pruned to nothing has neither reason.
     /// `testAnEmptyFolderSurvivesIntoWhicheverHalfItRanksIn` is the fixture for the difference.
-    func split(atLeaf layerIndex: Int) -> (below: [RenderNode], above: [RenderNode])? {
+    ///
+    /// **`includingTheLeafAbove` puts the active leaf in the upper half instead of dropping it, and
+    /// that one flag is EFFECT_BACKDROP.md §2.1 ruling (b).** At rest the live canvas has no middle
+    /// view — the active layer's host is blanked and its pixels come from `full` — so a Behind onion
+    /// skin fronted above the lower view has nothing over it and `.behind` becomes pixel-identical to
+    /// `.inFront`. Keeping the ghost meaning what it says needs the at-rest picture to be two images
+    /// with the ghost between them, and the upper one is then "the active layer *and* everything
+    /// above it": `below → ghost → activeLayer+above` is the same z-order the mid-stroke sandwich
+    /// already draws, with the host's own view folded into the composite.
+    ///
+    /// A parameter rather than a second function because the pruning is the same pruning — a
+    /// half-group still keeps its identity and its properties, an empty half is still dropped — and
+    /// the only difference is one index at the cut. Two implementations of this would be two things
+    /// to keep in step, and `testEveryTreeSplitsIntoTwoHalvesThatPutTheStackBackTogether` sweeps both
+    /// modes over the same battery for that reason.
+    ///
+    /// The upper half is composited with `background: nil` in both modes (`makeSandwichRequests`), so
+    /// "the active layer and everything above it" arrives on transparency and the paper stays in the
+    /// lower half exactly once.
+    func split(atLeaf layerIndex: Int,
+               includingTheLeafAbove keepLeaf: Bool = false) -> (below: [RenderNode], above: [RenderNode])? {
         for (position, node) in enumerated() {
             switch node.content {
             case .leaf(let index):
                 guard index == layerIndex else { continue }
-                return (Array(self[..<position]), Array(self[(position + 1)...]))
+                return (Array(self[..<position]), Array(self[(keepLeaf ? position : position + 1)...]))
 
             case .node(_, let inputs):
                 // Slots are ordered and each is its own bottom-to-top stack, so the slots before the
@@ -697,7 +717,7 @@ extension Array where Element == RenderNode {
                 // recursion.
                 var found: (slot: Int, below: [RenderNode], above: [RenderNode])?
                 for (slot, input) in inputs.enumerated() {
-                    guard let inner = input.split(atLeaf: layerIndex) else { continue }
+                    guard let inner = input.split(atLeaf: layerIndex, includingTheLeafAbove: keepLeaf) else { continue }
                     found = (slot, inner.below, inner.above)
                     break
                 }

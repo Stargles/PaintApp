@@ -57,6 +57,11 @@ struct CanvasView: UIViewRepresentable {
         // just draws over the composite of the layers beneath the active one, and `above` still
         // covers it with the artwork on layers over the active one — which is what "Behind" means.
         //
+        // **At rest that upper view is normally empty**, which is §2.1's second ruling: the whole
+        // tree collapses into `sandwichBelow` and a ghost fronted above it has nothing over it at
+        // all. `Coordinator.wantsBehindGhostAtRest` is the gate that keeps the two views split for
+        // exactly the documents where that would lose the placement.
+        //
         // Deliberately left on the default bilinear filter — nearest-neighbor made the onion-skin
         // ghost render as a distractingly pixelated overlay instead of a soft reference. That is
         // doubly true now: `OnionSkinBudget` can composite below canvas resolution on a large canvas,
@@ -1125,7 +1130,26 @@ struct CanvasView: UIViewRepresentable {
         /// The three composites of one rebuild, wrapped as `UIImage` once so assigning them is an
         /// identity check rather than a fresh wrapper — and therefore a Core Animation no-op — on
         /// every one of the many SwiftUI passes that change nothing.
-        private var sandwichImages: (full: UIImage, below: UIImage, above: UIImage)?
+        /// **Exactly one of `full` and `aboveInclusive` is present, and that is what keeps
+        /// EFFECT_BACKDROP.md §2.1 ruling (b) free.**
+        ///
+        /// The obvious shape is four images — the three plus the ghost's upper half — and it is a
+        /// real regression at the default settings: `isOnionSkinEnabled` defaults to true and
+        /// `placement` defaults to `.behind`, so the gate is *on* for every document the compositor
+        /// engages for unless the artist turns it off. That would be a fourth canvas-sized composite
+        /// and a fourth canvas-sized image on every rebuild — ~17 MB at 2048² and ~67 MB at 4096²,
+        /// on top of the 50/192 MB the disengage branch already declines to hold.
+        ///
+        /// It is not needed, because **under the gate `full` is never on screen**: at rest the canvas
+        /// shows `below` + `aboveInclusive` and mid-stroke it shows `below` + `above`. So the gate
+        /// *swaps* the fourth composite for the first rather than adding to it, and both counts stay
+        /// at three. `wantsBehindGhostAtRest` is in `SandwichKey` precisely so that flipping the gate
+        /// rebuilds the set with the other one in it.
+        ///
+        /// Both are therefore optional and the presentation reads whichever it has — which also
+        /// covers the window where the gate has moved and the rebuild it asked for has not landed, so
+        /// the artist keeps looking at a stale picture rather than a blank one.
+        private var sandwichImages: (full: UIImage?, below: UIImage, above: UIImage, aboveInclusive: UIImage?)?
         /// The key as of the last pass. What `makeSandwichKey` freezes the active layer against, and
         /// deliberately *not* the same thing as `sandwichCacheKey`.
         private var sandwichKey: SandwichKey?
@@ -1253,7 +1277,10 @@ struct CanvasView: UIViewRepresentable {
             // nearest for an image that genuinely needs interpolating, and the blocky result would
             // look like the bug the comment above exists to prevent, on the device least able to
             // afford being reported as broken.
-            let composited = sandwichImages?.full.size ?? .zero
+            // `below` rather than `full`, because `full` is not composited under §2.1's gate — all
+            // the requests of one rebuild share a single `renderSize` (`makeSandwichRequests`), so
+            // any of them answers "was this reduced" identically.
+            let composited = sandwichImages?.below.size ?? .zero
             let isReduced = composited != .zero
                 && composited != (canvasManager.canvasSize ?? composited)
             let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
@@ -1275,17 +1302,44 @@ struct CanvasView: UIViewRepresentable {
             let midStroke = isSandwichStrokeLive
                 || (sandwichPresentation == .midStroke && key != sandwichCacheKey)
 
+            // **The at-rest split — EFFECT_BACKDROP.md §2.1 ruling (b), "Behind keeps meaning
+            // behind".** The first ruling moved the Behind ghost up to sit between the two sandwich
+            // views, which is right mid-stroke (`below < ghost < activeHost < above`) and empty at
+            // rest, where the whole tree collapses into `belowView` and there is nothing left over
+            // the ghost — `.behind` then renders pixel-identically to `.inFront` in any document the
+            // compositor engages for, which is any blend, mask, effect or buffering folder.
+            //
+            // Under the gate the at-rest picture becomes `below < ghost < aboveInclusive`, which is
+            // the mid-stroke z-order with the active layer's own host folded into the upper
+            // composite. The hosts stay blanked below, deliberately: a host draws its own pixels with
+            // no mask and no blend mode, so unblanking the active one instead would fix the ghost by
+            // changing how a masked or blended active layer looks.
+            //
+            // **`images.full == nil` counts as "gated" here as well as `key` saying so**, and that
+            // clause is the window rather than defensiveness: the gate moved, the rebuild it asked
+            // for has not landed, and the cached set is the other shape. Reading whichever image is
+            // actually held keeps the artist looking at a stale picture — which this cache tolerates
+            // by design, at most one edit behind — instead of a blank canvas for a frame.
+            let atRestUpper = midStroke || !(key.wantsBehindGhostAtRest || images.full == nil)
+                ? nil : images.aboveInclusive
             if midStroke {
                 if belowView.image !== images.below { belowView.image = images.below }
                 if aboveView.image !== images.above { aboveView.image = images.above }
+            } else if let atRestUpper {
+                if belowView.image !== images.below { belowView.image = images.below }
+                if aboveView.image !== atRestUpper { aboveView.image = atRestUpper }
             } else {
-                if belowView.image !== images.full { belowView.image = images.full }
+                // `?? images.below` cannot be reached — the install guard admits a set only with the
+                // one of the two its key called for — and is spelled rather than force-unwrapped
+                // because the lower half is the honest half of the picture if it ever is.
+                let single = images.full ?? images.below
+                if belowView.image !== single { belowView.image = single }
                 // Nothing in the upper view at rest: `full` is the whole tree, so a second image over
                 // it would be everything above the active layer drawn a second time.
                 if aboveView.image != nil { aboveView.image = nil }
             }
             if belowView.isHidden { belowView.isHidden = false }
-            let hideAbove = !midStroke
+            let hideAbove = !midStroke && atRestUpper == nil
             if aboveView.isHidden != hideAbove { aboveView.isHidden = hideAbove }
 
             // The active layer's host is the middle of the sandwich and the only one that draws
@@ -1309,8 +1363,11 @@ struct CanvasView: UIViewRepresentable {
             // host is still the thing on screen.
             if !midStroke { liveMaskImage = nil }
             sandwichPresentation = midStroke ? .midStroke : .rest
-            // Both presentations put an image carrying the paper in `belowView` — `full` at rest,
-            // `below` mid-stroke — so from here the `paperView` would be a second copy of it.
+            // Every presentation puts an image carrying the paper in `belowView` — `full` at rest,
+            // `below` mid-stroke, and `below` again under §2.1's at-rest split — so from here the
+            // `paperView` would be a second copy of it. The split does not change that: the paper
+            // goes into `full` and `below` and never into either upper half, which is what keeps it
+            // painted exactly once whichever of the three is on screen.
             paperIsNowPaintedBy(true)
         }
 
@@ -1420,6 +1477,41 @@ struct CanvasView: UIViewRepresentable {
             /// Invisible is not the same key as white — it is the difference between an effect
             /// grading a backdrop and an effect grading nothing, which is the whole subject here.
             let isCanvasBackgroundVisible: Bool
+            /// **EFFECT_BACKDROP.md §2.1 ruling (b)'s gate, in the key because it decides whether a
+            /// *fourth image gets composited at all***, and a cached set built without one cannot be
+            /// presented split. Turning the onion skin on, or moving it from In Front to Behind,
+            /// moves nothing else this key reads — not the tree, not a content version, not the frame
+            /// — so leaving it out is `renderResolution`'s failure again: a control that visibly does
+            /// nothing when you use it, this time until some unrelated edit happens to rebuild.
+            ///
+            /// Deliberately **not** in `SandwichFullKey`: `full` is the whole tree either way, so an
+            /// already-composited `full` stays reusable straight across the toggle and only the
+            /// fourth image is actually new work.
+            let wantsBehindGhostAtRest: Bool
+        }
+
+        /// EFFECT_BACKDROP.md §2.1 ruling (b): whether the at-rest canvas has to stay split so a
+        /// Behind onion skin still has something over it.
+        ///
+        /// **Two of the ruling's three conditions, because the third is the caller.** Engagement
+        /// (`needsCompositorOnCanvas`, via `isSandwichEngaged`) is what makes a ghost fronted over
+        /// `belowView` sit over the whole picture in the first place; both callers of this are
+        /// already inside the engaged branch, so asking again here would be asserting a fact rather
+        /// than testing one.
+        ///
+        /// **It is the *setting*, not "is a ghost actually on screen this frame".** `updateOnionSkin`
+        /// blanks the view when the neighbourhood yields no frames, so a document at a lone keyframe
+        /// pays for a composite nobody sees. Answering that properly means running
+        /// `OnionSkinSource.frames` a second time per pass, off a different code path from the one
+        /// that decides it — a duplicated rule for a saving on a document that has one drawing in it.
+        ///
+        /// **No clause for "something is actually above the active layer", and that was considered
+        /// and is wrong.** The upper composite is the active layer *and* everything above it, so even
+        /// when the active layer is topmost the split is what puts the ghost behind the artist's own
+        /// ink. Gating on a non-empty `above` half would silently reinstate the bug for exactly the
+        /// documents where the active layer is the one being drawn on.
+        private func wantsBehindGhostAtRest() -> Bool {
+            canvasManager.isOnionSkinEnabled && canvasManager.onionSkin.placement == .behind
         }
 
         /// The active layer's content version as of the first key built after a vector text edit
@@ -1482,7 +1574,8 @@ struct CanvasView: UIViewRepresentable {
             return SandwichKey(tree: tree, activeLayerIndex: active, frame: frame, contents: contents,
                                renderResolution: canvasManager.renderResolution,
                                canvasBackgroundColor: canvasManager.canvasBackgroundColor,
-                               isCanvasBackgroundVisible: canvasManager.isCanvasBackgroundVisible)
+                               isCanvasBackgroundVisible: canvasManager.isCanvasBackgroundVisible,
+                               wantsBehindGhostAtRest: wantsBehindGhostAtRest())
         }
 
         // MARK: Rebuilding
@@ -1519,7 +1612,8 @@ struct CanvasView: UIViewRepresentable {
             // the index is only out of range between a delete and the reselect that follows it, and
             // the next pass schedules the rebuild this one declined.
             guard let requests = canvasManager.makeSandwichRequests(atFrame: canvasManager.currentFrame,
-                                                                    activeLayerIndex: canvasManager.currentLayerIndex)
+                                                                    activeLayerIndex: canvasManager.currentLayerIndex,
+                                                                    alsoAboveInclusive: key.wantsBehindGhostAtRest)
             else { return }
 
             // **Reuse `full` when only the cut moved.** A layer tap changes `activeLayerIndex` and
@@ -1527,6 +1621,11 @@ struct CanvasView: UIViewRepresentable {
             // composite is the one already on screen — see that type for why that is a property of
             // `makeSandwichRequests` rather than a hope. Carried into the closure as a value, so the
             // background queue reads no main-actor state.
+            //
+            // Inert under §2.1's gate, where no `full` is composited to reuse and `sandwichFullKey`
+            // is held nil for that reason. A layer tap there costs three composites rather than two,
+            // because `aboveInclusive` depends on the cut in the way `full` does not — which is still
+            // no more than the three every other edit costs.
             let wantedFullKey = fullKey(from: key)
             let reusableFull = (sandwichFullKey == wantedFullKey) ? sandwichImages?.full : nil
 
@@ -1535,12 +1634,20 @@ struct CanvasView: UIViewRepresentable {
                 // `Compositor.composite` is skipped entirely rather than called and discarded: the
                 // count is the measurement (`CompositeProbe`), and a call that happens is a call that
                 // costs whatever the document makes it cost.
-                let full = reusableFull?.cgImage ?? Compositor.composite(requests.full)
+                // **Three composites either way** — see `sandwichImages`. Under §2.1's gate `full` is
+                // never displayed (at rest the canvas shows `below` + `aboveInclusive`), so
+                // compositing it as well would be a fourth canvas-sized image bought for nobody to
+                // look at, on documents where the gate is the default rather than a choice.
+                let aboveInclusive = requests.aboveInclusive.flatMap(Compositor.composite)
+                let full = requests.aboveInclusive == nil
+                    ? (reusableFull?.cgImage ?? Compositor.composite(requests.full))
+                    : nil
                 let below = Compositor.composite(requests.below)
                 let above = Compositor.composite(requests.above)
                 Task { @MainActor in
                     self?.finishSandwichRebuild(key: key, fullKey: wantedFullKey,
                                                 full: full, below: below, above: above,
+                                                aboveInclusive: aboveInclusive,
                                                 reusedFull: reusableFull)
                 }
             }
@@ -1548,19 +1655,27 @@ struct CanvasView: UIViewRepresentable {
 
         private func finishSandwichRebuild(key: SandwichKey, fullKey: SandwichFullKey,
                                            full: CGImage?, below: CGImage?, above: CGImage?,
-                                           reusedFull: UIImage?) {
+                                           aboveInclusive: CGImage?, reusedFull: UIImage?) {
             isSandwichRebuilding = false
-            // All three or none: a half-updated set would put a `below` from this frame under an
+            // All of them or none: a half-updated set would put a `below` from this frame under an
             // `above` from the last one. `composite` returns nil only for a degenerate canvas.
-            if let full, let below, let above, key == sandwichKey {
+            // "All of them" is three, and which three depends on §2.1's gate — `full` outside it,
+            // `aboveInclusive` inside it, never both (see `sandwichImages`). The condition asks the
+            // key rather than the images, so a gate that moved mid-rebuild is a mismatch rather than
+            // a set that is quietly one image short of what the presentation will look for.
+            if let below, let above, key == sandwichKey,
+               (key.wantsBehindGhostAtRest ? aboveInclusive != nil : full != nil) {
                 // The reused image is passed straight back through rather than re-wrapped, so the
                 // `!==` identity checks in `updateSandwich` still read "nothing changed" and Core
                 // Animation is handed no new contents for a picture that did not move.
-                sandwichImages = (full: reusedFull ?? UIImage(cgImage: full, scale: 1, orientation: .up),
+                sandwichImages = (full: full.map { reusedFull ?? UIImage(cgImage: $0, scale: 1, orientation: .up) },
                                   below: UIImage(cgImage: below, scale: 1, orientation: .up),
-                                  above: UIImage(cgImage: above, scale: 1, orientation: .up))
+                                  above: UIImage(cgImage: above, scale: 1, orientation: .up),
+                                  aboveInclusive: aboveInclusive.map { UIImage(cgImage: $0, scale: 1, orientation: .up) })
                 sandwichCacheKey = key
-                sandwichFullKey = fullKey
+                // Nil when this rebuild composited no `full`: the key is the claim "the `full` we are
+                // holding was built from this", and under the gate we are holding none.
+                sandwichFullKey = full == nil ? nil : fullKey
             }
             // The whole reconciliation rather than only the image swap: this result may be the first
             // one, and the first one is what unblocks blanking the hosts (trap 1 in `updateSandwich`).
