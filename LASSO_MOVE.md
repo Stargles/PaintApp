@@ -1118,6 +1118,30 @@ fourth are decisions this stage had to make and are recorded so they are not re-
 
 ---
 
+A seventeenth was settled on **2026-08-27**, the day after Freeform shipped, and it closes the one
+thing stage 3a had to decide without a ruling.
+
+17. **A Freeform stretch scales the ink by the map's area root, `sqrt(|det|)` — not by one axis, and
+    not by nothing.** The question only exists under Freeform: a `VectorStroke.size` is a scalar, and a
+    non-uniform map has no single scale for it to follow. Two earlier rulings pointed opposite ways —
+    (v) *"the ink keeps its shape"*, which the area root honours, against *"default being no
+    scaling"*, which was said of **Distort**, where there is no global scale to read at all. The owner
+    was shown both and **chose the area root**, on the argument that settles it: for a similarity
+    `sqrt(|det|)` *is* `k`, so a corner dragged along the box's own diagonal in Freeform produces the
+    identical document a Uniform drag would, and **Freeform therefore contains Uniform** instead of
+    sitting beside it. "Never change the width" would put a visible discontinuity exactly there — the
+    same gesture thickening the ink on one tab of the picker and not the other. §0 carries the two
+    supporting reasons (symmetry in the axes, and that a pure shape change leaves the weight untouched
+    to the last bit).
+
+    **The cost was disclosed and accepted with it**: while the finger is down, the latched piece is a
+    bitmap, so a non-uniform Core Animation transform stretches the ink where the bake keeps it round.
+    The latch is dropped at the end of any gesture that changes the aspect — the mechanism `mayDiverge`
+    and Mirror already use — so the layer re-renders from real geometry between gestures and the error
+    is one gesture's worth and cannot accumulate. Making the preview exact *is* the stretched-ink
+    renderer, which is a later stage and not this one.
+
+
 ## 6. Open risks
 
 **Needs the owner's eye on the device, not a test:**

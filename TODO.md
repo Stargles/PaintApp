@@ -60,6 +60,29 @@ requirement was nearly re-derived from scratch this week because it was only in 
       rounding has no path by which to accumulate. One bake, one rounding.
       **Coupled to (9)**: if the encoding's width is derived from the canvas extent, resizing the canvas changes
       the domain. Decide together whether a resize re-encodes every sample or the width is stored per document.
+
+      **DECIDED 2026-08-27 — fixed width, 24 signed bits per axis at quarter-pixel.** The owner delegated
+      this (*"you decide if you want the dynamic bit allocation ... or if we should just keep it at 20 bits
+      with a max canvas size"*), having correctly spotted that a constant width sits awkwardly with a canvas
+      that is not constant. **Fixed wins, and dynamic-sized-to-the-canvas is not merely more complex — it is
+      unsound**, because the canvas extent was never a bound on the stored data. CANVAS_RESIZE.md found three
+      independent reasons coordinates leave `[0, extent)` as a matter of course: vector geometry is stored
+      **layer-local** (a layer at 0.1x stores coordinates 10x the extent, by construction), touches keep being
+      delivered after a drag leaves the canvas, and every shrink parks content outside the bounds.
+      **The 20-bit proposal overflows, and the number that kills it was measured rather than assumed**:
+      `ObjectTransformFrame.minimumScale` is **0.02** (`ObjectTransformFrame.swift:260` — "below this the layer
+      is a dot the artist cannot get back"), and the canvas maximum is **8192** (`CanvasSizePickerView.swift:16`).
+      Worst-case stored coordinate is therefore `8192 / 0.02 = 409,600 pt`. Twenty signed bits at quarter-pixel
+      reach only **±131,072 pt** — short by 3.1x. (It would be fine on the owner's own 2048-wide canvas, at
+      102,400 pt, which is exactly the kind of thing that ships and then breaks on someone else's document.)
+      **Sizing**: 22 bits is the tight fit (±524,288 pt); **24 is the choice** — byte-aligned at 3 bytes an
+      axis, ±2,097,152 pt, 5.1x headroom over the worst case. With 8 bits of pressure a sample is **7 bytes
+      against today's 24** (three `CGFloat`), a **3.4x** memory win, and far more on disk against the 89
+      bytes/sample the JSON currently spends. Quarter-pixel resolution is kept exactly as the owner specified.
+      **The payoff for fixing the width**: a resize re-encodes nothing, so **(8) and (9) become independent and
+      can ship in either order** — which was the whole reason the question was asked.
+      To go back to 20 bits, `minimumScale` would have to rise, which is a behaviour change and not worth it.
+
 - [ ] **(9) Resize the canvas from the Actions menu.** The owner: *"a resize canvas option in actions would be
       nice, to which users can resize the canvas however they want. They should be able to control whether it
       gets cropped/expanded, or if everything gets scaled."* Two controls: a **scale** option that scales the
