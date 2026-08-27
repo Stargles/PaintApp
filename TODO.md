@@ -105,15 +105,29 @@ requirement was nearly re-derived from scratch this week because it was only in 
       practical limit — at the 2048x1024 the owner actually works on, the artwork occupies ±1024 x ±512 of a
       ±8,192 field, so there is 8x margin in x and 16x in y for strokes that wander off the edge — and they
       have already said the 16k canvas *"will likely never be used for animation."*
-      **The one detail still to settle, in implementation, not by guessing**: centre of *what*. If the origin
-      is the centre of the **current canvas**, then a crop/expand that is not symmetric moves the origin and
-      every stored coordinate has to be re-encoded — reintroducing exactly the resize-couples-to-storage
-      problem that fixing the width was meant to remove. If it is the centre of the **fixed 16,384 address
-      space**, it is resize-invariant and nothing is re-encoded. **Prefer the fixed address space** unless
-      something argues otherwise; note that a *scaling* resize rewrites coordinates anyway under (9), and a
-      layer resize bakes them under (12), so only crop/expand is affected either way.
-      **PREREQUISITE, found 2026-08-27 by the reviewer of `LAYER_TRANSFORM.md` — (8) is UNSAFE without a
-      saturating clamp at encode time, and nothing in the tree clamps.** `CanvasView.swift:3074-3075` floors
+      **Centre of *what* — SETTLED by the owner, 2026-08-27: the centre of the current canvas.** This entry
+      recommended the fixed 16,384 address space, to keep the encoding resize-invariant. The owner overruled
+      it and the reasoning is sound: *"If such a feature gets implemented in the future, then yes I'd say the
+      origin moves to assume the center of the new canvas. However, thats just a one time operation so it
+      doesnt need to be particularly performance optimized, and asymmetric canvas crop isnt a current
+      feature."* So an asymmetric crop re-encodes every sample, and that is acceptable because it is a
+      one-off the artist explicitly asks for — the thing to avoid was a re-encode on *ordinary* operations,
+      and this is not one. It is also moot today: asymmetric crop does not exist yet.
+      **A saturating clamp at encode, ruled minor by the owner 2026-08-27 and kept anyway because it costs two
+      lines.** The reviewer of `LAYER_TRANSFORM.md` raised this as a blocking prerequisite; the owner's reply
+      narrowed it correctly and it is recorded as a *cheap guard*, not a blocker.
+      **The owner's answer, and the direction it addresses**: *"zooming in the canvas shouldn't be an issue.
+      zooming is basically just transforming canvas coordinates into screen coordinates ... The canvas size
+      should be the resolution, not the screen you are drawing on."* That is right, and it is about zoom **in**,
+      which costs *precision* — and costs none here, because the quarter-pixel grid is in canvas space, so
+      magnifying the view consumes no bits. The finding was about zoom **out**, which costs *range*.
+      **Quantified, the owner's judgement holds**: on their 2048-wide canvas a full-screen drag exceeds
+      ±8,192 pt only below roughly **12%** zoom — the canvas an eighth of the screen — which nobody draws a
+      deliberate full-screen stroke at. It is an edge case, not an ordinary one.
+      **Why it is still worth two lines**: unclamped, a 16-bit field **wraps** rather than truncating, so ink
+      does not stop at the boundary, it teleports to the opposite side. A saturating clamp turns a bizarre bug
+      into a boring one. Original finding follows.
+      **The raw finding — nothing in the tree clamps.** `CanvasView.swift:3074-3075` floors
       canvas zoom at 0.01 of fit and has **no ceiling** — its own comment says so: *"No upper bound on zoom;
       the tiny floor only guards against a pinch's fingers crossing."* A screen-wide drag at minimum zoom
       therefore spans ~100x the canvas extent — **1,638,400 pt** at the 16,384 ceiling — against the ±8,192 pt
@@ -170,6 +184,27 @@ requirement was nearly re-derived from scratch this week because it was only in 
       `node.effect != nil`) — that is the seam a transformation layer would use.
       **Note (8) is not blocked on this** — 24 bits works today with no other change; adopting (12) is what
       lets the field narrow to 18, which is a refinement rather than a prerequisite.
+
+- [ ] **(14) A reversible Move: keep the transform in doubles until you choose to bake it.** Owner,
+      2026-08-27: *"In the move tool have an option to store whatever the transformation is as doubles so it
+      is reversible, and add an option in actions to bake everything down back to 16bits."*
+      **This is the answer to the strongest objection against (12)**, and it arrived unprompted. The reviewer's
+      case for keeping a layer transform was that it is the only operation in the app that is *exactly,
+      infinitely and freely reversible* — scale a cel to 2% and back and the geometry is bit-identical because
+      nothing touched it. Baking gives that up: measured, 100 shrink-to-2%-and-regrow cycles drift only
+      **6.0e-11 pt** and `stroke.size` returns bit-exact, so the *geometry* half of the objection is dead —
+      but two artist-visible residues survive, and this ask covers both:
+      - **`BrushStamper.stampSpacing`'s 1 pt absolute floor** (`BrushStamper.swift:67`): a stroke shrunk below
+        the floor and regrown comes back with a different dab count. Not reversible in *pixels*, whatever the
+        geometry does.
+      - **The Move box itself inflates.** Its pivot and size come from `localContentBounds()`, an alpha scan of
+        rendered ink, which is invariant under a transform today. After a bake it is recomputed from moved
+        ink, and the axis-aligned box of a rotated drawing is larger — so rotate 45° then −45° returns a
+        *bigger* box on a moved pivot, and repeated gestures inflate it monotonically.
+      **Deferred precision fixes both**: hold the pose in `Double` while the artist is still working on it,
+      bake on an explicit Actions command. It is the same shape as the float's latch, and the same shape as
+      the owner's own earlier ruling on (8) — *"converted temporarely to a double as to not lose accuracy,
+      then converted back when it bakes."* Two rulings, one mechanism.
 
 - [ ] **(13) Canvas padding: one 16k budget shared with the canvas, and a higher base maximum.** Owner,
       2026-08-27: *"the canvas plus the padding should have the maximum size of 16k, so the padding should hit
