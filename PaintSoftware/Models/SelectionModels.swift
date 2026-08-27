@@ -447,14 +447,15 @@ extension CanvasManager {
     /// **Only a vector float can refuse, and only because of what it is carrying.** A raster piece is
     /// pixels and flips by negating a scale. A vector float's pose lives in `LayerTransform`, which
     /// has no flip, so Mirror is carried instead as a reflection folded into the map every nudge
-    /// already applies (`VectorFloat.mirror`) — exact for strokes and fills, and impossible for the
-    /// two kinds whose own placement is a `LayerTransform` or a text frame's four corners. Refusing
-    /// those is `VectorCanvas.canBeMirrored(_:)`; carrying them anyway would silently turn a mirrored
-    /// photo into a half-turned one.
+    /// already applies (`VectorFloat.mirror`) — exact for strokes, fills and, as of the owner's ruling
+    /// of 2026-08-27, text, whose four free corners reverse their winding under a reflection and whose
+    /// glyphs therefore come out reflected. **A placed image is the one kind left**: its whole
+    /// placement is a `LayerTransform`, so carrying a reflection anyway would silently turn a mirrored
+    /// photo into a half-turned one. Refusing it is `VectorCanvas.canBeMirrored(_:)`.
     var mirrorUnavailableReason: String? {
         guard let float = vectorFloat else { return nil }
         guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeMirrored) else {
-            return "Mirror can't flip a placed image or a text box."
+            return "Mirror can't flip a placed image."
         }
         return nil
     }
@@ -462,19 +463,23 @@ extension CanvasManager {
     /// Why **Freeform** is unavailable on whatever is floating, or nil when it is available. The
     /// mode picker on the Move bar is disabled for exactly as long, with this in the caption.
     ///
-    /// **The same shape as `mirrorUnavailableReason`, and for the same underlying reason** — a placed
-    /// image's placement is a `LayerTransform` and a text frame is four ordered corners, and neither
-    /// holds two axis scales any more than it holds a flip. It is a *separate* property rather than a
-    /// shared one because the two questions come apart in the stage after this: teaching an image to
-    /// hold a stretched shape (the owner's own words) unblocks Freeform on it and leaves Mirror
-    /// exactly where it is.
+    /// **The same shape as `mirrorUnavailableReason`, and now for the same *single* reason** — a placed
+    /// image's placement is a `LayerTransform`, which holds two axis scales no better than it holds a
+    /// flip. A text box does hold both, since it is four free corners over a layout size, and the owner
+    /// ruled on 2026-08-27 that it should: a stretch distorts the letterforms and does not re-flow the
+    /// words.
+    ///
+    /// It stays a *separate* property rather than collapsing into the one above, and the reason is
+    /// now visible rather than anticipated: the two questions came apart on text, and they will come
+    /// apart the other way on an image — teaching an image to hold a stretched shape (the owner's own
+    /// words) unblocks Freeform on it and leaves Mirror exactly where it is.
     ///
     /// A raster piece answers nil: `FloatingTransform` has held `scaleX`/`scaleY` since Move shipped,
     /// which is why the picker was live for it and greyed for a vector float until this stage.
     var freeformUnavailableReason: String? {
         guard let float = vectorFloat else { return nil }
         guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeStretched) else {
-            return "Freeform can't stretch a placed image or a text box."
+            return "Freeform can't stretch a placed image."
         }
         return nil
     }

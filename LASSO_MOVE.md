@@ -51,7 +51,7 @@ scale and one rotation. It now carries a second number beside it and the picker 
 | the non-similarity affine the box now implies | `VectorCanvas.affine(from:aspect:pivot:)`. `aspect == 1` is the old function bit for bit |
 | one element moved by it | `VectorCanvas.mapping(_:throughStretch:)`, beside the similarity one it does **not** widen. The two share `drawn(_:through:widthScale:)` — the half they agree about — and differ only in where the width scale comes from |
 | which of the two a nudge uses | `applyToVectorFloat`, on the *pose* and not on the mode: an unstretched float goes through the similarity arm exactly as it did before Freeform existed, assert and all |
-| Freeform refusing, out loud, on a piece carrying a placed image or a text box | `VectorCanvas.canBeStretched(_:)` → `CanvasManager.freeformUnavailableReason`, the Mirror pattern applied to the neighbouring impossibility. `vectorFloatIsFreeform` is the second guard, on the drag, because `transformMode` is shared with the raster tier and outlives the piece that chose it |
+| Freeform refusing, out loud, on a piece carrying a **placed image** | `VectorCanvas.canBeStretched(_:)` → `CanvasManager.freeformUnavailableReason`, the Mirror pattern applied to the neighbouring impossibility. `vectorFloatIsFreeform` is the second guard, on the drag, because `transformMode` is shared with the raster tier and outlives the piece that chose it. **A text box was refused here until 2026-08-27 and is not any more** — see §5.18 and the stage 3d row below |
 | the stretch surviving undo, Reset and a mode switch | `frame.aspect` in the nudge's undo step; the `aspect != 1` term in `canResetFloating`; and `nudgeVectorFloat(to:aspect:)`'s defaulted `aspect`, which is what makes *"3:1 stays 3:1 and scales from there"* fall out rather than need a rule |
 
 **The ink keeps its shape and the path stretches — owner's ruling, 2026-08-26**, one toggle over
@@ -92,7 +92,7 @@ i.e. the toggle's other half.
   and adding four `Handle` cases walks straight into the trap this stage was warned about:
   `allowedHandles` defaults to *all cases*, so a new grip switches itself on for the whole-layer box
   too, where there is nothing to store it in.
-- **The yellow box-only rotate knob** (3b) and **placed images holding a stretched shape** (3c).
+- **The yellow box-only rotate knob** (3b) and **placed images holding a stretched shape** (3c). 3c is now the *only* thing either refusal names: text was taught to mirror and to stretch on 2026-08-27 (stage 3d, §5.18), and a placed image is what is left — its `LayerTransform` needs a stored field and a decode migration before it can hold either.
 - **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
   `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
   discarded at the gesture's end. Both defaults — `ObjectTransformFrame.aspect` and
@@ -110,7 +110,7 @@ has a vector arm.
 | the bar, for either kind of float | `MoveTransformBottomBar`, gated on `CanvasManager.isAnyPieceFloating` in `DrawingView` |
 | Done, for either kind | `CanvasManager.commitAnyFloatingPiece()` |
 | Mirror H/V | `CanvasManager.mirrorFloating(horizontal:)`. Raster toggles `FloatingTransform.flipH/flipV`; a vector float carries `VectorFloat.mirror`, a reflection folded in front of the map every nudge already applies — **`LayerTransform` has no flip, so there is nowhere else for it to go** |
-| what Mirror cannot do, and how it says so | `VectorCanvas.canBeMirrored(_:)` → `CanvasManager.mirrorUnavailableReason`. A placed image's whole placement is a `LayerTransform` and a text box is four ordered corners; neither can hold a reflection, so with either in the piece the two buttons are **disabled and the bar says why** |
+| what Mirror cannot do, and how it says so | `VectorCanvas.canBeMirrored(_:)` → `CanvasManager.mirrorUnavailableReason`. A **placed image**'s whole placement is a `LayerTransform`, which cannot hold a reflection, so with one in the piece the two buttons are **disabled and the bar says why**. A text box was refused here too until 2026-08-27; its corners reverse their winding under a reflection, which is what a mirror *is* — see §5.18 |
 | Rotate 45° and Rotate 90°, both directions | `CanvasManager.rotateFloating(eighths:)` over `FixedAngleRotation.stepped(from:lift:eighths:)` — composed onto the box's current angle and re-quantised onto the eighth-turn grid, so eight presses of 45° return the piece **bit-exactly** to where it started |
 | Reset | `CanvasManager.resetFloating()` / `canResetFloating`. One undo step on a vector float (§5.13); nothing on a raster piece, which has no per-nudge steps for it to sit beside |
 | the Select menu standing down while anything floats | `DrawingView` — the *presentation* is suppressed, `activePanel` is deliberately not cleared, so the panel returns by itself at the bake |
@@ -883,7 +883,8 @@ type each. The box-only knob is the remaining unbuilt one and it needs no quad e
 - ~~**Flips**~~ — **done**, stage 2, as one affine on the float.
 - **The box-only rotate knob** (stage 3b) and **placed images holding a stretched shape** (3c), and
   then **Distort** (stage 5) over the shared `Homography` solver — the one member of this list that
-  really does need a quad.
+  really does need a quad. Text reached both Mirror and Freeform on 2026-08-27 (stage 3d) without
+  needing 3c's stored field, because a `TextFrame` already carries four free corners.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.
@@ -1104,10 +1105,10 @@ fourth are decisions this stage had to make and are recorded so they are not re-
     stack, so there is no per-nudge step for it to sit beside.
 
     **Mirror is the one button that can be unavailable**, and it says so rather than going quietly
-    grey. A reflection is not expressible for a placed image (whose placement *is* a `LayerTransform`)
-    or for a text box (four ordered corners that `TextFrame.Basis` reads as a frame), so a piece
-    carrying either disables both Mirror buttons with the reason in the bar. Strokes and fills — what
-    drawing on a vector layer produces — mirror exactly.
+    grey. A reflection is not expressible for a placed image, whose placement *is* a `LayerTransform`,
+    so a piece carrying one disables both Mirror buttons with the reason in the bar. Strokes and fills
+    — what drawing on a vector layer produces — mirror exactly, and **so does text as of §5.18**, which
+    reversed the refusal this paragraph used to state for it.
 
 ### Still needs a ruling
 
@@ -1140,6 +1141,54 @@ thing stage 3a had to decide without a ruling.
     and Mirror already use — so the layer re-renders from real geometry between gestures and the error
     is one gesture's worth and cannot accumulate. Making the preview exact *is* the stretched-ink
     renderer, which is a later stage and not this one.
+
+---
+
+An eighteenth was settled on **2026-08-27**, and it reverses a refusal §0 and §5.16 both record.
+
+18. **Text is transformable.** Verbatim: *"when trying to select and move text, freeform is greyed
+    out and i also cant mirror it. I rule text should be able to be transformed."* Both refusals were
+    hand-written policy switches (`VectorCanvas.canBeStretched` and `canBeMirrored`), not a limit of
+    the object: a `TextFrame` already stores four free corners, which express any affine including a
+    reflection and a per-axis stretch, and every path that draws text already concatenates the matrix
+    those corners imply. **A placed image is unaffected and still refuses both** — its placement *is* a
+    `LayerTransform`, so it needs a stored field and a decode migration first (stage 3c).
+
+    Two sub-behaviours were put to the owner the same day and answered. Verbatim, and not to be
+    re-litigated:
+
+    - **Mirror reflects the rendered glyphs.** *"The text reads backwards, as in a real mirror. It
+      does NOT re-lay-out the string right-to-left. Mirror-then-mirror-back must be exactly the
+      original."*
+    - **Non-uniform scale distorts the letterforms.** *"Same words, same line breaks, wider or taller
+      glyphs. It does NOT re-flow the text onto different lines."*
+
+    **The second one is what forces the map to be decomposed rather than simply applied.** The stretch
+    arm splits `t` into its uniform part `sqrt(|det t|)` and a residual: the uniform part scales the
+    layout box and the recipe's point size, exactly as the similarity arm already did, so CoreText
+    wraps the same words onto the same lines; the residual stays in `corners`, where
+    `TextFrame.affineTransform` reads it as the glyphs' own distortion. That also keeps §5.17 true one
+    level down — at `aspect == 1` the residual is nothing and the stretch arm writes the identical
+    document the similarity arm writes, so **Freeform still contains Uniform** on a text box rather
+    than crossing a discontinuity at `aspect == 1 ± ε`. `applyToVectorFloat` dispatches on an *exact*
+    comparison, so that reduction is a requirement and not a nicety.
+
+    **What it cost elsewhere, and it is not nothing.** `TextFrame.Basis` documented an invariant —
+    `basis.width == size.width` for every frame this project writes — and a stretch breaks it on
+    purpose. `TextFrame.needsBoxSpaceSizing` is the discharge: `TextFrameDrag.clampedFrame` and
+    `TextFrame.resized(to:)` both ask it and route through the frame's own map instead of through its
+    basis, which is the same treatment stage 5 gave `.projective` frames. Without it the failure is
+    silent and delayed — the artist stretches a box, reopens it days later, types one character, and it
+    snaps back square with nothing on the undo stack naming the cause.
+
+    **Three consequences were disclosed and are not fixed here.** A mirrored frame inverts the handle
+    *names* (the grip an artist reads as "top-left" sits on the right; self-consistent, so drags still
+    work). Re-opening a mirrored box puts the live `UITextView` under a negative-determinant transform,
+    mirroring the caret and the selection handles — the same concession ADD_TEXT.md §1 already makes
+    for typing in a `.projective` box. And routing merely-stretched frames through `sizedInBoxSpace`
+    hands them the distort-mode exemption from `TextLayout.minimumBoxSize`, so a stretched box can be
+    dragged smaller than its own text. **That last one is unruled**, it rode along rather than being
+    chosen, and the conditional that would undo it is two lines (see `sizedInBoxSpace`'s own note).
 
 
 ## 6. Open risks

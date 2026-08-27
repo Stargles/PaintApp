@@ -50,6 +50,35 @@ final class TextTransformLogicTests: XCTestCase {
         return turned
     }
 
+    /// `frame`'s corners pulled `k`× along **the box's own +x**, about its top-left, with `size` left
+    /// exactly where it was — a Freeform stretch as the document stores it, per the owner's ruling of
+    /// 2026-08-27: the layout box takes only the map's uniform part (here, none) and the residue lives
+    /// in the corners. Built by hand rather than through `VectorCanvas.mapping`, so a test of the
+    /// sizing paths cannot be satisfied by the mapping's own bug.
+    private func stretchedInPlace(_ frame: TextFrame, by k: CGFloat) -> TextFrame {
+        guard let basis = frame.basis else { return frame }
+        var stretched = frame
+        let o = basis.origin
+        stretched.corners = frame.corners.map { corner in
+            let dx = corner.x - o.x, dy = corner.y - o.y
+            let alongU = (dx * basis.u.dx + dy * basis.u.dy) * k
+            let alongV = dx * basis.v.dx + dy * basis.v.dy
+            return CGPoint(x: o.x + basis.u.dx * alongU + basis.v.dx * alongV,
+                           y: o.y + basis.u.dy * alongU + basis.v.dy * alongV)
+        }
+        return stretched
+    }
+
+    /// The same pull along **the canvas's** +x instead of the box's. On a box that was already turned
+    /// this leaves `u` and `v` out of square — the sheared parallelogram a lasso Freeform actually
+    /// produces on rotated type, and the second thing the basis cannot describe.
+    private func stretchedInCanvas(_ frame: TextFrame, by k: CGFloat) -> TextFrame {
+        var stretched = frame
+        let o = frame.corners.first ?? .zero
+        stretched.corners = frame.corners.map { CGPoint(x: o.x + ($0.x - o.x) * k, y: $0.y) }
+        return stretched
+    }
+
     private func assertPoint(_ actual: CGPoint, _ expected: CGPoint,
                              accuracy: CGFloat = TextTransformLogicTests.epsilon,
                              _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
@@ -396,6 +425,77 @@ final class TextTransformLogicTests: XCTestCase {
                      "`.projective` is stage 5's, and an affine matrix for it would be a lie.")
 
         XCTAssertNil(TextFrame(origin: .zero, size: .zero).affineTransform)
+    }
+
+    // MARK: - Which frames the basis can describe
+
+    /// **`needsBoxSpaceSizing` is the predicate that keeps a Freeform stretch alive, and it has to
+    /// answer *false* for everything that existed before it.** Every `true` reroutes a frame off
+    /// stage 4's arithmetic and onto stage 5's, so a predicate that over-answered would quietly
+    /// change the sizing of every ordinary text box in the app while looking like a new feature.
+    ///
+    /// A **mirror** is the interesting negative: it reverses the corners' winding, which is what a
+    /// mirror is, but it leaves `u ⟂ v` and both extents exactly where they were — so the basis still
+    /// describes the quad, and stage 4's grips keep working on a mirrored box unchanged.
+    func testOnlyAStretchedOrWarpedFrameNeedsBoxSpaceSizing() {
+        XCTAssertFalse(upright().needsBoxSpaceSizing, "an ordinary box")
+        XCTAssertFalse(turned(upright(), by: .pi / 5).needsBoxSpaceSizing, "a turned box")
+
+        var mirrored = upright()
+        let c = mirrored.centre
+        mirrored.corners = mirrored.corners.map { CGPoint(x: 2 * c.x - $0.x, y: $0.y) }
+        XCTAssertFalse(mirrored.needsBoxSpaceSizing,
+                       "a mirror keeps the axes perpendicular and both extents, so the basis still "
+                       + "describes the quad")
+
+        XCTAssertTrue(stretchedInPlace(upright(), by: 3).needsBoxSpaceSizing, "a stretched box")
+        XCTAssertTrue(stretchedInCanvas(turned(upright(), by: .pi / 5), by: 3).needsBoxSpaceSizing,
+                      "and a box that was turned first and then pulled along the canvas's own axis, "
+                      + "whose `u` and `v` are no longer perpendicular either")
+
+        var projective = upright()
+        projective.mode = .projective
+        XCTAssertTrue(projective.needsBoxSpaceSizing, "stage 5's own case, unchanged")
+    }
+
+    /// **A sizing grip on a stretched box grows the box and leaves the stretch alone.**
+    ///
+    /// The failure this rules out is silent in the worst way: `warpedFrame`'s guard used to read
+    /// `start.mode == .projective`, so a stretched `.affine` frame fell through to
+    /// `resized(towards:)`, which rebuilds the quad from the basis — i.e. from a box scaled
+    /// *uniformly* — and the 3:1 pull the artist had just made would come back undone by their next
+    /// grip drag, with nothing on the undo stack naming the cause.
+    func testASizingGripOnAStretchedBoxKeepsTheStretch() throws {
+        let start = stretchedInPlace(upright(), by: 3)
+        let basis = try XCTUnwrap(start.basis)
+        let before = basis.width / start.size.width
+        XCTAssertEqual(before, 3, accuracy: Self.epsilon, "fixture precondition")
+
+        let drag = try XCTUnwrap(TextFrameDrag(frame: start, handle: .right))
+        let pulled = CGPoint(x: basis.origin.x + basis.u.dx * basis.width * 1.5 + basis.v.dx * basis.height / 2,
+                             y: basis.origin.y + basis.u.dy * basis.width * 1.5 + basis.v.dy * basis.height / 2)
+        let sized = try XCTUnwrap(drag.clampedFrame(draggedTo: pulled),
+                                  "a nil here is a grip that does nothing at all")
+
+        XCTAssertEqual(sized.size.width, start.size.width * 1.5, accuracy: 1e-4,
+                       "the box is what the grip sizes, in the box's own units")
+        XCTAssertEqual(try XCTUnwrap(sized.basis).width / sized.size.width, before, accuracy: 1e-6,
+                       "and the residue in the corners is untouched")
+        assertPoint(sized[.topLeft], start[.topLeft], accuracy: 1e-4,
+                    "the `.right` grip's anchor edge does not move")
+        XCTAssertEqual(sized.mode, .affine, "a stretch is still a parallelogram")
+    }
+
+    /// The same guarantee on the *other* path into `basis.width` — the auto-size regrow a keystroke
+    /// runs. This is the delayed half: the artist stretches the box, closes the session, reopens it
+    /// days later, types one character, and the box snaps back square.
+    func testAutoSizeRegrowthKeepsTheBoxStretched() throws {
+        let start = stretchedInPlace(upright(autoSize: true), by: 3)
+        let regrown = start.resized(to: CGSize(width: 260, height: 40))
+        XCTAssertEqual(try XCTUnwrap(regrown.basis).width, 780, accuracy: 1e-4,
+                       "the new box carries the 3:1 residue out with it")
+        XCTAssertEqual(try XCTUnwrap(regrown.basis).height, 40, accuracy: 1e-4)
+        assertPoint(regrown[.topLeft], start[.topLeft], "It grows from its top-left, as it always did.")
     }
 
     /// `resized(to:)` is what `autoSize` calls on every keystroke. It used to rebuild the corners

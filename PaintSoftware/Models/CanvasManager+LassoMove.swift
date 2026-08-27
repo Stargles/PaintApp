@@ -78,9 +78,10 @@ struct VectorFloat {
     ///
     /// `mapping(_:throughSimilarity:)` accepts the product (a reflection has equal axis norms and
     /// perpendicular axes, so the shape assert holds and `hypot(t.a, t.b)` is still the true scale),
-    /// and it is exact for the two element kinds a drawing produces. It is **not** expressible for a
-    /// placed image or a text box — see `CanvasManager.mirrorUnavailableReason`, which is why the
-    /// buttons refuse rather than this quietly doing the wrong thing.
+    /// and it is exact for the two element kinds a drawing produces, and for text — whose corners
+    /// reverse their winding under it, which is what a mirror *is*. It is **not** expressible for a
+    /// placed image — see `CanvasManager.mirrorUnavailableReason`, which is why the buttons refuse
+    /// rather than this quietly doing the wrong thing.
     var mirror: CGAffineTransform = .identity
 
     /// The whole display list before the split, and the selection before the lift — what a cancel or
@@ -345,6 +346,14 @@ extension CanvasManager {
         // through the similarity arm bit for bit, so every Uniform move, rotate and mirror is exactly
         // the document it was before Freeform existed — including `mapping`'s assert, which is the
         // tripwire that catches a stretch leaking into a path that cannot carry one.
+        //
+        // **The comparison is exact, and every arm has to reduce across it.** `aspect == 1 ± ε` sends
+        // otherwise identical gestures down two different functions, so any arm whose two versions
+        // disagree at `aspect == 1` puts a discontinuity exactly at the boundary — §5.17's whole
+        // argument, one level down. The stroke arm reduces because `sqrt(|det|) == hypot(t.a, t.b)`
+        // for a similarity; the text arm reduces because it takes that same number as its uniform
+        // part, so at `aspect == 1` the residual is nothing and the two write the same box, the same
+        // point size and the same corners.
         let isStretched = aspect != 1
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in

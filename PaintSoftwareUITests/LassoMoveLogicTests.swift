@@ -54,6 +54,17 @@ final class LassoMoveLogicTests: XCTestCase {
 
     private func cgImage(_ vector: VectorCanvas) -> CGImage? { vector.render().cgImage }
 
+    /// `a·d − b·c`. Its **sign** is the whole question a mirror asks: negative is a plane turned over,
+    /// positive is a plane merely turned. `CGAffineTransform` has no such accessor of its own.
+    private func determinant(_ t: CGAffineTransform) -> CGFloat { t.a * t.d - t.b * t.c }
+
+    /// The recipe laid out into a box of `boxWidth` — line count, line ranges and line widths, with
+    /// the font resolved the way the app resolves it. What "did the text re-flow" is actually asked
+    /// of; the corners cannot answer it.
+    private func layout(of recipe: TextRecipe, boxWidth: CGFloat) -> TextLayout.Metrics {
+        TextLayout.measure(recipe, font: TextLayout.resolvedFont(for: recipe).font, maxWidth: boxWidth)
+    }
+
     /// The opaque bounding box of what a canvas actually draws — the question "did the *ink* move",
     /// which is not the same question as "did the samples move". See
     /// `testANudgeMovesTheRenderedInkAndNotOnlyTheSamples`.
@@ -1361,47 +1372,89 @@ final class LassoMoveLogicTests: XCTestCase {
                        "H then V is a point reflection, not a second horizontal flip")
     }
 
-    /// **Mirror refuses, out loud, when the lassoed piece carries a placed image or a text box.**
+    /// **Mirror refuses, out loud, when the lassoed piece carries a placed image.**
     ///
-    /// Neither is expressible: an image's whole placement is a `LayerTransform` with no flip in it,
-    /// and a text frame is four ordered corners that `TextFrame.Basis` reads as a frame rather than as
-    /// a shape. Carrying them through the reflection anyway is not a rounding error — `theta` becomes
-    /// `atan2` of a map that turns the plane over, and the photo would come back rotated a half turn
-    /// instead of mirrored. So the button is off and the bar says why, which is the difference between
-    /// a disabled control and a control that does nothing.
-    func testMirrorIsRefusedAndSaysWhyWhenThePieceCarriesAnImageOrText() {
-        for kind in ["image", "text"] {
-            let (manager, layerIndex, vector) = fixture()
-            vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
-            if kind == "image" {
-                vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
-                                                                                   rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                                   size: CGSize(width: 6, height: 6)),
-                                                   transform: LayerTransform(position: CGPoint(x: 30, y: 34),
-                                                                             scale: 1, rotation: 0)))
-            } else {
-                var recipe = TextRecipe(string: "hi")
-                recipe.typography.pointSize = 12
-                vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
-                                                    frame: TextFrame(origin: CGPoint(x: 30, y: 34),
-                                                                     size: CGSize(width: 10, height: 6))))
-            }
-            select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
-            XCTAssertTrue(manager.beginVectorLassoMove(), "\(kind): the lift should have caught both")
-            let samplesBefore = vector.elements.compactMap(\.stroke).map(\.samples)
-            let stepsBefore = manager.history.undoStack.count
+    /// It is not expressible: the image's whole placement is a `LayerTransform` with no flip in it, so
+    /// carrying it through the reflection anyway is not a rounding error — `theta` becomes `atan2` of a
+    /// map that turns the plane over, and the photo would come back rotated a half turn instead of
+    /// mirrored. So the button is off and the bar says why, which is the difference between a disabled
+    /// control and a control that does nothing.
+    ///
+    /// **A text box used to be refused here too and is not any more** (owner, 2026-08-27; LASSO_MOVE.md
+    /// §5.18). Its half of this test moved to
+    /// `testMirroringALassoedTextBoxReflectsTheGlyphsAndMirroringBackIsPixelIdentical`, which asserts
+    /// the behaviour rather than the refusal; the image half stays here, pinned, because that one is a
+    /// stored-field-and-migration problem and not a policy switch.
+    func testMirrorIsRefusedAndSaysWhyWhenThePieceCarriesAnImage() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
+        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                           size: CGSize(width: 6, height: 6)),
+                                           transform: LayerTransform(position: CGPoint(x: 30, y: 34),
+                                                                     scale: 1, rotation: 0)))
+        select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
+        XCTAssertTrue(manager.beginVectorLassoMove(), "the lift should have caught both")
+        let samplesBefore = vector.elements.compactMap(\.stroke).map(\.samples)
+        let stepsBefore = manager.history.undoStack.count
 
-            XCTAssertNotNil(manager.mirrorUnavailableReason, "\(kind): the bar has to have something to say")
-            manager.mirrorFloating(horizontal: true)
+        XCTAssertNotNil(manager.mirrorUnavailableReason, "the bar has to have something to say")
+        manager.mirrorFloating(horizontal: true)
 
-            XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "\(kind): and the press changes nothing")
-            XCTAssertEqual(manager.history.undoStack.count, stepsBefore,
-                           "\(kind): a refused button spends no undo step either")
-            let samplesAfter = vector.elements.compactMap(\.stroke).map(\.samples)
-            for (before, after) in zip(samplesBefore, samplesAfter) {
-                for (a, b) in zip(before, after) { XCTAssertEqual(a.x, b.x, accuracy: 1e-9, "\(kind)") }
-            }
+        XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "and the press changes nothing")
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore,
+                       "a refused button spends no undo step either")
+        let samplesAfter = vector.elements.compactMap(\.stroke).map(\.samples)
+        for (before, after) in zip(samplesBefore, samplesAfter) {
+            for (a, b) in zip(before, after) { XCTAssertEqual(a.x, b.x, accuracy: 1e-9) }
         }
+    }
+
+    /// **Mirror reflects the rendered glyphs, and mirroring back is the drawing that was lifted.**
+    ///
+    /// The owner's ruling of 2026-08-27, verbatim in LASSO_MOVE.md §5.18: the text reads backwards, as
+    /// in a real mirror; it is *not* re-laid-out right-to-left.
+    ///
+    /// **The load-bearing assertion is the sign of the determinant**, and nothing else here can stand
+    /// in for it. A frame whose corners had been rotated a half turn instead of reflected would put
+    /// every corner in a plausible place, pass any "did the box move" check, and draw the type the
+    /// right way round — the exact failure `mapping`'s `.image` arm still asserts against. A negative
+    /// determinant on `frame.affineTransform` is the one number that says the plane was turned over,
+    /// and every path that draws text concatenates that matrix.
+    func testMirroringALassoedTextBoxReflectsTheGlyphsAndMirroringBackIsPixelIdentical() throws {
+        let (manager, layerIndex, vector) = fixture()
+        var recipe = TextRecipe(string: "Fj")
+        recipe.typography.pointSize = 16
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 22, y: 22),
+                                                             size: CGSize(width: 20, height: 18))))
+        let pixelsBefore = cgImage(vector)
+        let before = try XCTUnwrap(vector.elements.compactMap(\.text).first)
+        let determinantBefore = determinant(try XCTUnwrap(before.frame.affineTransform))
+        XCTAssertGreaterThan(determinantBefore, 0, "fixture precondition: an ordinary, unreflected box")
+
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 44, height: 44)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertNil(manager.mirrorUnavailableReason, "text mirrors, as of the 2026-08-27 ruling")
+
+        manager.mirrorFloating(horizontal: true)
+
+        let mirrored = try XCTUnwrap(vector.elements.compactMap(\.text).first)
+        let transform = try XCTUnwrap(mirrored.frame.affineTransform,
+                                      "a reflected parallelogram still has an affine map; "
+                                      + "`affineTransform` guards `abs(det) > 1e-9`, not `det > 0`")
+        XCTAssertLessThan(determinant(transform), 0,
+                          "the glyphs are reflected — a rotation would leave this positive")
+        XCTAssertEqual(mirrored.frame.size, before.frame.size,
+                       "a mirror is not a resize: the layout box is untouched, so the words and the "
+                       + "line breaks are the ones CoreText already chose")
+        XCTAssertEqual(mirrored.recipe.typography.pointSize, before.recipe.typography.pointSize,
+                       accuracy: 1e-9, "and the type is the same size, read backwards")
+
+        manager.mirrorFloating(horizontal: true)
+        manager.commitVectorFloatIfNeeded()
+        assertPixelsIdentical(cgImage(vector), pixelsBefore,
+                              "mirror and mirror back must be exactly the original")
     }
 
     /// A mirror is a nudge: one undo step, the box left standing, and the mirror itself restored — the
@@ -1633,52 +1686,227 @@ final class LassoMoveLogicTests: XCTestCase {
         assertPixelsIdentical(cgImage(vector), before, "and the drawing is the one that was lifted")
     }
 
-    /// **Freeform refuses, out loud, when the piece carries a placed image or a text box** — the
-    /// Mirror pattern, applied to the neighbouring impossibility. An image's placement *is* a
-    /// `LayerTransform`, which has one scale and no second axis any more than it has a flip; a text
-    /// frame's `Basis` reads four ordered corners as a layout size.
+    /// **Freeform refuses, out loud, when the piece carries a placed image** — the Mirror pattern,
+    /// applied to the neighbouring impossibility. An image's placement *is* a `LayerTransform`, which
+    /// has one scale and no second axis any more than it has a flip, so teaching it costs a stored
+    /// field and a decode migration.
     ///
     /// Both halves matter and they are separate guards: the bar disables the picker from the reason,
     /// and `vectorFloatIsFreeform` refuses the drag even if `transformMode` arrived already set to
     /// `.freeform` from a raster Move three gestures ago — which it can, since the mode is shared
     /// with the raster tier and outlives the piece that chose it.
-    func testFreeformIsRefusedAndSaysWhyWhenThePieceCarriesAnImageOrText() {
-        for kind in ["image", "text"] {
-            let (manager, layerIndex, vector) = fixture()
-            vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
-            if kind == "image" {
-                vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
-                                                                                   rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                                   size: CGSize(width: 6, height: 6)),
-                                                   transform: LayerTransform(position: CGPoint(x: 30, y: 34),
-                                                                             scale: 1, rotation: 0)))
-            } else {
-                var recipe = TextRecipe(string: "hi")
-                recipe.typography.pointSize = 12
-                vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
-                                                    frame: TextFrame(origin: CGPoint(x: 30, y: 34),
-                                                                     size: CGSize(width: 10, height: 6))))
-            }
-            select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
-            XCTAssertTrue(manager.beginVectorLassoMove(), "\(kind): the lift should have caught both")
+    ///
+    /// **A text box used to be refused here too and is not any more** (owner, 2026-08-27; LASSO_MOVE.md
+    /// §5.18) — a `TextFrame` already stores four free corners, so the stretch needed no new field. Its
+    /// half of this test moved to
+    /// `testAStretchedTextBoxDistortsItsLetterformsAndDoesNotReflowTheWords`; the text case is now one
+    /// of the *positive* cases at the bottom of this one.
+    func testFreeformIsRefusedAndSaysWhyWhenThePieceCarriesAnImage() {
+        let (imageManager, imageLayer, imageVector) = fixture()
+        imageVector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
+        imageVector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                                rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                                size: CGSize(width: 6, height: 6)),
+                                                transform: LayerTransform(position: CGPoint(x: 30, y: 34),
+                                                                          scale: 1, rotation: 0)))
+        select(imageManager, imageLayer, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
+        XCTAssertTrue(imageManager.beginVectorLassoMove(), "the lift should have caught both")
 
-            manager.setTransformMode(.freeform)
-            XCTAssertNotNil(manager.freeformUnavailableReason, "\(kind): the bar has to have something to say")
-            XCTAssertFalse(manager.vectorFloatIsFreeform,
-                           "\(kind): and the drag refuses even with the mode already lit")
-        }
+        imageManager.setTransformMode(.freeform)
+        XCTAssertNotNil(imageManager.freeformUnavailableReason, "the bar has to have something to say")
+        XCTAssertFalse(imageManager.vectorFloatIsFreeform,
+                       "and the drag refuses even with the mode already lit")
 
-        // The same predicate answers the other way for what a drawing is actually made of.
+        // The same predicate answers the other way for what a drawing is actually made of — and, since
+        // the ruling, for type as well.
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 26, y: 30, width: 10, height: 5),
                                                       transform: nil),
                                          color: black(), opacity: 1, evenOddFill: false))
+        var recipe = TextRecipe(string: "hi")
+        recipe.typography.pointSize = 12
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 30, y: 34),
+                                                             size: CGSize(width: 10, height: 6))))
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.setTransformMode(.freeform)
-        XCTAssertNil(manager.freeformUnavailableReason, "strokes and fills stretch exactly")
+        XCTAssertNil(manager.freeformUnavailableReason, "strokes, fills and text all stretch")
         XCTAssertTrue(manager.vectorFloatIsFreeform)
+    }
+
+    /// **A stretched text box distorts its letterforms and does not re-flow.** The owner's ruling of
+    /// 2026-08-27, verbatim in LASSO_MOVE.md §5.18: *"Same words, same line breaks, wider or taller
+    /// glyphs."*
+    ///
+    /// **The corners are not what this asserts, and that is the whole point.** A test that only
+    /// checked where the four corners landed would pass identically for an implementation that
+    /// re-flowed the string into a wider box — same quad, different words on different lines — so it
+    /// would not settle the ruling at all. What separates the two is the *layout*: the same number of
+    /// lines, carrying the same character ranges. And the third layout below is what stops that from
+    /// being vacuous: it is what a re-flow would actually have produced, laid out at the width the box
+    /// now covers on the canvas, and it has to come out **different** or the two hypotheses were never
+    /// distinguishable on this fixture.
+    ///
+    /// **Per-line widths are deliberately not asserted, and the reason is a fact about fonts rather
+    /// than about this code.** The obvious invariant — each line fills the same fraction of the box it
+    /// did — is false on the system face, because SF carries size-dependent tracking: MEASURED, the
+    /// first line of this fixture goes from 0.630 of its box at 9 pt to 0.587 at 15.6 pt, a 7% drift
+    /// with the line breaks bit-identical. `TextLayoutLogicTests`' header states the rule this falls
+    /// under — assert identities, never measured glyph widths — and the line *ranges* are the identity
+    /// the ruling is actually about.
+    ///
+    /// The distortion itself is the other half, and one number carries it: the frame's own map scales
+    /// its two axes by different amounts. That is exactly what `mapping(_:throughSimilarity:)` asserts
+    /// can never reach *it*, and here it is, held in the corners where it belongs.
+    func testAStretchedTextBoxDistortsItsLetterformsAndDoesNotReflowTheWords() throws {
+        let (manager, layerIndex, vector) = fixture()
+        var recipe = TextRecipe(string: "one two three four five")
+        recipe.typography.pointSize = 9
+        recipe.typography.tracking = 0
+        let box = CGSize(width: 30, height: 22)
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(size: box,
+                                                             corners: TextFrame.uprightCorners(origin: CGPoint(x: 16, y: 20),
+                                                                                               size: box),
+                                                             autoSize: false)))
+        let layoutBefore = layout(of: recipe, boxWidth: box.width)
+        XCTAssertGreaterThan(layoutBefore.lines.count, 1,
+                             "fixture precondition: the string has to wrap, or there are no line "
+                             + "breaks for a re-flow to move")
+
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 12, width: 48, height: 40)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        let pose = stretched(manager, x: 3, y: 1)
+        XCTAssertNotEqual(pose.aspect, 1, "fixture precondition: this is the stretched arm")
+
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+
+        let text = try XCTUnwrap(vector.elements.compactMap(\.text).first)
+        let layoutAfter = layout(of: text.recipe, boxWidth: text.frame.size.width)
+
+        XCTAssertEqual(layoutAfter.lines.count, layoutBefore.lines.count,
+                       "same words on the same number of lines — a re-flow would change this")
+        for (before, after) in zip(layoutBefore.lines, layoutAfter.lines) {
+            XCTAssertEqual(after.range.location, before.range.location, "and the same words on each")
+            XCTAssertEqual(after.range.length, before.range.length)
+        }
+
+        // What a re-flow *would* have done: the same type laid out at the width the box now covers on
+        // the canvas, which is `sqrt(3)` wider again than the layout box. Fewer lines, different
+        // breaks. Without this the two assertions above could both hold on a fixture where nothing
+        // could have moved anyway.
+        let reflowed = layout(of: text.recipe,
+                              boxWidth: try XCTUnwrap(text.frame.basis).width)
+        XCTAssertLessThan(reflowed.lines.count, layoutAfter.lines.count,
+                          "fixture premise: re-flowing into the stretched width is a visibly different "
+                          + "document, so the assertions above are discriminating between two live "
+                          + "possibilities rather than restating one")
+
+        // The distortion, as one number: the frame's own map no longer scales its axes alike.
+        let map = try XCTUnwrap(text.frame.affineTransform)
+        let along = hypot(map.a, map.b), down = hypot(map.c, map.d)
+        XCTAssertEqual(along / down, 3, accuracy: 1e-6,
+                       "a 3:1 pull leaves a 3:1 residue in the corners, which is what widens the glyphs")
+        XCTAssertTrue(text.frame.needsBoxSpaceSizing,
+                      "and the frame says so, which is what keeps its grips and its regrow honest")
+    }
+
+    /// **Freeform contains Uniform on a text box too** — §5.17's ruling, checked on the kind that
+    /// reached Freeform a day after it was made.
+    ///
+    /// The dispatch in `applyToVectorFloat` is `aspect != 1`, an *exact* comparison, so the two arms
+    /// are one ULP apart in the artist's hand: a corner dragged along the box's own diagonal writes
+    /// `aspect == 1` and goes through the similarity arm, and the smallest wobble off the diagonal
+    /// goes through the stretch arm. If the stretch arm left `size` and `pointSize` alone while the
+    /// similarity arm scaled them, the two would draw the same pixels out of documents whose stored
+    /// point size differed by `k` — the panel would show a different number on either side of a
+    /// boundary the artist cannot see, and `TextLayout.minimumBoxSize`'s floor would move with it.
+    ///
+    /// Asserted against the mapping functions directly rather than through two drags, because that is
+    /// where the property lives: at `aspect == 1` the stretch arm's `sqrt(|det t|)` **is** the
+    /// similarity arm's `hypot(t.a, t.b)`, so the two must write the same element.
+    func testTheStretchArmReducesToTheSimilarityArmForATextBoxWhenNothingIsStretched() throws {
+        var recipe = TextRecipe(string: "one two three")
+        recipe.typography.pointSize = 11
+        let element = VectorElement.text(VectorTextElement(id: UUID(), recipe: recipe,
+                                                           frame: TextFrame(origin: CGPoint(x: 7, y: 13),
+                                                                            size: CGSize(width: 26, height: 14))))
+        // A similarity with all four parts live — scale, rotation and translation — so nothing can
+        // agree by being trivial.
+        let similarity = CGAffineTransform(rotationAngle: 0.7)
+            .concatenating(CGAffineTransform(scaleX: 2.5, y: 2.5))
+            .concatenating(CGAffineTransform(translationX: -3, y: 11))
+
+        let viaSimilarity = try XCTUnwrap(VectorCanvas.mapping(element, throughSimilarity: similarity).text)
+        let viaStretch = try XCTUnwrap(VectorCanvas.mapping(element, throughStretch: similarity).text)
+
+        XCTAssertEqual(viaStretch.frame.size.width, viaSimilarity.frame.size.width, accuracy: 1e-9,
+                       "the layout box is the same box either way")
+        XCTAssertEqual(viaStretch.frame.size.height, viaSimilarity.frame.size.height, accuracy: 1e-9)
+        XCTAssertEqual(viaStretch.recipe.typography.pointSize, viaSimilarity.recipe.typography.pointSize,
+                       accuracy: 1e-9, "and so is the point size the panel will show on re-open")
+        for (a, b) in zip(viaStretch.frame.corners, viaSimilarity.frame.corners) {
+            XCTAssertEqual(a.x, b.x, accuracy: 1e-9)
+            XCTAssertEqual(a.y, b.y, accuracy: 1e-9)
+        }
+        XCTAssertFalse(viaStretch.frame.needsBoxSpaceSizing,
+                       "an unstretched result keeps stage 4's own sizing arithmetic, untouched")
+    }
+
+    /// **The delayed failure, driven rather than reasoned about.** A stretch that survived the nudge
+    /// and then evaporated on the artist's next grip drag — or, worse, on their next *keystroke*, days
+    /// later — is the shape of bug this feature could most easily have shipped: `TextFrameDrag` and
+    /// `TextFrame.resized(to:)` both read `basis.width` as a layout extent and write it back into
+    /// `size`, and a stretched frame is precisely one whose `basis.width != size.width`.
+    ///
+    /// So: stretch a lassoed text box, commit it, and then do both of the things that would quietly
+    /// undo it.
+    func testAStretchSurvivesTheNextGripDragAndTheNextAutoSizeRegrow() throws {
+        let (manager, layerIndex, vector) = fixture()
+        var recipe = TextRecipe(string: "wide")
+        recipe.typography.pointSize = 9
+        let box = CGSize(width: 26, height: 14)
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(size: box,
+                                                             corners: TextFrame.uprightCorners(origin: CGPoint(x: 18, y: 24),
+                                                                                               size: box),
+                                                             autoSize: true)))
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 16, width: 44, height: 32)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        let pose = stretched(manager, x: 3, y: 1)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+        manager.commitVectorFloatIfNeeded()
+
+        let stretchedFrame = try XCTUnwrap(vector.elements.compactMap(\.text).first).frame
+        // A 3:1 pull puts `sqrt(3)` of it in each axis of the corners-to-box ratio and the other
+        // `sqrt(3)` in the box itself — the decomposition, read back off the stored document.
+        let ratio = try XCTUnwrap(stretchedFrame.basis).width / stretchedFrame.size.width
+        XCTAssertEqual(ratio, CGFloat(3).squareRoot(), accuracy: 1e-6,
+                       "fixture precondition: the corners carry the residue and the box does not")
+
+        // (1) A sizing grip. The right edge is dragged out to twice the box's canvas width; the box
+        // grows and the residue is untouched.
+        let drag = try XCTUnwrap(TextFrameDrag(frame: stretchedFrame, handle: .right))
+        let basis = try XCTUnwrap(stretchedFrame.basis)
+        let pulled = CGPoint(x: basis.origin.x + basis.u.dx * basis.width * 2,
+                             y: basis.origin.y + basis.u.dy * basis.width * 2)
+        let sized = try XCTUnwrap(drag.clampedFrame(draggedTo: pulled),
+                                  "the grip has to answer — a nil here is a grip that does nothing")
+        XCTAssertNotEqual(sized.size.width, stretchedFrame.size.width,
+                          "the grip actually sized something")
+        XCTAssertEqual(try XCTUnwrap(sized.basis).width / sized.size.width, ratio, accuracy: 1e-6,
+                       "and the stretch is still 3:1 afterwards")
+
+        // (2) The auto-size regrow, which is what a keystroke into a pristine box runs.
+        let regrown = stretchedFrame.resized(to: CGSize(width: stretchedFrame.size.width + 9,
+                                                        height: stretchedFrame.size.height))
+        XCTAssertEqual(try XCTUnwrap(regrown.basis).width / regrown.size.width, ratio, accuracy: 1e-6,
+                       "typing one more character must not snap the box back square")
+        XCTAssertEqual(regrown[.topLeft].x, stretchedFrame[.topLeft].x, accuracy: 1e-6,
+                       "and it still grows from its top-left")
+        XCTAssertEqual(regrown[.topLeft].y, stretchedFrame[.topLeft].y, accuracy: 1e-6)
     }
 
     /// **A stretched float shows the truth between gestures.**

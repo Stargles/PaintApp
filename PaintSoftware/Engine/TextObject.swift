@@ -329,16 +329,39 @@ struct TextFrame: Codable, Equatable {
     /// (`basis`), which is the same statement as before for an upright frame and the right one for a
     /// turned box. A frame too degenerate to have axes falls back to the upright rebuild, because a
     /// collapsed quad has no direction to preserve.
+    ///
+    /// **A stretched or warped frame goes through its own map instead, and that is not an optimisation
+    /// — it is the only thing that keeps the stretch.** The basis rebuild describes a box scaled
+    /// uniformly from `size`, so handed a Freeform-stretched frame it returns the *unstretched*
+    /// proportions: the artist stretches a text box 3:1, later reopens it, types one character, and the
+    /// box snaps back square with no undo step naming the cause. Projecting the new box's corners
+    /// through the frame's own map is also what ADD_TEXT.md §1 specifies for `autoSize` in the first
+    /// place (*"`corners` are re-derived by projecting the new box's corners through the existing
+    /// homography"*), and it agrees with the basis rebuild to the last bit wherever the two both apply
+    /// — for a similarity `(c₁ − o)/size.width` **is** `u`.
     func resized(to newSize: CGSize) -> TextFrame {
         var resized = self
         resized.size = newSize
-        if let basis {
+        if needsBoxSpaceSizing, let projected = projectingBox(of: newSize) {
+            resized.corners = projected
+        } else if let basis {
             resized.corners = TextFrame.corners(origin: basis.origin, u: basis.u, v: basis.v,
                                                 width: newSize.width, height: newSize.height)
         } else {
             resized.corners = TextFrame.uprightCorners(origin: corners.first ?? .zero, size: newSize)
         }
         return resized
+    }
+
+    /// The canvas-space image of a `newSize` box under this frame's **own** map, with the box's
+    /// top-left where it already is — `(0, 0)` is a fixed point of the map, so corner 0 does not move.
+    ///
+    /// Nil when the frame has no solvable map, which is the same set `homography` refuses.
+    private func projectingBox(of newSize: CGSize) -> [CGPoint]? {
+        guard let homography else { return nil }
+        let mapped = Quad.rect(CGRect(origin: .zero, size: newSize)).points
+            .compactMap { homography.map($0) }
+        return mapped.count == 4 ? mapped : nil
     }
 
     private enum CodingKeys: String, CodingKey { case size, corners, mode, autoSize }
@@ -391,17 +414,50 @@ extension TextFrame {
         var u: CGVector
         /// Unit vector along the box's local +y (down the page).
         var v: CGVector
-        /// How far the quad runs along `u` and along `v`. Equal to `size` for every frame this
-        /// project writes — `VectorCanvas.mapping(_:throughSimilarity:)`'s text arm scales `size`,
-        /// `corners` and the recipe's point size together for exactly this reason — so the two are
-        /// stated separately only so a decoded document cannot make one lie about the other.
+        /// How far the quad runs along `u` and along `v`. Equal to `size` for every frame this project
+        /// wrote until Freeform reached text — `VectorCanvas.mapping(_:throughSimilarity:)`'s text arm
+        /// scales `size`, `corners` and the recipe's point size together for exactly this reason — so
+        /// the two are stated separately only so a decoded document cannot make one lie about the
+        /// other.
         ///
-        /// **`TextFrameDrag.resized` and `TextFrame.resized(to:)` both depend on that equality**: each
-        /// reads `basis.width` as a layout extent and writes it back into `size`. A frame whose
-        /// corners had been scaled without its `size` would therefore lose the scale on the first
-        /// handle drag or the first auto-size regrow, and nowhere in between would say so.
+        /// **A Freeform stretch breaks that equality on purpose, and `needsBoxSpaceSizing` is what
+        /// discharges it.** The owner's ruling of 2026-08-27 is that a stretched text box distorts its
+        /// letterforms and does not re-flow, so the layout box takes only the map's uniform part and
+        /// the residual per-axis part stays in the corners — which is the same statement as
+        /// `basis.width != size.width`. On such a frame `u` and `v` are also no longer perpendicular
+        /// once the box has been rotated, so the decomposition below is not the quad either.
+        ///
+        /// **`TextFrameDrag` and `TextFrame.resized(to:)` used to depend on that equality**: each read
+        /// `basis.width` as a layout extent and wrote it back into `size`, so a frame whose corners
+        /// had been scaled without its `size` would lose the scale on the first handle drag or the
+        /// first auto-size regrow, silently and much later. Both now ask `needsBoxSpaceSizing` first
+        /// and go through the frame's own map instead, which is what makes a stretch survive them.
         var width: CGFloat
         var height: CGFloat
+    }
+
+    /// **Whether this frame's sizing has to be computed in the box's own coordinates rather than off
+    /// its `basis`** — true for a `.projective` frame, and true for an `.affine` one whose map is not
+    /// a similarity of its `size` box.
+    ///
+    /// `Basis` is two edge *directions* plus two extents, which describes the quad only while the map
+    /// from `size` onto `corners` is a similarity (or a reflection of one — a mirror keeps `u ⟂ v` and
+    /// both extents, and so is *not* box-space sizing). A Freeform stretch is neither: it scales the
+    /// two axes by different amounts, and on a box the artist had already rotated it shears them out
+    /// of square as well. Sizing such a frame off its basis reports the parallelogram nearest it —
+    /// which is exactly the silent flatten stage 5 found on `.projective` frames, in a second costume.
+    ///
+    /// The two clauses are the invariant `Basis.width` documents, asked rather than assumed: the
+    /// extents must match `size`, and the axes must still be perpendicular.
+    var needsBoxSpaceSizing: Bool {
+        if mode == .projective { return true }
+        // A collapsed quad has no map to preserve, and `basis` is what every path falls back to.
+        guard let basis else { return false }
+        let eps = max(1e-6, 1e-6 * max(size.width, size.height))
+        guard abs(basis.width - size.width) <= eps, abs(basis.height - size.height) <= eps else {
+            return true
+        }
+        return abs(basis.u.dx * basis.v.dx + basis.u.dy * basis.v.dy) > 1e-6
     }
 
     var basis: Basis? {
@@ -716,15 +772,16 @@ extension TextFrame {
     /// The canvas point a drag on `handle` must hold still. The rotation knob's is the centre, which
     /// does not move either.
     ///
-    /// **A `.projective` frame answers through its homography, not through its basis**, and the two
-    /// genuinely differ. `Basis` decomposes onto `u` and `v`, which is the same statement as the
-    /// quad only while the quad is a parallelogram; on a warped one it reports the point the box
-    /// *would* have had if the perspective were taken out, which is not a point on the quad at all.
-    /// The homography answers the question actually asked — where does the box's own opposite edge
-    /// sit on the artist's screen — and for an `.affine` frame the two agree to the last bit,
-    /// because there `H` **is** the basis written as a matrix.
+    /// **A frame that needs box-space sizing answers through its homography, not through its basis**,
+    /// and the two genuinely differ. `Basis` decomposes onto `u` and `v`, which is the same statement
+    /// as the quad only while the map from `size` onto `corners` is a similarity; on a warped or a
+    /// Freeform-stretched one it reports the point the box *would* have had with the perspective or
+    /// the stretch taken out, which is not a point on the quad at all. The homography answers the
+    /// question actually asked — where does the box's own opposite edge sit on the artist's screen —
+    /// and on an unstretched `.affine` frame the two agree to the last bit, because there `H` **is**
+    /// the basis written as a matrix.
     func anchor(for handle: Handle) -> CGPoint? {
-        if mode == .projective, let homography {
+        if needsBoxSpaceSizing, let homography {
             let local = handle.anchorLocal(width: size.width, height: size.height)
             if let mapped = homography.map(local) { return mapped }
         }
@@ -868,11 +925,12 @@ struct TextFrameDrag: Equatable {
     /// can be drawn through** — at which point the caller holds whatever it last accepted.
     ///
     /// Nil is only reachable on the two paths that can *make* an invalid quad: the distort, and the
-    /// sizing grips and knob on a `.projective` frame. Stage 4's parallelogram arithmetic on an
-    /// `.affine` frame always answers, exactly as it did before stage 5 existed.
+    /// sizing grips and knob on a frame that needs box-space sizing. Stage 4's parallelogram
+    /// arithmetic on an unstretched `.affine` frame always answers, exactly as it did before stage 5
+    /// existed.
     func clampedFrame(draggedTo point: CGPoint) -> TextFrame? {
         if isDistort { return distortedFrame(draggedTo: point) }
-        if start.mode == .projective { return warpedFrame(draggedTo: point) }
+        if start.needsBoxSpaceSizing { return warpedFrame(draggedTo: point) }
         return handle == .rotation ? rotated(towards: point) : resized(towards: point)
     }
 
@@ -904,17 +962,30 @@ struct TextFrameDrag: Equatable {
         return next
     }
 
-    // MARK: - The eight sizing grips and the knob, on a quad that has perspective
+    // MARK: - The eight sizing grips and the knob, on a quad the basis cannot describe
 
     /// **The same two gestures stage 4 wrote, composed *through* the homography instead of replacing
-    /// it** — the eight sizing grips and the rotation knob on a `.projective` frame.
+    /// it** — the eight sizing grips and the rotation knob on any frame whose own map is not a
+    /// similarity of its `size` box (`TextFrame.needsBoxSpaceSizing`).
+    ///
+    /// **Two kinds of frame arrive here, and the second one is why the guard is not `mode ==
+    /// .projective`.** A `.projective` frame is the one this was written for. A **Freeform-stretched**
+    /// `.affine` frame is the other: the owner's ruling of 2026-08-27 lets a lassoed text box be
+    /// stretched, and such a box stores the map's uniform part in `size` and the residual per-axis
+    /// part in its corners — so `basis.width != size.width`, and on a box that had also been rotated
+    /// `u` and `v` are no longer perpendicular either. It is a parallelogram, so `homography` is
+    /// exactly `affineTransform` written as a 3×3 and every line below means what it says; what it is
+    /// not is a box the basis can describe.
     ///
     /// What this replaces was a silent flatten, and it is worth naming because it looked like
     /// nothing: `resized(towards:)` rebuilds the quad from `basis`, which is the frame's two edge
-    /// *directions* and therefore describes a parallelogram. Handed a warped quad it produced the
-    /// parallelogram nearest it — the wall of text lay down flat and the far corner jumped — and it
-    /// left `mode` saying `.projective` over a quad that no longer was. Nudging the wrap width to
-    /// fix a line break destroyed the perspective, with no undo step of its own to get it back.
+    /// *directions* and two extents, and therefore describes a box scaled uniformly from `size`.
+    /// Handed a warped quad it produced the parallelogram nearest it — the wall of text lay down flat
+    /// and the far corner jumped — and it left `mode` saying `.projective` over a quad that no longer
+    /// was. Nudging the wrap width to fix a line break destroyed the perspective, with no undo step of
+    /// its own to get it back. Handed a *stretched* quad it does the same thing one dimension down: it
+    /// returns the unstretched proportions, so the first grip drag after a 3:1 Freeform pull would
+    /// quietly undo the pull.
     ///
     /// **The composition, and why it is the honest behaviour rather than a workaround.** A sizing
     /// grip does not move the quad; it changes the *box* the glyphs are laid out in. So the drag is
@@ -935,8 +1006,11 @@ struct TextFrameDrag: Equatable {
     ///
     /// Nil on a drag that would leave the valid set — a box grown through the vanishing line, most
     /// of all — which is ADD_TEXT.md §1's clamp, reached by the same predicate the distort uses.
+    /// `Homography.isValidQuad` is winding-agnostic (`Quad.area` is an absolute value, `isConvex`
+    /// accepts four right turns as readily as four left ones, and a parallelogram's four box weights
+    /// are all exactly 1), so a **mirrored** frame passes it unchanged.
     func warpedFrame(draggedTo point: CGPoint) -> TextFrame? {
-        guard !isDistort, start.mode == .projective, let homography = start.homography else { return nil }
+        guard !isDistort, start.needsBoxSpaceSizing, let homography = start.homography else { return nil }
         let candidate = handle == .rotation
             ? turnedInPlane(towards: point)
             : sizedInBoxSpace(towards: point, through: homography)
@@ -961,6 +1035,14 @@ struct TextFrameDrag: Equatable {
     /// may never be smaller than its text *unless in distort mode*. A warped box is in distort mode,
     /// so its grips keep stage 4's flat floor; `resized(towards:)`, the same gesture on an unwarped
     /// box, is where the ruling actually lands.
+    ///
+    /// **A Freeform-stretched `.affine` frame now reaches here too, and it takes that exemption with
+    /// it — unruled, and flagged rather than decided.** A stretched box is not in distort mode by any
+    /// reading the owner has given, so its grips arguably still owe the text-derived floor; the
+    /// conditional (`start.mode == .projective ? minimumExtent : minimumSize`) is two lines away if
+    /// the owner rules that way. It rides along rather than being chosen because nobody has asked
+    /// them, and a stretched box that can be dragged smaller than its own type is a visible thing to
+    /// ask about.
     private func sizedInBoxSpace(towards point: CGPoint, through homography: Homography) -> TextFrame? {
         guard let inverse = homography.inverse, let local = inverse.map(point) else { return nil }
         let minimumExtent = TextFrame.minimumExtent

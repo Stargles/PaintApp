@@ -1606,14 +1606,14 @@ final class VectorCanvas {
     /// stroke and fill arms with this one through `drawn(_:through:widthScale:)` and differs only in
     /// where the ink's width scale comes from.
     ///
-    /// **A *reflection* passes that assert, and is deliberately allowed — but only for two of the four
+    /// **A *reflection* passes that assert, and is deliberately allowed — for three of the four
     /// kinds.** The Move menu's Mirror folds one into `t` (`VectorFloat.mirror`), and the shape test
     /// above cannot see it: a reflection has equal axis norms and perpendicular axes, so `k` is still
-    /// the true scale and strokes and fills follow the map exactly, dab for dab. What a reflection
-    /// does break is `theta`, which `atan2(t.b, t.a)` reads as an *angle* — meaningless for a map that
-    /// turns the plane over — and the corner-order of a text frame. Those are precisely the `.image`
-    /// and `.text` arms, so each asserts the determinant is positive, and `canBeMirrored(_:)` below is
-    /// the same fact stated where a caller can ask it *before* offering the artist the button.
+    /// the true scale and strokes, fills and text follow the map exactly. What a reflection does break
+    /// is `theta`, which `atan2(t.b, t.a)` reads as an *angle* — meaningless for a map that turns the
+    /// plane over. That is read by the `.image` arm alone, which is why that one asserts the
+    /// determinant is positive and the others do not; `canBeMirrored(_:)` below is the same fact stated
+    /// where a caller can ask it *before* offering the artist the button.
     ///
     /// ## Why scaling one scalar is exact, and where it stops being
     ///
@@ -1670,36 +1670,68 @@ final class VectorCanvas {
             if k != 1 { image.transform.scale *= k }
             if theta != 0 { image.transform.rotation += theta }
             return .image(image)
-        case .text(var text):
-            assert(t.a * t.d - t.b * t.c > 0,
-                   "mapping(_:throughSimilarity:) was handed the reflection \(t) with a text box in "
-                   + "the piece. Reflecting `frame.corners` reverses their winding, which is not what "
-                   + "`TextFrame.Basis` reads them as. Ask `canBeMirrored(_:)` before offering Mirror.")
-            // Stored **local**, despite `TextFrame.corners`' own doc saying canvas space — that
-            // comment is written from the authoring perspective, and `localText(fromCanvas:)` maps
-            // every incoming frame through `_transform.inverted()` before it is stored. Translating
-            // stored corners by a canvas-space delta on a transformed layer sends the text somewhere
-            // else entirely.
-            text.frame.corners = text.frame.corners.map { $0.applying(t) }
-            // **`size` and `pointSize` scale with the corners, and that is not optional.** Mapping the
-            // corners alone would draw correctly — `TextFrame.affineTransform` is the ratio of the
-            // corners to `size`, so the glyphs would come out k× larger on their own — but it breaks
-            // the invariant `TextFrame.Basis` states, that `basis.width == size.width` for every frame
-            // this project writes. `TextFrameDrag.resized` and `TextFrame.resized(to:)` both read
-            // `basis.width` as a *layout* extent and write it straight back into `size`, so the first
-            // handle drag, or the first keystroke into a still-`autoSize` box, would snap the type
-            // back to the size it had before the scale — long after the artist could connect the two.
-            // Scaling all three together keeps the invariant, puts the same words on the same lines,
-            // and leaves `autoSize` meaning what it meant.
-            if k != 1 {
-                text.frame.size = CGSize(width: text.frame.size.width * k,
-                                         height: text.frame.size.height * k)
-                // Stored unclamped; `Typography.pointSizeRange` (8...512) is applied at render, so a
-                // piece shrunk past the floor and dragged back comes back at full size.
-                text.recipe.typography.pointSize *= k
-            }
-            return .text(text)
+        case .text(let text):
+            // **A reflection is safe here, and that is what makes Mirror available on text** — the
+            // assert this arm used to carry was policy rather than a real limit, and the owner ruled
+            // it out on 2026-08-27 (LASSO_MOVE.md §5.18). Three separate things have to be true and
+            // each is:
+            //
+            //  * `corners` are mapped **point for point** below, so a negative determinant simply
+            //    reverses their winding. `TextFrame.affineTransform` is the ratio of those corners to
+            //    `size`, so it comes back with a negative determinant of its own — which it already
+            //    permits (`abs(det) > 1e-9`) — and every path that draws text concatenates exactly
+            //    that matrix. The glyphs come out reflected: the words read backwards, in the order
+            //    they were laid out, which is the ruling verbatim.
+            //  * `k = hypot(t.a, t.b)` is still the true scale of a reflected similarity: a reflection
+            //    preserves length, so the box and the point size follow it correctly.
+            //  * `theta` is **not read by this arm at all**. It is what makes the `.image` case above
+            //    assert — a `LayerTransform` has only an angle to put a reflection in, and a half turn
+            //    is not a mirror — and a text frame has four free corners instead, so there is nothing
+            //    here for the sign to corrupt.
+            return .text(Self.mapped(text, through: t, uniformScale: k))
         }
+    }
+
+    /// **The text arm of both public mappings**, differing only in where the uniform scale comes from
+    /// — `hypot(t.a, t.b)` for a similarity, `sqrt(|det t|)` for a stretch, which are the same number
+    /// wherever the two overlap. Shared for `drawn(_:through:widthScale:)`'s reason: the half the two
+    /// agree about must not be able to drift.
+    ///
+    /// **`corners` follow `t` whole; `size` and the point size follow only its *uniform* part.** For a
+    /// similarity those are one statement, and the invariant `TextFrame.Basis` documents —
+    /// `basis.width == size.width` — comes through untouched. For a stretch they are two, and the
+    /// difference between them is exactly the residual aspect: the layout box is scaled uniformly, so
+    /// CoreText wraps the same words onto the same lines, and `TextFrame.affineTransform` carries the
+    /// per-axis distortion into the glyphs at draw time. That is the owner's ruling of 2026-08-27 —
+    /// *"Same words, same line breaks, wider or taller glyphs"* — and it is also what makes the stretch
+    /// arm **reduce to the similarity arm exactly** at `aspect == 1`, rather than drawing the same
+    /// pixels out of a different stored document (LASSO_MOVE.md §5.18).
+    ///
+    /// **Scaling `size` and `pointSize` at all is not optional**, and the reason is worth keeping:
+    /// mapping the corners alone would draw correctly, since the frame's own map is the ratio of the
+    /// corners to `size` — but `TextFrameDrag` and `TextFrame.resized(to:)` read `basis.width` as a
+    /// *layout* extent and write it back into `size`, so the first handle drag or the first keystroke
+    /// into a still-`autoSize` box would snap the type back to the size it had before the move. Under
+    /// a stretch the residual breaks that equality on purpose, and `TextFrame.needsBoxSpaceSizing` is
+    /// what discharges it: both of those functions ask it and route through the frame's own map
+    /// instead of through its basis.
+    private static func mapped(_ text: VectorTextElement, through t: CGAffineTransform,
+                               uniformScale k: CGFloat) -> VectorTextElement {
+        var text = text
+        // Stored **local**, despite `TextFrame.corners`' own doc saying canvas space — that
+        // comment is written from the authoring perspective, and `localText(fromCanvas:)` maps
+        // every incoming frame through `_transform.inverted()` before it is stored. Translating
+        // stored corners by a canvas-space delta on a transformed layer sends the text somewhere
+        // else entirely.
+        text.frame.corners = text.frame.corners.map { $0.applying(t) }
+        if k != 1 {
+            text.frame.size = CGSize(width: text.frame.size.width * k,
+                                     height: text.frame.size.height * k)
+            // Stored unclamped; `Typography.pointSizeRange` (8...512) is applied at render, so a
+            // piece shrunk past the floor and dragged back comes back at full size.
+            text.recipe.typography.pointSize *= k
+        }
+        return text
     }
 
     /// **One element moved by a non-uniform `t` — the Move bar's Freeform.**
@@ -1746,23 +1778,39 @@ final class VectorCanvas {
     /// right — but the exactness claim the similarity carries does **not** extend here, and no test
     /// should be written as though it did.
     ///
-    /// ## The two kinds it refuses
+    /// ## Text stretches; a placed image is the one kind this still refuses
     ///
-    /// A placed image's placement *is* a `LayerTransform` and a text frame's `Basis` reads four
-    /// ordered corners as `size`; neither can hold a per-axis stretch, for the same reason neither
-    /// can hold a flip. `canBeStretched(_:)` is the question asked *before* the artist is offered the
-    /// mode, exactly as `canBeMirrored(_:)` is asked before they are offered the button — teaching
-    /// images to hold a stretched shape is its own stage (the owner's *"Teach images to hold a
-    /// stretched shape"*).
+    /// **Text distorts its letterforms and does not re-flow** — the owner's ruling of 2026-08-27,
+    /// verbatim in LASSO_MOVE.md §5.18: *"Same words, same line breaks, wider or taller glyphs."* A
+    /// `TextFrame` already stores four free corners, so a stretch costs it no new field and no decode
+    /// migration; `mapped(_:through:uniformScale:)` is where the split between the box and the residual
+    /// aspect is written down, and it is what makes this arm reduce to the similarity arm exactly at
+    /// `aspect == 1`.
+    ///
+    /// A **placed image** genuinely cannot. `VectorImageElement.transform` *is* a `LayerTransform` —
+    /// position, one scale, one rotation — with nowhere to put a second axis scale any more than a
+    /// flip, so teaching it costs a stored field and a persistence migration and is its own stage (the
+    /// owner's *"Teach images to hold a stretched shape"*). `canBeStretched(_:)` is the question asked
+    /// *before* the artist is offered the mode, exactly as `canBeMirrored(_:)` is asked before they are
+    /// offered the button; the two answers now differ, which is what that pair of properties was always
+    /// separate for.
     static func mapping(_ element: VectorElement, throughStretch t: CGAffineTransform) -> VectorElement {
         guard !t.isIdentity else { return element }
         let k = sqrt(abs(t.a * t.d - t.b * t.c))
         switch element {
         case .stroke, .fill:
             return drawn(element, through: t, widthScale: k) ?? element
-        case .image, .text:
-            assertionFailure("mapping(_:throughStretch:) was handed a placed image or a text box, "
-                             + "whose placement cannot hold the per-axis stretch in \(t). Ask "
+        case .text(let text):
+            // `sqrt(|det t|)` is the uniform part, and it is the *same* choice §5.17 made for a
+            // stroke's width — for a similarity it is `hypot(t.a, t.b)` to the last bit, which is what
+            // makes a diagonal Freeform drag on a text box produce the identical document a Uniform
+            // drag would. Everything `t` carries beyond it — the per-axis residue, and the shear a
+            // non-uniform map leaves on a box the artist had rotated — lands in `corners`, where
+            // `TextFrame.affineTransform` reads it as the glyphs' own distortion.
+            return .text(mapped(text, through: t, uniformScale: k))
+        case .image:
+            assertionFailure("mapping(_:throughStretch:) was handed a placed image, whose "
+                             + "`LayerTransform` cannot hold the per-axis stretch in \(t). Ask "
                              + "`canBeStretched(_:)` before offering Freeform.")
             return element
         }
@@ -1817,32 +1865,37 @@ final class VectorCanvas {
     /// offerable on a float carrying it.
     ///
     /// The same shape as `canBeMirrored(_:)` below and for the same underlying reason, but they are
-    /// two questions and not one: a reflection is a *similarity* that only the `.image` and `.text`
-    /// arms mishandle, and a per-axis stretch is not a similarity at all. Today the two answers
-    /// coincide; the stage that teaches a placed image to hold a stretched shape moves this one and
-    /// leaves that one alone, which is why the Move bar asks each separately.
+    /// two questions and not one: a reflection is a *similarity* that only the `.image` arm mishandles,
+    /// and a per-axis stretch is not a similarity at all. **They no longer coincide** — as of the
+    /// owner's ruling of 2026-08-27 a text box does both and a placed image still does neither — which
+    /// is what the Move bar asking each separately was always for.
     ///
     ///  * a **stroke** is points plus one width, and a stretch moves the points and scales the width
     ///    by the map's own area root — visibly right, and the only sense in which a round dab can
     ///    follow a non-uniform map without becoming an ellipse;
     ///  * a **fill** is a `CGPath`, which carries any affine exactly, stretch included — so a fill is
     ///    the one kind Freeform is *perfect* on;
+    ///  * a **text box** is four free corners over a layout `size`, so the stretch has somewhere to go
+    ///    that costs no stored field and no decode migration: the box takes the map's *uniform* part,
+    ///    which keeps the same words on the same lines, and the residual per-axis part stays in the
+    ///    corners, where `TextFrame.affineTransform` reads it as the glyphs' own distortion. That is
+    ///    the ruling — *"Same words, same line breaks, wider or taller glyphs"* — and it is a different
+    ///    problem from perspective text, which needs the map to stop being affine at all;
     ///  * a **placed image** stores position, **one** scale and one rotation. There is nowhere in that
-    ///    shape for two axis scales, and inventing one means a stored field and a decode migration;
-    ///  * a **text box** would have to keep `Basis.width == size.width` while its corners stopped
-    ///    describing a rectangle scaled uniformly from `size` — which is the perspective-text problem,
-    ///    not this one.
+    ///    shape for two axis scales, and inventing one means a stored field and a decode migration. It
+    ///    is the one kind still refused, and the only reason the two properties below are not now the
+    ///    same function.
     static func canBeStretched(_ element: VectorElement) -> Bool {
         switch element {
-        case .stroke, .fill: return true
-        case .image, .text: return false
+        case .stroke, .fill, .text: return true
+        case .image: return false
         }
     }
 
     /// Whether this element can go through `mapping(_:throughSimilarity:)` with a **reflection** — the
     /// Move menu's Mirror — rather than only with an orientation-preserving similarity.
     ///
-    /// Two kinds can, exactly, and two cannot at all:
+    /// Three kinds can, exactly, and one cannot at all:
     ///
     ///  * a **stroke** follows the map point for point, and its one scalar (`size`) is untouched by a
     ///    reflection, whose `k` is 1. A reflection preserves arc length, so `BrushStamper` walks the
@@ -1850,20 +1903,25 @@ final class VectorCanvas {
     ///    sequence — the same argument the scale case makes above, with `k == 1`;
     ///  * a **fill** is a `CGPath`, which carries any affine including this one. Reversing every
     ///    subpath's winding together leaves the same interior under both fill rules;
+    ///  * a **text box** is four corners over a layout size, and reflecting them reverses their
+    ///    winding — which is precisely what a mirror *is*. The corners' order is not a fact the layout
+    ///    acts on; the layout runs in the box's own coordinates and `TextFrame.affineTransform` carries
+    ///    it out, sign and all, so a negative determinant reflects the rendered glyphs and the words
+    ///    read backwards. **The owner ruled that is the wanted behaviour** on 2026-08-27
+    ///    (LASSO_MOVE.md §5.18): a mirror reflects what is drawn, as in a real mirror, and does not
+    ///    re-lay-out the string right-to-left. Mirror and mirror back is the original, exactly;
     ///  * a **placed image**'s whole placement is a `LayerTransform` — position, one *unsigned-in-
     ///    practice* scale, one rotation. There is no flip in that shape and no way to put one there
-    ///    without a stored field and a decode migration, so a mirrored photo is not expressible;
-    ///  * a **text box** is four corners plus a layout size, and `TextFrame.Basis` reads the corners
-    ///    as an ordered frame. Reflecting them reverses that order, which is a different statement
-    ///    from "the glyphs are mirrored" and is not one the layout can act on.
+    ///    without a stored field and a decode migration, so a mirrored photo is not expressible. It is
+    ///    the one kind left, and the `.image` arm of `mapping(_:throughSimilarity:)` still asserts.
     ///
     /// Stated here, beside the function that would be wrong, rather than in the Move bar: the bar asks
-    /// (`CanvasManager.mirrorUnavailableReason`) and the two arms above assert. A third kind added to
-    /// `VectorElement` has to answer this switch before it can be lassoed and mirrored.
+    /// (`CanvasManager.mirrorUnavailableReason`) and the `.image` arm above asserts. A third kind added
+    /// to `VectorElement` has to answer this switch before it can be lassoed and mirrored.
     static func canBeMirrored(_ element: VectorElement) -> Bool {
         switch element {
-        case .stroke, .fill: return true
-        case .image, .text: return false
+        case .stroke, .fill, .text: return true
+        case .image: return false
         }
     }
 

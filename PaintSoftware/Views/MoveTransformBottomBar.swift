@@ -13,11 +13,15 @@ import SwiftUI
 /// still the artist's open panel, and they have not lost their place.
 ///
 /// **No control here is allowed to be pressed and do nothing.** Three can be unavailable, and each
-/// says so rather than going quietly grey: Mirror, when the lassoed piece carries a placed image or
-/// text (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip); the **mode picker**,
-/// on a piece carrying either of those for the neighbouring reason that a `LayerTransform` has no
-/// second axis scale (`freeformUnavailableReason`); and Reset, when the piece is already sitting
-/// exactly where it was picked up.
+/// says so rather than going quietly grey: Mirror, when the lassoed piece carries a **placed image**
+/// (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip); the **mode picker**, on a
+/// piece carrying one for the neighbouring reason that a `LayerTransform` has no second axis scale
+/// (`freeformUnavailableReason`); and Reset, when the piece is already sitting exactly where it was
+/// picked up.
+///
+/// **Text used to be refused by both and no longer is** (owner, 2026-08-27: *"I rule text should be
+/// able to be transformed"*), which leaves the placed image as the only kind either refusal names —
+/// so the two reasons coincide again, on one kind rather than on two.
 struct MoveTransformBottomBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
@@ -30,15 +34,20 @@ struct MoveTransformBottomBar: View {
     /// would have been the "acts like Uniform for now" caption with no caption. It now writes an
     /// `ObjectTransformFrame.aspect` alongside it and `VectorCanvas.mapping(_:throughStretch:)` carries
     /// it into the geometry, so the only float that still cannot stretch is one carrying a placed
-    /// image or a text box — and that one says so, in the caption, rather than going quietly grey.
+    /// image — and that one says so, in the caption, rather than going quietly grey.
     private var modeIsAdjustable: Bool { freeformReason == nil }
 
     /// One line under the buttons, or none. Ordered by which the artist is most likely to have just
     /// pressed against — and with the two refusals merged where they coincide, so a piece with a
     /// photo in it does not disable the picker with a caption that only mentions Mirror.
+    ///
+    /// The merged line names the **image alone** as of 2026-08-27. It is not bookkeeping: the two
+    /// reasons no longer coincide except on an image, since a text box now mirrors and stretches, and
+    /// a caption that still said "or a text box" would be telling the artist their type is stuck at
+    /// the moment they can see it move.
     private var caption: String? {
         if mirrorReason != nil, freeformReason != nil {
-            return "A placed image or a text box can't be mirrored or stretched."
+            return "A placed image can't be mirrored or stretched."
         }
         if let mirrorReason { return mirrorReason }
         if let freeformReason { return freeformReason }
