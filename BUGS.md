@@ -4,28 +4,96 @@ Open items only — fixed entries are pruned, and the fix lives in the commit an
 One section per bug, newest first.
 
 
-## Chromatic aberration — and possibly every effect and blend mode — is masked to the layer's own ink (2026-08-27)
+## Every effect and blend mode is masked to the layer's own ink, because the paper is not in the composite (2026-08-27)
 
-**Reported from the iPad, 2026-08-27, and not yet diagnosed.** The owner: *"Chromatic abberation seems to
-for some reason be masked to the objects on the layers only. If it is transparent to the canvas, it doesnt
-affect it. Other effects and blend modes might have this error too, so it's worth a check."*
+**Reported from the iPad, 2026-08-27, DIAGNOSED, and the mechanism was independently verified line by
+line.** The owner: *"Chromatic abberation seems to for some reason be masked to the objects on the
+layers only. If it is transparent to the canvas, it doesnt affect it. Other effects and blend modes
+might have this error too, so it's worth a check."* Their diagnosis was right and their instinct that
+it generalises was right — it is 8 effects and 20 blend modes, not one effect.
 
-So an effect applied to a layer changes only the pixels that layer already painted, and leaves the
-transparent parts of the canvas — including whatever other layers show through them — untouched. For a
-displacement-style effect like chromatic aberration that is visibly wrong: the whole point is that it
-shifts what is *behind* it.
+**ROOT CAUSE: the canvas paper is a `UIView` painted *behind* the composite, not a layer inside it.**
+`let paper = UIView(); paper.backgroundColor = .white` (`CanvasView.swift:39-43`, driven by
+`updatePaper()` at `:540-552`), added to the container *before* the two sandwich image views that carry
+the composite (`:57-60`), so it is strictly below them in z-order and no compositor pass can read it.
+`makeSandwichRequests` — the only builder the live canvas uses — hardcodes `background: nil` on all
+three requests (`RenderRequest.swift:547`) and says why at `:472-476`: *the live canvas paints its own
+paperView behind the whole stack*. **The only caller in the app that passes `includeBackground: true`
+is the eyedropper** (`CanvasManager+Eyedropper.swift:52`), which is exactly why README can say the
+eyedropper samples the composite "paper included" while nothing else does.
 
-**The sweep is the deliverable, not the one effect.** The owner asked explicitly whether other effects and
-blend modes share it, so the answer wanted is a per-effect and per-blend-mode table saying which are
-affected, which are correct as they stand — some effects genuinely should be scoped to their own layer —
-and which are wrong. TODO.md records the ask.
+So an adjustment layer grades an accumulator that is **transparent everywhere the artist has not
+painted**. Every kernel then correctly short-circuits on alpha 0 — `if (!(alpha > 0.0f)) { ... return; }`
+(`Composite.metal:773` generic, `:572` chromatic aberration, CPU twins at `EffectKernels.swift:96` and
+`:279`) — because a transparent pixel has no colour to unpremultiply. grade(transparent) = transparent,
+`mix` writes the backdrop back unchanged, and the effect reads as masked to the ink.
 
-**Do not guess at the mechanism.** The candidates worth ruling in or out by reading are: the effect output
-multiplied by or blended through the source layer's alpha; the shader sampling a texture that holds only
-that layer's content, so the offset samples land on alpha = 0; premultiplied-alpha handling zeroing the
-shifted channels; and a bounds or scissor rect derived from the layer's content. The render tree already
-composites effect nodes over the layers beneath them (`RenderTree.needsCompositorOnCanvas`,
-`node.effect != nil`), which is why the correct semantic has to be established before the fix.
+**The effect is NOT scoped to the layer's own texture, and three plausible theories are refuted by
+reading.** `Layer.layerEffect` is `kind == .value ? effect : nil` (`Layer.swift:120`) and a value layer
+holds no pixels, so there is no "own ink" to be scoped to. Both backends grade the *accumulator*
+(`Compositor.swift:853-880` reads `context.currentImage`; `MetalCompositor.swift:648-668` grades
+`front`). Both dispatch over the full canvas, so there is no scissor or content-bounds rect. And `mix()`
+uses only `node.opacity` and the resolved `AlphaMask` coverage, never the layer alpha as a mask.
+
+### Per-effect verdict (13 effects)
+
+| Effect | On an alpha-0 backdrop today | Verdict |
+|---|---|---|
+| Levels, Curves, Brightness/Contrast, HSV Shift, Gradient Map, Posterize, Noise | no-op — the kernel writes 0 | **wrong**; Brightness/Contrast and Noise are the most visible (dimming the canvas does nothing; film grain over paper is the whole use case) |
+| **Chromatic Aberration** | no-op outside the ink; inside it, alpha comes from the centre texel only (`Composite.metal:579`) so no fringe crosses the silhouette | **wrong — the reported one.** The centre-alpha rule is a *separate, deliberate, documented* choice (`:562-565`) and becomes moot once the backdrop is opaque; leave it alone |
+| Gaussian / Directional Blur | works — convolves premultiplied and spreads ink into transparency | correct today; an opaque backdrop changes almost nothing, since blurring uniform paper is identity |
+| Bloom | works — the glow spreads outside the ink | correct today. **An opaque paper breaks it**: default threshold 0.75 (`Effect.swift:314`) against white paper at Lum 1.0 makes the entire canvas a bright source |
+| Sobel | edges at the ink's alpha boundary; flat regions emit `(0,0,0,0)` so the paper shows through | works **by accident**. An opaque backdrop flips its background white → black |
+| Outline | keys on `src.a > threshold` (`Composite.metal:696-698`, default 0.5) | works today. **An opaque paper makes that true for every pixel and Outline becomes a complete no-op** |
+
+The 20 affected blend modes are fixed by giving them a backdrop, **not** by editing `blendOver`
+(`Composite.metal:236-250`) — its `mix(cs, B(cb,cs), da)` is W3C Compositing Level 1 and is correct for
+a genuinely transparent backdrop. Eleven modes are gated byte-for-byte against `CGBlendMode`, so editing
+the formula would break `CompositorParityLogicTests`.
+
+### The ruling, 2026-08-27
+
+The owner was shown both options and took the more expensive one: **"Paper is part of the picture, but
+rescue those three."** The paper becomes part of what an adjustment layer grades and what a blend mode
+blends against, **and** Outline, Bloom and Sobel get a way to see the ink alone rather than being
+allowed to regress. That second half is a new concept — an effect scoped to the pixels below it rather
+than to the accumulated backdrop — and wants a short specification before it is built.
+
+### The blocker a reviewer found, and it is not a tuning problem
+
+**Putting an opaque background into the `full` and `below` requests hides the "Behind" onion skin.**
+`onionSkin` is added to the container at `CanvasView.swift:49-50`, *before* `sandwichBelow` (`:57-58`)
+and `sandwichAbove` (`:59-60`), and the comment at `:54-56` states the invariant: the disengaged
+z-order is `onionSkin < below < above < chrome`. `updateOnionSkin` routes the `.behind` placement to
+that lower view (`:2311-2315`). **The Behind ghost is visible today only because the composited sandwich
+images are transparent where the artist has not painted — the same transparency that is the bug.** Once
+the paper is inside the artwork image there is no view position left that is above the paper and below
+the artwork, because they are one image. Fixing it means compositing the onion-skin frames into the
+request as well (they are already CGImages, `CanvasView.swift:2378`, but have never been part of a
+`RenderRequest`), or keeping the paper out of the composite and giving the effect path a synthetic
+opaque backdrop instead. **Decide this before writing the compositing change, not after.**
+
+### Other traps on this path, all found by reading
+
+- **`above` must keep `background: nil`.** It is composited over the live stroke, so a background there
+  is an opaque sheet over everything beneath it — the reason already given at `RenderRequest.swift:472-476`.
+- **Double-painted paper.** If `paperView` keeps painting while the composite also carries the
+  background, an *opaque* colour hides the mistake and a *translucent* one does not.
+- **The padding margin.** `canvasSize` includes `canvasPadding` (`CanvasManager.swift:20-27`) and both
+  compositors fill the background across the whole bounds, while `paperView` is inset
+  (`CanvasView.swift:544-551`). Flipping the flag without insetting turns the grey margin into paper.
+  The eyedropper has this discrepancy today, unnoticed because it is the only caller.
+- **`SandwichFullKey` would go stale.** It asserts `full` depends on everything except `activeLayerIndex`
+  (`RenderRequest.swift:385-398`); adding a background makes `full` depend on `canvasBackgroundColor` and
+  `isCanvasBackgroundVisible` too, and without them in the key a paper-colour change will not invalidate
+  the cached composite.
+- **Backend parity is the gate for this subsystem and this is exactly the change that breaks it.**
+  `MetalCompositor.swift:599-605` premultiplies in float and dispatches `compositeFill`;
+  `Compositor.swift:675-677` goes through `UIColor.setFill` + `UIRectFill`. Two paths to one colour that
+  can differ by a least-significant bit.
+- **The project thumbnail has the same flag off** (`ProjectStore.swift:284`, `includeBackground: false`)
+  and its own comment already calls the transparent-backed tile "a real defect". Same one-flag change,
+  same ruling — and flipping it changes every existing gallery thumbnail until each project is re-saved.
 
 ## Move with no selection blocks the brush button (2026-08-27)
 
@@ -50,12 +118,22 @@ some kind of compositor or display think hiding the strokes outside."* Live data
 build. It was the whole case for LAYER_TRANSFORM.md and for TODO item (12), and that case now rests on
 evidence rather than on reading.
 
-**Our predicted shape was wrong, and the correction is worth keeping.** We said *"only the top-left
-quadrant's worth of the stroke survives"*; the owner saw a box around the **original object**, and added
-*"The only one quarter of it getting shown does not nessesarely seem the case."* A clip at `[0, size]`
-from the local origin and a clip to the content's own bounds are different rects, and the observation says
-it is the second. Whichever it is, the mechanism below stands — the clip happens in local space before the
-transform — but any fix or test written against "the top-left quadrant" is written against the wrong rect.
+**Our predicted shape was wrong, the owner's description was exactly right, and the arithmetic now
+agrees with them.** We said *"only the top-left quadrant's worth of the stroke survives"*; the owner saw a
+box around the **original object** and added *"The only one quarter of it getting shown does not
+nessesarely seem the case."* They were right, and the reason is that the prediction assumed a scale about
+the **origin** when the Move box scales about the **ink-bbox centre**. The pivot is the midpoint of
+`localContentBounds()` (`CanvasView.swift:1541-1542`), `layerTransform(pivot:)` gives
+`position = pivot.applying(_transform)` (`VectorLayer.swift:864-871`), so at identity a pure shrink by `k`
+is `p ↦ P + k(p − P)`. **The surviving region is therefore the canvas rect scaled by `k` about the
+original object's ink-bbox centre** — verbatim the owner's *"a box around the original object … likely the
+canvas borders after it got shrunk"*. Any fix or test written against "the top-left quadrant" is written
+against the wrong rect.
+
+**Two facts the owner could not see from the outside.** It is **not display-only**: `render()` feeds
+`PixelOps.rasterize(cel:)` and therefore thumbnails, merge and export, so the loss is in the document, not
+in the view. And the **geometry is not destroyed** — the samples are intact in `_elements` and it is the
+rasterizer that drops them, which is why baking the transform recovers the ink rather than losing it.
 
 **THE OWNER RULED AGAINST FIXING IT IN PLACE**: *"I dont think you should try to fix this, as scaling the
 entire canvas should transform the objects coordinates in it, not the entire canvas coordinates as per the

@@ -67,11 +67,27 @@ fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
       `_transform`'s reason to exist — the indirection LAYER_TRANSFORM.md counted **eleven of sixteen
       entry points** inverting away again.
       **It also carries a second reported defect**, see (16) below, which may or may not be subsumed.
-      **The load-bearing unknowns to settle in implementation, not to guess**: whether the lasso path
-      works on **raster** layers as well as vector (Move-with-no-selection works on any layer today);
-      whether "the entire canvas was lassoed" means the canvas rect or the cel's content bounds, and
-      what happens to content sitting outside the canvas; and whether a **saved project already on the
-      owner's iPad** contains a layer transform that must still decode.
+      **The unknowns are settled and stage 1 is in build, 2026-08-27.**
+      *"The entire canvas was lassoed"* is **every element id, with no path test and no split** — not a
+      canvas rect. A rect through `membershipRuns` (`VectorLayer.swift:1450-1470`) would cut every
+      stroke crossing the canvas edge into two permanent strokes with fresh ids and abandon content
+      wholly outside it, and off-canvas content is real here; `localContentBounds()` is worse still,
+      being an alpha scan of the *already-clipped* render, so it would exclude the very ink the fix
+      exists for. Raster layers and the saved-document migration are **stages 2-3 and are not in stage
+      1**, which deletes nothing.
+      **Three artist-visible costs were put to the owner and accepted**, 2026-08-27: *"Accept all three,
+      ship stage 1, then the double precision move comes later and integrates in with it."*
+      (a) **The Move box inflates** — today's pivot and size come from `localContentBounds()`, invariant
+      under `_transform`; the float's come from a geometric AABB of moved ink, so rotate +45° then −45°
+      returns a bigger box, monotonically over repeated gestures. **Item (14) is the cure and the owner
+      named it as the follow-up.** (b) **Undo goes from one step per Move session to one per gesture**,
+      which is LASSO_MOVE §5.5's existing ruling. (c) **The Move bar appears where there was none**, with
+      Freeform and Mirror greyed on any cel holding text or an image until (17) lands.
+      **One hazard is not a cost but a defect the stage must fix**: `rasterizeLayer`
+      (`CanvasManager.swift:433-455`) clears `isVectorTransforming` but never commits a vector float, and
+      a whole-cel float suppresses *every* element id — so Rasterize or Merge Down with the Move box up
+      would flatten the cel **to blank in the saved document**. LASSO_MOVE §6 names a stranded
+      suppression as this design's one silent failure mode.
 
 ### (16) Move with no selection blocks the brush button
 
@@ -91,10 +107,23 @@ fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
       (LASSO_MOVE.md §0). **The ruling is about text.** Placed images sit behind the same gate
       (stage 3c) and the owner has not ruled on them; report whether one change ungates both before
       ungating both.
-      Two sub-behaviours to settle: what a **mirrored** text box does — reflect the rendered glyphs, not
-      re-lay-out the string, is the recommendation — and whether a non-uniform scale **stretches the
-      glyphs** or re-flows the line breaks. Stretching is what a transform means; ruling 17's area-root
-      rule is for ink and has no text equivalent.
+      **Both sub-behaviours are SETTLED, 2026-08-27 — recorded as LASSO_MOVE.md §5 ruling 18, do not
+      re-open them.** The owner chose *"Mirror reflects, stretch distorts the letters"*: a mirrored text
+      box **reflects the rendered glyphs**, so the text reads backwards as in a real mirror and
+      mirror-then-mirror-back is exactly the original — it does *not* re-lay-out the string
+      right-to-left; and a non-uniform scale **distorts the letterforms**, same words on the same lines
+      with wider or taller glyphs — it does *not* re-flow the line breaks. Both are what a transform
+      means everywhere else on the canvas, and both are what the code does naturally with no renderer
+      change. Ruling 17's area-root rule is for a stroke's one scalar width and has no text equivalent;
+      a point size is not an ink weight.
+      **Two blockers found by review, both real, both briefed into the build**: `warpedFrame` guards on
+      `start.mode == .projective` (TextObject.swift:938), so a stretched *affine* frame falls through to
+      `start` and every sizing grip on a stretched box would be **silently dead**; and the obvious
+      stretch arm breaks ruling 17's *"Freeform contains Uniform"* discontinuously at `aspect == 1`,
+      because the dispatch is an exact comparison (`CanvasManager+LassoMove.swift:262`) and the
+      similarity arm scales `size` and `pointSize` where a corners-only stretch arm would not. The fix
+      is to decompose the map and give the uniform part to `size`/`pointSize` exactly as the similarity
+      arm does, leaving only the residual aspect in `corners`.
 
 ### (18) The bottom bars should be as tall as their contents
 
@@ -105,15 +134,18 @@ fill ([LASSO_MOVE.md](LASSO_MOVE.md) §5).
       The height is the whole point of (11) — 45% → 85% of the paper visible, MEASURED — so this is
       finishing that change rather than adjusting it.
 
-### (19) An empty text object is deleted when it bakes
+### (19) An empty text object is deleted when it bakes — ALREADY SHIPPED, closed 2026-08-27
 
-- [ ] The owner, 2026-08-27, confirming Add Text and asking for one thing more: *"works pretty much
-      properly now. Just one thing, if there is a text object with nothing in it, delete it when it
-      bakes."* The classic failure here is fixing one exit — a text session can end by tapping away, by
-      switching tool, by switching layer, by the keyboard dismissing, by backgrounding — so the fix wants
-      **one choke point that covers every exit**, not a check at the one the tester used. Two things to
-      settle rather than guess: whether whitespace-only counts as empty, and whether an undo step is
-      pushed at all for a box that never carried content (the recommendation is none).
+- [x] The owner, 2026-08-27: *"if there is a text object with nothing in it, delete it when it bakes."*
+      **It already does, and has since `400b4de` on 2026-08-20** — 123 commits before the build on their
+      iPad, so the behaviour they were asking for was already under their finger. The owner confirmed
+      they were asking without having tested: *"I was asking for it, hadn't tested."*
+      Kept as a closed entry rather than deleted, because the *checking* is the reusable part: the raster
+      arm guards `!recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty`
+      (`CanvasManager+Text.swift:339`) and the vector arm computes `isBlank` and passes a nil element
+      (`:378-380`), which `VectorLayer.commitTextEdit` turns into `removeTextLocked` (`:753-766`).
+      `TextBakeCharacterizationTests` pins both. **So whitespace-only counts as empty too** — a box
+      holding only spaces or a newline is deleted, which the owner has been told and has not objected to.
 
 ### Chromatic aberration, and possibly every effect, is masked to the layer's own ink
 
@@ -122,6 +154,14 @@ layers only. If it is transparent to the canvas, it doesnt affect it. Other effe
 might have this error too, so it's worth a check."* Filed in [BUGS.md](BUGS.md) — it is a defect we now
 own, not an ask — but recorded here because **the owner asked for the sweep**, and a per-effect and
 per-blend-mode answer is the deliverable, not a fix to the one effect they happened to notice.
+
+**RULED 2026-08-27, and it is the more expensive of the two options offered**: *"Paper is part of the
+picture, but rescue those three."* So the canvas paper becomes part of what an adjustment layer grades
+and what a blend mode blends against — which fixes the reported effect, seven others and twenty blend
+modes at once — **and** Outline, Bloom and Sobel keep a way to see the ink alone, rather than being
+allowed to regress. That second half is a **new concept in this design** — an effect scoped to the
+pixels below it rather than to the accumulated backdrop — and it wants its own short specification
+before it is built, not an inline flag.
 
 ## Canvas geometry, and how a coordinate is stored
 
