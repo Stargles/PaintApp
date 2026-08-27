@@ -64,6 +64,27 @@ requirement was nearly re-derived from scratch this week because it was only in 
       rather than painted bars.
       Note this is adjacent to report (6): the owner's freeze sequence names *"try to resize the canvas"*, so
       whatever exists today on that path is worth understanding before extending it.
+- [ ] **(11) Move the effect-settings and Add Text menus to a bottom bar, like Move's.** The owner,
+      2026-08-27: *"the effect settings menu right now takes beside the layers menu. Those two things take up
+      about 80% of the canvas, making it hard to see what you are editing ... When the user clicks on effect
+      settings, the menu is on the bottom, like the same kind of menu that the lasso or move tool uses. Same
+      for the add text menu, make it the same type of menu."*
+      **This is a "can't see my work while I edit it" complaint, and that is the acceptance test** — the fix is
+      good when the artist can see the thing the slider is changing. Two panels move, not one.
+      **The pattern to copy already exists**: `Views/MoveTransformBottomBar.swift` is the bar the Move tool
+      raises, and the lasso/Select flow uses the same shape. Read it before designing anything.
+      **What moves**: the effect settings UI (`Views/EffectSection.swift`, and `Views/MaskTuningSection.swift`
+      is its neighbour — decide whether both move or only the first) and `Views/TextSettingsPanel.swift`.
+      Both are reached today through `activePanel`, which is `@State` on `DrawingView` (`DrawingView.swift:15`,
+      the panel is mounted at `:399`) — **ARCHITECTURE_REVIEW.md finding 1 is about exactly this variable**, so
+      a change here should read that finding first rather than adding a fourteenth place that decides a touch.
+      **Two things that are genuinely harder than they look, to settle in design rather than discover late**:
+      1. *A Move bar is a handful of buttons; an effect panel is a stack of sliders per effect.* A bottom bar
+         may need to scroll, or grow, or page. Say what happens with many effects before building one.
+      2. *`TextSettingsPanel` carries three system presentations* — the font-family `Menu` (`:115`), the face
+         `Menu` (`:150`) and a stock `ColorPicker` (`:202`) — and [BUGS.md](BUGS.md)'s newest entry records that
+         the presentation census does not know about them. Re-hosting the panel changes what those present
+         *from*. `MENU_PRESENTATION_CENSUS.md` is the document that has to stay true.
 - [ ] **(10) Switch colour storage and processing to Oklab, from the Actions menu.** The owner: *"I also want the
       option in actions to switch the color storage and processing to oklab or other future models. Oklab may
       give better compositing."* Supersedes the queued *thought* of the same name — it is now an ask, and it is
