@@ -94,7 +94,16 @@ final class SelectionOverlayView: UIView {
         liveShadowLayer.fillColor = UIColor.clear.cgColor
         liveShadowLayer.strokeColor = UIColor.systemBlue.cgColor
         liveShadowLayer.lineWidth = 2.5
-        liveShadowLayer.isHidden = true
+        // No `isHidden` here, unlike `antsShadowLayer`/`antsLayer` above: those sit under an
+        // optional *committed* selection and need a flag because a nil path there means "no
+        // selection yet" and "selection just got cleared" alike. This pair's path is only ever nil
+        // between gestures (handlePan's `.ended`/default cases null it), and a `CAShapeLayer` with
+        // `path == nil` already draws nothing — so `path` alone is the single source of truth for
+        // visibility. A previous version hid this layer unconditionally at init and never un-hid it,
+        // which left only `liveLayer`'s 1.5pt white dash visible while dragging: invisible over white
+        // paper and the wrong colour over line art. Do not reintroduce an `isHidden` toggle in
+        // `handleLassoPan`/`handleRectanglePan` — that would be a second mechanism racing the path
+        // assignment to control the same thing.
         layer.addSublayer(liveShadowLayer)
 
         liveLayer.fillColor = UIColor.white.withAlphaComponent(0.12).cgColor
@@ -129,12 +138,25 @@ final class SelectionOverlayView: UIView {
         let tap = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         addGestureRecognizer(tap)
 
+        // Shared by `antsLayer` (the committed selection) and `liveLayer` (the in-progress preview),
+        // so the outline marches identically whether the artist is still dragging or has lifted the
+        // pen. `CABasicAnimation` conforms to `NSCopying` and `CALayer.add(_:forKey:)` copies what it
+        // is given, so adding the one instance to two layers is safe — each layer owns its own copy
+        // and they free-run independently (their phases can drift apart over a long drag, which is
+        // invisible at 0.6s/cycle and not worth synchronising).
+        //
+        // Added here, at init, exactly once — NEVER from inside `handleLassoPan`/`handleRectanglePan`.
+        // Those run on every `.changed` event of an active gesture, and `add(_:forKey:)` restarts the
+        // animation from `fromValue` each time it's called for a given key; re-adding per-event resets
+        // the phase every touch move, so under a fast stylus the dashes stutter or appear frozen
+        // instead of marching. Set the path in the gesture handlers; leave the animation alone.
         let animation = CABasicAnimation(keyPath: "lineDashPhase")
         animation.fromValue = 0
         animation.toValue = 10
         animation.duration = 0.6
         animation.repeatCount = .infinity
         antsLayer.add(animation, forKey: "marchingAnts")
+        liveLayer.add(animation, forKey: "marchingAnts")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -311,8 +333,17 @@ final class SelectionOverlayView: UIView {
             lassoPoints.append(location)
             let path = CGMutablePath()
             path.addLines(between: lassoPoints)
+            // Actions disabled, same reason and same fix as `ShapeOverlayView.update`
+            // (ShapeOverlayView.swift:218-222) and `GuideOverlayView.redraw`
+            // (GuideOverlayView.swift:155-158): this runs on every touch-moved event of an active
+            // drag, and without disabling implicit animations each `path` assignment picks up
+            // CALayer's default ~0.25s animation, so the preview visibly lags behind the stylus
+            // instead of tracking it.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             liveShadowLayer.path = path
             liveLayer.path = path
+            CATransaction.commit()
         case .ended:
             lassoPoints.append(location)
             defer { lassoPoints = []; liveShadowLayer.path = nil; liveLayer.path = nil }
