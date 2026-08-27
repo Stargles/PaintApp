@@ -135,8 +135,8 @@ struct TopToolbar: View {
         // next time something else forces a commit, producing exactly the "content teleports back"
         // bug this guards against.
         canvasManager.commitAllInteractiveState()
-        // On a vector layer, Move transforms the whole layer's geometry losslessly via the on-canvas
-        // box (no raster floating piece) — toggle that mode instead of lifting pixels.
+        // On a vector layer, Move lifts geometry into a float and drags it with the on-canvas box —
+        // no raster floating piece, and, since 2026-08-27, no whole-layer `_transform` either.
         if canvasManager.activeLayerIsVector {
             // ...but not on an interpolated cel, whose frame is derived rather than stored: the
             // transform would be written onto a `VectorCanvas` the displayed image does not come
@@ -150,7 +150,17 @@ struct TopToolbar: View {
                 canvasManager.beginVectorLassoMove()
                 return
             }
-            canvasManager.isVectorTransforming.toggle()
+            // No loop: the whole cel travels, through the *same* float. This used to toggle
+            // `isVectorTransforming`, which wrote `VectorCanvas._transform` — and a cel carrying a
+            // shrink clips every later canvas-space stroke to the canvas rect scaled about the old
+            // ink's centre, because `render()` rasterizes the display list at the local origin and
+            // applies the transform to the finished bitmap afterwards. That was live artwork loss on
+            // the owner's iPad (2026-08-27). A float moves geometry and writes no transform, so the
+            // clip has nowhere to come from. See `CanvasManager.beginVectorWholeCelMove`.
+            //
+            // The second tap is the `vectorFloat != nil` arm at the top of this method, which is why
+            // this is a plain begin rather than a toggle.
+            canvasManager.beginVectorWholeCelMove()
             return
         }
         if canvasManager.floatingPiece != nil {

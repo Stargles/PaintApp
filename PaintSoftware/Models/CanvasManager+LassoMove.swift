@@ -193,6 +193,95 @@ extension CanvasManager {
         return true
     }
 
+    /// **Move with no selection: the whole cel is lifted into the same float.**
+    ///
+    /// The owner's own framing, 2026-08-27: *"the move tool without the lasso tool would pretty much
+    /// use the exact same code as if the entire canvas was lassoed around, then move was clicked
+    /// on"*. This is that, and the point of it is the defect it retires. The old whole-cel path wrote
+    /// `VectorCanvas._transform`, and `render()` rasterizes the display list into a context of
+    /// exactly `size` at the *local* origin and applies `_transform` to the finished bitmap
+    /// afterwards — so the clip happens in local space, **before** the transform. After a shrink by
+    /// *k*, `addStroke(canvasSpaceStroke:)` stores `canvasPoint · _transform⁻¹`, and everything
+    /// landing outside the local canvas rect is clipped away at the next render. What survives is the
+    /// canvas rect scaled by *k* about the original ink's bounding-box centre, which is verbatim what
+    /// the owner reported: *"only the part of the line in a box around the original object gets
+    /// baked"*.
+    ///
+    /// A float moves **geometry**, so `_transform` is never written and no clip is ever introduced.
+    /// `LASSO_MOVE.md` §5.1's ruling that Move with no selection moves the whole cel is unchanged —
+    /// only the machinery under it is.
+    ///
+    /// **`selectionBeforeLift` is nil**, which is the whole of what this shares with the lasso arm
+    /// apart from the lift: there is no loop, so there is nothing to travel and nothing to put back.
+    /// `Self.moving(nil, by:)` returns nil, so every nudge's selection arm is a no-op.
+    ///
+    /// **Three accepted costs, ruled on by the owner before this shipped** — none of them are bugs:
+    ///
+    ///   * *The box inflates.* The old pivot and size came from `localContentBounds()`, an alpha scan
+    ///     that is invariant under `_transform`; a float's come from `localBounds(of:)`, a geometric
+    ///     AABB padded by `stampRadius`. Rotate +45° then −45° therefore returns a slightly bigger
+    ///     box, monotonically. The cure is the double-precision move, TODO item (14), which this
+    ///     integrates with rather than works around.
+    ///   * *Undo granularity changes* from one step per Move session to one step per gesture — which
+    ///     is `LASSO_MOVE.md` §5.5's existing ruling, and is wanted.
+    ///   * *The Move bar now appears where there never was one*, and Mirror/Freeform grey out on a
+    ///     cel holding text or a placed image (`mirrorUnavailableReason`, `freeformUnavailableReason`).
+    @discardableResult
+    func beginVectorWholeCelMove() -> Bool {
+        commitAllInteractiveState()
+        guard let target = activeVectorMoveTarget() else { return false }
+        let vector = target.vector
+        guard let lift = vector.liftWholeCel() else { return false }
+
+        let elementsBeforeLift = vector.elements
+        let lifted = Dictionary(uniqueKeysWithValues: lift.elements.map { ($0.id, $0) })
+        // No assignment to `vector.elements`: the lift splits nothing, so `lift.elements` *is* the
+        // list already there. Assigning the suppression is therefore the lift's one invalidation,
+        // exactly as it is on the lasso arm.
+        vector.suppressedElementIDs = lift.insideIDs
+
+        guard let bounds = Self.localBounds(of: lift.elements) else {
+            // A cel whose every element is degenerate — nothing measurable to put a box around.
+            // Clear rather than leave a suppression nothing will ever come back for.
+            vector.suppressedElementIDs = []
+            vector.bumpVersion()
+            return false
+        }
+        let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
+        let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
+                                         contentSize: bounds.size)
+        vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
+                                  insideIDs: lift.insideIDs, liftedInside: lifted,
+                                  pivot: pivot, contentSize: bounds.size,
+                                  baseTransform: vector.transform, frame: frame,
+                                  liftFrameTransform: frame.transform, mirror: .identity,
+                                  elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: nil,
+                                  sourceVersion: vector.contentVersion,
+                                  mayDiverge: lift.mayDiverge, wantsLatch: true,
+                                  latchedFrameTransform: frame.transform, latchedAspect: frame.aspect)
+        celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
+        refreshUndoRedoState()
+        return true
+    }
+
+    /// Settles a float that was lifted from `layerID` (and, when given, `celID`) — for the structural
+    /// edits that are about to **replace or destroy the canvas it came from**.
+    ///
+    /// `commitVectorFloatIfNeeded` clears the suppression through `vectorCanvas(ofFloat:)`, which
+    /// resolves by id; once the layer has been removed or its `vector` set to nil there is nothing
+    /// left to resolve, and the suppression is stranded on a canvas the undo stack still holds a
+    /// reference to (`captureStructure` snapshots `layers`, and a `VectorCanvas` is a reference
+    /// type). So the settle has to happen *before* the edit, not after — which is the same
+    /// before-the-scope rule `rasterizeLayer`'s `isVectorTransforming` line already follows.
+    ///
+    /// Gated on the float's own layer rather than unconditional: an edit to some other layer leaves
+    /// this one's canvas alone, and a float the artist is still holding should not be settled by it.
+    func commitVectorFloatIfLifted(fromLayer layerID: UUID, cel celID: UUID? = nil) {
+        guard let float = vectorFloat, float.layerID == layerID,
+              celID == nil || float.celID == celID else { return }
+        commitVectorFloatIfNeeded()
+    }
+
     // MARK: One nudge
 
     /// Re-arms the latch at the start of a drag. A no-op on an ordinary float, whose latch never

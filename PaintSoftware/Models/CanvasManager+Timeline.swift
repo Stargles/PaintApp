@@ -186,6 +186,12 @@ extension CanvasManager {
 
     func clearCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        // The cel's `vector` is about to be replaced by a fresh empty one, so a float lifted from
+        // this cel would leave its suppression on the old canvas — which the undo snapshot still
+        // holds, so undoing the clear would give back a cel whose ink renders nowhere. Same shape as
+        // `rasterizeLayer`'s, and the settle has to precede the scope for the same reason.
+        commitVectorFloatIfLifted(fromLayer: layers[layerIndex].id,
+                                  cel: layers[layerIndex].cels[celIndex].id)
         withStructureUndo(label: .clearFrame) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
             layers[layerIndex].cels[celIndex].raster = .empty(size: size)

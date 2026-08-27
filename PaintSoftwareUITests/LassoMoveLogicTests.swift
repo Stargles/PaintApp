@@ -63,22 +63,69 @@ final class LassoMoveLogicTests: XCTestCase {
 
     // MARK: - The one that would silently lose artwork
 
-    /// **Every way a float can end leaves nothing suppressed and nothing dropped.**
+    /// Which of the two lifts a test is driving. **Both reach the same float**, which is the whole
+    /// point of `beginVectorWholeCelMove` — so every teardown door has to be walked twice, once with
+    /// a subset of the cel suppressed and once with all of it.
+    private enum LiftKind: String, CaseIterable {
+        case lasso = "lasso"
+        case wholeCel = "whole cel"
+    }
+
+    /// The lift a door test is opened with. The lasso arm draws the loop the rest of this file uses.
+    @discardableResult
+    private func lift(_ kind: LiftKind, _ manager: CanvasManager, _ layerIndex: Int) -> Bool {
+        switch kind {
+        case .lasso:
+            select(manager, layerIndex, loop(CGRect(x: 24, y: 4, width: 32, height: 56)))
+            return manager.beginVectorLassoMove()
+        case .wholeCel:
+            return manager.beginVectorWholeCelMove()
+        }
+    }
+
+    /// **Every way a float can end leaves nothing suppressed and nothing dropped — for both lifts.**
     ///
-    /// Six paths, and each is a different door: the artist taps Move again; they undo before nudging;
+    /// Ten paths, and each is a different door: the artist taps Move again; they undo before nudging;
     /// they switch tool or panel; they change layer; they change frame; they press undo after a
-    /// nudge. A leak on any one of them is artwork that is in the document and renders nowhere.
+    /// nudge; they **Rasterize** the layer; they **Merge Down**. A leak on any one of them is artwork
+    /// that is in the document and renders nowhere.
     ///
     /// Watched failing with `commitVectorFloatIfNeeded`'s `suppressedElementIDs = []` removed — four
-    /// of the six doors went red at once: *commit: 2 element(s) still suppressed after commit*, and
-    /// the same for tool switch, layer change and frame change.
+    /// of the six original doors went red at once: *commit: 2 element(s) still suppressed after
+    /// commit*, and the same for tool switch, layer change and frame change.
+    ///
+    /// **Rasterize and Merge Down were added with `beginVectorWholeCelMove` (2026-08-27), and they
+    /// are worse than a leak.** `rasterizeLayer` never settled the float, and the flatten it performs
+    /// goes through `cel.vector?.render(quality:)` — which *honours* the suppression — before setting
+    /// `vector = nil`. With a lasso float that bakes away the lassoed subset; with a whole-cel float,
+    /// where every id is suppressed, it bakes the entire cel to blank, in the saved document, and the
+    /// geometry that could have restored it is gone in the same statement. Merge Down reaches the
+    /// identical code through `mergeLayers`. `ink` below is what catches it: a teardown that leaked
+    /// leaves the flattened raster missing exactly the elements that were floating.
+    ///
+    /// Watched failing with `rasterizeLayer`'s `commitVectorFloatIfLifted` removed — and the two
+    /// lifts fail differently, which is the amplification stated as output:
+    /// *lasso / rasterize: the flatten lost ink on the right* — `("26.0") is not equal to ("58.0")`,
+    /// the lassoed half gone — against
+    /// *whole cel / rasterize: the flatten is blank — the whole cel was baked away*.
+    /// Merge Down went red on the same run for the same reason.
     func testEveryTeardownPathLeavesNothingSuppressedAndNothingDropped() {
-        let paths: [(name: String, act: (CanvasManager) -> Void)] = [
-            ("commit", { $0.commitVectorFloatIfNeeded() }),
-            ("cancel", { $0.cancelVectorFloat() }),
-            ("tool switch", { $0.commitAllInteractiveState() }),
-            ("layer change", { $0.currentLayerIndex = 0 }),
-            ("frame change", { manager in
+        /// The flattened image of the layer's first cel — what Rasterize and Merge Down actually
+        /// wrote. Nil when the flatten is blank, which is the whole-cel failure.
+        func flattenedInk(_ manager: CanvasManager, _ layerIndex: Int) -> CGRect? {
+            guard manager.layers.indices.contains(layerIndex),
+                  let cel = manager.layers[layerIndex].cels.first else { return nil }
+            return PixelOps.opaqueContentBounds(
+                PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))
+        }
+
+        let paths: [(name: String, act: (CanvasManager, Int) -> Void,
+                     ink: ((CanvasManager, Int) -> CGRect?)?)] = [
+            ("commit", { manager, _ in manager.commitVectorFloatIfNeeded() }, nil),
+            ("cancel", { manager, _ in manager.cancelVectorFloat() }, nil),
+            ("tool switch", { manager, _ in manager.commitAllInteractiveState() }, nil),
+            ("layer change", { manager, _ in manager.currentLayerIndex = 0 }, nil),
+            ("frame change", { manager, _ in
                 // Onto a frame the *other* cel covers. A same-cel frame tick is deliberately not a
                 // context change (`handleActiveContextChanged`), so scrubbing inside one cel's range
                 // leaves the float alone — the raster piece behaves identically.
@@ -89,46 +136,69 @@ final class LassoMoveLogicTests: XCTestCase {
                         raster: .empty(size: CanvasFixture.canvasSize),
                         vector: .empty(size: CanvasFixture.canvasSize)))
                 manager.currentFrame = 6
-            }),
-            ("undo with zero nudges", { $0.undo() }),
+            }, nil),
+            ("undo with zero nudges", { manager, _ in manager.undo() }, nil),
             // The two handle kinds the box gained in stage 1. A scale and a rotate reach the same
             // teardown as a move, and this is the artwork-loss test, so they belong in it.
-            ("commit after a scale", { manager in
+            ("commit after a scale", { manager, _ in
                 manager.nudgeVectorFloat(to: {
                     guard var t = manager.vectorFloat?.frame.transform else { return .identity }
                     t.scale *= 1.8
                     return t
                 }())
                 manager.commitVectorFloatIfNeeded()
-            }),
-            ("undo after a rotate", { manager in
+            }, nil),
+            ("undo after a rotate", { manager, _ in
                 manager.nudgeVectorFloat(to: {
                     guard var t = manager.vectorFloat?.frame.transform else { return .identity }
                     t.rotation += 0.5
                     return t
                 }())
                 manager.undo()
-            })
+            }, nil),
+            // The two that flatten. Both must leave the ink where it was: the float is settled, not
+            // baked away, and no drag happened, so the picture is the one that was there before.
+            ("rasterize", { manager, layerIndex in
+                manager.rasterizeLayer(layerIndex: layerIndex)
+            }, { manager, layerIndex in flattenedInk(manager, layerIndex) }),
+            ("merge down", { manager, layerIndex in
+                manager.mergeLayers(manager.layers[layerIndex].id, manager.layers[layerIndex - 1].id)
+            }, { manager, _ in flattenedInk(manager, 0) })
         ]
-        for path in paths {
-            let (manager, layerIndex, vector) = fixture()
-            vector.addStroke(stroke(from: CGPoint(x: 8, y: 20), to: CGPoint(x: 56, y: 20)))
-            vector.addStroke(stroke(from: CGPoint(x: 20, y: 40), to: CGPoint(x: 30, y: 44)))
-            let idsBefore = Set(vector.elements.map(\.id))
-            select(manager, layerIndex, loop(CGRect(x: 24, y: 4, width: 32, height: 56)))
-            XCTAssertTrue(manager.beginVectorLassoMove(), "\(path.name): the lift should have caught something")
+        for kind in LiftKind.allCases {
+            for path in paths {
+                let label = "\(kind.rawValue) / \(path.name)"
+                let (manager, layerIndex, vector) = fixture()
+                vector.addStroke(stroke(from: CGPoint(x: 8, y: 20), to: CGPoint(x: 56, y: 20)))
+                vector.addStroke(stroke(from: CGPoint(x: 20, y: 40), to: CGPoint(x: 30, y: 44)))
+                let idsBefore = Set(vector.elements.map(\.id))
+                // Taken before the lift: afterwards the moved ids are suppressed, so the render is
+                // the hole rather than the drawing and comparing against it would assert nothing.
+                let inkBefore = inkBounds(vector)
+                XCTAssertTrue(lift(kind, manager, layerIndex), "\(label): the lift should have caught something")
 
-            path.act(manager)
+                path.act(manager, layerIndex)
 
-            XCTAssertTrue(vector.suppressedElementIDs.isEmpty,
-                          "\(path.name): \(vector.suppressedElementIDs.count) element(s) still suppressed after \(path.name)")
-            XCTAssertNil(manager.vectorFloat, "\(path.name): the float outlived its teardown")
-            // Nothing dropped: every id that was there before the lift is either still there, or has
-            // been replaced by pieces — and either way the list can never be *shorter* than it was.
-            let idsAfter = Set(vector.elements.map(\.id))
-            XCTAssertGreaterThanOrEqual(idsAfter.count, idsBefore.count,
-                                        "\(path.name): the display list lost elements")
-            XCTAssertFalse(vector.elements.isEmpty, "\(path.name): the display list was emptied")
+                XCTAssertTrue(vector.suppressedElementIDs.isEmpty,
+                              "\(label): \(vector.suppressedElementIDs.count) element(s) still suppressed")
+                XCTAssertNil(manager.vectorFloat, "\(label): the float outlived its teardown")
+                // Nothing dropped: every id that was there before the lift is either still there, or
+                // has been replaced by pieces — and either way the list can never be *shorter*.
+                let idsAfter = Set(vector.elements.map(\.id))
+                XCTAssertGreaterThanOrEqual(idsAfter.count, idsBefore.count,
+                                            "\(label): the display list lost elements")
+                XCTAssertFalse(vector.elements.isEmpty, "\(label): the display list was emptied")
+                if let ink = path.ink {
+                    guard let before = inkBefore else { return XCTFail("\(label): nothing rendered before the lift") }
+                    guard let after = ink(manager, layerIndex) else {
+                        return XCTFail("\(label): the flatten is blank — the whole cel was baked away")
+                    }
+                    XCTAssertEqual(after.minX, before.minX, accuracy: 1.5, "\(label): the flatten lost ink on the left")
+                    XCTAssertEqual(after.maxX, before.maxX, accuracy: 1.5, "\(label): the flatten lost ink on the right")
+                    XCTAssertEqual(after.minY, before.minY, accuracy: 1.5, "\(label): the flatten lost ink at the top")
+                    XCTAssertEqual(after.maxY, before.maxY, accuracy: 1.5, "\(label): the flatten lost ink at the bottom")
+                }
+            }
         }
     }
 
@@ -1674,6 +1744,242 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(box.height, 8, accuracy: 1e-3, "and exactly as tall as it was")
         XCTAssertEqual(box.midX, pivot.x, accuracy: 1e-3, "about the box's own centre")
         XCTAssertEqual(box.midY, pivot.y, accuracy: 1e-3)
+    }
+
+    // MARK: - Move with no selection (stage 1 of TODO item (15))
+
+    /// **The reported bug, 2026-08-27, and the reason this whole path moved.**
+    ///
+    /// The owner, on their iPad: *"After I shrink the entire canvas and put in a line, the line does
+    /// not bake properly, and only the part of the line in a box around the original object gets
+    /// baked."*
+    ///
+    /// The mechanism, and it is entirely in `VectorCanvas`: `renderLocalContent` rasterizes the
+    /// display list into a context of exactly `size` at the **local** origin, and `render()` applies
+    /// `_transform` to that finished bitmap *afterwards* — so the clip happens in local space, before
+    /// the transform. `addStroke(canvasSpaceStroke:)` stores `canvasPoint · _transform⁻¹`. So on a
+    /// cel shrunk by *k* about the ink's centre *P*, the only canvas region a later stroke can
+    /// survive in is the canvas rect scaled by *k* about *P* — a box around the original object,
+    /// which is what the owner saw, and not the top-left quadrant a first reading predicts.
+    ///
+    /// The `viaTheOldWholeLayerTransform` half of this test **is** that bug, written out: it is the
+    /// mechanism the Move tool used until this change, driven directly, and it asserts the loss. The
+    /// `viaTheFloat` half is the fix — a float moves geometry and never writes `_transform`, so there
+    /// is no local-space clip for the ink to fall out of. Keeping both in one method is deliberate:
+    /// the negative control is what stops the positive one rotting into a vacuous pass.
+    func testInkDrawnAfterAWholeCelShrinkIsNotClippedAway() {
+        /// Points along the second stroke's own line, spread from one corner of the canvas to the
+        /// other. Under the old mechanism only the middle one survives.
+        let alongTheLine = [CGPoint(x: 8, y: 8), CGPoint(x: 20, y: 20), CGPoint(x: 32, y: 32),
+                            CGPoint(x: 44, y: 44), CGPoint(x: 56, y: 56)]
+        func theLine() -> VectorStroke { stroke(from: CGPoint(x: 4, y: 4), to: CGPoint(x: 60, y: 60), size: 3) }
+        func theObject() -> VectorStroke { stroke(from: CGPoint(x: 24, y: 24), to: CGPoint(x: 40, y: 40), size: 4) }
+
+        // The control: the same line on a cel nothing has ever moved. Every point above is on it.
+        let (_, _, untouched) = fixture()
+        untouched.addStroke(canvasSpaceStroke: theLine())
+        for point in alongTheLine {
+            XCTAssertTrue(isOpaque(untouched, at: point),
+                          "fixture precondition: \(point) is on the line on an untouched cel")
+        }
+
+        // The bug, driven through the mechanism the Move tool used to use: `_transform` written to a
+        // 0.3× shrink about the content's own centre, exactly as `setVectorTransform` did.
+        let (_, _, viaTheOldWholeLayerTransform) = fixture()
+        viaTheOldWholeLayerTransform.addStroke(theObject())
+        guard let localBounds = viaTheOldWholeLayerTransform.localContentBounds() else {
+            return XCTFail("fixture precondition: the object has ink to measure")
+        }
+        let oldPivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
+        var shrunk = viaTheOldWholeLayerTransform.layerTransform(pivot: oldPivot)
+        shrunk.scale *= 0.3
+        viaTheOldWholeLayerTransform.setTransform(VectorCanvas.affine(from: shrunk, pivot: oldPivot))
+        viaTheOldWholeLayerTransform.addStroke(canvasSpaceStroke: theLine())
+
+        XCTAssertTrue(isOpaque(viaTheOldWholeLayerTransform, at: CGPoint(x: 32, y: 32)),
+                      "the old mechanism keeps the middle — that is the box around the original object")
+        XCTAssertFalse(isOpaque(viaTheOldWholeLayerTransform, at: CGPoint(x: 8, y: 8)),
+                       "and this is the reported bug: the far end of the line is clipped away in local space")
+        XCTAssertFalse(isOpaque(viaTheOldWholeLayerTransform, at: CGPoint(x: 56, y: 56)),
+                       "…at both ends")
+
+        // The fix: the same shrink, through Move with no selection.
+        let (manager, _, viaTheFloat) = fixture()
+        viaTheFloat.addStroke(theObject())
+        XCTAssertTrue(manager.beginVectorWholeCelMove(), "Move with no selection lifts the whole cel")
+        manager.nudgeVectorFloat(to: scaledBy(manager, 0.3))
+        manager.commitVectorFloatIfNeeded()
+        XCTAssertTrue(viaTheFloat.transform.isIdentity,
+                      "the float moved geometry — nothing may have been written to the layer transform")
+
+        viaTheFloat.addStroke(canvasSpaceStroke: theLine())
+        for point in alongTheLine {
+            XCTAssertTrue(isOpaque(viaTheFloat, at: point),
+                          "every sample of a line drawn after a whole-cel shrink must survive the render; \(point) did not")
+        }
+        guard let after = inkBounds(viaTheFloat), let control = inkBounds(untouched) else {
+            return XCTFail("nothing rendered")
+        }
+        XCTAssertLessThanOrEqual(after.minX, control.minX + 1.5, "the line reaches as far left as it does untouched")
+        XCTAssertGreaterThanOrEqual(after.maxX, control.maxX - 1.5, "…and as far right")
+    }
+
+    /// **A whole-cel lift splits nothing.** No path test, no `membershipRuns`, no fresh ids — the
+    /// moved set is the identity on the display list.
+    ///
+    /// This is the pinning test for `liftWholeCel`'s central decision. Implementing "the whole canvas
+    /// was lassoed" literally, as a canvas rect through `splitForLassoMove`, would cut every stroke
+    /// crossing the canvas edge into two permanent strokes with new ids — and this test is what says
+    /// so out loud.
+    func testAWholeCelLiftSplitsNothingAndCarriesEveryElement() {
+        let (manager, _, vector) = fixture()
+        // One stroke crossing the canvas edge and one wholly beyond it: exactly what a literal
+        // canvas-rect lasso would cut in half and abandon.
+        vector.addStroke(stroke(from: CGPoint(x: -12, y: 30), to: CGPoint(x: 30, y: 30), size: 4))
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 12), size: 4))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 40, y: 40, width: 40, height: 40),
+                                                      transform: nil),
+                                         color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),
+                                         opacity: 1))
+        let idsBefore = vector.elements.map(\.id)
+
+        guard let lifted = vector.liftWholeCel() else { return XCTFail("a non-empty cel must lift") }
+
+        XCTAssertEqual(lifted.elements.map(\.id), idsBefore, "same elements, same ids, same order")
+        XCTAssertEqual(lifted.insideIDs, Set(idsBefore), "every element travels")
+        XCTAssertEqual(vector.elements.map(\.id), idsBefore, "and the cel itself was not re-written")
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        XCTAssertEqual(vector.elements.map(\.id), idsBefore, "the lift is not a split")
+        XCTAssertEqual(manager.vectorFloat?.insideIDs, Set(idsBefore))
+        XCTAssertEqual(vector.suppressedElementIDs, Set(idsBefore), "all of it is suppressed while it floats")
+    }
+
+    /// **Content outside the canvas travels too**, which is the other half of the decision above: a
+    /// literal canvas-rect lasso would leave it behind, and off-canvas content is real here — a
+    /// stroke drawn past the edge, or content a previous shrink put out there.
+    func testOffCanvasContentTravelsWithAWholeCelMove() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 40, y: 10), size: 4))
+        vector.addStroke(stroke(from: CGPoint(x: -40, y: -30), to: CGPoint(x: -20, y: -30), size: 4))
+        let offCanvasID = vector.elements[1].id
+        let before = vector.elements[1].stroke?.samples.map(\.x) ?? []
+        XCTAssertFalse(before.isEmpty, "fixture precondition")
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        XCTAssertTrue(manager.vectorFloat?.insideIDs.contains(offCanvasID) == true,
+                      "content beyond the canvas edge is part of the whole cel and must travel with it")
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 5, dy: 0))
+        manager.commitVectorFloatIfNeeded()
+
+        let after = vector.elements.first { $0.id == offCanvasID }?.stroke?.samples.map(\.x) ?? []
+        XCTAssertEqual(after.count, before.count, "the off-canvas stroke is still one stroke")
+        for (a, b) in zip(before, after) {
+            XCTAssertEqual(b - a, 5, accuracy: 1e-6, "and it moved with everything else")
+        }
+    }
+
+    /// Four nudges are four steps, and the fourth press gives back the pre-lift list — the same
+    /// ruling as the lasso's, with the split half of it vacuous because a whole-cel lift cuts nothing.
+    func testFourWholeCelNudgesAreFourStepsAndTheFourthGivesBackThePreLiftList() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 4, y: 30), to: CGPoint(x: 60, y: 30), size: 4))
+        let originalID = vector.elements[0].id
+        let originalSamples = vector.elements[0].stroke?.samples.map(\.x) ?? []
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        XCTAssertEqual(vector.elements.count, 1, "the lift split nothing")
+        let stepsAtLift = manager.history.undoStack.count
+        for _ in 1...4 { manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0)) }
+        XCTAssertEqual(manager.history.undoStack.count - stepsAtLift, 4, "one step per nudge, and no more")
+
+        func travellingX() -> CGFloat? { vector.elements.first?.stroke?.samples.first?.x }
+        XCTAssertEqual(travellingX() ?? 0, (originalSamples.first ?? 0) + 16, accuracy: 1e-6)
+        manager.undo()
+        XCTAssertNotNil(manager.vectorFloat, "the first press leaves the piece floating")
+        XCTAssertEqual(travellingX() ?? 0, (originalSamples.first ?? 0) + 12, accuracy: 1e-6)
+        manager.undo()
+        manager.undo()
+        XCTAssertNotNil(manager.vectorFloat, "three presses in, the float is still alive")
+        manager.undo()
+
+        XCTAssertNil(manager.vectorFloat, "the fourth press ends the float")
+        XCTAssertEqual(vector.elements.count, 1)
+        XCTAssertEqual(vector.elements[0].id, originalID, "the very stroke that was there before")
+        XCTAssertEqual(vector.elements[0].stroke?.samples.map(\.x) ?? [], originalSamples)
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+        XCTAssertNil(manager.selection, "there was no loop, so there is none to put back")
+    }
+
+    /// The bake identity, for the whole-cel lift: a nudge to exactly where the box was lifted changes
+    /// no sample and no pixel.
+    func testAZeroDeltaWholeCelNudgeChangesNoSampleAndNoPixel() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 22), to: CGPoint(x: 40, y: 22), size: 5))
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 34), to: CGPoint(x: 40, y: 34), size: 5))
+        let pixelsBefore = cgImage(vector)
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        guard let float = manager.vectorFloat else { return XCTFail("no float") }
+        let samplesBefore = vector.elements.compactMap(\.stroke).map(\.samples)
+        manager.nudgeVectorFloat(to: float.frame.transform)
+        let samplesAfter = vector.elements.compactMap(\.stroke).map(\.samples)
+
+        XCTAssertEqual(samplesBefore.count, samplesAfter.count)
+        for (before, after) in zip(samplesBefore, samplesAfter) {
+            XCTAssertEqual(before.count, after.count)
+            for (a, b) in zip(before, after) {
+                XCTAssertEqual(a.x, b.x, accuracy: 1e-9)
+                XCTAssertEqual(a.y, b.y, accuracy: 1e-9)
+            }
+        }
+        manager.commitVectorFloatIfNeeded()
+        assertPixelsIdentical(cgImage(vector), pixelsBefore)
+    }
+
+    /// Move on an empty vector cel does **nothing** — no float, no suppression, no undo step. The
+    /// same shape as `testAnEmptyLassoDoesNothingAndLeavesTheLoopOnScreen`, answered in `liftWholeCel`
+    /// rather than at the call site so no caller can invent a float with nothing in it.
+    func testWholeCelMoveOnAnEmptyVectorCelDoesNothing() {
+        let (manager, _, vector) = fixture()
+        let stepsBefore = manager.history.undoStack.count
+
+        XCTAssertNil(vector.liftWholeCel(), "an empty cel has nothing to lift")
+        XCTAssertFalse(manager.beginVectorWholeCelMove())
+
+        XCTAssertNil(manager.vectorFloat)
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+        XCTAssertTrue(vector.elements.isEmpty)
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore, "and records nothing")
+    }
+
+    /// **The whole-cel float hands the canvas back.** `commitAllInteractiveState` settles it — which
+    /// the flag it replaced did *not* do, since nothing in that method ever cleared
+    /// `isVectorTransforming` — so a paint tool selected after a Move can draw again.
+    ///
+    /// The property is `CanvasTouchInputs.activeHostIsInteractive`, restated from `reconcileLayers`'
+    /// `shouldInteract`. Asserted rather than driven: the tool-switch call sites are TODO item (16),
+    /// being fixed independently, and this test's business is only that the whole-cel move no longer
+    /// leaves a latch behind for them to trip over.
+    func testAWholeCelMoveIsSettledByCommitAllInteractiveStateAndHandsTheCanvasBack() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10), size: 4))
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        XCTAssertTrue(manager.isAnyPieceFloating)
+
+        manager.commitAllInteractiveState()
+
+        XCTAssertNil(manager.vectorFloat, "the float is settled by the same chokepoint every tool switch goes through")
+        XCTAssertFalse(manager.isAnyPieceFloating)
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+        XCTAssertFalse(manager.isVectorTransforming,
+                       "Move with no selection no longer turns the whole-layer transform flag on at all")
+        let inputs = CanvasTouchInputs(tool: .pen,
+                                       hasVectorFloat: manager.vectorFloat != nil,
+                                       isVectorTransforming: manager.isVectorTransforming,
+                                       activeLayer: .vector)
+        XCTAssertTrue(inputs.activeHostIsInteractive,
+                      "with a paint tool selected the layer's own stroke recognizer must be live again")
     }
 
     // MARK: - Helpers

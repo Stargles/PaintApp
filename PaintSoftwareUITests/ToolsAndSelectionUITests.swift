@@ -456,10 +456,12 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     func testMoveWithNoSelectionLiftsWholeLayerAndCommits() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        // The floating-piece path is raster-only by design: `TopToolbar.toggleMove` sends a vector
-        // layer down `isVectorTransforming` instead, which writes `VectorCanvas.transform` and never
-        // shows the Move bottom bar. Vector is the default kind now (PLAN §8), so this test has to
-        // ask for the raster layer whose lift-and-bake it is about.
+        // The *raster* floating-piece path is what this test is about, and a vector layer does not
+        // take it: `TopToolbar.toggleMove` sends one to `beginVectorWholeCelMove`, which lifts a
+        // `VectorFloat` — geometry, not pixels, and nothing lands in the raster tier. (Until
+        // 2026-08-27 it toggled `isVectorTransforming` and showed no Move bar at all; either way this
+        // test has to ask for the raster layer whose lift-and-bake it is about, vector being the
+        // default kind since PLAN §8.)
         addRasterLayer(app)
 
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))
@@ -659,8 +661,9 @@ final class SelectionAndMoveUITests: PaintUITestCase {
     func testArmingTheEyedropperBakesAFloatingPieceRatherThanRacingIt() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
-        // The floating-piece path is raster-only by design — `TopToolbar.toggleMove` sends a vector
-        // layer down `isVectorTransforming` instead, and vector is the default kind.
+        // The *raster* floating-piece path this test is about is not what a vector layer takes —
+        // `TopToolbar.toggleMove` sends one to `beginVectorWholeCelMove` and it floats geometry — and
+        // vector is the default kind, so ask for a raster layer explicitly.
         addRasterLayer(app)
 
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))

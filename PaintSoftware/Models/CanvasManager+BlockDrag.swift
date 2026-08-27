@@ -173,6 +173,11 @@ extension CanvasManager {
         // geometry still attached would be a cel the target layer's tools cannot touch. Refuse
         // instead, rather than moving it into a state nothing can edit.
         if case .needsRasterization = verdict, canvasSize == nil { return false }
+        // A block that is about to be flattened takes `rasterizeLayer`'s hazard with it: the
+        // `PixelOps.rasterize` below honours a float's suppression and `cel.vector = nil` then
+        // destroys the geometry, so a float still open on this cel is baked away as a hole — the
+        // whole cel, once Move with no selection lifts every id. Settled before the scope, as there.
+        commitVectorFloatIfLifted(fromLayer: sourceLayerID, cel: celID)
 
         withStructureUndo(label: .moveFrameToLayer) {
             var cel = layers[sourceIndex].cels.remove(at: celIndex)

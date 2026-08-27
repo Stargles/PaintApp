@@ -1520,6 +1520,44 @@ final class VectorCanvas {
         return (result, insideIDs, Self.mayDiverge(result, movedIDs: insideIDs))
     }
 
+    /// `splitForLassoMove`'s answer for **Move with no selection**: the whole cel travels, and
+    /// nothing is cut. Same tuple, so `CanvasManager.beginVectorWholeCelMove` builds the identical
+    /// `VectorFloat` the lasso builds and every nudge, undo, bake and teardown path is shared.
+    ///
+    /// Nil on an empty cel, for `splitForLassoMove`'s reason: answering it here rather than at the
+    /// call site is what stops a caller inventing a float with nothing in it.
+    ///
+    /// **Every element id, with no containment test and no split — and the two obvious alternatives
+    /// are both wrong.**
+    ///
+    ///   * *"The whole canvas was lassoed"*, taken literally as `splitForLassoMove(insideLocalPath:
+    ///     canvasRect)`, would run `StrokeGeometry.membershipRuns` against the canvas edge: every
+    ///     stroke crossing that edge would become **two permanent strokes with fresh ids**, and
+    ///     everything wholly outside the canvas would be left behind. Off-canvas content is real
+    ///     here — a stroke drawn past the edge, or content that a previous shrink put out there —
+    ///     and abandoning it is exactly the artwork loss this whole change exists to end.
+    ///   * *`localContentBounds()`* is worse still: it is an alpha scan of `renderLocalContent`,
+    ///     which rasterizes into a context of exactly `size` at the local origin — so it can only
+    ///     ever report ink that is already inside the canvas rect. Deriving the moved set from it
+    ///     would exclude the very ink the clip is losing.
+    ///
+    /// So the answer is the identity: the moved set is the whole display list, which is what "move
+    /// the whole cel" means, and it is the one reading under which no element can be dropped.
+    ///
+    /// **`mayDiverge` is over-conservative here, deliberately left as it is.** With every id moving,
+    /// an isolated render of the moved set *is* a render of the whole list, so the latch could stand
+    /// for the float's whole life — but `mayDiverge` answers yes for any cel holding an `.erase`
+    /// stroke or a non-normal blend mode, so such a cel drops its latch at every gesture end and
+    /// re-renders. That is correct (it shows the truth) and merely costs one render per gesture;
+    /// reading the extra renders later as a bug is the mistake this paragraph exists to prevent.
+    func liftWholeCel() -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !_elements.isEmpty else { return nil }
+        let allIDs = Set(_elements.map(\.id))
+        return (_elements, allIDs, Self.mayDiverge(_elements, movedIDs: allIDs))
+    }
+
     /// Whether "render the moved ids alone, composite over the rest" can differ from "render the whole
     /// list" — i.e. whether the latched float is an approximation rather than the truth.
     ///

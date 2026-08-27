@@ -458,6 +458,16 @@ final class CanvasManager: ObservableObject {
         // the order the artist performed them in. Moved inside or below the scope, the two steps swap
         // and undo would try to un-transform a cel whose `vector` it has not put back yet.
         if isVectorTransforming && currentLayerIndex == layerIndex { isVectorTransforming = false }
+        // **The float's version of the line above, and it is silent artwork loss without it.** A
+        // float suppresses its ids out of the layer's own render; the suppression setter invalidates,
+        // so `PixelOps.RasterizeKey` misses and `rasterizeUncached` flattens through
+        // `cel.vector?.render(quality:)` *honouring* the suppression — and then the loop below sets
+        // `vector = nil`, so the geometry that produced the missing ink is gone too. With a lasso
+        // float that costs the lassoed subset; with a whole-cel float (`beginVectorWholeCelMove`,
+        // where every id is suppressed) it flattens the entire cel to blank, in the saved document,
+        // recoverable only by relaunch. Above `withStructureUndo` for that line's own reason: the
+        // settle must be part of the state the snapshot is taken *of*, not of the step it records.
+        commitVectorFloatIfLifted(fromLayer: layers[layerIndex].id)
         withStructureUndo(label: .rasterize) {
             for celIndex in layers[layerIndex].cels.indices {
                 let cel = layers[layerIndex].cels[celIndex]
@@ -1374,6 +1384,13 @@ final class CanvasManager: ObservableObject {
 
     func deleteLayer(at index: Int) {
         guard layers.indices.contains(index) else { return }
+        // Settle a float lifted from this layer *before* the layer goes, for `rasterizeLayer`'s
+        // reason one door along. `handleActiveContextChanged` below does commit it, but by then the
+        // layer is out of `layers`, so `vectorCanvas(ofFloat:)` resolves nothing and the suppression
+        // is left on the canvas — which `captureStructure` above is still holding by reference, so
+        // undoing the delete brings the layer back with its ink suppressed and nothing left alive to
+        // clear it.
+        commitVectorFloatIfLifted(fromLayer: layers[index].id)
         withStructureUndo(label: .deleteLayer) {
             // If the deleted layer is the active one, currentLayerIndex's *numeric* value may end up
             // unchanged (a later layer slides into the same slot) — didSet won't fire, so
