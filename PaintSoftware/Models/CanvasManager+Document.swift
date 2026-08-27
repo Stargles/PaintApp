@@ -18,7 +18,18 @@ extension CanvasManager {
     /// clear on next activation, see `updateActiveLayerAndTool`).
     func setCanvasPadding(_ newPadding: CGFloat) {
         guard let oldSize = canvasSize else { return }
-        let clamped = min(max(newPadding, Self.canvasPaddingRange.lowerBound), Self.canvasPaddingRange.upperBound)
+        // **Rounded, because `ActionsMenu`'s slider has no `step:` and this value is folded into
+        // `canvasSize` two lines down** — so a padding of 8.4 made the whole *canvas* 80.8 px wide,
+        // and a fractional canvas is a document the two compositor backends size differently:
+        // Metal rounds, UIKit's `UIGraphicsImageRenderer` ceils (MEASURED 2026-08-27, 80.2 → 80 vs
+        // 81, `CompositorParityLogicTests.testBothBackendsAllocateTheSameBufferForAFractionalCanvas`).
+        // The artist loses nothing: the slider's own readout is already `Int(…rounded()) px` and
+        // `CanvasManager+Fill` already rounds this before using it as a rect. This does not replace
+        // `RenderRequest.wholePixels` — `ProjectStore` restores `canvasSize` and `canvasPadding` as
+        // two independently decoded Doubles, so a project saved before today still loads fractional —
+        // it makes the class unreachable through the UI, which is where it came from.
+        let clamped = min(max(newPadding, Self.canvasPaddingRange.lowerBound),
+                          Self.canvasPaddingRange.upperBound).rounded()
         let delta = clamped - canvasPadding
         guard delta != 0 else { return }
 

@@ -945,13 +945,28 @@ final class CompositorMetalEngine {
             colour.getRed(&r, green: &g, blue: &b, alpha: &a)
             background = SIMD4<Float>(Float(r * a), Float(g * a), Float(b * a), Float(a))
         }
+        // **The paper covers the artwork rect, not the whole buffer** — `RenderBackground.rect`
+        // carries the decision and the arithmetic; this only obeys it. A padded canvas therefore
+        // needs two writes, because the margin still has to start transparent and the texture
+        // arrives undefined. A canvas with no padding — the default, and every fixture — takes the
+        // single full-texture write it always did, so nothing about the common path has moved.
         let paper = request.background?.rect
         let whole = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
         if let paper, paper != whole {
             fill(texture, with: SIMD4<Float>(repeating: 0), encoder: encoder, width: width, height: height)
+            // **Edges, not an extent.** `Int(paper.width)` *truncated*, so a 64.8-px paper became a
+            // 64-px fill and the column CoreGraphics antialiased was one this backend never wrote —
+            // MEASURED delta 204 (`RenderBackground.rect` carries the arithmetic). `rect` is whole
+            // pixels now, so these `.rounded()`s are the identity; they are here so that a rect which
+            // somehow is not cannot put `gid + origin` outside the texture, which `compositeFill`
+            // does not bounds-check and Metal leaves undefined rather than merely wrong.
+            let x0 = max(0, min(width, Int(paper.minX.rounded())))
+            let y0 = max(0, min(height, Int(paper.minY.rounded())))
+            let x1 = max(x0, min(width, Int(paper.maxX.rounded())))
+            let y1 = max(y0, min(height, Int(paper.maxY.rounded())))
             fill(texture, with: background, encoder: encoder,
-                 width: Int(paper.width), height: Int(paper.height),
-                 origin: SIMD2<UInt32>(UInt32(max(0, paper.minX)), UInt32(max(0, paper.minY))))
+                 width: x1 - x0, height: y1 - y0,
+                 origin: SIMD2<UInt32>(UInt32(x0), UInt32(y0)))
         } else {
             fill(texture, with: background, encoder: encoder, width: width, height: height)
         }

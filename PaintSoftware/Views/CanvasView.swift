@@ -567,8 +567,22 @@ struct CanvasView: UIViewRepresentable {
             paperView.backgroundColor = UIColor(canvasManager.canvasBackgroundColor)
             paperView.isHidden = !canvasManager.isCanvasBackgroundVisible || compositeCarriesThePaper
             // Inset the paper to the artwork rect; the grey backdrop shows through the margin.
+            //
+            // **Whole pixels, matching `RenderBackground.rect`.** The container's bounds are exactly
+            // `canvasSize` (`hostBoundsDidChange`) and the composite is blitted into that same
+            // container `.scaleToFill`, so one point here is one canvas pixel and the artwork rect
+            // the compositor fills is this same integer inset. The two are shown in *alternation*,
+            // never together (`isHidden` above), so a disagreement is not a double image — it is the
+            // paper edge jumping by up to half a pixel the moment an adjustment layer engages the
+            // sandwich. `CanvasManager+Fill` already spells the artwork rect this way; this is the
+            // third consumer of the same rect and they now agree.
+            //
+            // Residual, and deliberately not chased: at 75%/50% the composite's inset is
+            // `round(canvasPadding × scale) / scale`, up to a canvas pixel from this. At reduced
+            // resolution the composite is magnified with `.linear` so its paper edge is soft anyway,
+            // and `paperView` is hidden throughout.
             if let c = paperInsetConstraints {
-                let p = canvasManager.canvasPadding
+                let p = canvasManager.canvasPadding.rounded()
                 if c.top.constant != p { c.top.constant = p }
                 if c.leading.constant != p { c.leading.constant = p }
                 if c.bottom.constant != -p { c.bottom.constant = -p }

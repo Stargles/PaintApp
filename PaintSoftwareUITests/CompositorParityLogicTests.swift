@@ -1096,6 +1096,152 @@ final class CompositorParityLogicTests: XCTestCase {
                        "The background is premultiplied on the GPU and set as a fill colour on the CPU")
     }
 
+    // MARK: - A fractional canvas (EFFECT_BACKDROP.md §7 defect 3)
+
+    /// **The two backends do not round a fractional canvas the same way, and that is measured here
+    /// rather than reasoned about — it is the fact `RenderRequest.wholePixels` exists for.**
+    ///
+    /// `CompositorMetalEngine.attempt` allocates `Int(width.rounded())`;
+    /// `CoreGraphicsCompositor.composite` hands the size to a `UIGraphicsImageRenderer`, whose sizing
+    /// rule UIKit does not document. MEASURED 2026-08-27 on the iOS 26.5 simulator: **UIKit ceils.**
+    /// A bounds of 80.2 gives an 81-px context where Metal gives an 80-px texture. 80.2 is chosen
+    /// precisely because `ceil` and `round` disagree about it — at 80.8 both say 81 and the
+    /// difference is invisible.
+    ///
+    /// That is worse than a paper bug and no amount of rounding `RenderBackground.rect` reaches it:
+    /// two composites of different dimensions cannot be compared per-pixel at all
+    /// (`CanvasFixture.rgbaBytes` reads back different byte counts and `maxChannelDelta` degenerates
+    /// to `.max`). **So the rounding has to happen upstream of both**, which is what
+    /// `makeRenderRequest` now does — and it is why deleting `RenderResolution.renderSize`'s `.full`
+    /// guard was never going to be sufficient on its own: this path never consults it.
+    ///
+    /// The first assertion pins UIKit's rule directly, so that if a future iOS changes it the failure
+    /// names the cause instead of surfacing as a mystery parity delta.
+    func testBothBackendsAllocateTheSameBufferForAFractionalCanvas() throws {
+        try skipUnlessGPUAvailable()
+        let raw = UIGraphicsImageRenderer(bounds: CGRect(x: 0, y: 0, width: 80.2, height: 80.2),
+                                          format: PixelOps.transparentFormat()).image { _ in }
+        print("[compositor] UIGraphicsImageRenderer(80.2) → \(Int(raw.size.width))×\(Int(raw.size.height))")
+        XCTAssertEqual(raw.size, CGSize(width: 81, height: 81),
+                       "UIKit ceils a fractional renderer bounds and Metal rounds it — the whole "
+                       + "reason a render size is snapped before either backend sees it")
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.canvasSize = CGSize(width: 80.2, height: 80.2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32),
+                                                               size: CGSize(width: 80.2, height: 80.2)))
+
+        guard let (gpu, cpu) = gpuAndCPU(manager, includeBackground: false) else { return }
+        print("[compositor] fractional canvas 80.2 → GPU \(gpu.width)×\(gpu.height), CPU \(cpu.width)×\(cpu.height)")
+        XCTAssertEqual([gpu.width, gpu.height], [cpu.width, cpu.height],
+                       "The two backends sized the same canvas differently, so no per-pixel comparison "
+                       + "between them means anything on a fractional canvas")
+        XCTAssertEqual([cpu.width, cpu.height], [80, 80],
+                       "`RenderRequest.wholePixels` rounds once, upstream of both, so neither backend "
+                       + "is handed the 80.2 it would resolve for itself")
+        XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "…and once they agree on the buffer, they agree on the bytes")
+    }
+
+    /// The paper rect itself, whole pixels, stated as a number.
+    ///
+    /// Both backends index integers — Metal dispatches a thread grid (`MetalCompositor` fills the
+    /// background rect through `fill`) and CoreGraphics indexes a bitmap — so a fractional edge is
+    /// not a soft edge, it is each backend rounding for itself. `canvasBackground` rounded the
+    /// **inset** and not the resulting **rect**, which is exactly enough asymmetry to produce one.
+    ///
+    /// The state is assigned the way `ProjectStore.assemble` assigns it — `canvasSize` and
+    /// `canvasPadding` as two independent values — rather than through `setCanvasPadding`, so this
+    /// keeps testing a reachable document now that the slider rounds at the source: a project saved
+    /// before that change still loads fractional.
+    func testTheCanvasBackgroundRectIsWholePixelsOnAFractionalCanvas() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.canvasBackgroundColor = .white
+        manager.isCanvasBackgroundVisible = true
+        manager.canvasSize = CGSize(width: 80.8, height: 80.8)
+        manager.canvasPadding = 8.4
+
+        guard let rect = manager.makeRenderRequest(atFrame: 0, includeBackground: true)?.background?.rect else {
+            return XCTFail("A visible canvas background must produce a paper")
+        }
+        XCTAssertEqual(rect, rect.integral, "Got \(rect) — a fractional edge is a parity bug by construction")
+        XCTAssertEqual(rect, CGRect(x: 8, y: 8, width: 65, height: 65),
+                       "The 80.8-px buffer rounds to 81, and 8.4 rounds to an inset of 8 on each side")
+    }
+
+    /// **A fractional canvas padding, which is the one the slider used to produce.**
+    ///
+    /// `ActionsMenu` hands `setCanvasPadding` the raw slider `Double` and only the px readout rounds,
+    /// and `setCanvasPadding` folds the value into `canvasSize` — so a fractional padding was a
+    /// fractional *canvas*, and `RenderResolution.full` is the one case that does not round it away.
+    ///
+    /// `testTheGPUDrawsTheBackgroundUnderTheStack` above cannot see this: its fixture has no padding,
+    /// so the paper rect equals the whole buffer and Metal takes the single-write fast path. Padding
+    /// plus two backends is the only case EFFECT_BACKDROP.md §6 step 3 altered that nothing covered.
+    ///
+    /// MEASURED before the fix: **max channel delta 204**, on column 72 and row 72 of an 81-px
+    /// buffer — CoreGraphics antialiased a 0.8-covered column to `255 × 0.8`, Metal truncated
+    /// `Int(64.8)` to 64 and left it at the transparent pre-clear.
+    func testTheGPUAndCPUAgreeOnThePaperUnderAFractionalCanvasPadding() throws {
+        try skipUnlessGPUAvailable()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
+        manager.canvasBackgroundColor = .white
+        manager.isCanvasBackgroundVisible = true
+        manager.canvasSize = CGSize(width: 80.8, height: 80.8)
+        manager.canvasPadding = 8.4
+
+        guard let (gpu, cpu) = gpuAndCPU(manager, includeBackground: true) else { return }
+        let delta = maxChannelDelta(gpu, cpu)
+        XCTAssertEqual(delta, 0,
+                       "The paper's edge is one rectangle, not one per backend. Metal truncated a "
+                       + "64.8-px fill to 64 while CoreGraphics antialiased the 0.8 — differ by \(delta)")
+    }
+
+    /// The same document with no padding at all, which the fractional canvas breaks on its own.
+    ///
+    /// With the rect derived from the fractional `renderSize`, `(0,0,80.8,80.8)` is not equal to the
+    /// `(0,0,81,81)` whole texture, so Metal took the *two-write* path — a transparent clear followed
+    /// by an `Int(80.8) = 80` fill — and silently lost the last row and column of paper on a document
+    /// with no margin to lose it into. Deriving the rect from the buffer restores the fast path by
+    /// making the comparison exact again.
+    func testTheGPUKeepsTheWholeTexturePaperPathOnAFractionalCanvasWithNoPadding() throws {
+        try skipUnlessGPUAvailable()
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.canvasBackgroundColor = .white
+        manager.isCanvasBackgroundVisible = true
+        manager.canvasSize = CGSize(width: 80.8, height: 80.8)
+
+        guard let rect = manager.makeRenderRequest(atFrame: 0, includeBackground: true)?.background?.rect else {
+            return XCTFail("A visible canvas background must produce a paper")
+        }
+        XCTAssertEqual(rect, CGRect(x: 0, y: 0, width: 81, height: 81),
+                       "No padding means the paper is the whole buffer, and the buffer is 81 px")
+        guard let (gpu, cpu) = gpuAndCPU(manager, includeBackground: true) else { return }
+        XCTAssertEqual(maxChannelDelta(gpu, cpu), 0, "An unpadded canvas is paper edge to edge on both backends")
+    }
+
+    /// **The slider cannot mint a fractional canvas any more**, which is what makes the whole class
+    /// above unreachable through the UI rather than merely handled.
+    ///
+    /// `ActionsMenu`'s readout already tells the artist the value is an integer (`Int(…rounded()) px`)
+    /// and `CanvasManager+Fill` already rounds it before using it as a rect, so rounding at the source
+    /// changes nothing the artist can observe and keeps `canvasSize` whole. It does **not** replace
+    /// the rect fix: `ProjectStore` restores `canvasSize` and `canvasPadding` as two independently
+    /// decoded `Double`s with no cross-check, so a project saved before today still loads fractional.
+    ///
+    /// Lives in this file rather than beside the other padding fixtures because the property it pins
+    /// is a compositor one — "neither backend is ever handed an arithmetic problem" — and this file is
+    /// where that claim is tested.
+    func testTheCanvasPaddingSliderCannotProduceAFractionalCanvas() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.setCanvasPadding(8.4)
+        XCTAssertEqual(manager.canvasPadding, 8, "The px readout already tells the artist it is an integer")
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 80, height: 80),
+                       "…so the buffer stays whole pixels and no backend has to round it for itself")
+    }
+
     /// **The backend no longer declines a group that needs its own buffer, which is phase 5's change
     /// to it.** This test used to assert the opposite — `XCTAssertNil(MetalCompositor.composite(...))`
     /// for a faded group — and the bail-out it pinned was affordable only while a faded group was the

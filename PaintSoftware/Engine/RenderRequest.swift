@@ -240,10 +240,19 @@ enum RenderResolution: String, CaseIterable, Identifiable {
     ///
     /// `max(1, …)` because a degenerate canvas must stay degenerate in the same direction the rest of
     /// the pipeline already guards for, rather than becoming a zero-sized texture allocation.
+    ///
+    /// **`.full` used to be exempted from the rounding by a `guard`, which contradicted every word
+    /// above, and the contradiction is measurable.** MEASURED 2026-08-27
+    /// (`CompositorParityLogicTests.testBothBackendsAllocateTheSameBufferForAFractionalCanvas`): on a
+    /// canvas of 80.2, Metal allocates `Int(80.2.rounded()) = 80` and CoreGraphics'
+    /// `UIGraphicsImageRenderer` allocates **81** — UIKit *ceils* a fractional bounds where this
+    /// codebase rounds. Two backends, two different buffers, and every per-pixel comparison between
+    /// them is then comparing byte arrays of different lengths. `RenderRequest.wholePixels` is what
+    /// actually closes that on both request builders; this line is here so the type stops making a
+    /// claim its own implementation broke.
     func renderSize(for canvasSize: CGSize) -> CGSize {
-        guard self != .full else { return canvasSize }
-        return CGSize(width: max(1, (canvasSize.width * scale).rounded()),
-                      height: max(1, (canvasSize.height * scale).rounded()))
+        CGSize(width: max(1, (canvasSize.width * scale).rounded()),
+               height: max(1, (canvasSize.height * scale).rounded()))
     }
 }
 
@@ -264,9 +273,20 @@ struct RenderBackground: Equatable {
     let color: UIColor
 
     /// **Which pixels of this request's own buffer the paper covers** — `canvasSize` inset by
-    /// `canvasPadding` on every side, already scaled into this request's `canvasSize` and snapped to
-    /// whole pixels, so both backends fill exactly the same integers and no rounding can separate
-    /// them.
+    /// `canvasPadding` on every side, scaled into this request's own `canvasSize` and then derived
+    /// from the **whole-pixel buffer both backends allocate** (`RenderRequest.wholePixels`), so both
+    /// fill exactly the same integers and no rounding can separate them.
+    ///
+    /// **That last clause is a correction, and the old wording was the bug.** This field used to be
+    /// built by rounding the *inset* and leaving the resulting *width* alone, which on a fractional
+    /// canvas is not the same thing at all: padding 8.4 on a canvas of 80.8 gave `(8, 8, 64.8, 64.8)`
+    /// — an integral origin and a fractional extent. Metal truncated `Int(64.8)` to 64 and left the
+    /// last column at its transparent pre-clear; CoreGraphics antialiased that column to 0.8 coverage
+    /// and wrote `255 × 0.8`. MEASURED: **max channel delta 204** on column 72 and row 72
+    /// (`CompositorParityLogicTests.testTheGPUAndCPUAgreeOnThePaperUnderAFractionalCanvasPadding`).
+    /// A fractional canvas is reachable — `setCanvasPadding` folded a continuous slider value into
+    /// `canvasSize`, and `ProjectStore` still decodes the two independently for a project saved
+    /// before that was rounded at the source.
     ///
     /// **The decision this field records (EFFECT_BACKDROP.md §6 step 3's open question): the paper is
     /// the artwork rect, and the padding margin is not paper.** `CanvasManager.canvasSize` includes
@@ -366,6 +386,34 @@ struct RenderRequest {
         guard scale < 1 else { return canvasSize }
         return CGSize(width: max(1, (canvasSize.width * scale).rounded()),
                       height: max(1, (canvasSize.height * scale).rounded()))
+    }
+
+    /// The buffer a request of this size actually gets, in whole pixels — **the one rounding both
+    /// backends are held to**, applied where a `renderSize` is finalised rather than left to either
+    /// of them.
+    ///
+    /// **The two do not round the same way, and that is measured rather than assumed.**
+    /// `CompositorMetalEngine.attempt` allocates `Int(width.rounded())`; `CoreGraphicsCompositor`
+    /// hands the size to a `UIGraphicsImageRenderer`, and UIKit **ceils** it. MEASURED 2026-08-27 on
+    /// the iOS 26.5 simulator (`CompositorParityLogicTests.testBothBackendsAllocateTheSameBufferForA`
+    /// `FractionalCanvas`): a canvas of 80.2 is 80 px on the GPU and **81 px** on the CPU. At that
+    /// point the two composites are images of different dimensions and no per-pixel comparison
+    /// between them means anything — `CanvasFixture.rgbaBytes` reads back different byte counts and
+    /// the parity suite's `maxChannelDelta` degenerates to `.max`. It is not a paper problem and no
+    /// amount of rounding `RenderBackground.rect` reaches it.
+    ///
+    /// **Every path that finalises a size has to pass through here, which is why this is not folded
+    /// into `RenderResolution.renderSize`.** That one is bypassed twice: `makeRenderRequest` sets
+    /// `renderSize = canvasSize` outright when it has no bounding box (the eyedropper, the live-mask
+    /// resolve, every parity test), and `renderSize(fitting:within:)` returns `canvasSize` verbatim
+    /// whenever the box is larger than the canvas. Deleting the `.full` guard alone would have fixed
+    /// neither.
+    ///
+    /// `max(1, …)` for `RenderResolution.renderSize`'s reason: a degenerate canvas stays degenerate
+    /// in the direction the rest of the pipeline already guards for, rather than becoming a
+    /// zero-sized allocation.
+    static func wholePixels(_ size: CGSize) -> CGSize {
+        CGSize(width: max(1, size.width.rounded()), height: max(1, size.height.rounded()))
     }
 }
 
@@ -487,9 +535,12 @@ extension CanvasManager {
         if let bound {
             let wanted = RenderRequest.renderSize(fitting: canvasSize, within: bound)
             let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
-            renderSize = CompositorBudget.affordableSize(for: wanted, textures: textures)
+            // Whole pixels last, after the cap: `affordableSize` returns its argument verbatim on any
+            // document that already fits, so it passes a fractional canvas straight through — see
+            // `RenderRequest.wholePixels` for the 80.2-is-80-or-81 measurement this closes.
+            renderSize = RenderRequest.wholePixels(CompositorBudget.affordableSize(for: wanted, textures: textures))
         } else {
-            renderSize = canvasSize
+            renderSize = RenderRequest.wholePixels(canvasSize)
         }
 
         let maskStacks = maskSourceStacks(of: tree)
@@ -515,22 +566,44 @@ extension CanvasManager {
     /// may be smaller than the canvas (`RenderResolution`, `CompositorBudget`, the thumbnail's
     /// bounding box), so the inset is scaled with it rather than applied in canvas pixels.
     ///
-    /// **Rounded here, once, so the two backends receive integers rather than an arithmetic
-    /// problem.** `CompositorParityLogicTests` is this subsystem's gate and a fill whose edge each
-    /// backend rounded for itself is precisely the shape of failure it exists to catch.
+    /// **The whole rect is whole pixels, not merely the inset**, so the two backends receive integers
+    /// rather than an arithmetic problem. `CompositorParityLogicTests` is this subsystem's gate and a
+    /// fill whose edge each backend rounded for itself is precisely the shape of failure it exists to
+    /// catch — which is what it caught: rounding the inset and not the extent left a 0.8-px column
+    /// that Metal truncated away and CoreGraphics antialiased, MEASURED at delta 204. See
+    /// `RenderBackground.rect`.
+    ///
+    /// Derived from `RenderRequest.wholePixels(renderSize)` rather than from `renderSize` itself.
+    /// Both callers already pass a whole-pixel size, so this is the identity for them; it is spelled
+    /// out anyway because the rect's correctness is a property of *the buffer the backends allocate*
+    /// and not of what the caller happened to hand over, and a future caller getting that wrong
+    /// should be harmless rather than a parity bug.
     @MainActor
     func canvasBackground(renderedInto renderSize: CGSize) -> RenderBackground? {
         guard isCanvasBackgroundVisible, let canvasSize,
               canvasSize.width > 0, canvasSize.height > 0,
               renderSize.width > 0, renderSize.height > 0 else { return nil }
-        let insetX = (canvasPadding * renderSize.width / canvasSize.width).rounded()
-        let insetY = (canvasPadding * renderSize.height / canvasSize.height).rounded()
-        // `max(0, …)` for the degenerate document the padding slider can reach on a small canvas:
-        // an inset wider than the canvas means there is no artwork rect left, and an empty rect is
-        // the honest answer to that rather than a negative one both backends would read differently.
+        let buffer = RenderRequest.wholePixels(renderSize)
+        // `min(…, half)` for the degenerate document a hand-written or pre-2026-08-27 manifest can
+        // carry: `ProjectStore` decodes `canvasSize` and `canvasPadding` as two independent Doubles
+        // with no cross-check, so an inset wider than half the buffer is expressible even though
+        // `setCanvasPadding` cannot reach it (the canvas grows with the padding). Clamping is what
+        // keeps the rect from acquiring a negative width, or an origin past the end of the texture —
+        // `compositeFill` writes `gid + origin` with no bounds test, and an out-of-range
+        // `texture2d::write` is undefined in Metal rather than merely wrong.
+        let insetX = min((canvasPadding * buffer.width / canvasSize.width).rounded(),
+                         (buffer.width / 2).rounded(.down))
+        let insetY = min((canvasPadding * buffer.height / canvasSize.height).rounded(),
+                         (buffer.height / 2).rounded(.down))
+        // One inset per axis, rounded to nearest and applied to both sides — so the rect stays
+        // *exactly* symmetric and the "symmetric on all four sides, which is what keeps it out of the
+        // flip" claim below survives verbatim. Asymmetric rounding would also have been safe (both
+        // backends index rows y-down from the top, which `testTheGPUMatchesTheCPUReferenceExactly`
+        // already proves on vertically asymmetric content) but it buys nothing: the residual against
+        // the true artwork rect is ≤0.5 px per edge either way.
         let rect = CGRect(x: insetX, y: insetY,
-                          width: max(0, renderSize.width - 2 * insetX),
-                          height: max(0, renderSize.height - 2 * insetY))
+                          width: max(0, buffer.width - 2 * insetX),
+                          height: max(0, buffer.height - 2 * insetY))
         return RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor), rect: rect)
     }
 
@@ -623,7 +696,9 @@ extension CanvasManager {
         // where it is most expensive, to preserve sharpness on the frames least able to afford it.
         let wanted = renderResolution.renderSize(for: canvasSize)
         let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
-        let renderSize = CompositorBudget.affordableSize(for: wanted, textures: textures)
+        // `wholePixels` last, for `makeRenderRequest`'s reason: the cap is a no-op on a document that
+        // already fits, so it hands a fractional canvas back unchanged.
+        let renderSize = RenderRequest.wholePixels(CompositorBudget.affordableSize(for: wanted, textures: textures))
 
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
         let maskStacks = maskSourceStacks(of: tree)
