@@ -76,11 +76,28 @@ mandatory. `below` is opaque under §6 step 3, so a ghost drawn on top of it is 
 and `above` keeps `background: nil` so artwork on layers over the active one still covers the ghost —
 which is what `.behind` means.
 
-**The one behaviour change, stated rather than discovered**: a Behind ghost is now drawn *over* the
-layers below the active layer instead of under them, and it is never dimmed by an effect. For a single
-layer, or when drawing on the top layer, this is identical to today. It differs only with layers
-beneath the active one **and** Behind placement selected — and the owner's *"so user can see it
-clearly"* is the reason to prefer the new answer in exactly that case.
+**THE PARAGRAPH THAT USED TO SIT HERE WAS WRONG, AND REVIEW CAUGHT IT BEFORE IT SHIPPED.** It said the
+change *"differs only with layers beneath the active one and Behind placement selected"*. That is true
+of the **mid-stroke** split and false at **rest**, which is where the artist actually lives — mid-stroke
+lasts as long as a touch is down.
+
+At rest the sandwich puts the **whole tree** in the lower view (`belowView.image = images.full`), sets
+`aboveView.image = nil` and hides it, and blanks **every** layer host. So a ghost fronted above
+`belowView` has nothing left to cover it: it paints over the layers above the active one, over the
+active layer's own ink, and over the layers below. **`.behind` becomes pixel-identical to `.inFront`,
+and one of the two placements is silently lost.**
+
+Scope is wider than effect layers, because engagement is `needsCompositorOnCanvas` — any non-normal
+blend mode, any alpha mask, any clip-to-below, any buffered group. One multiply shadow layer is enough.
+
+**This is now an owner question, not a bug to fix quietly**, because their ruling taken literally —
+*"onion skin goes over compositing so user can see it clearly"* — *is* what the at-rest picture does.
+The choice is between (a) accepting that Behind and In Front coincide whenever the compositor engages,
+which is the cheapest reading of the ruling and loses a placement; (b) keeping the ghost out of the
+composite but splitting the at-rest presentation so something still covers it, which is new work in a
+path this document called untouched; or (c) compositing the onion skin into the request after all,
+which is the branch §2.1 originally called mandatory and the ruling deleted. **Recommendation: (b)** —
+the ruling was about visibility, not about collapsing two features into one.
 
 ### 2.2 Once the paper is in the accumulator, alpha stops meaning coverage
 
@@ -221,3 +238,42 @@ this subsystem's gate.
 adjustment layer over an **empty** canvas region changes those pixels. It fails today. Add the
 `BlendMode.allCases` sweep too — one test covers all twenty modes by construction rather than twenty
 tests covering them by enumeration.
+
+## §7 — What the build got wrong, found by review before merge (2026-08-27)
+
+Stages 1-4 are built on `tmp/effectbackdrop` (`e71e2a3`, `f1abe03`, `a0e611c`, `fe2743f`) and
+**MUST NOT MERGE AS THEY STAND**. The mechanism is right and `testAnAdjustmentLayerGradesTheEmptyCanvas`
+goes from `[0,0,0,0]` to `[128,128,128,255]` — the owner's report, byte for byte — but three
+independent reviewers found four defects, all measured rather than argued.
+
+1. **`PerfBaselineTests` is RED, in a file the branch never opened.** `RenderTree`'s texture estimate
+   **doubled, 5 to 10**, for a bloom document, because Bloom's ruled default is `.ink` and the re-walk
+   counts a second pair. That number feeds `CompositorBudget.affordableSize`, so **every composite on a
+   memory-constrained device shrinks** — and the failing test is the owner's own crash scene, 4096² with
+   vector + bloom + blur on the iPad 9 budget. The estimate must count the re-walk's peak, not its sum.
+2. **An `.ink` effect composites the ink a second time, and it is not subtle.** The re-walk builds the
+   sub-tree on transparency and draws it over an accumulator that already holds the same sub-tree over
+   paper; `blendOver` with `da == 0` returns the source unblended, so the ink is source-over'd onto
+   itself. MEASURED: a 60%-alpha black square reads **[102,102,102]** normally and **[41,41,41]** with an
+   Outline layer above it. **Adding an Outline layer, changing nothing else, darkens the layer by 40%.**
+   Bloom is worse, because `.ink` is its shipped default. The fix is to composite the *difference* the
+   grade made, or to re-walk into the accumulator rather than over it.
+3. **Backend parity breaks on a fractional `canvasPadding`, and the slider produces one.**
+   `ActionsMenu` passes a continuous `Double` straight through (the `px` readout rounds for display
+   only), and `canvasBackground` rounds the **inset** but not the resulting **rect** — so Metal
+   truncates 64.8 to 64 while CoreGraphics antialiases the last column. MEASURED: **max channel delta
+   204** at one pixel. It also makes the paper asymmetric on screen, because `updatePaper` insets by the
+   *unrounded* value. **Neither existing parity test catches it**: both use integer padding, so the only
+   case the change altered is the only case nothing covers. Fix in one place — return an integral rect,
+   not merely an integral inset.
+4. **The onion skin at rest** — §2.1 above, now an owner question.
+
+**Two smaller things worth carrying**, both from the build agent rather than the reviewers:
+`Effect.reshapesCoverage` is **not** exhaustive (it has a `default:`), so this document was wrong to
+call it the model to copy; and **§4's table names twelve of thirteen effects — Sharpen is missing**, in
+this document and in BUGS.md's copy of it. The build answered it `.backdrop`, reasoning that sharpen's
+`x + amount·(x − blur(x))` has a zero second term across flat paper, so a uniform backdrop is the
+identity for it exactly as it is for the blur it is built on. **Confirm that rather than inherit it.**
+And nothing downstream switches on `Input` — all four consumers test `== .ink`, so a third case would
+compile clean and silently take the backdrop path. The exhaustive switch protects the declaration and
+nothing that acts on it.

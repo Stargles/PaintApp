@@ -13,25 +13,28 @@ You are the orchestrator: delegate the building and the test runs, do the mergin
 inline. `main` is at 1773 fast-tier tests (1769 passed, 3 skipped). There is ONE branch in flight —
 `tmp/effectbackdrop`, four commits, unmerged — and its state is the first thing to establish.
 
-**1. Finish the effect backdrop.** EFFECT_BACKDROP.md is the spec and every design question in it is
-   already ruled. Stages 1-4 are committed on `tmp/effectbackdrop`: the onion skin's z-order,
-   `Effect.input`, the paper entering the composite, and the ink-only re-walk. Three adversarial
-   reviewers were reading it when session 71 ended — check `git log` and the branch before assuming
-   anything about their verdict. **Then stages 5 and 6**: Bloom's and Sobel's controls with their
-   persisted fields and decode defaults, and the thumbnail flag.
-   **Expect backend parity trouble at stage 3** — the background fill is a Metal dispatch on one side
-   and a `UIRectFill` on the other, and `CompositorParityLogicTests` is this subsystem's gate.
+**1. Fix the effect backdrop, then merge it. DO NOT MERGE `tmp/effectbackdrop` AS IT STANDS.**
+   Stages 1-4 are committed and the mechanism is right — the owner's report goes from `[0,0,0,0]` to
+   `[128,128,128,255]` — but three reviewers found four measured defects, written up as
+   **EFFECT_BACKDROP.md §7**. Two are serious: the texture estimate **doubled** for a bloom document and
+   turned `PerfBaselineTests` red *in a file the branch never opened*, which shrinks every composite on
+   a memory-constrained device and is the owner's own crash scene; and an `.ink` effect composites the
+   ink twice, so **adding an Outline layer darkens the layer beneath it by 40%** (MEASURED 102 → 41).
+   The third is a parity break on fractional canvas padding that neither parity test covers, because
+   both use integer padding. **The fourth is a question for the owner, not a fix** — see §2.1, where
+   this document's own ruling turned out to be analysed for the mid-stroke case and false at rest.
+   **Then stages 5 and 6**: Bloom's and Sobel's controls with their persisted fields and decode
+   defaults, and the thumbnail flag. And confirm §4's table — it names twelve of thirteen effects,
+   **Sharpen is missing**, and the build agent answered it `.backdrop` by reasoning rather than ruling.
 
-**2. Get it on the iPad, and lead with what changed underneath the artist.** Four things shipped this
-   pass that a person has to look at, and the last two change what existing documents look like:
+**2. Get it on the iPad.** Two things shipped this pass that a person has to look at:
    - **Draw across the canvas after shrinking a whole vector cel.** The whole line must survive. This
      is the data loss you reported, and it is fixed — this is the confirmation.
    - **Move with no lasso now shows the Move bar**, where there was never one. Freeform and Mirror are
      live on text now; they still grey out on a placed image, which is deliberate.
-   - **Sobel looks different.** Its default input changed to the canvas colour, so it is bright edges
-     on black rather than edges over white paper. Your ruling; flagged because open documents change.
-   - **The Behind onion skin draws over the layers below the active one** rather than under them.
-     Identical on one layer or on the top layer.
+   - Sobel's changed default is **not** on the iPad either — it is stage 5, unbuilt.
+   - The onion-skin change is **not** on the iPad — it is on the unmerged branch, and §2.1 needs an
+     answer first.
 
 **3. Then TODO.md's canvas-geometry programme**, which is five asks and one number. (8) is settled and
    buildable today. (12) stages 2-4 are the clean-up you asked for — deleting the legacy whole-layer
@@ -50,7 +53,8 @@ them: a Freeform-stretched text box can be dragged smaller than its own text.
 
 `main` = `6fc3205` plus this close-out. **Fast tier 1773 total / 1769 passed / 0 failed / 3 skipped**,
 measured on the merged tree, up from 1748 at the session's start. One in-flight branch,
-`tmp/effectbackdrop` (4 commits, unmerged, under review). No simulator clones.
+`tmp/effectbackdrop` (4 commits, unmerged, **reviewed and rejected** — see EFFECT_BACKDROP.md §7). No
+simulator clones.
 
 **The one red in that run was `ARAPLogicTests.testStrokesArePairedByPositionRatherThanDrawingOrder`
 failing with `crashed with signal term`** — a SIGTERM in an interpolation test nothing this pass
@@ -136,3 +140,19 @@ Two behaviour questions have been owed for days and nobody is blocked on them: s
 project loaded with something unreadable (may saving overwrite the good original, refuse, or prompt? a
 branch shipped "prompt once, then remember" — confirm it), and which faces belong in the font picker's
 favourites strip.
+
+## The review that did not merge, and why it was worth its cost
+
+The effect-backdrop branch was built by one agent and then read by three, each given a different lens
+rather than the same one three times. **Every one of the four defects came from the reviewers, none
+from the build**, and two were measured rather than argued — a 40% darkening reproduced with a probe,
+and a 204-channel parity delta reproduced with a fractional padding value no existing test uses.
+
+The one to learn from is the **onion skin**, because the defect was in *this project's own
+specification* and not in the code. EFFECT_BACKDROP.md §2.1 reasoned about the mid-stroke split, where
+the sandwich really does have an `above` half covering the ghost, and stated a conclusion about "the
+one behaviour change" as though it covered every state. At rest the whole tree is in the lower view,
+`above` is nil and hidden, and every host is blanked — so there is nothing left to cover the ghost and
+the two onion-skin placements collapse into one. The spec was confident, specific, and wrong about the
+state the artist spends all their time in. A reviewer walked the six cases in a table; that is what
+found it.
