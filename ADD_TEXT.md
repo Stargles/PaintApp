@@ -306,7 +306,20 @@ should not be re-litigated.
    Stage 6 exists. Slicing letters directly was rejected because it forces an outline conversion on
    first cut, after which the text is no longer text.
 
-5. **The font picker gets a favourites strip**, above the full grouped list, in the same shape as the
+5. **A box may not be dragged smaller than its own text, unless it is being distorted.** The owner's
+   ruling of 2026-08-26, alongside the report that text went invisible in a box too small for it.
+   Implemented per axis, because the ruling read literally is the max-content size and that makes a
+   wrapping box un-narrowable — narrowing is *how* a wrap width is set — and on the other axis it
+   would contradict §5.3 above. The floor is the smallest unit the layout cannot subdivide: **one
+   measured line tall, one unbreakable run wide** (`TextLayout.minimumBoxSize`, applied at
+   `TextFrameDrag.resized`). Neither depends on the other, so no box is ever un-narrowable. The
+   width floor is a *run* rather than a word because MEASURED, `.byWordWrapping` breaks inside a word
+   too wide for the box rather than overflowing it — so a word-wide floor would pin a box holding one
+   long token open at its full width. The distort keeps the flat `TextFrame.minimumExtent`, which is
+   the owner's own exception. **This settles the box-size half of that report only**; whether text is
+   invisible *in distort mode* is a separate question and is still open.
+
+6. **The font picker gets a favourites strip**, above the full grouped list, in the same shape as the
    brush presets. **Answered 2026-08-21: it ships with sensible defaults the owner can edit later.**
    Stage 1 shipped *without* a strip — all families grouped System / Serif / Sans / Mono / Display,
    with a second menu for the faces within the chosen family — because inventing a shortlist would
