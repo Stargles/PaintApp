@@ -110,7 +110,10 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     private func healthyPayload() -> VectorCanvasData {
         VectorCanvasData(elements: [.fill(fill(1)), .image(imageRef("a.png")),
                                     .stroke(stroke(1)), .stroke(stroke(0.5, composite: .erase))],
-                         transform: [1, 0, 0, 1, 0, 0])
+                         // Empty, which is what this build writes: the key is decode-only since TODO
+                         // item (12) stage 3, and a payload carrying `[1,0,0,1,0,0]` would no longer
+                         // round-trip through `encode(to:)`.
+                         transform: [])
     }
 
     /// Encodes `payload` and replaces the element at `index` with `replacement`, so the *rest* of the
@@ -177,8 +180,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
 
         let placed = solidImage(.green)
-        let elements = decoded.elements { _ in placed }
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: elements, transform: decoded.affineTransform)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: decoded.canvasSpaceElements { _ in placed })
 
         XCTAssertEqual(kinds(canvas.elements), ["fill", "image", "erase"])
         XCTAssertFalse(canvas.isEmpty, "A cel that lost one element is not an empty cel")
@@ -251,7 +253,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     // MARK: - The happy path is unchanged
 
     /// Characterization guard: per-element tolerance must be invisible to a well-formed file. Same
-    /// elements, same identities, same order, same transform, clean report — and re-encoding produces
+    /// elements, same identities, same order, clean report — and re-encoding produces
     /// byte-identical JSON, so the tolerant decode did not quietly rewrite anyone's project.
     func testAWellFormedPayloadRoundTripsUnchanged() throws {
         let payload = healthyPayload()
@@ -263,7 +265,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
 
         XCTAssertEqual(ids(decoded.elements), ids(payload.elements))
         XCTAssertEqual(kinds(decoded.elements), ["fill", "image", "stroke", "erase"])
-        XCTAssertEqual(decoded.transform, payload.transform)
+        XCTAssertEqual(decoded.transform, payload.transform, "both empty, and the key is not written")
         XCTAssertTrue(decoded.decodeReport.isClean, "Nothing was dropped, so the report says nothing was dropped")
         XCTAssertEqual(decoded.decodeReport.droppedCount, 0)
         XCTAssertEqual(try encoder.encode(decoded), data,
@@ -350,16 +352,124 @@ final class VectorCanvasDataLogicTests: XCTestCase {
                              "A structurally broken elements key is a broken file, not a file with a broken element")
     }
 
-    /// A missing transform costs the transform, not the drawing — `affineTransform` has always
-    /// answered `.identity` for anything that is not six numbers, and now the decode agrees with it.
-    func testAMissingTransformLoadsAsIdentityRatherThanCostingTheElements() throws {
+    /// A transform that will not read costs the transform, not the drawing — `affineTransform` has
+    /// always answered `.identity` for anything that is not six numbers, and the decode agrees with
+    /// it. **Both ways it can fail to read**, since TODO item (12) stage 3 made the absent case the
+    /// ordinary one: this build writes no key at all, so a file that *does* carry one was written by
+    /// an older build and is exactly the file most likely to be damaged as well.
+    func testATransformThatWillNotReadLoadsAsIdentityRatherThanCostingTheElements() throws {
+        var absent = try jsonObject(healthyPayload())
+        XCTAssertNil(absent["transform"], "fixture precondition: this build writes no transform")
+        absent.removeValue(forKey: "transform")
+
+        for (name, object) in [("absent", absent),
+                               ("unreadable", { var o = absent; o["transform"] = "not six numbers"; return o }()),
+                               ("too short", { var o = absent; o["transform"] = [1, 0, 0]; return o }())] {
+            let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: try jsonData(object))
+            XCTAssertEqual(decoded.elements.count, 4, "\(name): every element survives")
+            XCTAssertTrue(decoded.affineTransform.isIdentity, "\(name)")
+            XCTAssertTrue(decoded.decodeReport.isClean, "\(name): a defaulted transform is not a dropped element")
+        }
+    }
+
+    // MARK: - The stored transform is advisory (TODO item (12) stage 3)
+
+    /// **A stored transform is baked into the geometry on the way in, and the cel loads at identity.**
+    ///
+    /// Every document on the owner's iPad that has ever touched the Canvas Padding slider carries a
+    /// non-identity entry on *every* cel of *every* layer, because `setCanvasPadding` walks the whole
+    /// document — so this is not a hypothetical shape of file. Baking it is what makes a persisted
+    /// sample a canvas coordinate, which is the precondition TODO item (8) is blocked on.
+    ///
+    /// The fixture is the shape `resized(to:offset:)` used to write: a pure translation.
+    func testAStoredTransformIsBakedIntoTheGeometryAndTheCelLoadsAtIdentity() throws {
         var object = try jsonObject(healthyPayload())
-        object.removeValue(forKey: "transform")
+        object["transform"] = [1, 0, 0, 1, 12, -7]
 
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: try jsonData(object))
+        XCTAssertEqual(decoded.affineTransform.tx, 12, "fixture precondition: the file says +12")
 
-        XCTAssertEqual(decoded.elements.count, 4, "Every element survives a transform that would not read")
-        XCTAssertTrue(decoded.affineTransform.isIdentity)
-        XCTAssertTrue(decoded.decodeReport.isClean, "A defaulted transform is not a dropped element")
+        let placed = solidImage(.green)
+        let baked = decoded.canvasSpaceElements { _ in placed }
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: baked)
+
+        XCTAssertTrue(canvas.transform.isIdentity, "the cel itself must carry nothing")
+        XCTAssertEqual(kinds(baked), ["fill", "image", "stroke", "erase"], "and nothing is lost to the bake")
+
+        // The stroke's samples sat at (32, 32); +12/-7 in canvas space puts them at (44, 25).
+        let sample = try XCTUnwrap(baked.compactMap(\.stroke).first?.samples.first)
+        XCTAssertEqual(sample.x, 44, accuracy: 1e-9)
+        XCTAssertEqual(sample.y, 25, accuracy: 1e-9)
+        // A placed image is a pose, and it travels whole.
+        let image = try XCTUnwrap(baked.compactMap(\.image).first)
+        XCTAssertEqual(image.transform.position.x, 44, accuracy: 1e-9)
+        XCTAssertEqual(image.transform.position.y, 25, accuracy: 1e-9)
+        XCTAssertEqual(image.transform.scale, 1, accuracy: 1e-9, "a translation changes no size")
+
+        // Local geometry, un-baked, would have left the samples where the file put them. Stated so a
+        // future reader can see the assertion above is about the bake and not about the fixture.
+        let unbaked = VectorCanvas(size: Self.canvasSize, elements: baked, transform: decoded.affineTransform)
+        XCTAssertFalse(unbaked.transform.isIdentity, "control: this is the shape the load path no longer builds")
+    }
+
+    /// **Nothing writes the key any more**, so a build that predates stage 3 opening a file this one
+    /// wrote finds no transform, defaults to identity, and draws the baked geometry — the correct
+    /// picture, with no version gap in either direction. Written as the absence it is rather than as
+    /// `[1,0,0,1,0,0]`: `affineTransform` has always answered identity for a key that is not six
+    /// numbers, so leaving it out costs 48 bytes a cel less and means the same thing.
+    func testEncodingWritesNoTransformKeyAtAll() throws {
+        let written = try jsonObject(healthyPayload())
+        XCTAssertNil(written["transform"], "the field is decode-only now")
+        XCTAssertNotNil(written["elements"], "fixture precondition: this is still a real payload")
+
+        let round = try JSONDecoder().decode(VectorCanvasData.self,
+                                             from: try JSONEncoder().encode(healthyPayload()))
+        XCTAssertTrue(round.affineTransform.isIdentity)
+        XCTAssertEqual(kinds(round.elements), ["fill", "image", "stroke", "erase"])
+    }
+
+    /// **A canvas handed to the payload still carrying a transform has it baked, not dropped.** Only
+    /// a test can build one now — no app path writes `_transform` — but "the encoder silently lost
+    /// geometry the canvas was holding" is exactly the failure this whole file exists about, so the
+    /// encode half asserts the same identity as the decode half.
+    func testEncodingBakesATransformTheCanvasWasStillCarrying() throws {
+        let canvas = VectorCanvas(size: Self.canvasSize, strokes: [stroke(1)],
+                                  transform: CGAffineTransform(translationX: 5, y: 9))
+        let payload = VectorCanvasData(from: canvas, imageFileNames: [:])
+
+        XCTAssertTrue(payload.affineTransform.isIdentity, "the payload records no transform")
+        let sample = try XCTUnwrap(payload.elements.compactMap {
+            if case .stroke(let s) = $0 { return s } else { return nil }
+        }.first?.samples.first)
+        XCTAssertEqual(sample.x, 37, accuracy: 1e-9, "the geometry carries it instead")
+        XCTAssertEqual(sample.y, 41, accuracy: 1e-9)
+    }
+
+    /// **`resized(to:offset:)` bakes its shift, so `setCanvasPadding` stops being a producer of
+    /// non-identity cel transforms** — the other half of stage 3, and the one that makes the claim
+    /// "no path in this app writes a cel transform" true rather than nearly true.
+    ///
+    /// Exact by construction: a translation moves no sample onto a different sub-pixel and re-stamps
+    /// nothing, so none of `mapping`'s three floors can bind.
+    func testResizingBakesTheShiftIntoTheGeometryInsteadOfCarryingIt() throws {
+        let canvas = VectorCanvas(size: Self.canvasSize, strokes: [stroke(1)], fills: [fill(1)])
+        let grown = canvas.resized(to: CGSize(width: 128, height: 128), offset: CGPoint(x: 32, y: 32))
+
+        XCTAssertTrue(grown.transform.isIdentity,
+                      "a padded cel must not carry a translation — that is what clipped later ink")
+        XCTAssertEqual(grown.size, CGSize(width: 128, height: 128))
+        XCTAssertEqual(kinds(grown.elements), ["fill", "stroke"], "z-order survives the map")
+
+        let sample = try XCTUnwrap(grown.elements.compactMap(\.stroke).first?.samples.first)
+        XCTAssertEqual(sample.x, 64, accuracy: 1e-9)
+        XCTAssertEqual(sample.y, 64, accuracy: 1e-9)
+        XCTAssertEqual(sample.pressure, 1, accuracy: 1e-9, "pressure is not geometry")
+
+        let fillBox = try XCTUnwrap(grown.elements.compactMap(\.fill).first?.cgPath?.boundingBoxOfPath)
+        XCTAssertEqual(fillBox.minX, 32, accuracy: 1e-6)
+        XCTAssertEqual(fillBox.minY, 32, accuracy: 1e-6)
+
+        // The stroke's own width is untouched: this is a translation, so `mapping`'s width scale is 1.
+        XCTAssertEqual(try XCTUnwrap(grown.elements.compactMap(\.stroke).first).size, 20, accuracy: 1e-9)
     }
 }

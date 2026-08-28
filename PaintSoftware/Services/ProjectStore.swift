@@ -1127,12 +1127,13 @@ enum ProjectStore {
                 do {
                     let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
                     // A placed image whose PNG is not in the package is dropped by
-                    // `elements(resolvingImages:)` and always has been. It is counted here rather than
-                    // there because the resolver is the one place that knows a ref failed, and because
-                    // `VectorCanvasData` is deliberately free of any notion of a project directory.
+                    // `canvasSpaceElements(resolvingImages:)` and always has been. It is counted here
+                    // rather than there because the resolver is the one place that knows a ref failed,
+                    // and because `VectorCanvasData` is deliberately free of any notion of a project
+                    // directory.
                     // **`validateProject` cannot catch this one**: image refs live inside the vector
                     // JSON, not in the manifest, so the integrity check never sees their file names.
-                    let elements = payload.elements { ref in
+                    let elements = payload.canvasSpaceElements { ref in
                         guard let image = UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path) else {
                             damage.images += 1
                             log.error("""
@@ -1144,7 +1145,10 @@ enum ProjectStore {
                         }
                         return image
                     }
-                    vector = VectorCanvas(size: canvasSize, elements: elements, transform: payload.affineTransform)
+                    // No `transform:`. The accessor above has already baked whatever the file carried
+                    // into the geometry, so a cel loads in canvas coordinates and its own transform is
+                    // identity — TODO item (12) stage 3.
+                    vector = VectorCanvas(size: canvasSize, elements: elements)
                     report(payload.decodeReport, cel: celManifest.id, file: vectorFileName)
                     // Only the malformed half is damage. An unknown `kind` is a newer build's element
                     // in an older binary — see `ProjectLoadDamage` for why that is deliberately not

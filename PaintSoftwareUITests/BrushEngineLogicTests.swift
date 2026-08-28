@@ -690,10 +690,8 @@ final class BrushEngineLogicTests: XCTestCase {
 
         // …and the pixels. One resolver for both so the placed image is byte-identical either way.
         let resolve: (VectorCanvasData.ImageRef) -> UIImage? = { [weak self] _ in self?.solidImage(.green) }
-        let before = VectorCanvas(size: Self.canvasSize, elements: first.elements(resolvingImages: resolve),
-                                  transform: first.affineTransform)
-        let after = VectorCanvas(size: Self.canvasSize, elements: second.elements(resolvingImages: resolve),
-                                 transform: second.affineTransform)
+        let before = VectorCanvas(size: Self.canvasSize, elements: first.canvasSpaceElements(resolvingImages: resolve))
+        let after = VectorCanvas(size: Self.canvasSize, elements: second.canvasSpaceElements(resolvingImages: resolve))
         XCTAssertEqual(renderedBytes(before), renderedBytes(after),
                        "A migrated payload must render exactly as the legacy one it came from")
 

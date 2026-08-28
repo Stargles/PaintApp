@@ -426,13 +426,27 @@ final class VectorCanvas {
     }
 
     /// A new canvas sized to `newSize` with all content shifted by `offset`, used by the
-    /// canvas-padding resize. Lossless: `render()` applies `transform` after drawing local content,
-    /// so appending a translation shifts the result with no resampling.
+    /// canvas-padding resize.
+    ///
+    /// **The shift is baked into the geometry and the new canvas is identity** — TODO item (12)
+    /// stage 3. It used to *append* the translation to `_transform` and hand back the same local
+    /// display list, which is where every non-identity transform in the owner's documents came from:
+    /// `setCanvasPadding` walks every cel of every layer, so one use of the slider left one on every
+    /// cel in the file, and each of those then clipped later canvas-space ink in local space (the
+    /// defect stage 1 closed for the Move box). Nothing writes `_transform` any more, so with this
+    /// line the app has no producer of a non-identity cel transform at all, which is what makes a
+    /// stored sample a canvas coordinate — the precondition TODO item (8) was blocked on.
+    ///
+    /// Still lossless, and for a stronger reason than before: a translation moves no sample onto a
+    /// different sub-pixel and re-stamps nothing, so `mapping`'s three floors cannot bind. The
+    /// composition with `_transform` is kept rather than assumed away — a canvas handed in with one
+    /// (a test, or a document decoded by a build older than stage 3) bakes both at once.
     func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
-        let shifted = _transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
-        return VectorCanvas(size: newSize, elements: _elements, transform: shifted)
+        let baked = _transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
+        let moved = baked.isIdentity ? _elements : _elements.map { Self.mapping($0, throughSimilarity: baked) }
+        return VectorCanvas(size: newSize, elements: moved)
     }
 
     // MARK: - Display-list ordering
@@ -591,14 +605,6 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         return Self.scale(of: _transform)
-    }
-
-    /// Maps canvas-space stroke samples into this canvas's local (pre-`transform`) space, preserving
-    /// pressure. The point-wise counterpart of `localPath(fromCanvas:)`.
-    func localSamples(fromCanvas samples: [VectorSample]) -> [VectorSample] {
-        lock.lock()
-        defer { lock.unlock() }
-        return Self.localSamples(samples, through: _transform)
     }
 
     // Static functions of the transform they're given, rather than methods reading `_transform`, so
@@ -2419,8 +2425,9 @@ final class VectorCanvas {
         // eagerly: `StrokeCanvasView.vectorCanvas`'s `didSet` renders on assignment. Without this,
         // every empty vector layer would retain 16.8 MB of transparent pixels at 2048², 64 MB at
         // 4000², for nothing. `transform` deliberately isn't part of the test — an affine of nothing
-        // is still nothing, and `resized(to:offset:)` leaves empty canvases carrying a translation,
-        // which is exactly when a project has the most of them.
+        // is still nothing. (It used to be reachable: `resized(to:offset:)` left empty canvases
+        // carrying a translation, which is exactly when a project has the most of them. It bakes
+        // now, so no canvas the app produces carries one at all.)
         //
         // Nothing is memoized here on purpose: there is no allocation to amortize, and caching would
         // make `hasCachedImage` report a claim on memory that was never made, so eviction would
@@ -2960,8 +2967,14 @@ struct VectorCanvasData: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case elements, transform
-        /// Legacy pre-display-list keys. Decoded when `elements` is absent, never written.
+        case elements
+        /// Legacy keys. Decoded, never written.
+        ///
+        /// `transform` joined the other three in TODO item (12) stage 3: a cel's geometry is stored
+        /// in canvas coordinates, so there is nothing for a stored affine to mean. It is still read,
+        /// and `canvasSpaceElements(resolvingImages:)` bakes what it finds.
+        case transform
+        /// Pre-display-list. Decoded when `elements` is absent.
         case strokes, fills, images
     }
 
@@ -2970,8 +2983,24 @@ struct VectorCanvasData: Codable {
         self.transform = transform
     }
 
+    /// **Writes canvas-space geometry and no transform at all** — TODO item (12) stage 3.
+    ///
+    /// The `transform` key is decode-only now, alongside the three legacy parallel arrays in
+    /// `CodingKeys`, and it is left out of `encode(to:)` rather than written as `[1,0,0,1,0,0]`: a
+    /// missing key decodes to `[]`, which `affineTransform` has always answered `.identity` for, so
+    /// a build that predates this reads the baked geometry and applies nothing — the correct picture,
+    /// with no version gap in either direction and 48 bytes a cel less on disk.
+    ///
+    /// The bake here is a no-op for anything the app produces, since nothing writes `_transform` any
+    /// more (`setVectorTransform` went in stage 2, `resized(to:offset:)` bakes). It is kept because
+    /// `VectorCanvas.init(size:elements:transform:)` still accepts one, so "the payload dropped a
+    /// transform the canvas was carrying" would otherwise be a silent way to lose geometry.
     init(from canvas: VectorCanvas, imageFileNames: [UUID: String]) {
-        elements = canvas.elements.compactMap { element in
+        let carried = canvas.transform
+        let source = carried.isIdentity
+            ? canvas.elements
+            : canvas.elements.map { VectorCanvas.mapping($0, throughSimilarity: carried) }
+        elements = source.compactMap { element in
             switch element {
             case .stroke(let stroke): return .stroke(stroke)
             case .fill(let fill): return .fill(fill)
@@ -2984,8 +3013,7 @@ struct VectorCanvasData: Codable {
                                        scale: el.transform.scale, rotation: el.transform.rotation))
             }
         }
-        let t = canvas.transform
-        transform = [Double(t.a), Double(t.b), Double(t.c), Double(t.d), Double(t.tx), Double(t.ty)]
+        transform = []
     }
 
     /// **The rule: a broken *element* costs that element; a broken *payload* still throws.**
@@ -3040,13 +3068,39 @@ struct VectorCanvasData: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(elements, forKey: .elements)
-        try c.encode(transform, forKey: .transform)
     }
 
-    /// Rebuilds the ordered display list, turning each `ImageRef` back into a `VectorImageElement` via
-    /// `resolveImage`. A ref whose PNG can't be loaded is dropped — the same `compactMap` behaviour the
-    /// load path had before, just kept here so ordering logic lives in one place.
-    func elements(resolvingImages resolveImage: (ImageRef) -> UIImage?) -> [VectorElement] {
+    /// Rebuilds the ordered display list **in canvas coordinates**, turning each `ImageRef` back into
+    /// a `VectorImageElement` via `resolveImage`. A ref whose PNG can't be loaded is dropped — the
+    /// same `compactMap` behaviour the load path had before, just kept here so ordering logic lives
+    /// in one place.
+    ///
+    /// **`affineTransform` is baked in here, which is the whole of TODO item (12) stage 3's decode
+    /// half, and it is on this accessor rather than in `ProjectStore` for two reasons.** It is the
+    /// one door every caller already goes through, so no construction site can forget it and hand a
+    /// `VectorCanvas` a transform it should not have; and it sits *after* the per-element `LossySlot`
+    /// decode, so a cel whose payload dropped an element bakes the survivors, which is the honest
+    /// thing to do and matches what re-encoding this type already does.
+    ///
+    /// It is exact: `mapping(_:throughSimilarity:)` measures 1.3e-13 pt over 264 similarity cases,
+    /// and the only two writers that ever produced a stored transform — the deleted
+    /// `setVectorTransform`, through `affine(from:pivot:)` with `aspect == 1`, and
+    /// `resized(to:offset:)`, a pure translation — could only produce a similarity. The **rendered**
+    /// result changes for a shrunk cel, and better: the bake is a native re-stamp where the stored
+    /// transform was a bitmap magnify of a display list already clipped in local space.
+    /// Documents are expendable (TODO.md, the owner 2026-08-27), so this is not migration machinery
+    /// that has to be kept working — it is twelve lines that open the owner's current file correctly,
+    /// and it costs nothing on a file this build wrote, where `transform` is absent.
+    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) -> UIImage?) -> [VectorElement] {
+        let stored = affineTransform
+        let rebuilt = localElements(resolvingImages: resolveImage)
+        guard !stored.isIdentity else { return rebuilt }
+        return rebuilt.map { VectorCanvas.mapping($0, throughSimilarity: stored) }
+    }
+
+    /// The display list as the file literally holds it, before `affineTransform` is baked in. Private
+    /// to the accessor above — nothing outside this type has any business with layer-local geometry.
+    private func localElements(resolvingImages resolveImage: (ImageRef) -> UIImage?) -> [VectorElement] {
         elements.compactMap { data in
             switch data {
             case .stroke(let stroke): return .stroke(stroke)
@@ -3062,6 +3116,10 @@ struct VectorCanvasData: Codable {
         }
     }
 
+    /// What the *file* said, which since TODO item (12) stage 3 is only ever something an older
+    /// build wrote — `canvasSpaceElements(resolvingImages:)` bakes it and nothing writes it back.
+    /// Six numbers or nothing: a missing, short or unreadable key is identity, which it has answered
+    /// since long before it was load-bearing.
     var affineTransform: CGAffineTransform {
         guard transform.count == 6 else { return .identity }
         return CGAffineTransform(a: CGFloat(transform[0]), b: CGFloat(transform[1]), c: CGFloat(transform[2]),

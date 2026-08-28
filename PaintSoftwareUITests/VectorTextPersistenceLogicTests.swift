@@ -234,8 +234,7 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
                                  elements: [.fill(fill()), .text(element), .stroke(stroke())])
         let payload = try reload(VectorCanvasData(from: saved, imageFileNames: [:]))
         let loaded = VectorCanvas(size: Self.canvasSize,
-                                  elements: payload.elements(resolvingImages: { _ in nil }),
-                                  transform: payload.affineTransform)
+                                  elements: payload.canvasSpaceElements(resolvingImages: { _ in nil }))
 
         // 1. It came back as a text object, not as pixels, and as the same one.
         let reopened = try XCTUnwrap(loaded.topmostText(atCanvasPoint: CGPoint(x: 30, y: 18)))
