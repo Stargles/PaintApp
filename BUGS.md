@@ -3,6 +3,35 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Fill and Clear on a selection rewrite a derived in-between's `VectorCanvas` (2026-08-28)
+
+Every other vector edit that writes a cel's display list refuses on an interpolated cel, because an
+in-between's frame is *derived* from its two keyframes and its own `VectorCanvas` is not where the
+displayed image comes from. `TopToolbar.swift:143` is the rule stated —
+`guard !canvasManager.activeCelIsInBetween else { return }`, with the comment *"the transform would be
+written onto a `VectorCanvas` the displayed image does not come from"* — and
+`CanvasManager+LassoMove.swift:836` carries the same guard inside `activeVectorMoveTarget()`, so both
+lasso and whole-cel Move inherit it.
+
+**`fillSelection` (`SelectionModels.swift:648`) and `clearSelectionPixels` (`:686`) do not have it.**
+Their guard chain checks the layer, the cel id and the selection's stamp, and then goes straight to
+`vectorCanvas.addFill(...)` / the fill-clipping walk. On an in-between that is a write to a display
+list nothing renders: the artist taps Fill, sees no change, taps again, and each tap costs a real undo
+step. The elements are not lost — they are in the document and they reappear the moment the cel is
+committed to a keyframe — which is what makes this quiet rather than loud.
+
+The correct guard is the one its two neighbours already use, and it is one line in each. It was **not
+added while building Change Colour (`ed3eab8`)**, deliberately: changing when Fill and Clear refuse is
+a behaviour change nobody has put to the owner, and the new action taking the guard while its two
+siblings keep the hole is a smaller inconsistency than fixing two shipped commands on a worker's own
+judgement. `CanvasManager.recolorUnavailableReason` (`:750`) is the shape to copy if the answer is
+yes — a sentence in the Select panel rather than a button that goes quietly grey — since a bare
+`guard … else { return }` in these two would trade a silent wrong write for a silent no-op.
+
+Not a duplicate of "Canvas Padding while a vector Move is held writes pre-resize geometry onto the
+resized cel" below: that one writes correct geometry to the wrong *pose*, this one writes to the wrong
+*cel*.
+
 ## Picking a colour or starting a masked stroke can pay a full CPU composite mid-gesture (2026-08-28)
 
 Found while writing CANVAS_RESIZE.md §6 Q5, and it is independent of that feature — nothing about it
