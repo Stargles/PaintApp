@@ -23,10 +23,13 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(9) stage 1**, `tmp/resize1` — "Resize Canvas" in Actions, crop/expand only, today's contract with
-  an arbitrary rectangle instead of a symmetric margin.
-- **(19) Change Color**, `tmp/recolor` — the owner's new ask, below.
-- **(20) Move's three-way membership** — scoped, ruled, **blocked on (19) merging**, below.
+- **(20) Move's three-way membership** — scoped and ruled, below. Unblocked: (19) merged the shared
+  containment predicate, already shaped as a pure geometric classifier with the kind-skipping in the
+  caller, and `testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips` goes red if anyone
+  folds the skipping back down into it. **The refactor the scoping pass called stage 0 is not owed.**
+- **(9) stages 2-4** — scale-to-fit with the Fit/Fill choice, then undo and the busy modal. Stage 2's
+  vector arm is already written: `VectorCanvas.resized` bakes the map into the elements through
+  `mapping(_:throughSimilarity:)` since item (12) stage 3, which §0 did not know.
 - **(9) stage 0 is merged** (`ea51607`): a failed save now raises the `CanvasNotice` banner instead of
   failing silently, which this feature needs because after a resize the in-memory document is the only
   copy. **It is only visible on the autosave path** — on "leave to gallery" the banner is raised and
@@ -57,7 +60,7 @@ genuinely independent *because* the width is fixed, so a resize re-encodes nothi
 that a payload carries the origin it was quantised about, which leaves an unresaved cel readable
 whatever the canvas becomes.
 
-### (9) Resize the canvas from the Actions menu
+### (9) Resize the canvas from the Actions menu — stages 0 and 1 merged
 
 - [ ] The owner: *"a resize canvas option in actions would be nice ... They should be able to control
       whether it gets cropped/expanded, or if everything gets scaled."* On an aspect change it
@@ -70,36 +73,15 @@ whatever the canvas becomes.
       anyway and says so up front (rule 10); an aspect change offers Fit *and* Fill, Fit still the
       default (rule 2); and the compositor's admission gate warns and lets the artist proceed — which
       also corrects a stale reading of what that gate does (rule 14, CANVAS_RESIZE.md §6 Q5).
+      **Stage 0 `ea51607`** (a failed save says so) and **stage 1 `3d0c7c4`** (Resize Canvas exists,
+      crop/expand only, not undoable) are merged. Stage 1 also fixed three defects `setCanvasPadding`
+      had all along — guides untransformed, `copiedCel` uncleared, lattices unmoved — because both now
+      share one walk; §0 listed two of the three.
       **BUGS.md carries a defect on this path**: Canvas Padding while a vector Move is held cancels
       pre-resize geometry onto the resized cel. Left unfixed on purpose, because this item rebuilds that
       path.
 
 ## Open
-
-### (19) Change Color — recolour a lasso selection to the picked colour
-
-- [ ] The owner, 2026-08-28: *"When the user uses select, there should be an option called something
-      like change color which changes the color of all the strokes and fills inside the [selection] to
-      the current picked color. It's alright if part of the stroke is outside the selection."*
-      **That last sentence is the load-bearing one: a recolour splits nothing.** A selected element is
-      recoloured whole, deliberately unlike a lasso *move*, which splits at the boundary into two
-      independent strokes ([LASSO_MOVE.md](LASSO_MOVE.md) §5). It also means the whole class of Move's
-      engineering risk is absent — no boundary dab, no interpolation-tier demotion, because a recolour
-      changes no stroke count and no geometry.
-      **Three rulings, 2026-08-28.** Opacity does **not** travel: only the hue changes, so a faint mark
-      stays faint. **Text is recoloured too**, caught by its box centre as §5.3 already has it. **Pixel
-      layers are out of scope** — the action says why it is unavailable there, in
-      `mirrorUnavailableReason`'s voice, because pixels can only be cut at the loop and a half-recoloured
-      stroke contradicts the ask's own rule.
-      **Erasers and placed images are skipped, and skipped from the count**, so a lasso catching only
-      those costs no undo step: an eraser composites `.destinationOut` and reads only alpha, so writing
-      its colour is an inert no-op that would lie about what happened.
-      **The obvious code to reuse is the wrong code.** `splitForLassoMove`'s `insideIDs` holds a stroke
-      only when it is *wholly* inside; a straddling stroke is cut and only the inside piece enters the
-      set — exactly what the ask rules out. Membership is its own predicate over the same broad phase.
-      **Known and not a defect**: recolouring a keyframe changes its in-betweens live and does not tween
-      the colour, so the span cross-fades old against new. That is `InterpolationEvaluator` reading both
-      ends at draw time, and it will be reported as a bug once.
 
 ### (20) Move should offer three membership rules, not one
 
