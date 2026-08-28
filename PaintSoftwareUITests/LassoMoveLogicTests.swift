@@ -925,6 +925,58 @@ final class LassoMoveLogicTests: XCTestCase {
                        "under the floor the spacing stops scaling and the count doubles instead")
     }
 
+    /// **Down through the spacing floor and back out gives the identical walk** — and the floor is
+    /// not something the Move tool created.
+    ///
+    /// Two claims, and TODO item (14) had both of them the other way round. `stampSpacing` is
+    /// `max(brushSize * spacingFraction, 1)`: it floors whatever scalar it is handed, at native
+    /// sizes, with no transform anywhere near it — Hard Round's fraction is 0.05, so a 9 pt brush
+    /// wants 0.45 pt of spacing and gets 1 pt, on a cel nobody ever lassoed. Nothing about a Move
+    /// creates it, and no amount of precision removes it: it is an absolute constant inside a
+    /// relative walk, so it is the *ratio* between the two that a shrink destroys.
+    ///
+    /// What a Move could have done is fail to come back, and it does not. Every nudge maps
+    /// `float.liftedInside` — the elements exactly as the lift produced them — so the scalar reaching
+    /// the walk is the box's own accumulated factor rather than a running geometry, and there is no
+    /// term for an error to land in. `0.02 * 50` is **bit-exactly** 1 in IEEE double, which is why
+    /// the third walk here is not merely close to the first; the assertion below spends a line saying
+    /// so, because "and back" is the whole claim and a `1.0000000000000002` would make it a different
+    /// test. `testAScaleOutAndBackIsPixelIdentical` is the same finding one level up, in pixels.
+    func testTheSpacingFloorSurvivesAScaleRoundTrip() {
+        var brush = BrushLibrary.hardRound
+        brush.spacingFraction = 0.05
+        let line = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
+        func walk(size: CGFloat, scale k: CGFloat) -> Int {
+            let target = RecordingDabTarget()
+            BrushStamper.stampStroke(into: target,
+                                     samples: line.map {
+                                         BrushStamper.Sample(point: CGPoint(x: $0.x * k, y: $0.y * k),
+                                                             pressure: $0.pressure)
+                                     },
+                                     brush: brush, color: .black, brushSize: size * k,
+                                     brushOpacity: 1, seed: 99)
+            return target.dabs.count
+        }
+
+        // The two box scalars a corner drag out to 2% and back would leave behind, multiplied the
+        // way `scaledBy` multiplies them.
+        let out: CGFloat = 0.02, back: CGFloat = 50
+        let roundTrip = out * back
+        XCTAssertEqual(roundTrip, 1,
+                       "0.02 × 50 is exactly 1 in double, so the round trip is a return and not an approach")
+
+        let native = walk(size: 40, scale: 1)
+        let shrunk = walk(size: 40, scale: out)
+        let regrown = walk(size: 40, scale: roundTrip)
+
+        // 40 pt of brush wants 2 pt of spacing and gets it; 0.8 pt wants 0.04 and is floored to 1,
+        // which is longer than the whole shrunk stroke.
+        XCTAssertNotEqual(shrunk, native,
+                          "under the floor the walk is a different walk: \(shrunk) dabs against \(native)")
+        XCTAssertEqual(regrown, native,
+                       "and coming back out of the floor gives it back exactly: \(regrown) against \(native)")
+    }
+
     /// **A rotated piece is the same ink turned.** The dab set is the source's, mapped — so the ink's
     /// box transposes under a quarter turn and the amount of ink is conserved.
     ///
@@ -1194,6 +1246,94 @@ final class LassoMoveLogicTests: XCTestCase {
             assertPixelsIdentical(cgImage(vector), pixelsBefore,
                                   "the drawing after the bake is the drawing before the lift — \(note)")
         }
+    }
+
+    // MARK: - The handle box, and what a fresh lift measures
+
+    /// **The handle box is measured once, at the lift, and no gesture can grow it.**
+    ///
+    /// `contentSize` is assigned in exactly three places in the app — `ObjectTransformFrame.init` and
+    /// the two lift sites in `CanvasManager+LassoMove.swift` — and `applyToVectorFloat`, which every
+    /// drag, every Rotate press and every Mirror goes through, writes `frame.transform`,
+    /// `frame.aspect` and `mirror` and nothing else. So there is no path by which turning a piece
+    /// re-measures the box it is being turned inside, and the "monotonically over repeated gestures"
+    /// this file's own callers were warned about could not happen even in principle. Inflation needs
+    /// a **fresh lift** — see
+    /// `testARotateBakeAndReliftInflatesTheBoxAndTheRoundTripDeflatesItAgain`.
+    ///
+    /// Both lifts, because both reach the same float through the same `localBounds(of:)`.
+    /// `testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted` pins a whole turn inside one
+    /// lift as exact for the *geometry*; this is the same lift's answer for the *handles*.
+    func testTheBoxDoesNotInflateWithinOneLift() {
+        for kind in LiftKind.allCases {
+            let (manager, layerIndex, vector) = fixture()
+            vector.addStroke(stroke(from: CGPoint(x: 28, y: 20), to: CGPoint(x: 44, y: 44), size: 4))
+            XCTAssertTrue(lift(kind, manager, layerIndex), "\(kind.rawValue): nothing lifted")
+            guard let atLift = manager.vectorFloat?.frame.contentSize else {
+                return XCTFail("no float — \(kind.rawValue)")
+            }
+
+            manager.rotateFloating(eighths: 1)          // +45°
+            XCTAssertEqual(manager.vectorFloat?.frame.contentSize, atLift,
+                           "\(kind.rawValue): a rotation is not a re-measurement")
+            manager.rotateFloating(eighths: -1)         // and −45° back
+            XCTAssertEqual(manager.vectorFloat?.frame.contentSize, atLift,
+                           "\(kind.rawValue): and coming back does not grow it either")
+        }
+    }
+
+    /// **A fresh lift of already-tilted ink measures a bigger box — and an exactly cancelling round
+    /// trip gives the small one back.** The half of "the Move box inflates" that is true and the half
+    /// that is not, both stated as numbers rather than as a direction.
+    ///
+    /// The box is `localBounds(of:)`: the AABB of the stroke's **samples**, padded by `stampRadius`
+    /// *afterwards*. The padding is therefore re-applied in the axis-aligned frame at every lift and
+    /// is never carried round with the ink — which is why the tilted lift is not the 84.85 pt you get
+    /// by rotating the first box. A spine 80 pt long under a 20 pt brush (radius 10) lifts as
+    /// 80 + 2×10 by 0 + 2×10 = **100 × 20**; turned 45° that spine spans 80/√2 = 56.57 on each axis
+    /// and is padded again, so the second lift measures **76.57 × 76.57**. The 8.28 pt shortfall
+    /// against 84.85 is exactly 2·radius·(√2 − 1) — the padding a rotating box would have carried
+    /// diagonally and this one does not. Area still nearly triples, which is the real complaint.
+    ///
+    /// **And it is not monotonic.** Nothing feeds the box back into the geometry, so rotating −45°
+    /// and baking puts every sample back where it started and the third lift measures 100 × 20 again.
+    /// The box tracks the tilt of the ink in both directions; it does not ratchet.
+    ///
+    /// Whole-cel rather than lasso only because it needs no loop, and the bar is deliberately longer
+    /// than the 64 pt canvas: this measures geometry and `localBounds` never rasterizes.
+    func testARotateBakeAndReliftInflatesTheBoxAndTheRoundTripDeflatesItAgain() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: -8, y: 32), to: CGPoint(x: 72, y: 32), size: 20))
+
+        func liftAndMeasure() -> CGSize {
+            XCTAssertTrue(manager.beginVectorWholeCelMove(), "the cel must lift")
+            return manager.vectorFloat?.frame.contentSize ?? .zero
+        }
+
+        let first = liftAndMeasure()
+        XCTAssertEqual(first.width, 100, accuracy: 1e-6, "spine 80 plus 2 × radius 10 — measured \(first)")
+        XCTAssertEqual(first.height, 20, accuracy: 1e-6, "spine 0 plus 2 × radius 10 — measured \(first)")
+
+        manager.rotateFloating(eighths: 1)
+        manager.commitVectorFloatIfNeeded()
+
+        let tilted = liftAndMeasure()
+        let tiltedSide = CGFloat(80 / 2.0.squareRoot() + 20)   // 76.5685…, not 120/√2 = 84.8528…
+        XCTAssertEqual(tilted.width, tiltedSide, accuracy: 1e-4,
+                       "the tilted lift measured \(tilted) against \(first) at the first lift")
+        XCTAssertEqual(tilted.height, tiltedSide, accuracy: 1e-4, "and it is square: \(tilted)")
+        XCTAssertGreaterThan(tilted.width * tilted.height, first.width * first.height,
+                             "\(tilted) must enclose more than \(first) — that is the whole inflation")
+
+        manager.rotateFloating(eighths: -1)
+        manager.commitVectorFloatIfNeeded()
+
+        let back = liftAndMeasure()
+        XCTAssertEqual(back.width, first.width, accuracy: 1e-6,
+                       "an exact round trip deflates it again: \(first) → \(tilted) → \(back)")
+        XCTAssertEqual(back.height, first.height, accuracy: 1e-6,
+                       "an exact round trip deflates it again: \(first) → \(tilted) → \(back)")
+        manager.commitVectorFloatIfNeeded()
     }
 
     /// The raster piece takes the identical arithmetic, so the two Move tools turn the same way — and

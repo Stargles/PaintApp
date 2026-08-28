@@ -23,78 +23,7 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-### (8) Fixed-point sample coordinates — BUILT, on branch `tmp/fixedpoint`
-
-- [ ] **Built 2026-08-27 on `tmp/fixedpoint`; it leaves this file when that merges, not now.**
-      A persisted `VectorSample` is a signed 16-bit quarter-pixel offset from a stored origin plus 8
-      bits of pressure — **40 bits, 5 bytes a sample** — base64'd into one JSON string. In memory it is
-      still three `CGFloat`, exactly as the rulings below require, so **memory does not change at all
-      and the whole win is on disk**, where it is measured below. `PackedSampleRun`
-      (`Engine/ShapeGeometry.swift`) is the codec, `VectorStroke` and `DabLattice` hand-write their
-      coders onto it, `ProjectStore.writeCel` hands it the canvas centre, and `SampleCodingLogicTests`
-      is the tier.
-      **The quantisation origin is written into the payload** — `"samples": {"o":[cx,cy],"d":"<b64>"}`
-      — and that is the one decision the build added rather than inherited. An origin *implied* by the
-      reader's canvas size is one a caller can get wrong, and getting it wrong shifts every coordinate
-      by half a canvas, silently. Writing it costs ~24 bytes a stroke, makes a payload impossible to
-      decode wrong, and leaves a resize free to not re-encode old cels at all.
-      **MEASURED 2026-08-27** (scratch `swiftc -O`, 1,000 samples, `.sortedKeys`): **7.10 bytes a
-      sample on the wire** — 5.00 of payload, the rest base64 expansion plus `JSONEncoder` escaping
-      base64's `/`. Against the **~77 bytes** one full-precision sample costs in this app's own JSON
-      that is **~11x**. The ratio is a property of the *coordinates* rather than of the code — the same
-      probe over shorter decimals measured 60.5 and 8.6x — and the packed form is smaller at every
-      length, a one-sample stroke included. The ~77 is measured, **not the 89 this item used to quote**:
-      89 was the whole-file average from the owner's `Untitled.paintproj` (776 KB / 8,714 samples), and
-      the ~12 bytes/sample difference is per-stroke header — **dominated by a whole `Brush` struct
-      embedded in every stroke, ~13.5% of that file, which this item does not touch and which may be
-      the cheaper win.**
-      **The old array-of-objects shape still decodes, and that is tolerance rather than migration** —
-      three lines, swallowing `typeMismatch` and nothing else. The standing "everything is expendable"
-      permission above means nothing is owed to old files; they keep a project written by yesterday's
-      build openable and can be deleted any day.
-      **The field addresses -8192.0 … +8191.75, a span of 16,383.75 rather than 16,384**, so with the
-      origin at the centre the largest canvas that encodes both its edges is **16383** —
-      `CanvasManager.maxCanvasExtent`, already shipped by (13), which `SampleCodingLogicTests` now ties
-      to the codec rather than leaving the two to agree by coincidence. At that maximum the clamp
-      saturates a quarter-pixel *inside* the artwork on two edges, not merely at the boundary.
-      The centring is the owner's and is what buys the sign bit for free: *"have something like the first
-      bit represent a plus or minus, then center the origin to the exact middle of the canvas ... which is
-      across -8k to 8k, and the last two bits for quarter pixel res."* The `+2` buys quarter-pixel
-      placement because `BrushStamper` places dabs at sub-pixel positions — the owner's own caveat, and
-      correct.
-
-      **Attached rulings. Do not re-open any of them.**
-      - **Clamp, do not wrap, at the encode boundary only.** *"If you draw outside the 16k, it should not
-        wrap but rather clamp."* Unclamped, a 16-bit field wraps and ink drawn past the edge **teleports
-        to the opposite side of the canvas**. Saturating makes the failure local and boring — and it is
-        counted, so a stroke that loses ink says so once, on the save that loses it.
-      - **Reversible transforms decode to `Double` and re-encode at the bake** — *"converted temporarely
-        to a double as to not lose accuracy, then converted back when it bakes."* See (14), the same
-        mechanism asked for again at the tool level.
-      - **Residual drift is closed** (2026-08-26). The many-transform case lives inside a single unbaked
-        session where samples are already `Double`, so rounding has no path by which to accumulate. One
-        bake, one rounding. **MEASURED 2026-08-27, now for the storage layer too**: 5,000 samples through
-        a hundred consecutive saves drift **0.0 pt**, and through six canvas-padding changes **0.0 pt** —
-        exact rather than lucky, since `setCanvasPadding` grows the canvas by 2·delta and moves content
-        by delta, so the centre moves with it and the stored offset is unchanged.
-      - **The centre is the centre of the *current* canvas**, overruling this file's own recommendation of
-        a fixed address space. An asymmetric crop therefore re-encodes every sample, acceptable for a
-        one-off the artist asks for — and moot, since asymmetric crop does not exist.
-      - **At a canvas of exactly 16k there is no off-canvas room**, accepted: *"a max size canvas would
-        have no off canvas stroke room, but that's a very minor concern, since ... the 16k canvas would
-        only ever be used for big concept art boards."* At 2048x1024 the artwork occupies +/-1024 x +/-512
-        of a +/-8,192 field.
-
-      **Why fixed and not sized-to-the-canvas, kept so it is not re-derived.** Dynamic is not merely more
-      complex, it is unsound: geometry left `[0, extent)` as a matter of course for three independent
-      reasons. **The 20-bit proposal overflowed on measured numbers** — `minimumScale` is 0.02 and the
-      canvas maximum 8192, so a stored coordinate reached 409,600 pt against 20 signed bits' +/-131,072.
-      **24 signed bits is the answer if (12) is not adopted**; adopting (12) removes the layer-local
-      blow-up and is what lets the field narrow to 16.
-      The clamp is now the only thing standing between storage and BUGS.md's unclamped zoom, which is
-      unchanged: `CanvasView` still floors zoom at 0.01 of fit with **no ceiling**, so a screen-wide drag
-      at minimum zoom spans ~1,638,400 pt — 200x this field — and is **independent of (12)**, which does
-      nothing about zoom.
+- **Nothing.** Item (8) merged as `e277f82`; the five-item refit is down to (14) and (9).
 
 ## How a brush stroke is stored — one feature in five items
 
@@ -103,39 +32,74 @@ parts of the same feature, being the refit to the way brush strokes are stored. 
 (9) and (14) are features of the feature."* Read the five as one refit and sequence them together;
 splitting them across sessions is what let their premises drift apart in the first place.
 
-**Five asks, one programme**, sharing one number. Two are merged, (8) is in flight, two remain.
+**Five asks, one programme**, sharing one number. Three are merged, two remain.
 **`CanvasManager.maxCanvasExtent` — 16383 — is that one number**: the maximum canvas, the ceiling the
 canvas-plus-padding budget is derived from, and what a stored coordinate can address. It is defined
 once, and (8)'s codec derives its own bounds from `Int16` rather than restating it.
 
-**Order, and it is forced rather than preferred: (12) stage 3 → (13) → (8) → (14) → (9).** The first
-two are **merged** (`2fa1725`, `83f7c0d`) and have left this file; what they bought is that nothing
-writes a cel transform any more, so **a persisted sample is now a canvas coordinate** and (8)'s ruled
-origin — the centre of the current canvas — finally has a fixed point to mean. Until 2026-08-27 this
-file said "(8) needs nothing", which was false: samples are stored in layer-**local** space, so the
-origin moved with the cel.
-
-So **(14) is next.** (8) is built and sitting in flight above, which is what (14) was waiting on: it
-answers the strongest objection to the refit and wanted (8)'s quantiser to exist first, so that a Move
-held in doubles has something definite to bake *back to*. (9) is genuinely independent *because* the
-width is fixed, so a resize re-encodes nothing — and more so now that a payload carries the origin it
-was quantised about, which leaves an unresaved cel readable whatever the canvas becomes.
+**Order, and it is forced rather than preferred: (12) stage 3 → (13) → (8) → (14) → (9).**
+The first three are **merged** — (12) stage 3 `2fa1725`, (13) `83f7c0d`, (8) `e277f82` — and have
+left this file. So **(14) is next** — and scoping it on 2026-08-27 found that (8) had *answered* it
+rather than unblocked it: the quantiser (14) wanted something to bake back **to** turned out to be a
+save-time codec with no resident 16-bit form, and the doubles it wanted the Move held in were always
+what the Move held. (14) is therefore one question for the owner rather than a piece of work; see
+below, and do not schedule it as a build until that question is answered. (9) is genuinely
+independent *because* the width is fixed, so a resize re-encodes nothing — and more so now that a
+payload carries the origin it was quantised about, which leaves an unresaved cel readable whatever
+the canvas becomes.
 
 ### (14) A reversible Move: hold the transform in doubles until an explicit bake
 
 - [ ] The owner: *"In the move tool have an option to store whatever the transformation is as doubles so
-      it is reversible, and add an option in actions to bake everything down back to 16bits."*
-      **This is the answer to the strongest objection against (12) and it arrived unprompted** — that a
-      layer transform was the only exactly reversible operation in the app. The *geometry* half of that
-      objection is dead by measurement: 100 shrink-to-2%-and-regrow cycles drift **6.0e-11 pt** and
-      `stroke.size` returns bit-exact. Two artist-visible residues survive, and this ask covers both:
-      - **`BrushStamper.stampSpacing`'s 1 pt absolute floor** — a stroke shrunk below it and regrown comes
-        back with a different dab count. Not reversible in *pixels*, whatever the geometry does.
-      - **The Move box inflates**, and this is now live rather than hypothetical: stage 1 of (12) shipped
-        with it and the owner accepted it explicitly — *"Accept all three, ship stage 1, then the double
-        precision move comes later and integrates in with it."* The float's box is a geometric AABB of
-        moved ink, so rotate +45 degrees then -45 returns a bigger box, monotonically over repeated
-        gestures. **(14) is the cure and the owner named it as the follow-up.**
+      it is reversible, and add an option in actions to bake everything down back to 16bits."* It
+      arrived unprompted as the answer to the strongest objection against (12) — that a layer
+      transform was the only exactly reversible operation in the app.
+      **Scoped 2026-08-27, and the scope came back saying the mechanism already exists.** Nothing here
+      is built or merged, so the item stays; but what remains of it is one owner question, not a
+      branch.
+
+      **The doubles half already holds.** Every nudge maps `float.liftedInside` — the elements exactly
+      as the lift produced them — so a drag is an *absolute* map from the lift rather than an
+      increment on the current geometry, and there is no term for an error to accumulate in.
+      `VectorSample.x/y/pressure` and `VectorStroke.size` are plain `CGFloat` in memory and always
+      were; (8) never touched them. Measured: 100 shrink-to-2%-and-regrow cycles drift **6.0e-11 pt**
+      and `stroke.size` returns bit-exact. `LassoMoveLogicTests.testAScaleOutAndBackIsPixelIdentical`
+      already scales a lassoed piece 2.5×, turns it 0.7 rad, drags the box back to the lift pose and
+      asserts the drawing is pixel-identical.
+
+      **The bake half has no referent.** (8) made the 16-bit form a *save* format: `PackedSampleRun`
+      quantises on the way to disk and decodes back to `CGFloat`, so there is no resident 16-bit
+      representation for an Actions item to bake down *to*. One save is one rounding — measured at
+      0.0 pt drift over a hundred consecutive saves. If the owner still wants the option, what it
+      would mean today is "snap every sample to the storage grid on demand", which is a different
+      feature and worth asking about before building.
+
+      **Both stated residues were misdiagnosed, and both corrections are now executable.**
+      - **`BrushStamper.stampSpacing`'s 1 pt floor is not a Move residue.** It is
+        `max(brushSize * spacingFraction, 1)` and binds at native sizes with no transform anywhere
+        near it — Hard Round's fraction is 0.05, so a 9 pt brush wants 0.45 pt of spacing and gets
+        1 pt, on a cel nobody ever lassoed. Precision cannot remove an absolute constant from a
+        relative walk, so (14) was never its cure. It costs no ink (dab diameter still scales) and
+        re-rolls nothing visible (every built-in has zero scatter and zero rotation jitter), and a
+        scale out through it and back gives the identical dab count —
+        `testTheSpacingFloorSurvivesAScaleRoundTrip`.
+      - **The Move box does not inflate monotonically, and precision is not its cure either.**
+        `contentSize` is written at the two lift sites and nowhere else — `applyToVectorFloat` writes
+        the transform, the aspect and the mirror — so **no gesture re-measures the box**, and a full
+        turn inside one lift is exact (`testTheBoxDoesNotInflateWithinOneLift`). What inflates it is a
+        *fresh lift of already-tilted ink*, because `localBounds(of:)` re-applies its `stampRadius`
+        padding axis-aligned instead of carrying it round with the ink. Measured on a 100 × 20 bar,
+        over lift / rotate 45° / bake / re-lift / rotate back / bake / re-lift:
+        **100 × 20 → 76.57 × 76.57 → 100 × 20**. Nothing feeds the box back into the geometry, so it
+        tracks the tilt in both directions and never ratchets
+        (`testARotateBakeAndReliftInflatesTheBoxAndTheRoundTripDeflatesItAgain`).
+
+      **What is left is one question for the owner: should the Move box carry its own rotation?** An
+      oriented rectangle around tilted ink is the only thing that would make a re-lift measure the
+      same box twice, and it changes what the handles look like — a visible behaviour change, so it is
+      the owner's call rather than ours. The existing acceptance — *"Accept all three, ship stage 1,
+      then the double precision move comes later and integrates in with it."* — was given against the
+      monotonic reading of the box, so the corrected one is worth putting in front of them with it.
 
 ### (9) Resize the canvas from the Actions menu
 

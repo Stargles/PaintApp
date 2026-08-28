@@ -218,11 +218,24 @@ extension CanvasManager {
     ///
     /// **Three accepted costs, ruled on by the owner before this shipped** — none of them are bugs:
     ///
-    ///   * *The box inflates.* The old pivot and size came from `localContentBounds()`, an alpha scan
-    ///     that is invariant under `_transform`; a float's come from `localBounds(of:)`, a geometric
-    ///     AABB padded by `stampRadius`. Rotate +45° then −45° therefore returns a slightly bigger
-    ///     box, monotonically. The cure is the double-precision move, TODO item (14), which this
-    ///     integrates with rather than works around.
+    ///   * *The box inflates — on a fresh lift of tilted content, and not otherwise.* The old pivot
+    ///     and size came from `localContentBounds()`, an alpha scan that is invariant under
+    ///     `_transform`; a float's come from `localBounds(of:)`, a geometric AABB padded by
+    ///     `stampRadius`. **Within one lift the box is fixed**: `contentSize` is written here and at
+    ///     the lasso lift and nowhere else, and `applyToVectorFloat` writes only the transform, the
+    ///     aspect and the mirror — so no drag, Rotate press or Mirror can grow it
+    ///     (`testTheBoxDoesNotInflateWithinOneLift`). What grows it is *re-measuring* ink that is
+    ///     already turned: bake a 45° rotation and lift again and the AABB is bigger, because the
+    ///     `stampRadius` padding is re-applied axis-aligned rather than carried round with the ink.
+    ///     Measured on a 100 × 20 bar: **100 × 20 → 76.57 × 76.57 → 100 × 20** across lift, rotate,
+    ///     bake, re-lift, rotate back, bake, re-lift. **It is not monotonic** — nothing feeds the box
+    ///     into the geometry, so an exactly cancelling round trip deflates it again
+    ///     (`testARotateBakeAndReliftInflatesTheBoxAndTheRoundTripDeflatesItAgain`).
+    ///     The cure is therefore not precision — the arithmetic is already `Double` and already
+    ///     exact, and TODO item (14) buys nothing here. It is giving the box **its own tilt**, so a
+    ///     lift of turned ink lands an oriented rectangle on it instead of an axis-aligned hull. That
+    ///     is a visible behaviour change to the handles and awaits an owner ruling; until then this
+    ///     stands as accepted, which is what the owner accepted.
     ///   * *Undo granularity changes* from one step per Move session to one step per gesture — which
     ///     is `LASSO_MOVE.md` §5.5's existing ruling, and is wanted.
     ///   * *The Move bar now appears where there never was one*, and Mirror/Freeform grey out on a
