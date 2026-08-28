@@ -14,29 +14,27 @@ inline. Fast tier **1839 / 1836 / 0 / 3**. **Items (8) and (14) are both merged*
 flight, one worktree, clean tree. The last full suite was at the (8) merge (1932 / 1925 / 1 / 6, the
 one red environmental); (14) added nine fast-tier tests and no full run since.
 
-**1. Build Move stage 3b — a second knob that turns the handle box alone.** TODO item (20). The
-   owner approved it on 2026-08-27 and **it is fully scoped**: LASSO_MOVE.md §5.19–21 are the three
-   rulings, and none of them is open.
-   - **The box never tilts by itself.** *"leave it straight up and down. Thats what the orange rotate
-     node is for, rotating the box only"* — so the re-lift inflation of the box on already-tilted ink
-     is **accepted**, not a defect, and hand-fitting is the cure. The knob the owner named **does not
-     exist**: today's turns box and content together.
-   - **A Freeform stretch on a hand-turned box stores the axis it was made about** — the owner chose
-     to build it after pushing back, and the arithmetic is why it is not a hack: `R(ρ)·S·R(−φ)` is the
-     SVD of a general 2×2, so `2 translation + 2 angles + 2 scales = 6` is *exactly* a general affine.
-     The second angle completes the representation; nothing is left over, and it is still far short of
-     Distort's 8.
-   - **The box angle is chrome and never enters the geometry map.** `VectorFloat`'s lift invariant
-     `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform` depends on that. At lift
-     both angles are zero and the map is the identity.
-   - **Turning the box costs no undo step** — free, like zooming, and an *exception* to §5.5 rather
-     than an amendment: a box-only turn moves no ink, and as the first act after a lasso lift its undo
-     would rejoin the cut stroke and dismiss the float (§5.8).
-   - **Disclose, do not discover**: turning the box *after* a Freeform stretch cannot leave the ink
-     perfectly still, because the stretch axes are what turn.
-   **Two things are still open and neither blocks the build**: where the second knob sits on the box,
-   and what colour it is. LASSO_MOVE.md says yellow, the owner said orange, and **orange already means
-   "distort corner" on a text box** — put the pair to them before drawing it.
+**1. Build stage 3b PHASE 2 — the second stored angle, which is what un-greys Freeform.** TODO item
+   (20). **Phase 1 is merged** (`330efd4`): a yellow knob off the box's bottom edge writes
+   `ObjectTransformFrame.boxAngle`, which is chrome and reaches no geometry — it appears nowhere in
+   `VectorLayer.swift`, and in `CanvasManager+LassoMove` only in `turnVectorFloatBox`.
+   Phase 2 is the one that touches the map, which is why phase 1 landed first.
+   - **What to build**: a Freeform stretch made about a hand-turned box records the axis it was made
+     about (LASSO_MOVE.md §5.20). The arithmetic is why it is not a hack: `R(ρ)·S·R(−φ)` is the SVD of
+     a general 2×2, so `2 translation + 2 angles + 2 scales = 6` is *exactly* a general affine. The
+     second angle **completes** the representation — nothing is left over — and is still far short of
+     Distort's 8. `ObjectTransformDrag.stretched` measures from `start.rotation`, the *ink's* angle:
+     that is the arm to change, and the reason Freeform is currently refused rather than merely
+     awkward on a turned box.
+   - **Today Freeform greys out while the box is turned** — *"The box is turned. Straighten it to
+     stretch this piece."* Phase 2 removes that gate. Uniform and both knobs already work at any angle.
+   - **State when it ships**: turning the box *after* a stretch cannot leave the ink perfectly still,
+     because the stretch axes are what would be turning. The owner has not seen this yet.
+   - **The trap that broke main for four minutes building phase 1 is now in CLAUDE.md** — a worker's
+     worktree is a workbench, not a deliverable, and a *green* grep expires the moment the worker
+     types again. Wait for the completion notification; harvest commits, not trees.
+   - **`boxAngle` is deliberately absent from Reset** (§5.16 meeting §5.21) — do not "fix" that; the
+     argument is written at `canResetFloating`.
 
 **2. Then (9), the canvas resize.** Genuinely independent of everything else: (8) settled
    CANVAS_RESIZE.md §6's first question and each payload records the origin it was quantised about, so
