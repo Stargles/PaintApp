@@ -148,6 +148,11 @@ struct ObjectTransformFrame: Equatable {
     /// it that way. What *does* read it is `drawnAngle`, and nothing else here reads
     /// `transform.rotation` directly.
     ///
+    /// **Phase 3 gave it a second reader outside this type, and it is still not a geometry path.**
+    /// `CanvasManager.fittedFrame(of:at:)` measures the ink in the frame this angle names, so the box
+    /// re-hugs the drawing as the knob turns (§5.22, and `contentSize`/`contentOffset` above). It
+    /// returns a frame and writes nothing, so the list in the paragraph above is unchanged.
+    ///
     /// **Turning the box costs no undo step** — LASSO_MOVE.md §5.21, a deliberate exception to
     /// §5.5's "one turn of a knob is one step". It moves no ink, so there is nothing to give back;
     /// and were it the first thing after a lift, its step would be the one carrying the pre-split

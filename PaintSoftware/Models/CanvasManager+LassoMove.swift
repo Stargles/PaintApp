@@ -426,10 +426,12 @@ extension CanvasManager {
     ///   * *The box inflates — on a fresh lift of tilted content, and not otherwise.* The old pivot
     ///     and size came from `localContentBounds()`, an alpha scan that is invariant under
     ///     `_transform`; a float's come from `localBounds(of:)`, a geometric AABB padded by
-    ///     `stampRadius`. **Within one lift the box is fixed**: `contentSize` is written here and at
-    ///     the lasso lift and nowhere else, and `applyToVectorFloat` writes only the transform, the
-    ///     aspect and the mirror — so no drag, Rotate press or Mirror can grow it
-    ///     (`testTheBoxDoesNotInflateWithinOneLift`). What grows it is *re-measuring* ink that is
+    ///     `stampRadius`. **Within one lift the *stored* box is fixed**: `contentSize` is written here
+    ///     and at the lasso lift and nowhere else, and `applyToVectorFloat` writes only the transform,
+    ///     the aspect and the mirror — so no drag, Rotate press or Mirror can grow it
+    ///     (`testTheBoxDoesNotInflateWithinOneLift`). Since phase 3 the box the artist *sees* is
+    ///     `fittedFrame(of:at:)`'s, which re-hugs the ink as the yellow knob turns (§5.22) — a return
+    ///     value, never written back here, which is what keeps that guard meaning what it says. What grows it is *re-measuring* ink that is
     ///     already turned: bake a 45° rotation and lift again and the AABB is bigger, because the
     ///     `stampRadius` padding is re-applied axis-aligned rather than carried round with the ink.
     ///     Measured on a 100 × 20 bar: **100 × 20 → 76.57 × 76.57 → 100 × 20** across lift, rotate,

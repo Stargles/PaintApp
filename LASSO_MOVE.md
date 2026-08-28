@@ -92,7 +92,7 @@ i.e. the toggle's other half.
   and adding four `Handle` cases walks straight into the trap this stage was warned about:
   `allowedHandles` defaults to *all cases*, so a new grip switches itself on for the whole-layer box
   too, where there is nothing to store it in.
-- ~~**The box-only rotate knob**~~ (3b) — **shipped, both phases**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store — `ObjectTransformFrame.stretchAxis`, which makes the map the general affine `R(ρ+φ)·S·R(−φ)` — and §5.21 exempts a box-only turn from the undo stack, which is also the reason the recorded axis is not the live box angle. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
+- ~~**The box-only rotate knob**~~ (3b) — **shipped, all three phases**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store — `ObjectTransformFrame.stretchAxis`, which makes the map the general affine `R(ρ+φ)·S·R(−φ)` — §5.21 exempts a box-only turn from the undo stack, which is also the reason the recorded axis is not the live box angle, and §5.22 is phase 3 — the box's size and centre become a live function of the angle, so the hand-fit fits. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
 - **Placed images holding a stretched shape** (3c). This is now the *only* thing either refusal names: text was taught to mirror and to stretch on 2026-08-27 (stage 3d, §5.18), and a placed image is what is left — its `LayerTransform` needs a stored field and a decode migration before it can hold either.
 - **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
   `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
@@ -884,7 +884,7 @@ about makes the pair a *general affine* and still not a homography.
 - ~~**Freeform**~~ — **done**, stage 3a, see §0. It needed one scalar on the box and a second mapping
   function, not the quad this list assumed.
 - ~~**Flips**~~ — **done**, stage 2, as one affine on the float.
-- ~~**The box-only rotate knob**~~ (stage 3b) — **done, both phases**, on §5.19–21. A yellow knob off
+- ~~**The box-only rotate knob**~~ (stage 3b) — **done, all three phases**, on §5.19–22. A yellow knob off
   the box's *bottom* edge writes `ObjectTransformFrame.boxAngle`, which is **chrome**: `drawnAngle`
   (`transform.rotation + boxAngle`) is the single place the two are added, and no geometry path reads
   it, so the lift invariant holds and the knob's own drag arm returns `transform: start` bit for bit.
@@ -899,6 +899,15 @@ about makes the pair a *general affine* and still not a homography.
   computed — `φ == 0`, and `aspect == 1`, where a scalar commutes with a rotation — which is what
   keeps every unstretched document bit-identical and keeps `applyToVectorFloat`'s exact `aspect != 1`
   dispatch honest.
+  **Phase 3 is §5.22**, and it is what makes the hand-fit fit: `contentSize` and the new
+  `ObjectTransformFrame.contentOffset` are a live function of `boxAngle`, measured by `MoveBoxInk` in
+  the box's own frame `B⁻¹·L·Mirror`. `ρ` cancels out of `B⁻¹·L`, so the green knob is free; two poses
+  reduce to `R(−β)` exactly and are written out, `aspect == 1` and `boxAngle == stretchAxis`, which
+  include the pose at rest — where the fit returns the lift's own box to the bit.
+  `CanvasManager.fittedFrame(of:at:)` **returns** a frame and writes nothing, so `contentSize` is
+  still assigned only at the two lifts and the offset has no route into any map. The re-fit runs per
+  touch-move: `MoveBoxInk` takes a convex hull per element at the lift, which measured 2.223 ms a
+  frame down to 0.401 ms on a 24,000-sample cel.
 - **Placed images holding a stretched shape** (3c), and then **Distort** (stage 5) over the shared
   `Homography` solver — the one member of this list that really does need a quad. Text reached both
   Mirror and Freeform on 2026-08-27 (stage 3d) without needing 3c's stored field, because a
@@ -1268,6 +1277,42 @@ ink, and the first is the one the other two are consequences of.
     and if it were the first thing done after lifting a lassoed piece, its step would be the one
     carrying the pre-split display list (§5.8), so one press of Undo would rejoin the cut stroke and
     dismiss the whole float — wildly out of proportion to straightening a box.
+
+22. **The box re-fits to the ink as it turns.** The owner, 2026-08-28: *"currently when the user uses
+    the yellow node to rotate the selection box, the dimensions of the box does not change to fit the
+    drawing. That box should be the bounding box of the drawing inside of it and should actively
+    change dimensions when rotated to keep on fitting the image. For example, the box would be bigger
+    and then smaller on 45 degree angle increments of a square it is around, and constant for a
+    circle."*
+
+    This is what makes §5.19's hand-fit actually fit. Phases 1 and 2 gave the knob an angle and gave a
+    stretch an axis; the box's *size* stayed the number `localBounds(of:)` measured at the lift, so
+    turning the knob turned a rectangle of fixed, wrong dimensions round the drawing.
+
+    **Both cases the owner named are the specification.** A square of side *s* is *s* across at 0°,
+    `s√2` at 45° — every corner on an axis of the turned frame — and *s* again at 90°; the closed form
+    is `s·(|cos β| + |sin β|)`. A circle is **constant at every angle**, and that is the case worth
+    naming, because it is the one that separates a box measured from the *ink* from a box measured
+    from the *previous box*: the second grows a disc by √2 every eighth-turn and never comes back,
+    while a square would still look plausible while it did.
+
+    **The box's centre moves and the geometry's anchor does not**, and that is a consequence rather
+    than an option. A tight box around a diagonal is not centred where the loose axis-aligned one was
+    — a right triangle's moves by about a quarter of its own width at 45°. But `pivot` is what every
+    `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` holds still and `transform.position` is
+    where the map sends it, so a fit that wrote its travelled centre into either would slide the
+    artist's drawing while they merely turned a knob — which §5.21 forbids outright, there being
+    nothing on the undo stack to give it back. The offset lives on the box, in
+    `ObjectTransformFrame.contentOffset`, and no map reads it. **This is the same separation phase 1
+    established for the angle, extended to the size.**
+
+    **The green knob needs no special case, and that is arithmetic.** The frame the fit measures in is
+    `B⁻¹·L`, where `B = R(ρ+β)·diag(sx, sy)` is the box as drawn and `L = R(ρ+φ)·diag(sx, sy)·R(−φ)`
+    is the ink as mapped; `ρ` appears in both and cancels identically. Turning ink and box together
+    therefore leaves both the size and the centre exactly where they were.
+
+    **§5.19 is untouched.** A *fresh lift* of already-tilted ink still measures a loose, axis-aligned
+    box, and the box still never tilts by itself. What changed is that hand-fitting it now works.
 
 
 ## 6. Open risks

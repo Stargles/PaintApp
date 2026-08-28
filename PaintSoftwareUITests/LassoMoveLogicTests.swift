@@ -1252,10 +1252,13 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// **The handle box is measured once, at the lift, and no gesture can grow it.**
     ///
-    /// `contentSize` is assigned in exactly three places in the app — `ObjectTransformFrame.init` and
-    /// the two lift sites in `CanvasManager+LassoMove.swift` — and `applyToVectorFloat`, which every
-    /// drag, every Rotate press and every Mirror goes through, writes `frame.transform`,
-    /// `frame.aspect` and `mirror` and nothing else. So there is no path by which turning a piece
+    /// `contentSize` is assigned on the **model** in exactly two places — the two lift sites in
+    /// `CanvasManager+LassoMove.swift` — and `applyToVectorFloat`, which every drag, every Rotate
+    /// press and every Mirror goes through, writes `frame.transform`, `frame.aspect` and `mirror` and
+    /// nothing else. (Stage 3b phase 3 added a third construction of an `ObjectTransformFrame`
+    /// carrying a size, `fittedFrame(of:at:)`, and it is deliberately not a third *assignment*: it
+    /// returns a frame for the overlay to draw and never writes it back, which is exactly what keeps
+    /// this test's claim true and worth making — see §5.22.) So there is no path by which turning a piece
     /// re-measures the box it is being turned inside, and the "monotonically over repeated gestures"
     /// this file's own callers were warned about could not happen even in principle. Inflation needs
     /// a **fresh lift** — see

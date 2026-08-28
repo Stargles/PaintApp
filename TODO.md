@@ -126,15 +126,16 @@ whatever the canvas becomes.
 
 ## Open
 
-### (20) A second knob that turns the Move box alone — both phases BUILT
+### (20) A second knob that turns the Move box alone — all three phases BUILT
 
-      **Phase 1 merged as `87081de`; phase 2 is on `tmp/stretch` and not yet merged**, so this item
+      **Phases 1 and 2 are merged; phase 3 is on `tmp/refit` and not yet merged**, so this item
       stays here until it is. A yellow knob
       off the box's *bottom* edge (green is the content knob; `systemOrange` already means "distort
       corner" on a text box) turns `ObjectTransformFrame.boxAngle`, and **that field reaches no
-      geometry at all** — it appears nowhere in `VectorLayer.swift`, and in `CanvasManager+LassoMove`
-      only in `turnVectorFloatBox`, which writes it straight onto the frame with no undo step, per
-      §5.21. The drag arm returns `transform: start` bit for bit, so the ink is not touched by any
+      geometry at all** — it appears nowhere in `VectorLayer.swift`, which is where every geometry map
+      lives, and in `CanvasManager+LassoMove` only in `turnVectorFloatBox`, which writes it straight
+      onto the frame with no undo step per §5.21, and in `fittedFrame(of:at:)`, which phase 3 added
+      and which measures a *box* — it returns a frame for the overlay and writes nothing. The drag arm returns `transform: start` bit for bit, so the ink is not touched by any
       arithmetic — not scaled by 1, not rotated by 0.
       `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is the guard against a leak
       into the map, and **it caught a real one**: `87081de` shipped with two lines added to
@@ -156,7 +157,7 @@ whatever the canvas becomes.
       any angle throughout: a uniform drag scales the ratio of two radii from the anchor and reads no
       rotation.
 
-- [x] **Phase 2 — §5.20's second stored angle** — **BUILT on `tmp/stretch`, not yet merged.**
+- [x] **Phase 2 — §5.20's second stored angle** — **BUILT and merged.**
       `ObjectTransformFrame.stretchAxis` is the axis a stretch was made about, and
       `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` builds `R(ρ+φ)·S·R(−φ)` from it — the
       singular value decomposition of a general 2×2, so `2 translation + 2 angles + 2 scales = 6` is
@@ -172,6 +173,34 @@ whatever the canvas becomes.
       is true instead: a second stretch about a *different* axis composes two maps that do not
       commute, so the product carries a rotation of its own, `transform.rotation` moves and the box
       turns with it. `ObjectTransformFrame.decompose` reads the product back into the four fields.
+
+- [x] **Phase 3 — §5.22, the box re-fits to the ink as it turns** — **BUILT on `tmp/refit`, not yet
+      merged.** The owner, 2026-08-28: *"currently when the user uses the yellow node to rotate the
+      selection box, the dimensions of the box does not change to fit the drawing. That box should be
+      the bounding box of the drawing inside of it and should actively change dimensions when rotated
+      to keep on fitting the image. For example, the box would be bigger and then smaller on 45 degree
+      angle increments of a square it is around, and constant for a circle."* Phases 1 and 2 gave the
+      knob an angle and gave a stretch an axis; the box's *size* was still the number the lift
+      measured, so the knob turned a rectangle of fixed, wrong dimensions.
+      `contentSize` and the new `ObjectTransformFrame.contentOffset` are now a function of `boxAngle`,
+      measured by `MoveBoxInk` in the box's own frame `B⁻¹·L·Mirror`. A square gives
+      `s·(|cos β| + |sin β|)` — `s√2` at 45° — and a disc is constant, which is the case that separates
+      a box measured from the *ink* from one measured from the *previous box*.
+      **`ρ` cancels out of `B⁻¹·L`, so the green knob is free**; `aspect == 1` and
+      `boxAngle == stretchAxis` reduce to `R(−β)` exactly and are written out, which covers the pose at
+      rest — where the fit returns the lift's own box to the bit.
+      **The box's centre travels and the geometry's anchor does not.** A right triangle's tight box is
+      materially off-centre at 45°, but `pivot` is what the map holds still and `transform.position` is
+      where it sends it, so the offset lives on the box and no map reads it —
+      `CanvasManager.fittedFrame(of:at:)` *returns* a frame and writes nothing, so `contentSize` is
+      still assigned only at the two lift sites. §5.19 is untouched: a fresh lift still measures a
+      loose, axis-aligned box and the box still never tilts by itself.
+      Nine mutations, nine killed — including the two the brief named, a fit that measures the previous
+      box (caught by the disc) and an anchor that follows the box centre (caught by
+      `testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot`, and by both phase-1/2 guards).
+      **The convex hull was bought by a measurement, not assumed**: walking every sample of a
+      24,000-sample cel cost 2.223 ms a frame, over the 120 Hz bar, and Andrew's monotone chain per
+      element took it to 0.401 ms.
 
 - [ ] Asked whether the handle box should turn by itself to hug ink the artist had already rotated,
       the owner ruled it should not: *"leave it straight up and down. Thats what the orange rotate node
