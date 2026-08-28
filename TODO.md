@@ -126,9 +126,10 @@ whatever the canvas becomes.
 
 ## Open
 
-### (20) A second knob that turns the Move box alone — phase 1 BUILT, phase 2 next
+### (20) A second knob that turns the Move box alone — both phases BUILT
 
-      **Phase 1 merged as `87081de`**, so only phase 2 is left open below. A yellow knob
+      **Phase 1 merged as `87081de`; phase 2 is on `tmp/stretch` and not yet merged**, so this item
+      stays here until it is. A yellow knob
       off the box's *bottom* edge (green is the content knob; `systemOrange` already means "distort
       corner" on a text box) turns `ObjectTransformFrame.boxAngle`, and **that field reaches no
       geometry at all** — it appears nowhere in `VectorLayer.swift`, and in `CanvasManager+LassoMove`
@@ -150,19 +151,27 @@ whatever the canvas becomes.
       untouched float — `nudges == 1`, the step carrying the pre-split display list — so one Undo
       after it would rejoin the cut stroke and dismiss the float; and it would destroy a hand-fit no
       Undo could give back, since §5.21 keeps the angle off the stack in both directions.
-      **Freeform greys out while the box is turned** — *"The box is turned. Straighten it to stretch
-      this piece."* Uniform and both knobs keep working at any angle: a uniform drag scales the ratio
-      of two radii from the anchor and reads no rotation.
+      **Freeform greyed out while the box was turned** — *"The box is turned. Straighten it to
+      stretch this piece."* — the one thing phase 2 removed. Uniform and both knobs kept working at
+      any angle throughout: a uniform drag scales the ratio of two radii from the anchor and reads no
+      rotation.
 
-- [ ] **Phase 2 — §5.20's second stored angle**, which is what un-greys Freeform. A stretch made about
-      a hand-turned box needs a rotation on *both* sides of the scale, `R(ρ)·S·R(−φ)`; its singular
-      value decomposition is the general 2x2, so `2 translation + 2 angles + 2 scales = 6` is **exactly
-      a general affine** — the term completes the box's transform rather than extending it, and stops
-      well short of stage 5's Distort, which needs 8 for perspective. The owner, shown the constraint:
-      *"i feel like there is some kind of clever fix, but if the skew is the sensible way to do it, go
-      ahead and build the skew."*
-      **One consequence to state when it ships**: turning the box *after* a stretch cannot leave the
-      ink perfectly still, because the stretch axes are what would be turning.
+- [x] **Phase 2 — §5.20's second stored angle** — **BUILT on `tmp/stretch`, not yet merged.**
+      `ObjectTransformFrame.stretchAxis` is the axis a stretch was made about, and
+      `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` builds `R(ρ+φ)·S·R(−φ)` from it — the
+      singular value decomposition of a general 2×2, so `2 translation + 2 angles + 2 scales = 6` is
+      **exactly a general affine**. The term completes the box's transform rather than extending it,
+      and stops well short of stage 5's Distort, which needs 8 for perspective. The owner, shown the
+      constraint: *"i feel like there is some kind of clever fix, but if the skew is the sensible way
+      to do it, go ahead and build the skew."* The Freeform gate is gone; the placed-image refusal
+      stays, being a different one.
+      **The consequence this item predicted did not happen, and §5.20 now carries the correction.**
+      Turning the box after a stretch *does* leave the ink perfectly still, because the stretch
+      records its axis instead of reading the live `boxAngle` — and §5.21 forces that, since a box
+      turn that moved ink would change the document with nothing on the stack to give it back. What
+      is true instead: a second stretch about a *different* axis composes two maps that do not
+      commute, so the product carries a rotation of its own, `transform.rotation` moves and the box
+      turns with it. `ObjectTransformFrame.decompose` reads the product back into the four fields.
 
 - [ ] Asked whether the handle box should turn by itself to hug ink the artist had already rotated,
       the owner ruled it should not: *"leave it straight up and down. Thats what the orange rotate node

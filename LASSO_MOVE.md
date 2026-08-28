@@ -92,7 +92,7 @@ i.e. the toggle's other half.
   and adding four `Handle` cases walks straight into the trap this stage was warned about:
   `allowedHandles` defaults to *all cases*, so a new grip switches itself on for the whole-layer box
   too, where there is nothing to store it in.
-- **The box-only rotate knob** (3b) — **approved 2026-08-27 and the next thing built**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store, and §5.21 exempts a box-only turn from the undo stack. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
+- ~~**The box-only rotate knob**~~ (3b) — **shipped, both phases**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store — `ObjectTransformFrame.stretchAxis`, which makes the map the general affine `R(ρ+φ)·S·R(−φ)` — and §5.21 exempts a box-only turn from the undo stack, which is also the reason the recorded axis is not the live box angle. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
 - **Placed images holding a stretched shape** (3c). This is now the *only* thing either refusal names: text was taught to mirror and to stretch on 2026-08-27 (stage 3d, §5.18), and a placed image is what is left — its `LayerTransform` needs a stored field and a decode migration before it can hold either.
 - **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
   `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
@@ -884,18 +884,21 @@ about makes the pair a *general affine* and still not a homography.
 - ~~**Freeform**~~ — **done**, stage 3a, see §0. It needed one scalar on the box and a second mapping
   function, not the quad this list assumed.
 - ~~**Flips**~~ — **done**, stage 2, as one affine on the float.
-- ~~**The box-only rotate knob**~~ (stage 3b) — **phase 1 done**, `87081de`, TODO item (20), on
-  §5.19–21. A yellow knob off the box's *bottom* edge writes `ObjectTransformFrame.boxAngle`, which is
-  **chrome**: `drawnAngle` (`transform.rotation + boxAngle`) is the single place the two are added,
-  and every geometry path still reads `transform.rotation` alone, so the lift invariant holds and the
-  drag arm returns `transform: start` bit for bit. No undo step (§5.21), written straight onto the
-  float by `CanvasManager.turnVectorFloatBox(to:)`. Reset leaves it alone — §5.16 and §5.21 meet
-  there, and both point the same way (see `canResetFloating`'s own note).
-  **Phase 2 is §5.20's second stored angle**, which is what un-greys Freeform: until it exists,
-  `freeformUnavailableReason` refuses a stretch on a turned box, because `ObjectTransformDrag.stretched`
-  measures its axes from `start.rotation` — the *ink's* angle, which on a hand-turned box is not the
-  box the artist can see. Uniform and both knobs are unaffected at any angle: they read radii and swept
-  angles about the anchor and no rotation at all.
+- ~~**The box-only rotate knob**~~ (stage 3b) — **done, both phases**, on §5.19–21. A yellow knob off
+  the box's *bottom* edge writes `ObjectTransformFrame.boxAngle`, which is **chrome**: `drawnAngle`
+  (`transform.rotation + boxAngle`) is the single place the two are added, and no geometry path reads
+  it, so the lift invariant holds and the knob's own drag arm returns `transform: start` bit for bit.
+  No undo step (§5.21), written straight onto the float by `CanvasManager.turnVectorFloatBox(to:)`.
+  Reset leaves it alone — §5.16 and §5.21 meet there, and both point the same way.
+  **Phase 2 is §5.20's second stored angle**, `ObjectTransformFrame.stretchAxis`, and it un-greyed
+  Freeform. `ObjectTransformDrag.stretched` now measures from the *drawn* box rather than from
+  `start.rotation`, and records the axis it pulled along;
+  `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` builds `R(ρ+φ)·S·R(−φ)` from it. The two
+  angles are exact opposites in what they touch: **`boxAngle` draws and never maps, `stretchAxis` maps
+  and never draws.** Two poses reduce to the pre-phase-2 expression and are written out rather than
+  computed — `φ == 0`, and `aspect == 1`, where a scalar commutes with a rotation — which is what
+  keeps every unstretched document bit-identical and keeps `applyToVectorFloat`'s exact `aspect != 1`
+  dispatch honest.
 - **Placed images holding a stretched shape** (3c), and then **Distort** (stage 5) over the shared
   `Homography` solver — the one member of this list that really does need a quad. Text reached both
   Mirror and Freeform on 2026-08-27 (stage 3d) without needing 3c's stored field, because a
@@ -1241,8 +1244,22 @@ ink, and the first is the one the other two are consequences of.
     are zero and the map is the identity, so §5.17's "Freeform contains Uniform" survives one level down
     again.
 
-    **One consequence, disclosed rather than found later**: turning the box *after* a Freeform stretch
-    cannot leave the ink perfectly still, because the stretch axes are the thing that would be turning.
+    **One consequence was disclosed here rather than found later — and it did not survive the
+    build.** The prediction was that turning the box *after* a Freeform stretch could not leave the
+    ink perfectly still, because the stretch axes are the thing that would be turning. That is true
+    of the design where the *live* `boxAngle` is the φ in the map, and **§5.21 rules that design
+    out**: a box turn that moved ink would be a change to the document with nothing on the undo stack
+    to give it back, which is exactly what §5.21's "it moves no ink, so there is nothing to give
+    back" forbids. So the shape above is the only one consistent with the ruling, the stretch records
+    the axis rather than reading it, and turning the box afterwards changes no sample and no pixel.
+    `LassoMoveLogicTests.testTurningTheBoxAfterAStretchChangesNoSampleAndNoPixel` pins it. The
+    prediction was a prediction; the ruling is unchanged.
+
+    **What *is* true, and is the consequence worth stating instead**: a second stretch made about a
+    *different* axis composes two maps that do not commute, so the product carries a rotation of its
+    own. `transform.rotation` genuinely moves and the box turns with it — the ink really did turn, and
+    a box drawn at `rotation + boxAngle` follows it. `ObjectTransformFrame.decompose` is where the
+    product is read back into the four fields, and it is the closed-form 2×2 SVD.
 
 21. **Turning the box costs no undo step — it is free, like zooming.** A deliberate **exception** to
     §5.5's *"one drag of a corner is one step and one turn of the knob is one step"*, and **not an

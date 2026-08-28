@@ -2073,16 +2073,19 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(vector.suppressedElementIDs, manager.vectorFloat?.insideIDs)
 
         let pose = stretched(manager, x: 3, y: 1)
-        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect, stretchAxis: 0.8)
         XCTAssertEqual(manager.vectorFloat?.wantsLatch, false,
                        "and a stretch hands the display back to the layer's own render")
         XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
 
         // The next drag re-arms it, and against the pose the bitmap will actually be rendered at —
-        // both halves, or the stretch already in the bitmap is applied to it a second time.
+        // all three parts, or the stretch already in the bitmap is applied to it a second time, or
+        // applied again along a different axis.
         manager.beginVectorFloatDrag()
         XCTAssertEqual(manager.vectorFloat?.wantsLatch, true)
         XCTAssertEqual(manager.vectorFloat?.latchedAspect ?? 0, manager.vectorFloat?.frame.aspect ?? -1)
+        XCTAssertEqual(manager.vectorFloat?.latchedStretchAxis ?? 0,
+                       manager.vectorFloat?.frame.stretchAxis ?? -1)
         XCTAssertEqual(manager.vectorFloat?.latchedFrameTransform, manager.vectorFloat?.frame.transform)
     }
 
