@@ -132,6 +132,23 @@ final class CanvasManager: ObservableObject {
     /// to show that something is happening rather than to gate anything.
     @Published var isRegisteringInterpolation: Bool = false
 
+    /// True from the moment a "Resize Canvas" is committed until its walk has finished —
+    /// CANVAS_RESIZE.md §5 rules 12 and 15, and stage 3's items 1 and 2.
+    ///
+    /// **It does two jobs and only one of them is the spinner.** `DrawingView` puts a hit-testing
+    /// overlay up on it, so the artist can see the app is working and cannot draw into a document
+    /// whose extent is changing under them; and `ContentView.saveIfNeeded` refuses to *start* a save
+    /// while it is set, through `ScenePhaseSaveGate.mayStartSave`. The second is the one the owner's
+    /// ruling makes **more** necessary rather than less: a block the artist is told about is still a
+    /// block, and `ScenePhaseSaveGate` fires on `active → !active`, so an app switch during one
+    /// would otherwise write a document that is half old-size and half new.
+    ///
+    /// **Set for the announced path only, and that is why nothing flashes.** A resize small enough
+    /// to be imperceptible never suspends, so SwiftUI never lays out with this true and there is no
+    /// frame in which the overlay could appear — see `resizeCanvasAnnouncingProgress`, which decides
+    /// which path a resize takes and carries the reasoning.
+    @Published var isResizing: Bool = false
+
     /// True between `beginInterpolationDrag` and `commitInterpolationDrag` — the `t` slider is being
     /// dragged. Selects `.preview` render quality for the duration; see `RenderQuality`.
     @Published var isScrubbingInterpolation: Bool = false

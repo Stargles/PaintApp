@@ -27,9 +27,8 @@ app, and whoever notices that should come back and say so rather than assuming i
   containment predicate, already shaped as a pure geometric classifier with the kind-skipping in the
   caller, and `testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips` goes red if anyone
   folds the skipping back down into it. **The refactor the scoping pass called stage 0 is not owed.**
-- **(9) stages 2-4** — scale-to-fit with the Fit/Fill choice, then undo and the busy modal. Stage 2's
-  vector arm is already written: `VectorCanvas.resized` bakes the map into the elements through
-  `mapping(_:throughSimilarity:)` since item (12) stage 3, which §0 did not know.
+- **(9) stage 3 is built on `tmp/resize3`** — undo, the refusal, the save gate and the busy state.
+  Stage 4 is deferred polish nobody has asked for, so the ask itself is complete once this merges.
 - **(9) stage 0 is merged** (`ea51607`): a failed save now raises the `CanvasNotice` banner instead of
   failing silently, which this feature needs because after a resize the in-memory document is the only
   copy. **It is only visible on the autosave path** — on "leave to gallery" the banner is raised and
@@ -60,7 +59,7 @@ genuinely independent *because* the width is fixed, so a resize re-encodes nothi
 that a payload carries the origin it was quantised about, which leaves an unresaved cel readable
 whatever the canvas becomes.
 
-### (9) Resize the canvas from the Actions menu — stages 0 and 1 merged
+### (9) Resize the canvas from the Actions menu — stages 0-2 merged, stage 3 built
 
 - [ ] The owner: *"a resize canvas option in actions would be nice ... They should be able to control
       whether it gets cropped/expanded, or if everything gets scaled."* On an aspect change it
@@ -77,12 +76,18 @@ whatever the canvas becomes.
       crop/expand only, not undoable) are merged. Stage 1 also fixed three defects `setCanvasPadding`
       had all along — guides untransformed, `copiedCel` uncleared, lattices unmoved — because both now
       share one walk; §0 listed two of the three.
-      **Stage 2 `b42a67b`** (the scale toggle and the letterbox rule) is merged; **stage 3 is what is
-      left, and the owner re-scoped it on 2026-08-28**: *"resize freezing canvas isnt that big of an
-      issue, as long as the user knows its loading. It is a one time thing anyway."* §5 rule 15 and §4
-      stage 3 carry it — the busy state becomes the requirement, off-main execution and bounded raster
-      concurrency drop to options, and `isResizing`, the validation refusal and the undo step are
-      unaffected. The same message asked *why* a resize costs anything given fixed-point sample
+      **Stage 2 `b42a67b`** (the scale toggle and the letterbox rule) is merged. **Stage 3 is built on
+      `tmp/resize3`** — the owner re-scoped it on 2026-08-28 (*"resize freezing canvas isnt that big of
+      an issue, as long as the user knows its loading. It is a one time thing anyway."*, §5 rule 15),
+      and it shipped the undo step, the rule 11 refusal, the `isResizing` save gate and the busy
+      overlay; off-main execution, bounded raster concurrency and the cache purge were dropped as the
+      ruling allows. **The busy overlay has two paths, and that is the part worth knowing**: the flag
+      is free and only the suspension costs anything, so a resize predicted to block for under 0.2 s
+      runs in one main-actor turn and is never rendered as busy at all — which is what stops a 0.27 s
+      resize flashing a modal. Three of this document's own instructions were refuted and are recorded
+      in CANVAS_RESIZE.md §4: the undo step's retained cost is O(1) rather than `Σ elements × 512`,
+      `image.cgImage == nil` is not a failure mode, and determinate progress is exclusive with an
+      atomic walk. The same owner message asked *why* a resize costs anything given fixed-point sample
       storage; answered in CANVAS_RESIZE.md §2 and PERFORMANCE.md item 18 — right about the file, and
       the cost is in the resident display list, which is still doubles. That pass also found the 3–4 s
       figure was a raster-only fixture's: a document shaped like the owner's own resizes at **0.9 ms a

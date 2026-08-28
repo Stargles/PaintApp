@@ -168,6 +168,9 @@ struct DrawingView: View {
             }
         }
         .background(Color.black)
+        // **Above everything, including the side toolbar** — which is why it is an overlay on the
+        // `HStack` rather than another layer of the canvas `ZStack`. See below for what it is for.
+        .overlay { canvasResizeBusyOverlay }
         // Applied here, above both surfaces that carry a size slider: the left rail is clipped by its
         // own `cornerRadius(16)` and the settings panel by its `cornerRadius(12)`, so a window
         // overlaid inside either one would be cut off at that container's edge.
@@ -277,6 +280,50 @@ struct DrawingView: View {
     ///
     /// Ordered least-transient first, so the bar the artist is actively dragging a slider in is the one
     /// nearest their hand and the one that does not move when another arrives above it.
+    /// The "Resizing canvas…" modal — CANVAS_RESIZE.md §5 rule 15, and the whole of what the owner
+    /// asked for when they ruled the freeze acceptable: *"as long as the user knows its loading."*
+    ///
+    /// **It is a scrim as much as a spinner.** The resize rewrites every cel's buffers and then
+    /// `canvasSize`, and `setCanvasPadding`'s own comment explains why even a pending shape preview
+    /// has to be baked first — so a touch that reached the canvas across the one suspension the
+    /// announced path takes would be a touch on a document whose extent is about to change. `Color`
+    /// hit-tests, so this swallows it. CANVAS_RESIZE.md §3: *"A resize is modal-busy or it is a
+    /// race."*
+    ///
+    /// **No transition and no animation, deliberately.** The next thing that happens after this view
+    /// is drawn is a multi-second main-thread block, so a fade-in would be a fade that never runs —
+    /// the artist would see the half-way frame frozen. It appears instantly and is gone instantly.
+    ///
+    /// **Indeterminate.** `CanvasResizeAudit` knows the cel count before the first cel, so a
+    /// determinate bar was on the table (§4 stage 3's item 1 asks for one) — but reporting `n / total`
+    /// needs the walk to suspend between cels, which is the interleaved execution the owner's ruling
+    /// demoted *and* what would make a half-resized document observable. `resizeCanvasAnnouncingProgress`
+    /// carries that argument; the count is spent on deciding whether to show this at all instead.
+    @ViewBuilder
+    private var canvasResizeBusyOverlay: some View {
+        if canvasManager.isResizing {
+            ZStack {
+                Color.black.opacity(0.6)
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(1.3)
+                    Text("Resizing canvas…")
+                        .font(.callout)
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 34)
+                .padding(.vertical, 28)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(16)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            }
+            .ignoresSafeArea()
+            .accessibilityIdentifier("resizeCanvas.busyOverlay")
+        }
+    }
+
     @ViewBuilder
     private var bottomDock: some View {
         VStack(spacing: 10) {
@@ -408,7 +455,7 @@ struct DrawingView: View {
                 canvasManager.toggleFolderVisibility(folder.id)
             }
         case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
-             .nothingWhollyInside, .saveFailed:
+             .nothingWhollyInside, .saveFailed, .resizeRefused, .resizeResampled:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner
             // never offers a button that would land here. Every case is spelled out rather than
             // defaulted so that adding a new kind is a compile error here, not a silent no-op.

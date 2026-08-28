@@ -484,7 +484,13 @@ struct CanvasResizeSheet: View {
                 Spacer()
                 Button("Resize") {
                     guard let width, let height, isValid else { return }
-                    canvasManager.resizeCanvas(to: CGSize(width: width, height: height), mode: mode)
+                    // The announcing entry point, not `resizeCanvas(to:mode:)` itself: on a document
+                    // large enough for the walk to be felt it puts the busy overlay up and gets it a
+                    // frame before the block starts (§5 rule 15), and on one small enough that a
+                    // modal would flicker it runs the resize straight through. It also raises the
+                    // refusal (rule 11) and the resample notice (rule 10).
+                    canvasManager.resizeCanvasAnnouncingProgress(to: CGSize(width: width, height: height),
+                                                                 mode: mode)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -508,9 +514,18 @@ struct CanvasResizeSheet: View {
     }
 
     /// What the resize will do to the drawing, in the artist's terms. One sentence per mode, and the
-    /// undo clause every mode shares because stage 3 has not landed.
+    /// undo clause every mode shares.
+    ///
+    /// **The undo clause changed with stage 3 and says two things now**, because §5 rule 10 gives
+    /// exactly two: the resize itself takes one press to undo, and everything below it on the stack
+    /// is gone — every entry there holds pixel patches at the old canvas dimensions, so restoring one
+    /// after a resize would put them at the wrong size in the wrong place. Depth 1 afterwards is
+    /// strictly better than the 0 this operation used to leave, which is the owner's own reason for
+    /// choosing it (§6 Q2). What it does *not* promise is that the pixels come back bit-exact; that
+    /// is a property of the particular resize rather than of the dialog, so it is said by
+    /// `CanvasNotice.resizeResampled` at the moment it is true.
     private var explanation: String {
-        let undo = " This clears the undo history."
+        let undo = " The resize itself can be undone; anything you did before it can't."
         guard scaleContent else {
             return "Your artwork keeps its size and stays centred. Anything outside the new edges "
                  + "is cropped away." + undo

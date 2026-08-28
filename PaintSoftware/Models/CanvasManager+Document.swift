@@ -177,6 +177,28 @@ struct CanvasResizeMap: Equatable {
     var inverse: CanvasResizeMap {
         CanvasResizeMap(from: newSize, to: oldSize, padding: padding, mode: mode.inverted)
     }
+
+    /// Whether `inverse` would bring the **raster** tiers back bit-exact — CANVAS_RESIZE.md §2's
+    /// permanent vector/raster asymmetry, asked of one particular resize rather than of the mode.
+    ///
+    /// The vector tier is never in question: geometry through a similarity is exact both ways, to the
+    /// 1.3e-13 pt `mapping(_:throughSimilarity:)`'s own doc measures. The raster tier loses in two
+    /// ways, and **crop/expand reaches the second**, which is why this is not simply `scale != 1`:
+    ///
+    ///  * a scale **resamples** — `draw(in:)` filters, a downscale discards pixels and the inverse
+    ///    upscale invents them;
+    ///  * any placement whose content rect leaves the new buffer **crops**, and a crop is
+    ///    irreversible whatever the factor. Growing a canvas is exactly reversible and shrinking one
+    ///    is not, under the very same mode.
+    ///
+    /// This is the predicate §5 rule 10's notice fires on, together with "and there were pixels
+    /// there to lose": a document whose raster tiers are all blank — which is what the owner's own
+    /// packages measure as (PERFORMANCE.md item 14) — has an exactly invertible resize and must not
+    /// be told otherwise.
+    var losesRasterFidelity: Bool {
+        if scale != 1 { return true }
+        return !CGRect(origin: .zero, size: newSize).contains(contentRect)
+    }
 }
 
 extension InterpolationRecipe {
@@ -316,9 +338,150 @@ struct CompositorSizeGate: Equatable {
     }
 }
 
+/// What a canvas resize refused to carry — CANVAS_RESIZE.md §5 rule 11, in the artist's terms.
+///
+/// **A refusal, not a report of damage already done.** The rule is *never a partial resize*: a
+/// document with one element the map cannot carry comes out with that element sitting at its old
+/// coordinates while everything else moved, which is a silent corruption of the drawing rather than
+/// an error. So the whole operation declines and says what stopped it, in the style
+/// `VectorCanvasData.DecodeReport` already established for the load path.
+struct CanvasResizeRefusal: Equatable {
+
+    /// One entry per element the map could not carry, in document order — the element's kind, the
+    /// same vocabulary `DecodeReport.malformedKinds` uses (`"fill"`, `"stroke"`, `"image"`,
+    /// `"text"`).
+    let kinds: [String]
+
+    var count: Int { kinds.count }
+
+    /// "3 fills", or "2 fills and 1 image" — grouped in first-seen order and pluralised, because the
+    /// artist judges the sentence and "3 elements failed" is not one.
+    var phrase: String {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for kind in kinds {
+            if counts[kind] == nil { order.append(kind) }
+            counts[kind, default: 0] += 1
+        }
+        let parts = order.map { kind -> String in
+            let n = counts[kind] ?? 0
+            return "\(n) \(kind)\(n == 1 ? "" : "s")"
+        }
+        guard let last = parts.last else { return "nothing" }
+        guard parts.count > 1 else { return last }
+        return parts.dropLast().joined(separator: ", ") + " and " + last
+    }
+}
+
+/// One pre-flight walk of the document: whether the resize may run at all, and how long its walk
+/// will block for.
+///
+/// **Both answers come from the same walk because both are the same walk.** The validation §2 asks
+/// for is a decode of every fill's archived path; the cost estimate needs to know which cels carry
+/// raster pixels; each is a pass over every cel of every layer and there is no reason to make two.
+///
+/// It is taken *after* `commitAllInteractiveState()` and before anything is written, so what it
+/// audits is exactly the display list the mutation will walk.
+struct CanvasResizeAudit: Equatable {
+
+    /// Cels whose three raster tiers are all empty — no backing bitmap, no `fillImage`, no
+    /// `bakedImage`. `RasterLayerTexture.resized(to:placing:)` early-outs on these and allocates
+    /// nothing, so their whole cost is the vector arm.
+    var blankCels: Int = 0
+
+    /// Cels carrying at least one raster tier with pixels in it. These pay a canvas-sized redraw
+    /// (two or three of them, where the fill and baked tiers are also present).
+    var inkedCels: Int = 0
+
+    /// The kinds of every element `VectorCanvas.canBeMapped` refused, in document order. Empty is
+    /// the ordinary case and the only one that may proceed.
+    var unmappableKinds: [String] = []
+
+    var celCount: Int { blankCels + inkedCels }
+
+    var canProceed: Bool { unmappableKinds.isEmpty }
+
+    var refusal: CanvasResizeRefusal { CanvasResizeRefusal(kinds: unmappableKinds) }
+
+    // MARK: The cost model
+
+    // **MEASURED 2026-08-28**, `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`
+    // — 4 layers × 8 cels at 2048×1024 ↔ 1024×512, cels carrying 190 strokes × 46 samples (the
+    // owner's own measured density), best of three, **Debug, simulator, 57.3% idle**. CANVAS_RESIZE.md
+    // §2's split carries the table and its provenance.
+    //
+    // **These are ceilings and that is the direction to be wrong in.** Debug on a simulator is slower
+    // than Release on the device, so the estimate over-predicts, so the busy state is shown slightly
+    // more often than it is strictly needed. The other error — a freeze the artist was not told
+    // about — is the one §5 rule 15 explicitly refuses to license.
+
+    /// A cel whose raster tiers are blank: the vector walk and nothing else. 97% of this is
+    /// `drawn`'s per-stroke array churn (§2), not the similarity arithmetic.
+    static let blankCelSeconds: Double = 0.0009
+    /// A cel with raster content, placed at its own size — a copy, no filtering.
+    static let inkedCropCelSeconds: Double = 0.0044
+    /// The same cel resampled into a rect of a different size. Twice the crop, and **not because of
+    /// `interpolationQuality`**: forcing `.default` in both primitives measured 2.28×, no cheaper.
+    static let inkedScaleCelSeconds: Double = 0.0088
+
+    /// How long the mutation walk will block the main actor for, near enough to decide whether the
+    /// artist needs telling.
+    func predictedSeconds(scaling: Bool) -> Double {
+        Double(blankCels) * Self.blankCelSeconds
+            + Double(inkedCels) * (scaling ? Self.inkedScaleCelSeconds : Self.inkedCropCelSeconds)
+    }
+
+    /// Above this, the block is a wait; below it, a spinner would be on screen for less time than it
+    /// takes to see one.
+    ///
+    /// **The threshold exists because the flag alone is free and only the *yield* costs anything.**
+    /// A resize that never suspends is one main-actor turn, so SwiftUI never renders the busy state
+    /// at all and there is nothing to flash; the announced path suspends first precisely so the
+    /// spinner is committed to the screen before the block starts. So this number is not "when is
+    /// the app busy" — it is "when is a modal worth putting up", and 0.2 s is where a briefly-shown
+    /// one stops reading as a glitch. At the owner's real document size (§2: 0.9 ms a cel, blank
+    /// raster tiers) that is 222 cels; at 300 the resize is announced, and a 32-cel test document is
+    /// silent.
+    static let announceAboveSeconds: Double = 0.2
+
+    func needsAnnouncing(scaling: Bool) -> Bool {
+        predictedSeconds(scaling: scaling) >= Self.announceAboveSeconds
+    }
+}
+
+/// A resize decided but not yet performed: the one map, and what the pre-flight walk found.
+///
+/// Split from the mutation so the *decision* — refuse, announce, or just do it — is made once, from
+/// one walk, and so the announced path can put its spinner on screen between the two halves without
+/// auditing the document twice.
+struct CanvasResizePlan: Equatable {
+    let map: CanvasResizeMap
+    let audit: CanvasResizeAudit
+    /// Preserved literally through the resize (§5 rule 9); carried here so the undo step's inverse
+    /// walk restores the value the document had rather than whichever one is live when it runs.
+    let padding: CGFloat
+}
+
 extension CanvasManager {
 
-    // MARK: - Resize (CANVAS_RESIZE.md stages 1 and 2)
+    // MARK: - Resize (CANVAS_RESIZE.md stages 1, 2 and 3)
+
+    /// What one resize step charges against `UndoHistory`'s byte budget.
+    ///
+    /// **A flat number, and that is a correction to CANVAS_RESIZE.md §2 rather than a shortcut.**
+    /// That section sizes this step as `4096` flat *plus* `Σ elements.count × 512` for the vector
+    /// arms, on the stated ground that "the closures retain the old `VectorCanvas` objects, whose
+    /// real cost is the elements", and warns that at 800 cels × 1000 elements the ~410 MiB would
+    /// evict the very step that recorded it. Neither is true of the step this file records: its undo
+    /// is the **inverse resize, recomputed**, not a restoration of captured state, so the two
+    /// closures capture a `CanvasResizeMap` (six scalars), one `CGFloat`, and a weak `self` — no
+    /// canvas, no element array, no pixels. The retained cost is O(1) in the document, and the term
+    /// §2 was worried about is not owed at all.
+    ///
+    /// `4096` rather than the true few hundred bytes: it is the flat structural charge every other
+    /// non-pixel step in the app already uses (`CanvasManager+Undo`, `CanvasManager+LassoMove`), and
+    /// making the cheapest step in the app cheaper still buys nothing.
+    static let resizeUndoCostBytes = 4096
 
     /// The artwork rect the artist is looking at: `canvasSize` inset by `canvasPadding` on every side.
     ///
@@ -405,14 +568,150 @@ extension CanvasManager {
     /// - Returns: whether the document changed.
     @discardableResult
     func resizeCanvas(to newArtworkSize: CGSize, mode: CanvasResizeMode = .cropExpand) -> Bool {
-        guard canvasSize != nil else { return false }
+        guard let plan = planResize(to: newArtworkSize, mode: mode) else { return false }
+        return commitResize(plan)
+    }
+
+    /// The Resize button's entry point: `resizeCanvas(to:mode:)` with §5 rule 15's busy state around
+    /// it. CANVAS_RESIZE.md stage 3, item 1.
+    ///
+    /// > *"resize freezing canvas isnt that big of an issue, as long as the user knows its loading.
+    /// > It is a one time thing anyway."* — the owner, 2026-08-28.
+    ///
+    /// **The walk stays one synchronous main-actor turn, and that is the point rather than a
+    /// shortcut.** The ruling makes the busy state the requirement and off-main execution an option;
+    /// what an atomic walk buys is that a half-resized document — some cels at the new extent, some
+    /// at the old, `canvasSize` still the old one — is never observable by anything, which is the
+    /// same property §2's "Failure and partial completion" wants and which §3 states from the other
+    /// end: *"A resize is modal-busy or it is a race."*
+    ///
+    /// ## Why there are two paths, and why the fast one does not flash
+    ///
+    /// **The flag is free; only the suspension costs anything.** A resize that never suspends runs
+    /// inside one main-actor turn, so SwiftUI never lays out with `isResizing == true` and there is
+    /// no frame in which a spinner could appear — the artist sees the sheet close and the canvas
+    /// already resized. §2's split measures the owner's own documents at **0.9 ms a cel**, so a
+    /// 300-cel resize is 0.27 s and a 32-cel one is 29 ms: putting a modal up for the second of those
+    /// is a flicker, and this is what stops it being one.
+    ///
+    /// The announced path sets the flag **before** the `Task`, so the save gate (rule 12) closes with
+    /// no window at all, and then `await Task.yield()` inside it, which is what commits the spinner's
+    /// frame to the screen before the block starts. `GalleryView.open` carries the same yield and the
+    /// same reasoning; without it the flag is set and the block begins in the same turn, so the
+    /// artist gets the freeze *and* no spinner — strictly worse than saying nothing at all.
+    ///
+    /// **Indeterminate, and that is a refutation of §4 stage 3's own item 1 rather than a corner cut.**
+    /// A determinate `n / total` needs the walk to report progress, which needs it to suspend between
+    /// cels, which is the interleaved execution the ruling demoted *and* the thing that makes a
+    /// half-resized document observable. The two are exclusive: an atomic walk or a progress bar, not
+    /// both. The total being known in advance — the reason §4 called determinate progress cheap here —
+    /// is real, and it is spent on deciding whether to show the spinner at all instead.
+    func resizeCanvasAnnouncingProgress(to newArtworkSize: CGSize, mode: CanvasResizeMode = .cropExpand) {
+        guard let plan = planResize(to: newArtworkSize, mode: mode) else { return }
+        guard plan.audit.canProceed else {
+            raise(.resizeRefused(plan.audit.refusal))
+            return
+        }
+        guard plan.audit.needsAnnouncing(scaling: plan.map.mode.scalesContent) else {
+            commitResize(plan)
+            return
+        }
+        isResizing = true
+        Task { @MainActor [weak self] in
+            // Committed before the block, not merely requested: setting `isResizing` marks the view
+            // dirty and SwiftUI renders that at the end of this run-loop turn, so resuming *after*
+            // that turn is what puts the overlay on screen rather than in a queue.
+            await Task.yield()
+            guard let self else { return }
+            self.commitResize(plan)
+            self.isResizing = false
+        }
+    }
+
+    /// Decides a resize without performing any of it: the one map, and one walk of the document for
+    /// the two questions that have to be answered before anything is written.
+    ///
+    /// Nil when there is no canvas, or when the clamped size is the one the document already has —
+    /// both of which are "nothing to do" rather than a refusal.
+    ///
+    /// **`commitAllInteractiveState()` runs here, before the audit, and it is the one thing this
+    /// function mutates.** A pending fill or text session is artwork the artist has already made; it
+    /// has to be in the display list before the display list is validated, or a refusal could be
+    /// decided against a document that is one bake short of the one the mutation would walk. What a
+    /// *refusal* therefore leaves behind is that bake and nothing else — no cel buffer, no
+    /// `canvasSize`, no `canvasPadding`, no history entry, not even the selection, which
+    /// `commitResize` clears only once the audit has passed. The same bake happens on every save
+    /// (`ContentView.saveIfNeeded`), so it is not a change the artist can read as a loss.
+    func planResize(to newArtworkSize: CGSize, mode: CanvasResizeMode = .cropExpand) -> CanvasResizePlan? {
+        guard let oldSize = canvasSize else { return nil }
         let range = resizableArtworkExtentRange
         let clampedArtwork = CGSize(
             width: min(max(newArtworkSize.width.rounded(), range.lowerBound), range.upperBound),
             height: min(max(newArtworkSize.height.rounded(), range.lowerBound), range.upperBound))
         let newSize = CGSize(width: clampedArtwork.width + 2 * canvasPadding,
                              height: clampedArtwork.height + 2 * canvasPadding)
-        return performCanvasResize(toBuffer: newSize, padding: canvasPadding, mode: mode)
+        guard newSize != oldSize else { return nil }
+
+        commitAllInteractiveState()
+        let map = CanvasResizeMap(from: oldSize, to: newSize, padding: canvasPadding, mode: mode)
+        return CanvasResizePlan(map: map, audit: auditDocumentForResize(), padding: canvasPadding)
+    }
+
+    /// Performs a planned resize, or refuses it — CANVAS_RESIZE.md §5 rules 10 and 11.
+    ///
+    /// The refusal is checked here as well as in `resizeCanvasAnnouncingProgress` because this is the
+    /// function `resizeCanvas(to:mode:)` reaches, and rule 11 is a property of the operation rather
+    /// than of the dialog that raised it.
+    @discardableResult
+    func commitResize(_ plan: CanvasResizePlan) -> Bool {
+        guard plan.audit.canProceed else {
+            raise(.resizeRefused(plan.audit.refusal))
+            return false
+        }
+        let changed = applyCanvasResize(plan.map, padding: plan.padding, history: .clearThenRecord)
+        // **Said when the resize happens, not when undo is pressed** (§5 rule 10, §6 Q2). Both halves
+        // are required: a resize that resamples nothing, or a document with no raster pixels to lose,
+        // is exactly invertible and must not be told it is lossy — which is the ordinary case on the
+        // owner's own packages, whose raster tiers PERFORMANCE.md item 14 measured as empty.
+        if changed, plan.audit.inkedCels > 0, plan.map.losesRasterFidelity {
+            raise(.resizeResampled)
+        }
+        return changed
+    }
+
+    /// The pre-flight walk: which cels carry raster pixels, and which elements the map cannot carry.
+    ///
+    /// One pass for both because they are the same pass. The decode is `VectorCanvas.canBeMapped`'s
+    /// — a `NSKeyedUnarchiver` per fill and nothing else — which is what makes §2's "a decode, not a
+    /// render, and therefore cheap" true: no context is allocated and no pixel is touched.
+    private func auditDocumentForResize() -> CanvasResizeAudit {
+        var audit = CanvasResizeAudit()
+        for layer in layers {
+            for cel in layer.cels {
+                if cel.raster.hasContent || cel.fillImage != nil || cel.bakedImage != nil {
+                    audit.inkedCels += 1
+                } else {
+                    audit.blankCels += 1
+                }
+                guard let vector = cel.vector else { continue }
+                for element in vector.elements where !VectorCanvas.canBeMapped(element) {
+                    audit.unmappableKinds.append(Self.kindName(of: element))
+                }
+            }
+        }
+        return audit
+    }
+
+    /// The artist-facing noun for an element kind — the same four words
+    /// `VectorCanvasData.DecodeReport.malformedKinds` writes, so a resize refusal and a load report
+    /// name the same thing the same way.
+    private static func kindName(of element: VectorElement) -> String {
+        switch element {
+        case .stroke: return "stroke"
+        case .fill: return "fill"
+        case .image: return "image"
+        case .text: return "text"
+        }
     }
 
     /// Sets the light-grey drawable margin around the artwork, resizing every layer/cel buffer so the
@@ -445,20 +744,50 @@ extension CanvasManager {
         guard delta != 0 else { return }
 
         let newSize = CGSize(width: oldSize.width + 2 * delta, height: oldSize.height + 2 * delta)
-        performCanvasResize(toBuffer: newSize, padding: clamped, mode: .cropExpand)
+        // **`canvasPadding`, not `clamped`, in the map.** The margin cancels out of
+        // `CanvasResizeMap`'s arithmetic entirely under `.cropExpand`, which is the only mode this
+        // caller uses; the *new* value is what `canvasPadding` becomes once the walk is done.
+        let map = CanvasResizeMap(from: oldSize, to: newSize, padding: canvasPadding, mode: .cropExpand)
+        // `.clear`, not `.clearThenRecord`: the padding slider's contract is unchanged by
+        // CANVAS_RESIZE.md stage 3, which is about "Resize Canvas". Making this undoable is not free
+        // — the slider moves the *padding* as well as the buffer, so its inverse is a second value
+        // this step would have to carry — and nothing has asked for it.
+        applyCanvasResize(map, padding: clamped, history: .clear)
+    }
+
+    /// What a resize does to the undo stack. CANVAS_RESIZE.md §5 rule 10.
+    private enum ResizeHistory {
+        /// Clear every entry below, then record the resize as one step whose undo is the inverse
+        /// resize. Depth 1 afterwards, which is strictly better than the 0 this path used to leave.
+        case clearThenRecord
+        /// Clear and record nothing — `setCanvasPadding`'s and `flipCanvas`'s long-standing contract.
+        case clear
+        /// Leave the stack exactly as it is: the inverse walk that an undo or a redo of a resize
+        /// runs is *inside* a step, and clearing the stack it is standing on would delete itself.
+        case leaveAlone
     }
 
     /// The one walk. Every canvas resize in the app goes through here.
     ///
     /// - Parameters:
-    ///   - newSize: the new **buffer** extent (`canvasSize`, padding included).
+    ///   - map: the resize, already decided — including which way round. An undo runs this same
+    ///     function with `map.inverse`, which is the whole of §5 rule 10's "undo runs the inverse
+    ///     resize" and the reason this takes a map rather than a target size: the inverse's factor
+    ///     and mode are `CanvasResizeMap`'s to derive (Fit out is Fill back), not the caller's to
+    ///     re-invent at the point of use.
     ///   - newPadding: what `canvasPadding` becomes — unchanged by `resizeCanvas`, moved by
     ///     `setCanvasPadding`.
-    ///   - mode: see `CanvasResizeMode`.
+    ///   - policy: see `ResizeHistory`.
     @discardableResult
-    private func performCanvasResize(toBuffer newSize: CGSize, padding newPadding: CGFloat,
-                                     mode: CanvasResizeMode) -> Bool {
+    private func applyCanvasResize(_ map: CanvasResizeMap, padding newPadding: CGFloat,
+                                   history policy: ResizeHistory) -> Bool {
         guard let oldSize = canvasSize else { return false }
+        assert(oldSize == map.oldSize,
+               "applyCanvasResize was handed a map from \(map.oldSize) while the document is "
+               + "\(oldSize). A resize step's inverse is only the inverse of the document it was "
+               + "recorded against.")
+        guard oldSize == map.oldSize else { return false }
+        let newSize = map.newSize
         guard newSize != oldSize else {
             canvasPadding = newPadding
             return false
@@ -466,15 +795,12 @@ extension CanvasManager {
 
         // Every transient buffer here is canvas-sized, so all of them have to be baked before the
         // size changes underneath them (a shape/fill preview rendered at the old size would land
-        // mis-scaled once it eventually committed).
+        // mis-scaled once it eventually committed). Already done by `planResize` on the "Resize
+        // Canvas" path, where the audit has to see the baked display list; a second call finds
+        // nothing pending and is a no-op.
         commitAllInteractiveState()
         selection = nil
 
-        // **`canvasPadding`, not `newPadding`, and the two differ only where it cannot matter.**
-        // `resizeCanvas` never moves the margin, so under scale they are the same number; the one
-        // caller that moves it is `setCanvasPadding`, which is always `.cropExpand`, where the
-        // padding cancels out of `CanvasResizeMap`'s arithmetic entirely.
-        let map = CanvasResizeMap(from: oldSize, to: newSize, padding: canvasPadding, mode: mode)
         let placement = map.contentRect
 
         for layerIndex in layers.indices {
@@ -536,7 +862,27 @@ extension CanvasManager {
         canvasSize = newSize
         canvasPadding = newPadding
 
-        history.removeAll()
+        switch policy {
+        case .clear:
+            history.removeAll()
+        case .clearThenRecord:
+            // **The clear comes first, and it is not optional** (§5 rule 10). Every entry below a
+            // resize holds canvas-coordinate pixel patches at the old dimensions —
+            // `StrokeCanvasView` stores cropped before/after `UIImage`s keyed to
+            // `RasterLayerTexture.strokeDirtyRect`, `SelectionModels` stores whole-cel images — so
+            // restoring any of them after a resize puts pixels of the wrong size in the wrong place.
+            history.removeAll()
+            let padding = newPadding
+            recordUndo(label: .resizeCanvas, cost: Self.resizeUndoCostBytes,
+                       undo: { [weak self] in
+                           self?.applyCanvasResize(map.inverse, padding: padding, history: .leaveAlone)
+                       },
+                       redo: { [weak self] in
+                           self?.applyCanvasResize(map, padding: padding, history: .leaveAlone)
+                       })
+        case .leaveAlone:
+            break
+        }
         refreshUndoRedoState()
         // **`startThumbnailBackfill()`, never `regenerateAllThumbnails()`** — §2. The deferred
         // `.utility` pass PERFORMANCE.md item 9(c) already shipped, which batches by layer, walks

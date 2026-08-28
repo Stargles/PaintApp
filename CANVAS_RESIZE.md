@@ -21,9 +21,10 @@ dialog, an undo contract, and the answer to what happens on cel 400 of 800.
 §0 is the census of what exists and is the most useful part of this document. §1 enumerates every
 tier. §2 is the decisions, and its **split** section is where a resize's time actually goes — read
 that before optimising anything on this path, because the two tables above it are measured on a
-raster-only fixture the owner's own documents are nothing like. §4 stages it. §5 is the settled
-rulings, of which **15 is the newest and the one that changes stage 3**. §6 is the owner's rulings —
-six questions, all now answered.
+raster-only fixture the owner's own documents are nothing like. §4 stages it, and **stages 0-3 are built**; stage 3's
+entry carries the three things this document asked for that turned out to be wrong, and stage 4 is
+deferred polish nobody has asked for. §5 is the settled rulings, of which **15 is the newest and the one that re-scoped
+stage 3**. §6 is the owner's rulings — six questions, all now answered.
 
 ---
 
@@ -186,19 +187,21 @@ closed off explicitly: **the header and every buffer move together, in one opera
 
 ### What does *not* exist
 
-- No `HistoryActionLabel` case for a canvas resize
-  ([`HistoryActionLabel.swift`](PaintSoftware/Models/HistoryActionLabel.swift), 73 cases; `.resizeFrame`
-  is a *timeline* duration op and `.transform` is a layer transform). The enum's exhaustive `phrase`
-  switch means adding the feature without a label is a build failure — which is the mechanism that
-  will force the decision in §2 to be made rather than defaulted.
+- ~~No `HistoryActionLabel` case for a canvas resize~~ — **stage 3 added `.resizeCanvas`**
+  ([`HistoryActionLabel.swift`](PaintSoftware/Models/HistoryActionLabel.swift); `.resizeFrame` is a
+  *timeline* duration op and `.transform` is a layer transform). The enum's exhaustive `phrase` switch
+  is what forced the decision in §2 to be made rather than defaulted, exactly as this line predicted.
 - No scaling raster primitive. `ImageWarp` ([`ImageWarp.swift:65`](PaintSoftware/Engine/ImageWarp.swift))
   is the app's only true resampler, and it is a *homography* warp built for text distort — far more
   machinery than a uniform scale needs.
 - No transform for `Lattice` / `InterpolationRecipe` (§1).
-- No determinate progress UI anywhere in the app. The only *working* long-operation pattern is
-  `GalleryOpenState` + `Task { await Task.yield(); await …InBackground() }`
-  ([`GalleryView.swift:134-145`](PaintSoftware/Views/GalleryView.swift)); the two other spinner flags
-  are dead (`isRegisteringInterpolation` guards synchronous work and can never be observed;
+- No determinate progress UI anywhere in the app, and **stage 3 did not add one** — see §4, which
+  records why an atomic walk and a progress bar are exclusive. The only *working* long-operation
+  pattern is `GalleryOpenState` + `Task { await Task.yield(); … }`
+  ([`GalleryView.swift:134-145`](PaintSoftware/Views/GalleryView.swift)), and `isResizing` is now a
+  second instance of it — with the twist that the flag is raised only on the *predicted-slow* path,
+  because a flag nothing suspends around is a flag SwiftUI never renders. The two other spinner flags
+  are still dead (`isRegisteringInterpolation` guards synchronous work and can never be observed;
   `isFilling` is declared and read but never assigned).
 
 ---
@@ -451,12 +454,14 @@ including the resize itself. That door is closed. So:
 2. **Then record exactly one step, whose undo is the inverse resize.** `M⁻¹` is `k' = 1/k` with the
    complementary offset; the same walk runs backwards. It captures no pixels, so its cost is the
    structural shape already in use — `4096` flat plus `Σ elements.count × 512` for the vector arms
-   (`CanvasManager+Undo.swift:68`, `CanvasManager+LassoMove.swift:439`). At 800 cels × 200 elements that
-   is ~82 MiB, inside budget; at 800 × 1000 it is ~410 MiB and would evict itself, so the cost formula
-   must be the flat structural one plus a *bounded* term, or the step charges `4096` and the honest
-   answer is that the closures retain the old `VectorCanvas` objects, whose real cost is the elements.
-   **The vector arms are the only thing this step retains, and stage 3 must measure that number before
-   claiming it fits.**
+   (`CanvasManager+Undo.swift:68`, `CanvasManager+LassoMove.swift:439`). **Stage 3 built it and the
+   whole of this arithmetic turned out not to apply**: the undo is the inverse resize *recomputed*,
+   not captured state, so the closures retain a `CanvasResizeMap`, one `CGFloat` and a weak `self` —
+   no `VectorCanvas`, no element array, no pixels. The cost is **O(1) in the document**, charged as
+   the flat structural `4096`, and `CanvasResizeLogicTests.testTheResizeStepsCostDoesNotGrowWithThe-`
+   `Document` pins that it does not move between 1 and 400 elements a cel. The paragraph this replaced
+   assumed the closures retain the old canvases and warned that 800 cels × 1000 elements would be
+   ~410 MiB and evict the step that recorded it; neither the assumption nor the risk was real.
 3. **Undo depth after a resize is 1.** That is strictly better than today, where it is 0.
 4. **The undo of a lossy resize is announced when the resize happens**, via `CanvasNotice` — the
    banner machinery is already built and already used for hidden layers and for undo/redo itself
@@ -599,12 +604,23 @@ Four rules:
    **run a validation pass over the whole document first** — a decode, not a render, and therefore
    cheap — and if anything cannot be mapped, **refuse the whole resize** and raise a notice naming the
    count and the kinds, in the style `VectorCanvasData.DecodeReport` already established for the load
-   path. The mutation pass that follows cannot fail.
+   path. The mutation pass that follows cannot fail. **Built in stage 3 as `VectorCanvas.canBeMapped`,
+   with one of the three named causes struck out**: `image.cgImage == nil` is *not* a failure here.
+   The `.image` arm of `mapping(_:throughSimilarity:)` moves a `LayerTransform` and never touches the
+   pixels, and both raster primitives draw through `UIImage.draw(in:)`, which needs no `cgImage` — so
+   refusing for it would decline a document nothing else in the app declines. A damaged `.fill` path
+   is the one reachable cause, and it is a real one: `VectorFillElement.init(path:)` ends `?? Data()`,
+   so a fill can be born unreadable as well as decoded so.
 3. **Gate the save while a resize is in flight.** `ScenePhaseSaveGate` fires on `active → !active`
    ([`ScenePhaseSaveGate.swift:33-35`](PaintSoftware/Services/ScenePhaseSaveGate.swift)), so an artist
    switching apps mid-resize would otherwise write a document that is half old-size and half new. An
    `isResizing` flag consulted by `ContentView.saveIfNeeded` alongside its existing
-   `screen == .editor && canvasSize != nil` guard is the whole of it.
+   `screen == .editor && canvasSize != nil` guard is the whole of it. **Shipped in stage 3** as
+   `ScenePhaseSaveGate.mayStartSave(screenIsEditor:hasCanvas:isResizing:)`, the three conditions in
+   one place. The window it covers is narrower than it looks and is real: the mutation walk is one
+   synchronous main-actor turn and no `scenePhase` change can be delivered *during* it, so what the
+   flag actually guards is the announced path's `Task.yield()` — the one run-loop turn the spinner is
+   given, deliberately.
 4. **[ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) finding 3's thirty-line remedy is a prerequisite,
    not a nice-to-have.** Give `writeAtomically` a return value and raise the existing `CanvasNotice` on
    failure. The safety net underneath — `stashLiveProjectForSave` moves the pre-resize package into
@@ -793,7 +809,69 @@ plus the survey the dialog asks, the artwork-ratio correction, the Fill asymmetr
 gate's two thresholds.
 *Owed before merge:* **measured** — see §2's table above.
 
-**Stage 3 — undoable, told, and safe. Re-scoped 2026-08-28 by §5 rule 15 and §2's split.**
+**Stage 3 — undoable, told, and safe. DONE (2026-08-28).**
+
+**What shipped**, all five items, plus three refutations of what this section asked for:
+
+- **The busy state, and the decision not to show it.** `CanvasManager.isResizing` drives a
+  hit-testing overlay in `DrawingView`; `resizeCanvasAnnouncingProgress` is what the Resize button
+  calls. The interesting part is that there are **two paths**, because the flag is free and only the
+  *suspension* costs anything: a resize that never suspends is one main-actor turn, so SwiftUI never
+  lays out with the flag set and there is no frame in which a spinner could appear. A document
+  predicted (via `CanvasResizeAudit`, from this document's own measured per-cel costs) to block for
+  less than **0.2 s** takes that path and shows nothing; anything above it sets the flag *before* the
+  `Task`, so rule 12's gate closes with no window, and then `await Task.yield()` commits the
+  overlay's frame before the block starts. That is what stops a 0.27 s resize flashing a modal.
+- **`isResizing` and the save gate.** `ScenePhaseSaveGate.mayStartSave(screenIsEditor:hasCanvas:isResizing:)`
+  — the second gate, and the one that is not about the scene phase. `ContentView.saveIfNeeded`'s
+  existing two-part guard goes through it.
+- **The validation pass and the refusal.** `VectorCanvas.canBeMapped` beside `canBeStretched` /
+  `canBeMirrored`, asked by `planResize` over every element of every cel; a non-empty answer raises
+  `CanvasNotice.resizeRefused` and writes nothing.
+- **The undo step.** `HistoryActionLabel.resizeCanvas`, one step, whose undo is
+  `applyCanvasResize(map.inverse, …)` — the same walk backwards. Depth 1 afterwards.
+- **The resample notice.** `CanvasNotice.resizeResampled`, on `map.losesRasterFidelity && audit.inkedCels > 0`.
+
+**Three things this section asked for that turned out to be wrong, each pinned by a test:**
+
+1. **The undo step's cost is O(1), not `4096 + Σ elements × 512`.** The "Undo" section above sizes it
+   on the assumption that *"the closures retain the old `VectorCanvas` objects"* and warns that 800
+   cels × 1000 elements would be ~410 MiB and evict the step that recorded it. That is not this
+   step's shape: its undo is the **inverse resize, recomputed**, so the closures capture a
+   `CanvasResizeMap`, one `CGFloat` and a weak `self` — no canvas, no elements, no pixels. It charges
+   the flat structural 4096 and `testTheResizeStepsCostDoesNotGrowWithTheDocument` asserts the number
+   does not move when the element count goes from 1 to 400. **The measurement this stage owed is
+   taken, and the answer is that there was nothing to measure.**
+2. **`image.cgImage == nil` is not a failure mode.** §2's "Failure and partial completion" lists it
+   beside the two fill decodes. On the shipped code the `.image` arm of
+   `mapping(_:throughSimilarity:)` moves a `LayerTransform` and never touches the pixels, and both
+   raster primitives draw through `UIImage.draw(in:)`, which needs no `cgImage` — so refusing for it
+   would decline a document nothing else in the app declines. **A damaged `.fill` path is the one
+   reachable cause**, and `testOnlyADamagedFillIsUnmappable` states both halves.
+3. **Determinate `n / total` is not available and was never cheap.** Item 1 below called it cheap
+   *because the total is known before the first cel*, which is true and is not the binding
+   constraint: reporting progress needs the walk to suspend between cels, which is exactly the
+   interleaved execution the ruling demoted — and which would make a half-resized document
+   observable, the thing §3 rules out in as many words (*"A resize is modal-busy or it is a race"*).
+   **An atomic walk or a progress bar, not both.** The known total is spent instead on deciding
+   whether to put the spinner up at all, which is the more valuable of the two things it can buy.
+
+**Dropped under the ruling, as this section allowed:** off-main execution, bounded raster concurrency,
+and the cache purge. The one crop/expand behaviour change worth naming: `testAResizeStillClearsTheHistoryStack`
+became `testAResizeClearsTheStackBelowItAndRecordsItself`, which is the only stage-1 assertion this
+stage inverts.
+
+*Tests:* `CanvasResizeLogicTests`, 46 (from 31) — undo of a crop/expand exact including guides; undo
+of a **Fit** inverting through **Fill**, with the Fit-both-ways factor computed independently so the
+test catches the landmine whatever `inverted` returns; depth 1 and the pre-resize stack gone; the
+step's cost flat in the element count; a refusal that mutates nothing, field by field; the refusal
+sentence; `canBeMapped` over all four kinds; the resample notice's two conditions across six
+documents, including the crop/expand *growth* row that a `scale != 1` test would false-alarm on;
+`losesRasterFidelity`; the save gate's truth table; the announce threshold; and both busy paths.
+
+---
+
+*What the stage was, before it was built — kept because §5 rule 15 is the ruling it turns on.*
 
 The owner ruled that the block itself is acceptable: *"resize freezing canvas isnt that big of an
 issue, as long as the user knows its loading. It is a one time thing anyway."* That does not delete
@@ -879,10 +957,20 @@ mapper.
    one consequence that ink drawn out in the old margin can overflow even under Fit.
 10. **The history stack is cleared, then the resize is recorded as one step.** Depth 1 afterwards.
     Undo runs the inverse resize; it restores geometry exactly and raster pixels approximately, and the
-    app says so when the resize happens rather than when undo is pressed.
+    app says so when the resize happens rather than when undo is pressed. **Shipped in stage 3**, as
+    `HistoryActionLabel.resizeCanvas` plus `CanvasNotice.resizeResampled`. The notice has *two*
+    conditions and the second is easy to miss: the map has to actually resample or crop
+    (`CanvasResizeMap.losesRasterFidelity`) **and** the document has to hold raster pixels to lose.
+    Growing a canvas under crop/expand is exactly reversible, pixels and all, so a `scale != 1` test
+    would false-alarm on the most ordinary resize there is; a crop/expand *shrink* is irreversible at
+    `k == 1`, so testing the mode instead of the map would miss it.
 11. **A resize that cannot map some element refuses entirely**, naming the count and the kinds. Never
-    a partial resize.
-12. **No disk write happens during a resize, and no save may start during one.**
+    a partial resize. **Shipped in stage 3** as `VectorCanvas.canBeMapped` + `CanvasNotice.resizeRefused`.
+    One of §2's three named causes is struck out there: `image.cgImage == nil` is not a failure on
+    this path. A refusal leaves the document byte-identical, with one stated exception — the pending
+    interactive state baked before the audit, which every save bakes too.
+12. **No disk write happens during a resize, and no save may start during one.** **Shipped in stage 3**
+    as `ScenePhaseSaveGate.mayStartSave`.
 13. **The dab-spacing floor, the dab-diameter floor and pencil grain are inherited, knowingly.** The
     dialog says once that brush texture re-stamps at the new size; nothing in the engine changes.
     **Shipped in stage 2** as `SpacingFloorSurvey`: one walk when the sheet opens collecting
@@ -913,7 +1001,11 @@ mapper.
     becomes an option**. §4 stage 3 is re-sorted around it. Three things it does **not** license.
     A block the artist is not told about is still a bug — an unannounced freeze and an announced one
     are different products, and the yield that gets the spinner its first frame is the whole
-    difference. It does not license a block during which a *save* can start (rule 12): a longer
+    difference. **Stage 3 built it with one refinement the ruling implies but does not state**: the
+    yield is what makes the busy state visible, so a resize predicted to finish inside
+    `CanvasResizeAudit.announceAboveSeconds` (0.2 s) does not take it, runs in one main-actor turn,
+    and is never rendered as busy at all. Telling the artist about a 29 ms operation is not honesty,
+    it is a flicker. It does not license a block during which a *save* can start (rule 12): a longer
     operation is a wider window for `ScenePhaseSaveGate` to write a half-resized document, so the
     ruling makes `isResizing` more necessary, not less. And it does not license unbounded memory —
     "one time" is about the artist's patience, and jetsam does not consult it.

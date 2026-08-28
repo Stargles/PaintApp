@@ -33,4 +33,30 @@ enum ScenePhaseSaveGate {
     static func shouldSave(from oldPhase: ScenePhase, to newPhase: ScenePhase) -> Bool {
         oldPhase == .active && newPhase != .active
     }
+
+    /// Whether a save may **start** at all, whoever asked for it — the second gate, and the one that
+    /// is not about the scene phase.
+    ///
+    /// `shouldSave` above answers "is this transition worth a save"; this answers "is the document in
+    /// a state that can be written". Every caller of `ContentView.saveIfNeeded` passes through it,
+    /// not only the phase change, because the third condition is about the document rather than
+    /// about what asked.
+    ///
+    /// **`isResizing` is CANVAS_RESIZE.md §5 rule 12, and the owner's 2026-08-28 ruling makes it more
+    /// necessary rather than less.** A canvas resize rewrites every cel's buffers and then
+    /// `canvasSize`; a save that lands between those two is a package whose manifest header and whose
+    /// PNGs disagree — and `ProjectStore.decodeCel` builds every texture at the manifest's size and
+    /// `RasterLayerTexture.setContents` stretches a mismatched PNG to fit, aspect and all, so that
+    /// document does not fail to open. It opens, silently non-uniformly stretched, which is the worst
+    /// class of bug this codebase can ship. The window is real but narrow: the mutation walk is one
+    /// synchronous main-actor turn and no `scenePhase` change can be delivered during it, so what
+    /// this gate actually covers is the *announced* path's `Task.yield()` — the one turn the run loop
+    /// gets, deliberately, so the busy overlay can be drawn.
+    ///
+    /// Refusing rather than deferring: a resize is at most seconds, `completion` still runs so
+    /// nothing is left hanging, and the artist's next stroke or next backgrounding saves the finished
+    /// document. Losing a save is a stall; writing a half-resized package is a corrupted drawing.
+    static func mayStartSave(screenIsEditor: Bool, hasCanvas: Bool, isResizing: Bool) -> Bool {
+        screenIsEditor && hasCanvas && !isResizing
+    }
 }

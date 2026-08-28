@@ -1,7 +1,7 @@
 import XCTest
 import UIKit
 
-/// Pure-logic tests for CANVAS_RESIZE.md **stage 1** — "Resize Canvas", crop/expand only.
+/// Pure-logic tests for CANVAS_RESIZE.md's "Resize Canvas" — stages 1, 2 and 3.
 ///
 /// Headless, like `CanvasManagerTestSupport`'s other clients: `CanvasManager` and the rest of the
 /// app's non-view sources are compiled a second time straight into this target, so `resizeCanvas`,
@@ -361,17 +361,22 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(moved.size, 8, accuracy: 0, "the default mode re-stamps nothing")
     }
 
-    /// A resize is still not undoable, and still says so by clearing the stack — §4's "exactly
-    /// today's contract with an arbitrary rectangle instead of a symmetric margin". Every entry below
-    /// it holds canvas-coordinate pixel patches at the old dimensions, so restoring one would put
-    /// pixels of the wrong size in the wrong place. Stage 3 is what gives this a single inverse step.
-    func testAResizeStillClearsTheHistoryStack() {
+    /// A resize clears the stack below it, and — since stage 3 — puts exactly one step back.
+    ///
+    /// **This assertion was `XCTAssertFalse(canUndo)` through stages 1 and 2** and is the one place
+    /// stage 3 changes the contract rather than adding to it: every entry below a resize holds
+    /// canvas-coordinate pixel patches at the old dimensions, so the clear stays; what is new is that
+    /// the resize itself is recorded. §5 rule 10, and `testTheHistoryIsExactlyOneResizeStepDeepAfterwards`
+    /// is where the depth and the undo are asserted properly.
+    func testAResizeClearsTheStackBelowItAndRecordsItself() {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addLayer()
         XCTAssertTrue(manager.canUndo, "setup: adding a layer is an undoable structure change")
 
         XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 100, height: 40)))
-        XCTAssertFalse(manager.canUndo, "the stack below a resize is unrestorable and is cleared")
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.resizeCanvas],
+                       "the stack below a resize is unrestorable and is cleared; the resize is not")
+        XCTAssertTrue(manager.canUndo)
     }
 
     // MARK: - 4. The manifest and every buffer agree
@@ -925,6 +930,437 @@ final class CanvasResizeLogicTests: XCTestCase {
                                     "adding layers cannot make the walk cheaper")
     }
 
+    // MARK: - 5. Stage 3 — undoable, told, and safe
+
+    /// **Undo of a crop/expand restores the geometry exactly**, and the whole document with it: every
+    /// tier back at the old extent, every sample on the coordinate it started on, guides included.
+    ///
+    /// Exact rather than to a tolerance, because at `k == 1` there is nothing to be approximate
+    /// about: the map is a whole-point translation and its inverse is the negation of it, so the
+    /// arithmetic is `x + d - d` in doubles. A resize that came home 0.5 pt off would still look
+    /// right and would be a slow leak across repeated resizes.
+    func testUndoOfACropExpandRestoresEveryGeometryExactly() throws {
+        let manager = Self.documentWithEveryTierPopulated()
+        let celRef = CelRef(layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+        manager.guideStrokes = [GuideStroke(
+            samples: [TimedSample(x: 11, y: 13, pressure: 0.5, time: 0),
+                      TimedSample(x: 41, y: 37, pressure: 0.75, time: 0.25)],
+            interval: KeyframeInterval(start: celRef, end: celRef))]
+        let before = try XCTUnwrap(manager.layers[2].cels[0].vector?.strokes.first)
+
+        XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 101, height: 45)))
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 101, height: 45), "PREMISE: it really moved")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize)
+        for (layerIndex, layer) in manager.layers.enumerated() {
+            for (celIndex, cel) in layer.cels.enumerated() {
+                let where_ = "layer \(layerIndex) cel \(celIndex)"
+                XCTAssertEqual(cel.raster.size, CanvasFixture.canvasSize, "raster tier, \(where_)")
+                if let fill = cel.fillImage { XCTAssertEqual(fill.size, CanvasFixture.canvasSize, "fillImage, \(where_)") }
+                if let baked = cel.bakedImage { XCTAssertEqual(baked.size, CanvasFixture.canvasSize, "bakedImage, \(where_)") }
+                if let vector = cel.vector { XCTAssertEqual(vector.size, CanvasFixture.canvasSize, "vector tier, \(where_)") }
+            }
+        }
+        let after = try XCTUnwrap(manager.layers[2].cels[0].vector?.strokes.first)
+        XCTAssertEqual(after.samples.count, before.samples.count)
+        for (index, sample) in after.samples.enumerated() {
+            XCTAssertEqual(sample.x, before.samples[index].x, accuracy: 0, "sample \(index) x")
+            XCTAssertEqual(sample.y, before.samples[index].y, accuracy: 0, "sample \(index) y")
+        }
+        XCTAssertEqual(after.size, before.size, accuracy: 0, "and the brush width was never touched")
+        XCTAssertEqual(manager.guideStrokes[0].samples[0].x, 11, accuracy: 0, "guides come back too")
+        XCTAssertEqual(manager.guideStrokes[0].samples[0].y, 13, accuracy: 0)
+        XCTAssertEqual(manager.guideStrokes[0].samples[1].x, 41, accuracy: 0)
+        XCTAssertEqual(manager.guideStrokes[0].samples[1].y, 37, accuracy: 0)
+    }
+
+    /// **Undoing a Fit resize requires a Fill to come back**, and this test is written so it fails if
+    /// the inverse is derived any other way.
+    ///
+    /// `k = min(rx, ry)` going out wants `1/k = max(1/rx, 1/ry)` coming back, which is Fill's rule on
+    /// the reversed ratios. The bug this pins was latent in `CanvasResizeMap.inverse` for two stages
+    /// — it read `scale != 1` and picked Fit both ways, landing on `1/max(rx, ry)` — and stage 3's
+    /// undo is the first thing in the app that can reach it.
+    ///
+    /// **The Fit-both-ways factor is computed here rather than taken from the type under test**, so
+    /// this test would catch the regression even if `inverted` were changed to return `self`: it
+    /// asserts the round trip lands home *and* that the wrong map demonstrably would not.
+    func testUndoOfAFitResizeInvertsThroughFillAndNotThroughFit() throws {
+        // 64² → 100×40. rx = 1.5625, ry = 0.625, so Fit takes k = 0.625 and the way back is
+        // max(64/100, 64/40) = 1.6 = 1/0.625. Fit-both-ways would take min(0.64, 1.6) = 0.64.
+        let old = CGSize(width: 64, height: 64), new = CGSize(width: 100, height: 40)
+        let out = CanvasResizeMap(from: old, to: new, mode: .scaleToFit)
+        let back = out.inverse
+        let fitBothWays = CanvasResizeMap(from: new, to: old, mode: .scaleToFit)
+        XCTAssertEqual(out.scale, 0.625, accuracy: 1e-12, "PREMISE")
+        XCTAssertEqual(back.scale, 1.6, accuracy: 1e-12, "the inverse factor is Fill's on the reversed ratios")
+        XCTAssertEqual(fitBothWays.scale, 0.64, accuracy: 1e-12,
+                       "PREMISE: and the wrong rule gives a different, plausible-looking number")
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let points = [CGPoint(x: 8, y: 12), CGPoint(x: 50, y: 44)]
+        let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
+        canvas.addStroke(Self.stroke(at: points, size: 9, brush: manager.selectedBrush))
+
+        XCTAssertTrue(manager.resizeCanvas(to: new, mode: .scaleToFit))
+        let scaled = try XCTUnwrap(manager.layers[1].cels[0].vector?.strokes.first)
+        XCTAssertEqual(scaled.size, 9 * 0.625, accuracy: 1e-9, "PREMISE: the scale really happened")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.canvasSize, old)
+        let returned = try XCTUnwrap(manager.layers[1].cels[0].vector?.strokes.first)
+        for (index, point) in points.enumerated() {
+            XCTAssertEqual(returned.samples[index].x, point.x, accuracy: 1e-9, "sample \(index) x")
+            XCTAssertEqual(returned.samples[index].y, point.y, accuracy: 1e-9, "sample \(index) y")
+        }
+        XCTAssertEqual(returned.size, 9, accuracy: 1e-9, "and the brush width came home with them")
+
+        // What the wrong inverse would have produced, stated as a number this test would fail on:
+        // 0.64 rather than 1.6 leaves the first sample at 2.4% of where it belongs on the bound axis.
+        let wrong = fitBothWays.apply(out.apply(points[0]))
+        XCTAssertNotEqual(wrong.x, points[0].x, accuracy: 0.5,
+                          "PREMISE: Fit-both-ways does not round-trip, so this test can tell them apart")
+    }
+
+    /// **Depth 1 after a resize, and the stack below it is gone.** §5 rule 10, both halves.
+    ///
+    /// The pre-resize entry is the one that matters: every step below a resize holds
+    /// canvas-coordinate pixel patches at the old dimensions, so leaving one there and letting the
+    /// artist press undo twice would restore pixels of the wrong size in the wrong place.
+    func testTheHistoryIsExactlyOneResizeStepDeepAfterwards() {
+        let manager = Self.documentWithEveryTierPopulated()
+        var strokeUndone = false
+        manager.recordUndo(label: .brushStroke, cost: 8, undo: { strokeUndone = true }, redo: {})
+        manager.recordUndo(label: .fill, cost: 8, undo: {}, redo: {})
+        // The fixture builds itself out of `addLayer`/`addVectorLayer`/`addCel`, each of which is
+        // itself an undo step, so the depth here is those plus the two above rather than two.
+        XCTAssertGreaterThan(manager.history.undoStack.count, 2, "PREMISE")
+
+        XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 96, height: 96)))
+
+        XCTAssertEqual(manager.history.undoStack.count, 1, "one step, and only one")
+        XCTAssertEqual(manager.history.undoStack[0].label, .resizeCanvas)
+        XCTAssertTrue(manager.canUndo, "and the affordance is live, where before stage 3 it was not")
+        XCTAssertTrue(manager.history.redoStack.isEmpty)
+
+        manager.undo()
+        XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize)
+        XCTAssertEqual(manager.history.undoStack.count, 0, "and the stack below it really was cleared")
+        XCTAssertFalse(strokeUndone, "the pre-resize stroke step is gone, not merely buried")
+        XCTAssertEqual(manager.history.redoStack.count, 1, "the resize is redoable")
+
+        manager.redo()
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96), "and redo reapplies it")
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+    }
+
+    /// **The resize step retains nothing that grows with the document** — the measurement §2 asked
+    /// stage 3 to take before claiming the step fits in `UndoHistory`'s budget.
+    ///
+    /// §2 sized this as `4096` flat *plus* `Σ elements.count × 512`, on the ground that the closures
+    /// retain the old `VectorCanvas` objects, and warned that 800 cels × 1000 elements would be
+    /// ~410 MiB and evict the step that recorded it. That is not the shape of this step: its undo is
+    /// the *inverse resize*, recomputed, so it captures a map, a padding and a weak `self`. This
+    /// asserts the charged cost does not move when the document's element count does — which is the
+    /// property the eviction argument turns on.
+    func testTheResizeStepsCostDoesNotGrowWithTheDocument() throws {
+        func costAfterResizing(strokesPerCel: Int) throws -> Int {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            manager.addVectorLayer()
+            let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
+            for index in 0..<strokesPerCel {
+                canvas.addStroke(Self.stroke(at: [CGPoint(x: CGFloat(index % 60) + 1, y: 5),
+                                                  CGPoint(x: CGFloat(index % 60) + 2, y: 40)],
+                                             size: 4, brush: manager.selectedBrush))
+            }
+            XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 96, height: 96)))
+            return manager.history.currentCost
+        }
+        let small = try costAfterResizing(strokesPerCel: 1)
+        let large = try costAfterResizing(strokesPerCel: 400)
+        XCTAssertEqual(small, large, "the step's cost is O(1) in the document, not O(elements)")
+        XCTAssertEqual(small, CanvasManager.resizeUndoCostBytes)
+        XCTAssertLessThan(large, 64 * 1024,
+                          "and it is nowhere near a size that could evict itself out of the history")
+    }
+
+    /// **A resize that cannot map some element refuses entirely and changes nothing** — §5 rule 11.
+    ///
+    /// The reachable cause is a `.fill` whose archived path will not unarchive.
+    /// `mapping(_:throughSimilarity:)` hands such an element back unmapped, which is right for a
+    /// lasso nudge and is a *partial resize* here: that fill would be left at coordinates the rest of
+    /// the document no longer uses, looking exactly as if the artist had moved it.
+    ///
+    /// "Nothing was changed" is asserted field by field rather than by a `==` the types do not have:
+    /// the extent, the padding, every tier's size, the surviving stroke's samples, and the history.
+    func testAnUnmappableElementRefusesTheWholeResizeAndMutatesNothing() throws {
+        let manager = Self.documentWithEveryTierPopulated()
+        let canvas = try XCTUnwrap(manager.layers[2].cels[0].vector)
+        var damaged = VectorFillElement(path: CGPath(rect: CGRect(x: 4, y: 4, width: 8, height: 8), transform: nil),
+                                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        damaged.pathData = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        XCTAssertNil(damaged.cgPath, "PREMISE: this fill really cannot be decoded")
+        XCTAssertFalse(VectorCanvas.canBeMapped(.fill(damaged)), "PREMISE: and the predicate says so")
+        canvas.elements = canvas.elements + [.fill(damaged), .fill(damaged)]
+
+        let strokeBefore = try XCTUnwrap(canvas.strokes.first)
+        let sizesBefore = manager.layers.map { $0.cels.map { $0.raster.size } }
+        manager.recordUndo(label: .brushStroke, cost: 8, undo: {}, redo: {})
+        let depthBefore = manager.history.undoStack.count
+
+        XCTAssertFalse(manager.resizeCanvas(to: CGSize(width: 128, height: 128), mode: .scaleToFit),
+                       "the resize declines")
+
+        XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize, "the extent did not move")
+        XCTAssertEqual(manager.layers.map { $0.cels.map { $0.raster.size } }, sizesBefore,
+                       "and neither did any buffer")
+        XCTAssertEqual(manager.history.undoStack.count, depthBefore,
+                       "the history is untouched — not cleared…")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .brushStroke,
+                       "…and no step was recorded")
+        let strokeAfter = try XCTUnwrap(canvas.strokes.first)
+        XCTAssertEqual(strokeAfter.samples[0].x, strokeBefore.samples[0].x, accuracy: 0)
+        XCTAssertEqual(strokeAfter.samples[0].y, strokeBefore.samples[0].y, accuracy: 0)
+        XCTAssertEqual(strokeAfter.size, strokeBefore.size, accuracy: 0)
+
+        let notice = try XCTUnwrap(manager.notice, "and the artist is told why")
+        XCTAssertEqual(notice.code, "resizeRefused")
+        XCTAssertEqual(notice.kind, .resizeRefused(CanvasResizeRefusal(kinds: ["fill", "fill"])))
+        XCTAssertTrue(notice.message.contains("2 fills"),
+                      "it names the count and the kind — \(notice.message)")
+    }
+
+    /// The refusal's sentence counts and pluralises rather than reporting "2 elements failed" — the
+    /// distinction `VectorCanvasData.DecodeReport.malformedKinds` was built for and that this reuses.
+    func testTheRefusalNamesTheCountAndTheKinds() {
+        XCTAssertEqual(CanvasResizeRefusal(kinds: ["fill"]).phrase, "1 fill")
+        XCTAssertEqual(CanvasResizeRefusal(kinds: ["fill", "fill", "fill"]).phrase, "3 fills")
+        XCTAssertEqual(CanvasResizeRefusal(kinds: ["fill", "image", "fill"]).phrase, "2 fills and 1 image")
+        XCTAssertEqual(CanvasResizeRefusal(kinds: ["fill", "image", "text"]).phrase,
+                       "1 fill, 1 image and 1 text")
+        XCTAssertEqual(CanvasResizeRefusal(kinds: []).count, 0)
+    }
+
+    /// **`canBeMapped` admits everything `mapping` actually carries, and only that.** A stroke, a
+    /// placed image and a text box decode nothing on this path and cannot fail; a healthy fill
+    /// round-trips its archive; a damaged one does not.
+    ///
+    /// The `.image` case is the one worth stating out loud: CANVAS_RESIZE.md §2 lists
+    /// `image.cgImage == nil` among a resize's failure modes, and on the shipped code it is not one —
+    /// the map moves a `LayerTransform` and never touches the pixels, and both raster primitives draw
+    /// through `UIImage.draw(in:)`, which needs no `cgImage`. Refusing for it would decline a
+    /// document nothing else in the app declines.
+    func testOnlyADamagedFillIsUnmappable() throws {
+        let stroke = Self.stroke(at: [CGPoint(x: 1, y: 2)], size: 4)
+        XCTAssertTrue(VectorCanvas.canBeMapped(.stroke(stroke)))
+
+        let healthy = VectorFillElement(path: CGPath(rect: CGRect(x: 1, y: 1, width: 4, height: 4), transform: nil),
+                                        color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1))
+        XCTAssertTrue(VectorCanvas.canBeMapped(.fill(healthy)))
+        var damaged = healthy
+        damaged.pathData = Data()
+        XCTAssertFalse(VectorCanvas.canBeMapped(.fill(damaged)))
+
+        // A UIImage with no CGImage at all — the case §2 names and this refutes.
+        let backingless = UIImage()
+        XCTAssertNil(backingless.cgImage, "PREMISE")
+        XCTAssertTrue(VectorCanvas.canBeMapped(
+            .image(VectorImageElement(image: backingless, transform: .identity))),
+            "a placed image's map is its transform; its pixels are not consulted")
+    }
+
+    /// **The resample notice fires only when a raster tier actually held pixels, and only when the
+    /// resize really was lossy for them** — §5 rule 10's second half, both conditions.
+    ///
+    /// The crop/expand *growth* row is the one that would be missed by a `scale != 1` test: growing a
+    /// canvas is exactly reversible even with pixels in it, so saying otherwise would be a false
+    /// alarm on the most ordinary resize there is. The crop/expand *shrink* row is the one that would
+    /// be missed by testing the mode instead of the map: that crop is irreversible at `k == 1`.
+    func testTheResampleNoticeFiresOnlyWhenRasterPixelsWereReallyLost() throws {
+        func noticeAfter(inked: Bool, to newSize: CGSize, mode: CanvasResizeMode) throws -> String? {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            manager.addVectorLayer()
+            try XCTUnwrap(manager.layers[1].cels[0].vector)
+                .addStroke(Self.stroke(at: [CGPoint(x: 4, y: 4), CGPoint(x: 40, y: 40)], size: 6,
+                                       brush: manager.selectedBrush))
+            if inked {
+                CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                              CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 8, width: 16, height: 16)))
+            }
+            manager.notice = nil
+            XCTAssertTrue(manager.resizeCanvas(to: newSize, mode: mode), "PREMISE: the resize ran")
+            return manager.notice?.code
+        }
+
+        let grow = CGSize(width: 128, height: 128), shrink = CGSize(width: 32, height: 32)
+        XCTAssertEqual(try noticeAfter(inked: true, to: shrink, mode: .scaleToFit), "resizeResampled",
+                       "a scale resamples every pixel it has")
+        XCTAssertEqual(try noticeAfter(inked: true, to: grow, mode: .scaleToFit), "resizeResampled",
+                       "an upscale invents pixels and cannot give the originals back either")
+        XCTAssertEqual(try noticeAfter(inked: true, to: shrink, mode: .cropExpand), "resizeResampled",
+                       "and a crop is irreversible at k == 1")
+        XCTAssertNil(try noticeAfter(inked: true, to: grow, mode: .cropExpand),
+                     "but growing the canvas is exact, pixels and all — no false alarm")
+        XCTAssertNil(try noticeAfter(inked: false, to: shrink, mode: .scaleToFit),
+                     "and a document with no raster pixels resizes exactly in both directions")
+        XCTAssertNil(try noticeAfter(inked: false, to: grow, mode: .scaleToFill))
+    }
+
+    /// `losesRasterFidelity` is the map's own answer to "would undo bring the pixels back", and it is
+    /// not `scale != 1`: a crop/expand shrink reaches it too.
+    func testLosingRasterFidelityIsAboutTheCropAsWellAsTheScale() {
+        let old = CGSize(width: 64, height: 64)
+        XCTAssertFalse(CanvasResizeMap(from: old, to: CGSize(width: 128, height: 100), mode: .cropExpand)
+            .losesRasterFidelity, "growing on both axes keeps every pixel")
+        XCTAssertTrue(CanvasResizeMap(from: old, to: CGSize(width: 128, height: 40), mode: .cropExpand)
+            .losesRasterFidelity, "one axis shrinking is enough to crop")
+        XCTAssertTrue(CanvasResizeMap(from: old, to: CGSize(width: 32, height: 32), mode: .cropExpand)
+            .losesRasterFidelity)
+        XCTAssertTrue(CanvasResizeMap(from: old, to: CGSize(width: 128, height: 128), mode: .scaleToFit)
+            .losesRasterFidelity, "and a scale filters even when nothing leaves the buffer")
+    }
+
+    /// **No save may start while a resize is in flight** — §5 rule 12, which the owner's ruling that
+    /// the block is acceptable makes *more* necessary rather than less: a longer block is a wider
+    /// window for `ScenePhaseSaveGate` to write a package that is half old-size and half new.
+    func testNoSaveMayStartWhileAResizeIsInFlight() {
+        XCTAssertTrue(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true, isResizing: false))
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true, isResizing: true),
+                       "the one this rule adds")
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: false, hasCanvas: true, isResizing: false))
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: false, isResizing: false))
+        // The phase rule is untouched by any of this — the two gates answer different questions.
+        XCTAssertTrue(ScenePhaseSaveGate.shouldSave(from: .active, to: .background))
+        XCTAssertFalse(ScenePhaseSaveGate.shouldSave(from: .inactive, to: .active))
+    }
+
+    /// **The busy state is announced only when the walk would actually be felt** — the thing that
+    /// stops a 0.27 s resize putting a modal on screen for a quarter of a second and taking it away
+    /// again.
+    ///
+    /// The numbers are §2's measured per-cel costs. What this pins is the *shape* of the decision:
+    /// a small document is silent, the owner's real one is announced, and a raster-heavy document
+    /// crosses sooner than a blank one because it costs 5–10× as much per cel.
+    func testTheBusyStateIsAnnouncedOnlyWhenTheWalkWouldBeFelt() {
+        let small = CanvasResizeAudit(blankCels: 32, inkedCels: 0)
+        XCTAssertFalse(small.needsAnnouncing(scaling: false), "32 blank cels is 29 ms — a flicker")
+        XCTAssertFalse(small.needsAnnouncing(scaling: true))
+
+        let ownersDocument = CanvasResizeAudit(blankCels: 300, inkedCels: 0)
+        XCTAssertTrue(ownersDocument.needsAnnouncing(scaling: false),
+                      "300 blank cels is 0.27 s — §2's figure for the owner's own packages")
+        XCTAssertEqual(ownersDocument.predictedSeconds(scaling: false), 0.27, accuracy: 1e-9)
+
+        let rasterHeavy = CanvasResizeAudit(blankCels: 0, inkedCels: 32)
+        XCTAssertFalse(rasterHeavy.needsAnnouncing(scaling: false), "32 × 4.4 ms = 0.14 s")
+        XCTAssertTrue(rasterHeavy.needsAnnouncing(scaling: true),
+                      "but 32 × 8.8 ms = 0.28 s — scaling costs about twice what cropping does")
+
+        XCTAssertFalse(CanvasResizeAudit().needsAnnouncing(scaling: true), "an empty document is free")
+    }
+
+    /// The audit counts cels by whether their raster tiers hold anything, because that is what the
+    /// cost model turns on: `RasterLayerTexture.resized(to:placing:)` early-outs on a blank texture
+    /// and allocates nothing, so a vector-only cel is a tenth of an inked one.
+    ///
+    /// **All three raster tiers count**, and the two `UIImage` ones are the reason: §2's split notes
+    /// that `fillImage`/`bakedImage` have no `hasContent` door, so a document that has used the
+    /// bucket fill is not on the cheap row even where its `raster` tier is empty.
+    func testTheAuditSeparatesBlankCelsFromInkedOnesAcrossAllThreeRasterTiers() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        try XCTUnwrap(manager.layers[1].cels[0].vector)
+            .addStroke(Self.stroke(at: [CGPoint(x: 4, y: 4)], size: 4, brush: manager.selectedBrush))
+        let plan = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
+        XCTAssertEqual(plan.audit.blankCels, 2, "a vector cel with no pixels in it is blank")
+        XCTAssertEqual(plan.audit.inkedCels, 0)
+        XCTAssertTrue(plan.audit.canProceed)
+
+        manager.layers[1].cels[0].fillImage =
+            CanvasFixture.solidImage(.green, rect: CGRect(x: 2, y: 2, width: 4, height: 4))
+        let withFill = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
+        XCTAssertEqual(withFill.audit.inkedCels, 1, "fillImage counts — it has no hasContent door")
+        XCTAssertEqual(withFill.audit.blankCels, 1)
+        XCTAssertEqual(withFill.audit.celCount, 2)
+    }
+
+    /// **A resize small enough to be imperceptible never raises the busy state at all**, and that is
+    /// what stops a 0.27 s operation putting a modal on screen and taking it away again.
+    ///
+    /// The mechanism is worth stating because it is not a timer: the fast path never suspends, so the
+    /// whole resize is one main-actor turn, SwiftUI never lays out with `isResizing` set, and there is
+    /// no frame in which the overlay could be drawn. The flag is free; only the *yield* costs
+    /// anything.
+    func testASmallResizeNeverRaisesTheBusyStateAtAll() throws {
+        let manager = Self.documentWithEveryTierPopulated()
+        let plan = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
+        XCTAssertFalse(plan.audit.needsAnnouncing(scaling: false), "PREMISE: five cels is 22 ms")
+
+        manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 96, height: 96))
+
+        XCTAssertFalse(manager.isResizing, "nothing to flash: the flag was never observable")
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96),
+                       "and the resize is already finished, on the same turn as the tap")
+    }
+
+    /// **The announced path raises the busy state before it blocks and lowers it after** — §5 rule
+    /// 15's whole requirement, and rule 12's gate riding on the same flag.
+    ///
+    /// The two assertions taken *between* the call and the awaits are the load-bearing ones: the flag
+    /// is set synchronously, before the `Task`, so there is no window in which a `scenePhase` change
+    /// could start a save; and the canvas has not moved yet, which is what says the spinner precedes
+    /// the work rather than following it. Without the `await Task.yield()` inside
+    /// `resizeCanvasAnnouncingProgress` the artist would get the freeze *and* no spinner, which is
+    /// strictly worse than today.
+    func testTheAnnouncedResizeRaisesTheBusyStateBeforeItBlocks() async throws {
+        let manager = Self.documentWithManyInkedCels(count: 25)
+        let newSize = CGSize(width: 32, height: 32)
+        let plan = try XCTUnwrap(manager.planResize(to: newSize, mode: .scaleToFit))
+        XCTAssertTrue(plan.audit.needsAnnouncing(scaling: true),
+                      "PREMISE: 25 inked cels scaling is 0.22 s — over the line")
+        XCTAssertFalse(manager.isResizing)
+
+        manager.resizeCanvasAnnouncingProgress(to: newSize, mode: .scaleToFit)
+
+        XCTAssertTrue(manager.isResizing, "set synchronously, so no save can slip in behind it")
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true,
+                                                       isResizing: manager.isResizing),
+                       "and rule 12's gate is closed for the whole of it")
+        XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize,
+                       "the walk has not started: the overlay gets its frame first")
+
+        var spins = 0
+        while manager.isResizing, spins < 500 { await Task.yield(); spins += 1 }
+
+        XCTAssertFalse(manager.isResizing, "and it is lowered again when the walk returns")
+        XCTAssertEqual(manager.canvasSize, newSize)
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.resizeCanvas],
+                       "the announced path records the same one step the direct one does")
+    }
+
+    /// The button's own entry point refuses an unmappable document too — rule 11 belongs to the
+    /// operation, not to whichever of the two paths reached it, and the announced path checks it
+    /// *before* putting a modal up for work it is not going to do.
+    func testTheAnnouncedPathRefusesWithoutEverShowingTheBusyState() throws {
+        let manager = Self.documentWithManyInkedCels(count: 25)
+        manager.addVectorLayer()
+        let canvas = try XCTUnwrap(manager.layers[manager.layers.count - 1].cels[0].vector)
+        var damaged = VectorFillElement(path: CGPath(rect: CGRect(x: 1, y: 1, width: 4, height: 4), transform: nil),
+                                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        damaged.pathData = Data()
+        canvas.elements = [.fill(damaged)]
+
+        manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 32, height: 32), mode: .scaleToFit)
+
+        XCTAssertFalse(manager.isResizing, "no modal for work that is not going to happen")
+        XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize)
+        XCTAssertEqual(manager.notice?.code, "resizeRefused")
+    }
+
     // MARK: - Fixtures
 
     /// The three resizes §2's 324-case grid uses, and the ones the identity tests share: a Fit and a
@@ -1022,6 +1458,23 @@ final class CanvasResizeLogicTests: XCTestCase {
                          size: 8, opacity: 1,
                          samples: [VectorSample(x: 10, y: 10, pressure: 1),
                                    VectorSample(x: 40, y: 40, pressure: 1)]))
+        return manager
+    }
+
+    /// One layer of `count` cels, each with a `bakedImage` in it, so the audit counts them all as
+    /// inked and the cost model's raster row is the one in play. Twenty-five of them scaling crosses
+    /// `CanvasResizeAudit.announceAboveSeconds`; the same twenty-five blank would not, which is the
+    /// distinction the busy decision turns on.
+    private static func documentWithManyInkedCels(count: Int) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let image = CanvasFixture.solidImage(.red, rect: CGRect(x: 4, y: 4, width: 20, height: 20))
+        manager.layers[0].cels[0].bakedImage = image
+        for index in 1..<count {
+            _ = manager.addCel(layerIndex: 0, startFrame: index * 2 + 12, frameCount: 2)
+        }
+        for celIndex in manager.layers[0].cels.indices {
+            manager.layers[0].cels[celIndex].bakedImage = image
+        }
         return manager
     }
 }

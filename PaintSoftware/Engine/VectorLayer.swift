@@ -2327,6 +2327,39 @@ final class VectorCanvas {
         }
     }
 
+    /// Whether `mapping(_:throughSimilarity:)` would actually **carry** this element, or silently
+    /// hand back the one it was given.
+    ///
+    /// **The nil that `mapping` swallows is a partial resize.** `drawn(_:through:widthScale:)`
+    /// returns nil for a `.fill` whose archived `pathData` will not unarchive, and `mapping`'s
+    /// `?? element` then keeps the element **unmapped** — which is right for a lasso nudge (one
+    /// stubborn fill stays put; the artist can see it and try again) and is data corruption for a
+    /// canvas resize, where that fill is left at coordinates the rest of the document no longer uses.
+    /// CANVAS_RESIZE.md §5 rule 11 refuses the whole operation instead, and this is the predicate
+    /// `CanvasManager.planResize(to:mode:)` asks before it writes anything.
+    ///
+    /// **A decode, not a render, and only one kind can fail it.** `.stroke` is a point array and one
+    /// scalar; `.text` is four corners and a point size; `.image` is a `LayerTransform` — none of the
+    /// three decodes anything on this path, and an `.image` whose `UIImage` has no `cgImage` is not a
+    /// failure *here* either: this map moves its transform and never touches its pixels, and both
+    /// raster primitives draw through `UIImage.draw(in:)`, which needs no `cgImage`. (CANVAS_RESIZE.md
+    /// §2 lists `image.cgImage == nil` among the resize's failure modes; on the shipped code it is
+    /// not one, and refusing a resize for it would decline a document nothing else declines.)
+    /// `.fill` is the whole of it, and it fails exactly when `NSKeyedUnarchiver` cannot read the
+    /// path — a damaged file, or an archive that failed at birth, which `VectorFillElement.init`'s
+    /// `?? Data()` can produce.
+    ///
+    /// The map itself is not a parameter because it cannot change the answer: `CGPath.copy(using:)`
+    /// succeeds for every invertible affine once there is a path to copy, and a resize's map always
+    /// is one (`k > 0`). The unarchive is deterministic, so an element this admits is one the
+    /// mutation pass will carry.
+    static func canBeMapped(_ element: VectorElement) -> Bool {
+        switch element {
+        case .stroke, .text, .image: return true
+        case .fill(let fill): return fill.cgPath != nil
+        }
+    }
+
     /// Whether this element can go through `mapping(_:throughSimilarity:)` with a **reflection** — the
     /// Move menu's Mirror — rather than only with an orientation-preserving similarity.
     ///

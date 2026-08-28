@@ -73,9 +73,13 @@ struct CanvasNoticeBanner: View {
         // The same glyph for the same reason: the artist's loop, and the rule they picked for it, are
         // what the message is about.
         case .nothingWhollyInside: return "lasso"
-        // The one case in this switch where something genuinely has gone wrong with the app, so it
-        // gets the warning triangle none of the others use.
-        case .saveFailed:       return "exclamationmark.triangle"
+        // The two cases in this switch where something genuinely has gone wrong — a save that did not
+        // land, and a resize that found an element it could not read — so they get the warning
+        // triangle none of the others use.
+        case .saveFailed, .resizeRefused: return "exclamationmark.triangle"
+        // Not a warning: the resize did what was asked and this is the honest footnote about what
+        // undoing it will and will not give back. The canvas glyph, because that is what changed.
+        case .resizeResampled:  return "square.resize"
         }
     }
 }

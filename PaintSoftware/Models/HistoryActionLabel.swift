@@ -84,6 +84,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case deleteFolder
     case renameFolder
     case rasterize
+    /// TODO item (9): "Resize Canvas". **One step for the whole document**, whose undo is the
+    /// inverse resize rather than a restoration of captured pixels — CANVAS_RESIZE.md §5 rule 10.
+    /// Distinct from `.resizeFrame`, which is a *timeline* duration op: an artist who wants their
+    /// canvas back would read "undo resize frame" as the wrong thing having gone.
+    case resizeCanvas
     /// TODO item (14): snapping every full-precision stroke in the document back onto the
     /// quarter-pixel storage grid. One step, however many cels it touched.
     case bakePrecision
@@ -178,6 +183,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .deleteFolder: return "delete folder"
         case .renameFolder: return "rename folder"
         case .rasterize: return "rasterize layer"
+        case .resizeCanvas: return "resize canvas"
         case .bakePrecision: return "bake precision"
         case .reorderLayer: return "reorder layer"
         case .reorderFolder: return "reorder folder"

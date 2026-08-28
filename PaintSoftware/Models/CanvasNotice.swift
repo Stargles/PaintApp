@@ -85,6 +85,28 @@ struct CanvasNotice: Identifiable, Equatable {
         /// `ContentView` (via `ProjectStore.save`'s `onSaveFailed`), which is the one place that both
         /// owns `canvasManager` and learns the write's outcome.
         case saveFailed
+        /// A canvas resize declined to run because `M` could not carry every element — a damaged
+        /// archived fill path is the one reachable cause (`VectorCanvas.canBeMapped`).
+        /// CANVAS_RESIZE.md §5 rule 11: **never a partial resize**. The alternative the rule refuses
+        /// is not an error at all but a silent one — `mapping(_:throughSimilarity:)` hands back an
+        /// element it could not map, so the fill would stay at coordinates the rest of the document
+        /// no longer uses, looking for all the world like the artist had moved it.
+        ///
+        /// Carries the refusal rather than a rendered sentence for `Kind`'s stated reason: the
+        /// wording lives in `message`, and a test asserts on the case.
+        case resizeRefused(CanvasResizeRefusal)
+        /// A canvas resize ran, and undoing it will not bring the *pixels* back exactly —
+        /// CANVAS_RESIZE.md §5 rule 10 and §6 Q2, which the owner settled as *undo it anyway, and
+        /// say so*.
+        ///
+        /// **Raised when the resize happens, not when undo is pressed.** The artist is deciding
+        /// whether to keep the resize now; telling them at the moment they reach for undo is telling
+        /// them after the only decision it could have informed. Both halves of the condition are
+        /// required — the map has to actually resample or crop (`losesRasterFidelity`) *and* there
+        /// have to be raster pixels in the document to lose. A vector-only document, which is what
+        /// the owner's own packages measure as (PERFORMANCE.md item 14), resizes exactly in both
+        /// directions and is told nothing.
+        case resizeResampled
     }
 
     init(_ kind: Kind) {
@@ -103,6 +125,9 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
+        case .resizeRefused(let refusal):
+            return "Couldn't resize — \(refusal.phrase) on this canvas can't be moved. Nothing was changed."
+        case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
         }
     }
 
@@ -137,6 +162,10 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one: the artist's next stroke or the next backgrounding will retry the save on its
         // own, and there is no button here that would do anything a retry doesn't already do.
         case .saveFailed:       return nil
+        // Nor either resize notice. The refusal's fix is to find the damaged fill, which is a look
+        // rather than a tap; the resample one reports what already happened, and undo is on the top
+        // toolbar where it always is.
+        case .resizeRefused, .resizeResampled: return nil
         }
     }
 
@@ -155,6 +184,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingEnclosed:  return "nothingEnclosed"
         case .nothingWhollyInside: return "nothingWhollyInside"
         case .saveFailed:       return "saveFailed"
+        case .resizeRefused:    return "resizeRefused"
+        case .resizeResampled:  return "resizeResampled"
         }
     }
 

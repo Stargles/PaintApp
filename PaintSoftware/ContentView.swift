@@ -81,7 +81,12 @@ struct ContentView: View {
     }
 
     private func saveIfNeeded(intent: SaveIntent, completion: (@MainActor () -> Void)? = nil) {
-        guard screen == .editor, canvasManager.canvasSize != nil else {
+        // The third condition is CANVAS_RESIZE.md §5 rule 12: no save may *start* while a canvas
+        // resize is in flight, or the package written is half old-size and half new. See
+        // `ScenePhaseSaveGate.mayStartSave` for why that document opens rather than failing.
+        guard ScenePhaseSaveGate.mayStartSave(screenIsEditor: screen == .editor,
+                                              hasCanvas: canvasManager.canvasSize != nil,
+                                              isResizing: canvasManager.isResizing) else {
             completion?()
             return
         }
