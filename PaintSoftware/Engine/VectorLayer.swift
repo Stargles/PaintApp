@@ -1843,11 +1843,12 @@ final class VectorCanvas {
                     result.append(element)
                     continue
                 }
-                // Each fill is cut with **its own** rule, carried through to both halves — a
-                // clear-selection hole is stored `evenOddFill` and cutting it as a winding path would
-                // fill in the very hole it exists to make. `CanvasManager.clipPath` is deliberately
-                // not used: it concatenates two paths and leans on even-odd at render time, so it is
-                // not a set operation and cannot answer whether a half is empty.
+                // Each fill is cut with **its own** rule, carried through to both halves — a hole
+                // punched by an older build of Clear is stored `evenOddFill` and cutting it as a
+                // winding path would fill in the very hole it exists to make. The concatenate-two-
+                // paths-and-lean-on-even-odd trick that made those holes is deliberately not used
+                // (it was `CanvasManager.clipPath`, deleted 2026-08-28 when Clear moved onto this
+                // function): it is not a set operation and cannot answer whether a half is empty.
                 let fillRule: CGPathFillRule = fill.evenOddFill ? .evenOdd : .winding
                 let insidePart = path.intersection(loop, using: fillRule)
                 guard !insidePart.isEmpty else { result.append(element); continue }

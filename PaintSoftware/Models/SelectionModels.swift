@@ -728,6 +728,63 @@ extension CanvasManager {
         }
     }
 
+    /// **Everything inside the loop goes, and a stroke that hangs outside is cut at the boundary
+    /// rather than deleted whole** (owner, 2026-08-28).
+    ///
+    /// > *"clear does not work (in the selection menu). It should clear all the stuff in the
+    /// > selection."*
+    ///
+    /// It did not, on a vector layer, and the reason was that the walk this replaced only ever looked
+    /// at `element.fill` and `continue`d past every stroke, text object and placed image. An artist
+    /// who draws with strokes — which is all of them — pressed a button that did nothing. The two
+    /// tests named `testClear…` in `LassoMoveLogicTests` were watched failing on the old code before
+    /// this was written.
+    ///
+    /// **Cutting at the boundary is the consistent answer three ways**, which is why the owner picked
+    /// it over deleting whole caught strokes: it is what the raster arm below does, it is what an
+    /// eraser does, and it is already what the old walk did to *fills*.
+    ///
+    /// **So this is `splitForLassoMove`, with the inside thrown away instead of lifted.** Calling that
+    /// function and deleting the ids it reports was chosen over a sibling beside it or a third
+    /// parameter on it, because a Clear needs the whole of what it already computes and none of what
+    /// it already refuses to do:
+    ///
+    ///   * the split is the deliverable — Cut's per-kind rules, the stroke bisection, the fill
+    ///     boolean, the broad phase and `lassoFillRule` — and `insideIDs` is *exactly* the delete
+    ///     list, so the two answers a Clear needs are the two the function returns;
+    ///   * nothing about a float lives inside it. Fresh id minting and `DabLattice` re-keying happen
+    ///     in `piece(of:)`, where they are as right for a survivor as for a traveller: the outside
+    ///     half of a cut stroke keeps drawing on its parent's lattice, so clearing one end of a
+    ///     scattering brush's line does not re-roll the end that stayed. `suppressedElementIDs` is
+    ///     `beginVectorLassoMove`'s business and is untouched here, and `mayDiverge` — one `O(n)`
+    ///     pass, next to the path booleans — answers a question about an isolated render that a Clear
+    ///     never performs, so it is ignored rather than worked around.
+    ///
+    /// A parameter would have had to say "and do not tell me what is inside", which is the one thing
+    /// the function is for; a sibling would have duplicated the five things TODO item (20) already
+    /// gave one home.
+    ///
+    /// **Nil means nothing to delete**, and for a Clear that is a silent no-op with no undo step —
+    /// not the error it would be for a lift. It is also "nothing was cut": `splitForLassoMove` cuts a
+    /// stroke or a fill only when a piece of it lands inside, so an empty `insideIDs` guarantees the
+    /// list it built is element-for-element the one it was given.
+    ///
+    /// **Text and placed images cannot be cut, so a Clear deletes one whose *centre* the loop
+    /// contains and leaves one whose corner it merely clips.** Not a new rule — it is Cut's rule for
+    /// the two kinds that have no spine (LASSO_MOVE.md §5.3 and :431-434, `caught(_:by:bounds:using:
+    /// membership:)`), the cut rule rounded to the nearest whole object, and the same answer Change
+    /// Colour gives. Inventing a different one here would mean the same loop caught a text box for
+    /// Move and not for Clear.
+    ///
+    /// **An eraser mark is an ordinary element**, as it is for a move (owner, 2026-08-22): a punch
+    /// inside the loop is deleted with the ink around it. LASSO_MOVE.md §5.4's centre-line rule has a
+    /// visible consequence here that it also has for Move — a thick stroke whose spine lies outside
+    /// the loop is not caught, so its ink can survive inside the cleared region — and that is the
+    /// owner's settled ruling of 2026-08-21 rather than something for this function to second-guess.
+    ///
+    /// **No `activeCelIsInBetween` guard**, deliberately: [BUGS.md](BUGS.md) carries that hole for
+    /// this function and `fillSelection` together, and changing when either refuses is a behaviour
+    /// change nobody has put to the owner.
     func clearSelectionPixels() {
         let requested = selection
         // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection now outlives a Move lift
@@ -742,26 +799,38 @@ extension CanvasManager {
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
-            // Stored fill paths are local-space; `selection.path` is canvas-space. Punching the hole
-            // needs both in the same frame, so map the selection down rather than the fills up.
-            let localExclusion = vectorCanvas.localPath(fromCanvas: selection.path)
-            // Rewritten **in place** in the display list rather than gathered into a `fills` array and
-            // assigned back. Since `addFill` appends (LASSO_FILL.md §2a) a canvas can hold fills above
-            // and below the same stroke, and a clear must not be what silently restacks them.
+            // Both preconditions `splitForLassoMove` states, and neither is optional. Stored geometry
+            // is local while `selection.path` is canvas space, so an unmapped loop is correct on an
+            // untransformed layer and silently wrong on every layer Move has already touched; and
+            // Core Graphics leaves `intersection`/`subtracting` **undefined** on the self-intersecting
+            // path a lasso becomes the moment the artist loops back over their own line.
+            let loop = vectorCanvas.localPath(fromCanvas: selection.path)
+                                   .normalized(using: VectorCanvas.lassoFillRule)
             let elementsBefore = vectorCanvas.elements
-            var newElements = elementsBefore
-            for (index, element) in elementsBefore.enumerated() {
-                guard let fill = element.fill, let path = fill.cgPath else { continue }
-                let clipped = Self.clipPath(path, excluding: localExclusion)
-                newElements[index] = .fill(VectorFillElement(path: clipped, color: fill.color,
-                                                             opacity: fill.opacity, evenOddFill: true))
-            }
+            guard let split = vectorCanvas.splitForLassoMove(insideLocalPath: loop) else { return }
+            // **Filtered, in the order the split produced.** Both halves of a cut stroke replace their
+            // parent *at the parent's index*, outside first, so dropping the inside ids leaves every
+            // survivor's z-position exactly where it was. Gathering the survivors by kind, or
+            // appending them, would silently restack a canvas that holds fills above *and* below the
+            // same stroke — `addFill` appends (LASSO_FILL.md §2a), so such a canvas is ordinary.
+            let newElements = split.elements.filter { !split.insideIDs.contains($0.id) }
             vectorCanvas.elements = newElements
+            // **Not optional.** The `elements` setter deliberately does not invalidate, and both
+            // `PixelOps.RasterizeKey` and `LayerContentVersion` key on `vectorVersion` — without this
+            // the clear happens in the model and is invisible on screen.
             vectorCanvas.bumpVersion()
+            // Clear the transient tier, or a stale pre-clear fill preview composites over the top.
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
-                                       newElements: vectorCanvas.elements,
+                                       newElements: newElements,
                                        layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection)
+            // The timeline and layer-panel thumbnails are a third thing, and
+            // `registerVectorElementsUndo` refreshes them on the undo and redo sides but **not** on
+            // the initial apply. This used to lean on `setFillImage` publishing through
+            // `@Published layers`, which `recolorSelection`'s comment already calls an accident of
+            // that function's shape rather than a guarantee — so it is asked for explicitly, as the
+            // recolour and `bakePreciseStrokes` both do.
+            celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id, celID: cel.id)
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.clear(base: base, path: selection.path)
@@ -933,14 +1002,16 @@ extension CanvasManager {
                                        celID: layers[currentLayerIndex].cels[celIndex].id)
     }
 
-    /// Subtracts `excludePath` from `path` by composing them into a single even-odd filled path
-    /// (the overlapping region becomes a hole). Returns nil if the result is empty.
-    private static func clipPath(_ path: CGPath, excluding excludePath: CGPath) -> CGPath {
-        let combined = CGMutablePath()
-        combined.addPath(path)
-        combined.addPath(excludePath)
-        return combined
-    }
+    // `clipPath(_:excluding:)` lived here until 2026-08-28 and is deliberately **gone** rather than
+    // left for a future caller. It concatenated two paths and leaned on even-odd at render time to
+    // make the overlap read as a hole, which LASSO_MOVE.md §1 already ruled *"is not a boolean …
+    // do not extend it"*: the shape it returned depended on every downstream reader remembering to
+    // pass `.evenOdd`, it could not answer whether the result was empty, and its doc comment claimed
+    // a nil return the code did not have. Its last caller was `clearSelectionPixels`, and the trick
+    // was **wrong there** as well as inelegant — with no bounds test, a fill nowhere near the loop
+    // was rewritten to `fill ∪ exclusion`, so under even-odd the cleared region came out painted in
+    // that distant fill's colour. `testClearOverBlankPaperDoesNotPaintTheFillsColourIntoTheLoop`
+    // pins it. `CGPath.subtracting(_:using:)` answers all three, and is what the split now uses.
 
     // MARK: Undo-integrated mutation helpers
 

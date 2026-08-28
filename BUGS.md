@@ -13,19 +13,22 @@ written onto a `VectorCanvas` the displayed image does not come from"* — and
 `CanvasManager+LassoMove.swift:836` carries the same guard inside `activeVectorMoveTarget()`, so both
 lasso and whole-cel Move inherit it.
 
-**`fillSelection` (`SelectionModels.swift:648`) and `clearSelectionPixels` (`:686`) do not have it.**
+**`fillSelection` (`SelectionModels.swift:693`) and `clearSelectionPixels` (`:788`) do not have it.**
 Their guard chain checks the layer, the cel id and the selection's stamp, and then goes straight to
-`vectorCanvas.addFill(...)` / the fill-clipping walk. On an in-between that is a write to a display
-list nothing renders: the artist taps Fill, sees no change, taps again, and each tap costs a real undo
-step. The elements are not lost — they are in the document and they reappear the moment the cel is
-committed to a keyframe — which is what makes this quiet rather than loud.
+`vectorCanvas.addFill(...)` / `splitForLassoMove(...)` and the delete. On an in-between that is a write
+to a display list nothing renders: the artist taps Fill, sees no change, taps again, and each tap costs
+a real undo step. The elements are not lost — they are in the document and they reappear the moment the
+cel is committed to a keyframe — which is what makes this quiet rather than loud.
 
 The correct guard is the one its two neighbours already use, and it is one line in each. It was **not
-added while building Change Colour (`ed3eab8`)**, deliberately: changing when Fill and Clear refuse is
-a behaviour change nobody has put to the owner, and the new action taking the guard while its two
-siblings keep the hole is a smaller inconsistency than fixing two shipped commands on a worker's own
-judgement. `CanvasManager.recolorUnavailableReason` (`:750`) is the shape to copy if the answer is
-yes — a sentence in the Select panel rather than a button that goes quietly grey — since a bare
+added while building Change Colour (`ed3eab8`)**, nor while rewriting Clear's vector arm to cut at the
+loop (2026-08-28), and both times deliberately: changing when Fill and Clear refuse is a behaviour
+change nobody has put to the owner, and a new action taking the guard while its two siblings keep the
+hole is a smaller inconsistency than fixing two shipped commands on a worker's own judgement. **The
+Clear rewrite is the sharper case, because it fixed the same function** — it was asked to make Clear
+delete strokes and did exactly that, leaving what Clear *refuses* alone.
+`CanvasManager.recolorUnavailableReason` (`:869`) is the shape to copy if the answer is yes — a
+sentence in the Select panel rather than a button that goes quietly grey — since a bare
 `guard … else { return }` in these two would trade a silent wrong write for a silent no-op.
 
 Not a duplicate of "Canvas Padding while a vector Move is held writes pre-resize geometry onto the

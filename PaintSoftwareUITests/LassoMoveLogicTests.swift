@@ -3808,6 +3808,294 @@ final class LassoMoveLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - Clear on a selection (owner, 2026-08-28)
+    //
+    // > *"clear does not work (in the selection menu). It should clear all the stuff in the
+    // > selection."* — owner, 2026-08-28, on a build they were holding.
+    //
+    // They were right, and the reason was that `clearSelectionPixels`' vector arm walked the display
+    // list looking only at `element.fill` and `continue`d past every stroke. On a vector layer —
+    // which is the default kind — Clear punched holes in filled regions and left the artist's actual
+    // drawing untouched. **The first two tests here were watched failing before the fix was written**;
+    // they are the reproduction, not a regression net bolted on afterwards.
+    //
+    // The ruling is that Clear **cuts at the loop**: only what is inside vanishes and the part of a
+    // stroke hanging outside survives. So Clear is `splitForLassoMove` with the inside thrown away
+    // rather than lifted, and these live next to the move's own tests because the two must give the
+    // same answer to "what is inside" — a session that changes one has to look at the other.
+
+    /// **A stroke wholly inside the loop is cleared.** The owner's sentence as an assertion, and the
+    /// first of the two that were red on the old code: the walk it replaced skipped `.stroke`
+    /// entirely, so an artist who draws with strokes pressed a button that did nothing at all.
+    func testAStrokeWhollyInsideTheLoopIsCleared() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 20), size: 6))
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 48, height: 30)))
+        let baseline = manager.history.undoStack.count
+        manager.clearSelectionPixels()
+
+        XCTAssertTrue(vector.elements.isEmpty, "the stroke the loop caught is gone")
+        XCTAssertEqual(stepsSince(baseline, manager), 1, "one undo step for the one gesture")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .clearSelection)
+    }
+
+    /// **Clearing blank paper must not paint a distant fill's colour into the loop**, and on the old
+    /// code it did. `clipPath(_:excluding:)` concatenated the loop onto *every* fill in the list with
+    /// no bounds test and forced `evenOddFill`, so for a fill the loop did not overlap the two
+    /// regions were disjoint, each wound once, and even-odd filled **both** — the artist cleared an
+    /// empty corner and watched it turn blue.
+    ///
+    /// The second of the two reproduction tests, and the one nobody had reported: it is the reason
+    /// the helper is deleted rather than merely bypassed.
+    func testClearingBlankPaperDoesNotPaintADistantFillsColourIntoTheLoop() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 2, y: 2, width: 10, height: 10),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        let before = vector.elements
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 30, width: 20, height: 20)))
+        let baseline = manager.history.undoStack.count
+        manager.clearSelectionPixels()
+
+        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 40, y: 40)),
+                       "the cleared corner stays bare paper")
+        XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 6, y: 6)), "and the fill across the canvas is untouched")
+        XCTAssertEqual(vector.elements.map(\.id), before.map(\.id), "no element was rewritten")
+        XCTAssertEqual(stepsSince(baseline, manager), 0,
+                       "a clear that catches nothing is a silent no-op with no undo step")
+    }
+
+    /// **A straddling stroke is cut, and the outside half keeps its geometry.** This is the half that
+    /// makes Clear an eraser rather than a delete key: the artist loops half a line and gets the
+    /// other half back intact, ending exactly at the boundary they drew.
+    ///
+    /// The `seedID` assertion is the reason this reuses `splitForLassoMove` rather than filtering the
+    /// list by hand. A cut piece renders on its parent's `DabLattice`, so the half that stayed keeps
+    /// its dab phase and a scattering brush does not visibly re-roll along the part the artist did
+    /// *not* touch — the precise defect `DabLattice` exists to prevent, and it comes free here.
+    func testAStrokeStraddlingTheLoopIsCutAndTheOutsideHalfKeepsItsGeometry() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let originalID = vector.elements[0].id
+
+        // x ≥ 30: the middle and end samples are inside, the first one is not.
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.clearSelectionPixels()
+
+        XCTAssertEqual(vector.elements.count, 1, "one half survives, and it is one stroke")
+        guard let survivor = vector.elements.first?.stroke else {
+            return XCTFail("the survivor is a stroke")
+        }
+        XCTAssertEqual(survivor.samples.first?.x ?? .nan, 6, accuracy: 1e-6,
+                       "the outside end is exactly where the artist drew it")
+        XCTAssertEqual(survivor.samples.last?.x ?? .nan, 30, accuracy: 0.5,
+                       "and the cut lands on the loop, not at the previous stored sample")
+        XCTAssertNotEqual(survivor.id, originalID, "a split makes two independent strokes (§5.2)")
+        XCTAssertEqual(survivor.lattice?.seedID, originalID,
+                       "but it draws on its parent's lattice, so its dabs do not re-phase")
+        XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 12, y: 20)), "ink outside the loop stayed")
+        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 44, y: 20)), "ink inside the loop went")
+    }
+
+    /// **A fill still clips, and a hole punched by an older build of Clear stays a hole.** The
+    /// regression this change had the most room to break: the fills the app has already saved carry
+    /// `evenOddFill: true` because the deleted helper made them that way, and cutting one as a
+    /// winding path would fill in the very hole it exists to make.
+    ///
+    /// `splitForLassoMove` cuts each fill with its own stored rule, so this passes for the documents
+    /// on the owner's iPad as well as for the ones a future Clear will make.
+    func testAFillWithAHoleIsCutWithItsOwnEvenOddRuleAndKeepsTheHole() {
+        let (manager, layerIndex, vector) = fixture()
+        let ring = CGMutablePath()
+        ring.addRect(CGRect(x: 8, y: 8, width: 48, height: 48))
+        ring.addRect(CGRect(x: 24, y: 24, width: 16, height: 16))
+        vector.addFill(VectorFillElement(path: ring,
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1, evenOddFill: true))
+        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 32, y: 32)), "fixture precondition: a hole")
+
+        select(manager, layerIndex, loop(CGRect(x: 44, y: 0, width: 20, height: 64)))
+        manager.clearSelectionPixels()
+
+        // `guard`, not a subscript: `XCTAssertEqual` does not stop the test, so indexing here on a
+        // list this clear had emptied would trap and take the **other 122 tests in the class** down
+        // with it — a real regression would be reported as one crash instead of one red assertion.
+        // Found by mutation-testing this very file, where exactly that happened.
+        XCTAssertEqual(vector.elements.count, 1, "the outside remnant is one fill, not one per component")
+        guard let remnant = vector.elements.first?.fill else { return XCTFail("the survivor is a fill") }
+        XCTAssertTrue(remnant.evenOddFill, "cut with, and keeping, its own rule")
+        XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 12, y: 32)), "the part outside the loop stayed")
+        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 50, y: 32)), "the part inside it went")
+        XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 32, y: 32)), "and the hole is still a hole")
+    }
+
+    /// **A fill wholly inside the loop is deleted, not hollowed to an empty shell.** The old walk
+    /// left every fill in the list whatever happened to it, so a cel cleared twenty times carried
+    /// twenty invisible elements into the saved document. Deleting is what makes the display list
+    /// shrink when the drawing does.
+    func testAFillWhollyInsideTheLoopIsDeletedRatherThanHollowed() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 20, y: 20, width: 16, height: 16),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 48)))
+        manager.clearSelectionPixels()
+
+        XCTAssertTrue(vector.elements.isEmpty, "nothing invisible is left behind in the document")
+    }
+
+    /// **An eraser mark is an ordinary element here**, exactly as it is for a move (owner,
+    /// 2026-08-22): a hole inside the loop is cleared with the ink around it. This is the one place
+    /// Clear and Change Colour part company — a recolour skips `.erase` because a hole has no colour,
+    /// while a clear removes it because a hole has a position.
+    func testAnEraserStrokeInsideTheLoopIsClearedLikeAnyOtherElement() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 8, y: 54), to: CGPoint(x: 52, y: 54), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 40, y: 20),
+                                size: 5, composite: .erase))
+
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 8, width: 44, height: 28)))
+        manager.clearSelectionPixels()
+
+        XCTAssertEqual(vector.elements.count, 1, "the punch inside the loop was cleared")
+        XCTAssertEqual(vector.elements.first?.stroke?.composite, .paint,
+                       "and the paint stroke outside it stayed")
+    }
+
+    /// **Text cannot be cut, so a box whose *centre* the loop contains goes whole and one whose edge
+    /// it merely clips does not go at all.** Both directions asserted, because either alone would
+    /// pass on a rule that answers every box the same way.
+    ///
+    /// Not a rule invented for Clear: it is Cut's rule for the kinds with no spine (LASSO_MOVE.md
+    /// §5.3), the cut rule rounded to the nearest whole object, and the same answer a lasso move and
+    /// a recolour give. Choosing anything else would mean one loop caught a text box for Move and not
+    /// for Clear.
+    func testATextBoxIsClearedWholeByItsCentreAndOneMerelyClippedIsUntouched() {
+        let (manager, layerIndex, vector) = fixture()
+        var caughtRecipe = TextRecipe(string: "caught")
+        caughtRecipe.typography.pointSize = 10
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: caughtRecipe,
+                                            frame: TextFrame(origin: CGPoint(x: 20, y: 20),
+                                                             size: CGSize(width: 12, height: 8))))
+        var clippedRecipe = TextRecipe(string: "clipped")
+        clippedRecipe.typography.pointSize = 10
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: clippedRecipe,
+                                            frame: TextFrame(origin: CGPoint(x: 36, y: 16),
+                                                             size: CGSize(width: 20, height: 10))))
+
+        // Covers x ≤ 40: the first box's centre (26, 24) is inside; the second box overlaps the loop
+        // from x = 36 to x = 40 but its centre (46, 21) is outside.
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 30, height: 30)))
+        manager.clearSelectionPixels()
+
+        XCTAssertEqual(vector.elements.compactMap { $0.text?.recipe.string }, ["clipped"],
+                       "the box the loop is centred on goes whole; the one it clips is left alone")
+    }
+
+    /// **A placed image follows the same centre rule, in both directions** — the second kind that
+    /// cannot be parted, answered the same way for the same reason.
+    func testAPlacedImageIsClearedWholeByItsCentreAndOneMerelyClippedIsUntouched() {
+        let (manager, layerIndex, vector) = fixture()
+        let caught = VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                       rect: CGRect(x: 0, y: 0, width: 12, height: 12),
+                                                                       size: CGSize(width: 12, height: 12)),
+                                        transform: LayerTransform(position: CGPoint(x: 24, y: 24),
+                                                                  scale: 1, rotation: 0))
+        let clipped = VectorImageElement(image: CanvasFixture.solidImage(.red,
+                                                                        rect: CGRect(x: 0, y: 0, width: 20, height: 12),
+                                                                        size: CGSize(width: 20, height: 12)),
+                                         transform: LayerTransform(position: CGPoint(x: 46, y: 20),
+                                                                   scale: 1, rotation: 0))
+        vector.addImage(caught)
+        vector.addImage(clipped)
+
+        // Covers x ≤ 40: `caught` is centred at (24, 24); `clipped` spans x = 36…56 and so pokes into
+        // the loop, but its centre (46, 20) is outside it.
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 30, height: 30)))
+        manager.clearSelectionPixels()
+
+        XCTAssertEqual(vector.elements.map(\.id), [clipped.id],
+                       "the photo the loop is centred on goes whole; the one it clips is left alone")
+    }
+
+    /// **One undo press puts everything back** — the cut halves, the deleted whole objects and the
+    /// z-order, in one step rather than one per element the clear happened to touch.
+    func testOneUndoPressRestoresEverythingAClearRemoved() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 40, height: 12),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 30), to: CGPoint(x: 58, y: 30), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 44), to: CGPoint(x: 36, y: 44), size: 5))
+        let before = vector.elements.map(\.id)
+        let inkBefore = opaquePixelCount(vector)
+
+        select(manager, layerIndex, loop(CGRect(x: 14, y: 4, width: 40, height: 56)))
+        manager.clearSelectionPixels()
+        XCTAssertNotEqual(vector.elements.map(\.id), before, "fixture precondition: the clear did something")
+
+        manager.undo()
+
+        XCTAssertEqual(vector.elements.map(\.id), before,
+                       "every element is back, with its identity and its z-position")
+        XCTAssertEqual(opaquePixelCount(vector), inkBefore, "and so is every pixel of ink")
+    }
+
+    /// **A clear that catches nothing records no history step**, even on a cel full of ink. The
+    /// artist presses Undo expecting their own last real edit back, not a step that undoes to an
+    /// identical document — the same rule `recolorSelection` and `bakePreciseStrokes` state.
+    ///
+    /// `splitForLassoMove` answers this by returning nil, which for a lift means "nothing to carry"
+    /// and here means "nothing to delete". The distinction matters because the nil is also the
+    /// guarantee that nothing was *cut*: it cuts only when a piece lands inside.
+    func testAClearThatCatchesNothingRecordsNoHistoryStep() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 8, y: 8), to: CGPoint(x: 40, y: 8), size: 5))
+        let before = vector.elements.map(\.id)
+
+        select(manager, layerIndex, loop(CGRect(x: 4, y: 40, width: 40, height: 20)))
+        let baseline = manager.history.undoStack.count
+        manager.clearSelectionPixels()
+
+        XCTAssertEqual(vector.elements.map(\.id), before, "the display list is untouched")
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "and nothing is recorded")
+    }
+
+    /// **The clear is visible through `PixelOps.rasterize`, which is what proves `bumpVersion()` ran.**
+    ///
+    /// `VectorCanvas.elements`' setter deliberately does not invalidate, and both `RasterizeKey` and
+    /// `LayerContentVersion` key on `vectorVersion` — so a clear that forgot the bump would empty the
+    /// display list and leave the artist looking at their drawing. Asking through the cache, after
+    /// warming it with the pre-clear flatten, is the only assertion that can tell the two apart:
+    /// `vector.render()` would pass either way.
+    func testTheClearIsVisibleThroughTheRasterizeCacheAndNotOnlyInTheModel() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 20), size: 8))
+        XCTAssertTrue(isOpaqueThroughRasterize(manager, layerIndex, at: CGPoint(x: 32, y: 20)),
+                      "fixture precondition: the flatten is warm and carries the stroke")
+
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 48, height: 30)))
+        manager.clearSelectionPixels()
+
+        XCTAssertFalse(isOpaqueThroughRasterize(manager, layerIndex, at: CGPoint(x: 32, y: 20)),
+                       "the clear reaches the flatten every on-screen tier is built from")
+    }
+
+    /// The active cel flattened the way the compositor flattens it — **through the memoized path**,
+    /// so a stale entry is a failure rather than something the test quietly renders past.
+    private func isOpaqueThroughRasterize(_ manager: CanvasManager, _ layerIndex: Int,
+                                          at point: CGPoint) -> Bool {
+        let image = PixelOps.rasterize(cel: manager.layers[layerIndex].cels[0],
+                                       canvasSize: LassoMoveLogicTests.size)
+        guard let cg = image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else { return false }
+        let x = Int(point.x), y = Int(point.y)
+        guard x >= 0, y >= 0, x < cg.width, y < cg.height else { return false }
+        return bytes[(y * cg.width + x) * 4 + 3] > 128
+    }
+
     // MARK: - Three membership rules (TODO item (20))
     //
     // `Enclosed · Cut · Touching`, ordered by how much travels with the default in the middle. These

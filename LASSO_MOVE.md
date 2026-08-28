@@ -399,11 +399,12 @@ Three decisions fall out:
   trick: set `evenOddFill = true` on both halves and the rendering is identical either way. That is
   measured above, not assumed.
 - **This replaces `clearSelectionPixels`' `clipPath(_:excluding:)`, and should.** That helper
-  (`SelectionModels.swift:422-427`) concatenates the two paths and relies on even-odd to make the
-  overlap a hole. It is not a boolean: it produces a path whose *shape* depends on the fill rule
-  every downstream reader must remember to pass, its doc comment claims a nil return it does not
-  have, and it cannot answer "is the result empty". Do not extend it. (Migrating Clear onto the
-  boolean is a separate, welcome cleanup and is **not** in this plan.)
+  concatenated the two paths and relied on even-odd to make the overlap a hole. It was not a boolean:
+  it produced a path whose *shape* depended on the fill rule every downstream reader must remember to
+  pass, its doc comment claimed a nil return it did not have, and it could not answer "is the result
+  empty". **Done 2026-08-28** — Clear now cuts through `splitForLassoMove` and the helper is deleted.
+  It was also *wrong*, not merely inelegant: with no bounds test it rewrote every fill in the list to
+  `fill ∪ loop`, so clearing bare paper painted the loop in a distant fill's colour.
 - **The moved chunk is one element, not n.** `bar - notch` came back as one path with two subpaths,
   and that is the right granularity: the artist made one gesture, so the outside remnant is one fill
   and the inside chunk is one fill, however many components each has. Splitting components into
@@ -960,7 +961,6 @@ about makes the pair a *general affine* and still not a homography.
   step's undo **re-creating the float** at its last transform, which is a second feature: it changes
   what a raster Move retains in history from one canvas-sized pair of images to two, on a stack whose
   budget is already device-derived. It wants its own branch and its own measurement.
-- **Migrate `clearSelectionPixels` onto the `CGPath` boolean**, off `clipPath(_:excluding:)`.
 - **Fix `beginDuplicate()`'s rasterize-on-a-vector-layer** (§0) — a bug, not a stage of this. Filed
   in [BUGS.md](BUGS.md) so it does not live only inside a spec.
 - **Port `FloatingPieceOverlayView` onto the Stage 4 handle pattern**, the other half of
@@ -1380,6 +1380,23 @@ about the box, and the first is the one that makes the three rules say one sente
     *would* have caught anything: one extra pass over the display list, on the failure path only. The
     vehicle is a `CanvasNotice` and not the Move bar's caption slot, because the bar is raised on
     `isAnyPieceFloating` and this is precisely the path where nothing floats.
+
+25. **Clear cuts at the loop, exactly as Cut does.** In this file because Clear is now the same
+    engine seam, and here rather than in a document of its own so that a session changing the split's
+    membership rules can see who else it moves. The owner's report, 2026-08-28: *"clear does not work
+    (in the selection menu). It should clear all the stuff in the selection."* It did not — the vector
+    arm only ever looked at fills — and the ruling on the fix is that **only what is inside the loop
+    vanishes; the part of a stroke hanging outside survives**, chosen over deleting whole caught
+    strokes because it is the consistent answer three ways: it is what Clear already did to *fills*,
+    it is what the raster arm does, and it is what an eraser does.
+
+    So Clear is `splitForLassoMove` under `.cutting` with the reported ids **deleted** instead of
+    lifted — which settles the two kinds that cannot be parted without a new decision, since §5.3 and
+    §5.23 already answer them: a text box or a photo whose **centre** the loop contains is cleared
+    whole, and one whose corner it merely clips is left alone. `.erase` is an ordinary element (§5.7),
+    so a punch inside the loop is cleared with the ink around it. **A Clear that catches nothing is a
+    silent no-op with no undo step** — the nil `splitForLassoMove` already returns, read as "nothing
+    to delete" rather than as the failure a lift reads it as.
 
 
 ## 6. Open risks
