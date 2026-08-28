@@ -92,7 +92,8 @@ i.e. the toggle's other half.
   and adding four `Handle` cases walks straight into the trap this stage was warned about:
   `allowedHandles` defaults to *all cases*, so a new grip switches itself on for the whole-layer box
   too, where there is nothing to store it in.
-- **The yellow box-only rotate knob** (3b) and **placed images holding a stretched shape** (3c). 3c is now the *only* thing either refusal names: text was taught to mirror and to stretch on 2026-08-27 (stage 3d, §5.18), and a placed image is what is left — its `LayerTransform` needs a stored field and a decode migration before it can hold either.
+- **The box-only rotate knob** (3b) — **approved 2026-08-27 and the next thing built**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store, and §5.21 exempts a box-only turn from the undo stack. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
+- **Placed images holding a stretched shape** (3c). This is now the *only* thing either refusal names: text was taught to mirror and to stretch on 2026-08-27 (stage 3d, §5.18), and a placed image is what is left — its `LayerTransform` needs a stored field and a decode migration before it can hold either.
 - **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
   `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
   discarded at the gesture's end. Both defaults — `ObjectTransformFrame.aspect` and
@@ -872,7 +873,9 @@ introduce", and two of the four have since disproved it.** Flips shipped in stag
 extra scalar** on the box (`ObjectTransformFrame.aspect`) plus a second mapping function. A quad is
 what *Distort* needs — four corners moving independently is a homography and nothing smaller — and
 generalising from it to the whole list overstated the cost of the two cheapest members by a model
-type each. The box-only knob is the remaining unbuilt one and it needs no quad either.
+type each. The box-only knob is the remaining unbuilt one and it needs no quad either — it is a second
+**angle**, and §5.20's ruling that a stretch made about a hand-turned box stores the axis it was made
+about makes the pair a *general affine* and still not a homography.
 
 **Stage 4 — the follow-ups, independent small branches.** Each stands alone; none blocks the others.
 
@@ -881,10 +884,12 @@ type each. The box-only knob is the remaining unbuilt one and it needs no quad e
 - ~~**Freeform**~~ — **done**, stage 3a, see §0. It needed one scalar on the box and a second mapping
   function, not the quad this list assumed.
 - ~~**Flips**~~ — **done**, stage 2, as one affine on the float.
-- **The box-only rotate knob** (stage 3b) and **placed images holding a stretched shape** (3c), and
-  then **Distort** (stage 5) over the shared `Homography` solver — the one member of this list that
-  really does need a quad. Text reached both Mirror and Freeform on 2026-08-27 (stage 3d) without
-  needing 3c's stored field, because a `TextFrame` already carries four free corners.
+- **The box-only rotate knob** (stage 3b) — **approved by the owner on 2026-08-27 and the next thing
+  to build**, TODO item (20), on §5.19–21. It is not on this list as a maybe any more.
+- **Placed images holding a stretched shape** (3c), and then **Distort** (stage 5) over the shared
+  `Homography` solver — the one member of this list that really does need a quad. Text reached both
+  Mirror and Freeform on 2026-08-27 (stage 3d) without needing 3c's stored field, because a
+  `TextFrame` already carries four free corners.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.
@@ -1189,6 +1194,53 @@ An eighteenth was settled on **2026-08-27**, and it reverses a refusal §0 and �
     hands them the distort-mode exemption from `TextLayout.minimumBoxSize`, so a stretched box can be
     dragged smaller than its own text. **That last one is unruled**, it rode along rather than being
     chosen, and the conditional that would undo it is two lines (see `sizedInBoxSpace`'s own note).
+
+---
+
+Three more were settled on **2026-08-27/28**. All three are about the handle **box** rather than the
+ink, and the first is the one the other two are consequences of.
+
+19. **The Move box stays axis-aligned. There is no automatic tilt.** Asked whether the box should turn
+    by itself to hug ink the artist had already rotated — which is what makes a fresh lift of tilted
+    content look loose — the owner: *"leave it straight up and down. Thats what the orange rotate node
+    is for, rotating the box only"*. So `localBounds(of:)` is not to grow a box tilt, and the re-lift
+    inflation `CanvasManager+LassoMove.swift` documents stands as **accepted** rather than as a defect
+    waiting on a cure. Worth recording beside the ruling: **the knob the owner named did not exist.**
+    Today's knob turns box *and* content together
+    (`ObjectTransformLogicTests.testTheKnobTurnsAboutTheCentreAndScalesNothing`); a box-only knob is
+    §3's **stage 3b**, on the not-built list since this document was written. The ruling holds either
+    way — and the owner then approved building 3b, which is TODO item (20) and is next.
+
+20. **A Freeform stretch made about a hand-turned box records the axis it was made about, and that is
+    one extra stored angle.** The owner pushed back first, and correctly: *"If you make a selection,
+    rotate it, then freeform stretch it, it stretches diagonally, but you're telling me that if the box
+    is generated in a rotated position it cannot stretch the drawing along its cartisean coordinates
+    unless another variable is added? Welp, i feel like there is some kind of clever fix, but if the
+    skew is the sensible way to do it, go ahead and build the skew."* There is no clever fix, and the
+    arithmetic is what makes the extra term principled rather than a patch. Today's map is `R(θ)·S` —
+    stretch in the box's own axes, then rotate — which `LayerTransform` plus `ObjectTransformFrame.aspect`
+    can hold between them. Stretching along a box turned *independently* by φ needs `R(ρ)·S·R(−φ)`: a
+    rotation on **both** sides of the scale, which is exactly the singular-value decomposition of a
+    general 2×2. So `2 translation + 2 angles + 2 scales = 6` **is** a general affine — the second angle
+    *completes* the representation rather than extending it, and there is nothing left over to invent
+    later. It also stops well short of stage 5's Distort, which is a homography and needs 8.
+
+    **The shape this has to take**: the box angle is **chrome** and never enters the geometry map —
+    `VectorFloat`'s lift invariant `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform`
+    depends on exactly that — while a *stretch* is what carries the axis it was made about. At lift both
+    are zero and the map is the identity, so §5.17's "Freeform contains Uniform" survives one level down
+    again.
+
+    **One consequence, disclosed rather than found later**: turning the box *after* a Freeform stretch
+    cannot leave the ink perfectly still, because the stretch axes are the thing that would be turning.
+
+21. **Turning the box costs no undo step — it is free, like zooming.** A deliberate **exception** to
+    §5.5's *"one drag of a corner is one step and one turn of the knob is one step"*, and **not an
+    amendment to it**: every gesture that moves ink still records a step. The owner's reason is the
+    exception's whole justification. A box-only turn moves no ink, so there is nothing to give back;
+    and if it were the first thing done after lifting a lassoed piece, its step would be the one
+    carrying the pre-split display list (§5.8), so one press of Undo would rejoin the cut stroke and
+    dismiss the whole float — wildly out of proportion to straightening a box.
 
 
 ## 6. Open risks

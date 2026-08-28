@@ -232,10 +232,12 @@ extension CanvasManager {
     ///     into the geometry, so an exactly cancelling round trip deflates it again
     ///     (`testARotateBakeAndReliftInflatesTheBoxAndTheRoundTripDeflatesItAgain`).
     ///     The cure is therefore not precision — the arithmetic is already `Double` and already
-    ///     exact, and TODO item (14) buys nothing here. It is giving the box **its own tilt**, so a
-    ///     lift of turned ink lands an oriented rectangle on it instead of an axis-aligned hull. That
-    ///     is a visible behaviour change to the handles and awaits an owner ruling; until then this
-    ///     stands as accepted, which is what the owner accepted.
+    ///     exact, and TODO item (14) buys nothing here. Nor is it giving the box its own tilt:
+    ///     **the owner ruled on 2026-08-27 that the box stays axis-aligned and never tilts by
+    ///     itself** (`LASSO_MOVE.md` §5.19, *"leave it straight up and down"*), so this inflation is
+    ///     settled as accepted rather than open. The approved answer is a **second knob that turns
+    ///     the box alone**, leaving the ink where it is, so the artist hand-fits the box around ink
+    ///     they previously rotated — `LASSO_MOVE.md` stage 3b, TODO item (20).
     ///   * *Undo granularity changes* from one step per Move session to one step per gesture — which
     ///     is `LASSO_MOVE.md` §5.5's existing ruling, and is wanted.
     ///   * *The Move bar now appears where there never was one*, and Mirror/Freeform grey out on a
