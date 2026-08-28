@@ -23,8 +23,9 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(14), on `tmp/revmove`.** Built, not merged, so it stays in this file. Item (8) merged as
-  `e277f82`; the refit's last *unbuilt* member is (9).
+- **Nothing.** Items (8) `e277f82` and (14) `7eef540` are merged, and so is all three phases of
+  Move stage 3b — the box-only knob `330efd4`, the stretch axis `c78de6e`, the re-fitting box
+  `5b5577e`. **The five-item storage refit is down to (9) alone.**
 
 ## How a brush stroke is stored — one feature in five items
 
@@ -49,66 +50,6 @@ genuinely independent *because* the width is fixed, so a resize re-encodes nothi
 that a payload carries the origin it was quantised about, which leaves an unresaved cel readable
 whatever the canvas becomes.
 
-### (14) A reversible Move: hold the transform in doubles until an explicit bake
-
-- [ ] The owner: *"In the move tool have an option to store whatever the transformation is as doubles so
-      it is reversible, and add an option in actions to bake everything down back to 16bits."* It
-      arrived unprompted as the answer to the strongest objection against (12) — that a layer
-      transform was the only exactly reversible operation in the app. **Built on `tmp/revmove`; it
-      stays in this file until that merges.**
-
-      **The defect it fixes is not the one the ask named — it is scale across a *save*.** The doubles
-      half already held: every nudge maps `float.liftedInside`, the elements exactly as the lift
-      produced them, so a drag is an *absolute* map from the lift rather than an increment, and
-      `VectorSample.x/y/pressure` and `VectorStroke.size` are plain `CGFloat` in memory and always
-      were. MEASURED: 100 shrink-to-2%-and-regrow cycles drift **6.0e-11 pt** with `stroke.size`
-      bit-exact. What (8) *did* leave is that the quantisation grid is a fixed size in **canvas**
-      points, so a stroke shrunk before a save has fewer usable bits and comes back coarse when it is
-      grown again. MEASURED (200 samples, real codec, worst sample, shrink → store → regrow): **0.33 pt
-      at 50%, 1.75 pt at 10%, 8.57 pt at 2%**. Rotation and translation are exact, and a hundred
-      consecutive saves of an untouched project drift 0.0 pt — scale across a store is the whole of it,
-      and it only shows after a reopen because memory never rounds.
-
-      **The cure, in the owner's words:** *"when the option is turned on, it gets stored as doubles.
-      Then there is an item in actions to bake any strokes stored as doubles on the canvas as 16bit
-      integers."* **They chose float32 over float64**, shown both: MEASURED, float32 is **12.18 bytes a
-      sample against the packed form's 7.10 — 1.72x** — where float64-as-bytes is 3.2x and
-      float64-as-JSON-text 8.5x, and float32 takes the three errors above to **3.3e-5, 3.9e-5 and
-      5.0e-5 pt**. The further nine decimal places float64 buys are below anything that renders.
-
-      **What shipped.** `PackedSampleRun` gains a second record layout — `Float32` x, `Float32` y,
-      `UInt8` pressure — declared by a `"p":"f32"` wire key written **only** in that mode, so an
-      ordinary stroke's payload is byte-for-byte what it was. `VectorStroke.precise` is *derived* from
-      the wire form rather than stored beside it, because a stored copy can go stale.
-      `CanvasManager.preserveMovePrecision` (off by default) is a **Keep Full Precision** toggle on the
-      Move bar, and the flag is set inside `applyToVectorFloat`'s map rather than at the commit: the
-      commit records nothing, so a flag set there would be a document change no undo step carries, and
-      undo would give back the geometry while leaving the stroke writing nine bytes a sample for ever.
-      Actions gains **Bake Precise Strokes**, one step across every layer and cel, following
-      `registerVectorElementsUndo`'s whole-array swap — `withStructureUndo` could not carry it, because
-      `StructureSnapshot` copies the `Layer` structs while `Cel.vector` is a **class reference**.
-
-      **Two behaviour differences, both deliberate.** float32 **does not clamp**, so a precise stroke
-      cannot be flattened onto the storage boundary by BUGS.md's unclamped zoom, where an ordinary one
-      saturates and says so. And `nonFiniteCount` now counts a NaN coordinate in **both** layouts: a
-      saturation is storage declining to hold ink, a NaN is a defect upstream, and the mode that cannot
-      notice the first must still notice the second.
-
-      **Both residues the ask named were misdiagnosed, and both corrections are now tests rather than
-      assertions in a document.** `BrushStamper.stampSpacing`'s 1 pt floor is
-      `max(brushSize * spacingFraction, 1)` and binds at native sizes with no transform anywhere near it
-      — a 9 pt Hard Round wants 0.45 pt of spacing and gets 1 pt on a cel nobody ever lassoed — so
-      precision was never its cure, and a scale out through it and back gives the identical dab count.
-      And the Move box does **not** inflate monotonically: `contentSize` is written at the two lift sites
-      and nowhere else, so what grows it is a *fresh lift of already-tilted ink*, which deflates again on
-      the way back. MEASURED on a 100 × 20 bar across lift / rotate 45° / bake / re-lift / rotate back /
-      bake / re-lift: **100 × 20 → 76.57 × 76.57 → 100 × 20**. The tilted figure is 76.57 and not
-      120/√2 = 84.85 because `localBounds(of:)` takes the AABB of the *samples* and pads by `stampRadius`
-      afterwards, so the padding is re-applied axis-aligned at every lift — the shortfall is exactly
-      `2·radius·(√2 − 1) = 8.284`, structural rather than tolerance. **The box stays axis-aligned by
-      owner ruling** (LASSO_MOVE.md §5.19), so that inflation is accepted and its cure is item (20)'s
-      box-only knob.
-
 ### (9) Resize the canvas from the Actions menu
 
 - [ ] The owner: *"a resize canvas option in actions would be nice ... They should be able to control
@@ -125,126 +66,6 @@ whatever the canvas becomes.
       path.
 
 ## Open
-
-### (20) A second knob that turns the Move box alone — all three phases BUILT
-
-      **Phases 1 and 2 are merged; phase 3 is on `tmp/refit` and not yet merged**, so this item
-      stays here until it is. A yellow knob
-      off the box's *bottom* edge (green is the content knob; `systemOrange` already means "distort
-      corner" on a text box) turns `ObjectTransformFrame.boxAngle`, and **that field reaches no
-      geometry at all** — it appears nowhere in `VectorLayer.swift`, which is where every geometry map
-      lives, and in `CanvasManager+LassoMove` only in `turnVectorFloatBox`, which writes it straight
-      onto the frame with no undo step per §5.21, and in `fittedFrame(of:at:)`, which phase 3 added
-      and which measures a *box* — it returns a frame for the overlay and writes nothing. The drag arm returns `transform: start` bit for bit, so the ink is not touched by any
-      arithmetic — not scaled by 1, not rotated by 0.
-      `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is the guard against a leak
-      into the map, and **it caught a real one**: `87081de` shipped with two lines added to
-      `applyToVectorFloat` that folded `frame.boxAngle` into the geometry map — a deliberate defect a
-      mutation-testing script had left on disk, which was committed and pushed by a *different*
-      session while the script was between runs. The commit that follows it reverts those two lines.
-      It went red on exactly the two tests you would want: that one and
-      `testEightPressesOfRotate45StayBitExactOnAHandTurnedBox`. Two lessons, both already in
-      CLAUDE.md wearing other costumes: a green run taken before the last edit is evidence about a
-      binary that no longer exists; and **a mutation left in a working tree is indistinguishable from
-      the implementation** to anyone who harvests that tree, so commit first and mutate second.
-      **Reset leaves the box angle alone**, which is where §5.16 meets §5.21 and they resolve the same
-      way twice: a Reset made pressable by a turned box would fire a zero-delta nudge on an otherwise
-      untouched float — `nudges == 1`, the step carrying the pre-split display list — so one Undo
-      after it would rejoin the cut stroke and dismiss the float; and it would destroy a hand-fit no
-      Undo could give back, since §5.21 keeps the angle off the stack in both directions.
-      **Freeform greyed out while the box was turned** — *"The box is turned. Straighten it to
-      stretch this piece."* — the one thing phase 2 removed. Uniform and both knobs kept working at
-      any angle throughout: a uniform drag scales the ratio of two radii from the anchor and reads no
-      rotation.
-
-- [x] **Phase 2 — §5.20's second stored angle** — **BUILT and merged.**
-      `ObjectTransformFrame.stretchAxis` is the axis a stretch was made about, and
-      `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` builds `R(ρ+φ)·S·R(−φ)` from it — the
-      singular value decomposition of a general 2×2, so `2 translation + 2 angles + 2 scales = 6` is
-      **exactly a general affine**. The term completes the box's transform rather than extending it,
-      and stops well short of stage 5's Distort, which needs 8 for perspective. The owner, shown the
-      constraint: *"i feel like there is some kind of clever fix, but if the skew is the sensible way
-      to do it, go ahead and build the skew."* The Freeform gate is gone; the placed-image refusal
-      stays, being a different one.
-      **The consequence this item predicted did not happen, and §5.20 now carries the correction.**
-      Turning the box after a stretch *does* leave the ink perfectly still, because the stretch
-      records its axis instead of reading the live `boxAngle` — and §5.21 forces that, since a box
-      turn that moved ink would change the document with nothing on the stack to give it back. What
-      is true instead: a second stretch about a *different* axis composes two maps that do not
-      commute, so the product carries a rotation of its own, `transform.rotation` moves and the box
-      turns with it. `ObjectTransformFrame.decompose` reads the product back into the four fields.
-
-- [x] **Phase 3 — §5.22, the box re-fits to the ink as it turns** — **BUILT on `tmp/refit`, not yet
-      merged.** The owner, 2026-08-28: *"currently when the user uses the yellow node to rotate the
-      selection box, the dimensions of the box does not change to fit the drawing. That box should be
-      the bounding box of the drawing inside of it and should actively change dimensions when rotated
-      to keep on fitting the image. For example, the box would be bigger and then smaller on 45 degree
-      angle increments of a square it is around, and constant for a circle."* Phases 1 and 2 gave the
-      knob an angle and gave a stretch an axis; the box's *size* was still the number the lift
-      measured, so the knob turned a rectangle of fixed, wrong dimensions.
-      `contentSize` and the new `ObjectTransformFrame.contentOffset` are now a function of `boxAngle`,
-      measured by `MoveBoxInk` in the box's own frame `B⁻¹·L·Mirror`. A square gives
-      `s·(|cos β| + |sin β|)` — `s√2` at 45° — and a disc is constant, which is the case that separates
-      a box measured from the *ink* from one measured from the *previous box*.
-      **`ρ` cancels out of `B⁻¹·L`, so the green knob is free**; `aspect == 1` and
-      `boxAngle == stretchAxis` reduce to `R(−β)` exactly and are written out, which covers the pose at
-      rest — where the fit returns the lift's own box to the bit.
-      **The box's centre travels and the geometry's anchor does not.** A right triangle's tight box is
-      materially off-centre at 45°, but `pivot` is what the map holds still and `transform.position` is
-      where it sends it, so the offset lives on the box and no map reads it —
-      `CanvasManager.fittedFrame(of:at:)` *returns* a frame and writes nothing, so `contentSize` is
-      still assigned only at the two lift sites. §5.19 is untouched: a fresh lift still measures a
-      loose, axis-aligned box and the box still never tilts by itself.
-      Nine mutations, nine killed — including the two the brief named, a fit that measures the previous
-      box (caught by the disc) and an anchor that follows the box centre (caught by
-      `testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot`, and by both phase-1/2 guards).
-      **The convex hull was bought by a measurement, not assumed**: walking every sample of a
-      24,000-sample cel cost 2.223 ms a frame, over the 120 Hz bar, and Andrew's monotone chain per
-      element took it to 0.401 ms.
-
-- [ ] Asked whether the handle box should turn by itself to hug ink the artist had already rotated,
-      the owner ruled it should not: *"leave it straight up and down. Thats what the orange rotate node
-      is for, rotating the box only"* — and then approved building the knob they had just named,
-      **because it does not exist**. Today's knob turns box and content together
-      (`ObjectTransformLogicTests.testTheKnobTurnsAboutTheCentreAndScalesNothing`); a box-only knob is
-      LASSO_MOVE.md stage 3b, on that spec's not-built list since it was written. It is **approved and
-      next**, once (14) merges. **Not part of the storage refit** — that programme's last unbuilt
-      member is (9), and this shares nothing with it.
-
-      **What it is for.** A lift of already-tilted ink lands an axis-aligned hull around the ink, which
-      is loose — and item (14) established that the looseness is structural (`localBounds(of:)` pads by
-      `stampRadius` axis-aligned at every lift) rather than a rounding fault, so precision was never
-      its cure. The knob lets the artist hand-fit the box instead. The three rulings behind it are
-      LASSO_MOVE.md §5.19–21.
-
-      **Turning the box costs no undo step — it is free, like zooming.** A deliberate exception to
-      §5.5's *"one turn of a knob is one step"*, with the owner's own reason: a box-only turn moves no
-      ink, and if it were the first thing done after lifting a lassoed piece, undoing it would rejoin
-      the cut stroke and dismiss the whole float (§5.8) — wildly out of proportion to straightening a
-      box.
-
-      **A Freeform stretch on a hand-turned box gets one extra stored term, and the owner chose to
-      build it after pushing back:** *"If you make a selection, rotate it, then freeform stretch it, it
-      stretches diagonally, but you're telling me that if the box is generated in a rotated position it
-      cannot stretch the drawing along its cartisean coordinates unless another variable is added?
-      Welp, i feel like there is some kind of clever fix, but if the skew is the sensible way to do it,
-      go ahead and build the skew."* **The arithmetic is why it is not a hack.** Today the map is
-      `R(θ)·S` — stretch in the box's axes, then rotate — which is storable. Stretching along a box
-      turned independently by φ needs `R(ρ)·S·R(−φ)`, a rotation on *both* sides of the scale, whose
-      singular-value decomposition is the general 2×2. So `2 translation + 2 angles + 2 scales = 6` is
-      **exactly a general affine**: the extra angle *completes* the representation rather than
-      extending it, and nothing is left over. It stops well short of stage 5's Distort, which needs 8
-      parameters for a perspective.
-
-      **The intended shape**: the box angle stays **chrome** and never enters the geometry map — the
-      lift invariant `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform` depends on
-      that — while a *stretch* records the axis it was made about. At lift both are zero and the map is
-      the identity. **One consequence to state honestly**: turning the box *after* a Freeform stretch
-      cannot leave the ink perfectly still, because the stretch axes are what would be turning.
-
-      **Two small things still open, neither blocking the build**: where the second knob sits on the
-      box, and what colour it is. LASSO_MOVE.md says yellow; the owner said orange, and **orange
-      already means "distort corner" on a text box** (ADD_TEXT.md).
 
 ### (18) The bottom bars should be as tall as their contents — attempted, reverted, still open
 
@@ -335,11 +156,16 @@ whatever the canvas becomes.
   A second feature. See LASSO_MOVE.md §3 stage 4.
 - **Move stages 3c and 5** — placed images holding a stretched shape; Distort on both tiers consuming
   the shared `Homography` solver, with the ink-deformation toggle defaulting off. LASSO_MOVE.md §0 lists
-  what each deliberately left out. **Stage 3b left this list on 2026-08-27** — the owner approved it, so
-  it is item (20) above. **3c is now the only half of the
+  what each deliberately left out. **Stage 3b left this list on 2026-08-28, built and merged in three
+  phases** — the knob `330efd4`, the stretch axis `c78de6e`, the re-fitting box `5b5577e`. **3c is now
+  the only half of the
   Freeform/Mirror gate still closed** — text was opened 2026-08-27, images were not, because
   `VectorImageElement.transform` is a `LayerTransform` with nowhere to put a flip or a second-axis scale
   and so needs a stored field plus a decode migration, where text's four corners cost neither.
+  **Stage 3b phase 3 left 3c a tripwire**: the re-fitting box measures a placed image exactly, but only
+  because Freeform is refused on a float holding one, so its frame is always a rotation and the
+  axis-aligned pad is exact. Teaching images to stretch breaks that, and the code note beside it says
+  what the fit would then need — the frame's row norms rather than a scalar pair.
 - **A Freeform-stretched text box inherits the distort-mode minimum-size exemption**, so it can be dragged
   smaller than its own text. Rode along with the 2026-08-27 text-transform change, is recorded in
   `sizedInBoxSpace`'s own doc with the two-line conditional that would undo it, and is **unruled**.
