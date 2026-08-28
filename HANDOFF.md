@@ -10,7 +10,8 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. Fast tier **1813 / 1810 / 0 / 3**. **No branches in flight, one worktree, clean tree.**
+inline. Fast tier **1813 / 1810 / 0 / 3**; the full suite ran on this tree at **1932 / 1925 / 1 / 6**,
+the one red confirmed environmental by an isolated re-run. **No branches in flight, one worktree, clean tree.**
 
 **1. Build item (14), the reversible Move.** It is the head of the queue now that (8) is merged, and
    (8) is what it was waiting for: the quantiser exists, so "hold the transform in doubles until an
@@ -59,10 +60,11 @@ shipped intact.
 the 1798 / 1795 / 0 / 3 that session 72 closed on, which is exactly the new test file, so nothing
 stopped running. No branches, no worktrees but the main one, no simulator clones.
 
-**The full suite has still NOT been run since `dee77ff`, now seven merges ago.** Item (8) is a
-persistence change with no gesture and no view in it, and the fast tier is where its coverage lives —
-but that is an argument, not a measurement, and the argument has been made seven times now. **Run one
-at the next phase boundary**, and check `pgrep -fl xcodebuild` before shutting anything down.
+**The full suite was run on the merge** — the first since `dee77ff`, seven merges back:
+**1932 / 1925 / 1 / 6**, and the one red was environmental. `InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`
+(the 170-second test that is the suite's whole critical path) failed with `afterCommit.isEmpty` while
+its own diagnostic sweep printed ink; it passes clean in isolation, and it touches no save or reload,
+so item (8)'s codec never runs inside it. Not a finding and it needs no fix.
 
 ## What landed
 

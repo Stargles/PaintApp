@@ -82,6 +82,17 @@ before something was deleted will silently resurrect it, and the count is the on
   them. The logic tier is ~250 s of work total, so the clone boots cost more than they save, and
   this section already warns that leftover clones cause "nearly every mystery failure".
 
+- **The log's per-test line is spelled differently in a parallel run than in a serial one**, so a grep
+  that counts one silently reports **zero** for the other. Serial prints
+  `Test Case '-[Suite testName]' passed`; parallel prints
+  `Test case 'Suite.testName()' passed on 'Clone 1 of …'` — different case, different shape, no
+  brackets. Counting a live parallel run with the serial pattern reads as a run that has started no
+  tests at all, which looks exactly like a hang; that cost one session a wrong diagnosis of a healthy
+  run twenty-five minutes in. It is the banner-versus-count trap again, so the answer is the same one:
+  **for a finished run read `xcresulttool`, never the log.** The log counts disagreed with the
+  xcresult on the very run that prompted this note (1914 against 1925) because a clone's output
+  interleaves and a line can be split.
+
 - **A red xcresult is evidence about a *binary*, not about your working tree** — the same trap as the
   banner, pointing the other way. `test-without-building` reuses whatever bundle was last compiled,
   so editing a source file and re-running it tests the *old* code while reporting against the new

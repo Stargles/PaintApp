@@ -757,8 +757,17 @@ final class BrushEngineLogicTests: XCTestCase {
         let parent = VectorStroke(brush: BrushLibrary.hardRound,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 9, opacity: 1,
+                                  // Pressures in *even* 255ths, and coordinates on whole points, so
+                                  // this fixture survives TODO item (8)'s storage quantisation exactly
+                                  // — including the midpoint sample `splitStrokeRuns` interpolates at
+                                  // 2.5, whose numerator is then still an integer. That is what lets
+                                  // the assertions below stay the strict, byte-exact ones they were:
+                                  // this test's subject is the lattice, not the codec, and widening
+                                  // its tolerance to accommodate quantisation would have cost the
+                                  // suite its only comparison of *pixels* across a save.
+                                  // `SampleCodingLogicTests` is where lossy values are pinned.
                                   samples: (0..<5).map { VectorSample(x: 8 + CGFloat($0) * 12, y: 32,
-                                                                      pressure: 0.5 + CGFloat($0) * 0.1) })
+                                                                      pressure: CGFloat(50 + $0 * 10) / 255) })
         guard let run = StrokeGeometry.splitStrokeRuns(parent.samples, removing: [2.5...3.5]).first else {
             return XCTFail("Setup: cutting the middle out should leave a head run")
         }
@@ -767,31 +776,18 @@ final class BrushEngineLogicTests: XCTestCase {
         piece.samples = run.samples
         piece.lattice = DabLattice(samples: parent.samples, parameters: run.parameters, seedID: parent.id)
 
-        // TODO item (8) made the stored form lossy: quarter-pixel coordinates and 8-bit pressure, so
-        // a decoded stroke is the *quantised* one and `==` against the in-memory original would fail
-        // on pressures like 0.7, which is not 255ths of anything. The contract this test exists for is
-        // untouched, and is stated as the fixed point the format actually is — save, reload, save
-        // again, and nothing moves. `SampleCodingLogicTests` pins the quantisation itself.
+        // **Both operands of both assertions reach the in-memory original**, and that is deliberate
+        // rather than incidental. Comparing a decode against another decode is tautological under a
+        // format that is a fixed point — a `DabLattice.encode` that dropped every pressure to 1 would
+        // satisfy it, and every reloaded cut stroke would come back untapered.
         let decoded = try JSONDecoder().decode(VectorStroke.self,
                                                from: try JSONEncoder().encode(piece))
-        let twice = try JSONDecoder().decode(VectorStroke.self,
-                                             from: try JSONEncoder().encode(decoded))
-        XCTAssertEqual(twice.lattice, decoded.lattice, "The lattice must round-trip intact")
-        // Against the *original*, not against the other decode — otherwise a codec that zeroed every
-        // coordinate would still satisfy every line here, which is how a green test stops testing.
-        let stored = try XCTUnwrap(decoded.lattice?.samples)
-        let wanted = try XCTUnwrap(piece.lattice?.samples)
-        XCTAssertEqual(stored.count, wanted.count, "…carrying the parent's whole walk, not a truncated one")
-        for (after, before) in zip(stored, wanted) {
-            XCTAssertEqual(after.x, before.x, accuracy: PackedSampleRun.quantum / 2)
-            XCTAssertEqual(after.y, before.y, accuracy: PackedSampleRun.quantum / 2)
-            XCTAssertEqual(after.pressure, before.pressure, accuracy: 1.0 / 510)
-        }
-        XCTAssertEqual(decoded.lattice?.parameters, piece.lattice?.parameters,
-                       "…and its parameters exactly, since those are not coordinates")
-        XCTAssertEqual(decoded.lattice?.seedID, piece.lattice?.seedID)
-        XCTAssertEqual(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(twice)])),
-                       renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
+        XCTAssertEqual(decoded.lattice, piece.lattice, "The lattice must round-trip intact")
+        let before = try XCTUnwrap(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(piece)])),
+                                   "Setup: the saved piece must render")
+        let after = try XCTUnwrap(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
+                                  "Setup: the reloaded piece must render")
+        XCTAssertEqual(after, before,
                        "A reloaded piece must render exactly as the one that was saved")
 
         let plain = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(parent)) as? [String: Any]
