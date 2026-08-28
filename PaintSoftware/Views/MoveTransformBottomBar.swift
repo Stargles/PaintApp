@@ -12,12 +12,18 @@ import SwiftUI
 /// clear `activePanel` — so when the piece bakes, the Select menu comes straight back if Select is
 /// still the artist's open panel, and they have not lost their place.
 ///
-/// **No control here is allowed to be pressed and do nothing.** Three can be unavailable, and each
+/// **No control here is allowed to be pressed and do nothing.** Four can be unavailable, and each
 /// says so rather than going quietly grey: Mirror, when the lassoed piece carries a **placed image**
 /// (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip); the **mode picker**, on a
 /// piece carrying one for the neighbouring reason that a `LayerTransform` has no second axis scale
-/// (`freeformUnavailableReason`); and Reset, when the piece is already sitting exactly where it was
-/// picked up.
+/// (`freeformUnavailableReason`); the **membership picker**, on a raster piece and after the first
+/// nudge (`lassoMembershipUnavailableReason`); and Reset, when the piece is already sitting exactly
+/// where it was picked up.
+///
+/// **One control is dropped rather than disabled, and it is the exception that states the rule**: the
+/// membership picker does not appear at all for the whole-cel float, which has no loop and therefore
+/// no membership question (`lassoMembershipPickerIsOffered`). That answer is fixed at the lift, so it
+/// cannot reflow the row under a finger.
 ///
 /// **Text used to be refused by both and no longer is** (owner, 2026-08-27: *"I rule text should be
 /// able to be transformed"*), which leaves the placed image as the only kind either refusal names —
@@ -116,6 +122,8 @@ struct MoveTransformBottomBar: View {
             .disabled(!modeIsAdjustable)
             .opacity(modeIsAdjustable ? 1 : 0.45)
 
+            if canvasManager.lassoMembershipPickerIsOffered { membershipPicker }
+
             precisionToggle
 
             if let caption {
@@ -132,6 +140,48 @@ struct MoveTransformBottomBar: View {
 
     private var divider: some View {
         Rectangle().fill(Color.white.opacity(0.25)).frame(width: 1, height: 24)
+    }
+
+    /// **TODO item (20) — "What travels".** `Enclosed · Cut · Touching`, ordered by how much of the
+    /// drawing comes with the artist, with the shipped rule — Cut — in the middle and selected until
+    /// they touch it.
+    ///
+    /// **It is on this bar rather than in the Select panel, and that is the whole placement
+    /// argument.** The Select panel's *presentation* is suppressed for as long as anything floats
+    /// (LASSO_MOVE.md §5.13, `DrawingView`), which is exactly the moment the artist can see what the
+    /// rule did. A picker there would be a control you can only reach when its effect is invisible.
+    ///
+    /// **Live while the float has not been nudged**, where switching re-lifts and the difference
+    /// appears immediately; **disabled with a reason after**, in the shape `modeIsAdjustable` above
+    /// already uses. Disabled, not dropped, for `iconButton`'s reason — the row must not reflow under
+    /// a finger the instant the artist starts dragging.
+    ///
+    /// Its caption carries the refusal when there is one and otherwise says what the *selected* rule
+    /// does, because the difference between the three is invisible until something has already moved.
+    private var membershipPicker: some View {
+        let reason = canvasManager.lassoMembershipUnavailableReason
+        let shown = canvasManager.displayedLassoMembership
+        return VStack(alignment: .leading, spacing: 2) {
+            Picker("What Travels", selection: Binding(
+                get: { shown },
+                set: { canvasManager.setLassoMoveMembership($0) }
+            )) {
+                ForEach(LassoMembership.allCases) { membership in
+                    Text(membership.displayName).tag(membership)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(reason != nil)
+            .opacity(reason == nil ? 1 : 0.45)
+            .accessibilityIdentifier("moveBar.membershipPicker")
+
+            Text(reason ?? shown.explanation)
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("moveBar.membershipCaption")
+        }
+        .frame(maxWidth: 360)
     }
 
     /// **TODO item (14) — "Keep Full Precision".** Named for what the artist gets rather than for what

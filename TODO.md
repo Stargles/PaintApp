@@ -118,6 +118,12 @@ whatever the canvas becomes.
       `.cutting` is the default and the setting is **not persisted** — per-drawing intent, the line
       `preserveMovePrecision` already draws (`CanvasManager.swift:348-350`). Persisting it would make
       the *last used* the default, which is not what the owner asked for.
+      **Built on `tmp/movemodes` in two commits** — the engine (`LassoMembership`, the parameter on
+      `splitForLassoMove`, the shared per-kind classifier) and the picker (the Move bar, the re-lift,
+      the `nothingWhollyInside` notice). [LASSO_MOVE.md](LASSO_MOVE.md) §0 is the inventory and §5.23-24
+      are the rulings. **One brief premise was wrong and is corrected there**: `mayDiverge` fires
+      *least* often under Enclosed, not most — an element wholly inside the loop moves under Cut too,
+      so Enclosed's moved set is a subset of Cut's. The latch stays in every mode regardless.
 
 ### (18) The bottom bars should be as tall as their contents — attempted, reverted, still open
 

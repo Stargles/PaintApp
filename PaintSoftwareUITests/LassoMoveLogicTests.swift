@@ -4070,6 +4070,185 @@ final class LassoMoveLogicTests: XCTestCase {
                       "Touching answers it by its quad, and takes it")
     }
 
+    // MARK: - The membership picker, and what changing the rule costs
+
+    /// **The rule the artist picks applies at the next lift, and the shipped rule is the default.**
+    func testTheDefaultRuleIsCutAndAChosenRuleAppliesAtTheNextLift() {
+        let (manager, layerIndex, vector) = fixture()
+        XCTAssertEqual(manager.lassoMoveMembership, .cutting,
+                       "nothing changes until the artist touches the picker")
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let id = vector.elements[0].id
+
+        // No float, so this is a plain assignment: there is nothing to re-lift.
+        manager.setLassoMoveMembership(.touching)
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+
+        XCTAssertEqual(vector.elements.count, 1, "Touching cut nothing")
+        XCTAssertEqual(manager.vectorFloat?.insideIDs, [id], "and lifted the stroke whole")
+    }
+
+    /// **Flipping the rule before the first nudge re-lifts, and must not bake and must not record a
+    /// step.** This is the sharpest bug available on this path and the test exists for it alone.
+    ///
+    /// `beginVectorLassoMove`'s first statement is `commitAllInteractiveState()`, which calls
+    /// `commitVectorFloatIfNeeded()` and **bakes** the float, clearing the selection as it goes. So
+    /// the tempting implementation — "just call begin again" — ships a Move that bakes on every tap of
+    /// the picker, and after the first tap there is no loop left to lift against at all. The order has
+    /// to be `cancelVectorFloat()` *then* `beginVectorLassoMove()`.
+    ///
+    /// The surviving **selection** is what catches the wrong order: a bake clears it (§5.6) and a
+    /// cancel restores it verbatim. The unchanged **undo stack** is what catches a re-lift that
+    /// records anything: a lift is not an edit, and a picker tap even less so.
+    func testFlippingTheRuleBeforeTheFirstNudgeReLiftsWithoutBakingOrRecordingAStep() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let id = vector.elements[0].id
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(vector.elements.count, 2, "fixture precondition: Cut split the stroke")
+        let stepsAtLift = manager.history.undoStack.count
+
+        manager.setLassoMoveMembership(.touching)
+
+        XCTAssertNotNil(manager.selection,
+                        "the loop survived, so the float was cancelled and not baked")
+        XCTAssertNotNil(manager.vectorFloat, "and a float is up again under the new rule")
+        XCTAssertEqual(manager.history.undoStack.count, stepsAtLift,
+                       "a picker tap is not an edit — nothing recorded, nothing consumed")
+        XCTAssertEqual(vector.elements.count, 1, "the cut was undone: one stroke again")
+        XCTAssertEqual(vector.elements[0].id, id, "and it is the original, not a re-split piece")
+        XCTAssertEqual(manager.vectorFloat?.insideIDs, [id])
+        XCTAssertEqual(manager.vectorFloat?.nudges, 0, "still un-nudged, so the picker stays live")
+        XCTAssertEqual(vector.suppressedElementIDs, [id],
+                       "and the new float's ids are the ones the flatten skips")
+        XCTAssertEqual(manager.vectorFloat?.elementsBeforeLift.count, 1,
+                       "the cancel's restore is what the next one puts back — the pre-lift list")
+
+        manager.commitVectorFloatIfNeeded()
+        XCTAssertEqual(vector.elements.count, 1, "and the bake leaves one stroke, not three")
+        XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+    }
+
+    /// **A rule that catches nothing keeps the float the artist already had, and says why.**
+    ///
+    /// Letting the re-lift fail would leave them with no float, no box and no bar after one tap on a
+    /// segmented control, which reads as a crash. The previous rule is restored — guaranteed to
+    /// succeed, because it succeeded a moment ago against the list the cancel has just put back — and
+    /// the picker snaps back with the banner explaining it.
+    func testFlippingToARuleThatCatchesNothingKeepsTheFloatAndSaysSo() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+
+        manager.setLassoMoveMembership(.enclosed)
+
+        XCTAssertEqual(manager.lassoMoveMembership, .cutting, "the picker snaps back to the rule that works")
+        XCTAssertNotNil(manager.vectorFloat, "and the artist keeps the piece they had lifted")
+        XCTAssertEqual(vector.elements.count, 2, "cut exactly as it was")
+        XCTAssertEqual(manager.vectorFloat?.insideIDs.count, 1)
+        XCTAssertEqual(manager.notice?.code, "nothingWhollyInside",
+                       "and is told why the picker did not stay where they put it")
+    }
+
+    /// **Enclosed catching nothing says so; an empty lasso still says nothing** (owner, 2026-08-28
+    /// against LASSO_MOVE.md §5.9, and the two are not in conflict).
+    ///
+    /// The difference is what the artist can see. Over blank paper the reason is on screen already;
+    /// over a loop full of ink it is the rule they picked, and a Move that does nothing and says
+    /// nothing reads as a broken button.
+    func testEnclosedCatchingNothingSaysSoAndABlankLoopStillStaysSilent() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        manager.setLassoMoveMembership(.enclosed)
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertFalse(manager.beginVectorLassoMove(), "no stroke lies completely inside the loop")
+        XCTAssertNil(manager.vectorFloat)
+        XCTAssertNotNil(manager.selection, "the loop stays on screen, ready to be redrawn")
+        XCTAssertEqual(manager.notice?.code, "nothingWhollyInside")
+
+        manager.notice = nil
+        select(manager, layerIndex, loop(CGRect(x: 4, y: 44, width: 16, height: 16)))
+        XCTAssertFalse(manager.beginVectorLassoMove(), "and bare paper still lifts nothing")
+        XCTAssertNil(manager.notice,
+                     "but says nothing about it — §5.9, where the artist can see the reason")
+    }
+
+    /// **The picker is offered for a lassoed float and dropped for the whole-cel one**, which has no
+    /// loop and therefore no membership question. Nothing else on the bar tells the two floats apart.
+    func testTheMembershipPickerIsOfferedForALassoFloatAndNotForAWholeCelOne() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        XCTAssertFalse(manager.lassoMembershipPickerIsOffered, "nothing floating, no bar, no picker")
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        XCTAssertFalse(manager.lassoMembershipPickerIsOffered,
+                       "a whole-cel move has no loop to be a member of")
+        manager.commitVectorFloatIfNeeded()
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertTrue(manager.lassoMembershipPickerIsOffered)
+        XCTAssertNil(manager.lassoMembershipUnavailableReason, "and it is live before the first nudge")
+    }
+
+    /// **After the first nudge the picker is disabled with a reason, and the model refuses too.**
+    ///
+    /// Two guards for one rule, in `vectorFloatIsFreeform`'s shape: a guard that lives only in the
+    /// view is one a new call site removes. Re-lifting after a nudge would have to rewrite undo steps
+    /// already on the stack against a display list that no longer matches them — deferred work, and
+    /// written down rather than discovered.
+    func testAfterTheFirstNudgeTheRuleIsFixedAndTheBarSaysWhy() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 6, dy: 0))
+
+        XCTAssertEqual(manager.lassoMembershipUnavailableReason, "Undo your moves to change what travels.")
+
+        let elementsAfterNudge = vector.elements.map(\.id)
+        let steps = manager.history.undoStack.count
+        manager.setLassoMoveMembership(.touching)
+
+        XCTAssertEqual(manager.lassoMoveMembership, .cutting, "the model refuses as well as the bar")
+        XCTAssertEqual(vector.elements.map(\.id), elementsAfterNudge, "and nothing was re-lifted")
+        XCTAssertEqual(manager.history.undoStack.count, steps)
+        XCTAssertEqual(manager.vectorFloat?.nudges, 1)
+    }
+
+    /// **A raster float shows the picker fixed on Cut and says why** — and the reason is a real limit
+    /// rather than a policy: `PixelOps.maskedPiece` *is* the cut, and a pixel layer has no elements
+    /// for "whole or partial" to be about.
+    ///
+    /// It needs its own property rather than a fourth arm on `mirrorUnavailableReason`, which returns
+    /// **nil** for a raster piece: the two questions have opposite answers on that kind.
+    func testARasterFloatShowsCutFixedAndSaysWhy() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: CGRect(x: 10, y: 10, width: 20, height: 20)))
+        manager.lassoMoveMembership = .touching
+        manager.selection = Selection(path: CGPath(rect: CGRect(x: 8, y: 8, width: 24, height: 24), transform: nil),
+                                      bounds: CGRect(x: 8, y: 8, width: 24, height: 24),
+                                      layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
+        manager.beginMove()
+        XCTAssertNotNil(manager.floatingPiece, "fixture precondition: something lifted")
+
+        XCTAssertTrue(manager.lassoMembershipPickerIsOffered, "shown, not dropped")
+        XCTAssertEqual(manager.displayedLassoMembership, .cutting,
+                       "and never shown holding a setting the piece does not obey")
+        XCTAssertEqual(manager.lassoMembershipUnavailableReason,
+                       "A pixel layer can only cut at the selection.")
+        XCTAssertNil(manager.mirrorUnavailableReason,
+                     "Mirror answers nil for the same piece — one property could not have said both")
+
+        manager.setLassoMoveMembership(.enclosed)
+        XCTAssertEqual(manager.lassoMoveMembership, .touching, "and nothing writes through it")
+    }
+
     // MARK: - Helpers
 
     /// The float's ink **as it currently sits in the document**, expressed in the drawn box's own

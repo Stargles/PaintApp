@@ -349,6 +349,19 @@ final class CanvasManager: ObservableObject {
     /// Not persisted across launches, unlike `pencilOnlyDrawing`: that one is about the artist's
     /// hardware and this one is about the drawing in front of them.
     @Published var preserveMovePrecision: Bool = false
+    /// **TODO item (20) — "What travels" on the Move bar.** Which of the three membership rules a
+    /// lasso move follows: `Enclosed`, `Cut` (the default and the shipped behaviour), `Touching`.
+    ///
+    /// **Not persisted, and that is the ruling rather than an omission** — it draws exactly the line
+    /// `preserveMovePrecision` above draws, one line up. This is per-drawing intent; storing it would
+    /// make *last used* the default, which is not what the owner asked for. There is no `@AppStorage`
+    /// anywhere in this project and this does not introduce one.
+    ///
+    /// Written through `setLassoMoveMembership(_:)` while a piece is floating, never assigned
+    /// directly from the view: changing the rule at that moment has to re-lift the float so the
+    /// artist sees the difference, and the order that re-lift happens in is load-bearing (see
+    /// `CanvasManager+LassoMove.swift`).
+    @Published var lassoMoveMembership: LassoMembership = .cutting
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection?
     @Published var floatingPiece: FloatingPiece? {

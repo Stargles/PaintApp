@@ -100,6 +100,36 @@ i.e. the toggle's other half.
   `ObjectTransformDrag(freeform:)` — are the unstretched, uniform ones for that reason, and
   `testTheWholeLayerBoxIsUnstretchedAndItsDragIsUniform` is what keeps them there.
 
+### Three membership rules — shipped 2026-08-28 (TODO item (20))
+
+`Enclosed · Cut · Touching`, on the Move bar, ordered by how much travels with the shipped rule in
+the middle and selected until the artist touches the picker. §5.23 and §5.24 are the rulings.
+
+| what | where |
+|---|---|
+| the three rules, and the ordering | `LassoMembership` |
+| which rule a lift follows | a **parameter** on `VectorCanvas.splitForLassoMove(insideLocalPath:membership:)`, defaulted to `.cutting`. A sibling would have duplicated the broad phase, `lassoFillRule`, the linear scan for the three kinds the stroke index does not hold, the empty-set contract and the `mayDiverge` call |
+| the one place a per-kind rule is decided | `VectorCanvas.caught(_:by:bounds:using:membership:)`, shared with `elementIDs(insideLocalPath:membership:)` — item (19)'s predicate, reused rather than re-derived. **Touching for a stroke or a fill is that predicate exactly** |
+| text and a placed image under the two new rules | their own quad — `VectorCanvas.quad(of:)`, two overloads — through the same two `CGPath` booleans the fill arm uses. A corners-only test would be wrong: four corners inside a crescent does not mean the rectangle is |
+| the picker | `MoveTransformBottomBar.membershipPicker`. Live while `nudges == 0`; **disabled with a reason** after (`CanvasManager.lassoMembershipUnavailableReason`); **dropped** for the whole-cel float, which has no loop (`lassoMembershipPickerIsOffered`); fixed on Cut for a raster piece, where `PixelOps.maskedPiece` *is* the cut |
+| changing the rule mid-float | `CanvasManager.setLassoMoveMembership(_:)` — `cancelVectorFloat()` **then** `beginVectorLassoMove()`, in that order, because the latter's first statement bakes the float. A rule that catches nothing restores the previous one rather than leaving the artist with no float |
+| Enclosed catching nothing | `CanvasNotice.Kind.nothingWhollyInside`, raised only when a laxer rule *would* have caught something — §5.24, and the one deliberate exception to §5.9 |
+| the setting | `CanvasManager.lassoMoveMembership`, **not persisted** — per-drawing intent, the line `preserveMovePrecision` already draws |
+
+**The two new rules are cheaper and safer than the one that ships**, which inverts the usual
+expectation: neither cuts, so there is no bisection, no boundary dab, no fresh ids, no lattice
+re-keying and — the one that matters — no interpolation-tier demotion, since the stroke count is
+unchanged. `liftWholeCel` is the working proof that a float which splits nothing shares every nudge,
+bake and teardown path with one that does.
+
+**Two consequences to expect rather than fix.** In Touching the **marching ants stop bounding the
+moving ink**: the ants are the loop (§5.11) and a stroke hanging outside it now travels whole, so
+`MoveBoxInk` measures a box larger than the loop. Both are correct. And `mayDiverge` fires **least**
+often under Enclosed and most under Touching — the scoping pass predicted the opposite, and the
+arithmetic settles it: an element wholly inside the loop moves under Cut as well as under Enclosed,
+so Enclosed's moved set is a subset of Cut's and its lowest moved index is at least as high. The
+latch stays in every mode regardless.
+
 ### The Move menu — shipped 2026-08-22 (stage 2)
 
 Until this the bar was raised on `floatingPiece != nil`, the *raster* piece, so a lassoed vector
@@ -1313,6 +1343,43 @@ ink, and the first is the one the other two are consequences of.
 
     **§5.19 is untouched.** A *fresh lift* of already-tilted ink still measures a loose, axis-aligned
     box, and the box still never tilts by itself. What changed is that hand-fitting it now works.
+
+---
+
+Two more came with TODO item (20), **2026-08-28**. Both are about *what the loop catches* rather than
+about the box, and the first is the one that makes the three rules say one sentence each.
+
+23. **Text and placed images follow the mode in Touching and Enclosed, and keep the centre rule in
+    Cut.** The owner's ask: *"There should be an option of three where instead of cutting the lines
+    outside the selection, it moves all the lines including the ones partially inside the selection,
+    or only the ones fully inside. The third option is the current behaviour."*
+
+    **The finding that reframes it: Cut was already a mixture.** §1's text rule — *"a text element
+    moves whole iff its frame's bounding-box centre is inside the loop"* — is neither of the two new
+    rules, so the mode called "cut" has always used a third rule for the two kinds that cannot be cut.
+    The picker therefore makes an existing inconsistency *visible* and gives it vocabulary rather than
+    introducing one. In Cut the centre stays, because it is exactly what it has always been: the cut
+    rule rounded to the nearest whole object (§1's own words). In the two new modes both kinds are
+    asked by their **own quad** — `text.frame.corners`, and a placed image's four corners under its
+    `LayerTransform` — through the same two `CGPath` booleans the fill arm uses, so each new mode has
+    one sentence true of every kind.
+
+    **Strokes are selected by the centre line in all three modes** (§5.4, unchanged). Under Enclosed
+    that means a thick stroke whose spine is enclosed travels whole even where its ink pokes out —
+    visible, benign, and the *right* failure direction: an outline-based Enclosed would instead leave
+    such a stroke behind silently. Ink membership still has no primitive here (§1), and §3 stage 4
+    still keeps it on the board.
+
+24. **Enclosed catching nothing says so.** A deliberate exception to §5.9's silent empty lasso, and
+    not a reversal of it: there the paper inside the loop was blank and the artist can see the reason,
+    where here the loop is full of ink and the **rule they just picked** is what excluded it. A Move
+    that does nothing and says nothing then reads as a broken button — which is §5.12's own argument,
+    one tool over.
+
+    The two cases are told apart rather than answered the same way, by asking whether a laxer rule
+    *would* have caught anything: one extra pass over the display list, on the failure path only. The
+    vehicle is a `CanvasNotice` and not the Move bar's caption slot, because the bar is raised on
+    `isAnyPieceFloating` and this is precisely the path where nothing floats.
 
 
 ## 6. Open risks

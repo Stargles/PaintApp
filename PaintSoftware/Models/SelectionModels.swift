@@ -488,6 +488,51 @@ extension CanvasManager {
         return nil
     }
 
+    /// Whether the Move bar offers the **membership picker** — "what travels" — at all.
+    ///
+    /// **False for the whole-cel float, and that is the one place it is dropped rather than
+    /// disabled.** `beginVectorWholeCelMove` sets `selectionBeforeLift: nil`: there is no loop, so
+    /// there is no membership question, and a greyed three-way picker would invite the artist to
+    /// wonder what it would have done. Nothing else in the bar distinguishes the two floats, which is
+    /// why this reads the float's own loop rather than the tool state.
+    ///
+    /// Dropping it cannot reflow the row under a finger, which is `iconButton`'s rule: the answer is
+    /// fixed at the lift and does not move for the float's life. The picker is *disabled* — not
+    /// dropped — for the two reasons that can change while a float is up.
+    var lassoMembershipPickerIsOffered: Bool {
+        if floatingPiece != nil { return true }
+        guard let float = vectorFloat else { return false }
+        return float.selectionBeforeLift != nil
+    }
+
+    /// Why the membership picker cannot be *changed* on whatever is floating, or nil when it can.
+    /// Shown under the picker, in the artist's terms — the shape `mirrorUnavailableReason` and
+    /// `recolorUnavailableReason` already use, and for their reason: a control that is off says why.
+    ///
+    /// **A raster piece is fixed on Cut, and it is a real limit rather than a policy.**
+    /// `PixelOps.maskedPiece` *is* the cut: a pixel layer has no elements to be whole or partial, so
+    /// "move the strokes the loop touches" has nothing to name. This is a separate property from
+    /// `mirrorUnavailableReason`, which returns **nil** for a raster piece — the two questions have
+    /// opposite answers on that kind, so folding them together would have made one of them wrong.
+    ///
+    /// **After the first nudge it says so rather than going quietly grey.** Changing the rule re-lifts
+    /// the float (`setLassoMoveMembership`), and a re-lift after the artist has moved something would
+    /// have to rewrite undo steps already on the stack against a display list that no longer matches
+    /// them. Undo is the way back to a rule they can still change, and the caption says that in those
+    /// words.
+    var lassoMembershipUnavailableReason: String? {
+        if floatingPiece != nil { return "A pixel layer can only cut at the selection." }
+        guard let float = vectorFloat else { return nil }
+        if float.nudges > 0 { return "Undo your moves to change what travels." }
+        return nil
+    }
+
+    /// The rule the picker should *show*. The artist's own choice, except on a raster piece, which is
+    /// fixed on Cut for the reason above and must not be shown holding a setting it does not obey.
+    var displayedLassoMembership: LassoMembership {
+        floatingPiece != nil ? .cutting : lassoMoveMembership
+    }
+
     /// Whether a corner drag on the **lassoed vector piece** stretches the two axes independently.
     ///
     /// **The one place the answer is decided**, and it is deliberately not just `transformMode ==
