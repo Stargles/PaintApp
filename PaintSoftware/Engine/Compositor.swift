@@ -1012,8 +1012,12 @@ enum CoreGraphicsCompositor {
     /// defect.** The ink was drawn a second time, so a 60%-alpha black square over white paper read
     /// 102 beside an Outline layer and 41 under one — the coverage going 0.6 → 1−0.4² = 0.84. Bloom
     /// defaults to `.ink`, so that darkening was shipped behaviour for every bloom document, and it
-    /// was not confined to non-opaque ink: under source-over a Sobel set to `.ink` could not replace
-    /// anything either, and the artwork stayed visible beneath its own edge map.
+    /// was not confined to non-opaque ink: an `.ink` effect that *replaces* its input rather than
+    /// adding to it could not replace anything either, and the artwork stayed visible beneath the
+    /// result. The case that showed it was a Sobel set to `.ink` — **a setting that existed for a few
+    /// hours on 2026-08-27 and that the owner then deleted** (EFFECT_BACKDROP.md §5.2), so Sobel is
+    /// fixed `.backdrop` now and never reaches this path at all. Outline is the `.ink` effect that
+    /// still does, and `testAFadedPassThroughFolderDoesNotFadeTwiceUnderAnInkEffect` names it.
     ///
     /// One consequence is inherent to §3's option A rather than to this correction, and is pinned by
     /// `testABlendModeBelowAnInkEffectIsReplacedNotPreserved`: a non-normal blend mode below an ink

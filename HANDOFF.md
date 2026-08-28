@@ -23,8 +23,10 @@ inline. `main` is at 1773 fast-tier tests (1769 passed, 3 skipped). There is ONE
    The third is a parity break on fractional canvas padding that neither parity test covers, because
    both use integer padding. **The fourth is a question for the owner, not a fix** — see §2.1, where
    this document's own ruling turned out to be analysed for the mid-stroke case and false at rest.
-   **Then stages 5 and 6**: Bloom's and Sobel's controls with their persisted fields and decode
-   defaults, and the thumbnail flag. And confirm §4's table — it names twelve of thirteen effects,
+   **Then stages 5 and 6**: Bloom's control with its persisted field and decode default, and the
+   thumbnail flag. **Sobel's control is not part of stage 5** — it was built on 2026-08-27 and the
+   owner deleted it the same day (*"drop it"*); EFFECT_BACKDROP.md §5.2 keeps both rulings and says
+   explicitly not to re-propose it. And confirm §4's table — it names twelve of thirteen effects,
    **Sharpen is missing**, and the build agent answered it `.backdrop` by reasoning rather than ruling.
 
 **2. Get it on the iPad.** Two things shipped this pass that a person has to look at:
@@ -32,7 +34,8 @@ inline. `main` is at 1773 fast-tier tests (1769 passed, 3 skipped). There is ONE
      is the data loss you reported, and it is fixed — this is the confirmation.
    - **Move with no lasso now shows the Move bar**, where there was never one. Freeform and Mirror are
      live on text now; they still grey out on a placed image, which is deliberate.
-   - Sobel's changed default is **not** on the iPad either — it is stage 5, unbuilt.
+   - Sobel's changed look is **not** on the iPad either — it is unmerged. It is fixed `.backdrop`
+     with no control: bright edges on opaque black, and no setting that gets the old look back.
    - The onion-skin change is **not** on the iPad — it is on the unmerged branch, and §2.1 needs an
      answer first.
 
