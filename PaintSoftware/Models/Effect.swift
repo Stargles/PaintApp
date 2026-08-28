@@ -117,8 +117,11 @@ enum Effect: Equatable {
     /// Whether this effect may change alpha. **False for every grade, true for blur, bloom, Sobel,
     /// sharpen and outline** — the file header's argument for blur and bloom (a blur that left the
     /// silhouette sharp is not a blur) applies to all three of the newer effects for their own reasons:
-    /// Sobel's output *is* a magnitude, sharpen's combine operates on the full premultiplied vector
-    /// exactly as bloom's does, and an outline by definition paints coverage where the shape had none.
+    /// Sobel's `.ink` output *is* a magnitude, sharpen's combine operates on the full premultiplied
+    /// vector exactly as bloom's does, and an outline by definition paints coverage where the shape had
+    /// none. **Sobel is true for one of its two modes**, and stays true rather than becoming conditional:
+    /// this answer gates a byte-exact alpha sweep, so the conservative direction is the safe one and an
+    /// effect that reshapes coverage under *any* setting has to say true here.
     ///
     /// Stated as a property rather than a comment because it is the precondition of a test: everything
     /// answering false is swept for byte-exact alpha, and a grade that quietly started reshaping
@@ -171,10 +174,18 @@ enum Effect: Equatable {
     /// - **Bloom** thresholds luminance, and white paper is Lum 1.0, so paper-inclusive bloom makes
     ///   the whole canvas a source. Ruled the artist's choice, **defaulting to `.ink`** — which is
     ///   the shipped look, so nothing visibly changes.
-    /// - **Sobel** emits `(0,0,0,0)` in flat regions, which is why the paper shows through it today.
-    ///   Ruled the artist's choice, **defaulting to `.backdrop`**: bright edges on black, which is
-    ///   what an edge detector conventionally is. That is a change to what ships and an artist with a
-    ///   Sobel layer in an open document will see it.
+    /// - **Sobel** convolves, and what it does with alpha is `EffectParams.preserveAlpha`'s question
+    ///   rather than a fixed answer. Ruled the artist's choice, **defaulting to `.backdrop`**: bright
+    ///   edges on black, which is what an edge detector conventionally is. That is a change to what
+    ///   ships and an artist with a Sobel layer in an open document will see it.
+    ///
+    ///   **EFFECT_BACKDROP.md §2.2 said that default came for free and it did not.** It claimed an
+    ///   opaque backdrop would make the flat regions opaque black on its own; the kernel emitted
+    ///   `(m, m, m, m)`, so they came out fully transparent no matter what it was handed, and the
+    ///   composite became a hole with `paperView` already stood down behind it. Fixed 2026-08-27 off
+    ///   the owner's report — *"sobel should be black mostly but right now its grey"* — by having
+    ///   `.backdrop` keep the coverage it was handed. `.ink` still emits the magnitude as coverage,
+    ///   byte for byte as it shipped.
     ///
     /// Bloom's and Sobel's is the artist's stored choice, not a fixed answer (EFFECT_BACKDROP.md §6
     /// step 5) — each reads its own `Bloom.input`/`Sobel.input` field, seeded with the ruled default
@@ -389,7 +400,13 @@ extension Effect {
     /// The divisor that keeps the magnitude from clipping is a resolved constant (`Effect.params`),
     /// not an artist-facing number — `input` is Sobel's only knob today.
     struct Sobel: Equatable {
-        /// EFFECT_BACKDROP.md §4/§6 step 5 — the artist's choice. Defaults to `.backdrop`, the
+        /// EFFECT_BACKDROP.md §4/§6 step 5 — the artist's choice. **It selects an alpha rule as well as
+        /// an input image**, which is more than the field's name suggests and is why it is written down
+        /// here: `.backdrop` keeps the coverage the kernel was handed (`EffectParams.preserveAlpha`),
+        /// `.ink` makes the gradient magnitude the coverage. No single expression is both, and "bright
+        /// edges on black" is unreachable without the first — see `sobel` in either backend.
+        ///
+        /// Defaults to `.backdrop`, the
         /// owner's ruled default: bright edges on black, what an edge detector conventionally is —
         /// matching the fixed answer `Effect.input` already gave for Sobel before this field existed,
         /// so this decode default is not itself a new change. The change already shipped one stage
@@ -523,6 +540,17 @@ struct EffectParams: Equatable {
     var colorR: Float = 0
     var colorG: Float = 0
     var colorB: Float = 0
+    /// **Sobel's alpha rule, and the only field here that changes what a kernel *means* rather than
+    /// how far it reaches.** 1 makes the kernel write back the coverage it was handed; 0 makes the
+    /// gradient magnitude the coverage.
+    ///
+    /// It exists because those two are both right, for different inputs, and no single expression is
+    /// both — see `Effect.Sobel.input` and `sobel` in either backend. Appended at the end for the
+    /// reason the three colour fields above were: the all-scalar layout rule makes the end of the
+    /// block the one position where a new field cannot shift an existing one.
+    ///
+    /// Default 0, so every effect that does not set it keeps the behaviour it shipped with.
+    var preserveAlpha: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -623,7 +651,19 @@ extension Effect {
             p.threshold = Float(min(max(bloom.threshold, 0), 1))
             p.intensity = Float(max(bloom.intensity, 0))
             p.taps = UInt32(Self.tapCount(forRadius: bloom.radius))
-        case .sobel:
+        case .sobel(let sobel):
+            // **The alpha rule, which is the half of Sobel that is not the stencil.** `.backdrop` is an
+            // edge detector over an opaque image and its output is an opaque image — bright edges on
+            // black — so it keeps the coverage it was handed. `.ink` is the artist's opt-out, edges
+            // floating over the paper, and there the magnitude *is* the coverage. EFFECT_BACKDROP.md
+            // §2.2 assumed the first fell out of the second and it does not; the owner reported the
+            // difference as "sobel should be black mostly but right now its grey".
+            //
+            // `src.a` rather than a literal 1: the padding margin is not paper
+            // (`testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper`), so the accumulator is
+            // transparent out there even under `.backdrop`, and an opaque literal would paint canvas
+            // colour across a margin that has already been ruled not to be canvas.
+            p.preserveAlpha = sobel.input == .backdrop ? 1 : 0
             // The divisor that peak-normalizes the magnitude without ever clipping it. Max |Gx| = 4
             // for input in [0, 1], but the true maximum of sqrt(Gx² + Gy²) over all binary 3×3
             // patterns is sqrt(20) ≈ 4.4721 (attained at Gx = 2, Gy = 4, a diagonal step — enumerated

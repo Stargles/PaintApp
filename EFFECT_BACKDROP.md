@@ -138,8 +138,48 @@ Outline, Sobel and Bloom do not read colour, they read **shape**:
 
 - **Outline** keys on `src.a > threshold` (`Composite.metal:696-698`, default 0.5 at `Effect.swift:364`).
   With an opaque backdrop that is true for every pixel and Outline is a **complete no-op**.
-- **Sobel** convolves and emits `(0,0,0,0)` in flat regions (`Composite.metal:655-670`), which is why the
-  paper currently shows through white. With an opaque backdrop flat regions become opaque black.
+- **Sobel** convolves and emitted `(0,0,0,0)` in flat regions (`Composite.metal:655-670`), which is why
+  the paper showed through it. **THE SENTENCE THAT USED TO FINISH THIS BULLET WAS FALSE AND IT SHIPPED.**
+  It read *"With an opaque backdrop flat regions become opaque black"*, and that claim is the entire
+  justification for §4's ruling that Sobel default to `.backdrop`. The kernel emitted `(m, m, m, m)` —
+  **alpha *was* the magnitude** — so a flat region came out fully transparent no matter what image it was
+  handed. No backdrop, opaque or otherwise, could have made it black.
+
+  What the ruled default actually produced was a **hole**: `mixBack` is a crossfade, so at opacity 1 the
+  graded image replaces the accumulator, paper included; `CanvasView.updateSandwich` had already called
+  `paperIsNowPaintedBy(true)` and hidden `paperView`; and what was left behind a transparent composite is
+  `paddingBackdrop` — `UIColor(white: 0.85)`, `CanvasView.swift:34`, byte **217**. The owner reported it
+  within the hour, from their iPad: *"weird, sobel should be black mostly but right now its grey."*
+
+  **What is true, as of 2026-08-27**: the alpha rule is now the mode's, not a constant.
+  `EffectParams.preserveAlpha` makes `.backdrop` keep the coverage it was handed — so over the paper the
+  flat regions really are opaque black and the edges are bright, which is the look §4 ruled — while
+  `.ink` still emits `(m, m, m, m)` byte for byte, because there the magnitude genuinely is the coverage.
+  `src.a` rather than a literal 1, so the padding margin (§6 step 3's artwork rect) stays transparent.
+
+  **Why three reviewers and a full suite missed it, which is the part worth keeping.** Every Sobel
+  fixture in the suite was either a flat field or an impulse on transparency, and on both of those
+  `(m, m, m, m)` and a correct opaque edge map are *the same bytes*. Nothing anywhere asserted what Sobel
+  looked like over paper. `testSobelOverPaperIsAnOpaqueEdgeMapRatherThanAHoleInTheCanvas`,
+  `testSobelsTwoAlphaRulesOverAnOpaqueStepEdge` and `testNoEffectLayerCanPunchAHoleInThePaper` are the
+  three that now do — the last of them generally, for every effect and every input, since the symptom
+  was never a wrong colour, it was a hole.
+
+  **The rule that needs no flag was measured and rejected**, so it does not get proposed again.
+  `alpha = src.a` unconditionally fixes `.backdrop` on its own and adds no field to either backend — but
+  it changes `.ink`, and not slightly. MEASURED 2026-08-27 over 64×64 line art (2–3px strokes plus one
+  9px bar, 944 inked pixels): with **black** ink today's `.ink` Sobel lights **0** pixels — the kernel
+  reads *premultiplied* rgb, and black ink is `(0,0,0)` inside the stroke and `(0,0,0)` outside it, so
+  the luminance field is flat and the gradient is identically zero — and `alpha = src.a` would light all
+  944, worst channel delta 255. With red or grey ink 1137 pixels are lit and **1404** would change:
+  more pixels change than the magnitude ever reaches, because the ink's coverage and the magnitude are
+  different *fields*, not the same field differing over a thick stroke's interior. The two rules are not
+  close, so both are needed and the flag is what carries the difference.
+
+  **That measurement leaves an open question for the owner, filed rather than answered**: `.ink` Sobel
+  finds no edges at all in black line art, which is most line art. It is not this fix's business — `.ink`
+  ships exactly as it always has — but it means the artist's opt-out is a blank canvas for the commonest
+  artwork, and making the kernel read coverage as well as colour would be a second, separate ruling.
 - **Bloom** thresholds luminance (default 0.75, `Effect.swift:314`) and white paper is Lum 1.0
   (`Composite.metal:626-637`), so the entire canvas becomes a bright source.
 
@@ -180,11 +220,13 @@ the owner 2026-08-27:
 | **Sharpen** | `.backdrop` | fixed — **this table named twelve of thirteen and left it out**, and the build answered it by reasoning about the formula. Confirmed against the kernel instead: `sharpenCombine` (`Composite.metal:684-693`, CPU twin `EffectKernels.swift:455-471`) works on the full premultiplied vector, has no unpremultiply step and **no `alpha > 0` short-circuit**, and clamps `rgb <= a` at the end. Over flat paper `blur == base` exactly, so the difference term is exactly zero and the effect is the identity. At an ink/paper edge it sharpens the real ink-against-paper contrast, where before it sharpened ink against implicit transparent black — a visible improvement, and the only thing an artist sees change |
 | Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
 | **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
-| **Sobel** | `.backdrop` **by default** | **artist's choice.** *"Same with sobel, defaulting this time to taking in the canvas color."* So Sobel's shipped look changes: bright edges on black, which is what an edge detector conventionally is, with today's edges-over-paper available as the other setting |
+| **Sobel** | `.backdrop` **by default** | **artist's choice.** *"Same with sobel, defaulting this time to taking in the canvas color."* So Sobel's shipped look changes: bright edges on black, which is what an edge detector conventionally is, with today's edges-over-paper available as the other setting. **The input is not the whole of what this control selects** — see §2.2: bright-edges-on-black also needs the alpha rule (`EffectParams.preserveAlpha`), which the input decides, and §2.2's original claim that it came for free was false and shipped as a transparent canvas |
 
 **Sobel's default is a deliberate change to what ships**, not a preservation of it — the owner chose the
 conventional edge-detector look over the current one. Say so in the commit message and in the release
-note; an artist with a Sobel layer in an open document will see it change.
+note; an artist with a Sobel layer in an open document will see it change. **It changed twice**: once
+when the paper entered the composite, and again on 2026-08-27 when §2.2's false claim was corrected and
+`.backdrop` started producing the black the ruling had asked for.
 
 The property must be an **exhaustive switch over the effect case with no `default:`**, for the reason
 CLAUDE.md records three times over in `CanvasManager`'s history: a hand-maintained list of exceptions

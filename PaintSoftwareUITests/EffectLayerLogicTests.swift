@@ -1856,6 +1856,187 @@ final class EffectLayerLogicTests: XCTestCase {
                        "…so the empty canvas is still graded, and the re-walk did not quietly take it back")
     }
 
+    // MARK: - Sobel over the paper (the owner's report, 2026-08-27)
+
+    /// **"weird, sobel should be black mostly but right now its grey."** The owner, on their iPad, an
+    /// hour after EFFECT_BACKDROP.md §6 step 3 put the paper into the composite.
+    ///
+    /// **EFFECT_BACKDROP.md §2.2 said this case was already right, and the claim was false.** It read
+    /// *"With an opaque backdrop flat regions become opaque black"*, and that sentence is the entire
+    /// justification for the owner's ruling that Sobel default to `.backdrop`. But `sobel` emits
+    /// `(m, m, m, m)` — its own doc comment says so — so **alpha *is* the magnitude**, and a flat
+    /// region is `m = 0`: RGBA (0,0,0,0), fully transparent, for a reason that never once consulted
+    /// the backdrop. No opaque input can make that pixel opaque.
+    ///
+    /// **Why transparent reads as grey rather than as paper**, which is the half that turns a wrong
+    /// alpha into the reported symptom. `mixBack` is a crossfade, not a source-over, so at opacity 1
+    /// the graded image *replaces* the accumulator — the paper it was computed from included. By then
+    /// `CanvasView.updateSandwich` has called `paperIsNowPaintedBy(true)` and `updatePaper` has hidden
+    /// `paperView`, because the composite was supposed to be carrying the paper. What is left behind a
+    /// fully transparent composite is `paddingBackdrop` — `UIColor(white: 0.85)`, `CanvasView.swift:34`,
+    /// byte 217. **Grey.**
+    ///
+    /// **Three reviewers and a full suite missed it because nothing ever looked at what Sobel
+    /// renders.** `testEveryEffectDeclaresWhichImageItIsHanded` pins the declaration;
+    /// `EffectMultiPassLogicTests` pins the stencil against first principles — on a *transparent*
+    /// impulse fixture, which is precisely the one image where `(m,m,m,m)` and a correct opaque edge
+    /// map are the same bytes.
+    func testSobelOverPaperIsAnOpaqueEdgeMapRatherThanAHoleInTheCanvas() {
+        XCTAssertEqual(Effect.sobel(Effect.Sobel()).input, .backdrop,
+                       "Premise: the ruled default grades the paper, which is what makes the flat "
+                       + "region under test the artist's whole canvas rather than a corner of it")
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.black, rect: Self.inkRect))
+        manager.addValueLayer(effect: .sobel(Effect.Sobel()))
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+
+        XCTAssertEqual(pixel(image, 56, 56), [0, 0, 0, 255],
+                       "Flat paper, well away from any edge: opaque black, which is what an edge "
+                       + "detector's ground is. It rendered RGBA (0,0,0,0) — a hole in the canvas with "
+                       + "`paperView` already stood down, so what the artist saw was `paddingBackdrop`'s "
+                       + "grey 217. Got RGBA \(pixel(image, 56, 56))")
+        XCTAssertEqual(pixel(image, 32, 32), [0, 0, 0, 255],
+                       "…and the flat interior of the ink is the same black for the same reason: there "
+                       + "is no gradient in there either. Got RGBA \(pixel(image, 32, 32))")
+
+        // The edge, from the published stencils rather than from either kernel: white paper is Lum 1
+        // and premultiplied black ink is Lum 0, so the vertical step at x = 16 gives Gx = -4 and
+        // Gy = 0, and `Effect.params`' divisor sqrt(20) turns |Gx| = 4 into 0.894427 → byte 228.
+        let edge = pixel(image, 15, 32)
+        XCTAssertEqual(edge[3], 255, "The edge is opaque too — it is on the same paper. Got RGBA \(edge)")
+        XCTAssertLessThanOrEqual(abs(edge[0] - 228), 1,
+                                 "…and bright: 4 / sqrt(20) = 0.894427, byte 228. Got RGBA \(edge)")
+    }
+
+    /// **The preservation, pinned rather than promised.** `.ink` is the setting an artist picks to get
+    /// the pre-backdrop look back — bright edges with the paper showing through everywhere else — and
+    /// the fix above must leave it exactly as it shipped.
+    ///
+    /// **This is the assertion that rules out the rule that needs no flag.** `alpha = src.a` fixes
+    /// `.backdrop` on its own and adds no state to either backend, which makes it the tempting answer;
+    /// under `.ink` the source alpha is the *ink's* coverage, so the flat interior of every stroke
+    /// stops letting the paper through and turns opaque black. That is the byte this test names.
+    ///
+    /// **Grey paper rather than white, and that is forced rather than chosen.** `(m,m,m,m)` over white
+    /// composites to `m·255 + 255(1−m) = 255` for *every* m, so on the default paper an `.ink` Sobel is
+    /// arithmetically invisible and a white fixture could not see the difference between the two rules
+    /// — nor could an artist. A 128 paper is the smallest fixture in which `.ink` renders anything.
+    func testSobelSetToInkStillLetsThePaperThroughItsFlatRegions() {
+        let inkSobel = Effect.sobel(Effect.Sobel(input: .ink))
+        XCTAssertEqual(inkSobel.input, .ink, "Premise: this is the artist's opt-out, not the default")
+
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.canvasBackgroundColor = .init(white: 128.0 / 255)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: Self.inkRect))
+        manager.addValueLayer(effect: inkSobel)
+
+        guard let image = liveCanvas(manager) else { return XCTFail("Fixture must composite") }
+
+        XCTAssertEqual(pixel(image, 56, 56), opaqueGrey(128),
+                       "Outside the ink the magnitude is zero and the pixel is transparent, so the "
+                       + "paper is what shows — unchanged. Got RGBA \(pixel(image, 56, 56))")
+        XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(128),
+                       "**The flat interior of the stroke, which is the whole point of this test.** "
+                       + "Zero gradient, transparent, paper through it. `alpha = src.a` would make this "
+                       + "opaque black and take the artist's opt-out away with it. Got RGBA "
+                       + "\(pixel(image, 32, 32))")
+
+        // Premultiplied red is Lum 0.3 and the ink walk's transparent surround is Lum 0, so the step
+        // at x = 16 gives Gx = 1.2, m = 1.2 / sqrt(20) = 0.268328 → byte 68, composited over the 128
+        // paper as 68 + 128 × (255 − 68) / 255 = 161.9.
+        let edge = pixel(image, 15, 32)
+        XCTAssertLessThanOrEqual(abs(edge[0] - 162), 2,
+                                 "…and the edge is still brighter than the paper it sits on: an m of "
+                                 + "68 over 128. Got RGBA \(edge)")
+    }
+
+    /// **The general invariant the Sobel defect broke, swept over every effect and every input it can
+    /// take.** An adjustment layer grades the paper, the paper is opaque, so the picture it produces is
+    /// opaque — §2.1's first consequence, which this file already states as prose and nothing asserted.
+    ///
+    /// This is the gate that would have caught the report without anyone thinking about Sobel: the
+    /// symptom was not a wrong colour, it was a **hole**, and a hole is visible in the alpha channel of
+    /// any effect over any fixture. It is cheap because it needs no expected picture — only that
+    /// nothing an effect layer does may take the canvas's opacity away from it.
+    ///
+    /// Both of Bloom's and Sobel's inputs are swept, not just their defaults, because the artist can
+    /// pick either and the ink path lays the paper back down for a different reason than the backdrop
+    /// path never lifting it: `gradedInkOverPaper` builds paper-then-graded-ink, so the two routes reach
+    /// opacity by different code and both have to be walked.
+    func testNoEffectLayerCanPunchAHoleInThePaper() {
+        var cases: [(String, Effect)] = [
+            ("Levels", .levels(Effect.Levels(inputBlack: 0.2, inputWhite: 0.9))),
+            ("Curves", .curves(Effect.Curves())),
+            ("Brightness / Contrast", Self.brighten),
+            ("HSV Shift", .hsvShift(Effect.HSVShift(hueDegrees: 30))),
+            ("Gradient Map", .gradientMap(Effect.GradientMap(mix: 1))),
+            ("Posterize", .posterize(Effect.Posterize(levels: 4))),
+            ("Noise", .noise(Effect.Noise(amount: 0.3))),
+            ("Chromatic Aberration", .chromaticAberration(Effect.ChromaticAberration(offsetX: 3))),
+            ("Gaussian Blur", .blur(Effect.Blur(radius: 3))),
+            ("Sharpen", .sharpen(Effect.Sharpen(radius: 2, amount: 1))),
+            ("Outline", Self.outline),
+        ]
+        for input in [Effect.Input.ink, .backdrop] {
+            cases.append(("Bloom [\(input)]", .bloom(Effect.Bloom(input: input))))
+            cases.append(("Sobel [\(input)]", .sobel(Effect.Sobel(input: input))))
+        }
+
+        for (name, effect) in cases {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(.black, rect: Self.inkRect))
+            manager.addValueLayer(effect: effect)
+            guard let image = liveCanvas(manager), let bytes = CanvasFixture.rgbaBytes(image) else {
+                XCTFail("\(name): fixture must composite"); continue
+            }
+            let transparent = stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] != 255 }
+            XCTAssertTrue(transparent.isEmpty,
+                          "\(name) left \(transparent.count) of \(bytes.count / 4) canvas pixels less "
+                          + "than opaque. The paper underneath is opaque everywhere and no grade may "
+                          + "take that away — Sobel did, and the artist saw the view behind the "
+                          + "composite instead of their canvas")
+        }
+    }
+
+    /// **Backend parity for both of Sobel's inputs, over the paper.** `EffectMultiPassLogicTests` gates
+    /// the kernel byte-for-byte on a bare buffer; this is the same claim through the wrapper, where the
+    /// two inputs take genuinely different routes — the backdrop path grades the accumulator in place
+    /// and the ink path re-walks the tree onto transparency and lays the result back over the paper.
+    /// A `preserveAlpha` transcribed into one backend and not the other shows up here as a solid canvas
+    /// against a transparent one, which is the largest delta this file can produce.
+    func testTheBackendsAgreeOnSobelOverThePaperForBothOfItsInputs() throws {
+        try skipUnlessGPUAvailable()
+
+        var deltas: [(String, Int)] = []
+        for input in [Effect.Input.backdrop, .ink] {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            manager.canvasBackgroundColor = .init(white: 128.0 / 255)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(red, rect: Self.inkRect))
+            manager.addValueLayer(effect: .sobel(Effect.Sobel(input: input)))
+            guard let request = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0)?.full else {
+                XCTFail("\(input): fixture must build a request"); continue
+            }
+            guard let cpu = CoreGraphicsCompositor.composite(request),
+                  let gpu = MetalCompositor.composite(request) else {
+                XCTFail("\(input): both backends must render"); continue
+            }
+            deltas.append(("\(input)", maxChannelDelta(gpu, cpu)))
+        }
+
+        let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        XCTContext.runActivity(named: "[sobel over paper] GPU-vs-CPU max channel delta: \(table)") { _ in }
+        for (name, delta) in deltas {
+            XCTAssertLessThanOrEqual(delta, Self.tolerance,
+                                     "Sobel [\(name)] differs by \(delta) between the backends. Table: \(table)")
+        }
+    }
+
     // MARK: - Which image an effect is handed (EFFECT_BACKDROP.md §4)
 
     /// **§4's table, written out as data rather than restated as prose.** `Effect.input` is an

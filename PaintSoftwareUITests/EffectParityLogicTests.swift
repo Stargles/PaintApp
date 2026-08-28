@@ -437,13 +437,14 @@ final class EffectParityLogicTests: XCTestCase {
     ///
     /// The number is fourteen plus the three phase 9's multi-pass half added (`threshold`, `intensity`,
     /// `taps`), plus the three phase 9c appended for Outline's stroke colour (`colorR`, `colorG`,
-    /// `colorB`) — appended at the end specifically so the twenty fields before this one keep the exact
-    /// byte offsets every effect shipping before phase 9c already relies on. A count worth updating
-    /// rather than relaxing, since "did anyone add a field to one declaration and not the other" is the
-    /// whole question it answers.
-    func testTheParameterBlockIsTwentyPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 80)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 80)
+    /// `colorB`), plus `preserveAlpha` — Sobel's alpha rule, 2026-08-27 — appended after those for the
+    /// same reason they were appended after everything else: the end of the block is the one position
+    /// where a new field cannot shift an existing one. A count worth updating rather than relaxing,
+    /// since "did anyone add a field to one declaration and not the other" is the whole question it
+    /// answers.
+    func testTheParameterBlockIsTwentyOnePackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 84)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 84)
     }
 
     /// The table is 256 RGBA entries, and an unused one is the identity — so an effect that does not

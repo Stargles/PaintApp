@@ -420,8 +420,13 @@ enum EffectReference {
     /// same kind of gradient to this kernel. Clamp-to-edge at the border, the same convention every
     /// other gather kernel in this file uses.
     ///
-    /// Output is `(m, m, m, m)`: a valid premultiplied colour by construction (`rgb == a`), which is
-    /// why `Effect.reshapesCoverage` names Sobel rather than treating it as a grade.
+    /// **Alpha is `params.preserveAlpha`'s question** — the Metal twin's doc comment carries the full
+    /// account and the report that produced it. In short: the output was `(m, m, m, m)` unconditionally,
+    /// so a flat region came out fully transparent whatever the backdrop was, and EFFECT_BACKDROP.md
+    /// §2.2's "with an opaque backdrop flat regions become opaque black" was false. `.backdrop` now
+    /// keeps the coverage it was handed and is an opaque edge map; `.ink` keeps `(m, m, m, m)`, where
+    /// the magnitude genuinely is the coverage. `rgb` is clamped to whichever alpha carries it, so both
+    /// are representable premultiplied colours.
     private static func sobel(_ bytes: [UInt8], params: EffectParams, width: Int, height: Int) -> [UInt8] {
         func lum(_ x: Int, _ y: Int) -> Float {
             let t = texel(bytes, x, y, width: width, height: height)
@@ -438,9 +443,11 @@ enum EffectReference {
                 let gy = (bl + 2 * bc + br) - (tl + 2 * tc + tr)
                 let magnitude = (gx * gx + gy * gy).squareRoot()
                 let m = min(max(magnitude * params.amount, 0), 1)
-                let byte = quantize(m)
                 let pixel = (x + y * width) * 4
-                for channel in 0..<4 { result[pixel + channel] = byte }
+                let alpha = params.preserveAlpha != 0 ? Float(bytes[pixel + 3]) / 255 : m
+                let colour = quantize(min(m, alpha))
+                for channel in 0..<3 { result[pixel + channel] = colour }
+                result[pixel + 3] = quantize(alpha)
             }
         }
         return result
