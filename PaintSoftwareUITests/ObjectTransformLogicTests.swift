@@ -802,6 +802,369 @@ final class ObjectTransformLogicTests: XCTestCase {
         XCTAssertEqual(collapsed.handleLayout(rotationOffset: 36).count, 6)
     }
 
+    // MARK: - The stretch axis (Move stage 3b, phase 2)
+    //
+    // A stretch made about a hand-turned box records the axis it was made about — LASSO_MOVE.md
+    // §5.20 — which is what un-greys Freeform. The map becomes `R(ρ+φ)·S·R(−φ)`, a rotation on both
+    // sides of the scale, which is the singular value decomposition of a general 2×2; with the
+    // position that is six numbers and exactly a general affine. `boxAngle` is still chrome: it says
+    // where the box is *now*, and `stretchAxis` says where it was when a stretch was made.
+
+    /// The linear part of a pose's map, read out of the shipping `affine` so the tests below compare
+    /// against matrices they built themselves rather than against a second copy of the expression.
+    /// Position and pivot cancel out of `a`/`b`/`c`/`d` entirely.
+    private func linear(of pose: ObjectTransformDrag.Pose) -> CGAffineTransform {
+        VectorCanvas.affine(from: pose.transform, aspect: pose.aspect,
+                            stretchAxis: pose.stretchAxis, pivot: .zero)
+    }
+
+    private func assertLinear(_ actual: CGAffineTransform, _ expected: CGAffineTransform,
+                              accuracy: CGFloat = ObjectTransformLogicTests.loose,
+                              _ message: String = "",
+                              file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(actual.a, expected.a, accuracy: accuracy, "a — " + message, file: file, line: line)
+        XCTAssertEqual(actual.b, expected.b, accuracy: accuracy, "b — " + message, file: file, line: line)
+        XCTAssertEqual(actual.c, expected.c, accuracy: accuracy, "c — " + message, file: file, line: line)
+        XCTAssertEqual(actual.d, expected.d, accuracy: accuracy, "d — " + message, file: file, line: line)
+    }
+
+    /// **`stretchAxis == 0` is the map that existed before the field did, to the bit** — the claim the
+    /// whole generalisation rests on, and the reason no existing document, call site or test changes.
+    /// The expected value is the old expression *written out here*, so this is a statement about the
+    /// map that shipped rather than a call to the new one.
+    ///
+    /// **And the second reduction, which is the one that is easy to get wrong**: at `aspect == 1` the
+    /// axis is a no-op for *any* φ, because a scalar commutes with a rotation. `affine` states that
+    /// as a branch rather than computing `R(ρ+φ)·s·R(−φ)` and hoping; computing it leaves a
+    /// similarity that is only nearly one, and `applyToVectorFloat` dispatches on `aspect != 1`
+    /// exactly while `mapping(_:throughSimilarity:)` asserts the shape it is handed. Both guards in
+    /// `LassoMoveLogicTests` — the zero-delta nudge and the non-zero box angle — depend on it.
+    func testAZeroStretchAxisIsTheMapThatExistedBeforeItDid() {
+        let pivot = CGPoint(x: 37, y: -11)
+        for rotation in [CGFloat(0), 0.4, CGFloat.pi / 2, 2.7, -1.2] {
+            for scale in [CGFloat(0.3), 1, 3] {
+                for aspect in [CGFloat(1), 3, 1.0 / 3.0, 0.77] {
+                    let t = LayerTransform(position: CGPoint(x: 1000, y: 500), scale: scale,
+                                           rotation: rotation)
+                    let s = ObjectTransformFrame.axisScales(scale: scale, aspect: aspect)
+                    let before = CGAffineTransform.identity
+                        .translatedBy(x: t.position.x, y: t.position.y)
+                        .rotated(by: t.rotation)
+                        .scaledBy(x: s.x, y: s.y)
+                        .translatedBy(x: -pivot.x, y: -pivot.y)
+                    let note = "\(rotation), \(scale), \(aspect)"
+                    XCTAssertEqual(VectorCanvas.affine(from: t, aspect: aspect, stretchAxis: 0,
+                                                       pivot: pivot), before, note)
+                    guard aspect == 1 else { continue }
+                    for axis in [CGFloat(0.6), -1.3, 2.2] {
+                        XCTAssertEqual(VectorCanvas.affine(from: t, aspect: 1, stretchAxis: axis,
+                                                           pivot: pivot), before,
+                                       "an unstretched pose ignores its axis — \(note), \(axis)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// **A stretch on a turned box pulls along the box's *visible* axes**, and the expected answer is
+    /// arithmetic done by hand rather than a second call into the code under test.
+    ///
+    /// The 400×300 box is turned a quarter turn by the yellow knob alone, so the drawing is still
+    /// upright and the box's own +x axis points *down* the screen. Pulling the bottom-right grip
+    /// three times as far down therefore triples the box's **width**, and the map it implies is
+    /// `R(π/2)·diag(3,1)·R(−π/2)`, which is `diag(1, 3)` — canvas x untouched, canvas y tripled.
+    ///
+    /// Phase 1 measured this drag from `start.rotation`, the *ink's* angle, which here is 0 — so it
+    /// would have read the same finger movement as a pull along the box's height and stretched the
+    /// drawing in the direction the artist did not point. That is what `freeformUnavailableReason`
+    /// refused rather than doing, and what the recorded axis replaces.
+    func testAStretchOnATurnedBoxPullsAlongTheBoxsVisibleAxes() {
+        let frame = turned(.pi / 2)
+        let centre = frame.centre
+        let (cw, ch) = (frame.contentSize.width, frame.contentSize.height)
+        // The grip's offset from the centre is (+cw/2, +ch/2) in the box's own axes; a quarter turn
+        // maps that to canvas (−ch/2, +cw/2). Tripling the box's x means tripling the canvas y term.
+        let pulled = CGPoint(x: centre.x - ch / 2, y: centre.y + 3 * cw / 2)
+        let drag = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: frame.corners[2],
+                                       freeform: true)
+        let pose = drag.pose(draggedTo: pulled)
+
+        XCTAssertEqual(pose.aspect, 3, accuracy: Self.loose, "three times as wide as it is tall")
+        XCTAssertEqual(pose.transform.scale, sqrt(3), accuracy: Self.loose)
+        XCTAssertEqual(pose.stretchAxis, .pi / 2, accuracy: Self.epsilon,
+                       "and it recorded the axis it was made about")
+        XCTAssertEqual(pose.transform.rotation, 0, accuracy: Self.epsilon, "the drawing did not turn")
+        XCTAssertEqual(pose.boxAngle, .pi / 2, accuracy: Self.epsilon, "nor did the box")
+
+        assertLinear(linear(of: pose), CGAffineTransform(scaleX: 1, y: 3),
+                     "canvas x is untouched and canvas y is tripled")
+        // And the grip arrives under the finger, which is the half an artist would notice first.
+        let after = ObjectTransformFrame(transform: pose.transform, contentSize: frame.contentSize,
+                                         aspect: pose.aspect, boxAngle: pose.boxAngle,
+                                         stretchAxis: pose.stretchAxis)
+        assertPoint(after.corners[2], pulled)
+    }
+
+    /// **Two stretches about two different axes compose into the product matrix** — the composition
+    /// problem, and the SVD round trip that answers it, asserted against a matrix this test
+    /// multiplies out itself.
+    ///
+    /// Stretch a straight box 3:1 along its own x; turn the box 45° with the yellow knob; stretch it
+    /// twice as wide along *that* axis. `(scale, aspect, rotation, stretchAxis)` cannot hold two
+    /// stretches about two axes as written, so `ObjectTransformFrame.decompose` reads the pose back
+    /// out of `R(45°)·diag(2,1)·R(−45°) · diag(3,1)`.
+    ///
+    /// **Three hand-computed numbers, and the first is the honest consequence.** That product is
+    /// `[[4.5, 0.5], [1.5, 1.5]]`, whose polar factor is a rotation of `atan2(1, 6) = 0.16515` rad:
+    /// composing two stretches about different axes *genuinely turns the ink*, so
+    /// `transform.rotation` genuinely moves and the box turns with it. `sqrt(|det|)` is `sqrt(6)`,
+    /// and the two singular values are `hypot(3, 0.5) ± hypot(1.5, 1)`.
+    func testTwoStretchesAboutDifferentAxesComposeIntoTheProductMatrix() {
+        // 3:1 along the box's own x, on a box nobody has turned: aspect 3, scale √3, axis 0.
+        let first = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                   scale: sqrt(3), rotation: 0),
+                                         contentSize: CGSize(width: 400, height: 300),
+                                         aspect: 3, boxAngle: .pi / 4, stretchAxis: 0)
+        XCTAssertEqual(first.axisScales.x, 3, accuracy: Self.loose, "fixture precondition")
+        XCTAssertEqual(first.axisScales.y, 1, accuracy: Self.loose)
+
+        // The grip's offset in the box's own axes is (600, 150); doubling the x term is the drag.
+        let root = CGFloat(2).squareRoot()
+        let centre = first.centre
+        let pulled = CGPoint(x: centre.x + (1200 - 150) / root, y: centre.y + (1200 + 150) / root)
+        let pose = ObjectTransformDrag(frame: first, handle: .bottomRight, at: first.corners[2],
+                                       freeform: true).pose(draggedTo: pulled)
+
+        let expected = CGAffineTransform.identity
+            .scaledBy(x: 3, y: 1)
+            .concatenating(CGAffineTransform.identity
+                .rotated(by: .pi / 4).scaledBy(x: 2, y: 1).rotated(by: -.pi / 4))
+        assertLinear(linear(of: pose), expected, "the pose is the product of the two stretches")
+
+        XCTAssertEqual(pose.transform.rotation, atan2(CGFloat(1), CGFloat(6)), accuracy: Self.loose,
+                       "two stretches about different axes turn the ink, and the pose says so")
+        XCTAssertEqual(pose.transform.scale, sqrt(6), accuracy: Self.loose,
+                       "the area factor is the root of the product of the two determinants")
+        let axes = ObjectTransformFrame.axisScales(scale: pose.transform.scale, aspect: pose.aspect)
+        XCTAssertEqual(axes.x, hypot(CGFloat(3), 0.5) + hypot(CGFloat(1.5), 1), accuracy: Self.loose)
+        XCTAssertEqual(axes.y, hypot(CGFloat(3), 0.5) - hypot(CGFloat(1.5), 1), accuracy: Self.loose)
+        XCTAssertEqual(pose.boxAngle, .pi / 4, "and the hand-fitted box is untouched by all of it")
+    }
+
+    /// **A stretch about the axis the piece was last stretched about needs no decomposition at all**,
+    /// and takes the arithmetic this arm had before phase 2 — two diagonal matrices multiplied. The
+    /// composed answer agrees with it, which is what makes the fast arm an optimisation of the slow
+    /// one rather than a second rule.
+    func testAStretchAboutTheRecordedAxisComposesWithoutTurningAnything() {
+        for axis in [CGFloat(0), 0.9, -2.1] {
+            let frame = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                       scale: sqrt(3), rotation: 0.35),
+                                             contentSize: CGSize(width: 400, height: 300),
+                                             aspect: 3, boxAngle: axis, stretchAxis: axis)
+            let centre = frame.centre
+            let axes = frame.axisScales
+            let beta = frame.transform.rotation + axis
+            // Double the box's x, in the box's own axes, turned out into canvas space by hand.
+            let (bx, by) = (2 * axes.x * 200, axes.y * 150)
+            let pulled = CGPoint(x: centre.x + bx * cos(beta) - by * sin(beta),
+                                 y: centre.y + bx * sin(beta) + by * cos(beta))
+            let pose = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: frame.corners[2],
+                                           freeform: true).pose(draggedTo: pulled)
+
+            XCTAssertEqual(pose.transform.rotation, 0.35,
+                           "a stretch about the recorded axis turns nothing — axis \(axis)")
+            XCTAssertEqual(pose.stretchAxis, axis, "and records the same axis again")
+            let after = ObjectTransformFrame.axisScales(scale: pose.transform.scale,
+                                                        aspect: pose.aspect)
+            XCTAssertEqual(after.x, 2 * axes.x, accuracy: Self.loose, "axis \(axis)")
+            XCTAssertEqual(after.y, axes.y, accuracy: Self.loose,
+                           "and the axis the finger did not pull is untouched — axis \(axis)")
+        }
+    }
+
+    /// **§5.17 survives the extra angle untouched: a stretch scales the ink by `sqrt(|det|)`, and a
+    /// rotation has determinant 1.** So neither `stretchAxis` nor `rotation` can change a stroke's
+    /// width — only the two axis scales can — and `VectorCanvas.mapping(_:throughStretch:)`, which
+    /// reads exactly that number, is untouched by phase 2.
+    func testTheDeterminantAndThereforeTheInkWidthIgnoresTheStretchAxis() {
+        for aspect in [CGFloat(1), 3, 0.4] {
+            for scale in [CGFloat(0.5), 2] {
+                let t = LayerTransform(position: CGPoint(x: 1000, y: 500), scale: scale, rotation: 1.1)
+                let base = VectorCanvas.affine(from: t, aspect: aspect, stretchAxis: 0, pivot: .zero)
+                let expected = abs(base.a * base.d - base.b * base.c)
+                XCTAssertEqual(expected, scale * scale, accuracy: Self.loose, "fixture precondition")
+                for axis in [CGFloat(0.3), -1.4, 2.9] {
+                    let m = VectorCanvas.affine(from: t, aspect: aspect, stretchAxis: axis, pivot: .zero)
+                    XCTAssertEqual(abs(m.a * m.d - m.b * m.c), expected, accuracy: Self.loose,
+                                   "\(aspect), \(scale), \(axis)")
+                }
+            }
+        }
+    }
+
+    /// **Every arm that is not the Freeform corner passes the stretch axis through unchanged** — the
+    /// mirror of `testEveryOtherArmPassesTheBoxAngleThroughUnchanged`, and the reason a hand-fitted
+    /// stretch survives a move, a uniform scale, either knob, and a Freeform drag that changes
+    /// nothing.
+    ///
+    /// **`Pose.stretchAxis` carries no default**, so a dropped pass-through is a build error rather
+    /// than a red test; this is the second line, guarding the arithmetic the compiler cannot see.
+    func testEveryOtherArmPassesTheStretchAxisThroughUnchanged() {
+        let frame = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                   scale: 1, rotation: 0),
+                                         contentSize: CGSize(width: 400, height: 300),
+                                         aspect: 3, boxAngle: 0.6, stretchAxis: 0.6)
+        let start = CGPoint(x: 1120, y: 620)
+        let end = CGPoint(x: 940, y: 380)
+        for handle in ObjectTransformFrame.Handle.allCases {
+            for freeform in [false, true] {
+                // The one gesture that is *allowed* to write it is a Freeform corner, and on this
+                // frame it writes the same 0.6 back — the box is turned to the axis of the stretch.
+                let drag = ObjectTransformDrag(frame: frame, handle: handle, at: start,
+                                               freeform: freeform)
+                XCTAssertEqual(drag.pose(draggedTo: end).stretchAxis, 0.6, accuracy: Self.loose,
+                               "\(handle), freeform \(freeform)")
+            }
+        }
+    }
+
+    /// **The green knob turns a stretched piece rigidly, and that is arithmetic rather than a
+    /// choice.** The map is `R(ρ+φ)·S·R(−φ)`, so adding δ to ρ pre-multiplies the whole thing by
+    /// `R(δ)`: the piece turns about its centre carrying whatever stretch it has, instead of the
+    /// stretch being re-aimed under it.
+    ///
+    /// Watched failing with the `.rotation` arm made to add its sweep to `stretchAxis` as well — the
+    /// plausible wrong reading of "the box's axes turn with the box".
+    func testTheGreenKnobTurnsAStretchedPieceRigidly() {
+        let frame = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                   scale: sqrt(3), rotation: 0),
+                                         contentSize: CGSize(width: 400, height: 300),
+                                         aspect: 3, boxAngle: 0, stretchAxis: 0)
+        let centre = frame.centre
+        let before = VectorCanvas.affine(from: frame.transform, aspect: frame.aspect,
+                                         stretchAxis: frame.stretchAxis, pivot: .zero)
+        let drag = ObjectTransformDrag(frame: frame, handle: .rotation,
+                                       at: CGPoint(x: centre.x, y: centre.y - 200))
+        let pose = drag.pose(draggedTo: CGPoint(x: centre.x + 200, y: centre.y))
+
+        XCTAssertEqual(pose.transform.rotation, .pi / 2, accuracy: Self.loose)
+        XCTAssertEqual(pose.stretchAxis, 0, "the axis the stretch was made about did not move")
+        assertLinear(linear(of: pose),
+                     before.concatenating(CGAffineTransform(rotationAngle: .pi / 2)),
+                     "the whole map is pre-multiplied by the turn")
+    }
+
+    // MARK: - Reading a pose back out of a matrix
+
+    /// **The decomposition is the inverse of the map, over a sweep of every pose the box can hold.**
+    /// The matrix is built here out of `rotated`/`scaledBy` primitives rather than through `affine`,
+    /// so the two are not the same expression checked against itself.
+    ///
+    /// **The matrix is what is asserted, and the axis only where it exists.** A square pose has no
+    /// principal axis at all — every direction is one — so which angle comes back is arbitrary and
+    /// carries no information; what must hold either way is that the four numbers rebuild the matrix
+    /// they were read from. `2×2` is in the sweep for exactly that case.
+    func testTheDecompositionRoundTripsEveryPose() {
+        for rotation in [CGFloat(0), 0.4, -1.2, 2.7] {
+            for axis in [CGFloat(0), 0.6, -1.9] {
+                for (x, y) in [(CGFloat(3), CGFloat(1)), (1, 3), (0.4, 2.5), (2, 2)] {
+                    let m = CGAffineTransform.identity
+                        .rotated(by: rotation + axis)
+                        .scaledBy(x: x, y: y)
+                        .rotated(by: -axis)
+                    guard let d = ObjectTransformFrame.decompose(m, preferringAxisNear: axis) else {
+                        return XCTFail("a positive-determinant map decomposes — \(rotation), \(axis)")
+                    }
+                    let note = "\(rotation), \(axis), \(x)×\(y)"
+                    XCTAssertEqual(d.rotation, rotation, accuracy: Self.loose, note)
+                    XCTAssertEqual(d.x, x, accuracy: Self.loose, note)
+                    XCTAssertEqual(d.y, y, accuracy: Self.loose, note)
+                    if x != y {
+                        XCTAssertEqual(d.stretchAxis, axis, accuracy: Self.loose, note)
+                    }
+                    assertLinear(CGAffineTransform.identity
+                        .rotated(by: d.rotation + d.stretchAxis)
+                        .scaledBy(x: d.x, y: d.y)
+                        .rotated(by: -d.stretchAxis), m, "rebuilt — " + note)
+                }
+            }
+        }
+    }
+
+    /// **A similarity comes back with a zero axis and its own angle**, which is the case that keeps
+    /// `aspect == 1 ⟹ the axis is a no-op` true from both directions. `atan2(0, 0)` is 0 by
+    /// accident; this is the same 0 on purpose, and the guard above it says so.
+    func testASimilarityDecomposesToItsOwnRotationAndNoAxis() {
+        for rotation in [CGFloat(0), 0.4, -1.2] {
+            for scale in [CGFloat(0.25), 1, 4] {
+                let m = CGAffineTransform(rotationAngle: rotation).scaledBy(x: scale, y: scale)
+                guard let d = ObjectTransformFrame.decompose(m, preferringAxisNear: 1.3) else {
+                    return XCTFail("a similarity decomposes")
+                }
+                XCTAssertEqual(d.rotation, rotation, accuracy: Self.loose)
+                XCTAssertEqual(d.stretchAxis, 0, "and it is not the axis it was asked to prefer")
+                XCTAssertEqual(d.aspect, 1, "exactly 1, not nearly — the dispatch is an == comparison")
+                XCTAssertEqual(d.scale, scale, accuracy: Self.loose)
+            }
+        }
+    }
+
+    /// **The two representations of one matrix, and the branch is chrome.**
+    /// `R(u)·diag(s₁,s₂)·R(−v)` and `R(u+π/2)·diag(s₂,s₁)·R(−v−π/2)` are the same matrix — the choice
+    /// is only which of the box's two axes is called "x". So `preferringAxisNear` can change the
+    /// aspect from 3 to ⅓ and the drawn box from wide to tall **without changing the map by one bit**,
+    /// which is why the drag asks for the axis it started from: a delta that moves nothing must not
+    /// flip the box under the finger.
+    func testThePreferredAxisChoosesTheDrawnBoxAndNeverTheMap() {
+        let m = CGAffineTransform.identity.rotated(by: 0.5).scaledBy(x: 3, y: 1).rotated(by: -0.5)
+        guard let near = ObjectTransformFrame.decompose(m, preferringAxisNear: 0.5),
+              let far = ObjectTransformFrame.decompose(m, preferringAxisNear: 0.5 + .pi / 2) else {
+            return XCTFail("both decompose")
+        }
+        XCTAssertEqual(near.x, 3, accuracy: Self.loose)
+        XCTAssertEqual(near.y, 1, accuracy: Self.loose)
+        XCTAssertEqual(near.stretchAxis, 0.5, accuracy: Self.loose)
+        XCTAssertEqual(far.x, 1, accuracy: Self.loose, "the other branch names the short axis first")
+        XCTAssertEqual(far.y, 3, accuracy: Self.loose)
+        XCTAssertEqual(far.stretchAxis, 0.5 + .pi / 2, accuracy: Self.loose)
+        XCTAssertEqual(near.rotation, far.rotation, accuracy: Self.epsilon,
+                       "and the rotation is an invariant of the matrix, not of the branch")
+
+        for d in [near, far] {
+            let rebuilt = CGAffineTransform.identity
+                .rotated(by: d.rotation + d.stretchAxis)
+                .scaledBy(x: d.x, y: d.y)
+                .rotated(by: -d.stretchAxis)
+            assertLinear(rebuilt, m, "both branches rebuild the same matrix")
+        }
+    }
+
+    /// **A reflection and a collapse are refused rather than answered.** This arrangement has no
+    /// signed axis — `aspect` is a ratio and `axisScales` takes its square root — so a negative
+    /// determinant has nowhere to go, and letting it come back as a rotation would turn a mirror into
+    /// a spin. A reflection is `VectorFloat.mirror`'s job and rides in front of the map.
+    ///
+    /// `det = q² − r²` in the decomposition's own terms, so `y > 0` *is* `det > 0`; the two cases
+    /// below are the same guard reached from either side of zero.
+    func testTheDecompositionRefusesAReflectionAndACollapse() {
+        let reflection = CGAffineTransform.identity.rotated(by: 0.4).scaledBy(x: -2, y: 3)
+        XCTAssertLessThan(reflection.a * reflection.d - reflection.b * reflection.c, 0,
+                          "fixture precondition")
+        XCTAssertNil(ObjectTransformFrame.decompose(reflection, preferringAxisNear: 0))
+        XCTAssertNil(ObjectTransformFrame.decompose(CGAffineTransform(scaleX: 3, y: 0),
+                                                    preferringAxisNear: 0),
+                     "a collapsed axis has no pose either")
+        XCTAssertNil(ObjectTransformFrame.decompose(.init(scaleX: 0, y: 0), preferringAxisNear: 0))
+        // …and a near-singular one still answers, so the refusal is a real boundary and not a
+        // tolerance: an axis 400 times shorter than the other is a sliver the artist can still grab.
+        let sliver = CGAffineTransform.identity.rotated(by: 0.4).scaledBy(x: 4, y: 0.01)
+        guard let d = ObjectTransformFrame.decompose(sliver, preferringAxisNear: 0) else {
+            return XCTFail("a positive determinant, however small, has a pose")
+        }
+        XCTAssertEqual(d.aspect, 400, accuracy: 1e-3)
+        XCTAssertEqual(d.rotation, 0.4, accuracy: Self.loose)
+    }
+
     // MARK: - The live drag, expressed to Core Animation
 
     /// The claim the whole (c) fix rests on: assigning this affine to the already-rendered image

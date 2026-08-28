@@ -270,15 +270,27 @@ struct ObjectTransformFrame: Equatable {
         // `r == 0` is a similarity: the two axes are one number, every axis is a principal axis, and
         // `atan2(0, 0)` would answer 0 for a direction that does not exist. Zero is the canonical
         // choice and the one that keeps `stretchAxis` at 0 for every pose that has not been stretched.
+        //
+        // **The test is exact zero, not a tolerance, and a *near*-similarity is left alone on
+        // purpose.** Its axis is arbitrary — but so is its effect: the further `r` is from 0 the more
+        // the axis means, and at `r` a rounding step from 0 the two axis scales differ by a rounding
+        // step too, so the matrix it rebuilds is right whichever direction comes back. A threshold
+        // here would instead put a seam at some arbitrary aspect, which is what §5.17's whole
+        // argument is against.
         guard r > 0 else {
             return Decomposition(rotation: rotation, x: x, y: y, stretchAxis: 0)
         }
-        var stretchAxis = (atan2(g, f) - rotation) / 2
-        if abs((stretchAxis - reference).remainder(dividingBy: .pi)) > .pi / 4 {
-            stretchAxis += .pi / 2
+        // φ is determined only modulo π, and the two branches a quarter turn apart describe the same
+        // matrix with the two axes named the other way round. `remainder` brings the raw answer into
+        // (−π/2, π/2] of the reference; a quarter turn more than half of that is the other branch.
+        // Expressed as `reference + delta` rather than as an absolute angle so that a matrix whose
+        // axis *is* the reference comes back with the reference itself, to the bit.
+        var delta = ((atan2(g, f) - rotation) / 2 - reference).remainder(dividingBy: .pi)
+        if abs(delta) > .pi / 4 {
+            delta -= delta > 0 ? CGFloat.pi / 2 : -CGFloat.pi / 2
             swap(&x, &y)
         }
-        return Decomposition(rotation: rotation, x: x, y: y, stretchAxis: stretchAxis)
+        return Decomposition(rotation: rotation, x: x, y: y, stretchAxis: reference + delta)
     }
 
     /// A box with no extent draws and hits nothing — the state the overlay hides itself in.

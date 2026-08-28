@@ -2649,20 +2649,21 @@ final class LassoMoveLogicTests: XCTestCase {
         }
     }
 
-    /// **Freeform greys out while the box is turned, and comes straight back when it is straightened**
-    /// — phase 1's one deliberate restriction. A stretch along a hand-turned box's axes needs the
-    /// second stored angle §5.20 rules on (`R(ρ)·S·R(−φ)`), which is phase 2; until then, offering a
-    /// picker that stretched along the *ink's* axes instead of the visible box's would move the
-    /// drawing in a direction the artist did not point.
+    /// **Freeform is offered at every box angle, and the placed image is the only thing that refuses
+    /// it** — phase 2 (LASSO_MOVE.md §5.20). This test is the phase-1 one turned round: it asserted
+    /// the caption *"The box is turned. Straighten it to stretch this piece."* and that
+    /// `vectorFloatIsFreeform` went false with it, and both are now gone rather than relaxed, because
+    /// `ObjectTransformDrag.stretched` measures from the *drawn* box and records the axis it pulled
+    /// along.
     ///
-    /// Both halves, as with the image refusal: the bar's caption comes from the reason, and
-    /// `vectorFloatIsFreeform` refuses the drag even with `transformMode` already lit — which it can
-    /// be, since the mode is shared with the raster tier and outlives the piece that chose it.
+    /// **The image arm stays and is a different refusal** — about what the piece is, not about how
+    /// the box is sitting — so it is checked here at a non-zero box angle, where the two used to be
+    /// confusable.
     ///
-    /// **Uniform and both rotate knobs are unaffected at any box angle**, which is asserted here
-    /// rather than assumed: a uniform drag scales the ratio of two radii from the anchor and reads no
-    /// rotation at all, and a rotate knob measures a swept angle about that same anchor.
-    func testFreeformIsRefusedWhileTheBoxIsTurnedAndIsRestoredByStraighteningIt() {
+    /// Uniform, Rotate 45° and Mirror keep working at any box angle, as they did in phase 1: a
+    /// uniform drag scales the ratio of two radii about the anchor and a rotate knob measures a swept
+    /// angle about the same one, so neither reads a rotation at all.
+    func testFreeformIsOfferedAtEveryBoxAngleAndOnlyAnImageStillRefusesIt() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
@@ -2671,16 +2672,15 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNil(manager.freeformUnavailableReason, "a straight box stretches")
         XCTAssertTrue(manager.vectorFloatIsFreeform)
 
-        manager.turnVectorFloatBox(to: 0.6)
-        guard let reason = manager.freeformUnavailableReason else {
-            return XCTFail("the bar has to have something to say")
+        for angle in [CGFloat(0.6), -1.4, CGFloat.pi / 2, 0] {
+            manager.turnVectorFloatBox(to: angle)
+            XCTAssertNil(manager.freeformUnavailableReason,
+                         "a turned box stretches too, as of phase 2 — \(angle)")
+            XCTAssertTrue(manager.vectorFloatIsFreeform, "\(angle)")
         }
-        XCTAssertTrue(reason.lowercased().contains("box") && reason.lowercased().contains("straighten"),
-                      "the reason names the box and the way out, in the artist's terms: \(reason)")
-        XCTAssertFalse(manager.vectorFloatIsFreeform,
-                       "and the drag refuses even with the mode already lit")
 
-        // Uniform, Rotate 45° and Mirror keep working on a turned box — nothing else greys out.
+        // Uniform, Rotate 45° and Mirror are unaffected, on a turned box as before.
+        manager.turnVectorFloatBox(to: 0.6)
         let box = manager.vectorFloat!.frame.transform
         manager.nudgeVectorFloat(to: scaledBy(manager, 2))
         XCTAssertEqual(manager.vectorFloat?.frame.transform.scale ?? 0, box.scale * 2, accuracy: 1e-9,
@@ -2689,9 +2689,23 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.rotateFloating(eighths: 1)
         XCTAssertNotNil(manager.vectorFloat)
 
-        manager.turnVectorFloatBox(to: 0)
-        XCTAssertNil(manager.freeformUnavailableReason, "straightening the box restores Freeform")
-        XCTAssertTrue(manager.vectorFloatIsFreeform)
+        // The one refusal that is left, asserted on a turned box so the two cannot be confused.
+        let (imageManager, imageLayer, imageVector) = fixture()
+        imageVector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
+        imageVector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                                rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                                size: CGSize(width: 6, height: 6)),
+                                                transform: LayerTransform(position: CGPoint(x: 30, y: 34),
+                                                                          scale: 1, rotation: 0)))
+        select(imageManager, imageLayer, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
+        XCTAssertTrue(imageManager.beginVectorLassoMove())
+        imageManager.turnVectorFloatBox(to: 0.6)
+        guard let reason = imageManager.freeformUnavailableReason else {
+            return XCTFail("a placed image still has something to say")
+        }
+        XCTAssertTrue(reason.lowercased().contains("image"),
+                      "and it names the image, not the box: \(reason)")
+        XCTAssertFalse(imageManager.vectorFloatIsFreeform)
     }
 
     /// **Reset does not touch the box angle, and a turned box does not by itself offer Reset.**
@@ -2760,6 +2774,221 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.turnVectorFloatBox(to: 1.2)
         XCTAssertNil(manager.vectorFloat)
         XCTAssertEqual(manager.history.undoStack.count, steps)
+    }
+
+    // MARK: - The stretch axis (stage 3b, phase 2)
+    //
+    // A stretch made about a hand-turned box records the axis it was made about — LASSO_MOVE.md
+    // §5.20 — and that recorded axis, not the live `boxAngle`, is what enters the map. The three
+    // tests below are the three claims that follow: the ink moves along the edges the artist can
+    // *see*, turning the box afterwards still moves nothing, and neither §5.15's Rotate-45
+    // exactness nor §5.17's `sqrt(|det|)` ink width notices the extra angle.
+
+    /// **A Freeform stretch on a hand-turned box moves the ink along the box's *visible* axes**, and
+    /// the expected sample positions are worked out by hand rather than read back out of the code.
+    ///
+    /// The box is turned a quarter turn by the yellow knob alone, so the drawing is still upright and
+    /// the box's own +x axis points down the screen. Pulling the bottom-right grip three times as far
+    /// down triples the box's **width** — and the map that implies is `R(π/2)·diag(3,1)·R(−π/2)`,
+    /// which is `diag(1, 3)`: **every sample keeps its x and has its y tripled about the pivot**.
+    ///
+    /// Phase 1 measured the same finger movement from `start.rotation` — the *ink's* angle, which
+    /// here is zero — so it would have read it as a pull along the box's height and stretched the
+    /// drawing in the direction the artist did not point. That is what `freeformUnavailableReason`
+    /// refused rather than doing.
+    func testAStretchOnAHandTurnedBoxMovesTheInkAlongTheBoxsVisibleAxes() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 22, y: 22), to: CGPoint(x: 42, y: 38), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 12, width: 44, height: 40)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let lifted = manager.vectorFloat else { return XCTFail("no float") }
+        let pivot = lifted.pivot
+        let before = vector.elements.compactMap(\.stroke).map(\.samples)
+        XCTAssertFalse(before.isEmpty, "fixture precondition")
+
+        manager.turnVectorFloatBox(to: .pi / 2)
+        guard let frame = manager.vectorFloat?.frame else { return XCTFail("no float") }
+        let centre = frame.centre
+        let (cw, ch) = (frame.contentSize.width, frame.contentSize.height)
+        // The grip's offset from the centre is (+cw/2, +ch/2) in the box's own axes; a quarter turn
+        // maps that to canvas (−ch/2, +cw/2), so tripling the box's x means tripling the canvas y.
+        let pulled = CGPoint(x: centre.x - ch / 2, y: centre.y + 3 * cw / 2)
+        let pose = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: frame.corners[2],
+                                       freeform: true).pose(draggedTo: pulled)
+        XCTAssertEqual(pose.aspect, 3, accuracy: 1e-9, "the drag read a pull along the box's width")
+        XCTAssertEqual(pose.stretchAxis, .pi / 2, accuracy: 1e-12, "and recorded the axis it used")
+        manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect,
+                                 stretchAxis: pose.stretchAxis)
+
+        let after = vector.elements.compactMap(\.stroke).map(\.samples)
+        XCTAssertEqual(after.count, before.count)
+        for (b, a) in zip(before, after) {
+            for (was, now) in zip(b, a) {
+                XCTAssertEqual(now.x, was.x, accuracy: 1e-6, "canvas x is untouched")
+                XCTAssertEqual(now.y, pivot.y + 3 * (was.y - pivot.y), accuracy: 1e-6,
+                               "and canvas y is tripled about the pivot")
+            }
+        }
+    }
+
+    /// **Turning the box after a stretch changes no sample and no pixel** — the claim phase 2 rests
+    /// on, and the reason `boxAngle` and `stretchAxis` are two fields rather than one.
+    ///
+    /// LASSO_MOVE.md §5.21 makes a box-only turn free: no undo step, on the argument that it moves no
+    /// ink. Reading the *live* box angle in the map instead of the recorded stretch axis would make a
+    /// turn of the yellow knob re-aim a stretch the artist had already committed, dragging their
+    /// drawing with nothing on the stack to give it back. §5.20's own text discloses that as an
+    /// unavoidable consequence; it is not, and this is why.
+    ///
+    /// **Three moments, and the middle one earns its keep**, exactly as in
+    /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel`: a leak could enter at the turn, at the
+    /// zero-delta nudge an artist's next drag re-derives its map from, or at the bake. Run on a
+    /// **transformed** layer, because `base ∘ base⁻¹` is exactly the identity only when `base` is.
+    func testTurningTheBoxAfterAStretchChangesNoSampleAndNoPixel() {
+        for transform in [CGAffineTransform.identity,
+                          CGAffineTransform(rotationAngle: 0.4).concatenating(
+                            CGAffineTransform(translationX: 6, y: 9))] {
+            let (manager, layerIndex, vector) = fixture()
+            vector.setTransform(transform)
+            vector.addStroke(stroke(from: CGPoint(x: 8, y: 22), to: CGPoint(x: 44, y: 30), size: 5))
+            var mapping = transform
+            let canvasLoop = CGPath(rect: CGRect(x: 4, y: 8, width: 56, height: 44),
+                                    transform: &mapping)
+            select(manager, layerIndex, canvasLoop)
+            XCTAssertTrue(manager.beginVectorLassoMove(), "transform \(transform)")
+            guard let frame = manager.vectorFloat?.frame else { return XCTFail("no float") }
+
+            // Stretch it 3:1 about a box the artist had already turned — the pose phase 1 refused.
+            manager.turnVectorFloatBox(to: 0.7)
+            var stretchedBox = frame.transform
+            stretchedBox.scale *= sqrt(3)
+            manager.nudgeVectorFloat(to: stretchedBox, aspect: 3, stretchAxis: 0.7)
+            XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? 0, 0.7, accuracy: 1e-12,
+                           "fixture precondition: the stretch is on the record")
+
+            // From here on the drawing must not move, however the box is turned.
+            let samplesAfterStretch = vector.elements.compactMap(\.stroke).map(\.samples)
+            let pixelsAfterStretch = cgImage(vector)
+            let boxAfterStretch = manager.vectorFloat?.frame.transform
+
+            for angle in [CGFloat(1.9), -0.4, 0] {
+                manager.turnVectorFloatBox(to: angle)
+                assertSamplesUnmoved(vector, samplesAfterStretch,
+                                     "after turning to \(angle), transform \(transform)")
+                XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? 0, 0.7, accuracy: 1e-12,
+                               "the recorded axis is not the box angle — \(angle)")
+                XCTAssertEqual(manager.vectorFloat?.frame.transform, boxAfterStretch,
+                               "and the box's own similarity is untouched — \(angle)")
+            }
+
+            // The next thing a real artist does is drag something, and a zero-delta drag re-derives
+            // the whole map from the pose the turns left behind.
+            manager.nudgeVectorFloat(to: stretchedBox)
+            assertSamplesUnmoved(vector, samplesAfterStretch,
+                                 "after the zero nudge, transform \(transform)")
+            XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 3, accuracy: 1e-12,
+                           "and the nudge carried the stretch and its axis, not one of the two")
+            XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? 0, 0.7, accuracy: 1e-12)
+
+            manager.commitVectorFloatIfNeeded()
+            assertPixelsIdentical(cgImage(vector), pixelsAfterStretch, "transform \(transform)")
+        }
+    }
+
+    /// **§5.15's Rotate-45 exactness and §5.17's `sqrt(|det|)` ink width both survive the extra
+    /// angle**, on a piece that is stretched *and* hand-turned — the pose neither ruling was written
+    /// against.
+    ///
+    /// Rotation has determinant 1, so no rotation on either side of the scale can change a stroke's
+    /// width; and `FixedAngleRotation` steps from `liftFrameTransform.rotation`, which neither new
+    /// angle appears in. Eight presses therefore return the identical matrix and the identical
+    /// samples — bit for bit on a straight layer, exactly as with no stretch at all.
+    func testEightPressesOfRotate45StayBitExactOnAStretchedHandTurnedBox() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 30), size: 5))
+        let widthAtLift = vector.strokes.first?.size ?? 0
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 12, width: 40, height: 34)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        guard let frame = manager.vectorFloat?.frame else { return XCTFail("no float") }
+        let liftRotation = frame.transform.rotation
+
+        manager.turnVectorFloatBox(to: 0.85)
+        var stretchedBox = frame.transform
+        stretchedBox.scale *= sqrt(3)
+        manager.nudgeVectorFloat(to: stretchedBox, aspect: 3, stretchAxis: 0.85)
+        let samplesAfterStretch = vector.elements.compactMap(\.stroke).map(\.samples)
+
+        // §5.17, restated against the new angle: the width follows the map's *area* root, and the
+        // area of a 3:1 stretch whose scale is √3 is 3 — whichever axis it was made about.
+        XCTAssertEqual(vector.strokes.first?.size ?? 0, widthAtLift * sqrt(3), accuracy: 1e-9,
+                       "sqrt(|det|) is sqrt(3·1)·1 — the stretch axis has determinant 1")
+
+        for press in 1...8 {
+            manager.rotateFloating(eighths: 1)
+            XCTAssertNotNil(manager.vectorFloat, "press \(press) must not dismiss the piece")
+        }
+
+        XCTAssertEqual(manager.vectorFloat?.frame.transform.rotation, liftRotation,
+                       "eight eighths is a whole turn, stretched and hand-turned or not")
+        XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis, 0.85, "and the axis rode through it")
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect, 3)
+        XCTAssertEqual(manager.vectorFloat?.frame.boxAngle, 0.85)
+        XCTAssertEqual(vector.strokes.first?.size ?? 0, widthAtLift * sqrt(3), accuracy: 1e-12,
+                       "and a whole turn changed no width")
+        let after = vector.elements.compactMap(\.stroke).map(\.samples)
+        XCTAssertEqual(after.count, samplesAfterStretch.count)
+        for (before, now) in zip(samplesAfterStretch, after) {
+            for (a, b) in zip(before, now) {
+                XCTAssertEqual(a.x, b.x, "a whole turn must not move a sample")
+                XCTAssertEqual(a.y, b.y)
+            }
+        }
+    }
+
+    /// **Undo restores the stretch axis, not only the aspect** — the fourth thing a nudge changes,
+    /// and the one a step that forgot it would leave pointing the wrong way. The harm is specific: an
+    /// undo that gave back `aspect == 3` with the axis reset to 0 would put the piece back at the
+    /// right *proportions* along the wrong direction, which is a document the artist never made.
+    ///
+    /// Also the lift invariant with both new angles non-zero: the map is `affine(from:aspect:
+    /// stretchAxis:pivot:)` and at `aspect == 1` the axis is a no-op, so the piece is back where it
+    /// was picked up and Reset agrees.
+    func testUndoRestoresTheStretchAxisAndResetClearsIt() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 22, y: 26), to: CGPoint(x: 42, y: 26), size: 4))
+        select(manager, layerIndex, loop(CGRect(x: 12, y: 14, width: 44, height: 32)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        let samplesAtLift = vector.elements.compactMap(\.stroke).map(\.samples)
+        // One ordinary nudge first, so the stretch is the *second* step: the first nudge's step is
+        // the one that also un-does the split (§5.8), and undoing that dismisses the float.
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 3, dy: 0))
+        let samplesAfterMove = vector.elements.compactMap(\.stroke).map(\.samples)
+        guard let frame = manager.vectorFloat?.frame else { return XCTFail("no float") }
+
+        manager.turnVectorFloatBox(to: 1.1)
+        var stretchedBox = frame.transform
+        stretchedBox.scale *= sqrt(3)
+        manager.nudgeVectorFloat(to: stretchedBox, aspect: 3, stretchAxis: 1.1)
+        XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis, 1.1)
+
+        manager.undo()
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 1, accuracy: 1e-12,
+                       "undo gives the shape back")
+        XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? -1, 0, accuracy: 1e-12,
+                       "and the axis it was made about with it")
+        assertSamplesUnmoved(vector, samplesAfterMove, "after the undo")
+        manager.redo()
+        XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? 0, 1.1, accuracy: 1e-12,
+                       "and redo puts both back")
+
+        // Reset writes the lift's pose, which is aspect 1 and axis 0 — and leaves the hand-fitted box
+        // angle alone, §5.21 as before.
+        XCTAssertTrue(manager.canResetFloating)
+        manager.resetFloating()
+        XCTAssertEqual(manager.vectorFloat?.frame.aspect ?? 0, 1, accuracy: 1e-12)
+        XCTAssertEqual(manager.vectorFloat?.frame.stretchAxis ?? -1, 0, accuracy: 1e-12)
+        XCTAssertEqual(manager.vectorFloat?.frame.boxAngle, 1.1, "the hand fit is not the drawing")
+        assertSamplesUnmoved(vector, samplesAtLift, "after the reset")
     }
 
     /// Every sample of every stroke is where it was. The assertion
