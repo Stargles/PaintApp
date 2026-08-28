@@ -1,4 +1,4 @@
-# Handoff — 2026-08-28 (session 73)
+# Handoff — 2026-08-28 (session 74)
 
 <!-- This file is BOTH the state of the repo and the prompt that starts the next session. It was once
 two files and they drifted apart inside a day, because the same state had to be written twice. Keep it
@@ -10,123 +10,136 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `5b5577e`. **Fast tier 1863 / 1860 / 0 / 3. FULL SUITE RUN AND CLEAN at this exact
-commit: 1982 / 1975 / 1 / 6, and the one red passed clean in isolation** —
-`InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`, environmental, no fix
-owed. **No branches in flight, one worktree, clean tree.**
+inline. `main` is `ab45074`. **Fast tier 1953 / 1950 / 0 / 3.** **No branches in flight, one
+worktree, clean tree.** For the full-suite result at this commit see "State" below — read it before
+you assume anything about the UI tiers.
 
-**1. Item (9), canvas resize — the last of the five-item storage refit, and it is BLOCKED on the
-   owner.** [CANVAS_RESIZE.md](CANVAS_RESIZE.md) is written; its **§6 is the questions the owner must
-   answer before a line is built**, chiefly what the width/height field means and what undo does over
-   raster content. §6's encoding question is already answered by (8). **Ask these first** — do not
-   start building and discover them.
-   §0 is why this is cheaper than it looks: `setCanvasPadding` is already a whole-document
-   crop/expand and `VectorCanvas.mapping(_:throughSimilarity:)` is already the exact vector scaler.
-   And a payload now carries the origin it was quantised about, so an unresaved cel stays readable
-   whatever the canvas becomes — a resize re-encodes nothing.
+**1. TODO.md has one item left, (10) Oklab, and its first move is not to build anything.**
+   The recommendation is argued and **not yet seen**: stage A is *not* Oklab, it is compositing in
+   **linear light** through a 256-entry LUT, on the theory that the muddy midpoint the owner
+   described between two saturated hues is a gamma problem. **Render the A/B and show it before
+   building.** The owner reversed a ruling once already this project on seeing an image they had
+   accepted on reading a number (SESSION_LOG session 72, the onion skin). Stage B is Oklab for
+   *interpolation only*; stage C is Oklab blend modes and breaks the `CGBlendMode` parity gate for
+   eleven of them.
 
-**2. If the owner is not available, (18) or (10) are unblocked.**
-   (18) is the bottom-bar height: the obvious implementation was built, measured and reverted, and
-   the candidate next approach is recorded on `maxRowsHeight`. **A screenshot is its acceptance test,
-   not a frame comparison** — an XCUITest passed against the broken build. Note the Move bar gained a
-   two-line toggle this pass, though (18)'s scope is `EffectSettingsBar` alone.
-   (10) is Oklab, and the recommendation is in the item: **not storage, not the compositor —
-   interpolation, and linear light first.** Stage A's premise is argued and **not yet seen**; render
-   the A/B before building it.
+**2. Then it is ROADMAP.md, and every item there needs the owner before it needs a design.**
+   The owner wrote the six-item long-term plan unprompted so architecture is not chosen blind, and
+   asked to be prompted to explain each one properly when it comes up. **Do that rather than
+   designing from the file.** Its three live findings: item (1) is mostly *somewhere to attach*
+   machinery that already exists (`SpacingCurve` is arbitrary easing today; `fps` is persisted and
+   only ever written by the load path); a video element inherits whatever **Move stage 3c** stores,
+   so making 3c's field a shared placed-object pose is free now and a second migration later; and
+   **export does not exist at all**, with a blocker that is not the compositor — `makeRenderRequest`
+   drops in-betweens, so an export written today silently omits every one of them.
 
-**3. Five things are on the owner's iPad awaiting a look.** The build there is old — it predates
-   items (8) and (14) and all of stage 3b. **Offer to deploy before asking about any of them**, from
-   the worktree, not `deploy.sh` (it pulls `main` and never ships branch work).
-   - **Sobel is bright edges on opaque black now.** If it still reads grey, that is a different bug.
-   - **An adjustment layer should grade blank paper**, and a blend mode should blend against it.
-   - **Draw across the canvas after shrinking a whole vector cel** — the ink loss, still unconfirmed.
-   - **Move with no lasso shows a Move bar**, where there was never one.
-   - **NEW, and worth watching them use**: the yellow box knob, "Keep Full Precision", and
-     "Bake Precise Strokes". A *second* stretch about a different axis genuinely rotates the ink, so
-     the corner does not track the finger exactly — honest, but it reads as a bug the first time.
+**3. Two behaviour questions are owed and nobody is blocked.**
+   - **The save-failure banner is invisible on "leave to gallery"** (`ea51607`): `raise(.saveFailed)`
+     and the screen flip land in the same render pass, and the banner lives in the editor. It works
+     on the autosave path, which was the silent one. Fixing it means holding the artist in the editor
+     on failure, which needs a retry affordance that does not exist. **Unruled.**
+   - **`fillSelection` and `clearSelectionPixels` can write to a derived in-between's `VectorCanvas`**
+     — BUGS.md, top. Move guards this in two places; those two never did. Deliberately not fixed
+     while Clear was being repaired, because changing when two shipped buttons refuse is a behaviour
+     change the owner has not been asked about. **Ask.**
 
-**Do not re-litigate**: LASSO_MOVE.md §5's **twenty-two** rulings (§5.19-22 are from 2026-08-28);
-(8)'s five attached rulings; EFFECT_BACKDROP.md §5's four and §2.1's three-pass onion-skin ruling;
-Sobel's deleted ink control.
+**4. The iPad has today's build** (Release, `88a3fb4`, installed over cable). Five older things were
+   already waiting there and three are new: **Resize Canvas**, **Recolour** in the Select panel, and
+   the Move bar's **Enclosed · Cut · Touching** picker. Note the build predates `c35df15` and
+   `ab45074`, so it has **no resize undo and no busy state**, and the effect bars are still the flat
+   300 pt. Offer to redeploy from the worktree, not `deploy.sh` (it pulls `main` and never ships
+   branch work). `devicectl list devices` first: `unavailable` means the owner must wake it and
+   nothing on this Mac fixes it; `available (paired)` with a failed install means a stale tunnel.
 
-**Two traps this pass paid for, both now in CLAUDE.md.** A worker's worktree is a *workbench*, not a
-deliverable — harvest its **commits**, and wait for the *completion notification*, not a finished test
-run. And a **green** check expires: the grep that verified a tree was true when it ran and false four
-minutes later, and `main` shipped a deliberate mutation-test defect because of it.
+**Do not re-litigate**: LASSO_MOVE.md §5's **twenty-five** rulings (§5.23-25 are from 2026-08-28);
+CANVAS_RESIZE.md §5's fourteen and §6's five answered questions; EFFECT_BACKDROP.md §5's four and
+§2.1's onion-skin ruling; (10)'s three-stage recommendation; Sobel's deleted ink control.
+
+**The trap this pass paid for, and it is a measurement one.** A performance number is evidence about
+*the fixture it ran on*. "A resize takes 3-4 s" was true and useless: that fixture's cels held raster
+pixels and **no `VectorCanvas` at all**, and on a document shaped like the owner's real artwork the
+same walk is **0.9 ms/cel**. A whole spec section had been planning against a tenth of the truth,
+and the owner's own question is what surfaced it. Before optimising anything, check what the fixture
+is made of.
 ```
 
 ---
 
 ## State
 
-`main` = `5b5577e`. **Fast tier 1863 / 1860 / 0 / 3.** **The full suite was run at this exact commit**:
-1982 / 1975 / 1 / 6, and the single red — `InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`
-— passed clean on an isolated re-run against an erased simulator. Environmental. No branches, no
-worktrees but the main one, no clones.
+`main` = `ab45074`. **Fast tier 1953 / 1950 / 0 / 3** (1956 declared; the 3-line gap is the 3 skips).
+Static `func test` across all test files 1985 → **2076**. No branches, no worktrees but the main one.
+
+**Full suite: see the line the closing session left here.** It was started at `ab45074` on a freshly
+erased simulator at the phase boundary; if this sentence is still the only one here, it did not finish
+before the session ended and **the UI tiers are unverified at this commit** — run it before trusting
+them, `simctl shutdown all` + `erase` immediately before, per CLAUDE.md.
 
 ## What landed
 
-Four merges, and three of them are one owner ask followed to the end.
+Twelve merges. **TODO item (9) closed in four stages, and with it the whole five-item storage refit**
+— (12) stage 3, (13), (8), (14) and (9) are all merged and all out of TODO.md.
 
-- **Item (8), fixed-point samples** (`e277f82`). A persisted `VectorSample` is 16 bits an axis at
-  quarter-pixel about a stored origin plus 8 bits of pressure — 5 bytes, base64'd, **~11x smaller on
-  disk**. The origin is written into the payload rather than implied by the reader's canvas, which is
-  what makes a payload impossible to decode wrong and leaves a resize re-encoding nothing.
-- **Item (14), precise strokes** (`7eef540`). The owner found the defect (8) leaves behind, and it is
-  about **scale**: the grid is a fixed size in canvas points, so a stroke shrunk before a save has
-  fewer usable bits. MEASURED, worst sample, shrink/store/reopen/regrow: **0.33 pt at 50%, 1.75 at
-  10%, 8.57 at 2%**. Rotation and translation are already exact. "Keep Full Precision" stores those
-  strokes as float32 — **12.18 bytes/sample against 7.10, 1.72x** — taking the three errors to
-  **3.3e-5, 3.9e-5, 5.0e-5 pt**; "Bake Precise Strokes (N)" in Actions puts them back, one undo step.
-  The owner chose float32 over float64 shown that doubles-as-bytes is 3.2x and doubles-as-JSON-text
-  is 8.5x.
-- **Move stage 3b, all three phases** (`330efd4`, `c78de6e`, `5b5577e`). A yellow knob turns the box
-  alone; a Freeform stretch records the axis it was made about; and the box now **re-fits the ink as
-  it turns**. §5.19-22.
+- **(9) stages 0-3** — `ea51607` a failed save says so; `3d0c7c4` Resize Canvas as crop/expand;
+  `b42a67b` scale-to-fit **and** scale-to-fill; `c35df15` undo, refusal, save gate, busy state.
+- **(19) Change Colour** `3ceaa12` — recolour a lasso selection whole, splitting nothing.
+- **(20) Move's three membership modes** `41de342` + `88a3fb4` — `Enclosed · Cut · Touching` as a
+  parameter on `splitForLassoMove`, defaulting to today's Cut.
+- **Clear actually clears** `6f4abcb` — the owner's bug, plus an unreported second one.
+- **(18) the effect bar is as tall as its rows** `ab45074`.
+- **`ROADMAP.md`** `ecc7af1`, **CANVAS_RESIZE.md §6 closed** `89c0526`, **the resize measurement**
+  `b7d5eeb`, housekeeping `19d9c3f`, TODO `91085c9` / `b198b57`.
 
 ## What each phase cost that nobody predicted
 
-- **§5.20's recorded formula was wrong.** It said `R(ρ)·S·R(−φ)`; only `R(ρ+φ)·S·R(−φ)` works, because
-  `transform.rotation` must stay the *ink's* angle — the green knob adds to it and `FixedAngleRotation`
-  steps it. As written, turning the green knob on a stretched piece would have **skewed** it.
-- **The SVD is needed in one case, not three.** Routing every stretch through it returns
-  `aspect == 1 ± ε` for a diagonal drag, and `applyToVectorFloat` dispatches on `aspect != 1`
-  *exactly* — so §5.17's "Freeform contains Uniform" would break at the seam. The fast arm keeps the
-  pre-phase-2 arithmetic bit for bit.
-- **The re-fit was too slow, and the measurement bought the fix.** 2.223 ms/frame on a 24,000-sample
-  cel — 27% of a 120 Hz frame — against **0.401 ms** with a per-element convex hull paid once at the
-  lift. The reduction is exact, not a trade: the extreme point in any direction is a hull vertex.
-- **The box's period is 90°, not 45°.** `s·(|cos β| + |sin β|)` peaks at 45° and returns at 90°. The
-  owner's description of what they *see* is right; the handoff that briefed it wrote the period wrong.
-- **"Constant for a circle" is exact only for a true disc** — a polygonal ring wobbles by
-  `1 − cos(π/n)`, 1.2% at 20 samples. The test uses a dab (exact) and a ring (tolerance stated as that
-  arithmetic).
+- **§2's letterbox factor was a ratio of the wrong rectangles.** Buffers, not artwork — so on any
+  document with padding, "double it" silently grows the margin and shrinks the artwork. Exactly the
+  "two controls fighting over one number" §6 Q3 had just ruled against, and **exactly zero at
+  `k == 1`**, which is why stage 1 could not see it.
+- **`CanvasResizeMap.inverse` picked Fit both ways.** Undoing a Fit needs a **Fill**
+  (`1/min(rx,ry) == max(1/rx,1/ry)`). Unreachable until stage 3's undo existed.
+- **§2 sized the undo step at ~410 MiB and worried it would evict itself.** The undo is the inverse
+  resize *recomputed*: a map, a scalar, a weak self. **O(1)**, now pinned by a test. The measurement
+  stage 3 owed had nothing to measure.
+- **§0's vector-primitive row was stale in our favour** — `VectorCanvas.resized` has baked the map
+  into the elements since (12) stage 3, so **stage 2's vector arm was already written**.
+- **Enclosed fires `mayDiverge` *less* often than Cut, not more.** Its moved set is a subset. The
+  scoping brief asserted the opposite confidently; a test now pins the ordering
+  Touching ≥ Cut ≥ Enclosed.
+- **(18)'s recorded dead end was misdiagnosed.** A `ScrollView` does *not* propose unbounded height
+  to its content — asked with `height: nil` it reports the content's ideal size. The greedy behaviour
+  is it reporting *its own* size upward once given a number. So the problem was never that the rows
+  could not be measured; it was that the measurement had to reach a frame without forming a cycle.
+  A custom `Layout` asks both questions in order, with no state and so no cycle to settle at zero.
+- **Clear hid a second defect under the reported one.** `clipPath` stapled the loop onto *every* fill
+  with no bounds test and forced even-odd, so two disjoint regions each winding once **both filled** —
+  clearing bare paper painted it the colour of a fill elsewhere on the canvas.
 
-## The trap that cost a broken `main`, and it is the one to carry
+## The trap to carry: a performance number is evidence about its fixture
 
-`87081de` shipped `leaked.rotation += float.frame.boxAngle` — the exact defect stage 3b exists to
-prevent — under a commit message asserting the opposite. It was a **mutation-testing defect the worker
-had deliberately written to disk**, to check its own new guard could catch a leak. The orchestrator saw
-the worker's test run finish, grepped the tree, found it clean, and committed / merged / pushed it,
-deleting the worker's worktree and branch while it was still running.
+The 3-4 s resize that started a whole design conversation was measured on a fixture whose cels had no
+vector content. The owner asked why it cost anything at all, given samples are stored as ints about a
+stored origin — and the honest answer had three parts: they are right that **nothing is re-encoded on
+disk**; the cost is the **in-memory** walk, which is 97% of it on their documents; and that walk is
+**0.9 ms/cel**, so a 300-cel resize is 0.27 s, a tenth of what the spec had been planning against.
 
-Two lessons, both now in CLAUDE.md. **A finished test run is not a finished agent** — there is a
-completion notification and it is the only signal that means what you want. And **a green check is
-evidence about the tree that existed when you ran it**: this file already warned that a *red* xcresult
-is evidence about a binary rather than a working tree, and nothing warned that it runs the other way.
-The grep was true when it ran and false four minutes later. The general rule is the plainer one: a
-worker's tree is a *workbench* — it legitimately holds deliberate poison — so harvest its **commits**.
+Their proposed fix — put the translation back in a layer transform, which this code once had — **does
+not skip the walk, it moves it to the next save**, because `VectorCanvasData.init(from:)` bakes any
+carried transform on encode. It also reintroduces two of the three defects (12) removed it for, one
+worse than before: a uniform per-cel offset shifts keyframes while in-betweens render unshifted.
+
+This is the same family as CLAUDE.md's banner-versus-count and red-xcresult-is-about-a-binary traps,
+reached from a third direction. **Check what the fixture is made of before believing what it measured.**
 
 ## Still open, unchanged
 
-`ARCHITECTURE_REVIEW.md` findings 2-4 are open and unruled. BUGS.md carries the raster-storage entry
-(`CompositorBudget` bounds only compositor scratch, so one persistent buffer at maximum canvas is
-~1.02 GB), the unclamped zoom — which a *precise* stroke now survives, since float32 has no boundary to
-saturate onto — `TextFrame.homography` decoding with no validity check, and PERFORMANCE.md item 14.
+`ARCHITECTURE_REVIEW.md` findings 2-4 are open and unruled. BUGS.md carries the two new entries
+(interactive-gesture CPU composites; Fill/Clear on a derived in-between), the raster-storage bound,
+the unclamped zoom, `TextFrame.homography` decoding with no validity check, and PERFORMANCE.md item 14.
 
-Two behaviour questions are still owed and nobody is blocked: save semantics when a project loaded with
-something unreadable, and which faces belong in the font picker's favourites strip.
+Two behaviour questions are owed: save semantics when a project loaded with something unreadable, and
+which faces belong in the font picker's favourites strip.
 
 Four judgement calls wait on real artwork, none of them defects: the Cut eraser across a line thicker
-than the eraser, a crossing line that can flicker during a cut drag, a fill chunk dropped on blank paper
-staying a fill, and a Freeform-stretched text box draggable smaller than its own text.
+than the eraser, a crossing line that can flicker during a cut drag, a fill chunk dropped on blank
+paper staying a fill, and a Freeform-stretched text box draggable smaller than its own text.

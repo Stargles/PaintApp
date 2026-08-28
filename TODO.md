@@ -23,122 +23,33 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(20) Move's three-way membership** — scoped and ruled, below. Unblocked: (19) merged the shared
-  containment predicate, already shaped as a pure geometric classifier with the kind-skipping in the
-  caller, and `testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips` goes red if anyone
-  folds the skipping back down into it. **The refactor the scoping pass called stage 0 is not owed.**
-- **(9) stage 3 is built on `tmp/resize3`** — undo, the refusal, the save gate and the busy state.
-  Stage 4 is deferred polish nobody has asked for, so the ask itself is complete once this merges.
-- **(9) stage 0 is merged** (`ea51607`): a failed save now raises the `CanvasNotice` banner instead of
-  failing silently, which this feature needs because after a resize the in-memory document is the only
-  copy. **It is only visible on the autosave path** — on "leave to gallery" the banner is raised and
-  the screen flips to the gallery in the same render pass, so nothing is seen. Making that visible
-  means holding the artist in the editor on failure, which needs a retry affordance that does not
-  exist; **unruled, and not blocking anything.**
+- **Nothing.**
 
-## How a brush stroke is stored — one feature in five items
+## How a brush stroke is stored — one feature in five items, and all five are merged
 
 **The owner's own framing, 2026-08-27:** *"there are alot of tasks in there currently which are all
 parts of the same feature, being the refit to the way brush strokes are stored. (8), (12), (13), with
-(9) and (14) are features of the feature."* Read the five as one refit and sequence them together;
-splitting them across sessions is what let their premises drift apart in the first place.
+(9) and (14) are features of the feature."* Read the five as one refit — splitting them across
+sessions is what let their premises drift apart in the first place.
 
-**Five asks, one programme**, sharing one number. Three are merged, (14) is built and awaiting a
-merge, and **(9) is the only one left to build**.
-**`CanvasManager.maxCanvasExtent` — 16383 — is that one number**: the maximum canvas, the ceiling the
-canvas-plus-padding budget is derived from, and what a stored coordinate can address. It is defined
-once, and (8)'s codec derives its own bounds from `Int16` rather than restating it.
+**Done 2026-08-28**: (12) stage 3 `2fa1725`, (13) `83f7c0d`, (8) `e277f82`, (14) `7eef540`, and (9)
+in four stages — `ea51607`, `3d0c7c4`, `b42a67b`, `c35df15`. `CANVAS_RESIZE.md` §4 stage 4 is deferred
+polish nobody has asked for. **`CanvasManager.maxCanvasExtent` — 16383 — is the one number they
+share**, defined once, with (8)'s codec deriving its bounds from `Int16` rather than restating it.
 
-**Order, and it is forced rather than preferred: (12) stage 3 → (13) → (8) → (14) → (9).**
-The first three are **merged** — (12) stage 3 `2fa1725`, (13) `83f7c0d`, (8) `e277f82` — and have
-left this file. **(14) is built on `tmp/revmove`** — scoping it found that (8) had *answered* three
-quarters of it rather than unblocked it: the quantiser (14) wanted something to bake back **to** is a
-save-time codec with no resident 16-bit form, and the doubles it wanted the Move held in were always
-what the Move held. What survived was a defect the ask had not named, and that is what shipped. (9) is
-genuinely independent *because* the width is fixed, so a resize re-encodes nothing — and more so now
-that a payload carries the origin it was quantised about, which leaves an unresaved cel readable
-whatever the canvas becomes.
-
-### (9) Resize the canvas from the Actions menu — stages 0-2 merged, stage 3 built
-
-- [ ] The owner: *"a resize canvas option in actions would be nice ... They should be able to control
-      whether it gets cropped/expanded, or if everything gets scaled."* On an aspect change it
-      letterboxes — *"Not in the conventional sense of adding black, just scaling the stuff so it fits."*
-      **[CANVAS_RESIZE.md](CANVAS_RESIZE.md) is the specification, it is written, and its §6 is answered
-      in full (2026-08-28) — this item is unblocked.** Its §0 records that two thirds of this already
-      exists under other names (`setCanvasPadding` is a whole-document crop/expand;
-      `VectorCanvas.mapping(_:throughSimilarity:)` is the exact vector scaler). The owner's four rulings
-      are folded into §5: the width/height field means the artwork rect (rule 9); a lossy resize undoes
-      anyway and says so up front (rule 10); an aspect change offers Fit *and* Fill, Fit still the
-      default (rule 2); and the compositor's admission gate warns and lets the artist proceed — which
-      also corrects a stale reading of what that gate does (rule 14, CANVAS_RESIZE.md §6 Q5).
-      **Stage 0 `ea51607`** (a failed save says so) and **stage 1 `3d0c7c4`** (Resize Canvas exists,
-      crop/expand only, not undoable) are merged. Stage 1 also fixed three defects `setCanvasPadding`
-      had all along — guides untransformed, `copiedCel` uncleared, lattices unmoved — because both now
-      share one walk; §0 listed two of the three.
-      **Stage 2 `b42a67b`** (the scale toggle and the letterbox rule) is merged. **Stage 3 is built on
-      `tmp/resize3`** — the owner re-scoped it on 2026-08-28 (*"resize freezing canvas isnt that big of
-      an issue, as long as the user knows its loading. It is a one time thing anyway."*, §5 rule 15),
-      and it shipped the undo step, the rule 11 refusal, the `isResizing` save gate and the busy
-      overlay; off-main execution, bounded raster concurrency and the cache purge were dropped as the
-      ruling allows. **The busy overlay has two paths, and that is the part worth knowing**: the flag
-      is free and only the suspension costs anything, so a resize predicted to block for under 0.2 s
-      runs in one main-actor turn and is never rendered as busy at all — which is what stops a 0.27 s
-      resize flashing a modal. Three of this document's own instructions were refuted and are recorded
-      in CANVAS_RESIZE.md §4: the undo step's retained cost is O(1) rather than `Σ elements × 512`,
-      `image.cgImage == nil` is not a failure mode, and determinate progress is exclusive with an
-      atomic walk. The same owner message asked *why* a resize costs anything given fixed-point sample
-      storage; answered in CANVAS_RESIZE.md §2 and PERFORMANCE.md item 18 — right about the file, and
-      the cost is in the resident display list, which is still doubles. That pass also found the 3–4 s
-      figure was a raster-only fixture's: a document shaped like the owner's own resizes at **0.9 ms a
-      cel**, a tenth of it.
-      **BUGS.md carries a defect on this path**: Canvas Padding while a vector Move is held cancels
-      pre-resize geometry onto the resized cel. Left unfixed on purpose, because this item rebuilds that
-      path.
+**The finding worth keeping now the programme is done, because it will be assumed wrong otherwise.**
+(9) proved independent of the rest *because* the width is fixed and each payload carries the origin it
+was quantised about — so a resize re-encodes nothing and an unresaved cel stays readable whatever the
+canvas becomes. But the resize's cost was never the encoding: MEASURED at **0.9 ms/cel** on a document
+shaped like the owner's real artwork (190 strokes x 46 samples a cel, blank raster tiers), **97% of it
+the in-memory vector walk**, of which **84% is array allocation and 15% arithmetic**. The earlier
+3-4 s figure came from a raster-only fixture whose cels held no `VectorCanvas` at all. And the obvious
+fix — re-adopting a translation-only layer transform so a crop touches no sample — **does not skip the
+walk, it moves it**: `VectorCanvasData.init(from:)` bakes any carried transform on encode, so the cost
+lands in the next save, off a path the artist is told is loading. See PERFORMANCE.md item 18 and
+LAYER_TRANSFORM.md.
 
 ## Open
-
-### (20) Move should offer three membership rules, not one
-
-- [ ] The owner, 2026-08-28: *"Additional feature for the move tool: There should be an option of
-      three where instead of cutting the lines outside the selection, it moves all the lines including
-      the ones partially inside the selection, or only the ones fully inside. The third option is the
-      current behaviour. I think you could reuse the color change code on figuring out the stuff
-      covered by the lasso."* **Their reuse instinct is right and understated**: mode Touching is (19)'s
-      predicate, and mode Enclosed is *already computed* inside the function that does the cutting —
-      `splitForLassoMove`'s `runs.count <= 1` fast path (`VectorLayer.swift:1581-1586`) is exactly
-      "every sample inside". So this is one parameter on one function, not three implementations.
-      **Names, ordered by how much travels, default in the middle:** `Enclosed · Cut · Touching`.
-      **Two rulings, 2026-08-28.** Text and placed images **follow the mode** in Touching and Enclosed
-      rather than keeping the centre rule — so each mode has one sentence true of every kind — while
-      **Cut keeps the centre**, which is what it has always been: a rounding of the cut rule for kinds
-      that cannot be cut. And **Enclosed catching nothing says so**, unlike §5.9's silent empty lasso,
-      because there the paper was blank and here the rule is what excluded a loop full of ink.
-      **Mode C is already a mixture**, which is the finding that reframes the ask: text and images
-      already use a third rule inside the mode called "cut". The option makes an existing
-      inconsistency visible and gives it vocabulary, rather than introducing one.
-      **A and B are cheaper and safer than the mode that ships**, which inverts the usual expectation:
-      no bisection, no boundary dab, no fresh ids, no lattice re-keying, and — the one that matters —
-      **no interpolation-tier demotion**, since stroke count is unchanged. `beginVectorWholeCelMove`
-      is the working proof: a float that splits nothing and shares every nudge, bake and teardown path.
-      **The picker goes on the Move bar, live while `nudges == 0`, disabled with a reason after.** The
-      Select panel is invisible while anything floats (§5.13), which is the one moment the artist can
-      see what the rule did. Re-lift is `cancelVectorFloat()` **then** `beginVectorLassoMove()` — in
-      that order, because the latter's first statement bakes the float. Re-lifting *after* a nudge is
-      a day's work with stale-closure risk on the undo stack; deferred, written down, not discovered.
-      **Two traps to carry.** (19)'s predicate skips erasers and images and Move's §5.7 rules the
-      opposite, so the shared thing is a per-element **classifier** and the kind-skipping belongs to
-      each caller. And in Touching the marching ants stop bounding the moving ink — the ants are the
-      loop, and a stroke hanging outside it now travels whole. Both correct, both will read as bugs.
-      `.cutting` is the default and the setting is **not persisted** — per-drawing intent, the line
-      `preserveMovePrecision` already draws (`CanvasManager.swift:348-350`). Persisting it would make
-      the *last used* the default, which is not what the owner asked for.
-      **Built on `tmp/movemodes` in two commits** — the engine (`LassoMembership`, the parameter on
-      `splitForLassoMove`, the shared per-kind classifier) and the picker (the Move bar, the re-lift,
-      the `nothingWhollyInside` notice). [LASSO_MOVE.md](LASSO_MOVE.md) §0 is the inventory and §5.23-24
-      are the rulings. **One brief premise was wrong and is corrected there**: `mayDiverge` fires
-      *least* often under Enclosed, not most — an element wholly inside the loop moves under Cut too,
-      so Enclosed's moved set is a subset of Cut's. The latch stays in every mode regardless.
 
 ### (10) Oklab colour storage and processing, from the Actions menu
 
