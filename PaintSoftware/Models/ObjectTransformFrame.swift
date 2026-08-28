@@ -30,7 +30,47 @@ struct ObjectTransformFrame: Equatable {
     var transform: LayerTransform
     /// The layer's own content bounding box, in the layer's local (pre-transform) space. The box is
     /// sized to the *content*, not to the canvas, so Move carries the drawing rather than the sheet.
+    ///
+    /// **Since stage 3b phase 3 this is a function of `boxAngle` rather than a constant** — see
+    /// `contentOffset`, and `CanvasManager.fittedFrame(of:at:)`, which is the only thing that writes
+    /// either to anything other than its default.
     var contentSize: CGSize
+
+    /// **Where the box's centre sits relative to `transform.position`, in the box's own local units
+    /// — the same units as `contentSize`, and the field that lets the box hug ink whose tight box is
+    /// not centred on the pivot.**
+    ///
+    /// **Why it has to exist.** `transform.position` is doing two jobs: it is where the box is drawn
+    /// *and* it is where `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` sends the geometry
+    /// pivot. A tight box around a diagonal has a different centre from the loose axis-aligned one
+    /// (a right triangle re-fitted at 45° moves its centre by a quarter of its own width), so the
+    /// re-fit has somewhere to put that offset or it does not have it at all. Putting it in
+    /// `transform.position` would slide the artist's drawing every time they turned the yellow knob
+    /// — which LASSO_MOVE.md §5.21 forbids outright, since a box turn has nothing on the undo stack
+    /// to give back. So the box's centre moves and the geometry's anchor does not, which is the same
+    /// separation phase 1 established for the *angle*, extended to the size.
+    ///
+    /// **`centre` is deliberately still `transform.position`.** That is the point a corner drag
+    /// scales about and a knob turns about (`ObjectTransformDrag.anchor`), and it has to stay the
+    /// geometry's fixed point: a drag anchored on the drawn box's centre would scale the ink about a
+    /// point `affine(…)` does not hold still, and the piece would slide under the finger. Only
+    /// `projected` and its inverse `local` read this field, so everything drawn or hit — the four
+    /// corners, both knobs, the move band — moves with the box while the anchor stays put.
+    ///
+    /// **It cannot reach the geometry, and that is structural rather than a convention.** The map
+    /// takes a `LayerTransform` and three scalars (`aspect`, `stretchAxis`, `pivot`); no signature on
+    /// the path from a drag to `VectorCanvas` mentions `ObjectTransformFrame` at all, and
+    /// `ObjectTransformDrag.Pose` — the one value that crosses from a gesture into the model — has no
+    /// offset field and no defaults, so a field added there would be a compile error at every
+    /// construction site rather than a silent leak. On top of that the fit is a *return value*:
+    /// `CanvasManager.fittedFrame(of:at:)` builds a frame for the overlay and writes nothing, so
+    /// `vectorFloat.frame.contentSize` is still assigned only at the two lift sites and
+    /// `LassoMoveLogicTests.testTheBoxDoesNotInflateWithinOneLift` still guards that.
+    ///
+    /// Defaulted to `.zero` so every existing call site is untouched, and `contentOffset == .zero`
+    /// is bit-identical to the frame before this field existed: `projected` adds an exact 0 to each
+    /// axis before scaling and `local` subtracts it again.
+    var contentOffset: CGPoint = .zero
 
     /// Which grips this box offers. Everything, for a whole-layer transform — the semantics the owner
     /// ruled correct on 2026-08-21 are unchanged, and the default is what keeps every existing call
@@ -163,11 +203,13 @@ struct ObjectTransformFrame: Equatable {
     var stretchAxis: CGFloat = 0
 
     init(transform: LayerTransform, contentSize: CGSize, aspect: CGFloat = 1,
+         contentOffset: CGPoint = .zero,
          boxAngle: CGFloat = 0, stretchAxis: CGFloat = 0,
          allowedHandles: Set<Handle> = Set(Handle.allCases)) {
         self.transform = transform
         self.contentSize = contentSize
         self.aspect = aspect
+        self.contentOffset = contentOffset
         self.boxAngle = boxAngle
         self.stretchAxis = stretchAxis
         self.allowedHandles = allowedHandles
@@ -296,7 +338,11 @@ struct ObjectTransformFrame: Equatable {
     /// A box with no extent draws and hits nothing — the state the overlay hides itself in.
     var isEmpty: Bool { contentSize.width <= 0 || contentSize.height <= 0 }
 
-    /// The point every scale and every rotation holds still.
+    /// **The point every scale and every rotation holds still — the geometry's anchor, and not
+    /// necessarily the middle of the drawn box.** The two coincide whenever `contentOffset` is zero,
+    /// which is every frame outside a re-fitted Move box; where they differ it is this one that a
+    /// drag must measure from, for the reason `contentOffset` states. `projected(.zero)` is the
+    /// other one.
     var centre: CGPoint { transform.position }
 
     /// The four corners in canvas space: top-left, top-right, bottom-right, bottom-left, in the
@@ -316,7 +362,10 @@ struct ObjectTransformFrame: Equatable {
     /// prerequisite for compiling the Move box's geometry, and for testing it.
     func projected(_ local: CGPoint) -> CGPoint {
         let s = axisScales
-        let x = local.x * s.x, y = local.y * s.y
+        // `contentOffset` is in these same local units and is added *before* the scale and the
+        // rotation, so the offset turns with the box rather than sliding it about the screen. At the
+        // default `.zero` this is `local.x * s.x` to the bit.
+        let x = (local.x + contentOffset.x) * s.x, y = (local.y + contentOffset.y) * s.y
         let r = drawnAngle
         return CGPoint(x: transform.position.x + x * cos(r) - y * sin(r),
                        y: transform.position.y + x * sin(r) + y * cos(r))
@@ -436,7 +485,7 @@ struct ObjectTransformFrame: Equatable {
         let r = -drawnAngle
         let rx = dx * cos(r) - dy * sin(r)
         let ry = dx * sin(r) + dy * cos(r)
-        return CGPoint(x: rx / s.x, y: ry / s.y)
+        return CGPoint(x: rx / s.x - contentOffset.x, y: ry / s.y - contentOffset.y)
     }
 }
 

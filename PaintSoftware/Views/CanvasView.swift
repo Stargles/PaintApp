@@ -1586,13 +1586,11 @@ struct CanvasView: UIViewRepresentable {
             if let float = canvasManager.vectorFloat,
                canvasManager.layerIndex(ofID: float.layerID) != nil {
                 let pose = liveVectorFloatPose ?? Self.pose(of: float)
+                // **The box is fitted, not the lift's** — `CanvasManager.fittedFrame(of:at:)` hugs
+                // the ink in the box's own turned frame (LASSO_MOVE.md §5.22). It returns a frame
+                // and writes nothing, so the float's own `contentSize` stays the lift's.
                 overlay.update(isActive: true,
-                               frame: ObjectTransformFrame(transform: pose.transform,
-                                                           contentSize: float.contentSize,
-                                                           aspect: pose.aspect,
-                                                           boxAngle: pose.boxAngle,
-                                                           stretchAxis: pose.stretchAxis,
-                                                           allowedHandles: float.frame.allowedHandles),
+                               frame: CanvasManager.fittedFrame(of: float, at: pose),
                                canvasScale: canvasContentScale)
                 container.bringSubviewToFront(overlay)
                 return
@@ -1732,13 +1730,12 @@ struct CanvasView: UIViewRepresentable {
                 let pose = drag.pose(draggedTo: point)
                 liveVectorFloatPose = pose
                 showVectorFloat(float, at: pose)
+                // The re-fit is the one thing this function gained that is *not* free: it walks the
+                // lifted ink's points once per touch-move. `MoveBoxInk` is why that is a pass over an
+                // array of `CGPoint` rather than a walk of the display list, and
+                // `PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts` is the measurement.
                 transformOverlay?.update(isActive: true,
-                                         frame: ObjectTransformFrame(transform: pose.transform,
-                                                                     contentSize: float.contentSize,
-                                                                     aspect: pose.aspect,
-                                                                     boxAngle: pose.boxAngle,
-                                                                     stretchAxis: pose.stretchAxis,
-                                                                     allowedHandles: float.frame.allowedHandles),
+                                         frame: CanvasManager.fittedFrame(of: float, at: pose),
                                          canvasScale: canvasContentScale)
             }
         }

@@ -23,6 +23,136 @@ import UIKit
 //     stroke you cut is one stroke again, because the cut was something the move did to make itself
 //     possible and not an edit anybody asked for (owner, 2026-08-22).
 
+/// **The lifted ink reduced to the points a handle box has to enclose** — measured once at the lift,
+/// and re-measured *through a matrix* on every frame of a knob drag.
+///
+/// **Why the reduction exists at all.** The box's size stopped being a constant at stage 3b phase 3:
+/// the owner's ask of 2026-08-28 is that turning the yellow knob re-fits the box to the drawing
+/// inside it, *"bigger and then smaller on 45 degree angle increments of a square … and constant for
+/// a circle"* (LASSO_MOVE.md §5.22). That makes the measurement a per-touch-move cost rather than a
+/// per-lift one, and it makes the *definition* of the measurement something two call sites share
+/// instead of one owning it. Both were reasons to name the thing being measured.
+///
+/// **One definition, used twice.** `CanvasManager.localBounds(of:)` is `bounds()` with no matrix, and
+/// the re-fit is `bounds(through:padScale:)` with the box's own frame. Nothing reads the *previous*
+/// box to compute the next one, which is the one implementation mistake this feature has that a
+/// screenshot would not catch: a box measured from the corners of the box before it grows by √2 on
+/// every eighth-turn and never comes back, and the circle case in
+/// `LassoMoveLogicTests.testTheFittedBoxIsConstantAtEveryAngleAroundADiscAndARing` is the cheap
+/// tripwire for exactly that.
+///
+/// **Padding is per element and is applied after the map, which is the whole of §5.19's arithmetic.**
+/// A stroke's footprint is a disc of `stampRadius` about each sample; rotating an already-padded
+/// axis-aligned box re-pads it diagonally, which is why a 100 × 20 bar re-lifted at 45° measures
+/// 76.57 × 76.57 rather than the 84.85 a rotated box would give. Keeping the points and the reach
+/// apart until the last moment is what lets the fit pad in the frame it is measuring in.
+struct MoveBoxInk {
+
+    /// One element's contribution: the points that bound it, and the **isotropic** reach that pads
+    /// them. Isotropic because that is what the ink is — a stroke stamps round dabs, and a Freeform
+    /// stretch scales the stamp by `sqrt(|det|)` (LASSO_MOVE.md §5, and
+    /// `VectorCanvas.mapping(_:throughStretch:)`) precisely so it stays round.
+    struct Cluster {
+        let points: [CGPoint]
+        let reach: CGFloat
+    }
+
+    let clusters: [Cluster]
+
+    init(of elements: [VectorElement]) {
+        clusters = elements.compactMap(Self.cluster(of:))
+    }
+
+    /// **Ink, and the half-width that wraps it** — the four kinds, each reduced to whichever of the
+    /// two it actually has.
+    ///
+    ///  * A **stroke** is its samples plus half its own width, so the box wraps what the artist can
+    ///    see rather than the centre line they cannot.
+    ///  * A **fill** is a `CGPath` and needs no padding; its points — on-curve and control alike —
+    ///    are what `boundingBoxOfPath` measures, so an unmapped measurement is the same rectangle
+    ///    that function returns and a mapped one is tight instead of a mapped rectangle's corners.
+    ///  * A **placed image** is a *disc*: `hypot(w, h)/2` about its centre, the circumscribed circle
+    ///    rather than its four corners. That is what the lift has always measured, and keeping it is
+    ///    what makes an image's contribution invariant under the box angle — which is right, because
+    ///    the box cannot tell the artist anything more useful about a photo it refuses to stretch or
+    ///    mirror anyway (`freeformUnavailableReason`, `mirrorUnavailableReason`).
+    ///  * A **text box** is its four corners, which under a turned box is *tighter* than the
+    ///    `boundingBox` the lift used to take of them and identical to it at rest, since that
+    ///    property is their axis-aligned hull.
+    ///
+    /// A lone `.erase` stroke contributes its footprint like any other: it draws nothing on its own,
+    /// but it is part of the piece being moved and a box that excluded it would have nothing to grab.
+    private static func cluster(of element: VectorElement) -> Cluster? {
+        switch element {
+        case .stroke(let stroke):
+            guard !stroke.samples.isEmpty else { return nil }
+            return Cluster(points: stroke.samples.map { CGPoint(x: $0.x, y: $0.y) },
+                           reach: StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
+                                                             size: stroke.size))
+        case .fill(let fill):
+            guard let path = fill.cgPath else { return nil }
+            var points: [CGPoint] = []
+            path.applyWithBlock { pointer in
+                let element = pointer.pointee
+                switch element.type {
+                case .moveToPoint, .addLineToPoint:
+                    points.append(element.points[0])
+                case .addQuadCurveToPoint:
+                    points.append(element.points[0]); points.append(element.points[1])
+                case .addCurveToPoint:
+                    points.append(element.points[0]); points.append(element.points[1])
+                    points.append(element.points[2])
+                case .closeSubpath:
+                    break
+                @unknown default:
+                    break
+                }
+            }
+            guard !points.isEmpty else { return nil }
+            return Cluster(points: points, reach: 0)
+        case .image(let image):
+            let size = image.image.size
+            return Cluster(points: [image.transform.position],
+                           reach: hypot(size.width, size.height) / 2 * abs(image.transform.scale))
+        case .text(let text):
+            guard !text.frame.corners.isEmpty else { return nil }
+            return Cluster(points: text.frame.corners, reach: 0)
+        }
+    }
+
+    /// The ink's bounding box **in the frame `through` maps into**, with each element's reach applied
+    /// there rather than before.
+    ///
+    /// `through` is a *linear* map and carries no translation on purpose: the box's **size** does not
+    /// depend on where the frame's origin is, so leaving the origin out means the caller can subtract
+    /// its own anchor from the answer's centre and get an exact zero back when the map is the
+    /// identity. Composing the translation in instead would make an un-turned box's size
+    /// `(a − p) − (b − p)` where the lift computed `a − b`, and those are not the same `Double`.
+    ///
+    /// `padScale` is how much of the reach lands on each of the frame's two axes. It is `(1, 1)` for
+    /// every measurement of unstretched ink; a stretched box's local units are not square, so the
+    /// disc the ink actually stamps pulls back to an ellipse — see
+    /// `CanvasManager.fittedFrame(of:at:)`, which is the only caller that passes anything else.
+    ///
+    /// Nil for ink with no extent at all, which is the state the overlay hides itself in.
+    func bounds(through map: CGAffineTransform = .identity,
+                padScale: CGPoint = CGPoint(x: 1, y: 1)) -> CGRect? {
+        var minX = CGFloat.infinity, minY = CGFloat.infinity
+        var maxX = -CGFloat.infinity, maxY = -CGFloat.infinity
+        let identity = map.isIdentity
+        for cluster in clusters {
+            let px = cluster.reach * padScale.x, py = cluster.reach * padScale.y
+            for point in cluster.points {
+                let q = identity ? point : point.applying(map)
+                minX = min(minX, q.x - px); maxX = max(maxX, q.x + px)
+                minY = min(minY, q.y - py); maxY = max(maxY, q.y + py)
+            }
+        }
+        guard minX < maxX, minY < maxY else { return nil }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+}
+
 /// A lassoed region lifted out for interactive moving, not yet baked.
 ///
 /// Transient — never persisted, never carried by `makeCopy()`. Keyed by stable UUIDs rather than
@@ -46,8 +176,29 @@ struct VectorFloat {
     /// The centre of the lifted content's local bounding box — the fixed point the box's transform is
     /// expressed about. `contentSize` is that box's size. The convention `updateTransformOverlay`
     /// already feeds the overlay for a whole-layer transform.
+    ///
+    /// **`pivot` is the geometry's anchor and it never moves** — a `let`, written at the lift, read by
+    /// every `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` a nudge builds. Since phase 3 the
+    /// *drawn* box's centre does move, as the fit re-hugs turned ink; that offset lands in
+    /// `ObjectTransformFrame.contentOffset` and nowhere near this (LASSO_MOVE.md §5.22).
     let pivot: CGPoint
+    /// The box the lift measured. **Still the box at rest**, and still the only `contentSize` the
+    /// *model* ever holds — the re-fit is a return value from `CanvasManager.fittedFrame(of:at:)`
+    /// and is never written back here, which is what keeps
+    /// `LassoMoveLogicTests.testTheBoxDoesNotInflateWithinOneLift` meaningful after phase 3.
     let contentSize: CGSize
+
+    /// The lifted ink reduced to points and reaches, once, so that re-fitting the box to a turned
+    /// frame costs one pass over an array instead of a walk of the display list. See `MoveBoxInk`.
+    ///
+    /// **Measured from `liftedInside` rather than from the elements currently in the cel**, and the
+    /// difference is not bookkeeping. The two describe the same ink — every nudge maps `liftedInside`
+    /// through an absolute map from the lift, so the elements in the list *are* these points mapped —
+    /// but only this one is right *during* a drag, where the model still holds the previous nudge's
+    /// geometry and what the artist is looking at is a latched bitmap under the live pose. The box
+    /// has to fit what they see, so it is measured from the lift and mapped by the pose, exactly as
+    /// the geometry is.
+    let ink: MoveBoxInk
 
     /// `vector.transform` at the moment of the lift. Every canvas-space delta is measured from here.
     let baseTransform: CGAffineTransform
@@ -166,7 +317,8 @@ extension CanvasManager {
         // deliberately does not invalidate, and callers follow with a bump.
         vector.suppressedElementIDs = split.insideIDs
 
-        guard let bounds = Self.localBounds(of: Array(lifted.values)) else {
+        let ink = MoveBoxInk(of: Array(lifted.values))
+        guard let bounds = ink.bounds() else {
             // Nothing measurable to put a box around. Put the list back rather than leaving a
             // suppression nothing will ever clear.
             vector.suppressedElementIDs = []
@@ -188,7 +340,7 @@ extension CanvasManager {
                                          contentSize: bounds.size)
         vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
                                   insideIDs: split.insideIDs, liftedInside: lifted,
-                                  pivot: pivot, contentSize: bounds.size,
+                                  pivot: pivot, contentSize: bounds.size, ink: ink,
                                   baseTransform: vector.transform, frame: frame,
                                   liftFrameTransform: frame.transform, mirror: .identity,
                                   elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: selection,
@@ -263,7 +415,8 @@ extension CanvasManager {
         // exactly as it is on the lasso arm.
         vector.suppressedElementIDs = lift.insideIDs
 
-        guard let bounds = Self.localBounds(of: lift.elements) else {
+        let ink = MoveBoxInk(of: lift.elements)
+        guard let bounds = ink.bounds() else {
             // A cel whose every element is degenerate — nothing measurable to put a box around.
             // Clear rather than leave a suppression nothing will ever come back for.
             vector.suppressedElementIDs = []
@@ -275,7 +428,7 @@ extension CanvasManager {
                                          contentSize: bounds.size)
         vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
                                   insideIDs: lift.insideIDs, liftedInside: lifted,
-                                  pivot: pivot, contentSize: bounds.size,
+                                  pivot: pivot, contentSize: bounds.size, ink: ink,
                                   baseTransform: vector.transform, frame: frame,
                                   liftFrameTransform: frame.transform, mirror: .identity,
                                   elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: nil,
@@ -639,35 +792,129 @@ extension CanvasManager {
     }
 
     /// The local-space bounding box of a set of elements, from their geometry rather than from a
-    /// rasterize — the box the float's handles are laid out on.
+    /// rasterize — the box the float's handles are laid out on at the lift.
     ///
-    /// **Ink, widened by half the stroke's own width**, so the box wraps what the artist can see
-    /// rather than the centre lines they cannot. A lone `.erase` element contributes its footprint
-    /// too: it draws nothing on its own, but it is the piece being moved and a box that excluded it
-    /// would have nothing to grab.
-    private static func localBounds(of elements: [VectorElement]) -> CGRect? {
-        var result: CGRect?
-        for element in elements {
-            let box: CGRect?
-            switch element {
-            case .stroke(let stroke):
-                let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
-                box = StrokeGeometry.bounds(of: stroke.samples, padding: reach)
-            case .fill(let fill):
-                box = fill.cgPath?.boundingBoxOfPath
-            case .image(let image):
-                let size = image.image.size
-                let radius = hypot(size.width, size.height) / 2 * abs(image.transform.scale)
-                box = CGRect(x: image.transform.position.x - radius, y: image.transform.position.y - radius,
-                             width: radius * 2, height: radius * 2)
-            case .text(let text):
-                box = text.frame.boundingBox
-            }
-            guard let box, !box.isNull else { continue }
-            result = result.map { $0.union(box) } ?? box
+    /// **One line, because the measurement itself moved to `MoveBoxInk`** when phase 3 made the box's
+    /// size a function of the box's angle: what used to be measured once now has to be measured again
+    /// in a turned frame on every touch-move, and both call sites have to be the *same* measurement
+    /// or the box would change size the instant the artist touched the knob and put it back. The
+    /// element-by-element argument — half a stroke's width, an image's circumscribed disc, a text
+    /// box's corners — lives there now, next to the padding rule that goes with it.
+    ///
+    /// Kept as a named function rather than inlined at the two lifts because the perf suite and this
+    /// file's own doc comments name it, and because "the box the lift measures" is worth having a
+    /// name for now that it is not the only box.
+    static func localBounds(of elements: [VectorElement]) -> CGRect? {
+        MoveBoxInk(of: elements).bounds()
+    }
+
+    /// **The Move box as it should be *drawn*: the lift's pose, with the box's size and centre
+    /// re-fitted to the ink inside it, in the box's own turned frame.** LASSO_MOVE.md §5.22, TODO
+    /// item (20) phase 3, and the owner's ask of 2026-08-28 — *"That box should be the bounding box
+    /// of the drawing inside of it and should actively change dimensions when rotated to keep on
+    /// fitting the image."*
+    ///
+    /// ## What it computes
+    ///
+    /// The box is a rectangle at the angle it is drawn at (`transform.rotation + boxAngle`) with the
+    /// two axis scales `axisScales` gives, so the tightest one is found by expressing the ink in that
+    /// rectangle's own coordinates and taking the axis-aligned hull there. Write `B` for the box's
+    /// linear map out of those coordinates and `L` for the ink's — the linear part of
+    /// `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)`, with `VectorFloat.mirror` in front —
+    /// and the frame this measures in is `G = B⁻¹·L·Mirror`:
+    ///
+    /// ```
+    /// B = R(ρ + β)·diag(sx, sy)                 the box, drawn
+    /// L = R(ρ + φ)·diag(sx, sy)·R(−φ)           the ink, mapped
+    /// ```
+    ///
+    /// **`ρ` cancels out of `B⁻¹·L` identically**, which is why the *green* knob needs no special
+    /// case: turning the ink and the box together changes neither the box's size nor its centre, and
+    /// that is arithmetic rather than a coincidence to be tested for
+    /// (`LassoMoveLogicTests.testTheGreenKnobTurnsInkAndBoxTogetherAndTheFitDoesNotMove` asserts it
+    /// anyway, because "provable" and "implemented" are different claims).
+    ///
+    /// **Two poses reduce to `R(−β)` exactly and are written out rather than computed**, the same
+    /// discipline — and for the same reason — as `affine`'s own two reductions. `aspect == 1` makes
+    /// `diag` a scalar, which commutes; `boxAngle == stretchAxis` makes the two inner rotations
+    /// cancel. Between them those are every pose an artist reaches without stretching twice about two
+    /// different axes, and they include the pose at rest, where `R(0)` is the identity to the bit and
+    /// the fit therefore returns the lift's own box with a `.zero` offset.
+    ///
+    /// **The reach is scaled, not rotated.** A stroke stamps a round dab and a Freeform stretch keeps
+    /// it round by scaling it `sqrt(|det|)` — so in canvas space the footprint is a disc of
+    /// `reach · transform.scale` whatever the box has been turned or stretched to, and in the box's
+    /// own (non-square, when stretched) units that disc is an ellipse with semi-axes
+    /// `reach/sqrt(aspect)` and `reach·sqrt(aspect)`. That is `padScale`, and it is `(1, 1)` exactly
+    /// on an unstretched box.
+    ///
+    /// ## What it must not do
+    ///
+    /// **Move the geometry's anchor.** A tight box around a diagonal is not centred where the loose
+    /// one was, so the box's centre travels as the knob turns — but `pivot` enters the map and
+    /// `transform.position` is where the map sends it, so a fit that wrote its centre into either
+    /// would slide the artist's drawing while they merely turned a knob, with nothing on the undo
+    /// stack to give it back (§5.21). The offset goes into `ObjectTransformFrame.contentOffset`,
+    /// which no map reads, and this function **returns** a frame rather than writing one: the model's
+    /// `vectorFloat.frame` is untouched, so `contentSize` is still assigned only at the two lifts.
+    ///
+    /// **Measure the previous box.** Every number here comes from `float.ink`, which is the *ink*;
+    /// nothing reads `contentSize`. A fit that measured the last box instead would swell by √2 on
+    /// every eighth-turn and never shrink back, and the constant-around-a-disc case is the cheap test
+    /// for it.
+    static func fittedFrame(of float: VectorFloat,
+                            at pose: ObjectTransformDrag.Pose) -> ObjectTransformFrame {
+        let atRest = ObjectTransformFrame(transform: pose.transform, contentSize: float.contentSize,
+                                          aspect: pose.aspect, boxAngle: pose.boxAngle,
+                                          stretchAxis: pose.stretchAxis,
+                                          allowedHandles: float.frame.allowedHandles)
+        let s = ObjectTransformFrame.axisScales(scale: pose.transform.scale, aspect: pose.aspect)
+        // A degenerate box has no frame to measure in, and `sqrt` of a non-positive aspect is NaN —
+        // the same refusal `axisScales`' own note describes, one level up. The lift's box is the
+        // honest answer: it is where the handles already are.
+        guard pose.aspect > 0, abs(s.x) > .ulpOfOne, abs(s.y) > .ulpOfOne else { return atRest }
+
+        let box = CGAffineTransform.identity
+            .rotated(by: pose.transform.rotation + pose.boxAngle)
+            .scaledBy(x: s.x, y: s.y)
+        let straight: CGAffineTransform
+        if pose.aspect == 1 || pose.boxAngle == pose.stretchAxis {
+            straight = CGAffineTransform(rotationAngle: -pose.boxAngle)
+        } else {
+            let ink = CGAffineTransform.identity
+                .rotated(by: pose.transform.rotation + pose.stretchAxis)
+                .scaledBy(x: s.x, y: s.y)
+                .rotated(by: -pose.stretchAxis)
+            straight = ink.concatenating(box.inverted())
         }
-        guard let result, result.width > 0, result.height > 0 else { return nil }
-        return result
+        // The mirror's *linear* part only: it is a reflection about `pivot`, and everything measured
+        // here is measured as an offset from `pivot`, so its translation is already accounted for.
+        // Exactly `diag(±1, ±1)` by construction (`mirrorFloating`), so it costs the fit no accuracy.
+        let mirrored = CGAffineTransform(a: float.mirror.a, b: float.mirror.b,
+                                         c: float.mirror.c, d: float.mirror.d, tx: 0, ty: 0)
+        let map = mirrored.concatenating(straight)
+        let padScale = CGPoint(x: 1 / sqrt(pose.aspect), y: sqrt(pose.aspect))
+        guard let fitted = float.ink.bounds(through: map, padScale: padScale) else { return atRest }
+        // `map` carries no translation, so the anchor has to be mapped alongside the ink rather than
+        // subtracted from it beforehand — which is also what makes the offset an exact `.zero` at
+        // rest, where `map` is the identity and this is `pivot` itself.
+        let anchor = float.pivot.applying(map)
+        return ObjectTransformFrame(transform: pose.transform, contentSize: fitted.size,
+                                    aspect: pose.aspect,
+                                    contentOffset: CGPoint(x: fitted.midX - anchor.x,
+                                                           y: fitted.midY - anchor.y),
+                                    boxAngle: pose.boxAngle, stretchAxis: pose.stretchAxis,
+                                    allowedHandles: float.frame.allowedHandles)
+    }
+
+    /// The fitted box for the float as it is *resting* — no drag in flight. What a logic test drives
+    /// and what the overlay rebuilds from between gestures; a live drag passes its own pose to
+    /// `fittedFrame(of:at:)` instead, since the model does not learn a drag's pose until it ends.
+    var fittedMoveBoxFrame: ObjectTransformFrame? {
+        guard let float = vectorFloat else { return nil }
+        return Self.fittedFrame(of: float, at: ObjectTransformDrag.Pose(
+            transform: float.frame.transform, aspect: float.frame.aspect,
+            boxAngle: float.frame.boxAngle, stretchAxis: float.frame.stretchAxis))
     }
 
     /// One nudge's undo step: `registerVectorElementsUndo`'s whole-array swap, plus the three things
