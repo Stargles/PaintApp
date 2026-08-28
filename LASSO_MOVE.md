@@ -884,8 +884,18 @@ about makes the pair a *general affine* and still not a homography.
 - ~~**Freeform**~~ — **done**, stage 3a, see §0. It needed one scalar on the box and a second mapping
   function, not the quad this list assumed.
 - ~~**Flips**~~ — **done**, stage 2, as one affine on the float.
-- **The box-only rotate knob** (stage 3b) — **approved by the owner on 2026-08-27 and the next thing
-  to build**, TODO item (20), on §5.19–21. It is not on this list as a maybe any more.
+- ~~**The box-only rotate knob**~~ (stage 3b) — **phase 1 done**, `87081de`, TODO item (20), on
+  §5.19–21. A yellow knob off the box's *bottom* edge writes `ObjectTransformFrame.boxAngle`, which is
+  **chrome**: `drawnAngle` (`transform.rotation + boxAngle`) is the single place the two are added,
+  and every geometry path still reads `transform.rotation` alone, so the lift invariant holds and the
+  drag arm returns `transform: start` bit for bit. No undo step (§5.21), written straight onto the
+  float by `CanvasManager.turnVectorFloatBox(to:)`. Reset leaves it alone — §5.16 and §5.21 meet
+  there, and both point the same way (see `canResetFloating`'s own note).
+  **Phase 2 is §5.20's second stored angle**, which is what un-greys Freeform: until it exists,
+  `freeformUnavailableReason` refuses a stretch on a turned box, because `ObjectTransformDrag.stretched`
+  measures its axes from `start.rotation` — the *ink's* angle, which on a hand-turned box is not the
+  box the artist can see. Uniform and both knobs are unaffected at any angle: they read radii and swept
+  angles about the anchor and no rotation at all.
 - **Placed images holding a stretched shape** (3c), and then **Distort** (stage 5) over the shared
   `Homography` solver — the one member of this list that really does need a quad. Text reached both
   Mirror and Freeform on 2026-08-27 (stage 3d) without needing 3c's stored field, because a

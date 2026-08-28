@@ -601,9 +601,15 @@ final class ObjectTransformLogicTests: XCTestCase {
     /// box and then moves, scales, turns or stretches the piece keeps their fit, and no arm can
     /// quietly straighten it.
     ///
-    /// Watched failing with `Pose`'s `boxAngle` defaulted at each `return` instead of being passed
-    /// through: *("0.0") is not equal to ("0.6") +/- ("1e-06") — body*, and the same for all four
-    /// corners and the green knob.
+    /// Watched failing with every arm's `boxAngle:` argument deleted so the field fell back to a
+    /// default: *("0.0") is not equal to ("0.6") +/- ("1e-06") — topLeft, freeform false*, sixteen
+    /// times over — every corner in both modes, the move band and the green knob — and it took
+    /// `testTheGreenKnobTurnsTheDrawingAndCarriesTheHandFittedBoxWithIt` down with it.
+    ///
+    /// **That mutation no longer compiles, and that is the better outcome.** `Pose.boxAngle` carries
+    /// no default precisely so a dropped pass-through is a build error rather than a red test; this
+    /// test is the second line, kept because the *first* line only guards construction and this one
+    /// guards the arithmetic that fills it in.
     func testEveryOtherArmPassesTheBoxAngleThroughUnchanged() {
         let frame = turned(0.6)
         let start = CGPoint(x: 1120, y: 620)
@@ -654,8 +660,12 @@ final class ObjectTransformLogicTests: XCTestCase {
     /// `transform.rotation`.
     ///
     /// Watched failing with `local(_:)` left reading `-transform.rotation` while `projected` read the
-    /// sum: the corners agree and *containment disagrees* — the box is drawn in one place and hit in
-    /// another, which is the exact defect the single-source-of-truth discipline exists to prevent.
+    /// sum — **the corners agree and containment disagrees**, which is the box drawn in one place and
+    /// hit in another, exactly the defect the single-source-of-truth discipline exists to prevent:
+    /// *("true") is not equal to ("false") — containment of (1190.0, 360.0) at 0.4*, and beside it
+    /// *("Optional(…Handle.body)") is not equal to ("nil") — target at (1190.0, 360.0), 0.4*, i.e. a
+    /// touch on bare canvas outside the visible box would have grabbed the move band. It is the only
+    /// test in the suite that goes red for it.
     func testTheDrawnBoxAndTheHitBoxBothFollowTheBoxAngle() {
         for angle in [CGFloat(0.4), CGFloat.pi / 2, 2.7, -1.2] {
             let byBox = turned(angle)
@@ -685,12 +695,19 @@ final class ObjectTransformLogicTests: XCTestCase {
 
     /// The yellow knob stands off the **bottom** edge — away from the artwork, and exactly opposite
     /// the green one, at every angle the box can be drawn at.
-    func testTheBoxKnobStandsOffTheBottomEdgeOppositeTheGreenOne() {
+    ///
+    /// **`XCTUnwrap`, not `!`, and that is not style.** The neighbouring knob test force-unwraps, and
+    /// a mutation that dropped `.boxRotation` from `handleLayout` turned that into a `fatalError`
+    /// which **killed the test runner 15 tests into a 118-test suite** — four legitimate failures
+    /// reported, the rest of the run simply gone. A truncated run reads like a short one, which is
+    /// the banner-versus-count trap arriving through a third door. One nil handle should fail one
+    /// test.
+    func testTheBoxKnobStandsOffTheBottomEdgeOppositeTheGreenOne() throws {
         let poses: [(rotation: CGFloat, boxAngle: CGFloat)] =
             [(0, 0), (0.7, 0), (0, 0.7), (1.2, -2.0), (CGFloat.pi, 0.3)]
         for (rotation, boxAngle) in poses {
             let frame = turned(boxAngle, rotation: rotation)
-            let knob = position(of: .boxRotation, in: frame)!
+            let knob = try XCTUnwrap(position(of: .boxRotation, in: frame))
             let corners = frame.corners
             let bottomCentre = CGPoint(x: (corners[2].x + corners[3].x) / 2,
                                        y: (corners[2].y + corners[3].y) / 2)
@@ -702,7 +719,7 @@ final class ObjectTransformLogicTests: XCTestCase {
                                  "and away from the centre, not into the artwork")
             // Diametrically opposite the green knob: the two offsets are negations, so the box's
             // centre is the midpoint of the two knobs.
-            let green = position(of: .rotation, in: frame)!
+            let green = try XCTUnwrap(position(of: .rotation, in: frame))
             assertPoint(CGPoint(x: (green.x + knob.x) / 2, y: (green.y + knob.y) / 2), frame.centre,
                         "the centre is the midpoint of the two knobs")
         }

@@ -2561,8 +2561,10 @@ final class LassoMoveLogicTests: XCTestCase {
     /// they did *before* they pressed Move.
     ///
     /// Watched failing with `turnVectorFloatBox` routed through `applyToVectorFloat(transform:
-    /// aspect:mirror:)` the way every other box change is: *("2") is not equal to ("1") — turning the
-    /// box put a step on the stack*, and then *the float was dismissed by one Undo*.
+    /// aspect:mirror:)` the way every other box change is: *("3") is not equal to ("2") — turning the
+    /// box to 0.3 must cost no step*, then ("4") for the next turn and so on — **one step per turn,
+    /// accumulating**, which is the shape of the harm rather than a single off-by-one. It is the only
+    /// test in the suite that goes red for it.
     func testTurningTheBoxCostsNoUndoStepAndCannotDismissTheFloat() {
         let (manager, layerIndex, vector) = fixture()
         // One stroke crossing the loop, so the lift really does split something for an undo to rejoin.
@@ -2596,9 +2598,11 @@ final class LassoMoveLogicTests: XCTestCase {
     /// The same fixture as `testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted`, with a hand
     /// turn added — including the 1.1 rad layer, which is one of the 13%.
     ///
-    /// Watched failing with `rotateFloating`'s vector arm stepping from
-    /// `turned.rotation + float.frame.boxAngle`: *("Optional(1.1)") is not equal to
-    /// ("Optional(-1.9415926535897933)")* on the straight-box case and moved samples on both.
+    /// **Watched failing against the real defect `87081de` shipped** — `frame.boxAngle` folded into
+    /// `applyToVectorFloat`'s `localDelta` — which is the leak this test catches from the other side:
+    /// `rotateFloating` goes through that same map, so eight presses on a turned box no longer close
+    /// the loop and the samples come back moved. It went red together with
+    /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel` and with nothing else in 1839 tests.
     func testEightPressesOfRotate45StayBitExactOnAHandTurnedBox() {
         for layerRotation in [CGFloat(0), 1.1] {
             let (manager, layerIndex, vector) = fixture()
@@ -2706,6 +2710,14 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// So Reset answers "put the drawing back where I picked it up", and the box angle is not where
     /// the drawing is. It survives Reset, Undo and Redo alike, and goes when the float goes.
+    ///
+    /// Watched failing with `boxAngle != 0` added to `canResetFloating` **and** `resetFloating`
+    /// zeroing it — the other answer, written out in full. All three harms show at once:
+    /// *XCTAssertFalse failed — a turned box is not a moved drawing, and Reset must not spend a step
+    /// on it*; then *("Optional(0.0)") is not equal to ("Optional(0.75)") — and the hand-fitted box is
+    /// still hand-fitted*; and finally the same on *undo does not restore it*, which is the one that
+    /// settles it — the step Reset recorded cannot give the angle back, because §5.21 keeps it off
+    /// the stack in both directions.
     func testResetLeavesTheBoxAngleAloneAndABoxAngleAloneDoesNotOfferReset() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 24, y: 32), to: CGPoint(x: 40, y: 32), size: 6))

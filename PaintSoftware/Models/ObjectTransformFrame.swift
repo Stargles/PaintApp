@@ -362,10 +362,16 @@ struct ObjectTransformDrag: Equatable {
     /// `ObjectTransformFrame.boxAngle`. `CanvasView.Coordinator.endObjectTransformDrag` reads it into
     /// `CanvasManager.turnVectorFloatBox(to:)` and never into `nudgeVectorFloat`, so it cannot reach
     /// the geometry map by way of this type.
+    /// **No defaults, deliberately** — unlike `ObjectTransformFrame`'s own fields, which default so
+    /// that call sites predating each one keep compiling. Nothing outside this file and
+    /// `CanvasView.Coordinator.pose(of:)` builds a `Pose`, so there is no legacy to protect; and the
+    /// one failure this whole feature is exposed to is an arm that *silently drops* a field on its
+    /// way through. A default makes that a test's job. No default makes it the compiler's, which is
+    /// the stronger guard and the one that will still be watching when phase 2 adds arms.
     struct Pose: Equatable {
         var transform: LayerTransform
         var aspect: CGFloat
-        var boxAngle: CGFloat = 0
+        var boxAngle: CGFloat
     }
 
     init(frame: ObjectTransformFrame, handle: ObjectTransformFrame.Handle, at point: CGPoint,
@@ -399,9 +405,7 @@ struct ObjectTransformDrag: Equatable {
                 return Pose(transform: uniformlyScaled(to: point), aspect: startAspect,
                             boxAngle: startBoxAngle)
             }
-            var pose = stretched(to: point)
-            pose.boxAngle = startBoxAngle
-            return pose
+            return stretched(to: point)
         case .rotation:
             var turned = start
             turned.rotation = start.rotation + turnedBy(point)
@@ -470,7 +474,7 @@ struct ObjectTransformDrag: Equatable {
         let sy = max(base.y * fy, Self.minimumScale)
         var stretched = start
         stretched.scale = sqrt(sx * sy)
-        return Pose(transform: stretched, aspect: sx / sy)
+        return Pose(transform: stretched, aspect: sx / sy, boxAngle: startBoxAngle)
     }
 
     /// `point`'s offset from the anchor, turned back into the box's own unrotated axes.
