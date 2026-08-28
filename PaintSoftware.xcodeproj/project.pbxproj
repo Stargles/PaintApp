@@ -10,6 +10,7 @@
 		5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */; };
 		1A9F57B072F694769F0C5DD0 /* PaintSoftware/Engine/StrokeInterruption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */; };
 		47F81C7C56AE76400C4BE5C5 /* CanvasPresentationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */; };
+		7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */; };
 		0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */; };
 		4508B41C19C6B8378BF07415 /* MenuInterruptionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */; };
 		99D1EA5B5A7EEE8F514A763E /* PaintSoftware/Engine/LassoFillMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */; };
@@ -201,6 +202,7 @@
 		B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasPresentation.swift; sourceTree = "<group>"; };
 		31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeInterruption.swift; sourceTree = "<group>"; };
 		B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasPresentationLogicTests.swift; sourceTree = "<group>"; };
+		C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleCodingLogicTests.swift; sourceTree = "<group>"; };
 		CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeInterruptionLogicTests.swift; sourceTree = "<group>"; };
 		37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MenuInterruptionUITests.swift; sourceTree = "<group>"; };
 		EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LassoFillMask.swift"; sourceTree = "<group>"; };
@@ -457,6 +459,7 @@
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
 				7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */,
 				B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */,
+				C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */,
 				CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */,
 				37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
@@ -759,6 +762,7 @@
 				5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */,
 				1A9F57B072F694769F0C5DD0 /* PaintSoftware/Engine/StrokeInterruption.swift in Sources */,
 				47F81C7C56AE76400C4BE5C5 /* CanvasPresentationLogicTests.swift in Sources */,
+				7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */,
 				0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */,
 				4508B41C19C6B8378BF07415 /* MenuInterruptionUITests.swift in Sources */,
 				A1B2C3D4E5F600112233445F /* BrushEngineLogicTests.swift in Sources */,

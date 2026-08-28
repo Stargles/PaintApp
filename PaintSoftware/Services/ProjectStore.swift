@@ -637,7 +637,7 @@ enum ProjectStore {
                 layer.cels.map { (layerIndex, $0) }
             }
         let written = PixelOps.parallelMap(jobs.count) { index in
-            writeCel(jobs[index].cel, to: imagesDir, tally: tally)
+            writeCel(jobs[index].cel, to: imagesDir, canvasSize: snapshot.canvasSize, tally: tally)
         }
         var celManifestsByLayer = [[CelManifest]](repeating: [], count: snapshot.layers.count)
         for (index, celManifest) in written.enumerated() {
@@ -718,7 +718,7 @@ enum ProjectStore {
     /// cels came back in completion order, and `writePackage` reconstructs that order from the job
     /// list rather than from completion — see its comment.
     private static func writeCel(_ cel: SaveSnapshot.CelContent, to imagesDir: URL,
-                                 tally: WriteTally) -> CelManifest {
+                                 canvasSize: CGSize, tally: WriteTally) -> CelManifest {
         var encodeSeconds = 0.0
         var writeSeconds = 0.0
         var encoded = 0
@@ -731,11 +731,34 @@ enum ProjectStore {
             encoded += 1
             return data
         }
+        // TODO item (8): the centre of *this* canvas is what stored sample coordinates are measured
+        // from, and it is the one thing the encoder needs that the payload cannot work out for
+        // itself. `PackedSampleRun` writes the origin it was given into the file, so a decoder needs
+        // no matching context and a forgotten origin here costs addressable range, never a wrong
+        // coordinate — `SampleCodingLogicTests` pins that by saving near the edge of a canvas too
+        // wide to encode about the origin.
+        let sampleOrigin = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
         func json<T: Encodable>(_ value: T) -> Data? {
             let started = CFAbsoluteTimeGetCurrent()
-            let data = try? JSONEncoder().encode(value)
-            encodeSeconds += CFAbsoluteTimeGetCurrent() - started
-            return data
+            let encoder = JSONEncoder()
+            encoder.userInfo[.sampleQuantisationOrigin] = sampleOrigin
+            // Not `try?`. An encode that throws used to leave `vectorFileName` nil and save the cel
+            // **empty**, which is the same silent-loss shape `VectorCanvasData`'s per-element decode
+            // was built to end, arriving from the other direction. Nothing in the tree throws here
+            // today; the point is that if something starts to, it says so.
+            do {
+                let data = try encoder.encode(value)
+                encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+                return data
+            } catch {
+                encodeSeconds += CFAbsoluteTimeGetCurrent() - started
+                log.error("""
+                    Encoding \(String(describing: T.self), privacy: .public) for cel \
+                    \(cel.id.uuidString, privacy: .public) failed, so that content is not written: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+                return nil
+            }
         }
         func write(_ data: Data, _ name: String) {
             let started = CFAbsoluteTimeGetCurrent()

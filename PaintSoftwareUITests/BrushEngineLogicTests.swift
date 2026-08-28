@@ -767,11 +767,23 @@ final class BrushEngineLogicTests: XCTestCase {
         piece.samples = run.samples
         piece.lattice = DabLattice(samples: parent.samples, parameters: run.parameters, seedID: parent.id)
 
+        // TODO item (8) made the stored form lossy: quarter-pixel coordinates and 8-bit pressure, so
+        // a decoded stroke is the *quantised* one and `==` against the in-memory original would fail
+        // on pressures like 0.7, which is not 255ths of anything. The contract this test exists for is
+        // untouched, and is stated as the fixed point the format actually is — save, reload, save
+        // again, and nothing moves. `SampleCodingLogicTests` pins the quantisation itself.
         let decoded = try JSONDecoder().decode(VectorStroke.self,
                                                from: try JSONEncoder().encode(piece))
-        XCTAssertEqual(decoded.lattice, piece.lattice, "The lattice must round-trip intact")
-        XCTAssertEqual(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
-                       renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(piece)])),
+        let twice = try JSONDecoder().decode(VectorStroke.self,
+                                             from: try JSONEncoder().encode(decoded))
+        XCTAssertEqual(twice.lattice, decoded.lattice, "The lattice must round-trip intact")
+        XCTAssertEqual(decoded.lattice?.samples.count, piece.lattice?.samples.count,
+                       "…carrying the parent's whole walk, not a truncated one")
+        XCTAssertEqual(decoded.lattice?.parameters, piece.lattice?.parameters,
+                       "…and its parameters exactly, since those are not coordinates")
+        XCTAssertEqual(decoded.lattice?.seedID, piece.lattice?.seedID)
+        XCTAssertEqual(renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(twice)])),
+                       renderedBytes(VectorCanvas(size: Self.canvasSize, elements: [.stroke(decoded)])),
                        "A reloaded piece must render exactly as the one that was saved")
 
         let plain = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(parent)) as? [String: Any]

@@ -723,3 +723,211 @@ extension ShapeGeometry: Codable {
         try c.encode(spanSweep, forKey: .spanSweep)
     }
 }
+
+// MARK: - Persisted sample coordinates (TODO item (8))
+
+extension CodingUserInfoKey {
+    /// The point stored samples are quantised about — see `PackedSampleRun`. Set on the `JSONEncoder`
+    /// that writes a payload containing strokes; absent means the origin is the canvas origin, which
+    /// is correct but wastes half the field (see `PackedSampleRun.init(_:about:)`).
+    static let sampleQuantisationOrigin = CodingUserInfoKey(rawValue: "PaintSoftware.sampleQuantisationOrigin")!
+}
+
+/// A run of `VectorSample`s in its **persisted** form: signed 16-bit quarter-pixel coordinates about a
+/// stored origin, plus 8 bits of pressure — 5 bytes a sample, base64'd into one JSON string.
+///
+/// TODO.md item (8). In memory a sample is three `CGFloat` and stays that way; this type exists only
+/// between `encode(to:)` and the file.
+///
+/// MEASURED (scratch `swiftc -O`, 2026-08-27, 1,000 samples, `.sortedKeys`): **7.10 bytes a sample on
+/// the wire** — 5.00 of payload, 1.67 of base64 expansion, and the rest `JSONEncoder` escaping
+/// base64's `/` as `\/`. Against the **~77 bytes a sample** TODO.md measures in the owner's own
+/// `Untitled.paintproj` that is **~11x**. The ratio is a property of the *coordinates*, not of this
+/// code: it is however many digits `Double`'s shortest round-trip spelling needs, so the same probe
+/// over shorter decimals measured 60.5 and 8.6x. The packed form is smaller at every length,
+/// including a one-sample stroke (31 bytes against 69) — a flat `[Double]` was also measured, at
+/// 56.3, and is not worth having.
+///
+/// A base64url alphabet would recover the ~0.33 bytes lost to escaping and is deliberately not used:
+/// it would cost `Data(base64Encoded:)`'s free validation on the decode side, and a non-standard
+/// alphabet in a file somebody may one day read by hand is a poor trade for 4%.
+///
+/// **The origin is written into the payload, and that is the load-bearing decision here.** The owner's
+/// ruling puts it at the centre of the *current* canvas, which is what buys the sign bit for free and
+/// makes a 16383-point canvas addressable (`CanvasManager.maxCanvasExtent`). But an origin that is
+/// *implied* by the reader's canvas size is an origin a caller can get wrong, and getting it wrong
+/// shifts every coordinate in the file by half a canvas — silently, and reading as success, which is
+/// this codebase's most expensive recurring bug. Writing it costs ~24 bytes a stroke against the ~380
+/// a stroke this saves, and in exchange **a payload cannot be decoded wrong**: `init(from:)` needs no
+/// context at all. It also means a canvas resize is free to leave old cels alone.
+///
+/// **The quantisation happens once, not once a save.** MEASURED (same probe): 5,000 samples through a
+/// hundred consecutive saves of an untouched project drift **0.0 pt**, and through six canvas-padding
+/// changes — each of which moves every sample and re-encodes about a new centre — also **0.0 pt**.
+/// The padding case is exact rather than lucky: `setCanvasPadding` grows the canvas by `2·delta` and
+/// moves the content by `delta`, so the centre moves by `delta` too and the stored offset is
+/// unchanged. TODO.md's ruling that residual drift is closed holds for the storage layer as well as
+/// for the unbaked session it was made about.
+///
+/// **Clamping, not wrapping** — the owner's ruling, and a prerequisite rather than polish: BUGS.md's
+/// unclamped zoom lets a real drag store a coordinate ~1.6 million points out, 200x this field's
+/// range. Unclamped, `Int16` truncation would teleport that ink to the opposite side of the canvas.
+/// Saturating keeps the failure local, boring and — via `clampedCount` — audible.
+///
+/// The bounds are derived from `Int16` rather than restated, so **-8192.0 … +8191.75** is a
+/// consequence of the field width in one place and not a number to keep in sync. `CanvasGeometryLogicTests`
+/// guards the canvas half of the same discipline.
+struct PackedSampleRun {
+
+    /// The coordinate step. The owner's *"last two bits for quarter pixel res"*, and it is
+    /// `BrushStamper`'s sub-pixel dab placement that needs it.
+    static let quantum: CGFloat = 0.25
+    /// Two `Int16` coordinates plus one `UInt8` pressure: 16 + 16 + 8 = 40 bits.
+    static let bytesPerSample = 5
+    /// What a coordinate may be, relative to `origin`, before it saturates.
+    static let representable: ClosedRange<CGFloat> =
+        (CGFloat(Int16.min) * quantum)...(CGFloat(Int16.max) * quantum)
+
+    /// The point coordinates are measured from, itself snapped to the quarter-pixel grid so that
+    /// `decode` then `encode` lands on the same bytes exactly rather than nearly (see `samples`).
+    let origin: CGPoint
+    /// `bytesPerSample` per sample, little-endian: `Int16` x, `Int16` y, `UInt8` pressure.
+    let bytes: Data
+    /// How many samples saturated on the way in. Zero for anything decoded — it describes *this
+    /// quantisation*, not the document, which is why it is not part of the encoded form. The one
+    /// caller that has somewhere to say it is `VectorStroke.encode(to:)`.
+    let clampedCount: Int
+
+    /// Quantise `samples` about `rawOrigin`.
+    ///
+    /// `rawOrigin` is snapped to the quarter-pixel grid first. That is not tidiness: it is what makes
+    /// the format an exact fixed point. A decoded coordinate is `i * quantum + origin`; re-encoding it
+    /// computes `((i * quantum + origin) - origin) / quantum`, and with both terms exact multiples of
+    /// `quantum` and bounded by ~16k the subtraction is exact in `Double`, so `i` comes back
+    /// bit-identical. An unsnapped origin would leave that one rounding away from stable.
+    init(_ samples: [VectorSample], about rawOrigin: CGPoint) {
+        let origin = CGPoint(x: PackedSampleRun.snapped(rawOrigin.x),
+                             y: PackedSampleRun.snapped(rawOrigin.y))
+        var bytes = Data()
+        bytes.reserveCapacity(samples.count * PackedSampleRun.bytesPerSample)
+        var clamped = 0
+        for sample in samples {
+            let (x, xClamped) = PackedSampleRun.quantise(sample.x - origin.x)
+            let (y, yClamped) = PackedSampleRun.quantise(sample.y - origin.y)
+            if xClamped || yClamped { clamped += 1 }
+            let ux = UInt16(bitPattern: x), uy = UInt16(bitPattern: y)
+            bytes.append(UInt8(truncatingIfNeeded: ux))
+            bytes.append(UInt8(truncatingIfNeeded: ux >> 8))
+            bytes.append(UInt8(truncatingIfNeeded: uy))
+            bytes.append(UInt8(truncatingIfNeeded: uy >> 8))
+            bytes.append(PackedSampleRun.quantisePressure(sample.pressure))
+        }
+        self.origin = origin
+        self.bytes = bytes
+        self.clampedCount = clamped
+    }
+
+    /// The samples this run holds, back in canvas points.
+    var samples: [VectorSample] {
+        var result: [VectorSample] = []
+        result.reserveCapacity(bytes.count / PackedSampleRun.bytesPerSample)
+        bytes.withUnsafeBytes { raw in
+            var i = 0
+            while i + PackedSampleRun.bytesPerSample <= raw.count {
+                let x = Int16(bitPattern: UInt16(raw[i]) | (UInt16(raw[i + 1]) << 8))
+                let y = Int16(bitPattern: UInt16(raw[i + 2]) | (UInt16(raw[i + 3]) << 8))
+                result.append(VectorSample(x: CGFloat(x) * PackedSampleRun.quantum + origin.x,
+                                           y: CGFloat(y) * PackedSampleRun.quantum + origin.y,
+                                           pressure: CGFloat(raw[i + 4]) / 255))
+                i += PackedSampleRun.bytesPerSample
+            }
+        }
+        return result
+    }
+
+    private static func snapped(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 0 }
+        return (value / quantum).rounded() * quantum
+    }
+
+    /// `delta` in quarter-pixel steps, saturating rather than wrapping, and saying which it did.
+    /// A non-finite coordinate is a defect upstream; it lands at the origin and is counted, because a
+    /// decoder that traps on bad input is worse than one that says so.
+    private static func quantise(_ delta: CGFloat) -> (Int16, Bool) {
+        let steps = (delta / quantum).rounded()
+        guard steps.isFinite else { return (0, true) }
+        if steps >= CGFloat(Int16.max) { return (Int16.max, steps > CGFloat(Int16.max)) }
+        if steps <= CGFloat(Int16.min) { return (Int16.min, steps < CGFloat(Int16.min)) }
+        return (Int16(steps), false)
+    }
+
+    /// Pressure is `0…1` at the source (`StrokeInput` clamps it there), so 8 bits is generous and the
+    /// clamp here is belt-and-braces rather than a lossy decision.
+    private static func quantisePressure(_ pressure: CGFloat) -> UInt8 {
+        let scaled = (pressure * 255).rounded()
+        guard scaled.isFinite else { return 0 }
+        return UInt8(min(max(scaled, 0), 255))
+    }
+}
+
+/// Two keys and nothing else: `o` is the quantisation origin as `[x, y]` in canvas points, `d` is the
+/// base64 of `bytes`. Short because this is the compaction feature and the tax is per stroke; `o` is
+/// spelled out as plain numbers rather than folded into the blob because it is the one field that
+/// decides whether every coordinate in the blob is right, and it should be readable by eye.
+extension PackedSampleRun: Codable {
+
+    private enum CodingKeys: String, CodingKey { case o, d }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let o = try c.decode([Double].self, forKey: .o)
+        guard o.count == 2 else {
+            throw DecodingError.dataCorruptedError(forKey: .o, in: c,
+                debugDescription: "a quantisation origin is two numbers, got \(o.count)")
+        }
+        let encoded = try c.decode(String.self, forKey: .d)
+        guard let bytes = Data(base64Encoded: encoded) else {
+            throw DecodingError.dataCorruptedError(forKey: .d, in: c,
+                debugDescription: "sample run is not base64")
+        }
+        guard bytes.count % PackedSampleRun.bytesPerSample == 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .d, in: c,
+                debugDescription: "sample run is \(bytes.count) bytes, not a multiple of \(PackedSampleRun.bytesPerSample)")
+        }
+        self.origin = CGPoint(x: o[0], y: o[1])
+        self.bytes = bytes
+        self.clampedCount = 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode([Double(origin.x), Double(origin.y)], forKey: .o)
+        try c.encode(bytes.base64EncodedString(), forKey: .d)
+    }
+}
+
+extension VectorSample {
+
+    /// `samples` packed about whatever origin `encoder` was given. **No origin means the canvas
+    /// origin**, which encodes correctly for any canvas up to half the field and is what every test
+    /// that round-trips a stroke through a bare `JSONEncoder()` gets. It is a smaller addressable
+    /// range, never a wrong coordinate: the origin used is written into the payload either way.
+    static func packed(_ samples: [VectorSample], for encoder: Encoder) -> PackedSampleRun {
+        PackedSampleRun(samples, about: encoder.userInfo[.sampleQuantisationOrigin] as? CGPoint ?? .zero)
+    }
+
+    /// The samples at `key`, from either shape this key has ever held.
+    ///
+    /// **Not a migration** — TODO.md's standing permission says no document written so far has to
+    /// survive, so nothing here is owed to old files. It is three lines that keep a project written by
+    /// yesterday's build openable, and `typeMismatch` is the only error it swallows: an array where an
+    /// object was expected is the old shape, and every other failure is a real one and still throws.
+    static func decodeRun<K: CodingKey>(from container: KeyedDecodingContainer<K>,
+                                        forKey key: K) throws -> [VectorSample] {
+        do {
+            return try container.decode(PackedSampleRun.self, forKey: key).samples
+        } catch DecodingError.typeMismatch {
+            return try container.decode([VectorSample].self, forKey: key)
+        }
+    }
+}

@@ -1,5 +1,6 @@
 import UIKit
 import CoreGraphics
+import os
 
 extension CodableColor {
     /// The stored components as a `UIColor`. One definition rather than the same four-argument
@@ -51,6 +52,10 @@ struct VectorStroke: Identifiable, Codable {
 
     var uiColor: UIColor { color.uiColor }
 
+    /// Saturating a coordinate at the storage boundary is ink the artist drew and will not get back,
+    /// so it is said out loud exactly once, on the save that loses it. `encode(to:)` is the only user.
+    static let log = Logger(subsystem: "Starg.PaintSoftware", category: "SampleCoding")
+
     /// Spelled out so `init(from:)` below can name the keys without suppressing the synthesized
     /// memberwise initialiser every construction site here uses.
     enum CodingKeys: String, CodingKey {
@@ -81,6 +86,12 @@ struct DabLattice: Codable, Equatable {
         return low...high
     }
 
+    /// Hand-written for one reason: `samples` is persisted as a packed quarter-pixel run like every
+    /// other run of samples (TODO item (8)), and a synthesized coder would write the parent's whole
+    /// walk back out as `{"x":…,"y":…,"pressure":…}` objects — the larger half of a cut-heavy cel.
+    /// Declared in an extension below so this stays a memberwise-initialisable struct.
+    enum CodingKeys: String, CodingKey { case samples, parameters, seedID }
+
     /// `parameter`, in the owning stroke's own domain, mapped into the parent's. Linear between
     /// neighbouring entries — exact, since a piece's segment lies inside one parent segment.
     func parentParameter(of parameter: CGFloat) -> CGFloat {
@@ -89,6 +100,24 @@ struct DabLattice: Codable, Equatable {
         let i = min(Int(clamped.rounded(.down)), parameters.count - 2)
         let f = clamped - CGFloat(i)
         return parameters[i] + (parameters[i + 1] - parameters[i]) * f
+    }
+}
+
+extension DabLattice {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        samples = try VectorSample.decodeRun(from: c, forKey: .samples)
+        parameters = try c.decode([CGFloat].self, forKey: .parameters)
+        seedID = try c.decode(UUID.self, forKey: .seedID)
+    }
+
+    /// A lattice's clamp count is deliberately not logged: it is the *parent's* walk, so a piece that
+    /// saturates has already said so through the stroke it was cut from.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(VectorSample.packed(samples, for: encoder), forKey: .samples)
+        try c.encode(parameters, forKey: .parameters)
+        try c.encode(seedID, forKey: .seedID)
     }
 }
 
@@ -102,7 +131,7 @@ extension VectorStroke {
         color = try c.decode(CodableColor.self, forKey: .color)
         size = try c.decode(CGFloat.self, forKey: .size)
         opacity = try c.decode(Double.self, forKey: .opacity)
-        samples = try c.decode([VectorSample].self, forKey: .samples)
+        samples = try VectorSample.decodeRun(from: c, forKey: .samples)
         // Absent key → `.paint`, so legacy files load.
         composite = try c.decodeIfPresent(StrokeComposite.self, forKey: .composite) ?? .paint
         // Absent is the normal case; only a stroke cut out of another one carries a lattice.
@@ -120,7 +149,19 @@ extension VectorStroke {
         try c.encode(color, forKey: .color)
         try c.encode(size, forKey: .size)
         try c.encode(opacity, forKey: .opacity)
-        try c.encode(samples, forKey: .samples)
+        // TODO item (8): quarter-pixel fixed point, five bytes a sample. `packed` reads the
+        // quantisation origin off the encoder and writes it into the payload, so a decoder needs no
+        // context; see `PackedSampleRun`.
+        let packed = VectorSample.packed(samples, for: encoder)
+        if packed.clampedCount > 0 {
+            VectorStroke.log.error("""
+                \(packed.clampedCount, privacy: .public) of \(samples.count, privacy: .public) samples on \
+                stroke \(id.uuidString, privacy: .public) are outside the storable range about \
+                (\(packed.origin.x, privacy: .public), \(packed.origin.y, privacy: .public)) and saturate — \
+                that ink is flattened onto the boundary. See BUGS.md's unclamped zoom.
+                """)
+        }
+        try c.encode(packed, forKey: .samples)
         try c.encode(composite, forKey: .composite)
         // Written only when present, so an ordinary stroke's payload stays byte-for-byte unchanged.
         try c.encodeIfPresent(lattice, forKey: .lattice)
