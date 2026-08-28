@@ -437,14 +437,17 @@ final class EffectParityLogicTests: XCTestCase {
     ///
     /// The number is fourteen plus the three phase 9's multi-pass half added (`threshold`, `intensity`,
     /// `taps`), plus the three phase 9c appended for Outline's stroke colour (`colorR`, `colorG`,
-    /// `colorB`), plus `preserveAlpha` — Sobel's alpha rule, 2026-08-27 — appended after those for the
-    /// same reason they were appended after everything else: the end of the block is the one position
-    /// where a new field cannot shift an existing one. A count worth updating rather than relaxing,
-    /// since "did anyone add a field to one declaration and not the other" is the whole question it
-    /// answers.
-    func testTheParameterBlockIsTwentyOnePackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 84)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 84)
+    /// `colorB`) — appended at the end specifically so the twenty fields before this one keep the exact
+    /// byte offsets every effect shipping before phase 9c already relies on. A count worth updating
+    /// rather than relaxing, since "did anyone add a field to one declaration and not the other" is the
+    /// whole question it answers.
+    ///
+    /// **It was twenty-one for a few hours on 2026-08-27**, when Sobel's alpha rule needed a
+    /// `preserveAlpha` scalar to choose between two modes. The owner deleted the mode; one rule needs no
+    /// flag, so the field went with it and the block is back to what it was.
+    func testTheParameterBlockIsTwentyPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 80)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 80)
     }
 
     /// The table is 256 RGBA entries, and an unused one is the identity — so an effect that does not
@@ -515,14 +518,17 @@ final class EffectParityLogicTests: XCTestCase {
     }
 
     /// EFFECT_BACKDROP.md §4/§6 step 5's decode-default, pinned byte for byte: a manifest written
-    /// before `Bloom.input`/`Sobel.input` existed — no `input` key, or no `params` key at all — must
-    /// decode into the ruled default for each, which is also the value `Effect.input` already
-    /// returned for that case before the field existed. Not extended to `Self.sweep` above:
-    /// `testEveryEffectAgreesBetweenTheBackends` runs every sweep entry through
-    /// `MetalEffectEngine.apply`, a single-dispatch call bloom and sobel do not go through (they are
-    /// multi-pass — see `Effect.Bloom`'s and `Effect.Sobel`'s own doc comments), so adding them there
-    /// would fail on a backend mismatch that has nothing to do with this field.
-    func testABloomOrSobelSavedBeforeTheInputControlExistedKeepsItsShippedLook() throws {
+    /// before `Bloom.input` existed — no `input` key, or no `params` key at all — must decode into the
+    /// ruled default, which is also the value `Effect.input` already returned for bloom before the
+    /// field existed. Not extended to `Self.sweep` above: `testEveryEffectAgreesBetweenTheBackends`
+    /// runs every sweep entry through `MetalEffectEngine.apply`, a single-dispatch call bloom does not
+    /// go through (it is multi-pass — see `Effect.Bloom`'s own doc comment), so adding it there would
+    /// fail on a backend mismatch that has nothing to do with this field.
+    ///
+    /// **Bloom is the only effect left with an artist-facing input**; Sobel had one for a few hours on
+    /// 2026-08-27, and `testASobelSavedWithTheDeletedInputKeyStillDecodes` below is what that leaves
+    /// behind.
+    func testABloomSavedBeforeTheInputControlExistedKeepsItsShippedLook() throws {
         let bareBloom = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"bloom"}"#.utf8))
         XCTAssertEqual(bareBloom, .bloom(Effect.Bloom()),
                        "No params object at all means an untouched bloom")
@@ -532,24 +538,51 @@ final class EffectParityLogicTests: XCTestCase {
                                                     from: Data(#"{"kind":"bloom","params":{"threshold":0.5}}"#.utf8))
         XCTAssertEqual(bloomNoInput, .bloom(Effect.Bloom(threshold: 0.5)),
                        "A params object saved before `input` existed decodes the rest and defaults `input` to `.ink`")
-
-        let bareSobel = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"sobel"}"#.utf8))
-        XCTAssertEqual(bareSobel, .sobel(Effect.Sobel()),
-                       "No params object at all means an untouched sobel")
-        XCTAssertEqual(bareSobel.input, .backdrop,
-                       "…which reads the backdrop, matching the fixed answer `Effect.input` gave for "
-                       + "sobel before this field existed — the decode default changes no document's picture")
     }
 
-    /// The new field, round-tripped at a non-default value — the concrete case the decode-default
-    /// test above does not cover, since a present key is the ordinary path every other field already
-    /// takes through `roundTrip`.
-    func testBloomAndSobelInputSurvivesAJSONRoundTrip() throws {
+    /// **The key that shipped and was withdrawn the same day, and the artist who saved a file in
+    /// between must not lose it.** `Effect.Sobel.input` existed on 2026-08-27 for a few hours; the owner
+    /// deleted the control, so `Sobel` is the empty struct again — and a document written in that window
+    /// still holds `{"kind":"sobel","params":{"input":"ink"}}`. **Demonstrated rather than argued**: a
+    /// keyed container reads only the keys its `CodingKeys` names, and an empty struct names none, so
+    /// the stale key is skipped — but "Swift ignores unknown keys" is a claim about the language, and
+    /// what this file has to pin is the claim about *this* decode path, which is two steps deep
+    /// (`kind` discriminator, then `params`) and hand-written at both.
+    ///
+    /// The last case is the one that would actually be on disk: the whole `LayerManifest` an artist's
+    /// project holds, not a bare `Effect`, because that is the object `ProjectStore` decodes and a throw
+    /// anywhere inside it takes the layer's entire project down rather than one effect node.
+    func testASobelSavedWithTheDeletedInputKeyStillDecodes() throws {
+        let bare = try JSONDecoder().decode(Effect.self, from: Data(#"{"kind":"sobel"}"#.utf8))
+        XCTAssertEqual(bare, .sobel(Effect.Sobel()), "No params object at all means an untouched sobel")
+        XCTAssertEqual(bare.input, .backdrop, "…which grades the paper, the one answer Sobel has")
+
+        for stale in [#"{"kind":"sobel","params":{}}"#,
+                      #"{"kind":"sobel","params":{"input":"ink"}}"#,
+                      #"{"kind":"sobel","params":{"input":"backdrop"}}"#] {
+            let decoded = try JSONDecoder().decode(Effect.self, from: Data(stale.utf8))
+            XCTAssertEqual(decoded, .sobel(Effect.Sobel()),
+                           "\(stale) must decode to the one Sobel there is, ignoring the withdrawn key")
+            XCTAssertEqual(decoded.input, .backdrop,
+                           "\(stale): and `input: ink` must not survive as behaviour either — the mode is gone")
+        }
+
+        let layer = #"{"id":"6B4B7A6E-0000-4000-8000-00000000A1B2","name":"Sobel","opacity":1,"isVisible":true,"kind":"value","cels":[],"effect":{"kind":"sobel","params":{"input":"ink"}}}"#
+        let manifest = try JSONDecoder().decode(LayerManifest.self, from: Data(layer.utf8))
+        XCTAssertEqual(manifest.effect, .sobel(Effect.Sobel()),
+                       "A layer saved while the control existed must still load, with the stale key ignored")
+    }
+
+    /// Bloom's input, round-tripped at a non-default value — the concrete case the decode-default test
+    /// above does not cover, since a present key is the ordinary path every other field already takes
+    /// through `roundTrip`. Sobel is round-tripped too, at the only value it has: `Effect.Sobel()`
+    /// encodes as an empty `params` object and must come back as itself.
+    func testBloomsInputSurvivesAJSONRoundTrip() throws {
         let bloom = Effect.bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 2, input: .backdrop))
         XCTAssertEqual(try roundTrip(bloom), bloom, "Bloom's non-default input did not survive encode/decode")
 
-        let sobel = Effect.sobel(Effect.Sobel(input: .ink))
-        XCTAssertEqual(try roundTrip(sobel), sobel, "Sobel's non-default input did not survive encode/decode")
+        let sobel = Effect.sobel(Effect.Sobel())
+        XCTAssertEqual(try roundTrip(sobel), sobel, "The empty Sobel did not survive encode/decode")
     }
 
     /// The discriminator is a stable string, not a case ordinal — so reordering the enum cannot

@@ -209,8 +209,9 @@ same way and are folded into it below: the memory win and the bit budget.
       Scope is `EffectSettingsBar` alone — `TextSettingsPanel` is greedy by construction
       (`.frame(maxHeight: .infinity)` on its own body) and would need that deleted first, and the owner's
       own words suggest they consider Add Text fine.
-      **Note the target moved slightly**: Bloom and Sobel each gain a control from the effect-backdrop
-      ruling, so Sobel stops being the zero-control degenerate case.
+      **Note the target moved slightly**: Bloom gains a control from the effect-backdrop ruling. Sobel
+      gained one too and the owner deleted it the same day (EFFECT_BACKDROP.md §5.2), so **Sobel is still
+      the zero-control degenerate case** this bar has to handle — a note and nothing else.
 
 ### (10) Oklab colour storage and processing, from the Actions menu
 

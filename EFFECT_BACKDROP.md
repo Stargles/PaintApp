@@ -46,6 +46,11 @@ So: the paper becomes part of what an adjustment layer grades and what a blend m
 fixing the reported effect, seven others and twenty blend modes at once — **and** Outline, Bloom and
 Sobel keep a way to see the ink alone rather than being allowed to regress.
 
+**Sobel's half of that was withdrawn on 2026-08-27** — *"drop it"* — once the ink-only route was measured
+and found to render nothing on a white canvas and nothing on black line art (§2.2, §5.2). Outline's
+fixed `.ink` and Bloom's artist-facing one are what the rescue amounts to; Sobel does not need one,
+because the alpha rule alone gives it the look the owner asked for.
+
 ## §2 — The two consequences are inherent, not incidental
 
 Both were found by review before any code was written. Neither is a tuning problem, and it is worth
@@ -151,19 +156,29 @@ Outline, Sobel and Bloom do not read colour, they read **shape**:
   `paddingBackdrop` — `UIColor(white: 0.85)`, `CanvasView.swift:34`, byte **217**. The owner reported it
   within the hour, from their iPad: *"weird, sobel should be black mostly but right now its grey."*
 
-  **What is true, as of 2026-08-27**: the alpha rule is now the mode's, not a constant.
-  `EffectParams.preserveAlpha` makes `.backdrop` keep the coverage it was handed — so over the paper the
-  flat regions really are opaque black and the edges are bright, which is the look §4 ruled — while
-  `.ink` still emits `(m, m, m, m)` byte for byte, because there the magnitude genuinely is the coverage.
-  `src.a` rather than a literal 1, so the padding margin (§6 step 3's artwork rect) stays transparent.
+  **What is true, as of 2026-08-27**: the alpha is `src.a`, always. Sobel writes back the coverage it was
+  handed, so over the paper the flat regions really are opaque black and the edges are bright, which is
+  the look §4 ruled. `src.a` rather than a literal 1, so the padding margin (§6 step 3's artwork rect)
+  stays transparent.
+
+  **For a few hours that rule was a per-mode choice carried by an `EffectParams.preserveAlpha` scalar,
+  because `.ink` needed the old `(m, m, m, m)`. The owner deleted `.ink` the same day** — *"drop it.
+  Remember to cleanly remove and delete the feature so no remnants of it are left in the code"* — and one
+  rule needs no flag, so the scalar went with it and `EffectParams` is back to twenty packed fields. The
+  two measurements immediately below are what killed the mode; they were made to justify keeping the
+  flag and they read, on a second look, as the case against the setting existing at all.
 
   **Why three reviewers and a full suite missed it, which is the part worth keeping.** Every Sobel
   fixture in the suite was either a flat field or an impulse on transparency, and on both of those
   `(m, m, m, m)` and a correct opaque edge map are *the same bytes*. Nothing anywhere asserted what Sobel
   looked like over paper. `testSobelOverPaperIsAnOpaqueEdgeMapRatherThanAHoleInTheCanvas`,
-  `testSobelsTwoAlphaRulesOverAnOpaqueStepEdge` and `testNoEffectLayerCanPunchAHoleInThePaper` are the
-  three that now do — the last of them generally, for every effect and every input, since the symptom
-  was never a wrong colour, it was a hole.
+  `testSobelOverAnOpaqueStepEdgeIsBrightEdgesOnOpaqueBlack` and `testNoEffectLayerCanPunchAHoleInThePaper`
+  are the three that now do — the last of them generally, for every effect and every input, since the
+  symptom was never a wrong colour, it was a hole. **A fourth followed from deleting the mode**: the
+  impulse fixture in `EffectMultiPassLogicTests` had to move onto an opaque ground
+  (`opaqueImpulseBytes`), because with the alpha rule unconditional a transparent ground clamps the
+  magnitude out of the output and the published Gx/Gy table would read as nine zeroes whatever the
+  stencil was. Same luminance field, so the same expected bytes.
 
   **The rule that needs no flag was measured and rejected**, so it does not get proposed again.
   `alpha = src.a` unconditionally fixes `.backdrop` on its own and adds no field to either backend — but
@@ -176,10 +191,14 @@ Outline, Sobel and Bloom do not read colour, they read **shape**:
   different *fields*, not the same field differing over a thick stroke's interior. The two rules are not
   close, so both are needed and the flag is what carries the difference.
 
-  **That measurement leaves an open question for the owner, filed rather than answered**: `.ink` Sobel
-  finds no edges at all in black line art, which is most line art. It is not this fix's business — `.ink`
-  ships exactly as it always has — but it means the artist's opt-out is a blank canvas for the commonest
-  artwork, and making the kernel read coverage as well as colour would be a second, separate ruling.
+  **Add to that: `.ink` Sobel was invisible on the default paper whatever the ink.** `(m,m,m,m)` over
+  white composites to `m·255 + 255(1−m) = 255` for **every** m — the source-over arithmetic, not an
+  approximation — so on a white canvas an ink-only Sobel renders nothing at all. The one test that could
+  see the mode's output at all had to set the paper to grey 128 to do it; it was deleted with the mode.
+
+  **Those two facts are why the setting is gone.** Together they say `.ink` Sobel shows nothing on the
+  default paper, and nothing at all on black line art — the two commonest documents there are. That was
+  put to the owner on 2026-08-27 and they ruled: *"drop it."* See §5.2.
 - **Bloom** thresholds luminance (default 0.75, `Effect.swift:314`) and white paper is Lum 1.0
   (`Composite.metal:626-637`), so the entire canvas becomes a bright source.
 
@@ -220,28 +239,31 @@ the owner 2026-08-27:
 | **Sharpen** | `.backdrop` | fixed — **this table named twelve of thirteen and left it out**, and the build answered it by reasoning about the formula. Confirmed against the kernel instead: `sharpenCombine` (`Composite.metal:684-693`, CPU twin `EffectKernels.swift:455-471`) works on the full premultiplied vector, has no unpremultiply step and **no `alpha > 0` short-circuit**, and clamps `rgb <= a` at the end. Over flat paper `blur == base` exactly, so the difference term is exactly zero and the effect is the identity. At an ink/paper edge it sharpens the real ink-against-paper contrast, where before it sharpened ink against implicit transparent black — a visible improvement, and the only thing an artist sees change |
 | Outline | `.ink` | fixed — over an opaque canvas there is no silhouette to trace, so `.backdrop` is not a mode, it is a no-op |
 | **Bloom** | `.ink` **by default** | **artist's choice.** *"Lets make bloom have an option for both, with default being ink only."* Physically a bloom over a lit white sheet should blow out; practically every canvas is white, so ink-only is the useful default and paper-inclusive is the one you reach for deliberately |
-| **Sobel** | `.backdrop` **by default** | **artist's choice.** *"Same with sobel, defaulting this time to taking in the canvas color."* So Sobel's shipped look changes: bright edges on black, which is what an edge detector conventionally is, with today's edges-over-paper available as the other setting. **The input is not the whole of what this control selects** — see §2.2: bright-edges-on-black also needs the alpha rule (`EffectParams.preserveAlpha`), which the input decides, and §2.2's original claim that it came for free was false and shipped as a transparent canvas |
+| **Sobel** | `.backdrop` | **fixed — and it was the artist's choice for a few hours on 2026-08-27.** *"Same with sobel, defaulting this time to taking in the canvas color"* got the default right and the control wrong; the owner deleted the control the same day (*"drop it"*), and §5.2 keeps both rulings. So Sobel's shipped look still changes — bright edges on black, which is what an edge detector conventionally is — but there is no other setting. **Bright-edges-on-black also needs the alpha rule**: see §2.2, whose original claim that it came for free was false and shipped as a transparent canvas. With one mode left that rule is unconditional and needs no parameter |
 
-**Sobel's default is a deliberate change to what ships**, not a preservation of it — the owner chose the
+**Sobel's look is a deliberate change to what ships**, not a preservation of it — the owner chose the
 conventional edge-detector look over the current one. Say so in the commit message and in the release
-note; an artist with a Sobel layer in an open document will see it change. **It changed twice**: once
-when the paper entered the composite, and again on 2026-08-27 when §2.2's false claim was corrected and
-`.backdrop` started producing the black the ruling had asked for.
+note; an artist with a Sobel layer in an open document will see it change, and has **no setting to get
+the old look back**. **It changed twice**: once when the paper entered the composite, and again on
+2026-08-27 when §2.2's false claim was corrected and Sobel started producing the black the ruling had
+asked for.
 
 The property must be an **exhaustive switch over the effect case with no `default:`**, for the reason
 CLAUDE.md records three times over in `CanvasManager`'s history: a hand-maintained list of exceptions
 rots, and a fourteenth effect added later must be forced to answer the question rather than inherit a
 default that happens to be wrong for it. `Effect.reshapesCoverage` (`Effect.swift:126-129`) is the
 existing property of this shape and the new one should sit beside it. Where the answer is the artist's,
-the stored value lives in that effect's own parameter struct (`Bloom`, `Sobel`) and is **persisted**, so
-it is a document change and needs a decode default for files written before it existed.
+the stored value lives in that effect's own parameter struct (`Bloom`) and is **persisted**, so it is a
+document change and needs a decode default for files written before it existed. **`Sobel` briefly had
+such a field and no longer does**, which needs the mirror-image guarantee: a document written while it
+existed must decode with the retired key *ignored* rather than throwing (§5.2, §6 step 5).
 
-**Two knock-on costs, both small and both worth naming.** Bloom and Sobel each gain one control in the
-effect settings bar, which shifts the per-effect control counts item (18) is sizing against — Sobel goes
-from *zero* controls to one, so it stops being the degenerate case that bar has to handle. And two more
-`.ink`-input nodes exist in the wild than §3 assumed when it argued the re-walk's cost is bounded; the
-argument still holds, since the count is per *document* and a document has one or two effect layers, not
-ten.
+**One knock-on cost, and it is smaller than this section first said.** Bloom gains one control in the
+effect settings bar; Sobel briefly gained one and lost it again, so **Sobel is still the zero-control
+degenerate case** the bar has to handle and the per-effect control counts item (18) is sizing against are
+unchanged for it. And one more `.ink`-input node exists in the wild than §3 assumed when it argued the
+re-walk's cost is bounded; the argument still holds, since the count is per *document* and a document has
+one or two effect layers, not ten.
 
 **Chromatic aberration's centre-alpha rule stays untouched.** `Composite.metal:562-565` documents it
 deliberately — "the shape of the artwork is the green channel's alpha and the fringe appears in colour,
@@ -263,10 +285,26 @@ them overruled the recommendation and the reasoning is the part worth not rebuil
 1. **Bloom — an option for both, defaulting to ink only.** *"Lets make bloom have an option for both,
    with default being ink only."* The recommendation was a fixed `.ink`; the owner made it a setting. The
    default is the recommendation, so the shipped look does not change.
-2. **Sobel — an option for both, defaulting to the canvas colour.** *"Same with sobel, defaulting this
-   time to taking in the canvas color."* This **overrules** the recommendation, which was to preserve
-   today's edges-over-paper. Sobel's default becomes the conventional bright-edges-on-black, and today's
-   look is the other setting. A visible change to existing documents — announce it.
+2. **Sobel — the canvas colour, and no option. SUPERSEDED THE SAME DAY, and both halves are kept
+   because the second only makes sense against the first.**
+
+   **The original ruling, 2026-08-27**: *"Same with sobel, defaulting this time to taking in the canvas
+   color."* That **overruled** the recommendation, which was to preserve today's edges-over-paper. It
+   got the default right and the control wrong, and it was made on §2.2's false claim that
+   bright-edges-on-black came for free from an opaque backdrop.
+
+   **The superseding ruling, the same day, after the control had shipped and been measured**: *"drop it.
+   Remember to cleanly remove and delete the feature so no remnants of it are left in the code."* The
+   `.ink` setting is deleted; Sobel always takes the backdrop and there is no control. **What changed
+   between the two rulings is evidence, not taste** — see §2.2: `(m,m,m,m)` over white paper composites
+   to 255 for every m, so an ink-only Sobel is arithmetically invisible on the default paper whatever
+   colour the ink is; and the kernel reads *premultiplied* rgb, so black ink is `(0,0,0)` on both sides
+   of every stroke edge and an ink-only Sobel finds **zero** edges in black line art. The opt-out was a
+   blank canvas for the two commonest documents there are.
+
+   Sobel's look still changes for existing documents and still wants announcing — there is simply no
+   setting that undoes it. **Do not re-propose the control**: it existed, it was measured, and it was
+   near-useless in practice.
 3. **The project thumbnail gets the paper. Decided here, at the owner's direction** — *"not sure what
    this is, you decide."* What it is: the small preview tile of each project in the project list.
    `ProjectStore.swift:284` composites it with `includeBackground: false`, so the tile has a transparent
@@ -299,9 +337,13 @@ Nothing here should land as one commit.
    `canvasBackgroundColor` and `isCanvasBackgroundVisible`, or a paper-colour change will not invalidate
    the cached composite.
 4. **Option A's re-walk for `.ink` effects**, which is what makes Outline work and what makes Bloom's
-   and Sobel's ink setting mean anything.
-5. **Bloom's and Sobel's controls**, their persisted fields and their decode defaults (§4). Sobel's
-   default is a change to shipped appearance and wants its own commit message saying so.
+   ink setting mean anything. (It was Sobel's too until the owner deleted that setting — §5.2.)
+5. **Bloom's control**, its persisted field and its decode default (§4). Sobel's fixed `.backdrop` is a
+   change to shipped appearance and wants its own commit message saying so. **Sobel's control was built
+   here and then deleted** — §5.2 — so this step is Bloom's alone; what survives of Sobel's half is the
+   alpha rule §2.2 describes, which is unconditional and carries no parameter. A document written while
+   Sobel's control existed holds `{"kind":"sobel","params":{"input":"ink"}}` and must still decode, with
+   the key ignored: `testASobelSavedWithTheDeletedInputKeyStillDecodes`.
 6. **The thumbnail flag** (§5.3).
 
 **Expect to chase backend parity at step 3.** `MetalCompositor.swift:599-605` premultiplies in float and

@@ -82,9 +82,10 @@ enum Effect: Equatable {
     /// can derive line art from a painting". It reads a 3×3 neighbourhood of the *premultiplied* texel
     /// directly — never unpremultiplied, the same convention `blur1D` follows — so a transparency edge
     /// and a colour edge are the same kind of gradient and the impulse fixture (opaque on transparent)
-    /// exercises exactly what a painted line-art edge needs. The output is `(m, m, m, m)`, where `m` is
-    /// the normalized magnitude: trivially a valid premultiplied colour (`rgb == a` always), and the
-    /// reason this replaces the image rather than being mixed over it — see `reshapesCoverage`.
+    /// exercises exactly what a painted line-art edge needs. The output is `(m, m, m, a)` clamped to
+    /// `rgb <= a`, where `m` is the normalized magnitude and `a` is the coverage the kernel was handed:
+    /// an edge map over whatever image it was given, opaque exactly where that image was. It replaces
+    /// the image rather than being mixed over it — see `reshapesCoverage`.
     case sobel(Sobel)
     /// **Sharpen / unsharp mask: `x + amount·(x − blur_r(x))`.** Fits the multi-pass contract with zero
     /// new plumbing — see `Sharpen`'s doc for the three-pass shape, which is bloom's combine shape
@@ -117,11 +118,16 @@ enum Effect: Equatable {
     /// Whether this effect may change alpha. **False for every grade, true for blur, bloom, Sobel,
     /// sharpen and outline** — the file header's argument for blur and bloom (a blur that left the
     /// silhouette sharp is not a blur) applies to all three of the newer effects for their own reasons:
-    /// Sobel's `.ink` output *is* a magnitude, sharpen's combine operates on the full premultiplied
+    /// Sobel replaces the image with an edge map, sharpen's combine operates on the full premultiplied
     /// vector exactly as bloom's does, and an outline by definition paints coverage where the shape had
-    /// none. **Sobel is true for one of its two modes**, and stays true rather than becoming conditional:
-    /// this answer gates a byte-exact alpha sweep, so the conservative direction is the safe one and an
-    /// effect that reshapes coverage under *any* setting has to say true here.
+    /// none.
+    ///
+    /// **Sobel's `true` became conservative rather than descriptive on 2026-08-27, and is left that
+    /// way deliberately.** It now writes back the coverage it was handed (`sobel` in either backend),
+    /// so its alpha out equals its alpha in on every fixture and it does not in fact move coverage.
+    /// It stays `true` because what answers false here is pinned byte-for-byte on alpha as a *grade* —
+    /// something that regrades what is there without replacing it — and an edge map is not one.
+    /// Moving it is a ruling of its own, not a consequence of deleting a control.
     ///
     /// Stated as a property rather than a comment because it is the precondition of a test: everything
     /// answering false is swept for byte-exact alpha, and a grade that quietly started reshaping
@@ -174,33 +180,34 @@ enum Effect: Equatable {
     /// - **Bloom** thresholds luminance, and white paper is Lum 1.0, so paper-inclusive bloom makes
     ///   the whole canvas a source. Ruled the artist's choice, **defaulting to `.ink`** — which is
     ///   the shipped look, so nothing visibly changes.
-    /// - **Sobel** convolves, and what it does with alpha is `EffectParams.preserveAlpha`'s question
-    ///   rather than a fixed answer. Ruled the artist's choice, **defaulting to `.backdrop`**: bright
-    ///   edges on black, which is what an edge detector conventionally is. That is a change to what
-    ///   ships and an artist with a Sobel layer in an open document will see it.
+    /// - **Sobel** convolves, and it takes the backdrop — **fixed, and with no control**. It writes
+    ///   back the coverage it was handed, so over the paper the flat regions are opaque black and the
+    ///   edges are bright: what an edge detector conventionally is. That is a change to what ships and
+    ///   an artist with a Sobel layer in an open document will see it. It joins the literal list below
+    ///   rather than getting a case of its own, even though it reads shape rather than colour, because
+    ///   the answer is a constant again.
     ///
-    ///   **EFFECT_BACKDROP.md §2.2 said that default came for free and it did not.** It claimed an
-    ///   opaque backdrop would make the flat regions opaque black on its own; the kernel emitted
-    ///   `(m, m, m, m)`, so they came out fully transparent no matter what it was handed, and the
-    ///   composite became a hole with `paperView` already stood down behind it. Fixed 2026-08-27 off
-    ///   the owner's report — *"sobel should be black mostly but right now its grey"* — by having
-    ///   `.backdrop` keep the coverage it was handed. `.ink` still emits the magnitude as coverage,
-    ///   byte for byte as it shipped.
+    ///   **It had an artist-facing `.ink` setting for a few hours on 2026-08-27 and the owner deleted
+    ///   it the same day**: *"drop it. Remember to cleanly remove and delete the feature so no remnants
+    ///   of it are left in the code."* EFFECT_BACKDROP.md §5.2 keeps the superseded ruling and §2.2 the
+    ///   two measurements that killed it — `(m,m,m,m)` over white paper composites to
+    ///   `m·255 + 255(1−m) = 255` for **every** m, so an ink-only Sobel is arithmetically invisible on
+    ///   the default paper whatever colour the ink is; and the kernel reads *premultiplied* rgb, so
+    ///   black ink is `(0,0,0)` inside the stroke and `(0,0,0)` outside it and an ink-only Sobel finds
+    ///   **zero** edges in black line art. The setting was near-useless for the two commonest documents
+    ///   there are.
     ///
-    /// Bloom's and Sobel's is the artist's stored choice, not a fixed answer (EFFECT_BACKDROP.md §6
-    /// step 5) — each reads its own `Bloom.input`/`Sobel.input` field, seeded with the ruled default
-    /// above, which is why those two bind their associated value here rather than joining the literal
-    /// lists.
+    /// Bloom's is the one answer here that is the artist's stored choice rather than a fixed one
+    /// (EFFECT_BACKDROP.md §6 step 5) — it reads its own `Bloom.input` field, seeded with the ruled
+    /// default above, which is why it binds its associated value rather than joining the literal list.
     var input: Input {
         switch self {
         case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap,
-             .posterize, .noise, .chromaticAberration, .blur, .sharpen:
+             .posterize, .noise, .chromaticAberration, .blur, .sharpen, .sobel:
             return .backdrop
         case .outline:
             return .ink
         case .bloom(let params):
-            return params.input
-        case .sobel(let params):
             return params.input
         }
     }
@@ -397,26 +404,16 @@ extension Effect {
         var input: Effect.Input = .ink
     }
 
-    /// The divisor that keeps the magnitude from clipping is a resolved constant (`Effect.params`),
-    /// not an artist-facing number — `input` is Sobel's only knob today.
-    struct Sobel: Equatable {
-        /// EFFECT_BACKDROP.md §4/§6 step 5 — the artist's choice. **It selects an alpha rule as well as
-        /// an input image**, which is more than the field's name suggests and is why it is written down
-        /// here: `.backdrop` keeps the coverage the kernel was handed (`EffectParams.preserveAlpha`),
-        /// `.ink` makes the gradient magnitude the coverage. No single expression is both, and "bright
-        /// edges on black" is unreachable without the first — see `sobel` in either backend.
-        ///
-        /// Defaults to `.backdrop`, the
-        /// owner's ruled default: bright edges on black, what an edge detector conventionally is —
-        /// matching the fixed answer `Effect.input` already gave for Sobel before this field existed,
-        /// so this decode default is not itself a new change. The change already shipped one stage
-        /// back, when the paper was folded into the accumulator (EFFECT_BACKDROP.md §1): before that,
-        /// `.backdrop` was ink-only (paper was a `UIView` behind the composite, not part of it), so an
-        /// artist's existing Sobel layer saw the paper *through* transparency; now `.backdrop` bakes
-        /// the paper in, and the same layer reads solid colour. This field is what lets that artist
-        /// choose `.ink` to get the old, edges-over-paper look back.
-        var input: Effect.Input = .backdrop
-    }
+    /// **Sobel has no parameters at all, and the empty struct is the whole of it.** The divisor that
+    /// keeps the magnitude from clipping is a resolved constant (`Effect.params`) rather than an
+    /// artist-facing number, and the `input` field that lived here for a few hours on 2026-08-27 was
+    /// deleted by the owner's ruling — `Effect.input`'s Sobel bullet carries the two measurements and
+    /// EFFECT_BACKDROP.md §5.2 the superseded ruling it replaced.
+    ///
+    /// Kept as an empty struct rather than collapsed into a bare `case sobel`, for `Effect.Curves`'
+    /// reason in reverse: the payload is where a knob goes if one is ever ruled, and adding a field is
+    /// a smaller change than reshaping the enum and the `{"kind":…,"params":…}` every document writes.
+    struct Sobel: Equatable {}
 
     /// The blur half is **exactly** `Effect.blur(Blur(radius: radius))` — same `gaussianHalfKernel`,
     /// same σ = radius/3, same 128-tap cap — which is the load-bearing fact `weights` states in code
@@ -540,17 +537,6 @@ struct EffectParams: Equatable {
     var colorR: Float = 0
     var colorG: Float = 0
     var colorB: Float = 0
-    /// **Sobel's alpha rule, and the only field here that changes what a kernel *means* rather than
-    /// how far it reaches.** 1 makes the kernel write back the coverage it was handed; 0 makes the
-    /// gradient magnitude the coverage.
-    ///
-    /// It exists because those two are both right, for different inputs, and no single expression is
-    /// both — see `Effect.Sobel.input` and `sobel` in either backend. Appended at the end for the
-    /// reason the three colour fields above were: the all-scalar layout rule makes the end of the
-    /// block the one position where a new field cannot shift an existing one.
-    ///
-    /// Default 0, so every effect that does not set it keeps the behaviour it shipped with.
-    var preserveAlpha: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -651,19 +637,7 @@ extension Effect {
             p.threshold = Float(min(max(bloom.threshold, 0), 1))
             p.intensity = Float(max(bloom.intensity, 0))
             p.taps = UInt32(Self.tapCount(forRadius: bloom.radius))
-        case .sobel(let sobel):
-            // **The alpha rule, which is the half of Sobel that is not the stencil.** `.backdrop` is an
-            // edge detector over an opaque image and its output is an opaque image — bright edges on
-            // black — so it keeps the coverage it was handed. `.ink` is the artist's opt-out, edges
-            // floating over the paper, and there the magnitude *is* the coverage. EFFECT_BACKDROP.md
-            // §2.2 assumed the first fell out of the second and it does not; the owner reported the
-            // difference as "sobel should be black mostly but right now its grey".
-            //
-            // `src.a` rather than a literal 1: the padding margin is not paper
-            // (`testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper`), so the accumulator is
-            // transparent out there even under `.backdrop`, and an opaque literal would paint canvas
-            // colour across a margin that has already been ruled not to be canvas.
-            p.preserveAlpha = sobel.input == .backdrop ? 1 : 0
+        case .sobel:
             // The divisor that peak-normalizes the magnitude without ever clipping it. Max |Gx| = 4
             // for input in [0, 1], but the true maximum of sqrt(Gx² + Gy²) over all binary 3×3
             // patterns is sqrt(20) ≈ 4.4721 (attained at Gx = 2, Gy = 4, a diagonal step — enumerated
@@ -1169,18 +1143,14 @@ extension Effect.Bloom: Codable {
     }
 }
 
-extension Effect.Sobel: Codable {
-    private enum CodingKeys: String, CodingKey { case input }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        // Absent covers two cases at once: a document saved before this field existed, and one saved
-        // when Sobel was still the empty struct above. Both decode to `.backdrop`, which is exactly
-        // what `Effect.input` already returned for every Sobel node before this field existed, so
-        // this default changes no document's picture on load.
-        input = try c.decodeIfPresent(Effect.Input.self, forKey: .input) ?? .backdrop
-    }
-}
+/// **Empty, synthesized, and that synthesis is a compatibility guarantee rather than an omission.**
+/// Sobel carried an `input` key for a few hours on 2026-08-27, so documents saved in that window hold
+/// `{"kind":"sobel","params":{"input":"ink"}}`. A keyed container reads only the keys its `CodingKeys`
+/// names, and an empty struct names none — so the stale key is ignored and the node decodes into the
+/// one Sobel there is, rather than throwing and taking the artist's whole project down with it.
+/// `testASobelSavedWithTheDeletedInputKeyStillDecodes` demonstrates that in this file's own two-step
+/// decode path rather than trusting the language rule.
+extension Effect.Sobel: Codable {}
 
 extension Effect.Sharpen: Codable {
     private enum CodingKeys: String, CodingKey { case radius, amount }

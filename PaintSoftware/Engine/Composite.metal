@@ -405,9 +405,6 @@ struct EffectParams {
     float colorR;
     float colorG;
     float colorB;
-    // Sobel's alpha rule: 1 writes back the coverage the kernel was handed, 0 makes the gradient
-    // magnitude the coverage. See the Swift declaration this mirrors for why both are needed.
-    uint  preserveAlpha;
 };
 
 /// One entry of the resolved transfer table.
@@ -660,20 +657,23 @@ static inline float4 bloomCombine(texture2d<float, access::read> glow,
 /// unpremultiplied, the same convention `blur1D` follows — so a coverage edge and a colour edge are the
 /// same kind of gradient to this kernel. Clamp-to-edge at the border, matching every other gather here.
 ///
-/// **Alpha is `params.preserveAlpha`'s question, and getting it wrong is what shipped on 2026-08-27.**
-/// The output used to be `(m, m, m, m)` unconditionally, so a flat region was `m = 0` — fully
-/// transparent, **whatever the backdrop was**. EFFECT_BACKDROP.md §2.2 claimed the opposite (*"with an
-/// opaque backdrop flat regions become opaque black"*) and the owner's ruled `.backdrop` default was
-/// made on that claim; what an artist actually got was a transparent canvas with `paperView` already
-/// stood down behind it, which reads as `paddingBackdrop`'s grey.
+/// **The alpha is the coverage the kernel was handed, and getting that wrong is what shipped on
+/// 2026-08-27.** The output used to be `(m, m, m, m)` unconditionally, so a flat region was `m = 0` —
+/// fully transparent, **whatever the backdrop was**. EFFECT_BACKDROP.md §2.2 claimed the opposite
+/// (*"with an opaque backdrop flat regions become opaque black"*) and the owner's ruling that Sobel
+/// grade the paper was made on that claim; what an artist actually got was a transparent canvas with
+/// `paperView` already stood down behind it, which reads as `paddingBackdrop`'s grey.
 ///
-/// So: `.backdrop` keeps the coverage it was handed (`preserveAlpha == 1`) and is an opaque edge map,
-/// bright edges on black, which is what an edge detector conventionally is. `.ink` keeps `(m, m, m, m)`
-/// unchanged — there the magnitude *is* the coverage, and the paper showing through the flat regions is
-/// the whole look that mode exists to offer. Both are premultiplied-valid: `rgb` is clamped to the
-/// alpha that carries it either way, the same re-imposition `bloomCombine` and `sharpenCombine` make.
+/// So the alpha is `src.a` and the result is an opaque edge map over an opaque image — bright edges on
+/// black, which is what an edge detector conventionally is. **`src.a` rather than a literal 1**,
+/// because the padding margin is not paper (`testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper`)
+/// and the accumulator is transparent out there; an opaque literal would paint canvas colour across a
+/// margin already ruled not to be canvas. `rgb` is clamped to the alpha that carries it, the same
+/// premultiplied re-imposition `bloomCombine` and `sharpenCombine` make.
 ///
-/// `reshapesCoverage` still names Sobel, and now for one mode rather than two.
+/// For a few hours on 2026-08-27 this was a per-mode choice carried by `params.preserveAlpha`, with
+/// `.ink` keeping `(m, m, m, m)`. The owner deleted the mode the same day; see `Effect.input`'s Sobel
+/// bullet for the two measurements that killed it.
 static inline float4 sobel(texture2d<float, access::read> source, constant EffectParams &params, uint2 gid) {
     int x = int(gid.x), y = int(gid.y);
     float tl = lum(texelClamped(source, x - 1, y - 1).rgb);
@@ -689,7 +689,7 @@ static inline float4 sobel(texture2d<float, access::read> source, constant Effec
     float gy = (bl + 2.0f * bc + br) - (tl + 2.0f * tc + tr);
     float magnitude = sqrt(gx * gx + gy * gy);
     float m = saturate(magnitude * params.amount);
-    float alpha = params.preserveAlpha != 0u ? texelClamped(source, x, y).a : m;
+    float alpha = texelClamped(source, x, y).a;
     return float4(float3(min(m, alpha)), alpha);
 }
 

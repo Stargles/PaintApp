@@ -420,13 +420,12 @@ enum EffectReference {
     /// same kind of gradient to this kernel. Clamp-to-edge at the border, the same convention every
     /// other gather kernel in this file uses.
     ///
-    /// **Alpha is `params.preserveAlpha`'s question** — the Metal twin's doc comment carries the full
-    /// account and the report that produced it. In short: the output was `(m, m, m, m)` unconditionally,
-    /// so a flat region came out fully transparent whatever the backdrop was, and EFFECT_BACKDROP.md
-    /// §2.2's "with an opaque backdrop flat regions become opaque black" was false. `.backdrop` now
-    /// keeps the coverage it was handed and is an opaque edge map; `.ink` keeps `(m, m, m, m)`, where
-    /// the magnitude genuinely is the coverage. `rgb` is clamped to whichever alpha carries it, so both
-    /// are representable premultiplied colours.
+    /// **The alpha is the coverage the kernel was handed** — the Metal twin's doc comment carries the
+    /// full account and the report that produced it. In short: the output was `(m, m, m, m)`
+    /// unconditionally, so a flat region came out fully transparent whatever the backdrop was, and
+    /// EFFECT_BACKDROP.md §2.2's "with an opaque backdrop flat regions become opaque black" was false.
+    /// Sobel now writes `src.a` straight back and is an opaque edge map over an opaque image, with
+    /// `rgb` clamped to that alpha so the result is a representable premultiplied colour.
     private static func sobel(_ bytes: [UInt8], params: EffectParams, width: Int, height: Int) -> [UInt8] {
         func lum(_ x: Int, _ y: Int) -> Float {
             let t = texel(bytes, x, y, width: width, height: height)
@@ -444,7 +443,7 @@ enum EffectReference {
                 let magnitude = (gx * gx + gy * gy).squareRoot()
                 let m = min(max(magnitude * params.amount, 0), 1)
                 let pixel = (x + y * width) * 4
-                let alpha = params.preserveAlpha != 0 ? Float(bytes[pixel + 3]) / 255 : m
+                let alpha = Float(bytes[pixel + 3]) / 255
                 let colour = quantize(min(m, alpha))
                 for channel in 0..<3 { result[pixel + channel] = colour }
                 result[pixel + 3] = quantize(alpha)

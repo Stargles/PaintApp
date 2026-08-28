@@ -355,14 +355,12 @@ struct EffectSettingsBar: View {
             }
             note("Pixels brighter than the threshold glow.")
 
-        case .sobel(var params):
-            // Off is `.ink` — edges over transparency, the paper showing through as it did before
-            // the paper was folded into the composite. On (the default) is `.backdrop` — bright
-            // edges on black, the conventional edge-detector look, now that the paper is part of
-            // what Sobel reads.
-            toggleRow("Include Canvas Color", isOn: params.input == .backdrop, identifier: "includeCanvasColor") {
-                params.input = $0 ? .backdrop : .ink; onChange(.sobel(params))
-            }
+        case .sobel:
+            // **Sobel is the zero-control effect, and the only one** — a note and nothing else, which
+            // is the degenerate end of the per-effect control counts TODO item (18) is sizing this bar
+            // against. It had an "Include Canvas Color" toggle for a few hours on 2026-08-27; the owner
+            // deleted the setting the same day (EFFECT_BACKDROP.md §5.2), and Sobel always grades the
+            // canvas colour now. Bloom above keeps the identically-named toggle, which is real.
             note("Edge detection. The divisor that keeps the magnitude from clipping is fixed.")
 
         case .sharpen(var params):

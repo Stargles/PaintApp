@@ -88,6 +88,20 @@ final class EffectMultiPassLogicTests: XCTestCase {
         return bytes
     }
 
+    /// **The same impulse on an opaque black ground**, which is the fixture Sobel needs now that it
+    /// writes back the coverage it was handed. The luminance field is *identical* to `impulseBytes`'s —
+    /// the kernel reads premultiplied rgb, and transparent black and opaque black are both `(0,0,0)` —
+    /// so the published Gx/Gy table below is the same numbers on either fixture. What differs is only
+    /// the alpha the kernel copies through, and on this one it is 255 everywhere, so the magnitude is
+    /// actually readable in rgb instead of being clamped away by `rgb <= a`.
+    private func opaqueImpulseBytes(at point: (x: Int, y: Int)) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: Self.side * Self.side * 4)
+        for pixel in stride(from: 3, to: bytes.count, by: 4) { bytes[pixel] = 255 }
+        let offset = (point.x + point.y * Self.side) * 4
+        for channel in 0..<3 { bytes[offset + channel] = 255 }
+        return bytes
+    }
+
     /// A hard-edged opaque square on transparency: a silhouette, so "did coverage move" is a question
     /// with an unambiguous answer.
     private func squareBytes(inset: Int, value: UInt8 = 220) -> [UInt8] {
@@ -823,11 +837,20 @@ final class EffectMultiPassLogicTests: XCTestCase {
     /// **The premise, stated before the arithmetic**: the impulse fixture really is one bright pixel
     /// among zero, not an image that happens to be uniform. A test that skipped this and still passed
     /// would be evidence of nothing — the failure this project has already shipped once.
+    ///
+    /// **Opaque-backed, and that is forced rather than chosen.** Sobel copies its input's coverage into
+    /// its output and clamps `rgb <= a`, so on a transparent ground every neighbour of the impulse comes
+    /// out `(0,0,0,0)` and the magnitude the table below is about is clamped out of existence. The
+    /// luminance field is unchanged by the swap — premultiplied transparent black and opaque black are
+    /// both `(0,0,0)` — so this fixture asks the same question the transparent one used to, and can
+    /// still see the answer.
     func testSobelImpulsePremiseIsGenuinelyAnImpulse() {
         let centre = (x: Self.side / 2, y: Self.side / 2)
-        let input = impulseBytes(at: centre)
+        let input = opaqueImpulseBytes(at: centre)
         XCTAssertEqual(pixel(input, centre.x, centre.y), [255, 255, 255, 255], "Fixture check: the centre must be opaque white")
-        XCTAssertEqual(pixel(input, centre.x + 1, centre.y), [0, 0, 0, 0], "Fixture check: its neighbour must be fully transparent, or every position below is trivially the same value")
+        XCTAssertEqual(pixel(input, centre.x + 1, centre.y), [0, 0, 0, 255], "Fixture check: its neighbour must be opaque BLACK — a different luminance, or every position below is trivially the same value, and opaque, or the magnitude is clamped away by `rgb <= a`")
+        XCTAssertEqual(pixel(impulseBytes(at: centre), centre.x + 1, centre.y), [0, 0, 0, 0],
+                       "Fixture check: …and the transparent twin this replaced has the same luminance at that pixel, so the published table below is the same numbers on both")
     }
 
     /// **The hand-worked table**, computed from the published stencils and stated as literals so a
@@ -852,36 +875,39 @@ final class EffectMultiPassLogicTests: XCTestCase {
     /// identifies the operator on its own. What it cannot discriminate — a full Gx↔Gy transpose or any
     /// sign flip — is genuinely unobservable in a magnitude-only Sobel, so it needs no test.
     ///
-    /// **`input: .ink` rather than the default, and the change is what this file could not see.** In
-    /// that mode the magnitude *is* the coverage, so one byte answers for all four channels and the
-    /// table above is the whole output. Under `.backdrop` the alpha is the source's own coverage
-    /// instead — and on this fixture the source is transparent everywhere but one pixel, which is
-    /// exactly why an impulse could never have caught the alpha bug the owner found on a screen.
-    /// `testSobelsTwoAlphaRulesOverAnOpaqueStepEdge` is the fixture that can.
+    /// **The magnitude is in rgb and the alpha is the input's, which is the shape of Sobel's output.**
+    /// `sobel` writes `(min(m, a), min(m, a), min(m, a), a)` — the coverage it was handed, and colour
+    /// clamped to it — so the table above is the rgb answer and 255 is the alpha answer everywhere on
+    /// this opaque fixture. That is why the fixture is opaque: on `impulseBytes`'s transparent ground
+    /// every neighbour has `a == 0`, the clamp takes rgb to 0 with it, and this table would read as
+    /// nine zeroes whatever stencil the kernel used.
     func testSobelImpulseMatchesTheKnownGradientKernels() {
         let centre = (x: Self.side / 2, y: Self.side / 2)
-        let input = impulseBytes(at: centre)
+        let input = opaqueImpulseBytes(at: centre)
         let expected: [(dx: Int, dy: Int, byte: Int)] = [
             (0, 0, 0),
             (1, 0, 114), (-1, 0, 114), (0, 1, 114), (0, -1, 114),
             (1, 1, 81), (1, -1, 81), (-1, 1, 81), (-1, -1, 81),
         ]
         var table: [String] = []
-        for (backend, out) in bothBackends(.sobel(Effect.Sobel(input: .ink)), input) {
+        for (backend, out) in bothBackends(.sobel(Effect.Sobel()), input) {
             var worst = 0
             for (dx, dy, want) in expected {
                 let got = pixel(out, centre.x + dx, centre.y + dy)
-                for channel in 0..<4 {
+                for channel in 0..<3 {
                     worst = max(worst, abs(got[channel] - want))
                     XCTAssertLessThanOrEqual(abs(got[channel] - want), 1,
                                              "\(backend) Sobel at (\(dx),\(dy)) channel \(channel): got \(got[channel]), the Gx/Gy stencils give \(want)")
                 }
+                XCTAssertEqual(got[3], 255,
+                               "\(backend) Sobel at (\(dx),\(dy)): the alpha is the coverage it was handed, and this fixture is opaque. Got \(got)")
             }
-            // Finite support: the stencil is 3×3, so nothing past radius 1 may have moved.
+            // Finite support: the stencil is 3×3, so nothing past radius 1 may have moved — which here
+            // means opaque black, the edge detector's ground, rather than a transparent hole.
             for step in [2, 3] {
-                XCTAssertEqual(pixel(out, centre.x + step, centre.y), [0, 0, 0, 0],
+                XCTAssertEqual(pixel(out, centre.x + step, centre.y), [0, 0, 0, 255],
                                "\(backend) Sobel reached \(step)px horizontally, past its 3×3 support")
-                XCTAssertEqual(pixel(out, centre.x, centre.y + step), [0, 0, 0, 0],
+                XCTAssertEqual(pixel(out, centre.x, centre.y + step), [0, 0, 0, 255],
                                "\(backend) Sobel reached \(step)px vertically, past its 3×3 support")
             }
             table.append("\(backend) \(worst)")
@@ -894,41 +920,47 @@ final class EffectMultiPassLogicTests: XCTestCase {
     /// analogue of `testABlurOfAFlatColourIsThatColourIncludingAtTheBorder`, but Sobel's identity output
     /// is black rather than the input colour, since the effect replaces the image with an edge map.
     ///
-    /// **Both modes, because the identity output is where they differ and EFFECT_BACKDROP.md §2.2 got
-    /// that wrong.** §2.2 claimed an opaque backdrop made flat regions opaque black on its own; the
-    /// kernel emitted `(m, m, m, m)`, so it made them *transparent*, and the artist saw whatever was
-    /// behind the composite. This is that claim as an assertion: it is true of `.backdrop` now, and it
-    /// was never true of `.ink` and still is not.
+    /// **OPAQUE black, and the word is the whole assertion — EFFECT_BACKDROP.md §2.2 got it wrong and
+    /// it shipped.** §2.2 claimed an opaque backdrop made flat regions opaque black on its own; the
+    /// kernel emitted `(m, m, m, m)`, so it made them *transparent*, and with `paperView` already stood
+    /// down the artist saw the grey view behind the composite. This is that claim as an assertion.
     func testSobelOfAFlatColourIsBlackEverywhereIncludingAtTheBorder() {
         let bytes = flatBytes(90, 160, 40)
-        for (backend, out) in bothBackends(.sobel(Effect.Sobel(input: .ink)), bytes) {
-            XCTAssertEqual(out, [UInt8](repeating: 0, count: bytes.count),
-                           "\(backend): under `.ink` the magnitude is the coverage, so a flat field is "
-                           + "transparent black — the paper shows through it, which is the whole look "
-                           + "that mode exists to offer")
-        }
         var opaqueBlack = [UInt8](repeating: 0, count: bytes.count)
         for pixel in stride(from: 3, to: opaqueBlack.count, by: 4) { opaqueBlack[pixel] = 255 }
         for (backend, out) in bothBackends(.sobel(Effect.Sobel()), bytes) {
             XCTAssertEqual(out, opaqueBlack,
-                           "\(backend): under the ruled `.backdrop` default the coverage it was handed "
-                           + "comes back, so a flat field is OPAQUE black — an edge detector's ground. "
-                           + "It was RGBA (0,0,0,0), and over the paper that is a hole in the canvas")
+                           "\(backend): the coverage it was handed comes back, so a flat field is "
+                           + "OPAQUE black — an edge detector's ground. It was RGBA (0,0,0,0), and over "
+                           + "the paper that is a hole in the canvas")
         }
     }
 
-    /// **The two alpha rules side by side over one fixture, which is the test that was missing.**
+    /// A flat field that is itself *transparent* still comes out transparent, which is the half of the
+    /// alpha rule `src.a` buys over a literal 1. The padding margin outside the artwork rect is exactly
+    /// this image (EFFECT_BACKDROP.md §6 step 3, and
+    /// `testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper`), so an opaque literal here would
+    /// paint canvas colour across a margin already ruled not to be canvas.
+    func testSobelOfATransparentFieldStaysTransparentRatherThanPaintingTheMargin() {
+        let bytes = flatBytes(0, 0, 0, 0)
+        for (backend, out) in bothBackends(.sobel(Effect.Sobel()), bytes) {
+            XCTAssertEqual(out, bytes,
+                           "\(backend): alpha 0 in, alpha 0 out — `src.a`, not a literal 1")
+        }
+    }
+
+    /// **The alpha rule over an opaque fixture, which is the test that was missing.**
     ///
     /// An opaque vertical step — black left half, white right half — is the smallest image in which
-    /// "bright edges on black" is a sentence about bytes. Every earlier Sobel fixture here was either
-    /// flat or an impulse on transparency, and on both of those `(m, m, m, m)` and a correct opaque
-    /// edge map agree everywhere it was checked. That is how the defect the owner reported cleared a
-    /// full suite: *"weird, sobel should be black mostly but right now its grey"*.
+    /// "bright edges on black" is a sentence about bytes. Every Sobel fixture in this file before
+    /// 2026-08-27 was either flat or an impulse on transparency, and on both of those `(m, m, m, m)`
+    /// and a correct opaque edge map agree everywhere they were checked. That is how the defect the
+    /// owner reported cleared a full suite: *"weird, sobel should be black mostly but right now its
+    /// grey"*.
     ///
-    /// The magnitude is the same in both modes and is computed from the published stencils rather than
-    /// from either kernel: across the seam `Gx = 4`, `Gy = 0`, and `4 / sqrt(20) = 0.894427` → byte 228.
-    /// Only the alpha differs, and only by which of the two the mode asked for.
-    func testSobelsTwoAlphaRulesOverAnOpaqueStepEdge() {
+    /// The magnitude is computed from the published stencils rather than from either kernel: across the
+    /// seam `Gx = 4`, `Gy = 0`, and `4 / sqrt(20) = 0.894427` → byte 228.
+    func testSobelOverAnOpaqueStepEdgeIsBrightEdgesOnOpaqueBlack() {
         let side = Self.side
         var step = [UInt8](repeating: 0, count: side * side * 4)
         for y in 0..<side {
@@ -943,28 +975,15 @@ final class EffectMultiPassLogicTests: XCTestCase {
 
         for (backend, out) in bothBackends(.sobel(Effect.Sobel()), step) {
             XCTAssertEqual(pixel(out, 4, 32), [0, 0, 0, 255],
-                           "\(backend) `.backdrop`, flat black far from the seam: opaque black. "
+                           "\(backend), flat black far from the seam: opaque black. "
                            + "Got \(pixel(out, 4, 32))")
             XCTAssertEqual(pixel(out, side - 5, 32), [0, 0, 0, 255],
-                           "\(backend) `.backdrop`, flat white far from the seam: opaque black too — a "
-                           + "gradient magnitude does not care which flat value it is. Got \(pixel(out, side - 5, 32))")
+                           "\(backend), flat white far from the seam: opaque black too — a gradient "
+                           + "magnitude does not care which flat value it is. Got \(pixel(out, side - 5, 32))")
             let edge = pixel(out, seam, 32)
-            XCTAssertEqual(edge[3], 255, "\(backend) `.backdrop`: the edge is opaque. Got \(edge)")
+            XCTAssertEqual(edge[3], 255, "\(backend): the edge is opaque. Got \(edge)")
             XCTAssertLessThanOrEqual(abs(edge[0] - 228), 1,
-                                     "\(backend) `.backdrop`: 4 / sqrt(20) = 0.894427 → 228. Got \(edge)")
-        }
-
-        for (backend, out) in bothBackends(.sobel(Effect.Sobel(input: .ink)), step) {
-            XCTAssertEqual(pixel(out, 4, 32), [0, 0, 0, 0],
-                           "\(backend) `.ink`, flat: transparent black, byte for byte as it shipped. "
-                           + "Got \(pixel(out, 4, 32))")
-            let edge = pixel(out, seam, 32)
-            XCTAssertLessThanOrEqual(abs(edge[0] - 228), 1,
-                                     "\(backend) `.ink`: the same magnitude — the stencil is not what "
-                                     + "the mode changes. Got \(edge)")
-            XCTAssertEqual(edge[3], edge[0],
-                           "\(backend) `.ink`: …and alpha IS that magnitude, which is the rule "
-                           + "`(m, m, m, m)` states and the one that must not change. Got \(edge)")
+                                     "\(backend): 4 / sqrt(20) = 0.894427 → 228. Got \(edge)")
         }
     }
 
