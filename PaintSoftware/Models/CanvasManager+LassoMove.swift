@@ -119,6 +119,14 @@ struct MoveBoxInk {
     ///    what makes an image's contribution invariant under the box angle — which is right, because
     ///    the box cannot tell the artist anything more useful about a photo it refuses to stretch or
     ///    mirror anyway (`freeformUnavailableReason`, `mirrorUnavailableReason`).
+    ///    **A disc is padded exactly for every pose a float carrying an image can reach**, and that
+    ///    is worth pinning rather than leaving to luck: `padScale` is an axis-aligned pair, which is
+    ///    exact for a disc only while the frame is a rotation — and it always is here, because
+    ///    Freeform is refused on a float holding an image, so `aspect` is 1 and the frame reduces to
+    ///    `R(−boxAngle)` (composed with the mirror, which is orthogonal too). Stage 3c, which teaches
+    ///    an image to hold a stretched shape, is what would make this inexact: a disc under a
+    ///    non-uniform map is an ellipse whose box wants the *row norms* of the frame, not one scalar
+    ///    per axis.
     ///  * A **text box** is its four corners, which under a turned box is *tighter* than the
     ///    `boundingBox` the lift used to take of them and identical to it at rest, since that
     ///    property is their axis-aligned hull.
@@ -895,6 +903,14 @@ extension CanvasManager {
     /// own (non-square, when stretched) units that disc is an ellipse with semi-axes
     /// `reach/sqrt(aspect)` and `reach·sqrt(aspect)`. That is `padScale`, and it is `(1, 1)` exactly
     /// on an unstretched box.
+    ///
+    /// **It tightens a stretched box even at `boxAngle == 0`, which is a change beyond the ask and is
+    /// the correct one.** The lift's padding is isotropic, so a box stretched 3:1 used to carry the
+    /// lift's `reach` on *both* axes and then have the long one stretched with the box — too wide by
+    /// `reach · scale · (sqrt(aspect) − 1)`, a slack the ink never had. Measuring the disc where it
+    /// actually is removes it. So a stretched float's drawn box is a little tighter than it was
+    /// before phase 3, on the long axis only, and `testTheFittedBoxHugsTheInkAtEveryPose` is what
+    /// says the new number is the true one rather than merely a different one.
     ///
     /// ## What it must not do
     ///
