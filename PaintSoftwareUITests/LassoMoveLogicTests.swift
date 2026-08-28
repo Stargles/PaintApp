@@ -2495,14 +2495,23 @@ final class LassoMoveLogicTests: XCTestCase {
     /// identity only when `base` is, so a spurious rotation has somewhere to hide on a straight layer
     /// and nowhere to hide here.
     ///
-    /// Three moments are checked, because a leak could enter at any of them: the turn itself; a
-    /// zero-delta nudge taken *after* the turn (which is what an artist's next drag re-derives from);
-    /// and the bake.
+    /// **Three moments are checked, and the middle one is the one that earns its keep.** A leak could
+    /// enter at the turn itself, at a zero-delta nudge taken *after* the turn (which is what an
+    /// artist's next drag re-derives its map from), or at the bake.
     ///
-    /// Watched failing with `boxAngle` added into `ObjectTransformFrame.axisScales`' caller — i.e.
-    /// with `VectorCanvas.affine(from:aspect:pivot:)` built from `drawnAngle` instead of
-    /// `transform.rotation`: *("11.42") is not equal to ("6.0") +/- ("1e-09")* on the first sample of
-    /// the first stroke, and *Composites differ* at the bake on every one of the three layers.
+    /// **Watched failing — and not hypothetically.** `87081de` shipped with two lines in
+    /// `applyToVectorFloat` folding `frame.boxAngle` into `localDelta`, left behind on disk by a
+    /// mutation-testing script and committed by another session before the script could restore it.
+    /// Against that binary this test went red at the **zero-nudge** assertion:
+    /// *("19.999999999994998") is not equal to ("28.483861775054198") +/- ("1e-09") — after the zero
+    /// nudge*, and on the **identity** layer transform at that, followed by
+    /// `testEightPressesOfRotate45StayBitExactOnAHandTurnedBox`. Nothing else in the suite noticed.
+    ///
+    /// **The moment it fired at is the finding.** `turnVectorFloatBox` writes one field and touches
+    /// no geometry, so the turn alone is silent *even when the map is poisoned*; it is the next
+    /// gesture — any gesture, including one that moves nothing — that re-derives the map and drags
+    /// the ink. A test that asserted only "the box turned and nothing moved" would have passed
+    /// against a build that jumps the artist's drawing on their very next touch.
     func testANonZeroBoxAngleChangesNoSampleAndNoPixel() {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4),

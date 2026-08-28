@@ -128,14 +128,23 @@ whatever the canvas becomes.
 
 ### (20) A second knob that turns the Move box alone — phase 1 BUILT, phase 2 next
 
-- [ ] **Phase 1 is built on `tmp/boxknob` and leaves this file when it merges, not now.** A yellow knob
+      **Phase 1 merged as `87081de`**, so only phase 2 is left open below. A yellow knob
       off the box's *bottom* edge (green is the content knob; `systemOrange` already means "distort
       corner" on a text box) turns `ObjectTransformFrame.boxAngle`, and **that field reaches no
       geometry at all** — it appears nowhere in `VectorLayer.swift`, and in `CanvasManager+LassoMove`
       only in `turnVectorFloatBox`, which writes it straight onto the frame with no undo step, per
       §5.21. The drag arm returns `transform: start` bit for bit, so the ink is not touched by any
-      arithmetic — not scaled by 1, not rotated by 0. `testABoxAngleChangesNoSampleAndNoPixel` is the
-      guard against a leak into the map.
+      arithmetic — not scaled by 1, not rotated by 0.
+      `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is the guard against a leak
+      into the map, and **it caught a real one**: `87081de` shipped with two lines added to
+      `applyToVectorFloat` that folded `frame.boxAngle` into the geometry map — a deliberate defect a
+      mutation-testing script had left on disk, which was committed and pushed by a *different*
+      session while the script was between runs. The commit that follows it reverts those two lines.
+      It went red on exactly the two tests you would want: that one and
+      `testEightPressesOfRotate45StayBitExactOnAHandTurnedBox`. Two lessons, both already in
+      CLAUDE.md wearing other costumes: a green run taken before the last edit is evidence about a
+      binary that no longer exists; and **a mutation left in a working tree is indistinguishable from
+      the implementation** to anyone who harvests that tree, so commit first and mutate second.
       **Reset leaves the box angle alone**, which is where §5.16 meets §5.21 and they resolve the same
       way twice: a Reset made pressable by a turned box would fire a zero-delta nudge on an otherwise
       untouched float — `nudges == 1`, the step carrying the pre-split display list — so one Undo

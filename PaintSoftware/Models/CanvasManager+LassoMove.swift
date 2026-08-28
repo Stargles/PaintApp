@@ -385,10 +385,15 @@ extension CanvasManager {
         // local frame *before* the box's rotation carries it — which is what makes the mirror axis
         // turn with the piece, the same way the raster piece's `flipH` sits inside its
         // `affineTransform` ahead of `rotated(by:)`.
-        var leaked = transform
-        leaked.rotation += float.frame.boxAngle
+        //
+        // **`frame.boxAngle` is deliberately absent from this expression**, and it is the one place
+        // where its absence is load-bearing rather than merely tidy. The box angle is chrome
+        // (LASSO_MOVE.md §5.19–21): adding it here would break the lift invariant
+        // `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform`, so a piece would
+        // jump the instant the yellow knob was touched.
+        // `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is the tripwire.
         let localDelta = mirror.concatenating(
-            VectorCanvas.affine(from: leaked, aspect: aspect, pivot: float.pivot)
+            VectorCanvas.affine(from: transform, aspect: aspect, pivot: float.pivot)
                 .concatenating(float.baseTransform.inverted()))
         // **Which mapping, decided by the pose and not by the mode.** An unstretched float goes
         // through the similarity arm bit for bit, so every Uniform move, rotate and mirror is exactly
