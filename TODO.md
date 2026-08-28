@@ -26,6 +26,7 @@ app, and whoever notices that should come back and say so rather than assuming i
 - **(9) stage 1**, `tmp/resize1` — "Resize Canvas" in Actions, crop/expand only, today's contract with
   an arbitrary rectangle instead of a symmetric margin.
 - **(19) Change Color**, `tmp/recolor` — the owner's new ask, below.
+- **(20) Move's three-way membership** — scoped, ruled, **blocked on (19) merging**, below.
 - **(9) stage 0 is merged** (`ea51607`): a failed save now raises the `CanvasNotice` banner instead of
   failing silently, which this feature needs because after a resize the in-memory document is the only
   copy. **It is only visible on the autosave path** — on "leave to gallery" the banner is raised and
@@ -99,6 +100,42 @@ whatever the canvas becomes.
       **Known and not a defect**: recolouring a keyframe changes its in-betweens live and does not tween
       the colour, so the span cross-fades old against new. That is `InterpolationEvaluator` reading both
       ends at draw time, and it will be reported as a bug once.
+
+### (20) Move should offer three membership rules, not one
+
+- [ ] The owner, 2026-08-28: *"Additional feature for the move tool: There should be an option of
+      three where instead of cutting the lines outside the selection, it moves all the lines including
+      the ones partially inside the selection, or only the ones fully inside. The third option is the
+      current behaviour. I think you could reuse the color change code on figuring out the stuff
+      covered by the lasso."* **Their reuse instinct is right and understated**: mode Touching is (19)'s
+      predicate, and mode Enclosed is *already computed* inside the function that does the cutting —
+      `splitForLassoMove`'s `runs.count <= 1` fast path (`VectorLayer.swift:1581-1586`) is exactly
+      "every sample inside". So this is one parameter on one function, not three implementations.
+      **Names, ordered by how much travels, default in the middle:** `Enclosed · Cut · Touching`.
+      **Two rulings, 2026-08-28.** Text and placed images **follow the mode** in Touching and Enclosed
+      rather than keeping the centre rule — so each mode has one sentence true of every kind — while
+      **Cut keeps the centre**, which is what it has always been: a rounding of the cut rule for kinds
+      that cannot be cut. And **Enclosed catching nothing says so**, unlike §5.9's silent empty lasso,
+      because there the paper was blank and here the rule is what excluded a loop full of ink.
+      **Mode C is already a mixture**, which is the finding that reframes the ask: text and images
+      already use a third rule inside the mode called "cut". The option makes an existing
+      inconsistency visible and gives it vocabulary, rather than introducing one.
+      **A and B are cheaper and safer than the mode that ships**, which inverts the usual expectation:
+      no bisection, no boundary dab, no fresh ids, no lattice re-keying, and — the one that matters —
+      **no interpolation-tier demotion**, since stroke count is unchanged. `beginVectorWholeCelMove`
+      is the working proof: a float that splits nothing and shares every nudge, bake and teardown path.
+      **The picker goes on the Move bar, live while `nudges == 0`, disabled with a reason after.** The
+      Select panel is invisible while anything floats (§5.13), which is the one moment the artist can
+      see what the rule did. Re-lift is `cancelVectorFloat()` **then** `beginVectorLassoMove()` — in
+      that order, because the latter's first statement bakes the float. Re-lifting *after* a nudge is
+      a day's work with stale-closure risk on the undo stack; deferred, written down, not discovered.
+      **Two traps to carry.** (19)'s predicate skips erasers and images and Move's §5.7 rules the
+      opposite, so the shared thing is a per-element **classifier** and the kind-skipping belongs to
+      each caller. And in Touching the marching ants stop bounding the moving ink — the ants are the
+      loop, and a stroke hanging outside it now travels whole. Both correct, both will read as bugs.
+      `.cutting` is the default and the setting is **not persisted** — per-drawing intent, the line
+      `preserveMovePrecision` already draws (`CanvasManager.swift:348-350`). Persisting it would make
+      the *last used* the default, which is not what the owner asked for.
 
 ### (18) The bottom bars should be as tall as their contents — attempted, reverted, still open
 
