@@ -13,7 +13,9 @@ struct CanvasSizePickerView: View {
     }
 
     private let minDimension = 1
-    private let maxDimension = 8192
+    /// TODO.md item (13): raised 8192 -> 16383. `CanvasManager.maxCanvasExtent` is the single named
+    /// home for this bound — see its doc comment for why 16383 and not 16384.
+    private let maxDimension = Int(CanvasManager.maxCanvasExtent)
 
     private var width: Int? { Int(widthText) }
     private var height: Int? { Int(heightText) }

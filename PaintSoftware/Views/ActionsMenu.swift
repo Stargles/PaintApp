@@ -228,7 +228,7 @@ struct ActionsMenu: View {
 
             Slider(
                 value: $paddingDraft,
-                in: Double(CanvasManager.canvasPaddingRange.lowerBound)...Double(CanvasManager.canvasPaddingRange.upperBound),
+                in: Double(canvasManager.canvasPaddingRange.lowerBound)...Double(canvasManager.canvasPaddingRange.upperBound),
                 onEditingChanged: { editing in
                     if !editing { canvasManager.setCanvasPadding(CGFloat(paddingDraft)) }
                 }

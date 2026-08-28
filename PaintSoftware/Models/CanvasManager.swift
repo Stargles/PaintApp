@@ -26,8 +26,37 @@ final class CanvasManager: ObservableObject {
     /// `setCanvasPadding`, which resizes every buffer to keep existing content centred.
     @Published var canvasPadding: CGFloat = 0
 
+    /// The largest coordinate a canvas dimension may reach — **16383, not 16384**. TODO.md item (8)'s
+    /// signed 16-bit quarter-pixel sample coordinate addresses -8192.0...+8191.75 (a span of
+    /// 16383.75 pt, not 16384), so with the encoding origin at the canvas centre, 16383 is the largest
+    /// dimension that encodes without clamping a quarter-pixel *inside* the artwork on two edges.
+    /// **The single named home for this bound** — TODO.md item (13) asks for one, and this is it.
+    /// `canvasPaddingRange` below and `CanvasSizePickerView.maxDimension` both read this rather than
+    /// spelling 16383 a second time.
+    static let maxCanvasExtent: CGFloat = 16383
+
+    /// Base upper bound for `canvasPadding` on an ordinary canvas — 1024 pt per side, raised from 512
+    /// by TODO.md item (13).
+    static let canvasPaddingBaseUpperBound: CGFloat = 1024
+
     /// Clamp range for `canvasPadding`; the Actions-menu slider mirrors it.
-    static let canvasPaddingRange: ClosedRange<CGFloat> = 0...512
+    ///
+    /// **Not `static` any more** — the bound depends on the *live* canvas, shrinking as it approaches
+    /// `maxCanvasExtent` so `canvasSize` (which already includes padding, see that property's doc
+    /// comment) can never exceed it: `min(canvasPaddingBaseUpperBound, (maxCanvasExtent -
+    /// artworkExtent) / 2)`. `k = 2` because `setCanvasPadding` adds `2 * delta` to each dimension —
+    /// padding is per side. `artworkExtent` is `canvasSize` inset by the padding *already applied*
+    /// (`canvasSize` minus twice the current `canvasPadding`), not `canvasSize` itself, or the padding
+    /// already on the canvas would be subtracted from the budget twice. Uses the larger of width/height
+    /// so a non-square canvas (the owner's own 2048x1024 baseline) is bounded by whichever dimension is
+    /// closer to the limit — `setCanvasPadding` grows both dimensions by the same `delta`.
+    var canvasPaddingRange: ClosedRange<CGFloat> {
+        guard let canvasSize else { return 0...Self.canvasPaddingBaseUpperBound }
+        let artworkExtent = max(canvasSize.width, canvasSize.height) - 2 * canvasPadding
+        let budgetBound = (Self.maxCanvasExtent - artworkExtent) / 2
+        let upper = max(0, min(Self.canvasPaddingBaseUpperBound, budgetBound))
+        return 0...upper
+    }
 
     @Published var projectName: String = "Untitled"
     var projectID: UUID = UUID()

@@ -3,6 +3,48 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Raising the canvas maximum reaches a raster-storage cost `CompositorBudget` never bounds (2026-08-27)
+
+TODO.md item (13) raised `CanvasSizePickerView.maxDimension` 8192 -> 16383 and let `canvasPaddingRange`
+grow to a 1024 base. The item itself asked to check what a 16383² canvas costs before shipping it,
+rather than shipping a setting that crashes — this is that check, and the answer splits in two.
+
+**The interactive composite is fine — `CompositorBudget` already covers it, unmodified.**
+`CompositorBudget.affordableSize` scales the GPU composite down to `textureBudgetBytes` before it
+allocates anything. On the owner's own 3 GB iPad 9 (`textureBudgetBytes(physicalMemory: 3 GB) == 192
+MiB`), a 16383² canvas holding the owner's own crash-scene shape (6 live textures,
+`peakCompositeTextures`) composites at roughly **2896²** instead of full size — a softer preview, not
+a crash. That is the exact mechanism `CompositorBudget`'s own doc comment describes, doing its job on
+a canvas four times the pixels of the one it was written against.
+
+**A freshly created canvas — even at 16383² — costs nothing extra by itself.** `RasterLayerTexture` is
+lazy: a blank cel has no backing `CGContext` (`context` stays `nil` until the first stamp or a load),
+and both `resized(to:offset:)` (the function `setCanvasPadding` calls) and `flipped` check
+`hasContent` first and leave a still-blank cel blank and free. `VectorCanvas` stores geometry, not
+pixels. So creating a document at the new maximum, or padding one nobody has drawn on, allocates
+nothing beyond what it costs today.
+
+**What is not covered: a raster tier that actually holds ink, at or near the new maximum.** The
+moment a cel's raster tier is materialized — the first stroke on it, a fill, a bake, or
+`setCanvasPadding` resizing a cel that already `hasContent` — it allocates a full canvas-sized
+`CGContext`/`UIImage`, with **no budget check of any kind**. `CompositorBudget` bounds the
+compositor's own ephemeral scratch textures (`peakCompositeTextures`, the upload cache); it was never
+asked about, and says nothing about, the persistent per-cel `raster`/`fillImage`/`bakedImage` tiers
+this item makes reachable at a new size. MEASURED: one canvas-sized `rgba8Unorm` buffer at 16383² is
+16383×16383×4 ≈ **1.02 GB** — before `fillImage`/`bakedImage` are counted, and before
+`setCanvasPadding`'s own doc comment's "at least two canvas-sized images per cel" during a resize
+(whose own measurement, 3.5 GB for 32 cels at 2048×1024, scales roughly ×128 with the pixel-count
+ratio to 16383²). On the owner's named 3 GB device, with roughly 1.4 GB of headroom before jetsam
+(`CompositorBudget`'s own doc comment), one drawn stroke on one raster layer near the new maximum is
+already more than the whole process is allowed to hold.
+
+**Not fixed here — flagged instead, per the item's own instruction.** This is a pre-existing gap in
+`CompositorBudget`'s scope (it bounds compositor scratch, not document storage), not a defect this
+item introduced — but the raise makes it reachable through the UI for the first time at a size where
+it matters. Whether the fix is a storage-side budget, a warning at creation time, or an owner ruling
+that a near-maximum canvas is understood to be raster-light (vector/text, not painted) is a product
+decision, not a one-line change, and is out of scope for item (13) as built.
+
 
 ## A project restored from backup comes back with no strokes (2026-08-27) — NOT A BUG, the test was
 

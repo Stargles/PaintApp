@@ -28,8 +28,8 @@ extension CanvasManager {
         // `RenderRequest.wholePixels` — `ProjectStore` restores `canvasSize` and `canvasPadding` as
         // two independently decoded Doubles, so a project saved before today still loads fractional —
         // it makes the class unreachable through the UI, which is where it came from.
-        let clamped = min(max(newPadding, Self.canvasPaddingRange.lowerBound),
-                          Self.canvasPaddingRange.upperBound).rounded()
+        let clamped = min(max(newPadding, canvasPaddingRange.lowerBound),
+                          canvasPaddingRange.upperBound).rounded()
         let delta = clamped - canvasPadding
         guard delta != 0 else { return }
 
