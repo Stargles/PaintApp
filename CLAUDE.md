@@ -237,6 +237,35 @@ simulators, zero uninterruptible processes, and 94.6% idle CPU. Read the real nu
 top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1
 ```
 
+### A subagent's worktree is not yours to commit, and the tree you verified is not the tree you push
+
+On 2026-08-28 an orchestrator watched a worker's test run finish, grepped its worktree, saw the change
+was clean, and committed / merged / pushed it — **and deleted the worker's worktree and branch** while
+the worker was still running. What it pushed contained `leaked.rotation += float.frame.boxAngle`, two
+lines the worker had just written **on purpose**: it was mutation-testing its own new test, checking a
+guard could actually catch the defect it guards against. `main` shipped with the exact bug the feature
+exists to prevent, and the commit message said "it reaches no geometry at all". The worker recovered
+its own work, reverted, and hardened — three commits where there should have been one.
+
+Two separate mistakes, and the second is the interesting one.
+
+**Do not act on a worker's tree before its completion notification arrives.** A finished *test run* is
+not a finished *agent*; the run is one step, and the most dangerous edits come after it. There is a
+notification for this and it is the only signal that means what you want.
+
+**And a green check is evidence about the tree that existed when you ran it.** This file already warns
+that a *red* xcresult is evidence about a binary rather than about your working tree. The same hazard
+runs the other way and nothing warned about that: the grep was true when it ran and false four minutes
+later, because someone else was still typing. Verification and commit must be the same instant on the
+same bytes — `git show <sha>:<path>` after the fact, not a grep before it.
+
+**The general rule, because mutation testing is not the only way to lose here:** a worker's working
+tree is a *workbench*, not a deliverable. It legitimately holds half-finished edits, deliberate
+poison, scratch harnesses and debug printf. Only the worker knows which bytes are the product. Harvest
+its *commits*, or wait for it to say it is done. If you are the worker: **commit first and mutate
+second**, or mutate in a throwaway copy outside any worktree, because a mutation on disk is
+indistinguishable from the implementation to anyone who picks that tree up.
+
 ### `git stash` is per-repository, not per-worktree
 
 An agent working in `../PaintApp-<id>` used `git stash push`/`pop` to park its edits between test runs, and the

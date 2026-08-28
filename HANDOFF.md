@@ -10,7 +10,7 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. Fast tier **1825 / 1822 / 0 / 3**. **Items (8) and (14) are both merged**; no branches in
+inline. Fast tier **1839 / 1836 / 0 / 3**. **Items (8) and (14) are both merged**; no branches in
 flight, one worktree, clean tree. The last full suite was at the (8) merge (1932 / 1925 / 1 / 6, the
 one red environmental); (14) added nine fast-tier tests and no full run since.
 
@@ -73,7 +73,7 @@ Sobel's deleted ink control; (8)'s five attached rulings and (14)'s choice of fl
 
 ## State
 
-`main` = the item (14) merge. **Fast tier 1825 / 1822 / 0 / 3** — +9 on the 1816 the scoping commit
+`main` = the item (14) merge. **Fast tier 1839 / 1836 / 0 / 3** — +9 on the 1816 the scoping commit
 left, which is exactly the nine tests added, so nothing stopped running. No branches, no worktrees but
 the main one, no simulator clones. No `project.pbxproj` change in either commit: everything went into
 existing test files.
