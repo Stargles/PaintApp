@@ -1122,6 +1122,13 @@ final class ObjectTransformLogicTests: XCTestCase {
                           "and covers its interior — \(note)")
             XCTAssertFalse(shifted.contains(plain.projected(CGPoint(x: 0, y: -600))),
                            "and not what is outside it — \(note)")
+            // Straddling the box's own edge, which is what says the *inverse* carries the offset too
+            // and not only the forward projection: without the subtraction in `local`, the point
+            // inside reads as `199 + offset` and falls out of a 400×300 box.
+            XCTAssertTrue(shifted.contains(shifted.projected(CGPoint(x: 199, y: 149))),
+                          "just inside its own corner — \(note)")
+            XCTAssertFalse(shifted.contains(shifted.projected(CGPoint(x: 201, y: 151))),
+                           "and just outside it — \(note)")
 
             // And the anchor — the whole point of the separation.
             assertPoint(shifted.centre, plain.centre, accuracy: 0,
