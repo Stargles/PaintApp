@@ -162,7 +162,8 @@ final class SampleCodingLogicTests: XCTestCase {
                                     "samples is an object now, not an array")
         XCTAssertEqual(samples["o"] as? [Double], [64, 64], "the origin it was quantised about, written out")
         XCTAssertNotNil(samples["d"] as? String, "and the run itself, as base64")
-        XCTAssertNil(object["x"], "no stray per-sample keys leaked to the top level")
+        XCTAssertNil(object["samples"] as? [Any], "…and it is not an array of anything any more")
+        XCTAssertEqual(Set(samples.keys), ["o", "d"], "two keys, and nothing derivable stored beside them")
     }
 
     /// A stroke encoded with no origin at all — every test in the suite that round-trips one through a

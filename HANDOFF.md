@@ -1,4 +1,4 @@
-# Handoff — 2026-08-27 (session 72)
+# Handoff — 2026-08-27 (session 73)
 
 <!-- This file is BOTH the state of the repo and the prompt that starts the next session. It was once
 two files and they drifted apart inside a day, because the same state had to be written twice. Keep it
@@ -10,123 +10,118 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `f99ca83`, fast tier **1798 / 1795 / 0 / 3**. **No branches in flight, one worktree,
-clean tree** — unusually, there is nothing to establish before you start.
+inline. Fast tier **1813 / 1810 / 0 / 3**. **No branches in flight, one worktree, clean tree.**
 
-**1. Build item (8), the fixed-point sample encoding. It was blocked yesterday and is not now.**
-   TODO.md's five geometry items are ONE feature — the owner's own framing, *"the refit to the way
-   brush strokes are stored"* — and the order is forced: **(12) stage 3 → (13) → (8) → (14) → (9)**.
-   The first two are merged, so **(8) is the head of the queue.** What unblocked it: nothing writes a
-   cel transform any more, so a persisted sample IS a canvas coordinate and "the origin is the centre
-   of the current canvas" finally has a fixed point to mean.
-   Read (8) as it stands — **three of its premises were corrected on 2026-08-27** and the item carries
-   the corrections: the memory win is zero (the ruling says memory is unchanged, so the win is
-   disk-only and larger), a sample costs ~77 JSON bytes not 89, and the field reaches **+8191.75** so
-   the maximum canvas is 16383. Its five attached rulings are settled; do not re-open them.
-   **No migration is needed.** The owner ruled 2026-08-27 that *"everything on the ipad
-   right now is expendable"* — no decode defaults for fields that never existed, no appearance-change
-   warnings. It is at the top of TODO.md and it is what makes this cheap.
+**1. Build item (14), the reversible Move.** It is the head of the queue now that (8) is merged, and
+   (8) is what it was waiting for: the quantiser exists, so "hold the transform in doubles until an
+   explicit bake" finally has a thing to be reversible *against*. The owner named it as the follow-up
+   to (12) stage 1 in their own words. Two artist-visible residues are what it has to fix, and both
+   are recorded on the item: `BrushStamper.stampSpacing`'s 1 pt absolute floor (a stroke shrunk below
+   it and regrown comes back with a different dab count), and the Move box inflating monotonically
+   because the float's box is a geometric AABB of moved ink. The *geometry* half of the objection is
+   already dead by measurement — 100 shrink-to-2%-and-regrow cycles drift 6.0e-11 pt.
+   **Item (8) is done and closes one worry (14) might otherwise have inherited**: MEASURED, 5,000
+   samples through a hundred consecutive saves drift **0.0 pt**, and through six canvas-padding
+   changes **0.0 pt**. Storage is not a source of drift; only `stampSpacing` and the box are.
 
-**2. Four things are on the owner's iPad awaiting a look, none of them blocking.** The build there is
-   `fe5e716`, one commit behind `main` (`f99ca83` adds only item (12)/(13), which are headless).
+**2. Then (9), the canvas resize.** It is genuinely independent of everything else now — (8) settled
+   CANVAS_RESIZE.md §6's first question, and the payload records the origin it was quantised about, so
+   **a resize re-encodes nothing for correctness**. What (9) still needs before it is built is §6's
+   *other four* questions, which are the owner's: what the width/height field means, what undo does
+   over raster content, fit-only or fit-and-fill, and what the dialog does about a size that would
+   blow the compositor's admission gate.
+
+**3. Four things are still on the owner's iPad awaiting a look, none of them blocking.** The build
+   there is `fe5e716`, now several commits behind; none of what has landed since is visible.
    - **Sobel is bright edges on opaque black now**, with no control. If it still reads grey, that is a
      different bug from the one fixed and it matters.
    - **An adjustment layer should grade blank paper**, and a blend mode should blend against it. This
-     is the owner's original report and the whole point of the pass.
+     is the owner's original report and the whole point of that pass.
    - **Draw across the canvas after shrinking a whole vector cel** — the ink loss, still unconfirmed.
    - **Move with no lasso shows a Move bar**, where there was never one.
 
-**3. Then (18) or (10), both in TODO.md's Open section.**
-   (18) is the bottom-bar height: the obvious implementation was built, measured and reverted, and the
-   candidate next approach is recorded on `maxRowsHeight`. **A screenshot is its acceptance test, not
-   a frame comparison** — an XCUITest passed against the broken build. Note Sobel is back to **zero**
-   controls, so it is the degenerate case again.
-   (10) is Oklab, and the recommendation is written into the item: **not storage, not the compositor —
-   interpolation, and linear light first.** Stage A's premise (that the unlinearized composite is what
-   makes saturated hues read muddy) is argued and **not yet seen**; render the A/B before building it.
+**4. (18) and (10) are still open** and unchanged. (18) is the bottom-bar height: the obvious
+   implementation was built, measured and reverted, the candidate next approach is recorded on
+   `maxRowsHeight`, and **a screenshot is its acceptance test, not a frame comparison**. (10) is
+   Oklab, and the recommendation is written into the item: **not storage, not the compositor —
+   interpolation, and linear light first**; render the A/B before building stage A.
 
 **Do not re-litigate**: LASSO_MOVE.md §5's eighteen rulings; EFFECT_BACKDROP.md §5's four and §2.1's
-three-pass onion-skin ruling; Sobel's deleted ink control (§5.2 says explicitly not to re-propose it);
-(8)'s five attached rulings.
+three-pass onion-skin ruling; Sobel's deleted ink control; (8)'s five attached rulings, all of which
+shipped intact.
 ```
 
 ---
 
 ## State
 
-`main` = `f99ca83`. **Fast tier 1798 / 1795 / 0 / 3**, measured on the merged tree. No branches, no
-worktrees but the main one, no simulator clones.
+`main` = the item (8) merge. **Fast tier 1813 / 1810 / 0 / 3**, measured on the merged tree — +15 on
+the 1798 / 1795 / 0 / 3 that session 72 closed on, which is exactly the new test file, so nothing
+stopped running. No branches, no worktrees but the main one, no simulator clones.
 
-**The full suite has NOT been run on this commit.** The last full run was at `dee77ff`, six merges ago:
-1916 tests, four reds — two environmental (confirmed by isolated re-run), two the recovery-test bug that
-is now fixed. Nothing since then touches a gesture or a view except item (12)'s deletions, which are
-covered headlessly, but that is an argument and not a measurement. **Run one at the next phase
-boundary**, and shut down and erase only after checking `pgrep -fl xcodebuild` — three sessions shared
-this Mac today.
+**The full suite has still NOT been run since `dee77ff`, now seven merges ago.** Item (8) is a
+persistence change with no gesture and no view in it, and the fast tier is where its coverage lives —
+but that is an argument, not a measurement, and the argument has been made seven times now. **Run one
+at the next phase boundary**, and check `pgrep -fl xcodebuild` before shutting anything down.
 
 ## What landed
 
-- **The effect backdrop, all six stages** (`ca4c008`…`d90b329`, plus fixes). The owner's report —
-  *"Chromatic abberation seems to be masked to the objects on the layers only"* — is closed, and with it
-  seven other effects and twenty blend modes: the canvas paper was a `UIView` behind the composite, so
-  every adjustment layer graded a transparent sheet. **All four of EFFECT_BACKDROP.md §7's defects are
-  fixed**, and §8 is new: it records what §7's own *explanations* got wrong, which was more than what
-  its findings got wrong.
-- **Sobel**, twice. First `5f88302`: its ruled `.backdrop` default rendered a **transparent** canvas,
-  not a black one, because the kernel emits `(m,m,m,m)` and a flat region has `m = 0`. The owner saw it
-  on their iPad as grey — which is `paddingBackdrop`'s `UIColor(white: 0.85)`, byte 217, showing through
-  a hole punched clean through the paper. **EFFECT_BACKDROP.md §2.2 asserted the opposite and was the
-  entire justification for the ruled default.** Then `601c983`: shown that ink-only Sobel is
-  arithmetically invisible on white paper and finds zero edges in black line art, the owner deleted the
-  control outright.
-- **Item (12) stages 2 and 3** (`683983c`, `2fa1725`), ~1,366 lines deleted. **Stage 3 closed a second
-  door onto the owner's own ink loss**: after stage 2, `setCanvasPadding` was the only remaining producer
-  of a non-identity cel transform, and it walks every cel — so one use of the padding slider left every
-  cel clipping later canvas-space ink. The same loss, through the Actions menu instead of the Move box,
-  and nobody had connected them. Stage 4 is **declined with a reason**, not forgotten: `_transform` is
-  dead-*valued* rather than trivially dead, and LAYER_TRANSFORM.md §7 prices its removal at 2-3 days for
-  clarity and no behaviour.
-- **Item (13)** (`83f7c0d`). Built as ruled, and what it exposed outgrew it — BUGS.md's top entry:
-  `CompositorBudget` only ever bounded compositor **scratch**, so the persistent raster/fill/baked
-  buffers go through no budget at all and **one at 16383² is ~1.02 GB** against a 3 GB device's whole
-  process budget. Whether a near-maximum canvas is vector-only is a product call.
-- **Item (10) answered rather than built** — the owner asked for the call. Storing Oklab *moves* a
-  conversion rather than removing one, and this tree adds three specific blockers: 8-bit textures band
-  Oklab's a/b, the byte-for-byte parity gate cannot hold a cube root, and coverage compositing is
-  averaging light. The staging turns on one fact: **sRGB→linear is per-channel, so on 8-bit input it is
-  a 256-entry LUT and bit-identical on both backends by construction; Oklab's cube root sits after a
-  matrix mix and cannot be tabled.**
+**TODO item (8), the fixed-point sample coordinate.** A persisted `VectorSample` is a signed 16-bit
+quarter-pixel offset from a stored origin plus 8 bits of pressure — 40 bits, base64'd into one JSON
+string. In memory it is still three `CGFloat`, which is what the ruling asked for, so the whole win is
+on disk. MEASURED: **7.10 bytes a sample on the wire** against the ~77 TODO.md measures in the owner's
+own `Untitled.paintproj` — **~11x**.
 
-## Two traps, both now in CLAUDE.md
+**The decision the build added, and the one to carry forward: the quantisation origin is written into
+the payload.** The ruling puts it at the centre of the current canvas, which is what buys the sign bit
+for free. But an origin *implied* by the reader's canvas size is an origin a caller can get wrong, and
+getting it wrong shifts every coordinate by half a canvas — silently, reading as success. Writing it
+costs ~24 bytes a stroke against ~380 a stroke saved, and in exchange **a payload cannot be decoded
+wrong**: `init(from:)` needs no context at all, and a resize is free to leave old cels alone.
 
-- **A test class is not its file.** The 2026-08-15 split cut six heavy UI files into three classes each
-  and left the filenames alone, so `VectorShapeAndRecoveryUITests.swift` holds `GalleryRecoveryUITests`.
-  A selector built from the filename matches nothing and prints `Executed 0 tests` then
-  `** TEST SUCCEEDED **`. Cost one four-test triage run.
-- **A green test can be a test that stopped testing.** Twice today: `GalleryRecoveryUITests` asserted the
-  **raster** stroke count of a **vector** layer and had been red-but-ignored since 2026-08-11 (and, before
-  that, green off a bitmap heuristic that defaults to 1). And Sobel's impulse-response test would have gone
-  **vacuous** — nine zeroes, passing against any stencil — when the alpha rule changed, had the fixture not
-  been moved to an opaque ground.
+Encode still needs the origin and `JSONEncoder.userInfo` is the only channel `Codable` offers, so the
+guard is **behavioural rather than a source scan**: `testInkNearTheEdgeOfAWideCanvasSurvivesASaveAndReload`
+saves ink at x=11900 on a 12,000-point canvas, which only survives if `ProjectStore` passed the origin.
+A forgotten origin costs addressable range, never a wrong coordinate.
+
+Two things rode along, both on the path:
+
+- **`ProjectStore.writeCel`'s `json()` stopped swallowing encode failures with `try?`.** A throwing
+  encode used to leave `vectorFileName` nil and save the cel **empty** — the same silent-loss shape
+  `VectorCanvasData`'s per-element decode was built to end, reached from the other direction.
+- **BUGS.md gained the matching defect on the decode side**, found while reading that function: a cel's
+  interpolation recipe is read with `try?`, so a recipe file that is present and damaged vanishes with
+  no log line and no `ProjectLoadDamage` count — and the next save rewrites the manifest without the
+  file name, which makes it permanent. The vector payload twenty lines above counts and logs every
+  unreadable element. The missing-*file* policy beside it is correct and is not what this disputes.
 
 ## The pattern worth carrying
 
-**Five of this pass's significant findings were wrong premises, not wrong code**, and two were caught by
-the owner looking at a screen. §7's own suggested fix would have erased Outline's ring. §2.1 described
-the onion-skin cost as "a little extra compositing work" when it was not extra work at all and the real
-cost was the picture. §2.2's claim about Sobel's flat regions was false. (8) said it needed nothing and
-needed (12). The "data loss" was a test that could never have passed.
+**The adversarial pass earned its cost on a test, not on the code.** Four lenses attacked the diff;
+the arithmetic and the wiring came back clean and the one finding that survived refutation was in a
+test *the change itself had edited*. 8-bit pressure legitimately broke a bit-exact `==` after a round
+trip, so that assertion was restated as the fixed point the format is — and the restatement left **no
+assertion at all comparing a decoded coordinate to the original**, so the test would have passed
+against a codec that zeroed every coordinate. That is the third instance this week of a green test
+that had stopped testing, and the first one reached by *fixing* a test rather than by changing what it
+measured. When a lossy format makes an equality assertion fail, the reflex is to widen the tolerance;
+the trap is widening it all the way to nothing.
 
-**And the process lesson: render the cost, do not describe it.** Told the onion-skin split cost "121 of
-255 channel steps", the owner accepted it. Shown the two pictures — a correctly multiplied dark navy
-shape beside the raw blue it actually becomes — they reversed the ruling in one message. Both
-descriptions were true.
+**And the discovery pass was worth more than the build.** Five parallel readers ahead of a line of code
+established that only two Codable trees reach disk with samples in them, that there are exactly four
+production call sites, that no hand-written legacy sample JSON exists anywhere in the suite — which is
+what made "no migration" cheap and certain rather than a hope — and that the UI-test target compiles
+app sources **by explicit path**, so putting the codec in `ShapeGeometry.swift` avoided a `project.pbxproj`
+edit for app code entirely. Each of those changed the design before it was written.
 
 ## Still open, unchanged
 
 `ARCHITECTURE_REVIEW.md` findings 2-4 (eleven hand-written cache keys, silent save-failure returns, a
-layer property in four hand-kept structs) are open and unruled. BUGS.md carries the new raster-storage
-entry, the unclamped-zoom coordinate, `TextFrame.homography` decoding with no validity check, the
+layer property in four hand-kept structs) are open and unruled. BUGS.md carries the raster-storage
+entry (a persistent buffer at 16383² is ~1.02 GB and goes through no budget at all), the new
+interpolation-recipe entry, the unclamped-zoom coordinate — **which item (8) makes concrete rather than
+theoretical: a screen-wide drag at minimum zoom now saturates against the storage boundary instead of
+wandering off into a `Double`** — `TextFrame.homography` decoding with no validity check, the
 `.projective` re-rasterise per invalidation, and PERFORMANCE.md item 14's expensive half.
 
 Two behaviour questions have been owed for days and nobody is blocked on them: save semantics when a
@@ -138,3 +133,8 @@ Four judgement calls wait on real artwork, none of them defects: the Cut eraser 
 than the eraser, a crossing line that can flicker during a cut drag (both BUGS.md), a fill chunk dropped
 on blank paper staying a fill (LASSO_MOVE.md §5), and a Freeform-stretched text box draggable smaller
 than its own text.
+
+**And one standing permission worth re-reading before it is relied on again.** TODO.md's "everything on
+the ipad right now is expendable" is what made item (8) cheap — no migration, no decode defaults, no
+appearance warnings. It lapses the day the owner starts keeping real artwork in the app. Item (8) shipped
+three lines that tolerate the old sample shape anyway, which buys a little slack; nothing else does.

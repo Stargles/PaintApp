@@ -777,8 +777,16 @@ final class BrushEngineLogicTests: XCTestCase {
         let twice = try JSONDecoder().decode(VectorStroke.self,
                                              from: try JSONEncoder().encode(decoded))
         XCTAssertEqual(twice.lattice, decoded.lattice, "The lattice must round-trip intact")
-        XCTAssertEqual(decoded.lattice?.samples.count, piece.lattice?.samples.count,
-                       "…carrying the parent's whole walk, not a truncated one")
+        // Against the *original*, not against the other decode — otherwise a codec that zeroed every
+        // coordinate would still satisfy every line here, which is how a green test stops testing.
+        let stored = try XCTUnwrap(decoded.lattice?.samples)
+        let wanted = try XCTUnwrap(piece.lattice?.samples)
+        XCTAssertEqual(stored.count, wanted.count, "…carrying the parent's whole walk, not a truncated one")
+        for (after, before) in zip(stored, wanted) {
+            XCTAssertEqual(after.x, before.x, accuracy: PackedSampleRun.quantum / 2)
+            XCTAssertEqual(after.y, before.y, accuracy: PackedSampleRun.quantum / 2)
+            XCTAssertEqual(after.pressure, before.pressure, accuracy: 1.0 / 510)
+        }
         XCTAssertEqual(decoded.lattice?.parameters, piece.lattice?.parameters,
                        "…and its parameters exactly, since those are not coordinates")
         XCTAssertEqual(decoded.lattice?.seedID, piece.lattice?.seedID)

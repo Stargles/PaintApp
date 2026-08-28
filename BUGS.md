@@ -3,6 +3,32 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## An in-between's interpolation recipe vanishes with no report if it will not decode (2026-08-27)
+
+`ProjectStore.swift:1213` reads a cel's recipe as
+`interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)`. A recipe file that
+is **present and damaged** therefore yields nil and the cel loads as an ordinary drawing — the same
+silent-drop shape as the four decode entries below, in the one tier that still has it, and it is the
+contrast with its own neighbour that makes it worth filing: the vector payload decoded twenty lines
+above counts every unreadable element into `ProjectLoadDamage` and logs the file and the cel, so
+`SaveDamageGate` can raise a banner before the artist overwrites the good copy. The recipe beside it
+says nothing at all, to the log or to the counters, so nothing downstream can mention it.
+
+**The next save makes it permanent.** `writeCel` writes `_interp.json` only `if let recipe =
+cel.interpolation`, so a recipe that failed to decode is not merely absent for the session: the
+manifest is rewritten without an `interpolationFileName` and the link is gone.
+
+**The missing-file half is correct and is not what this disputes.** The comment three lines above rules
+it deliberately — *"the recipe derives content, so losing it costs the link, not the drawing"* — and
+that judgement holds. What is wrong is that a file which is present and unreadable takes the identical
+path, with no way afterwards to tell damage from a recipe that was never there. The fix is the log line
+and the `damage` counter the vector arm already has, not a change of policy.
+
+Found while building TODO item (8), which rewrote the *encode* side of this same function (its `json`
+helper no longer swallows encode failures with `try?`) and left the decode alone. Related but distinct
+from "Duplicating a cel or a layer drops the in-between's `interpolation` recipe" below, which loses the
+same field with the file intact.
+
 ## Raising the canvas maximum reaches a raster-storage cost `CompositorBudget` never bounds (2026-08-27)
 
 TODO.md item (13) raised `CanvasSizePickerView.maxDimension` 8192 -> 16383 and let `canvasPaddingRange`

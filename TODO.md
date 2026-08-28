@@ -23,63 +23,60 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **Nothing.** The effect backdrop's six stages are merged.
+### (8) Fixed-point sample coordinates — BUILT, on branch `tmp/fixedpoint`
 
-## How a brush stroke is stored — one feature in five items
-
-**The owner's own framing, 2026-08-27:** *"there are alot of tasks in there currently which are all
-parts of the same feature, being the refit to the way brush strokes are stored. (8), (12), (13), with
-(9) and (14) are features of the feature."* Read the five as one refit and sequence them together;
-splitting them across sessions is what let their premises drift apart in the first place.
-
-**Five asks, one programme**, sharing one number. Two are merged; three remain. **16,384 pt is the span of a stored coordinate, the
-maximum canvas, and the canvas-plus-padding budget**, and it should be defined once in the code.
-
-**Order, and it is forced rather than preferred: (12) stage 3 → (13) → (8) → (14) → (9).** The first
-two are **merged** (`2fa1725`, `83f7c0d`) and have left this file; what they bought is that nothing
-writes a cel transform any more, so **a persisted sample is now a canvas coordinate** and (8)'s ruled
-origin — the centre of the current canvas — finally has a fixed point to mean. Until 2026-08-27 this
-file said "(8) needs nothing", which was false: samples are stored in layer-**local** space, so the
-origin moved with the cel.
-
-So **(8) is the head of the queue and is buildable today.** (14) answers the strongest objection to the
-refit and wants (8)'s quantiser to exist first; (9) is genuinely independent *because* the width is
-fixed, so a resize re-encodes nothing.
-
-### (8) Fixed-point sample coordinates — SETTLED, build it
-
-- [ ] **16 bits an axis, signed, origin at the centre of the canvas, quarter-pixel; 8 bits of pressure.
-      40 bits = 5 bytes a sample against today's 24.** **The "4.8x in memory" this item used to claim
-      was wrong and contradicted its own attached ruling**: the ruling says in memory samples stay as
-      they are, so **memory does not change at all** and the whole win is on disk — where it is much
-      larger than 4.8x. MEASURED: the marginal cost of one full-precision sample in this app's own
-      JSON is **~77 bytes**, not the 89 this item quoted; 89 was the whole-file average from the
-      owner's `Untitled.paintproj` (776 KB / 8,714 samples), and the ~12 bytes/sample difference is
-      per-stroke header — **dominated by a whole `Brush` struct embedded in every stroke, ~13.5% of
-      that file, which this item does not touch and which may be the cheaper win.**
-      **The field addresses ±8192.0 … +8191.75, a span of 16,383.75 rather than 16,384**, so with the
-      origin at the centre the largest safe canvas dimension is **16383** — see (13), whose 16384 is
-      one too large. At the maximum canvas the clamp therefore saturates a quarter-pixel *inside* the
-      artwork on two edges, not merely at the boundary. `VectorSample` is three `CGFloat`, not two — the third is pressure,
-      where 8-10 bits is generous.
+- [ ] **Built 2026-08-27 on `tmp/fixedpoint`; it leaves this file when that merges, not now.**
+      A persisted `VectorSample` is a signed 16-bit quarter-pixel offset from a stored origin plus 8
+      bits of pressure — **40 bits, 5 bytes a sample** — base64'd into one JSON string. In memory it is
+      still three `CGFloat`, exactly as the rulings below require, so **memory does not change at all
+      and the whole win is on disk**, where it is measured below. `PackedSampleRun`
+      (`Engine/ShapeGeometry.swift`) is the codec, `VectorStroke` and `DabLattice` hand-write their
+      coders onto it, `ProjectStore.writeCel` hands it the canvas centre, and `SampleCodingLogicTests`
+      is the tier.
+      **The quantisation origin is written into the payload** — `"samples": {"o":[cx,cy],"d":"<b64>"}`
+      — and that is the one decision the build added rather than inherited. An origin *implied* by the
+      reader's canvas size is one a caller can get wrong, and getting it wrong shifts every coordinate
+      by half a canvas, silently. Writing it costs ~24 bytes a stroke, makes a payload impossible to
+      decode wrong, and leaves a resize free to not re-encode old cels at all.
+      **MEASURED 2026-08-27** (scratch `swiftc -O`, 1,000 samples, `.sortedKeys`): **7.10 bytes a
+      sample on the wire** — 5.00 of payload, the rest base64 expansion plus `JSONEncoder` escaping
+      base64's `/`. Against the **~77 bytes** one full-precision sample costs in this app's own JSON
+      that is **~11x**. The ratio is a property of the *coordinates* rather than of the code — the same
+      probe over shorter decimals measured 60.5 and 8.6x — and the packed form is smaller at every
+      length, a one-sample stroke included. The ~77 is measured, **not the 89 this item used to quote**:
+      89 was the whole-file average from the owner's `Untitled.paintproj` (776 KB / 8,714 samples), and
+      the ~12 bytes/sample difference is per-stroke header — **dominated by a whole `Brush` struct
+      embedded in every stroke, ~13.5% of that file, which this item does not touch and which may be
+      the cheaper win.**
+      **The old array-of-objects shape still decodes, and that is tolerance rather than migration** —
+      three lines, swallowing `typeMismatch` and nothing else. The standing "everything is expendable"
+      permission above means nothing is owed to old files; they keep a project written by yesterday's
+      build openable and can be deleted any day.
+      **The field addresses -8192.0 … +8191.75, a span of 16,383.75 rather than 16,384**, so with the
+      origin at the centre the largest canvas that encodes both its edges is **16383** —
+      `CanvasManager.maxCanvasExtent`, already shipped by (13), which `SampleCodingLogicTests` now ties
+      to the codec rather than leaving the two to agree by coincidence. At that maximum the clamp
+      saturates a quarter-pixel *inside* the artwork on two edges, not merely at the boundary.
       The centring is the owner's and is what buys the sign bit for free: *"have something like the first
       bit represent a plus or minus, then center the origin to the exact middle of the canvas ... which is
-      across -8k to 8k, and the last two bits for quarter pixel res."* **Centring is an encoding concern,
-      not a coordinate-system change** — in memory samples stay as they are; encode subtracts the centre
-      and quantises, decode reverses it. Nothing above the storage layer changes.
-      The `+2` buys quarter-pixel placement because `BrushStamper` places dabs at sub-pixel positions —
-      the owner's own caveat, and correct.
+      across -8k to 8k, and the last two bits for quarter pixel res."* The `+2` buys quarter-pixel
+      placement because `BrushStamper` places dabs at sub-pixel positions — the owner's own caveat, and
+      correct.
 
       **Attached rulings. Do not re-open any of them.**
       - **Clamp, do not wrap, at the encode boundary only.** *"If you draw outside the 16k, it should not
         wrap but rather clamp."* Unclamped, a 16-bit field wraps and ink drawn past the edge **teleports
-        to the opposite side of the canvas**. Saturating makes the failure local and boring.
+        to the opposite side of the canvas**. Saturating makes the failure local and boring — and it is
+        counted, so a stroke that loses ink says so once, on the save that loses it.
       - **Reversible transforms decode to `Double` and re-encode at the bake** — *"converted temporarely
         to a double as to not lose accuracy, then converted back when it bakes."* See (14), the same
         mechanism asked for again at the tool level.
       - **Residual drift is closed** (2026-08-26). The many-transform case lives inside a single unbaked
         session where samples are already `Double`, so rounding has no path by which to accumulate. One
-        bake, one rounding.
+        bake, one rounding. **MEASURED 2026-08-27, now for the storage layer too**: 5,000 samples through
+        a hundred consecutive saves drift **0.0 pt**, and through six canvas-padding changes **0.0 pt** —
+        exact rather than lucky, since `setCanvasPadding` grows the canvas by 2·delta and moves content
+        by delta, so the centre moves with it and the stored offset is unchanged.
       - **The centre is the centre of the *current* canvas**, overruling this file's own recommendation of
         a fixed address space. An asymmetric crop therefore re-encodes every sample, acceptable for a
         one-off the artist asks for — and moot, since asymmetric crop does not exist.
@@ -94,9 +91,35 @@ fixed, so a resize re-encodes nothing.
       canvas maximum 8192, so a stored coordinate reached 409,600 pt against 20 signed bits' +/-131,072.
       **24 signed bits is the answer if (12) is not adopted**; adopting (12) removes the layer-local
       blow-up and is what lets the field narrow to 16.
-      **Nothing in the tree clamps today**, and `CanvasView` floors zoom at 0.01 of fit with **no
-      ceiling**, so a screen-wide drag at minimum zoom spans ~1,638,400 pt — filed in BUGS.md, and
-      **independent of (12)**, which does nothing about zoom.
+      The clamp is now the only thing standing between storage and BUGS.md's unclamped zoom, which is
+      unchanged: `CanvasView` still floors zoom at 0.01 of fit with **no ceiling**, so a screen-wide drag
+      at minimum zoom spans ~1,638,400 pt — 200x this field — and is **independent of (12)**, which does
+      nothing about zoom.
+
+## How a brush stroke is stored — one feature in five items
+
+**The owner's own framing, 2026-08-27:** *"there are alot of tasks in there currently which are all
+parts of the same feature, being the refit to the way brush strokes are stored. (8), (12), (13), with
+(9) and (14) are features of the feature."* Read the five as one refit and sequence them together;
+splitting them across sessions is what let their premises drift apart in the first place.
+
+**Five asks, one programme**, sharing one number. Two are merged, (8) is in flight, two remain.
+**`CanvasManager.maxCanvasExtent` — 16383 — is that one number**: the maximum canvas, the ceiling the
+canvas-plus-padding budget is derived from, and what a stored coordinate can address. It is defined
+once, and (8)'s codec derives its own bounds from `Int16` rather than restating it.
+
+**Order, and it is forced rather than preferred: (12) stage 3 → (13) → (8) → (14) → (9).** The first
+two are **merged** (`2fa1725`, `83f7c0d`) and have left this file; what they bought is that nothing
+writes a cel transform any more, so **a persisted sample is now a canvas coordinate** and (8)'s ruled
+origin — the centre of the current canvas — finally has a fixed point to mean. Until 2026-08-27 this
+file said "(8) needs nothing", which was false: samples are stored in layer-**local** space, so the
+origin moved with the cel.
+
+So **(14) is next.** (8) is built and sitting in flight above, which is what (14) was waiting on: it
+answers the strongest objection to the refit and wanted (8)'s quantiser to exist first, so that a Move
+held in doubles has something definite to bake *back to*. (9) is genuinely independent *because* the
+width is fixed, so a resize re-encodes nothing — and more so now that a payload carries the origin it
+was quantised about, which leaves an unresaved cel readable whatever the canvas becomes.
 
 ### (14) A reversible Move: hold the transform in doubles until an explicit bake
 
