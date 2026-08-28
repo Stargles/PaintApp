@@ -126,7 +126,34 @@ whatever the canvas becomes.
 
 ## Open
 
-### (20) A second knob that turns the Move box alone — approved, and next
+### (20) A second knob that turns the Move box alone — phase 1 BUILT, phase 2 next
+
+- [ ] **Phase 1 is built on `tmp/boxknob` and leaves this file when it merges, not now.** A yellow knob
+      off the box's *bottom* edge (green is the content knob; `systemOrange` already means "distort
+      corner" on a text box) turns `ObjectTransformFrame.boxAngle`, and **that field reaches no
+      geometry at all** — it appears nowhere in `VectorLayer.swift`, and in `CanvasManager+LassoMove`
+      only in `turnVectorFloatBox`, which writes it straight onto the frame with no undo step, per
+      §5.21. The drag arm returns `transform: start` bit for bit, so the ink is not touched by any
+      arithmetic — not scaled by 1, not rotated by 0. `testABoxAngleChangesNoSampleAndNoPixel` is the
+      guard against a leak into the map.
+      **Reset leaves the box angle alone**, which is where §5.16 meets §5.21 and they resolve the same
+      way twice: a Reset made pressable by a turned box would fire a zero-delta nudge on an otherwise
+      untouched float — `nudges == 1`, the step carrying the pre-split display list — so one Undo
+      after it would rejoin the cut stroke and dismiss the float; and it would destroy a hand-fit no
+      Undo could give back, since §5.21 keeps the angle off the stack in both directions.
+      **Freeform greys out while the box is turned** — *"The box is turned. Straighten it to stretch
+      this piece."* Uniform and both knobs keep working at any angle: a uniform drag scales the ratio
+      of two radii from the anchor and reads no rotation.
+
+- [ ] **Phase 2 — §5.20's second stored angle**, which is what un-greys Freeform. A stretch made about
+      a hand-turned box needs a rotation on *both* sides of the scale, `R(ρ)·S·R(−φ)`; its singular
+      value decomposition is the general 2x2, so `2 translation + 2 angles + 2 scales = 6` is **exactly
+      a general affine** — the term completes the box's transform rather than extending it, and stops
+      well short of stage 5's Distort, which needs 8 for perspective. The owner, shown the constraint:
+      *"i feel like there is some kind of clever fix, but if the skew is the sensible way to do it, go
+      ahead and build the skew."*
+      **One consequence to state when it ships**: turning the box *after* a stretch cannot leave the
+      ink perfectly still, because the stretch axes are what would be turning.
 
 - [ ] Asked whether the handle box should turn by itself to hug ink the artist had already rotated,
       the owner ruled it should not: *"leave it straight up and down. Thats what the orange rotate node

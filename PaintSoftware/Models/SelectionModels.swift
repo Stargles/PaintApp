@@ -471,10 +471,30 @@ extension CanvasManager {
     ///
     /// A raster piece answers nil: `FloatingTransform` has held `scaleX`/`scaleY` since Move shipped,
     /// which is why the picker was live for it and greyed for a vector float until this stage.
+    ///
+    /// **A hand-turned box is the second reason, and it is temporary where the first is not.** A
+    /// stretch made about a box the artist turned with the yellow knob needs a rotation on *both*
+    /// sides of the scale — `R(ρ)·S·R(−φ)` — which is one more stored angle than the box has today.
+    /// The owner ruled that angle in (LASSO_MOVE.md §5.20) and it is stage 3b **phase 2**; until it
+    /// exists, offering a picker that silently stretched along the *ink's* axes instead of the
+    /// visible box's would be the "acts like Uniform for now" caption with no caption. Uniform and
+    /// both rotate knobs keep working at any box angle: a uniform drag scales the ratio of two radii
+    /// from the anchor and reads no rotation at all, and a rotate knob measures a swept angle about
+    /// the same anchor.
+    ///
+    /// **The image reason is checked first on purpose.** Both can hold at once, and straightening the
+    /// box would not help a piece carrying a photo — so the artist is told the thing they cannot fix
+    /// rather than sent to turn a knob that changes nothing. It also keeps `MoveTransformBottomBar`'s
+    /// merged caption honest: a box-angle refusal can only happen on a float that mirrors, so
+    /// `mirrorUnavailableReason` is nil whenever this returns the box line, and the bar shows it
+    /// rather than the merged image sentence.
     var freeformUnavailableReason: String? {
         guard let float = vectorFloat else { return nil }
         guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeStretched) else {
             return "Freeform can't stretch a placed image."
+        }
+        guard float.frame.boxAngle == 0 else {
+            return "The box is turned. Straighten it to stretch this piece."
         }
         return nil
     }
@@ -527,6 +547,27 @@ extension CanvasManager {
     /// Whether **Reset** has anything to put back. False the instant the piece is already sitting
     /// exactly where it was picked up, which is what stops the button from spending an undo step
     /// doing nothing — the same reason it is disabled rather than merely inert.
+    ///
+    /// **`frame.boxAngle` is deliberately not a fourth term here, and `resetFloating` deliberately
+    /// leaves it alone.** This is where §5.16 ("Reset is one undoable step") meets §5.21 ("turning
+    /// the box costs no undo step"), and they resolve against including it, for two reasons that
+    /// point the same way:
+    ///
+    ///   * *A turned box would make Reset pressable on a piece that has not moved.* `resetFloating`
+    ///     would then call `applyToVectorFloat` with the lift's own transform — a zero-delta nudge,
+    ///     which is still a nudge, and on an otherwise untouched float it is `nudges == 1` and
+    ///     therefore the step that carries the pre-split display list. One press of Undo afterwards
+    ///     would rejoin the cut stroke and dismiss the float. That is exactly the harm §5.21 exists
+    ///     to prevent, reached through the Reset button instead of through the knob.
+    ///   * *It would be a change no undo could give back.* `registerVectorFloatNudgeUndo` restores
+    ///     `frame.transform`, `frame.aspect` and `mirror` — not the box angle, and correctly so,
+    ///     since §5.21 keeps that off the stack in both directions. A Reset that straightened the box
+    ///     would destroy a hand-fit the following Undo could not return, which is the one thing an
+    ///     undoable operation must not do.
+    ///
+    /// So Reset answers "put the *drawing* back where I picked it up", and the box angle is not where
+    /// the drawing is. The artist straightens the box the same way they turned it — by the knob,
+    /// freely, the way a zoom is un-zoomed. It goes when the float goes, at commit or at cancel.
     var canResetFloating: Bool {
         if let piece = floatingPiece { return piece.transform != piece.liftTransform }
         guard let float = vectorFloat else { return false }

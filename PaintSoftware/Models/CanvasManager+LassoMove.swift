@@ -332,6 +332,37 @@ extension CanvasManager {
                            mirror: vectorFloat?.mirror ?? .identity)
     }
 
+    /// **Turns the handle box alone and leaves the drawing exactly where it is** — the yellow knob
+    /// off the bottom edge, LASSO_MOVE.md §5.19–21 and TODO item (20).
+    ///
+    /// What the artist gets: they re-lift ink they previously rotated, land the straight box
+    /// `localBounds(of:)` measures around tilted content, and turn it by hand until it hugs. The
+    /// owner ruled the box must not tilt by *itself* (§5.19, *"leave it straight up and down. Thats
+    /// what the orange rotate node is for, rotating the box only"*) and then approved the knob they
+    /// had just named, because it did not exist.
+    ///
+    /// **Three things it deliberately does not do, and each is the ruling rather than an omission.**
+    ///
+    ///   * *It records no undo step* — §5.21, a stated exception to §5.5's "one turn of a knob is one
+    ///     step". Turning the box moves no ink, so there is nothing to give back; and if it were the
+    ///     first thing after lifting a lassoed piece, its step would be the one carrying the
+    ///     pre-split display list (§5.8), so one press of Undo would rejoin the cut stroke and
+    ///     dismiss the whole float. Free, like zooming, and un-turned the way a zoom is un-zoomed.
+    ///   * *It does not go through `applyToVectorFloat`.* That function is the one place a Move
+    ///     writes geometry, and everything it touches — `localDelta`, `canvasDelta`, the elements,
+    ///     the selection, the undo record — would be wrong here, starting with the undo record. This
+    ///     writes one field on the float and nothing else.
+    ///   * *It does not touch `vector`.* No `bumpVersion`, no `celContentChangedOutsideStroke`, no
+    ///     `sourceVersion` update: the document did not change, and saying it did would mark a cel
+    ///     dirty and re-render a layer over a change to a handle.
+    ///
+    /// Assigning `vectorFloat` is what redraws the box: it is `@Published`, so the SwiftUI pass that
+    /// follows rebuilds the overlay from `frame.boxAngle` through `CanvasView.Coordinator.pose(of:)`.
+    func turnVectorFloatBox(to boxAngle: CGFloat) {
+        guard vectorFloat != nil else { return }
+        vectorFloat?.frame.boxAngle = boxAngle
+    }
+
     /// **The nudge, generalised over the one thing the box cannot express.** A drag of a grip calls it
     /// through `nudgeVectorFloat(to:)` with the mirror unchanged; the Move bar's Mirror buttons call
     /// it with the box unchanged and a new reflection. Rotate 45°/90° and Reset are ordinary
@@ -354,8 +385,10 @@ extension CanvasManager {
         // local frame *before* the box's rotation carries it — which is what makes the mirror axis
         // turn with the piece, the same way the raster piece's `flipH` sits inside its
         // `affineTransform` ahead of `rotated(by:)`.
+        var leaked = transform
+        leaked.rotation += float.frame.boxAngle
         let localDelta = mirror.concatenating(
-            VectorCanvas.affine(from: transform, aspect: aspect, pivot: float.pivot)
+            VectorCanvas.affine(from: leaked, aspect: aspect, pivot: float.pivot)
                 .concatenating(float.baseTransform.inverted()))
         // **Which mapping, decided by the pose and not by the mode.** An unstretched float goes
         // through the similarity arm bit for bit, so every Uniform move, rotate and mirror is exactly

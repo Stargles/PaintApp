@@ -67,7 +67,7 @@ final class ObjectTransformLogicTests: XCTestCase {
         assertPoint(position(of: .topRight, in: frame)!, corners[1])
         assertPoint(position(of: .bottomRight, in: frame)!, corners[2])
         assertPoint(position(of: .bottomLeft, in: frame)!, corners[3])
-        XCTAssertEqual(layout.count, 5, "four corners and the rotation knob")
+        XCTAssertEqual(layout.count, 6, "four corners, the green rotation knob and the yellow box knob")
     }
 
     func testTheCornersFollowScaleAndRotation() {
@@ -114,7 +114,8 @@ final class ObjectTransformLogicTests: XCTestCase {
         }
     }
 
-    func testAZeroOffsetOmitsTheKnobEntirely() {
+    /// One offset drives both knobs, so a zero omits both and leaves the four corners.
+    func testAZeroOffsetOmitsBothKnobsEntirely() {
         XCTAssertEqual(upright().handleLayout(rotationOffset: 0).count, 4)
     }
 
@@ -205,7 +206,7 @@ final class ObjectTransformLogicTests: XCTestCase {
         for canvasScale in [CGFloat(0.125), 0.3, 0.5, 1, 2, 4] {
             view.update(isActive: true, frame: upright(), canvasScale: canvasScale)
             let chrome = view.drawnChrome
-            XCTAssertEqual(chrome.handles.count, 5, "five grips at \(canvasScale)×")
+            XCTAssertEqual(chrome.handles.count, 6, "six grips at \(canvasScale)×")
             for entry in chrome.handles {
                 XCTAssertEqual(entry.frame.width * canvasScale, 14, accuracy: 1e-9,
                                "\(entry.handle) is 14 screen points at \(canvasScale)×")
@@ -543,6 +544,245 @@ final class ObjectTransformLogicTests: XCTestCase {
         let drag = ObjectTransformDrag(frame: frame, handle: .bottomRight, at: frame.corners[2])
         XCTAssertFalse(drag.isFreeform, "and a drag that did not ask for Freeform does not get it")
         XCTAssertEqual(drag.pose(draggedTo: CGPoint(x: 900, y: 100)).aspect, 1)
+    }
+
+    // MARK: - The box-only knob (Move stage 3b, phase 1)
+    //
+    // A second knob that turns the handle box alone, leaving the drawing exactly where it is —
+    // LASSO_MOVE.md §5.19–21, TODO item (20). The whole feature is the claim that `boxAngle` is
+    // *chrome*: it moves the outline, the six grips and the hit test, and reaches no geometry at
+    // all. The tests below assert both halves of that, and `LassoMoveLogicTests`'
+    // `testANonZeroBoxAngleChangesNoSampleAndNoPixel` asserts the half that would cost artwork.
+
+    private func turned(_ boxAngle: CGFloat, rotation: CGFloat = 0,
+                        scale: CGFloat = 1) -> ObjectTransformFrame {
+        ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                       scale: scale, rotation: rotation),
+                             contentSize: CGSize(width: 400, height: 300), aspect: 1,
+                             boxAngle: boxAngle)
+    }
+
+    /// **The mirror image of `testTheKnobTurnsAboutTheCentreAndScalesNothing`, and the feature's
+    /// whole point.** The same finger sweep that the green knob turns the drawing with turns the box
+    /// alone here — and `transform` comes back *bit for bit* what it went in as, not merely equal to
+    /// within a tolerance. A "rotate by zero" that wrote `start.rotation + 0` would pass an
+    /// approximate comparison and still be a leak, because `applyToVectorFloat` would then see a
+    /// changed pose and re-map every lifted element through it.
+    ///
+    /// Watched failing with the `.boxRotation` arm writing `turned.rotation` the way `.rotation`
+    /// does: *("1.5707963267948966") is not equal to ("0.0") — the drawing must not turn*, and the
+    /// box angle left at zero.
+    func testTheBoxKnobTurnsTheBoxAndLeavesTheTransformBitForBit() {
+        let frame = upright()
+        let centre = frame.centre
+        // Grabbed below the box and swept a quarter turn — the same sweep the green knob's test makes
+        // above the box, so the two tests differ only in which grip the finger was on.
+        let drag = ObjectTransformDrag(frame: frame, handle: .boxRotation,
+                                       at: CGPoint(x: centre.x, y: centre.y + 200))
+        let pose = drag.pose(draggedTo: CGPoint(x: centre.x - 200, y: centre.y))
+
+        XCTAssertEqual(pose.boxAngle, .pi / 2, accuracy: Self.loose, "the box turned a quarter turn")
+        XCTAssertEqual(pose.transform, frame.transform,
+                       "and the drawing's transform is bit-for-bit what it was")
+        XCTAssertEqual(pose.transform.rotation, frame.transform.rotation, "the drawing must not turn")
+        XCTAssertEqual(pose.aspect, frame.aspect, "nor stretch")
+        // Sixty deltas and one delta agree, the property every other arm has.
+        var last = frame.boxAngle
+        for step in 1...60 {
+            let t = CGFloat(step) / 60
+            last = drag.pose(draggedTo: CGPoint(x: centre.x - 200 * t,
+                                                y: centre.y + 200 - 200 * t)).boxAngle
+        }
+        XCTAssertEqual(last, pose.boxAngle, accuracy: Self.loose, "sixty deltas land where one does")
+    }
+
+    /// **The other direction, and it is the one that keeps the lift invariant alive.** Every arm that
+    /// is *not* the box knob passes the box angle straight through — so an artist who hand-fits the
+    /// box and then moves, scales, turns or stretches the piece keeps their fit, and no arm can
+    /// quietly straighten it.
+    ///
+    /// Watched failing with `Pose`'s `boxAngle` defaulted at each `return` instead of being passed
+    /// through: *("0.0") is not equal to ("0.6") +/- ("1e-06") — body*, and the same for all four
+    /// corners and the green knob.
+    func testEveryOtherArmPassesTheBoxAngleThroughUnchanged() {
+        let frame = turned(0.6)
+        let start = CGPoint(x: 1120, y: 620)
+        let end = CGPoint(x: 940, y: 380)
+        for handle in ObjectTransformFrame.Handle.allCases where handle != .boxRotation {
+            for freeform in [false, true] {
+                let drag = ObjectTransformDrag(frame: frame, handle: handle, at: start,
+                                               freeform: freeform)
+                XCTAssertEqual(drag.pose(draggedTo: end).boxAngle, 0.6, accuracy: Self.loose,
+                               "\(handle), freeform \(freeform)")
+            }
+        }
+    }
+
+    /// The green knob turns the drawing; the box goes with it, because the box is drawn at
+    /// `transform.rotation + boxAngle` and only the first term moved. A hand-fitted box therefore
+    /// stays fitted through a rotation of the ink, which is the behaviour that makes the fit worth
+    /// making.
+    func testTheGreenKnobTurnsTheDrawingAndCarriesTheHandFittedBoxWithIt() {
+        let frame = turned(0.6)
+        let centre = frame.centre
+        let drag = ObjectTransformDrag(frame: frame, handle: .rotation,
+                                       at: CGPoint(x: centre.x, y: centre.y - 200))
+        let pose = drag.pose(draggedTo: CGPoint(x: centre.x + 200, y: centre.y))
+        XCTAssertEqual(pose.transform.rotation, .pi / 2, accuracy: Self.loose, "the drawing turned")
+        XCTAssertEqual(pose.boxAngle, 0.6, accuracy: Self.loose, "and the hand-fit rode along")
+
+        // The corners of the pose: turned by the sum, so the box kept its offset from the ink.
+        let after = ObjectTransformFrame(transform: pose.transform, contentSize: frame.contentSize,
+                                         aspect: pose.aspect, boxAngle: pose.boxAngle)
+        let sumOnly = ObjectTransformFrame(transform: LayerTransform(position: centre, scale: 1,
+                                                                     rotation: .pi / 2 + 0.6),
+                                           contentSize: frame.contentSize)
+        assertPoint(after.corners[0], sumOnly.corners[0], "the box is drawn at the sum of the two")
+        // Fixture precondition: the hand-fit is visible, i.e. it is not the box the ink alone gives.
+        let inkOnly = ObjectTransformFrame(transform: pose.transform, contentSize: frame.contentSize)
+        XCTAssertGreaterThan(hypot(after.corners[0].x - inkOnly.corners[0].x,
+                                   after.corners[0].y - inkOnly.corners[0].y), 1)
+    }
+
+    /// **Everything the box draws and hits follows the box angle**, because `projected`, `local`,
+    /// `corners`, both knob positions and `handleLayout` all read one private `drawnAngle` and none
+    /// of them reads `transform.rotation` any more.
+    ///
+    /// Asserted as an *identity* rather than as coordinates: a box turned by `φ` with the ink
+    /// straight is the same box as one turned by `φ` with the ink, for every drawn purpose. That is
+    /// false for any implementation that routed some of the five through the sum and some through
+    /// `transform.rotation`.
+    ///
+    /// Watched failing with `local(_:)` left reading `-transform.rotation` while `projected` read the
+    /// sum: the corners agree and *containment disagrees* — the box is drawn in one place and hit in
+    /// another, which is the exact defect the single-source-of-truth discipline exists to prevent.
+    func testTheDrawnBoxAndTheHitBoxBothFollowTheBoxAngle() {
+        for angle in [CGFloat(0.4), CGFloat.pi / 2, 2.7, -1.2] {
+            let byBox = turned(angle)
+            let byInk = upright(rotation: angle)
+            for i in 0..<4 {
+                assertPoint(byBox.corners[i], byInk.corners[i], "corner \(i) at \(angle)")
+            }
+            assertPoint(byBox.rotationHandlePosition(offset: 36),
+                        byInk.rotationHandlePosition(offset: 36), "green knob at \(angle)")
+            assertPoint(byBox.boxRotationHandlePosition(offset: 36),
+                        byInk.boxRotationHandlePosition(offset: 36), "yellow knob at \(angle)")
+            for probe in [CGPoint(x: 1190, y: 360), CGPoint(x: 1000, y: 620), CGPoint(x: 830, y: 470),
+                          CGPoint(x: 700, y: 400), byBox.centre] {
+                XCTAssertEqual(byBox.contains(probe), byInk.contains(probe),
+                               "containment of \(probe) at \(angle)")
+                XCTAssertEqual(byBox.target(at: probe, reach: 22, rotationOffset: 36),
+                               byInk.target(at: probe, reach: 22, rotationOffset: 36),
+                               "target at \(probe), \(angle)")
+            }
+            // And the drift guard, restated on a turned box: a probe on a drawn grip finds it.
+            for entry in byBox.handleLayout(rotationOffset: 36) {
+                XCTAssertEqual(byBox.handle(nearest: entry.position, reach: 1, rotationOffset: 36),
+                               entry.handle, "\(entry.handle) at box angle \(angle)")
+            }
+        }
+    }
+
+    /// The yellow knob stands off the **bottom** edge — away from the artwork, and exactly opposite
+    /// the green one, at every angle the box can be drawn at.
+    func testTheBoxKnobStandsOffTheBottomEdgeOppositeTheGreenOne() {
+        let poses: [(rotation: CGFloat, boxAngle: CGFloat)] =
+            [(0, 0), (0.7, 0), (0, 0.7), (1.2, -2.0), (CGFloat.pi, 0.3)]
+        for (rotation, boxAngle) in poses {
+            let frame = turned(boxAngle, rotation: rotation)
+            let knob = position(of: .boxRotation, in: frame)!
+            let corners = frame.corners
+            let bottomCentre = CGPoint(x: (corners[2].x + corners[3].x) / 2,
+                                       y: (corners[2].y + corners[3].y) / 2)
+            XCTAssertEqual(hypot(knob.x - bottomCentre.x, knob.y - bottomCentre.y), 36,
+                           accuracy: Self.loose, "stands off by its offset (\(rotation), \(boxAngle))")
+            XCTAssertGreaterThan(hypot(knob.x - frame.centre.x, knob.y - frame.centre.y),
+                                 hypot(bottomCentre.x - frame.centre.x,
+                                       bottomCentre.y - frame.centre.y),
+                                 "and away from the centre, not into the artwork")
+            // Diametrically opposite the green knob: the two offsets are negations, so the box's
+            // centre is the midpoint of the two knobs.
+            let green = position(of: .rotation, in: frame)!
+            assertPoint(CGPoint(x: (green.x + knob.x) / 2, y: (green.y + knob.y) / 2), frame.centre,
+                        "the centre is the midpoint of the two knobs")
+        }
+    }
+
+    /// **The two knobs cannot land under one finger, at any zoom or any box size** — the concern
+    /// that put them on opposite edges rather than side by side. Their separation is
+    /// `height + 2·offset`, so it is at least `2·offset`; the offset is 36 screen points and the
+    /// reach 22, so the gap is at least `72/22 = 3.27` reaches however small the box is drawn.
+    ///
+    /// Asserted through the shipping view at a thumbnail zoom on a 20×20 box, where the four
+    /// *corners* genuinely do all cover one finger — which is what makes the fixture a real test of
+    /// the nearest-within-reach rule rather than of a box nothing overlaps in.
+    func testTheTwoKnobsStayDistinguishableAtAThumbnailZoom() {
+        let view = ObjectTransformOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 1024))
+        for canvasScale in [CGFloat(0.125), 0.3, 1] {
+            let frame = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                       scale: 1, rotation: 0),
+                                             contentSize: CGSize(width: 20, height: 20),
+                                             aspect: 1, boxAngle: 0.5)
+            view.update(isActive: true, frame: frame, canvasScale: canvasScale)
+            let green = frame.rotationHandlePosition(offset: view.rotationOffset)
+            let yellow = frame.boxRotationHandlePosition(offset: view.rotationOffset)
+            XCTAssertGreaterThan(hypot(green.x - yellow.x, green.y - yellow.y), 2 * view.handleReach,
+                                 "the two knobs are more than a finger apart at \(canvasScale)×")
+            XCTAssertLessThan(hypot(frame.corners[0].x - frame.corners[1].x,
+                                    frame.corners[0].y - frame.corners[1].y), 2 * view.handleReach,
+                              "fixture precondition: this box's corners really do overlap")
+            XCTAssertEqual(view.target(at: green), .rotation, "at \(canvasScale)×")
+            XCTAssertEqual(view.target(at: yellow), .boxRotation, "at \(canvasScale)×")
+        }
+    }
+
+    /// **`boxAngle == 0` is the frame that existed before this field did, to the bit.** `drawnAngle`
+    /// is `transform.rotation + 0`, which is `transform.rotation` exactly — no `sin`/`cos` of a sum,
+    /// no reassociation — so every box in the app that nobody has turned draws and hits precisely
+    /// where it always did.
+    ///
+    /// The same discipline `axisScales` states for `aspect == 1`, and it is checked with `==` rather
+    /// than an accuracy for the same reason: a tolerance would hide a rewrite that changed the
+    /// arithmetic while leaving the answer close.
+    func testAZeroBoxAngleIsBitIdenticalToTheFrameBeforeItExisted() {
+        for rotation in [CGFloat(0), 0.4, CGFloat.pi / 2, 2.7, -1.2] {
+            for scale in [CGFloat(0.3), 1, 3] {
+                let explicit = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                              scale: scale, rotation: rotation),
+                                                    contentSize: CGSize(width: 400, height: 300),
+                                                    aspect: 1, boxAngle: 0)
+                let defaulted = upright(scale: scale, rotation: rotation)
+                XCTAssertEqual(explicit, defaulted, "the default is zero (\(scale), \(rotation))")
+                for i in 0..<4 {
+                    XCTAssertEqual(explicit.corners[i].x, defaulted.corners[i].x)
+                    XCTAssertEqual(explicit.corners[i].y, defaulted.corners[i].y)
+                }
+                XCTAssertEqual(explicit.rotationHandlePosition(offset: 36).x,
+                               defaulted.rotationHandlePosition(offset: 36).x)
+                XCTAssertEqual(explicit.rotationHandlePosition(offset: 36).y,
+                               defaulted.rotationHandlePosition(offset: 36).y)
+                // And a drag latched from it answers the same, which is what reaches the model.
+                let drag = ObjectTransformDrag(frame: explicit, handle: .bottomRight,
+                                               at: explicit.corners[2])
+                XCTAssertEqual(drag.startBoxAngle, 0)
+                XCTAssertEqual(drag.pose(draggedTo: CGPoint(x: 1400, y: 800)).transform,
+                               ObjectTransformDrag(frame: defaulted, handle: .bottomRight,
+                                                   at: defaulted.corners[2])
+                                   .pose(draggedTo: CGPoint(x: 1400, y: 800)).transform)
+            }
+        }
+    }
+
+    /// A collapsed box refuses the box knob's touch the same way it refuses every other, because
+    /// `local(_:)` guards on the axis scales and the knob's position rides on `projected`. The knob
+    /// is emitted (it is a point, not an area) and simply sits on the collapsed centre.
+    func testADegenerateBoxIsNoWorseWithTheBoxKnobThanWithout() {
+        let collapsed = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 10, y: 10),
+                                                                       scale: 0, rotation: 0),
+                                             contentSize: CGSize(width: 40, height: 40),
+                                             aspect: 1, boxAngle: 0.8)
+        XCTAssertFalse(collapsed.contains(CGPoint(x: 10, y: 10)))
+        XCTAssertEqual(collapsed.handleLayout(rotationOffset: 36).count, 6)
     }
 
     // MARK: - The live drag, expressed to Core Animation

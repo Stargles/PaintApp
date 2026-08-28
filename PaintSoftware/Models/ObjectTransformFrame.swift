@@ -18,6 +18,10 @@ import Foundation
 /// as well as scaled — see `aspect`. A whole-layer box never is, because `VectorCanvas.setTransform`
 /// reads its argument back as a similarity, and both defaults below are the unstretched ones for that
 /// reason.
+///
+/// **Since stage 3b the box can also be turned on its own** — see `boxAngle`, and the yellow knob off
+/// the bottom edge that writes it. That angle is chrome: it changes where the outline and the grips
+/// are drawn and hit, and reaches no geometry anywhere.
 struct ObjectTransformFrame: Equatable {
 
     /// The layer's aggregate move/scale/rotate, about `contentSize`'s centre.
@@ -40,7 +44,17 @@ struct ObjectTransformFrame: Equatable {
     /// The mechanism stays because it is the *one* place a handle set is decided: `handleLayout`
     /// emits all four corners unconditionally and filters here, and the hit test reads the same
     /// function, so a grip that is not drawn cannot be grabbable and neither can drift. Freeform's
-    /// edge nodes and the box-only rotate knob are meant to arrive through this filter, not beside it.
+    /// edge nodes are still meant to arrive through this filter, not beside it.
+    ///
+    /// **`.boxRotation` arrived through it on the default, and that was checked rather than assumed.**
+    /// The default is *every* case, so a new grip switches itself on at every construction site — the
+    /// trap LASSO_MOVE.md §0 names. All four sites in the app were walked: the two lifts in
+    /// `CanvasManager+LassoMove.swift` take this default, and both **should** offer the box knob (the
+    /// whole-cel lift is the one whose own doc comment records the inflation the knob is the cure
+    /// for); `CanvasView`'s two rebuild the frame with `allowedHandles: float.frame.allowedHandles`,
+    /// so they inherit whatever the lift decided. There is no third kind of box — the whole-layer arm
+    /// that used to be one was deleted with TODO item (12) stage 2 — so nothing gained a grip it
+    /// cannot answer for.
     var allowedHandles: Set<Handle> = Set(Handle.allCases)
 
     /// **Freeform's independent axes, held as the one number `LayerTransform` has no room for: how
@@ -65,13 +79,69 @@ struct ObjectTransformFrame: Equatable {
     /// `VectorCanvas.setTransform` path can only carry a similarity — is untouched.
     var aspect: CGFloat = 1
 
+    /// **How far the artist has turned the handle *box* by hand, on top of `transform.rotation` —
+    /// and it is chrome, never geometry.** Radians, clockwise on screen, exactly like
+    /// `LayerTransform.rotation`. 0 is the box as the lift measured it.
+    ///
+    /// **What it is for.** `CanvasManager.localBounds(of:)` measures an axis-aligned hull and pads it
+    /// by `stampRadius` afterwards, so lifting ink the artist previously rotated lands a straight
+    /// box with slack around tilted content — measured at 100 × 20 → 76.57 × 76.57 on a bar taken
+    /// round a 45° round trip. The owner ruled the box must **not** tilt by itself
+    /// (LASSO_MOVE.md §5.19, *"leave it straight up and down"*) and approved a second knob that turns
+    /// it by hand instead (§5.20, TODO item (20)). This is that angle.
+    ///
+    /// **`LayerTransform` has no room for it, and that is not an oversight.** A `LayerTransform` is
+    /// position, one scale and one rotation, and its rotation is *the ink's* — every geometry path
+    /// reads it, from `VectorCanvas.affine(from:pivot:)` down. A second angle sharing that field
+    /// would turn the drawing. It lives here, beside `aspect`, for the same reason `aspect` does:
+    /// this type is the box's whole pose and `LayerTransform` is only the part of it the document
+    /// stores.
+    ///
+    /// **It never reaches the geometry, and the lift invariant is what depends on that.**
+    /// `VectorFloat` holds `affine(from: frame.transform, pivot:) == baseTransform` at lift, so a box
+    /// dragged back to the pose it lifted at produces the identity and the ink does not move. Every
+    /// one of `VectorCanvas.affine(from:pivot:)`, `affine(from:aspect:pivot:)`, `axisScales`,
+    /// `CanvasManager.applyToVectorFloat` and `LiveLayerTransform.viewTransform` is blind to this
+    /// field, and `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is what keeps
+    /// it that way. What *does* read it is `drawnAngle`, and nothing else here reads
+    /// `transform.rotation` directly.
+    ///
+    /// **Turning the box costs no undo step** — LASSO_MOVE.md §5.21, a deliberate exception to
+    /// §5.5's "one turn of a knob is one step". It moves no ink, so there is nothing to give back;
+    /// and were it the first thing after a lift, its step would be the one carrying the pre-split
+    /// display list, so one Undo would rejoin the cut stroke and dismiss the float. So it is written
+    /// straight onto `vectorFloat.frame` (`CanvasManager.turnVectorFloatBox(to:)`) rather than
+    /// through `applyToVectorFloat`.
+    ///
+    /// Defaulted to 0 so every existing call site is untouched, and `boxAngle == 0` is bit-identical
+    /// to the frame before this field existed — `drawnAngle` is then `transform.rotation + 0`, which
+    /// is `transform.rotation` exactly.
+    ///
+    /// **Phase 1 is chrome only**: while this is non-zero, Freeform is refused
+    /// (`CanvasManager.freeformUnavailableReason`), because a stretch along a hand-turned box's axes
+    /// needs the *second* stored angle §5.20 rules on — `R(ρ)·S·R(−φ)` — and that is phase 2.
+    var boxAngle: CGFloat = 0
+
     init(transform: LayerTransform, contentSize: CGSize, aspect: CGFloat = 1,
+         boxAngle: CGFloat = 0,
          allowedHandles: Set<Handle> = Set(Handle.allCases)) {
         self.transform = transform
         self.contentSize = contentSize
         self.aspect = aspect
+        self.boxAngle = boxAngle
         self.allowedHandles = allowedHandles
     }
+
+    /// **The one place `transform.rotation` and `boxAngle` are added together** — the same discipline
+    /// `axisScales` applies to `scale` and `aspect`, and for the same reason: the projection, its
+    /// inverse, the corners, both knobs' stand-off directions and the hit test all have to agree
+    /// about which way the box is pointing, and five copies of `transform.rotation + boxAngle` are
+    /// five chances for one of them to drift.
+    ///
+    /// **Private on purpose.** It is the angle the box is *drawn* at; nothing outside this type has
+    /// any business with it, and the field it is built from is chrome (see `boxAngle`). At
+    /// `boxAngle == 0` it is `transform.rotation` to the bit.
+    private var drawnAngle: CGFloat { transform.rotation + boxAngle }
 
     /// The box's two axis scales. **The one place `scale` and `aspect` are turned back into a pair**,
     /// so the projection, its inverse and `VectorCanvas.affine(from:aspect:pivot:)` cannot disagree
@@ -112,7 +182,7 @@ struct ObjectTransformFrame: Equatable {
     func projected(_ local: CGPoint) -> CGPoint {
         let s = axisScales
         let x = local.x * s.x, y = local.y * s.y
-        let r = transform.rotation
+        let r = drawnAngle
         return CGPoint(x: transform.position.x + x * cos(r) - y * sin(r),
                        y: transform.position.y + x * sin(r) + y * cos(r))
     }
@@ -120,18 +190,24 @@ struct ObjectTransformFrame: Equatable {
     /// What a touch can be on. `body` is the box's interior — the move band — and is the one target
     /// that is an area rather than a point, so it is hit-tested by containment and never by reach.
     enum Handle: CaseIterable, Equatable {
-        case topLeft, topRight, bottomRight, bottomLeft, rotation, body
+        /// `rotation` is the green knob off the **top** edge — it turns box *and* ink together.
+        /// `boxRotation` is the yellow knob off the **bottom** edge, which turns the box alone and
+        /// leaves the drawing exactly where it is (LASSO_MOVE.md §5.19–21). They are on opposite
+        /// edges rather than beside each other for the reason this file's own hit test records: the
+        /// reach is 22 screen points and a knob stands off 36, so two knobs on the same edge are one
+        /// finger apart on a box scaled down to a thumbnail.
+        case topLeft, topRight, bottomRight, bottomLeft, rotation, boxRotation, body
 
         /// The four that scale. Kept as a property rather than a set literal at each call site so a
-        /// sixth case cannot be silently omitted from one of them.
+        /// seventh case cannot be silently omitted from one of them.
         var isCorner: Bool {
             switch self {
             case .topLeft, .topRight, .bottomRight, .bottomLeft: return true
-            case .rotation, .body: return false
+            case .rotation, .boxRotation, .body: return false
             }
         }
 
-        /// True for the five drawn as a dot, i.e. everything except the move band.
+        /// True for the six drawn as a dot, i.e. everything except the move band.
         var isDrawn: Bool { self != .body }
     }
 
@@ -139,10 +215,15 @@ struct ObjectTransformFrame: Equatable {
     /// overlay's rebuild and its hit test read**, which is `TextFrame.handleLayout`'s first
     /// discipline and the reason the two cannot drift apart.
     ///
-    /// `rotationOffset` is how far the knob stands off the top edge. It arrives already divided by
-    /// `canvasScale`, because it is a *screen*-point figure and this function works in canvas points
-    /// — a handle is chrome and belongs to the screen, so the view owns the constant and the geometry
-    /// owns the direction.
+    /// `rotationOffset` is how far a knob stands off the edge it belongs to. It arrives already
+    /// divided by `canvasScale`, because it is a *screen*-point figure and this function works in
+    /// canvas points — a handle is chrome and belongs to the screen, so the view owns the constant
+    /// and the geometry owns the direction.
+    ///
+    /// **Both knobs take the same offset**, which is what keeps this signature — and therefore
+    /// `handle(nearest:reach:rotationOffset:)`, `target(at:reach:rotationOffset:)`, the overlay's
+    /// `claimsTouch` and `point(inside:)` — exactly what it was when there was one knob. A second
+    /// parameter would have rippled through five call sites to say "36" twice.
     func handleLayout(rotationOffset: CGFloat) -> [(handle: Handle, position: CGPoint)] {
         guard !isEmpty else { return [] }
         let c = corners
@@ -151,18 +232,28 @@ struct ObjectTransformFrame: Equatable {
         ]
         if rotationOffset != 0 {
             layout.append((.rotation, rotationHandlePosition(offset: rotationOffset)))
+            layout.append((.boxRotation, boxRotationHandlePosition(offset: rotationOffset)))
         }
         // Filtered here, so the overlay's rebuild and the hit test below stay the one source of truth
         // they were: a grip that is not drawn is not grabbable either, and neither can drift.
         return layout.filter { allowedHandles.contains($0.handle) }
     }
 
-    /// The knob, along the box's own "up", so it stays over the top edge at any rotation instead of
-    /// swinging into the artwork.
+    /// The green knob, along the box's own "up", so it stays over the top edge at any rotation
+    /// instead of swinging into the artwork.
     func rotationHandlePosition(offset: CGFloat) -> CGPoint {
         let topCentre = projected(CGPoint(x: 0, y: -contentSize.height / 2))
-        let r = transform.rotation
+        let r = drawnAngle
         return CGPoint(x: topCentre.x + sin(r) * offset, y: topCentre.y - cos(r) * offset)
+    }
+
+    /// The yellow box-only knob, along the box's own "down" — the exact negation of the green knob's
+    /// direction, off the opposite edge, so the two can never land under one finger however small
+    /// the box is drawn.
+    func boxRotationHandlePosition(offset: CGFloat) -> CGPoint {
+        let bottomCentre = projected(CGPoint(x: 0, y: contentSize.height / 2))
+        let r = drawnAngle
+        return CGPoint(x: bottomCentre.x - sin(r) * offset, y: bottomCentre.y + cos(r) * offset)
     }
 
     /// The drawn handle **nearest** `point` within `reach`, not merely the first whose target
@@ -207,7 +298,7 @@ struct ObjectTransformFrame: Equatable {
         let s = axisScales
         guard abs(s.x) > .ulpOfOne, abs(s.y) > .ulpOfOne else { return nil }
         let dx = point.x - transform.position.x, dy = point.y - transform.position.y
-        let r = -transform.rotation
+        let r = -drawnAngle
         let rx = dx * cos(r) - dy * sin(r)
         let ry = dx * sin(r) + dy * cos(r)
         return CGPoint(x: rx / s.x, y: ry / s.y)
@@ -243,6 +334,10 @@ struct ObjectTransformDrag: Equatable {
     /// delta produced.
     let startAspect: CGFloat
 
+    /// `ObjectTransformFrame.boxAngle` when the finger went down, latched for the same reason
+    /// `startAspect` is. Every arm below passes it through untouched; only `.boxRotation` adds to it.
+    let startBoxAngle: CGFloat
+
     /// Whether a corner drag stretches the two axes independently (**Freeform**) or scales them
     /// together (**Uniform**).
     ///
@@ -259,11 +354,18 @@ struct ObjectTransformDrag: Equatable {
     /// independently of the other.
     static let minimumScale: CGFloat = 0.02
 
-    /// What a drag produces: the box's similarity, plus the one part of its pose a `LayerTransform`
-    /// cannot hold. `aspect` is unchanged from the lift for every drag except a Freeform corner.
+    /// What a drag produces: the box's similarity, plus the two parts of its pose a `LayerTransform`
+    /// cannot hold. `aspect` is unchanged from the lift for every drag except a Freeform corner, and
+    /// `boxAngle` for every drag except the box knob's.
+    ///
+    /// **`boxAngle` is chrome and travels no further than the overlay** — see
+    /// `ObjectTransformFrame.boxAngle`. `CanvasView.Coordinator.endObjectTransformDrag` reads it into
+    /// `CanvasManager.turnVectorFloatBox(to:)` and never into `nudgeVectorFloat`, so it cannot reach
+    /// the geometry map by way of this type.
     struct Pose: Equatable {
         var transform: LayerTransform
         var aspect: CGFloat
+        var boxAngle: CGFloat = 0
     }
 
     init(frame: ObjectTransformFrame, handle: ObjectTransformFrame.Handle, at point: CGPoint,
@@ -273,12 +375,15 @@ struct ObjectTransformDrag: Equatable {
         self.handle = handle
         self.anchor = frame.centre
         self.startAspect = frame.aspect
+        self.startBoxAngle = frame.boxAngle
         self.isFreeform = freeform
     }
 
-    /// The transform this drag produces with the finger at `point`. **Loses the aspect**, so it is
-    /// only correct for a caller that cannot hold one — see `pose(draggedTo:)`, which every Freeform
-    /// caller uses.
+    /// The transform this drag produces with the finger at `point`. **Loses the aspect and the box
+    /// angle**, so it is only correct for a caller that cannot hold either — see `pose(draggedTo:)`,
+    /// which every Freeform caller uses, and which the app's own drag path uses for everything.
+    /// On a `.boxRotation` drag this answers `start` at every point, which is exactly right: that
+    /// gesture produces no transform.
     func transform(draggedTo point: CGPoint) -> LayerTransform { pose(draggedTo: point).transform }
 
     /// The pose this drag produces with the finger at `point`.
@@ -288,17 +393,36 @@ struct ObjectTransformDrag: Equatable {
             var moved = start
             moved.position = CGPoint(x: start.position.x + (point.x - startPoint.x),
                                      y: start.position.y + (point.y - startPoint.y))
-            return Pose(transform: moved, aspect: startAspect)
+            return Pose(transform: moved, aspect: startAspect, boxAngle: startBoxAngle)
         case .topLeft, .topRight, .bottomRight, .bottomLeft:
-            guard isFreeform else { return Pose(transform: uniformlyScaled(to: point), aspect: startAspect) }
-            return stretched(to: point)
+            guard isFreeform else {
+                return Pose(transform: uniformlyScaled(to: point), aspect: startAspect,
+                            boxAngle: startBoxAngle)
+            }
+            var pose = stretched(to: point)
+            pose.boxAngle = startBoxAngle
+            return pose
         case .rotation:
-            let startAngle = atan2(startPoint.y - anchor.y, startPoint.x - anchor.x)
-            let currentAngle = atan2(point.y - anchor.y, point.x - anchor.x)
             var turned = start
-            turned.rotation = start.rotation + (currentAngle - startAngle)
-            return Pose(transform: turned, aspect: startAspect)
+            turned.rotation = start.rotation + turnedBy(point)
+            return Pose(transform: turned, aspect: startAspect, boxAngle: startBoxAngle)
+        case .boxRotation:
+            // **`transform` is `start`, bit for bit.** This is the whole of what makes the box knob
+            // chrome: the same angle the green knob adds to `transform.rotation` goes into `boxAngle`
+            // instead, so the box turns under the finger and the ink is not touched by any arithmetic
+            // at all — not scaled by 1, not rotated by 0, just passed through.
+            return Pose(transform: start, aspect: startAspect,
+                        boxAngle: startBoxAngle + turnedBy(point))
         }
+    }
+
+    /// How far the finger has swept about the anchor since touch-down. **Shared by both knobs**, so
+    /// the box-only turn feels identical to the one that carries the ink and neither can drift from
+    /// the other; which field the answer lands in is the only difference between them.
+    private func turnedBy(_ point: CGPoint) -> CGFloat {
+        let startAngle = atan2(startPoint.y - anchor.y, startPoint.x - anchor.x)
+        let currentAngle = atan2(point.y - anchor.y, point.x - anchor.x)
+        return currentAngle - startAngle
     }
 
     /// **Uniform**: one factor, the ratio of the two radii, on both axes. Unchanged since the port.
@@ -326,6 +450,11 @@ struct ObjectTransformDrag: Equatable {
     /// `scale · sqrt(f·f)` and `aspect · (f/f)`, i.e. the same scale to within a rounding step and
     /// the aspect untouched exactly. So dragging a corner along the box's own diagonal in Freeform is
     /// Uniform, with no seam for the artist to feel.
+    ///
+    /// **`-start.rotation` is the *ink's* angle, not the drawn box's**, and on a hand-turned box the
+    /// two differ. That is precisely what LASSO_MOVE.md §5.20's second stored angle is for —
+    /// `R(ρ)·S·R(−φ)` — and it is phase 2. Until it exists, `CanvasManager.freeformUnavailableReason`
+    /// refuses Freeform outright while `boxAngle != 0`, so this arm never runs on a turned box.
     private func stretched(to point: CGPoint) -> Pose {
         let r = -start.rotation
         let (d0x, d0y) = inBoxAxes(startPoint, cosR: cos(r), sinR: sin(r))

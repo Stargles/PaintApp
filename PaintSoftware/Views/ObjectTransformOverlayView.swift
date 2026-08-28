@@ -1,8 +1,15 @@
 import UIKit
 
 /// The Move tool's on-canvas box for the whole active vector layer: an outline you drag to move, a
-/// grip at each corner to scale about the centre, and a knob above the top edge to turn about the
-/// same centre.
+/// grip at each corner to scale about the centre, a green knob above the top edge to turn the box
+/// and the drawing together about that centre, and a **yellow knob below the bottom edge that turns
+/// the box alone** and leaves the drawing exactly where it is (LASSO_MOVE.md §5.19–21, stage 3b).
+///
+/// **The second knob cost this file nothing in hit testing**, which is the property that made it
+/// cheap and is worth stating because it is easy to assume rather than check: `claimsTouch`,
+/// `point(inside:)` and `target(at:)` all delegate to `ObjectTransformFrame.target(at:reach:rotationOffset:)`,
+/// which reads `handleLayout` — the one function that grew the entry. Both knobs take the same
+/// `rotationOffset`, so not even the signature moved.
 ///
 /// **This is `TextTransformOverlayView`'s pattern, ported.** It was the last overlay drawing its
 /// chrome at a fixed 24×24 inside the transformed `container`, which `ADD_TEXT.md` §1 "Handles live
@@ -78,9 +85,10 @@ final class ObjectTransformOverlayView: UIView {
     private var safeScale: CGFloat { max(canvasScale, 0.01) }
     private var handleSize: CGFloat { Self.handleScreenSize / safeScale }
     private var rotationHandleSize: CGFloat { Self.rotationHandleScreenSize / safeScale }
-    /// How far the knob stands off the top edge, in canvas points. Handed to
-    /// `ObjectTransformFrame.handleLayout` so the geometry owns the direction and the view owns the
-    /// constant.
+    /// How far a knob stands off its edge, in canvas points — the green one above the top, the
+    /// yellow one below the bottom. Handed to `ObjectTransformFrame.handleLayout` so the geometry
+    /// owns the direction and the view owns the constant. **One constant for both**, so the box
+    /// reads as symmetric and the layout signature stayed what it was.
     var rotationOffset: CGFloat { Self.rotationHandleScreenOffset / safeScale }
     var handleReach: CGFloat { Self.handleScreenReach / safeScale }
     private var handleBorderWidth: CGFloat { Self.handleScreenBorderWidth / safeScale }
@@ -194,26 +202,46 @@ final class ObjectTransformOverlayView: UIView {
         let path = CGMutablePath()
         path.addLines(between: corners)
         path.closeSubpath()
-        // The tether from the top edge to the knob, so the knob reads as belonging to this box
-        // rather than as a stray dot floating above it. Drawn only when there *is* a knob: no box
-        // withholds the rotation grip today (both the whole-cel arm and the lasso float offer all
-        // six), but `ObjectTransformFrame.allowedHandles` is the filter every future handle set comes
-        // through, and a tether to nothing is a line sticking out of the artwork for no reason.
+        // A tether from an edge to its knob, so a knob reads as belonging to this box rather than as
+        // a stray dot floating beside it. Drawn only when there *is* that knob: no box withholds
+        // either grip today (both the whole-cel arm and the lasso float offer all seven), but
+        // `ObjectTransformFrame.allowedHandles` is the filter every future handle set comes through,
+        // and a tether to nothing is a line sticking out of the artwork for no reason.
         if frameModel.allowedHandles.contains(.rotation) {
             let topCentre = CGPoint(x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2)
             path.move(to: topCentre)
             path.addLine(to: frameModel.rotationHandlePosition(offset: rotationOffset))
+        }
+        // **The box knob's tether hangs off the *bottom* edge**, and the outline is one path, so it
+        // is drawn here in the outline's own blue rather than in the knob's yellow. The dot carries
+        // the colour; the tether carries the attachment. Placement, not decoration, is what
+        // distinguishes the two knobs under a finger — see `ObjectTransformFrame.Handle`.
+        if frameModel.allowedHandles.contains(.boxRotation) {
+            let bottomCentre = CGPoint(x: (corners[2].x + corners[3].x) / 2,
+                                       y: (corners[2].y + corners[3].y) / 2)
+            path.move(to: bottomCentre)
+            path.addLine(to: frameModel.boxRotationHandlePosition(offset: rotationOffset))
         }
         outlineLayer.path = path
         outlineLayer.lineWidth = outlineWidth
 
         clearHandles()
         for entry in frameModel.handleLayout(rotationOffset: rotationOffset) {
-            let isRotation = entry.handle == .rotation
-            let size = isRotation ? rotationHandleSize : handleSize
+            // **Yellow for the box-only knob, and the two colours already taken are why.** Green is
+            // the knob that turns the ink, and `systemOrange` already means "distort corner" on a
+            // text box (`TextTransformOverlayView.rebuildHandles`), so a third meaning for it would
+            // be one colour saying two things across two overlays.
+            let colour: UIColor
+            switch entry.handle {
+            case .rotation:    colour = .systemGreen
+            case .boxRotation: colour = .systemYellow
+            default:           colour = .white
+            }
+            let isKnob = entry.handle == .rotation || entry.handle == .boxRotation
+            let size = isKnob ? rotationHandleSize : handleSize
             let dot = CALayer()
-            dot.backgroundColor = isRotation ? UIColor.systemGreen.cgColor : UIColor.white.cgColor
-            dot.borderColor = isRotation ? UIColor.white.cgColor : UIColor.systemBlue.cgColor
+            dot.backgroundColor = colour.cgColor
+            dot.borderColor = isKnob ? UIColor.white.cgColor : UIColor.systemBlue.cgColor
             dot.borderWidth = handleBorderWidth
             dot.cornerRadius = size / 2
             dot.frame = CGRect(x: entry.position.x - size / 2, y: entry.position.y - size / 2,

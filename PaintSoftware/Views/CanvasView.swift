@@ -1590,6 +1590,7 @@ struct CanvasView: UIViewRepresentable {
                                frame: ObjectTransformFrame(transform: pose.transform,
                                                            contentSize: float.contentSize,
                                                            aspect: pose.aspect,
+                                                           boxAngle: pose.boxAngle,
                                                            allowedHandles: float.frame.allowedHandles),
                                canvasScale: canvasContentScale)
                 container.bringSubviewToFront(overlay)
@@ -1626,10 +1627,15 @@ struct CanvasView: UIViewRepresentable {
         /// gesture's end, where it becomes one undo step.
         private var liveVectorFloatPose: ObjectTransformDrag.Pose?
 
-        /// The pose a float is resting at — its box transform and its aspect, read as one value so no
-        /// call site can pick up one and forget the other.
+        /// The pose a float is resting at — its box transform, its aspect and its hand-turned box
+        /// angle, read as one value so no call site can pick up one and forget the others.
+        ///
+        /// The box angle joined for exactly that reason: it is the third field the box is drawn from,
+        /// and a rebuild that read the other two would straighten a box the artist had turned on the
+        /// first SwiftUI pass after the gesture ended.
         private static func pose(of float: VectorFloat) -> ObjectTransformDrag.Pose {
-            ObjectTransformDrag.Pose(transform: float.frame.transform, aspect: float.frame.aspect)
+            ObjectTransformDrag.Pose(transform: float.frame.transform, aspect: float.frame.aspect,
+                                     boxAngle: float.frame.boxAngle)
         }
 
         /// Reconciles the layer host and the marching ants with `canvasManager.vectorFloat`, on every
@@ -1698,7 +1704,13 @@ struct CanvasView: UIViewRepresentable {
             activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle,
                                                         at: point,
                                                         freeform: canvasManager.vectorFloatIsFreeform)
-            canvasManager.beginVectorFloatDrag()
+            // **A box-only turn never arms the latch.** `beginVectorFloatDrag` re-suppresses the
+            // piece so a drag can be shown as a Core Animation transform on its own bitmap; this
+            // gesture moves no ink, so there is nothing to show — and on a `mayDiverge` float, which
+            // sits *un*-latched between gestures precisely so the artist is looking at the truth,
+            // arming it would swap the truth for an approximation for the length of a gesture that
+            // changes nothing about the drawing.
+            if handle != .boxRotation { canvasManager.beginVectorFloatDrag() }
             // Synchronously, not on the next SwiftUI pass: the first delta can arrive before one.
             updateVectorFloat()
         }
@@ -1719,19 +1731,33 @@ struct CanvasView: UIViewRepresentable {
                                          frame: ObjectTransformFrame(transform: pose.transform,
                                                                      contentSize: float.contentSize,
                                                                      aspect: pose.aspect,
+                                                                     boxAngle: pose.boxAngle,
                                                                      allowedHandles: float.frame.allowedHandles),
                                          canvasScale: canvasContentScale)
             }
         }
 
         func endObjectTransformDrag() {
-            guard activeVectorFloatDrag != nil else { return }
+            guard let drag = activeVectorFloatDrag else { return }
             let pose = liveVectorFloatPose
             activeVectorFloatDrag = nil
             liveVectorFloatPose = nil
-            // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
-            // `beginObjectTransformDrag`.
-            if let pose { canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect) }
+            if let pose {
+                if drag.handle == .boxRotation {
+                    // **The one gesture on this box that is not a nudge, and it is a ruling rather
+                    // than an optimisation** (LASSO_MOVE.md §5.21): turning the box costs no undo
+                    // step, so it must not go through `nudgeVectorFloat` — a zero-delta nudge is
+                    // still a step, and were it the first one it would be the step carrying the
+                    // pre-split display list, so one Undo would rejoin the cut stroke and dismiss
+                    // the float. Only `boxAngle` is read out of the pose; `pose.transform` is the
+                    // pose the drag started at, bit for bit.
+                    canvasManager.turnVectorFloatBox(to: pose.boxAngle)
+                } else {
+                    // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
+                    // `beginObjectTransformDrag`.
+                    canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+                }
+            }
             updateVectorFloat()
         }
 
