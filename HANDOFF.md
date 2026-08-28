@@ -1,4 +1,4 @@
-# Handoff — 2026-08-27 (session 71)
+# Handoff — 2026-08-27 (session 72)
 
 <!-- This file is BOTH the state of the repo and the prompt that starts the next session. It was once
 two files and they drifted apart inside a day, because the same state had to be written twice. Keep it
@@ -10,152 +10,131 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is at 1773 fast-tier tests (1769 passed, 3 skipped). There is ONE branch in flight —
-`tmp/effectbackdrop`, four commits, unmerged — and its state is the first thing to establish.
+inline. `main` is `f99ca83`, fast tier **1798 / 1795 / 0 / 3**. **No branches in flight, one worktree,
+clean tree** — unusually, there is nothing to establish before you start.
 
-**1. Fix the effect backdrop, then merge it. DO NOT MERGE `tmp/effectbackdrop` AS IT STANDS.**
-   Stages 1-4 are committed and the mechanism is right — the owner's report goes from `[0,0,0,0]` to
-   `[128,128,128,255]` — but three reviewers found four measured defects, written up as
-   **EFFECT_BACKDROP.md §7**. Two are serious: the texture estimate **doubled** for a bloom document and
-   turned `PerfBaselineTests` red *in a file the branch never opened*, which shrinks every composite on
-   a memory-constrained device and is the owner's own crash scene; and an `.ink` effect composites the
-   ink twice, so **adding an Outline layer darkens the layer beneath it by 40%** (MEASURED 102 → 41).
-   The third is a parity break on fractional canvas padding that neither parity test covers, because
-   both use integer padding. **The fourth is a question for the owner, not a fix** — see §2.1, where
-   this document's own ruling turned out to be analysed for the mid-stroke case and false at rest.
-   **Then stages 5 and 6**: Bloom's control with its persisted field and decode default, and the
-   thumbnail flag. **Sobel's control is not part of stage 5** — it was built on 2026-08-27 and the
-   owner deleted it the same day (*"drop it"*); EFFECT_BACKDROP.md §5.2 keeps both rulings and says
-   explicitly not to re-propose it. And confirm §4's table — it names twelve of thirteen effects,
-   **Sharpen is missing**, and the build agent answered it `.backdrop` by reasoning rather than ruling.
+**1. Build item (8), the fixed-point sample encoding. It was blocked yesterday and is not now.**
+   TODO.md's five geometry items are ONE feature — the owner's own framing, *"the refit to the way
+   brush strokes are stored"* — and the order is forced: **(12) stage 3 → (13) → (8) → (14) → (9)**.
+   The first two are merged, so **(8) is the head of the queue.** What unblocked it: nothing writes a
+   cel transform any more, so a persisted sample IS a canvas coordinate and "the origin is the centre
+   of the current canvas" finally has a fixed point to mean.
+   Read (8) as it stands — **three of its premises were corrected on 2026-08-27** and the item carries
+   the corrections: the memory win is zero (the ruling says memory is unchanged, so the win is
+   disk-only and larger), a sample costs ~77 JSON bytes not 89, and the field reaches **+8191.75** so
+   the maximum canvas is 16383. Its five attached rulings are settled; do not re-open them.
+   **No migration is needed.** The owner ruled 2026-08-27 that *"everything on the ipad
+   right now is expendable"* — no decode defaults for fields that never existed, no appearance-change
+   warnings. It is at the top of TODO.md and it is what makes this cheap.
 
-**2. Get it on the iPad.** Two things shipped this pass that a person has to look at:
-   - **Draw across the canvas after shrinking a whole vector cel.** The whole line must survive. This
-     is the data loss you reported, and it is fixed — this is the confirmation.
-   - **Move with no lasso now shows the Move bar**, where there was never one. Freeform and Mirror are
-     live on text now; they still grey out on a placed image, which is deliberate.
-   - Sobel's changed look is **not** on the iPad either — it is unmerged. It is fixed `.backdrop`
-     with no control: bright edges on opaque black, and no setting that gets the old look back.
-   - The onion-skin change is **not** on the iPad — it is on the unmerged branch, and §2.1 needs an
-     answer first.
+**2. Four things are on the owner's iPad awaiting a look, none of them blocking.** The build there is
+   `fe5e716`, one commit behind `main` (`f99ca83` adds only item (12)/(13), which are headless).
+   - **Sobel is bright edges on opaque black now**, with no control. If it still reads grey, that is a
+     different bug from the one fixed and it matters.
+   - **An adjustment layer should grade blank paper**, and a blend mode should blend against it. This
+     is the owner's original report and the whole point of the pass.
+   - **Draw across the canvas after shrinking a whole vector cel** — the ink loss, still unconfirmed.
+   - **Move with no lasso shows a Move bar**, where there was never one.
 
-**3. Then TODO.md's canvas-geometry programme**, which is five asks and one number. (8) is settled and
-   buildable today. (12) stages 2-4 are the clean-up you asked for — deleting the legacy whole-layer
-   transform path now that stage 1 has replaced it — and stage 2 must take the xcresult test count
-   before and after, because ~1,300 lines of test exist solely to pin what it deletes.
+**3. Then (18) or (10), both in TODO.md's Open section.**
+   (18) is the bottom-bar height: the obvious implementation was built, measured and reverted, and the
+   candidate next approach is recorded on `maxRowsHeight`. **A screenshot is its acceptance test, not
+   a frame comparison** — an XCUITest passed against the broken build. Note Sobel is back to **zero**
+   controls, so it is the degenerate case again.
+   (10) is Oklab, and the recommendation is written into the item: **not storage, not the compositor —
+   interpolation, and linear light first.** Stage A's premise (that the unlinearized composite is what
+   makes saturated hues read muddy) is argued and **not yet seen**; render the A/B before building it.
 
-Three judgement calls have been waiting on real artwork since 2026-08-22, none of them defects: the Cut
-eraser across a line thicker than the eraser, a crossing line that can flicker during a cut drag (both
-BUGS.md), and a fill chunk dropped on blank paper staying a fill (LASSO_MOVE.md §5). One more joined
-them: a Freeform-stretched text box can be dragged smaller than its own text.
+**Do not re-litigate**: LASSO_MOVE.md §5's eighteen rulings; EFFECT_BACKDROP.md §5's four and §2.1's
+three-pass onion-skin ruling; Sobel's deleted ink control (§5.2 says explicitly not to re-propose it);
+(8)'s five attached rulings.
 ```
 
 ---
 
 ## State
 
-`main` = `6fc3205` plus this close-out. **Fast tier 1773 total / 1769 passed / 0 failed / 3 skipped**,
-measured on the merged tree, up from 1748 at the session's start. One in-flight branch,
-`tmp/effectbackdrop` (4 commits, unmerged, **reviewed and rejected** — see EFFECT_BACKDROP.md §7). No
-simulator clones.
+`main` = `f99ca83`. **Fast tier 1798 / 1795 / 0 / 3**, measured on the merged tree. No branches, no
+worktrees but the main one, no simulator clones.
 
-**The one red in that run was `ARAPLogicTests.testStrokesArePairedByPositionRatherThanDrawingOrder`
-failing with `crashed with signal term`** — a SIGTERM in an interpolation test nothing this pass
-touched. Isolated re-run on a freshly erased device: 1 test, 1 passed, no clones. Environmental, and
-the cause is known — see the process-kill hazard below.
-
-## What the owner's device report settled
-
-Six checks went to the iPad and all six came back, which is why TODO.md no longer has a
-waiting-on-the-owner section.
-
-- **The ink loss is real** — *"only the part of the line in a box around the original object gets
-  baked"* — and **our predicted shape was wrong in their favour**. We said the top-left quadrant, which
-  assumed a scale about the origin; the Move box scales about the ink-bbox centre. Measured after the
-  fact on a 64x64 canvas shrunk 0.3x about ink at (32,32): the surviving band was **[22.4, 41.6]**.
-- **The owner ruled against repairing it in place**, which is why the fix is a replacement rather than
-  a patch. Two more things they could not see from outside: the loss is in the **document**, not the
-  display, and the **samples were intact** — the rasterizer dropped them, which is why baking recovers
-  the ink.
-- **The freeze is not reproducible and is ruled solved.** It closes BUGS.md's long-open Fill entry with
-  it, since the two were argued to be one bug. Kept undiagnosed rather than pruned: nothing was ever
-  found, and the two regression nets passed throughout, so a green suite is not evidence it is gone.
-- **Scribble, Freeform and the lasso ants are confirmed working.** The pencil-tap keyboard fix could
-  never have been verified on this Mac.
-- **The empty-text ask was already shipped** — since 2026-08-20, 123 commits before the build on their
-  iPad. Closed unbuilt. Whitespace-only counts as empty too.
+**The full suite has NOT been run on this commit.** The last full run was at `dee77ff`, six merges ago:
+1916 tests, four reds — two environmental (confirmed by isolated re-run), two the recovery-test bug that
+is now fixed. Nothing since then touches a gesture or a view except item (12)'s deletions, which are
+covered headlessly, but that is an argument and not a measurement. **Run one at the next phase
+boundary**, and shut down and erase only after checking `pgrep -fl xcodebuild` — three sessions shared
+this Mac today.
 
 ## What landed
 
-- **`a506d66` — the brush button after a whole-canvas Move.** Fixed at `selectedTool`'s own `didSet`,
-  which reaches all six writers by construction. **It could not go in `commitAllInteractiveState()`**:
-  `toggleMove()` calls that *before* toggling, so the close would zero the flag and the toggle would set
-  it straight back, and Move could never be dismissed from its own button. Gated on an exhaustive
-  `Tool.isMomentary` so an eyedropper round trip does not commit the box; `.text` is deliberately not
-  momentary. **A second-order bug was found inside the work**: the first draft exempted a momentary
-  transition on *either* side, which also exempted a direct switch away from an armed eyedropper and
-  reopened the defect behind one extra tap. Its own test caught it.
-- **`cf5de83` — Move with no selection lifts the whole cel into the lasso float.** The ink loss is
-  closed. The regression test ships with the *old* mechanism driven inside it asserting the loss, so the
-  positive half cannot rot into a vacuous pass and stage 2 has to delete that control deliberately.
-  **The teardown audit is the part nobody asked for and the part that mattered**: a whole-cel float
-  suppresses every element id, so any door that flattens while the box is up bakes the cel to blank in
-  the saved document. **Five** doors were missing the commit — Rasterize, Merge Down, `moveCelToLayer`,
-  `clearCel`, and `deleteLayer`, where the commit runs but the layer is already out of `layers`, and
-  because the undo snapshot holds a reference type, **undo brought the layer back still blanked**. A
-  sixth is filed rather than fixed (Canvas Padding, which belongs to the resize path being rebuilt).
-- **`045d509` — text mirrors and stretches**, owner ruling 18: mirror reflects the glyphs, a non-uniform
-  scale distorts the letterforms and does not re-flow. **Three brief claims were refuted by the code**,
-  including the acceptance test this orchestrator specified — "same per-line widths after a stretch" is
-  **not a scale invariant**, because the system face has size-dependent tracking, so a sqrt(3) scale moved
-  a line from 0.630 to 0.587 of its box with the breaks bit-identical. Replaced with line count plus
-  line *ranges* and a re-flow discriminator, so the passing assertion chooses between two live
-  possibilities.
-- **`785f3f7` — the bottom-bar height was attempted, measured and reverted**, and the dead end is the
-  deliverable. See TODO (18): the standard `.background(GeometryReader)` measures **exactly 0**, and
-  **the XCUITest passed against the broken build** because a clipped view's accessibility frame does not
-  reflect what painted. A screenshot is that item's acceptance test now.
-- **Docs**: [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) is new and fully ruled; TODO.md went 424 to 211
-  lines at the owner's request, with answered questions folded into the items they answer.
+- **The effect backdrop, all six stages** (`ca4c008`…`d90b329`, plus fixes). The owner's report —
+  *"Chromatic abberation seems to be masked to the objects on the layers only"* — is closed, and with it
+  seven other effects and twenty blend modes: the canvas paper was a `UIView` behind the composite, so
+  every adjustment layer graded a transparent sheet. **All four of EFFECT_BACKDROP.md §7's defects are
+  fixed**, and §8 is new: it records what §7's own *explanations* got wrong, which was more than what
+  its findings got wrong.
+- **Sobel**, twice. First `5f88302`: its ruled `.backdrop` default rendered a **transparent** canvas,
+  not a black one, because the kernel emits `(m,m,m,m)` and a flat region has `m = 0`. The owner saw it
+  on their iPad as grey — which is `paddingBackdrop`'s `UIColor(white: 0.85)`, byte 217, showing through
+  a hole punched clean through the paper. **EFFECT_BACKDROP.md §2.2 asserted the opposite and was the
+  entire justification for the ruled default.** Then `601c983`: shown that ink-only Sobel is
+  arithmetically invisible on white paper and finds zero edges in black line art, the owner deleted the
+  control outright.
+- **Item (12) stages 2 and 3** (`683983c`, `2fa1725`), ~1,366 lines deleted. **Stage 3 closed a second
+  door onto the owner's own ink loss**: after stage 2, `setCanvasPadding` was the only remaining producer
+  of a non-identity cel transform, and it walks every cel — so one use of the padding slider left every
+  cel clipping later canvas-space ink. The same loss, through the Actions menu instead of the Move box,
+  and nobody had connected them. Stage 4 is **declined with a reason**, not forgotten: `_transform` is
+  dead-*valued* rather than trivially dead, and LAYER_TRANSFORM.md §7 prices its removal at 2-3 days for
+  clarity and no behaviour.
+- **Item (13)** (`83f7c0d`). Built as ruled, and what it exposed outgrew it — BUGS.md's top entry:
+  `CompositorBudget` only ever bounded compositor **scratch**, so the persistent raster/fill/baked
+  buffers go through no budget at all and **one at 16383² is ~1.02 GB** against a 3 GB device's whole
+  process budget. Whether a near-maximum canvas is vector-only is a product call.
+- **Item (10) answered rather than built** — the owner asked for the call. Storing Oklab *moves* a
+  conversion rather than removing one, and this tree adds three specific blockers: 8-bit textures band
+  Oklab's a/b, the byte-for-byte parity gate cannot hold a cube root, and coverage compositing is
+  averaging light. The staging turns on one fact: **sRGB→linear is per-channel, so on 8-bit input it is
+  a 256-entry LUT and bit-identical on both backends by construction; Oklab's cube root sits after a
+  matrix mix and cannot be tabled.**
 
-## Two hazards learned the hard way, both now in CLAUDE.md
+## Two traps, both now in CLAUDE.md
 
-- **Killing by process name is machine-wide.** An agent sweeping for its own strays with
-  `pgrep -f xcodebuild | kill` killed the orchestrator's verification run. **The damage does not
-  announce itself as a kill**: the first attempt died with exit 144 and no output, the retry gave
-  `Mach error -308` with zero tests passed — which CLAUDE.md already attributed to *contention*, so it
-  was diagnosed as a loaded machine and restarted into the same hazard. Two runs and a wrong diagnosis.
-  Same family as the shared simulator UDID and the shared `git stash`.
-- **A passing XCUITest can be blind to a view that renders nothing.** Accessibility frames reported
-  plausible differing positions while the rows were clipped away entirely. This is the
-  banner-versus-count trap in a third costume, and the answer is the same: read the thing that actually
-  measures what you care about.
+- **A test class is not its file.** The 2026-08-15 split cut six heavy UI files into three classes each
+  and left the filenames alone, so `VectorShapeAndRecoveryUITests.swift` holds `GalleryRecoveryUITests`.
+  A selector built from the filename matches nothing and prints `Executed 0 tests` then
+  `** TEST SUCCEEDED **`. Cost one four-test triage run.
+- **A green test can be a test that stopped testing.** Twice today: `GalleryRecoveryUITests` asserted the
+  **raster** stroke count of a **vector** layer and had been red-but-ignored since 2026-08-11 (and, before
+  that, green off a bitmap heuristic that defaults to 1). And Sobel's impulse-response test would have gone
+  **vacuous** — nine zeroes, passing against any stencil — when the alpha rule changed, had the fixture not
+  been moved to an opaque ground.
+
+## The pattern worth carrying
+
+**Five of this pass's significant findings were wrong premises, not wrong code**, and two were caught by
+the owner looking at a screen. §7's own suggested fix would have erased Outline's ring. §2.1 described
+the onion-skin cost as "a little extra compositing work" when it was not extra work at all and the real
+cost was the picture. §2.2's claim about Sobel's flat regions was false. (8) said it needed nothing and
+needed (12). The "data loss" was a test that could never have passed.
+
+**And the process lesson: render the cost, do not describe it.** Told the onion-skin split cost "121 of
+255 channel steps", the owner accepted it. Shown the two pictures — a correctly multiplied dark navy
+shape beside the raw blue it actually becomes — they reversed the ruling in one message. Both
+descriptions were true.
 
 ## Still open, unchanged
 
-`LASSO_MOVE.md` §5 carries **eighteen** owner rulings; do not re-litigate any. `ARCHITECTURE_REVIEW.md`
-finding 1 is closed; findings 2-4 (eleven hand-written cache keys, silent save-failure returns, a layer
-property living in four hand-kept structs) are open and unruled. `BUGS.md` carries the unclamped-zoom
-coordinate, the `TextFrame.homography` decode with no validity check, the `.projective` re-rasterise per
-invalidation, and PERFORMANCE.md item 14's expensive half.
+`ARCHITECTURE_REVIEW.md` findings 2-4 (eleven hand-written cache keys, silent save-failure returns, a
+layer property in four hand-kept structs) are open and unruled. BUGS.md carries the new raster-storage
+entry, the unclamped-zoom coordinate, `TextFrame.homography` decoding with no validity check, the
+`.projective` re-rasterise per invalidation, and PERFORMANCE.md item 14's expensive half.
 
 Two behaviour questions have been owed for days and nobody is blocked on them: save semantics when a
 project loaded with something unreadable (may saving overwrite the good original, refuse, or prompt? a
 branch shipped "prompt once, then remember" — confirm it), and which faces belong in the font picker's
 favourites strip.
 
-## The review that did not merge, and why it was worth its cost
-
-The effect-backdrop branch was built by one agent and then read by three, each given a different lens
-rather than the same one three times. **Every one of the four defects came from the reviewers, none
-from the build**, and two were measured rather than argued — a 40% darkening reproduced with a probe,
-and a 204-channel parity delta reproduced with a fractional padding value no existing test uses.
-
-The one to learn from is the **onion skin**, because the defect was in *this project's own
-specification* and not in the code. EFFECT_BACKDROP.md §2.1 reasoned about the mid-stroke split, where
-the sandwich really does have an `above` half covering the ghost, and stated a conclusion about "the
-one behaviour change" as though it covered every state. At rest the whole tree is in the lower view,
-`above` is nil and hidden, and every host is blanked — so there is nothing left to cover the ghost and
-the two onion-skin placements collapse into one. The spec was confident, specific, and wrong about the
-state the artist spends all their time in. A reviewer walked the six cases in a table; that is what
-found it.
+Four judgement calls wait on real artwork, none of them defects: the Cut eraser across a line thicker
+than the eraser, a crossing line that can flicker during a cut drag (both BUGS.md), a fill chunk dropped
+on blank paper staying a fill (LASSO_MOVE.md §5), and a Freeform-stretched text box draggable smaller
+than its own text.
