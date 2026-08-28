@@ -1054,6 +1054,112 @@ final class ObjectTransformLogicTests: XCTestCase {
                      "the whole map is pre-multiplied by the turn")
     }
 
+    // MARK: - The box's own centre (Move stage 3b, phase 3)
+    //
+    // Phase 3 makes the box's size — and therefore its centre — a live function of `boxAngle`
+    // (LASSO_MOVE.md §5.22): the tight box around a diagonal is not centred where the loose
+    // axis-aligned one was, so the box has to be able to sit off the transform's own position.
+    // `ObjectTransformFrame.contentOffset` is where that lives. These two tests are the *frame's*
+    // half of it; `LassoMoveLogicTests` measures the fit itself against real ink.
+
+    /// **Every drawn and hit part of the box moves with `contentOffset`, and the anchor does not.**
+    ///
+    /// The offset is in the box's own local units, so it is added before the scale and the rotation —
+    /// which is the difference between a box that stays attached to its ink when the artist turns or
+    /// scales it and one that slides across the screen. The assertion is therefore not "the corners
+    /// moved by the offset" but "the corners moved by the offset *carried through the projection*",
+    /// which is the same thing as saying the offset box is the un-offset box of a shifted piece of
+    /// content: `projected(u + offset) == projectedWithOffset(u)` for every `u`.
+    ///
+    /// **The second half is the load-bearing one.** `centre` is `transform.position`, and it is what
+    /// `ObjectTransformDrag` latches as its `anchor` — the point a corner drag scales about and both
+    /// knobs turn about. It has to stay the *geometry's* fixed point, because that is the point
+    /// `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` holds still: a drag anchored on the drawn
+    /// box's centre instead would scale the ink about a point the map does not hold, and the artist's
+    /// drawing would slide out from under a corner they were only resizing.
+    func testTheContentOffsetMovesEveryDrawnPartOfTheBoxAndNotTheAnchor() {
+        let offset = CGPoint(x: -30, y: 17)
+        for (scale, rotation, boxAngle) in [(CGFloat(1), CGFloat(0), CGFloat(0)),
+                                            (2.5, 0.7, 0), (0.4, 0, 1.3), (1.6, -0.9, 0.45)] {
+            let plain = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 1000, y: 500),
+                                                                       scale: scale, rotation: rotation),
+                                             contentSize: CGSize(width: 400, height: 300),
+                                             boxAngle: boxAngle)
+            var shifted = plain
+            shifted.contentOffset = offset
+            let note = "scale \(scale), rotation \(rotation), boxAngle \(boxAngle)"
+
+            // The projection, and therefore the corners, the two knobs and the move band, all of
+            // which are `projected` one call down.
+            for u in [CGPoint.zero, CGPoint(x: 200, y: -150), CGPoint(x: -37, y: 96)] {
+                assertPoint(shifted.projected(u),
+                            plain.projected(CGPoint(x: u.x + offset.x, y: u.y + offset.y)),
+                            "the offset rides inside the projection — \(note)")
+            }
+            for (index, corner) in shifted.corners.enumerated() {
+                assertPoint(corner, plain.projected(CGPoint(x: (index == 0 || index == 3 ? -200 : 200) + offset.x,
+                                                            y: (index < 2 ? -150 : 150) + offset.y)),
+                            "corner \(index) — \(note)")
+            }
+            // Both knobs stand off the box they belong to, so they move by the same canvas delta the
+            // box's own middle did.
+            let travel = CGPoint(x: shifted.projected(.zero).x - plain.projected(.zero).x,
+                                 y: shifted.projected(.zero).y - plain.projected(.zero).y)
+            for (which, a, b) in [("green", shifted.rotationHandlePosition(offset: 36),
+                                   plain.rotationHandlePosition(offset: 36)),
+                                  ("yellow", shifted.boxRotationHandlePosition(offset: 36),
+                                   plain.boxRotationHandlePosition(offset: 36))] {
+                assertPoint(a, CGPoint(x: b.x + travel.x, y: b.y + travel.y),
+                            "the \(which) knob rides with the box — \(note)")
+            }
+
+            // The move band follows the drawn box rather than the transform's position: the box's own
+            // middle is inside it, a point half way out to a corner is inside it, and — on an offset
+            // this large against a 400×300 box — a point three box-widths the other way is not.
+            XCTAssertTrue(shifted.contains(shifted.projected(.zero)),
+                          "the band is under the box it draws — \(note)")
+            XCTAssertTrue(shifted.contains(shifted.projected(CGPoint(x: 100, y: -75))),
+                          "and covers its interior — \(note)")
+            XCTAssertFalse(shifted.contains(plain.projected(CGPoint(x: 0, y: -600))),
+                           "and not what is outside it — \(note)")
+
+            // And the anchor — the whole point of the separation.
+            assertPoint(shifted.centre, plain.centre, accuracy: 0,
+                        "`centre` is the transform's position, offset or no offset — \(note)")
+            let drag = ObjectTransformDrag(frame: shifted, handle: .boxRotation,
+                                           at: shifted.projected(.zero))
+            assertPoint(drag.anchor, shifted.transform.position, accuracy: 0,
+                        "and a drag turns about the geometry's fixed point — \(note)")
+        }
+    }
+
+    /// **`contentOffset == .zero` is the frame that existed before this field did, to the bit** — the
+    /// same claim `boxAngle == 0` makes one field up, and it is worth an assertion for the same
+    /// reason: the default is what every call site outside the Move box's re-fit takes, so a
+    /// projection that had gained a rounding step would move every text handle and every whole-layer
+    /// grip in the app by it.
+    func testAZeroContentOffsetIsBitIdenticalToTheFrameBeforeItExisted() {
+        for (scale, rotation, boxAngle, aspect) in [(CGFloat(1), CGFloat(0), CGFloat(0), CGFloat(1)),
+                                                    (0.37, 2.1, -0.8, 3), (4, -1.1, 0.6, 0.25)] {
+            let frame = ObjectTransformFrame(transform: LayerTransform(position: CGPoint(x: 811, y: -47),
+                                                                       scale: scale, rotation: rotation),
+                                             contentSize: CGSize(width: 400, height: 300),
+                                             aspect: aspect, boxAngle: boxAngle)
+            XCTAssertEqual(frame.contentOffset, .zero, "the default")
+            let note = "scale \(scale), rotation \(rotation), boxAngle \(boxAngle), aspect \(aspect)"
+            let s = ObjectTransformFrame.axisScales(scale: scale, aspect: aspect)
+            for u in [CGPoint.zero, CGPoint(x: 200, y: -150), CGPoint(x: -37.5, y: 96.25)] {
+                // The projection written out here rather than called into, so a change to both at
+                // once cannot pass this.
+                let r = rotation + boxAngle
+                let x = u.x * s.x, y = u.y * s.y
+                let expected = CGPoint(x: 811 + x * cos(r) - y * sin(r),
+                                       y: -47 + x * sin(r) + y * cos(r))
+                assertPoint(frame.projected(u), expected, accuracy: 0, "\(u) — \(note)")
+            }
+        }
+    }
+
     // MARK: - Reading a pose back out of a matrix
 
     /// **The decomposition is the inverse of the map, over a sweep of every pose the box can hold.**

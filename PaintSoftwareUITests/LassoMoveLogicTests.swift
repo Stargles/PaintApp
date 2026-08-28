@@ -3010,7 +3010,421 @@ final class LassoMoveLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - The box re-fits as it turns (stage 3b, phase 3)
+    //
+    // The owner, 2026-08-28: *"currently when the user uses the yellow node to rotate the selection
+    // box, the dimensions of the box does not change to fit the drawing. That box should be the
+    // bounding box of the drawing inside of it and should actively change dimensions when rotated to
+    // keep on fitting the image. For example, the box would be bigger and then smaller on 45 degree
+    // angle increments of a square it is around, and constant for a circle."*
+    //
+    // LASSO_MOVE.md §5.22. Phases 1 and 2 made the knob turn a rectangle of fixed, wrong dimensions;
+    // this is what makes the hand-fit §5.19 promised actually fit. The two cases in the ask are the
+    // first two tests below, in the owner's own order, and the *circle* is the one that costs
+    // nothing and catches the whole wrong family: a box measured from the previous box rather than
+    // from the ink grows by √2 on every eighth-turn and never comes back, which no amount of
+    // squinting at a square would separate from a correct answer.
+
+    /// **At rest the fit is the lift's own box, to the bit** — the reduction every other assertion
+    /// here is measured against, and the one that has to be exact rather than close.
+    ///
+    /// `boxAngle == 0` with nothing stretched and nothing mirrored makes the fit's frame `R(0)`, and
+    /// `CGAffineTransform(rotationAngle: 0)` is the identity exactly — so the fit walks the same
+    /// points through no matrix at all and `MoveBoxInk.bounds()` is literally the call the lift made.
+    /// The offset comes back an exact `.zero` because the anchor it subtracts is `pivot`, which *is*
+    /// the lift box's centre. Anything less than exact here would mean the box changed size the
+    /// instant the artist touched the knob and changed back when they let go.
+    func testTheFittedBoxAtRestIsTheLiftsOwnBoxToTheBit() {
+        for transform in [CGAffineTransform.identity,
+                          CGAffineTransform(rotationAngle: 0.4).concatenating(
+                            CGAffineTransform(translationX: 6, y: 9)),
+                          CGAffineTransform(translationX: -3, y: 11).scaledBy(x: 1.7, y: 1.7)] {
+            for kind in LiftKind.allCases {
+                let (manager, layerIndex, vector) = fixture()
+                vector.setTransform(transform)
+                vector.addStroke(stroke(from: CGPoint(x: 8, y: 14), to: CGPoint(x: 52, y: 41), size: 6))
+                vector.addStroke(stroke(from: CGPoint(x: 30, y: 6), to: CGPoint(x: 33, y: 55), size: 3))
+                XCTAssertTrue(lift(kind, manager, layerIndex), "\(kind.rawValue) \(transform)")
+                guard let float = manager.vectorFloat,
+                      let fitted = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+                let note = "\(kind.rawValue), layer \(transform)"
+                XCTAssertEqual(fitted.contentSize, float.contentSize, "the lift's box, exactly — \(note)")
+                XCTAssertEqual(fitted.contentOffset, .zero, "centred on the pivot — \(note)")
+                XCTAssertEqual(fitted.transform, float.frame.transform, "and the pose is untouched — \(note)")
+                XCTAssertEqual(fitted.allowedHandles, float.frame.allowedHandles,
+                               "including which grips it offers — \(note)")
+            }
+        }
+    }
+
+    /// **The owner's first case: a square swells and shrinks on a 45° period.** A square of side *s*
+    /// is *s* across at 0°, `s√2` at 45° — every corner on an axis of the turned frame — and *s*
+    /// again at 90°.
+    ///
+    /// The general answer for a square turned by β is `s·(|cos β| + |sin β|)`, which is where √2 at
+    /// an eighth-turn and 1 at a quarter-turn both come from, so the sweep asserts the closed form at
+    /// twenty angles rather than the three the owner happened to name. **The `+ 2·reach` is not a
+    /// fudge**: the ink is a stroke, its footprint is a disc of `stampRadius` about every sample, and
+    /// §5.19's whole arithmetic is that the padding is applied *in the frame being measured* rather
+    /// than carried round from the last one — which is exactly why a 100 × 20 bar re-lifted at 45°
+    /// measures 76.57 and not 84.85. A thin brush is used so the term is small enough that the shape
+    /// of the answer is visible in the numbers.
+    ///
+    /// The box stays centred throughout, which a square is entitled to and an asymmetric shape is
+    /// not — see `testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot`.
+    func testTheFittedBoxSwellsAndShrinksOnA45DegreePeriodAroundASquare() {
+        let (manager, _, vector) = fixture()
+        let side: CGFloat = 40, width: CGFloat = 2
+        let lo: CGFloat = 12, hi = lo + side
+        for (a, b) in [(CGPoint(x: lo, y: lo), CGPoint(x: hi, y: lo)),
+                       (CGPoint(x: hi, y: lo), CGPoint(x: hi, y: hi)),
+                       (CGPoint(x: hi, y: hi), CGPoint(x: lo, y: hi)),
+                       (CGPoint(x: lo, y: hi), CGPoint(x: lo, y: lo))] {
+            vector.addStroke(stroke(from: a, to: b, size: width))
+        }
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound, size: width)
+
+        func fitted(at boxAngle: CGFloat) -> ObjectTransformFrame {
+            manager.turnVectorFloatBox(to: boxAngle)
+            return manager.fittedMoveBoxFrame ?? ObjectTransformFrame(transform: .identity, contentSize: .zero)
+        }
+
+        // The three the owner named, spelled out rather than left to the sweep.
+        XCTAssertEqual(fitted(at: 0).contentSize.width, side + 2 * reach, accuracy: 1e-9,
+                       "s at 0° — \(fitted(at: 0).contentSize)")
+        let diagonal = fitted(at: .pi / 4).contentSize
+        XCTAssertEqual(diagonal.width, side * 2.0.squareRoot() + 2 * reach, accuracy: 1e-9,
+                       "s√2 at 45° — \(diagonal)")
+        XCTAssertEqual(diagonal.height, side * 2.0.squareRoot() + 2 * reach, accuracy: 1e-9,
+                       "and square with it — \(diagonal)")
+        XCTAssertEqual(fitted(at: .pi / 2).contentSize.width, side + 2 * reach, accuracy: 1e-9,
+                       "and s again at 90° — \(fitted(at: .pi / 2).contentSize)")
+        XCTAssertGreaterThan(diagonal.width, fitted(at: 0).contentSize.width * 1.3,
+                             "it really does swell — 45° must be materially bigger than 0°")
+
+        // And the closed form everywhere, in both directions and past a half-turn.
+        for step in -10...10 {
+            let angle = CGFloat(step) * .pi / 10
+            let box = fitted(at: angle)
+            let expected = side * (abs(cos(angle)) + abs(sin(angle))) + 2 * reach
+            let note = "at \(angle) rad the box is \(box.contentSize)"
+            XCTAssertEqual(box.contentSize.width, expected, accuracy: 1e-9, note)
+            XCTAssertEqual(box.contentSize.height, expected, accuracy: 1e-9, note)
+            XCTAssertEqual(box.contentOffset.x, 0, accuracy: 1e-9, "a square stays centred — \(note)")
+            XCTAssertEqual(box.contentOffset.y, 0, accuracy: 1e-9, "a square stays centred — \(note)")
+        }
+    }
+
+    /// **The owner's second case: a circle is constant at every angle** — the degenerate one, and the
+    /// cheapest test in this feature by a distance.
+    ///
+    /// **It is what separates "measures the ink" from "measures the last box".** A fit that took the
+    /// bounding box of the *previous* box would grow a disc's box by `|cos| + |sin|` every time the
+    /// knob moved — √2 per eighth-turn, monotonically, forever — and a square would still look
+    /// plausible while it did. There is no cheaper way to catch that family, which is why the owner
+    /// named it.
+    ///
+    /// Two circles, because they are degenerate in different ways. A **dab** — one sample under a
+    /// 24 pt brush — is a disc *exactly*, so its box is `2·reach` at every angle to the bit, and it
+    /// is also the case where the point set is a single point and only the padding can be wrong. A
+    /// **ring** of 256 samples is a disc the way an artist draws one: its hull is a polygon, so its
+    /// turned box wobbles by `1 − cos(π/256)` — four thousandths of a point here — which is the
+    /// tolerance and not a fudge.
+    func testTheFittedBoxIsConstantAtEveryAngleAroundADiscAndARing() {
+        for isRing in [false, true] {
+            let (manager, _, vector) = fixture()
+            let centre = CGPoint(x: 32, y: 32)
+            let expected: CGFloat
+            if isRing {
+                let radius: CGFloat = 20, width: CGFloat = 2
+                let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound,
+                                                       size: width)
+                var samples: [VectorSample] = []
+                for step in 0...256 {
+                    let t = CGFloat(step) / 256 * 2 * .pi
+                    samples.append(VectorSample(x: centre.x + radius * cos(t),
+                                                y: centre.y + radius * sin(t), pressure: 1))
+                }
+                vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(),
+                                              size: width, opacity: 1, samples: samples,
+                                              composite: .paint))
+                expected = 2 * radius + 2 * reach
+            } else {
+                let width: CGFloat = 24
+                vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(),
+                                              size: width, opacity: 1,
+                                              samples: [VectorSample(x: centre.x, y: centre.y, pressure: 1)],
+                                              composite: .paint))
+                expected = 2 * StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound,
+                                                          size: width)
+            }
+            XCTAssertTrue(manager.beginVectorWholeCelMove(), "ring \(isRing)")
+            // A dab is a disc to the last bit; a 256-gon is one to `1 − cos(π/256)` of its radius.
+            let accuracy: CGFloat = isRing ? 0.01 : 1e-9
+
+            var widest: CGFloat = 0
+            for step in 0...32 {
+                let angle = CGFloat(step) / 32 * 2 * .pi
+                manager.turnVectorFloatBox(to: angle)
+                guard let box = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+                let note = "ring \(isRing), at \(angle) rad the box is \(box.contentSize)"
+                XCTAssertEqual(box.contentSize.width, expected, accuracy: accuracy, note)
+                XCTAssertEqual(box.contentSize.height, expected, accuracy: accuracy, note)
+                XCTAssertEqual(box.contentOffset.x, 0, accuracy: accuracy, note)
+                XCTAssertEqual(box.contentOffset.y, 0, accuracy: accuracy, note)
+                widest = max(widest, box.contentSize.width)
+            }
+            // Stated a second way, because the harm this test exists for is *accumulation*: turning
+            // the knob a full circle in thirty-two steps must not have grown the box at all.
+            XCTAssertLessThan(widest, expected + accuracy,
+                              "ring \(isRing): a full turn in 32 steps grew the box to \(widest) "
+                              + "against \(expected) — that is a box measured from the last box")
+        }
+    }
+
+    /// **The box hugs the ink at every pose the float can hold — stretched, mirrored, on a
+    /// transformed layer — and every edge is checked separately.**
+    ///
+    /// **The oracle is deliberately the other source.** `CanvasManager.fittedFrame(of:at:)` measures
+    /// `float.ink`, which is the *lift's* geometry mapped by the pose; `inkInBoxUnits` measures the
+    /// elements actually sitting in the cel, which have been through `VectorCanvas.mapping` for real
+    /// — samples moved, a stroke's `size` scaled by `sqrt(|det|)`, a fill's `CGPath` transformed. An
+    /// oracle built the first way would only prove the code agrees with itself. That the two agree is
+    /// also the answer to "which geometry should the re-fit measure": they are the same ink, and the
+    /// lift's is the one that is *also* right mid-drag, where the model still holds the previous
+    /// nudge and the artist is looking at a bitmap under the live pose.
+    ///
+    /// **Four edges, not two extents.** A size that is right and a centre that is wrong passes any
+    /// assertion on width and height; it fails this one twice.
+    ///
+    /// The stretched arm is where `padScale` earns its place: the box's local units stop being
+    /// square, so the disc the brush stamps pulls back to an ellipse, and a fit that padded by the
+    /// same number on both axes would be loose on one and tight on the other by `sqrt(aspect)`.
+    func testTheFittedBoxHugsTheInkAtEveryPose() {
+        let angles: [CGFloat] = [0, 0.3, .pi / 4, 1.1, -0.7, 2.4]
+        for layer in [CGAffineTransform.identity,
+                      CGAffineTransform(rotationAngle: 0.4).concatenating(
+                        CGAffineTransform(translationX: 6, y: 9)),
+                      CGAffineTransform(translationX: -3, y: 11).scaledBy(x: 1.6, y: 1.6)] {
+            let (manager, _, vector) = fixture()
+            vector.setTransform(layer)
+            // A right triangle: asymmetric about both axes, so a wrong centre has nowhere to hide.
+            vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10), size: 5))
+            vector.addStroke(stroke(from: CGPoint(x: 50, y: 10), to: CGPoint(x: 10, y: 50), size: 5))
+            vector.addStroke(stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 10, y: 10), size: 5))
+            XCTAssertTrue(manager.beginVectorWholeCelMove(), "layer \(layer)")
+
+            func sweep(_ stage: String) {
+                for angle in angles {
+                    manager.turnVectorFloatBox(to: angle)
+                    guard let float = manager.vectorFloat,
+                          let box = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+                    assertTheBoxHugs(vector, float, box, accuracy: 1e-7,
+                                     "\(stage), layer \(layer), boxAngle \(angle)")
+                }
+            }
+
+            sweep("at rest")
+
+            // A Freeform corner drag made about a box the artist has turned — phase 2's pose, which
+            // records the axis it pulled along, so the ink is now a general affine of the lift.
+            manager.turnVectorFloatBox(to: 0.5)
+            guard let turned = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+            let drag = ObjectTransformDrag(frame: turned, handle: .bottomRight,
+                                           at: turned.corners[2], freeform: true)
+            let anchor = turned.centre
+            let pulled = CGPoint(x: anchor.x + (turned.corners[2].x - anchor.x) * 2.4,
+                                 y: anchor.y + (turned.corners[2].y - anchor.y) * 0.7)
+            let pose = drag.pose(draggedTo: pulled)
+            XCTAssertNotEqual(pose.aspect, 1, "fixture precondition: the drag really stretched it")
+            manager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect,
+                                     stretchAxis: pose.stretchAxis)
+            sweep("after a stretch about a turned box")
+
+            manager.mirrorFloating(horizontal: true)
+            XCTAssertNotEqual(manager.vectorFloat?.mirror, .identity,
+                              "fixture precondition: the mirror took")
+            sweep("after a stretch and a mirror")
+
+            manager.nudgeVectorFloat(to: turnedBy(manager, 0.85))
+            sweep("and after the green knob on top of both")
+        }
+    }
+
+    /// **The box's centre travels as it re-fits, and the geometry's anchor does not.** The constraint
+    /// that is easiest to get wrong and worst to get wrong.
+    ///
+    /// A tight box around a diagonal genuinely is not centred where the loose axis-aligned one was —
+    /// a right triangle re-fitted at 45° moves its box centre by about a quarter of its own width —
+    /// so the fit *has* to be able to express that, and the first assertion is that it does rather
+    /// than quietly returning a centred box that does not fit. But `pivot` is what every
+    /// `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` holds still and `transform.position` is
+    /// where it sends it, so writing the travelled centre into either would slide the artist's
+    /// drawing while they merely turned a knob — with nothing on the undo stack to give it back,
+    /// which §5.21 forbids outright.
+    ///
+    /// **The last two assertions are the ones that would catch that**, and they are the phase-1
+    /// tripwire aimed at a new field: the turn itself is silent even against a poisoned map, so it is
+    /// the *zero-delta nudge* — what an artist's next drag re-derives its map from — and the bake
+    /// that show a leak. `testANonZeroBoxAngleChangesNoSampleAndNoPixel` learned that the hard way
+    /// against `87081de`, and an offset folded into the map fails in exactly the same place.
+    func testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot() {
+        let (manager, _, vector) = fixture()
+        vector.setTransform(CGAffineTransform(rotationAngle: 0.3).concatenating(
+            CGAffineTransform(translationX: 5, y: -4)))
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10), size: 4))
+        vector.addStroke(stroke(from: CGPoint(x: 50, y: 10), to: CGPoint(x: 10, y: 50), size: 4))
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 10, y: 10), size: 4))
+        let pixelsBefore = cgImage(vector)
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        guard let float = manager.vectorFloat else { return XCTFail("no float") }
+        let pivot = float.pivot, position = float.frame.transform.position
+        let samplesBefore = vector.elements.compactMap(\.stroke).map(\.samples)
+
+        var travelled: CGFloat = 0
+        for angle in [CGFloat(0.4), CGFloat.pi / 4, 1.2, -0.9, 2.7] {
+            manager.turnVectorFloatBox(to: angle)
+            guard let box = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+            travelled = max(travelled, hypot(box.contentOffset.x, box.contentOffset.y))
+            XCTAssertEqual(manager.vectorFloat?.pivot, pivot,
+                           "the geometry's anchor is a `let` and must not have moved — \(angle)")
+            XCTAssertEqual(manager.vectorFloat?.frame.transform.position, position,
+                           "and neither is where the map sends it — \(angle)")
+            XCTAssertEqual(box.centre, position,
+                           "`centre` is still the anchor, not the drawn box's middle — \(angle)")
+            XCTAssertNotEqual(box.projected(.zero), box.centre,
+                              "…and the two really are different points here — \(angle)")
+        }
+        XCTAssertGreaterThan(travelled, 5,
+                             "a right triangle's tight box is materially off-centre; \(travelled) pt "
+                             + "of travel means the fit is quietly returning a centred box")
+
+        assertSamplesUnmoved(vector, samplesBefore, "after five turns of the knob")
+        // The moment a leak actually shows: the next gesture re-derives the map from the pose the
+        // turns left behind.
+        manager.nudgeVectorFloat(to: float.frame.transform)
+        assertSamplesUnmoved(vector, samplesBefore, "after the zero-delta nudge that follows them")
+        manager.commitVectorFloatIfNeeded()
+        assertPixelsIdentical(cgImage(vector), pixelsBefore, "and the bake")
+    }
+
+    /// **The green knob turns ink and box together, so the fit does not move — and that is arithmetic
+    /// rather than a special case.**
+    ///
+    /// The frame the fit measures in is `B⁻¹·L`, and `transform.rotation` appears in `B` and `L`
+    /// identically, so it cancels: the box's size and its centre are functions of `aspect`,
+    /// `boxAngle`, `stretchAxis` and the mirror, and of nothing else. That is why
+    /// `CanvasManager.fittedFrame(of:at:)` has no rotation arm — and why this is asserted anyway,
+    /// since "provable" and "implemented" are different claims and the whole feature is one term
+    /// being in the right expression.
+    ///
+    /// Driven both ways an artist can turn a piece: the green knob's own drag, and the Rotate 45°
+    /// button, which is the same field moved by a different door.
+    func testTheGreenKnobTurnsInkAndBoxTogetherAndTheFitDoesNotMove() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 12), to: CGPoint(x: 50, y: 12), size: 5))
+        vector.addStroke(stroke(from: CGPoint(x: 50, y: 12), to: CGPoint(x: 12, y: 48), size: 5))
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        manager.turnVectorFloatBox(to: 0.6)
+        guard let before = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+
+        for (label, turn) in [("a green-knob drag", { manager.nudgeVectorFloat(to: self.turnedBy(manager, 0.9)) }),
+                              ("Rotate 45°", { manager.rotateFloating(eighths: 1) }),
+                              ("Rotate 45° again", { manager.rotateFloating(eighths: 1) })] {
+            turn()
+            guard let after = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
+            XCTAssertEqual(after.contentSize.width, before.contentSize.width, accuracy: 1e-9,
+                           "\(label) must not resize the box: \(after.contentSize) vs \(before.contentSize)")
+            XCTAssertEqual(after.contentSize.height, before.contentSize.height, accuracy: 1e-9, label)
+            XCTAssertEqual(after.contentOffset.x, before.contentOffset.x, accuracy: 1e-9,
+                           "\(label) must not move it either")
+            XCTAssertEqual(after.contentOffset.y, before.contentOffset.y, accuracy: 1e-9, label)
+            XCTAssertEqual(after.boxAngle, 0.6, accuracy: 1e-12, "and the hand-fit rode along — \(label)")
+            XCTAssertNotEqual(after.transform.rotation, before.transform.rotation,
+                              "fixture precondition: the ink really turned — \(label)")
+        }
+    }
+
     // MARK: - Helpers
+
+    /// The float's ink **as it currently sits in the document**, expressed in the drawn box's own
+    /// local units and paired with the half-width that wraps it there. The oracle
+    /// `assertTheBoxHugs` measures against.
+    ///
+    /// The inverse projection is written out here rather than called into `ObjectTransformFrame`, so
+    /// a change made to both at once cannot pass. `pad` is anisotropic for the reason the fit's own
+    /// is: the ink's footprint is a disc in *canvas* space — `mapping(_:throughStretch:)` scales a
+    /// stroke's width by `sqrt(|det|)` precisely to keep it one — and the box's local units are not
+    /// square once it has been stretched.
+    private func inkInBoxUnits(_ vector: VectorCanvas, _ float: VectorFloat,
+                               _ frame: ObjectTransformFrame) -> [(u: CGPoint, pad: CGPoint)] {
+        let s = ObjectTransformFrame.axisScales(scale: frame.transform.scale, aspect: frame.aspect)
+        let toCanvas = vector.transform
+        let canvasScale = hypot(toCanvas.a, toCanvas.b)
+        let r = -(frame.transform.rotation + frame.boxAngle)
+        func boxLocal(_ p: CGPoint) -> CGPoint {
+            let dx = p.x - frame.transform.position.x, dy = p.y - frame.transform.position.y
+            return CGPoint(x: (dx * cos(r) - dy * sin(r)) / s.x - frame.contentOffset.x,
+                           y: (dx * sin(r) + dy * cos(r)) / s.y - frame.contentOffset.y)
+        }
+        var result: [(u: CGPoint, pad: CGPoint)] = []
+        for element in vector.elements where float.insideIDs.contains(element.id) {
+            var points: [CGPoint] = []
+            var reach: CGFloat = 0
+            switch element {
+            case .stroke(let stroke):
+                points = stroke.samples.map { CGPoint(x: $0.x, y: $0.y) }
+                reach = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
+            case .fill(let fill):
+                guard let path = fill.cgPath else { continue }
+                path.applyWithBlock { pointer in
+                    switch pointer.pointee.type {
+                    case .moveToPoint, .addLineToPoint:
+                        points.append(pointer.pointee.points[0])
+                    case .addQuadCurveToPoint:
+                        points.append(pointer.pointee.points[0])
+                        points.append(pointer.pointee.points[1])
+                    case .addCurveToPoint:
+                        for i in 0..<3 { points.append(pointer.pointee.points[i]) }
+                    case .closeSubpath:
+                        break
+                    @unknown default:
+                        break
+                    }
+                }
+            case .text(let text):
+                points = text.frame.corners
+            case .image:
+                XCTFail("this oracle does not model a placed image")
+            }
+            let pad = CGPoint(x: reach * canvasScale / s.x, y: reach * canvasScale / s.y)
+            result += points.map { (boxLocal($0.applying(toCanvas)), pad) }
+        }
+        return result
+    }
+
+    /// **All four edges of the drawn box touch the ink, and none of it sticks out.** Stated as four
+    /// separate equalities rather than as two extents, because a box of the right *size* in the wrong
+    /// *place* satisfies any assertion made on width and height.
+    private func assertTheBoxHugs(_ vector: VectorCanvas, _ float: VectorFloat,
+                                  _ frame: ObjectTransformFrame, accuracy: CGFloat,
+                                  _ note: String,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let ink = inkInBoxUnits(vector, float, frame)
+        guard !ink.isEmpty else {
+            return XCTFail("no ink to hug — \(note)", file: file, line: line)
+        }
+        let edges = [("left", ink.map { $0.u.x - $0.pad.x }.min()!, -frame.contentSize.width / 2),
+                     ("right", ink.map { $0.u.x + $0.pad.x }.max()!, frame.contentSize.width / 2),
+                     ("top", ink.map { $0.u.y - $0.pad.y }.min()!, -frame.contentSize.height / 2),
+                     ("bottom", ink.map { $0.u.y + $0.pad.y }.max()!, frame.contentSize.height / 2)]
+        for (which, measured, expected) in edges {
+            XCTAssertEqual(measured, expected, accuracy: accuracy,
+                           "the \(which) edge sits at \(expected) and the ink reaches \(measured) "
+                           + "— \(note)", file: file, line: line)
+        }
+    }
 
     /// The pose a **Freeform** corner drag that grows the box by `(fx, fy)` on its own two axes
     /// writes, from where the float is now — `ObjectTransformDrag`'s stretched arm stated as its two

@@ -4019,6 +4019,107 @@ final class PerfBaselineTests: XCTestCase {
                           + "this run again on a quiet machine (see PERFORMANCE.md §6)")
     }
 
+    // MARK: - What one frame of the box knob costs (Move stage 3b, phase 3)
+
+    /// **The re-fit is the one thing a Move drag's touch-move gained that is not free, so it is
+    /// measured rather than assumed.** LASSO_MOVE.md §5.22: the handle box's size and centre are now
+    /// a function of `boxAngle`, recomputed as the knob turns, and `contentSize` used to be a
+    /// constant measured once at the lift.
+    ///
+    /// **Two arms, and the second is the design decision.** The re-fit walks points; the question is
+    /// whether it walks *reduced* points held on the float (`MoveBoxInk`, built once at the lift) or
+    /// re-derives them from the display list every frame the way `localBounds(of:)` did — which for a
+    /// fill means unarchiving a `UIBezierPath` out of `Data` on every touch-move. The ratio is the
+    /// argument for the field.
+    ///
+    /// **A deliberately oversized cel**, ten times `movingSceneStrokes`' density: the drag is
+    /// per-touch-move at up to 120 Hz on the owner's iPad, so what matters is the ceiling and not the
+    /// median. A whole-cel lift measures *every* element, which is the case this bounds.
+    ///
+    /// Asserted against a frame budget rather than against the other arm, because that is the
+    /// question — 8.3 ms is one ProMotion frame and the re-fit is one of several things in it, so a
+    /// tenth of a frame is the bar.
+    ///
+    /// **This test is why `MoveBoxInk` hulls.** Measured 2026-08-28 on this Mac, Debug: walking every
+    /// sample cost **2.223 ms** a frame — 26.7% of a 120 Hz frame, and over the bar — and the
+    /// per-element convex hull took it to **0.401 ms**, 4.8%. The hull was written because this went
+    /// red, not before it. Debug is the honest number to hold the bar against, since it is what the
+    /// fast tier runs; a Release build is faster and this is therefore a ceiling.
+    func testWhatOneFrameOfTheBoxKnobCosts() {
+        let canvasSize = CGSize(width: 2048, height: 1024)
+        var strokes: [VectorStroke] = []
+        for row in 0..<120 {
+            let y = 8 + CGFloat(row % 60) * 17
+            var samples: [VectorSample] = []
+            for step in 0..<200 {
+                let t = CGFloat(step) / 199
+                samples.append(VectorSample(x: 60 + t * (canvasSize.width - 120),
+                                            y: y + sin(t * .pi * 5 + CGFloat(row)) * 8,
+                                            pressure: 0.3 + 0.7 * sin(t * .pi)))
+            }
+            strokes.append(VectorStroke(brush: Brush(name: "Fit", shape: .softRound, size: 14),
+                                        color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                        size: 14, opacity: 1, samples: samples))
+        }
+        let elements = strokes.map { VectorElement.stroke($0) }
+        let points = strokes.reduce(0) { $0 + $1.samples.count }
+
+        let ink = MoveBoxInk(of: elements)
+        // Warm-up: the first pass faults the arrays in, which is not what a drag's second frame pays.
+        _ = ink.bounds(through: CGAffineTransform(rotationAngle: 0.1))
+
+        func time(_ body: () -> Void) -> Double {
+            let began = CFAbsoluteTimeGetCurrent()
+            body()
+            return CFAbsoluteTimeGetCurrent() - began
+        }
+
+        // 60 frames is half a second of a knob drag on a 120 Hz display.
+        let frames = 60
+        var reducedTotal = 0.0, rebuiltTotal = 0.0
+        for round in 0..<3 {
+            reducedTotal += time {
+                for frame in 0..<frames {
+                    let angle = CGFloat(frame) / CGFloat(frames) * 2 * .pi
+                    _ = ink.bounds(through: CGAffineTransform(rotationAngle: -angle),
+                                   padScale: CGPoint(x: 1, y: 1))
+                }
+            }
+            rebuiltTotal += time {
+                for frame in 0..<frames {
+                    let angle = CGFloat(frame) / CGFloat(frames) * 2 * .pi
+                    _ = autoreleasepool {
+                        MoveBoxInk(of: elements).bounds(through: CGAffineTransform(rotationAngle: -angle))
+                    }
+                }
+            }
+            _ = round
+        }
+        let perFrame = reducedTotal / Double(3 * frames)
+        let perFrameRebuilt = rebuiltTotal / Double(3 * frames)
+
+        report("One frame of the Move box knob", [
+            ("canvas", "\(Int(canvasSize.width))x\(Int(canvasSize.height))"),
+            ("strokes", "\(strokes.count)"),
+            ("samples", "\(points)"),
+            ("framesPerRound", "\(frames)"),
+            ("refitPerFrame", String(format: "%.3f ms", perFrame * 1000)),
+            ("rebuiltPerFrame", String(format: "%.3f ms", perFrameRebuilt * 1000)),
+            ("saving", String(format: "%.1fx", perFrameRebuilt / Swift.max(perFrame, 1e-9))),
+            ("frameBudget120Hz", "8.333 ms"),
+            ("fractionOfAFrame", String(format: "%.1f%%", perFrame / (1.0 / 120) * 100)),
+        ])
+
+        XCTAssertGreaterThan(points, 20_000, "this only bounds anything if the cel is a real one")
+        XCTAssertLessThan(perFrame, 1.0 / 120 / 10,
+                          "the box re-fit must cost under a tenth of a 120 Hz frame on a cel of "
+                          + "\(points) samples, or it needs the per-element convex hull this test's "
+                          + "note describes")
+        XCTAssertLessThan(perFrame, perFrameRebuilt,
+                          "reducing the display list once at the lift must beat re-walking it, or "
+                          + "`VectorFloat.ink` is carrying weight for nothing")
+    }
+
     // MARK: - What a vector-only document pays for its raster tier (PERFORMANCE.md item 14)
 
     /// **The document the owner actually has, measured end to end.** Their live package
