@@ -430,10 +430,13 @@ enum ProjectStore {
     /// UI for multiple seconds on a multi-layer, multi-cel project.
     ///
     /// `completion` runs on the main actor once the package is on disk — or once the save has failed,
-    /// which it does not distinguish, matching the old signature's silence about failure. Callers that
-    /// read the package back immediately must wait for it instead of racing the write: the gallery
-    /// re-lists projects from disk in a one-shot `onAppear`, so navigating there before the rename
-    /// lands would show the project as missing or stale.
+    /// which it does not distinguish, matching the callers that only care that the attempt is over
+    /// (the gallery re-lists projects from disk in a one-shot `onAppear`, so navigating there before
+    /// the rename lands would show the project as missing or stale — `completion` is "the wait is
+    /// over", not "it worked"). `onSaveFailed` is the channel that does distinguish: it runs first,
+    /// also on the main actor, only when `writeAtomically`'s three formerly-silent failure returns
+    /// fire (ARCHITECTURE_REVIEW.md finding 3). `ContentView` is the only caller that passes it, and
+    /// raises the existing `CanvasNotice.Kind.saveFailed` banner from it.
     /// `intent` defaults to `.artist` because that is the direction it is safe to be wrong in. A new
     /// call site that forgets it gets the visible behaviour — a banner the artist can answer — rather
     /// than the quiet one, where the project file is left alone and the work goes to a version slot
@@ -446,6 +449,7 @@ enum ProjectStore {
     @discardableResult
     static func save(_ canvasManager: CanvasManager, to url: URL,
                      intent: SaveIntent = .artist,
+                     onSaveFailed: (@MainActor () -> Void)? = nil,
                      completion: (@MainActor () -> Void)? = nil) -> SaveDecision {
         let decision = SaveDamageGate.decide(damage: canvasManager.loadDamage,
                                              answered: canvasManager.damagedSaveAnswered,
@@ -469,9 +473,13 @@ enum ProjectStore {
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ProjectStore.save")
 
         saveQueue.async {
-            writeAtomically(snapshot, to: url, destination: decision == .writeAside ? .versionSlot : .liveProject,
+            let succeeded = writeAtomically(snapshot, to: url,
+                            destination: decision == .writeAside ? .versionSlot : .liveProject,
                             startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
             Task { @MainActor in
+                if !succeeded {
+                    onSaveFailed?()
+                }
                 completion?()
                 if backgroundTask != .invalid {
                     UIApplication.shared.endBackgroundTask(backgroundTask)
@@ -507,10 +515,15 @@ enum ProjectStore {
     /// main thread changes which thread executes the steps, not their order or their all-or-nothing
     /// character — a crash or kill at any point still leaves either the complete old package or the
     /// complete new one on disk, never a partial one.
+    ///
+    /// Returns whether the package actually landed. The three `return false`s below used to be bare
+    /// `return`s — the save silently did nothing and `save`'s completion ran regardless, which is
+    /// ARCHITECTURE_REVIEW.md finding 3.
+    @discardableResult
     private static func writeAtomically(_ snapshot: SaveSnapshot, to url: URL,
                                         destination: WriteDestination = .liveProject,
                                         startedAt saveStarted: CFAbsoluteTime,
-                                        snapshotSeconds: Double) {
+                                        snapshotSeconds: Double) -> Bool {
         let fm = FileManager.default
         // Minted here rather than by the caller so it is chosen on `saveQueue` — it lists a directory
         // to pick a free name, and the caller is the artist's own thread.
@@ -561,7 +574,7 @@ enum ProjectStore {
         // in Trash for diagnosis.
         guard ProjectBackupManager.validateProject(at: stageURL) else {
             _ = ProjectBackupManager.moveToTrash(stageURL, tag: "failedsave")
-            return
+            return false
         }
 
         // Stash the live package as an autosave restore point, then swap in the new one. A version
@@ -571,7 +584,7 @@ enum ProjectStore {
         if destination == .liveProject {
             guard ProjectBackupManager.stashLiveProjectForSave(projectURL: url, projectID: snapshot.projectID) else {
                 try? fm.removeItem(at: stageURL)
-                return
+                return false
             }
         }
         do {
@@ -585,7 +598,7 @@ enum ProjectStore {
                 _ = ProjectBackupManager.restoreNewestValidBackup(forProjectAt: url, trashTag: "corrupt")
             }
             try? fm.removeItem(at: stageURL)
-            return
+            return false
         }
 
         // Restore points: `latest` = exact copy of this save; autos rotated by count. `latest` means
@@ -595,6 +608,7 @@ enum ProjectStore {
             ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: snapshot.projectID)
         }
         ProjectBackupManager.pruneBackups(forProjectID: snapshot.projectID)
+        return true
     }
 
     /// Writes the complete project package at `url` (used by `writeAtomically` to stage the package

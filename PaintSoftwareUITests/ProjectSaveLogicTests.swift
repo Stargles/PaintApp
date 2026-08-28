@@ -365,6 +365,58 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(validatedInsideCompletion, "The package must already be complete when the completion handler runs, not shortly after")
     }
 
+    /// ARCHITECTURE_REVIEW.md finding 3: `writeAtomically`'s three failure returns used to be bare
+    /// `return`s, indistinguishable from success — `completion` ran either way, so `ContentView` (and
+    /// the gallery it navigates to) looked exactly the same whether the write landed or not.
+    /// `onSaveFailed` is the channel that tells them apart, and this pins both directions of it: a
+    /// failing write must call it, a succeeding one must not.
+    ///
+    /// The failure is induced by pointing the whole Projects/Backups/Trash tree at a path whose
+    /// parent is a plain file rather than a directory, so every `createDirectory`/`write` under it
+    /// fails with ENOTDIR. Nothing crashes — `ProjectBackupManager` and `writePackage` guard every one
+    /// of those calls with `try?` — the package is just never actually written, so `validateProject`
+    /// finds no manifest and `writeAtomically` takes its first failure return.
+    func testAFailedSaveCallsOnSaveFailedAndASucceedingOneDoesNot() {
+        let manager = makeManager()
+        let blocker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("save-blocker-\(UUID().uuidString)")
+        try! Data().write(to: blocker)
+        defer { try? FileManager.default.removeItem(at: blocker) }
+        ProjectBackupManager.rootDirectoryOverride = blocker.appendingPathComponent("root", isDirectory: true)
+        defer { ProjectBackupManager.rootDirectoryOverride = root }
+
+        let brokenURL = ProjectStore.createNewProjectURL(name: "Unwritable")
+        let failedSave = expectation(description: "ProjectStore.save completion (failing write)")
+        var reportedFailure = false
+        var completionRanOnFailure = false
+        ProjectStore.save(manager, to: brokenURL, onSaveFailed: { reportedFailure = true }) {
+            completionRanOnFailure = true
+            failedSave.fulfill()
+        }
+        wait(for: [failedSave], timeout: 30)
+
+        XCTAssertTrue(reportedFailure, "A save that cannot stage a valid package must call onSaveFailed")
+        XCTAssertTrue(completionRanOnFailure,
+                      "completion must still run on failure too — it means \"the attempt is over\", not \"it worked\", and existing callers rely on it to stop waiting")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: brokenURL.path),
+                       "Nothing should have been swapped into the live path when staging never produced a valid package")
+
+        // Restore a real root before proving the success side, so this half of the test is not
+        // exercising the same broken tree.
+        ProjectBackupManager.rootDirectoryOverride = root
+
+        let workingURL = projectURL(name: "Writable")
+        let goodSave = expectation(description: "ProjectStore.save completion (succeeding write)")
+        var reportedFailureOnSuccess = false
+        ProjectStore.save(manager, to: workingURL, onSaveFailed: { reportedFailureOnSuccess = true }) {
+            goodSave.fulfill()
+        }
+        wait(for: [goodSave], timeout: 30)
+
+        XCTAssertFalse(reportedFailureOnSuccess, "A save that actually lands on disk must not call onSaveFailed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workingURL.path), "Setup: the second save should have landed")
+    }
+
     /// A save leaves the previous version recoverable rather than destroyed — the other half of the
     /// session-34 design (`stashLiveProjectForSave`), which the move off main routes through
     /// unchanged. Guards against a future "optimisation" that deletes the live package before the

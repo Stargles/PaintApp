@@ -91,7 +91,12 @@ struct ContentView: View {
         canvasManager.commitAllInteractiveState()
         let url = canvasManager.projectURL ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName)
         canvasManager.projectURL = url
-        if ProjectStore.save(canvasManager, to: url, intent: intent, completion: completion) == .ask {
+        // `onSaveFailed` is the one channel `completion` never was (ARCHITECTURE_REVIEW.md finding
+        // 3): `writeAtomically`'s three failure returns used to be silent, so the gallery could
+        // appear exactly as it does on a real save while the artist's edits were never written.
+        if ProjectStore.save(canvasManager, to: url, intent: intent,
+                              onSaveFailed: { canvasManager.raise(.saveFailed) },
+                              completion: completion) == .ask {
             // Nothing was written and `completion` did not run, so the editor stays put with the
             // banner up. The two buttons below are the only ways out.
             pendingDamagedSave = PendingDamagedSave(completion: completion)
