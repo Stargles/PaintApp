@@ -124,36 +124,44 @@ func effectMenuSlug(_ effect: Effect) -> String {
 /// `Effect?` and `setLayerEffect`/`setLayerBlendMode` each clear what the other sets — so there is no
 /// paging, no tab strip and no "which effect am I looking at". What varies is how *tall* one effect's
 /// knobs are: two sliders for Sharpen, five for Levels, a 196pt square for Curves, and a row per stop
-/// for Gradient Map, which is the only unbounded one. The bar is therefore a fixed card whose rows
-/// scroll — wider than the rail was, so the sliders gained travel rather than losing it, and capped in
-/// height so it can never grow to eat the canvas it was moved to uncover. Levels fits without
-/// scrolling; Curves and a many-stop Gradient Map scroll. The alternative — reflowing the rows into
-/// columns to use the extra width — is a change to the controls themselves and was deliberately not
-/// made here.
+/// for Gradient Map, which is the only unbounded one. **The bar is therefore as tall as one effect's
+/// own rows, up to a ceiling** — wider than the rail was, so the sliders gained travel rather than
+/// losing it, and ceilinged in height so it can never grow to eat the canvas it was moved to uncover.
+/// Sobel, which has no controls at all, is a header and a caption; Levels' five sliders land exactly on
+/// the ceiling; Curves and a many-stop Gradient Map reach it and scroll. It shipped as a *fixed* card
+/// at that ceiling and the owner asked for this the same day — see `maxRowsHeight`. The alternative —
+/// reflowing the rows into columns to use the extra width — is a change to the controls themselves and
+/// was deliberately not made here.
 struct EffectSettingsBar: View {
     /// Wide enough that a slider has real travel (the rail gave it 212pt; this gives 532) and narrow
     /// enough that the canvas either side of it stays visible. Public so `DrawingView` docks it at the
     /// same width the text bar uses.
     static let width: CGFloat = 560
 
-    /// The scroll's cap. Sized so Levels — five slider rows, the tallest all-slider effect — fits with
-    /// nothing to scroll, and everything taller scrolls rather than growing.
+    /// The scroll's cap — a **ceiling now, not a height**. Sized so Levels, five slider rows and the
+    /// tallest all-slider effect, fits with nothing to scroll; everything taller scrolls rather than
+    /// growing, and everything shorter (nine of the thirteen have two controls or fewer) ends up as
+    /// short as its own rows. The owner asked for exactly that, 2026-08-27: *"Try to make that menu
+    /// shorter vertically because alot of them contain only 1 or 2 sliders which covers like half of
+    /// it."*
     ///
-    /// **A content-measured `.background(GeometryReader{...})` on the rows `VStack` was tried here
-    /// and reverted (2026-08-27).** The theory — that `.background` reads the host's already-resolved
-    /// size rather than the proposal offered to it — sounds right and is the standard advice, but
-    /// measured against the real app it was wrong: an on-screen debug overlay showed the measured
-    /// height pinned at exactly 0 for every effect, collapsing the whole card to its header with the
-    /// rows clipped away entirely. XCUITest did not catch this — `XCUIElement.frame` for the sliders
-    /// still reported plausible nonzero positions, so `testEffectSettingsBarIsShorterForFewerSliders`
-    /// passed against a build that was visibly broken. Only the simulator screenshot showed it.
-    /// `CurveEditor`'s doc a few hundred lines below records the same failure mode for a
-    /// `GeometryReader` used more directly ("collapses the graph to nothing") — evidently the
-    /// `.background` indirection does not shield you from a `ScrollView`'s unbounded height proposal
-    /// the way it is commonly assumed to. A working fix likely needs the content measured by an
-    /// `.accessibilityHidden(true)` twin laid out *outside* any `ScrollView`, but that was not reached
-    /// and verified before this had to ship, so the bar stays a fixed cap rather than shrinking to
-    /// content. See TODO.md item (18) for the follow-up.
+    /// **What makes it a ceiling is `ContentHeightCap` below, and the attempt that failed before it is
+    /// the reason that is a `Layout` rather than a measurement.** `ScrollView { rows }.frame(maxHeight:)`
+    /// is 300pt tall for two sliders and for twenty because a `ScrollView` is *greedy* in its scroll
+    /// axis: told a definite height, it takes it whatever the content measures. Reading the content's
+    /// size back and feeding it into the frame is the obvious repair and it does not work here —
+    /// a `.background(GeometryReader{...})` on the rows `VStack` publishing through a `PreferenceKey`
+    /// was built and reverted (2026-08-27, `785f3f7`) after an on-screen debug overlay showed the
+    /// measured height pinned at **exactly 0** for every effect, collapsing the card to its header with
+    /// the rows clipped away; `CurveEditor`'s doc below records the same zero for a `GeometryReader`
+    /// used directly. `ContentHeightCap` asks the question that actually has an answer instead — see
+    /// its own doc — and never reads a size back into state, so there is no feedback loop to settle
+    /// at zero.
+    ///
+    /// **XCUITest cannot be the check on any of this.** The reverted build *passed* the settings-bar
+    /// test: a clipped view's accessibility frame does not reflect what painted, so the sliders
+    /// reported plausible differing positions over a bar that rendered nothing. A screenshot is this
+    /// bar's acceptance test; `testEffectSettingsBarIsShorterForFewerSliders` is a regression net.
     private static let maxRowsHeight: CGFloat = 300
 
     let effect: Effect
@@ -185,15 +193,17 @@ struct EffectSettingsBar: View {
             optionsSubMenuHeader(title: effect.displayName, onBack: onBack, onClose: onClose)
             Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    rows
+            // Bounded rather than free: Curves and Gradient Map are the tall ones, and a bar that grew
+            // with its content would climb the canvas it was moved here to uncover. Bounded is not the
+            // same as fixed, though, which is what `.frame(maxHeight:)` alone gave — see
+            // `maxRowsHeight` and `ContentHeightCap`.
+            ContentHeightCap(cap: Self.maxRowsHeight) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        rows
+                    }
                 }
             }
-            // Bounded rather than free: Curves and Gradient Map are the tall ones, and a bar that grew
-            // with its content would climb the canvas it was moved here to uncover. See `maxRowsHeight`
-            // above for why this is still a fixed cap rather than shrinking to content.
-            .frame(maxHeight: Self.maxRowsHeight)
         }
         .frame(width: Self.width)
         .background(Color.black.opacity(0.9))
@@ -356,9 +366,10 @@ struct EffectSettingsBar: View {
             note("Pixels brighter than the threshold glow.")
 
         case .sobel:
-            // **Sobel is the zero-control effect, and the only one** — a note and nothing else, which
-            // is the degenerate end of the per-effect control counts TODO item (18) is sizing this bar
-            // against. It had an "Include Canvas Color" toggle for a few hours on 2026-08-27; the owner
+            // **Sobel is the zero-control effect, and the only one** — a note and nothing else, and so
+            // the degenerate case `ContentHeightCap` has to survive: it is the one effect whose rows
+            // are a single caption, and the bar comes out about 90pt tall for it against Levels' 344.
+            // It had an "Include Canvas Color" toggle for a few hours on 2026-08-27; the owner
             // deleted the setting the same day (EFFECT_BACKDROP.md §5.2), and Sobel always grades the
             // canvas colour now. Bloom above keeps the identically-named toggle, which is real.
             note("Edge detection. The divisor that keeps the magnitude from clipping is fixed.")
@@ -529,6 +540,55 @@ struct EffectSettingsBar: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Shrink-to-content, up to a ceiling
+
+/// Sizes its one subview to the height that subview's **content** wants, up to `cap`, and only then
+/// hands it a definite height — so a `ScrollView` inside it is as short as its rows when they are
+/// short, and scrolls when they are not.
+///
+/// **Why this is a `Layout` and not a modifier.** `ScrollView` is greedy in its scroll axis: proposed
+/// a definite height it returns that height whatever it contains, which is why
+/// `ScrollView { rows }.frame(maxHeight: 300)` is 300pt tall for two sliders and for twenty. But it is
+/// greedy *only when told how tall to be* — proposed `nil` in the scroll axis it reports its content's
+/// ideal size, which is the same property `.fixedSize(horizontal: false, vertical: true)` leans on.
+/// The fix therefore needs both questions asked of the same view in order: measure with `nil`, place
+/// with a number. No stock modifier does that — `.fixedSize` only ever asks the first (so the content
+/// is never told a height and never scrolls, it just overflows the clip), `.frame` only ever asks the
+/// second — and a `Layout` is the one place in SwiftUI where both are available.
+///
+/// **It is deliberately not a measurement.** The obvious alternative reads the rows' resolved size
+/// through a `GeometryReader` and feeds it back into a `@State` that drives the frame; that is a
+/// layout cycle, and on this exact view it settled at zero and clipped the bar away entirely
+/// (`EffectSettingsBar.maxRowsHeight` records it, `785f3f7` reverted it). Nothing here stores a size
+/// or invalidates on one, so there is no cycle to settle: `sizeThatFits` asks, answers, and forgets.
+///
+/// The `cap` fallback for a measurement that comes back as zero or non-finite is not defensive
+/// decoration. It is the difference between this failing *visibly short* — a bar with its rows clipped
+/// off, which is what shipped for a few hours in August — and failing back to the fixed-height card
+/// that worked, which is merely the feature not landing.
+struct ContentHeightCap: Layout {
+    let cap: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        // `height: nil` is the whole trick — it is what asks the scroll view for its content rather
+        // than for an echo of the number we were about to give it.
+        let ideal = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        let width = proposal.width ?? ideal.width
+        let height = (ideal.height.isFinite && ideal.height > 0) ? min(ideal.height, cap) : cap
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let subview = subviews.first else { return }
+        // Definite, and exactly the height we reported: the scroll view now knows how tall it is, so
+        // content that did not fit scrolls instead of being clipped away.
+        subview.place(at: CGPoint(x: bounds.minX, y: bounds.minY),
+                      anchor: .topLeading,
+                      proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
     }
 }
 

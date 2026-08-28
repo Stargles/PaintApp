@@ -140,31 +140,6 @@ whatever the canvas becomes.
       *least* often under Enclosed, not most — an element wholly inside the loop moves under Cut too,
       so Enclosed's moved set is a subset of Cut's. The latch stays in every mode regardless.
 
-### (18) The bottom bars should be as tall as their contents — attempted, reverted, still open
-
-- [ ] The owner, on the bottom bars as shipped: *"bottom bars are alright. Try to make that menu shorter
-      vertically because alot of them contain only 1 or 2 sliders which covers like half of it. You already
-      added the vertical scrolling thing to the bottom bar for things with more, so it should be good."*
-      Nine of thirteen effects have two controls or fewer, against a flat 300 pt cap.
-      **The obvious implementation was built, measured and reverted (`785f3f7`), and the dead end is the
-      finding.** A `PreferenceKey` plus `.background(GeometryReader { ... })` on the outer rows `VStack` —
-      the standard way to read a resolved size without an unbounded scroll-axis proposal — measures
-      **exactly 0** for every effect and clips the rows away entirely. `CurveEditor`'s own doc in that file
-      already names this failure for a more direct case; what is new is that **`.background` does not
-      shield you from it**.
-      **The XCUITest passed against the broken build**, which is the part to remember: accessibility frames
-      reported plausible differing slider positions while nothing was painted, because a clipped view's
-      frame does not reflect what rendered. Only an on-screen debug overlay read back through a screenshot
-      caught it. **So a screenshot is this item's acceptance test, not a frame comparison.**
-      **The candidate next approach**, recorded on `maxRowsHeight`: measure an `.accessibilityHidden(true)`
-      twin of the rows laid out *outside* any `ScrollView`, never entering the unbounded-proposal path.
-      Scope is `EffectSettingsBar` alone — `TextSettingsPanel` is greedy by construction
-      (`.frame(maxHeight: .infinity)` on its own body) and would need that deleted first, and the owner's
-      own words suggest they consider Add Text fine.
-      **Note the target moved slightly**: Bloom gains a control from the effect-backdrop ruling. Sobel
-      gained one too and the owner deleted it the same day (EFFECT_BACKDROP.md §5.2), so **Sobel is still
-      the zero-control degenerate case** this bar has to handle — a note and nothing else.
-
 ### (10) Oklab colour storage and processing, from the Actions menu
 
 - [ ] The owner: *"I also want the option in actions to switch the color storage and processing to oklab

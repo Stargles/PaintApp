@@ -566,15 +566,18 @@ final class LayerPanelUITests: PaintUITestCase {
     /// added the vertical scrolling thing to the bottom bar for things with more, so it should be
     /// good."*
     ///
-    /// **This does not yet test that ask — the card itself still ships a fixed ~300pt height
-    /// regardless of content; see the long comment on `EffectSettingsBar.maxRowsHeight` for the
-    /// content-measurement attempt that was reverted (2026-08-27) after an on-screen debug overlay
-    /// showed it collapsing the whole bar to zero height, a break XCUITest's own frame queries did not
-    /// catch.** What this test DOES check, and will keep checking once that follow-up lands: that the
-    /// rows' own content span — from the header title down to the last slider — genuinely differs by
-    /// effect, which is the precondition any shrink-to-fit fix depends on. Relative rather than
-    /// exact-pt, matching the coarse style of the geometry assertion above, so it survives a padding
-    /// or font tweak.
+    /// **This is a regression net, not the acceptance test for that ask, and the distinction is
+    /// written into this file's history.** The first attempt at shrink-to-fit (2026-08-27, reverted in
+    /// `785f3f7`) *passed this test* against a build whose bar rendered nothing at all: the measured
+    /// height collapsed to zero and clipped the rows away, and a clipped view's accessibility frame
+    /// does not reflect what painted, so the sliders below went on reporting plausible positions over
+    /// an empty card. **A screenshot is the acceptance test.** What is checkable from here is the
+    /// arithmetic either side of it — the rows' own content span differs by effect, and the scroll
+    /// container the fix resizes is neither zero nor identical between a two-slider effect and a
+    /// five-slider one. That second assertion is new with the fix (`EffectSettingsBar.maxRowsHeight`,
+    /// `ContentHeightCap`) and is the one that goes red on the specific way it broke last time.
+    /// Relative rather than exact-pt, matching the coarse style of the geometry assertion above, so it
+    /// survives a padding or font tweak.
     func testEffectSettingsBarIsShorterForFewerSliders() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -591,6 +594,18 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertTrue(contrast.waitForExistence(timeout: 5), "Brightness/Contrast's second and last knob")
         let shortSpan = contrast.frame.maxY - header.frame.minY
         XCTAssertGreaterThan(shortSpan, 0)
+
+        // The scrolling rows themselves, found by the knob they contain rather than by index — the
+        // timeline has scroll views of its own and they move about. This is the height the fix
+        // computes; a zero here is exactly the collapse the reverted attempt shipped.
+        let shortScroll = app.scrollViews.containing(.slider, identifier: "effectSettings.contrast").firstMatch
+        XCTAssertTrue(shortScroll.exists, "The rows scroll, so there is a scroll view around them")
+        let shortRowsHeight = shortScroll.frame.height
+        XCTAssertGreaterThan(shortRowsHeight, 0, """
+            The effect bar's rows measured zero high. That is not a layout nit — it is the whole card \
+            collapsed to its header with the knobs clipped away, which is how the first attempt at \
+            this failed while every other assertion in this test still passed.
+            """)
 
         // Back to the rail, flip the same layer to Levels (five sliders, the tall case) through its
         // Blend Mode menu — the same menu `addEffectLayerFromAddMenu` used to pick Brightness/Contrast
@@ -617,6 +632,13 @@ final class LayerPanelUITests: PaintUITestCase {
             bar that still gave every effect the same fixed card would measure these equal, which is \
             exactly the owner's complaint: "alot of them contain only 1 or 2 sliders which covers like \
             half of it."
+            """)
+
+        let tallScroll = app.scrollViews.containing(.slider, identifier: "effectSettings.outputWhite").firstMatch
+        XCTAssertTrue(tallScroll.exists)
+        XCTAssertGreaterThan(tallScroll.frame.height, shortRowsHeight + 40, """
+            The rows are the same height for two sliders as for five, so the card is a fixed cap \
+            again rather than a ceiling — see `EffectSettingsBar.maxRowsHeight` and `ContentHeightCap`.
             """)
     }
 
