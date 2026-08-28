@@ -433,9 +433,9 @@ extension CanvasManager {
         return layers[layerIndex].cels[celIndex].id
     }
 
-    /// The current layer is showing an interpolated cel at the playhead. The whole-content vector
-    /// transform (`isVectorTransforming`) is refused on one: it writes onto the cel's own empty
-    /// `VectorCanvas`, which the evaluated image doesn't come from.
+    /// The current layer is showing an interpolated cel at the playhead. Move is refused on one
+    /// (`TopToolbar.toggleMove`): it would act on the cel's own empty `VectorCanvas`, which the
+    /// evaluated image doesn't come from.
     var activeCelIsInBetween: Bool {
         guard layers.indices.contains(currentLayerIndex) else { return false }
         return inBetweenCelID(inLayer: layers[currentLayerIndex].id) != nil

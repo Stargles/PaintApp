@@ -174,7 +174,6 @@
 		6323A1DC0C883394F7DB1C02 /* TextLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */; };
 		A5A68D38B724AC5E7B05CC02 /* TextRecipeCodableLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */; };
 		3BC10692C536232621C6BB02 /* VectorTextPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */; };
-		DE3AE27EAF6238664BA62702 /* VectorTransformUndoLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3AE27EAF6238664BA62701 /* VectorTransformUndoLogicTests.swift */; };
 		23646AF05A85FB19D06D7B02 /* TextHitTestLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */; };
 		0789BD4706C24D697B17B585 /* TextTransformLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */; };
 		F07C2B782428CEB32ACA255F /* ObjectTransformLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */; };
@@ -367,7 +366,6 @@
 		6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextLayoutLogicTests.swift; sourceTree = "<group>"; };
 		A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextRecipeCodableLogicTests.swift; sourceTree = "<group>"; };
 		3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorTextPersistenceLogicTests.swift; sourceTree = "<group>"; };
-		DE3AE27EAF6238664BA62701 /* VectorTransformUndoLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorTransformUndoLogicTests.swift; sourceTree = "<group>"; };
 		23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextHitTestLogicTests.swift; sourceTree = "<group>"; };
 		0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextTransformLogicTests.swift; sourceTree = "<group>"; };
 		75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ObjectTransformLogicTests.swift; sourceTree = "<group>"; };
@@ -449,7 +447,6 @@
 				6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */,
 				A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */,
 				3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */,
-				DE3AE27EAF6238664BA62701 /* VectorTransformUndoLogicTests.swift */,
 				23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */,
 				0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */,
 				060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */,
@@ -751,7 +748,6 @@
 				6323A1DC0C883394F7DB1C02 /* TextLayoutLogicTests.swift in Sources */,
 				A5A68D38B724AC5E7B05CC02 /* TextRecipeCodableLogicTests.swift in Sources */,
 				3BC10692C536232621C6BB02 /* VectorTextPersistenceLogicTests.swift in Sources */,
-				DE3AE27EAF6238664BA62702 /* VectorTransformUndoLogicTests.swift in Sources */,
 				23646AF05A85FB19D06D7B02 /* TextHitTestLogicTests.swift in Sources */,
 				0789BD4706C24D697B17B585 /* TextTransformLogicTests.swift in Sources */,
 				F07C2B782428CEB32ACA255F /* ObjectTransformLogicTests.swift in Sources */,

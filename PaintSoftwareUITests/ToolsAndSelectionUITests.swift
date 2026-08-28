@@ -459,9 +459,9 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         // The *raster* floating-piece path is what this test is about, and a vector layer does not
         // take it: `TopToolbar.toggleMove` sends one to `beginVectorWholeCelMove`, which lifts a
         // `VectorFloat` — geometry, not pixels, and nothing lands in the raster tier. (Until
-        // 2026-08-27 it toggled `isVectorTransforming` and showed no Move bar at all; either way this
-        // test has to ask for the raster layer whose lift-and-bake it is about, vector being the
-        // default kind since PLAN §8.)
+        // 2026-08-27 it toggled a whole-layer `isVectorTransforming` flag, since deleted, and showed
+        // no Move bar at all; either way this test has to ask for the raster layer whose
+        // lift-and-bake it is about, vector being the default kind since PLAN §8.)
         addRasterLayer(app)
 
         dragOnCanvas(app, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.5, dy: 0.3))

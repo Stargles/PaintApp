@@ -1990,12 +1990,20 @@ final class LassoMoveLogicTests: XCTestCase {
     /// survive in is the canvas rect scaled by *k* about *P* — a box around the original object,
     /// which is what the owner saw, and not the top-left quadrant a first reading predicts.
     ///
-    /// The `viaTheOldWholeLayerTransform` half of this test **is** that bug, written out: it is the
-    /// mechanism the Move tool used until this change, driven directly, and it asserts the loss. The
-    /// `viaTheFloat` half is the fix — a float moves geometry and never writes `_transform`, so there
-    /// is no local-space clip for the ink to fall out of. Keeping both in one method is deliberate:
-    /// the negative control is what stops the positive one rotting into a vacuous pass.
-    func testInkDrawnAfterAWholeCelShrinkIsNotClippedAway() {
+    /// **The `viaTheOldWholeLayerTransform` negative control was removed on purpose, not lost in the
+    /// clean-up.** Stage 1 of TODO item (12) kept it — it drove `VectorCanvas.setTransform` directly
+    /// to assert the loss, so the positive half could not rot into a vacuous pass — and stage 2/3
+    /// retired what it was a control *for*: no writer of `_transform` survives in the app, and the
+    /// stored field is baked on decode and written as identity, so the local-space clip is no longer
+    /// a state any document or any gesture can reach. A control that drives a mechanism nothing can
+    /// enter pins a promise this project has stopped making, and it would have been the one caller
+    /// keeping `setTransform` alive for stage 4.
+    ///
+    /// What replaces it is a **live** control, in the same method: `theShrinkHappened` asserts the
+    /// object's own ink really did contract to about 0.3x through the float. That is what the old
+    /// half was actually guarding — that the fixture did the shrink at all — and it says so against
+    /// the mechanism that ships rather than against the one that was deleted.
+    func testInkDrawnAfterAWholeCelShrinkIsNotClippedAway() throws {
         /// Points along the second stroke's own line, spread from one corner of the canvas to the
         /// other. Under the old mechanism only the middle one survives.
         let alongTheLine = [CGPoint(x: 8, y: 8), CGPoint(x: 20, y: 20), CGPoint(x: 32, y: 32),
@@ -2011,34 +2019,25 @@ final class LassoMoveLogicTests: XCTestCase {
                           "fixture precondition: \(point) is on the line on an untouched cel")
         }
 
-        // The bug, driven through the mechanism the Move tool used to use: `_transform` written to a
-        // 0.3× shrink about the content's own centre, exactly as `setVectorTransform` did.
-        let (_, _, viaTheOldWholeLayerTransform) = fixture()
-        viaTheOldWholeLayerTransform.addStroke(theObject())
-        guard let localBounds = viaTheOldWholeLayerTransform.localContentBounds() else {
-            return XCTFail("fixture precondition: the object has ink to measure")
-        }
-        let oldPivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
-        var shrunk = viaTheOldWholeLayerTransform.layerTransform(pivot: oldPivot)
-        shrunk.scale *= 0.3
-        viaTheOldWholeLayerTransform.setTransform(VectorCanvas.affine(from: shrunk, pivot: oldPivot))
-        viaTheOldWholeLayerTransform.addStroke(canvasSpaceStroke: theLine())
-
-        XCTAssertTrue(isOpaque(viaTheOldWholeLayerTransform, at: CGPoint(x: 32, y: 32)),
-                      "the old mechanism keeps the middle — that is the box around the original object")
-        XCTAssertFalse(isOpaque(viaTheOldWholeLayerTransform, at: CGPoint(x: 8, y: 8)),
-                       "and this is the reported bug: the far end of the line is clipped away in local space")
-        XCTAssertFalse(isOpaque(viaTheOldWholeLayerTransform, at: CGPoint(x: 56, y: 56)),
-                       "…at both ends")
-
-        // The fix: the same shrink, through Move with no selection.
+        // The fix: a 0.3x shrink through Move with no selection.
         let (manager, _, viaTheFloat) = fixture()
         viaTheFloat.addStroke(theObject())
+        let objectBefore = try XCTUnwrap(inkBounds(viaTheFloat), "fixture precondition: the object has ink")
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "Move with no selection lifts the whole cel")
         manager.nudgeVectorFloat(to: scaledBy(manager, 0.3))
         manager.commitVectorFloatIfNeeded()
         XCTAssertTrue(viaTheFloat.transform.isIdentity,
                       "the float moved geometry — nothing may have been written to the layer transform")
+
+        // **The live control.** Without this the positive half below could pass on a fixture that
+        // never shrank anything — which is the job the deleted `viaTheOldWholeLayerTransform` half
+        // was doing, said against the mechanism that ships. An alpha-scanned box is a couple of
+        // points wider than the geometry on each side, so the tolerance is loose on purpose; 0.3x of
+        // a 16 pt diagonal is unmistakable at any of it.
+        let theShrinkHappened = try XCTUnwrap(inkBounds(viaTheFloat))
+        XCTAssertLessThan(theShrinkHappened.width, objectBefore.width * 0.6,
+                          "the whole-cel Move must actually have contracted the ink, or the assertions "
+                          + "below are about a cel nothing happened to")
 
         viaTheFloat.addStroke(canvasSpaceStroke: theLine())
         for point in alongTheLine {
@@ -2182,8 +2181,9 @@ final class LassoMoveLogicTests: XCTestCase {
     }
 
     /// **The whole-cel float hands the canvas back.** `commitAllInteractiveState` settles it — which
-    /// the flag it replaced did *not* do, since nothing in that method ever cleared
-    /// `isVectorTransforming` — so a paint tool selected after a Move can draw again.
+    /// the `isVectorTransforming` flag it replaced did *not* do, since nothing in that method ever
+    /// cleared the flag — so a paint tool selected after a Move can draw again. That flag is gone
+    /// (TODO item (12) stage 2) and this is the property that took over from it.
     ///
     /// The property is `CanvasTouchInputs.activeHostIsInteractive`, restated from `reconcileLayers`'
     /// `shouldInteract`. Asserted rather than driven: the tool-switch call sites are TODO item (16),
@@ -2200,11 +2200,8 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertNil(manager.vectorFloat, "the float is settled by the same chokepoint every tool switch goes through")
         XCTAssertFalse(manager.isAnyPieceFloating)
         XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
-        XCTAssertFalse(manager.isVectorTransforming,
-                       "Move with no selection no longer turns the whole-layer transform flag on at all")
         let inputs = CanvasTouchInputs(tool: .pen,
                                        hasVectorFloat: manager.vectorFloat != nil,
-                                       isVectorTransforming: manager.isVectorTransforming,
                                        activeLayer: .vector)
         XCTAssertTrue(inputs.activeHostIsInteractive,
                       "with a paint tool selected the layer's own stroke recognizer must be live again")

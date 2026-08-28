@@ -231,7 +231,8 @@ extension CanvasManager {
     /// A grip moved to `canvasPoint`.
     ///
     /// **No `recordUndo` here, and none per delta** — that is what `ADD_TEXT.md` §1 means by
-    /// "`setVectorTransform` is explicitly not the pattern to copy". The frame is a pure function of
+    /// "`setVectorTransform` is explicitly not the pattern to copy" — that function is gone (TODO
+    /// item (12) stage 2) and this is what replaced its shape everywhere. The frame is a pure function of
     /// the latched drag and this one point, so sixty deltas cost sixty struct assignments and
     /// produce exactly the answer one delta to the same place would have.
     /// **Stage 5's clamping lives in the one word `guard`.** `ADD_TEXT.md` §1: a drag that would
@@ -271,7 +272,7 @@ extension CanvasManager {
     /// is a step the artist has to press through" is the same objection one level down.
     ///
     /// What the sketch was actually guarding against — a drag spraying a step per delta, the way
-    /// `setVectorTransform`'s caller would — is guarded: `dragTextHandle` records nothing at all, and
+    /// the deleted `setVectorTransform`'s caller did — is guarded: `dragTextHandle` records nothing at all, and
     /// `TextTransformLogicTests` pins that sixty deltas and one delta leave the same history depth.
     ///
     /// Re-runs the auto-size measurement, which matters only after a *rotation*: a resize clears

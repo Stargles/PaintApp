@@ -29,8 +29,9 @@ import UIKit
 ///
 /// **It claims only its own targets.** Everywhere else it is transparent to touch, so the canvas's
 /// pan/pinch keep working while the box is up. That is safe rather than merely tidy: the active
-/// layer's host is already non-interactive while `isVectorTransforming` is on
-/// (`CanvasView.swift`'s `shouldInteract`), so nothing underneath can paint.
+/// layer's host is already non-interactive while a piece is floating
+/// (`CanvasView.swift`'s `shouldInteract`, restated as `CanvasTouchInputs.activeHostIsInteractive`),
+/// so nothing underneath can paint.
 ///
 /// **The one thing that costs is the tap *away* from the box**, which settles it — a raster piece
 /// gets that free from `FloatingPieceOverlayView`'s total claim, and a tap recognizer added here

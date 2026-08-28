@@ -3914,6 +3914,14 @@ final class PerfBaselineTests: XCTestCase {
     /// **The control is a phase neither arm changed** — a cold `render()` of a second, untouched
     /// canvas — measured in every round. If the two arms disagree because the machine moved rather
     /// than because the code did, the control moves with them.
+    ///
+    /// **Both arms are now history, and the figure is kept as history.** TODO item (12) stage 2
+    /// deleted the whole-layer Move this measured: Move with no selection lifts a `VectorFloat`, so
+    /// what a touch-move costs today is `LassoMoveLogicTests`' three-renders-per-move latch, and
+    /// `VectorCanvas.setTransform` below has no caller in the app at all. The arithmetic this test
+    /// does is still the arithmetic PERFORMANCE.md item 11 is about — one canvas-sized rasterize per
+    /// sample against none — and the ratio is why the float's latch is shaped the way it is, so the
+    /// measurement is left standing rather than deleted with the path it was taken on.
     func testWhatOneSampleOfAMoveDragCosts() {
         let canvasSize = CGSize(width: 2048, height: 1024)
         let strokes = Self.movingSceneStrokes(size: canvasSize)
@@ -3963,7 +3971,8 @@ final class PerfBaselineTests: XCTestCase {
                         let transform = drag.transform(draggedTo: point)
                         _ = canvas.localContentBounds()
                         canvas.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
-                        // No render: `StrokeCanvasView.updateLiveLayerTransform` assigns an affine.
+                        // No render: the view assigns an affine (`StrokeCanvasView.updateVectorFloat`
+                        // today; `updateLiveLayerTransform` when this was measured).
                         let box = ObjectTransformFrame(transform: transform, contentSize: localBounds.size)
                         _ = box.handleLayout(rotationOffset: 36)
                     }

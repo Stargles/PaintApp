@@ -184,81 +184,6 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// True while the whole active *vector* layer is being moved/rotated/scaled via the on-canvas
-    /// transform box (the vector-layer analogue of the raster Move tool's floating piece — but it
-    /// transforms the layer's vector geometry losslessly instead of baking pixels). Only meaningful
-    /// when the active layer is a vector layer.
-    ///
-    /// **The `didSet` is the undo bracket, and it is here rather than on the coordinator on purpose.**
-    /// The transform is written by `setVectorTransform` on every gesture-`.changed` event, so a
-    /// `recordUndo` in there would push hundreds of steps for one drag — the failure
-    /// `beginStructureGesture`/`commitStructureGesture` exist to prevent. What is wanted is one step
-    /// per gesture, which means a bracket, which means a close that "runs however it ends".
-    ///
-    /// **Five** paths turn this off with no drag of the on-canvas box itself ending: `rasterizeLayer`
-    /// below; `handleActiveContextChanged` when the artist leaves the layer or the frame;
-    /// `TopToolbar.toggleMove`'s own toggle, the second tap of the Move button;
-    /// `CanvasView.Coordinator.handleMoveBoxCommit`, a single tap on the canvas away from the box; and
-    /// `selectedTool`'s own `didSet` below, closing Move the instant the artist picks an explicit new
-    /// tool out from under it. A bracket the *coordinator* owned would need every one of them to
-    /// remember to close it — and a bracket that leaks is worse than none, since it either drops the
-    /// step or attributes the artist's next drag to this one. Hanging it off this property's `didSet`
-    /// makes every writer close it **by construction**: the flag cannot go false without the bracket
-    /// closing, because going false *is* the close. Same shape as `CanvasPresentationModifier`'s
-    /// `.onDisappear`/`.onChange` interlock, with the property observer playing the part the modifier
-    /// plays there.
-    ///
-    /// **This said "two" until 2026-08-27, and the undercount was itself the live bug, the same shape
-    /// as `canvasInteractionBegan`'s "four" above.** It was written when only the first two closers
-    /// existed and was never revisited when the Move button's own toggle and `handleMoveBoxCommit`
-    /// joined them, so nothing here flagged the enumeration as already stale — and the fifth gap, a
-    /// plain tool switch from the top or side toolbar, went unreported for the same reason: a bare
-    /// number is not checked against anything, only a name is. **Naming every writer, not counting
-    /// them, is what a later audit can verify.**
-    /// `grep -n 'isVectorTransforming = false\|isVectorTransforming\.toggle' PaintSoftware` finds all
-    /// five — four spell `= false` (this file's `rasterizeLayer` and the `didSet` below,
-    /// `SelectionModels.swift`'s `handleActiveContextChanged`, `CanvasView.swift`'s
-    /// `handleMoveBoxCommit`), one spells `.toggle()` (`TopToolbar.swift`'s `toggleMove`). If that grep
-    /// ever returns a site this paragraph does not name, this paragraph is the thing that is wrong —
-    /// update it before trusting anything else here.
-    @Published var isVectorTransforming: Bool = false {
-        didSet {
-            guard oldValue != isVectorTransforming else { return }
-            if !isVectorTransforming { closeVectorTransformBracket() }
-            // The bracket deliberately does *not* open here — see `vectorTransformBracket`.
-            ActionRecorder.ifRecording { $0.model("isVectorTransforming", isVectorTransforming ? "true" : "false") }
-        }
-    }
-
-    /// The open half of the undo bracket above: what the active vector cel's transform was before
-    /// this gesture's first write, and which cel that was.
-    ///
-    /// **Opened on the first `setVectorTransform`, not when the flag turns on**, which is what makes
-    /// three otherwise separate cases fall out for free:
-    ///
-    ///  * *A tap that moves nothing records nothing* — no write, no bracket, no step. (The value
-    ///    check in `closeVectorTransformBracket` is still needed for a drag that returns to where it
-    ///    started, and for the round-trip through `layerTransform`/`affine` that a bare tap on a
-    ///    handle can produce.)
-    ///  * *An in-between cel is excluded without a second guard.* `objectTransformChanged` already
-    ///    refuses to write on one (`activeCelIsInBetween`), so nothing opens there either.
-    ///  * *Undo mid-gesture re-baselines.* `finalizePendingGesturesForHistoryAction` closes the
-    ///    bracket so the undo has a real step to revert; the flag is still on, so the artist's next
-    ///    drag opens a fresh bracket against wherever undo left the layer.
-    ///
-    /// The cel is held **by reference plus IDs**, never by index: the two leak paths close this after
-    /// `currentLayerIndex`/`currentFrame` have already moved (`handleActiveContextChanged`) or after
-    /// the cel has dropped its `vector` entirely (`rasterizeLayer`), and an index re-resolved at close
-    /// time would name the wrong cel or none.
-    private var vectorTransformBracket: VectorTransformBracket?
-
-    struct VectorTransformBracket {
-        let vector: VectorCanvas
-        let layerID: UUID
-        let celID: UUID
-        let before: CGAffineTransform
-    }
-
     /// The node whose mask is being edited (§6.5), or nil outside mask-edit mode.
     ///
     /// **Modal state on the manager rather than view `@State`**, specifically so `CanvasView` can
@@ -346,101 +271,6 @@ final class CanvasManager: ObservableObject {
         return addImageToActiveVectorLayer(image)
     }
 
-    /// Applies an overall move/rotate/scale to the active vector layer's content, losslessly (the
-    /// geometry is re-rasterized at the new transform, no resolution loss). Driven by the transform
-    /// overlay while `isVectorTransforming` is on. `pivot` is the content's own bounding-box center,
-    /// not the canvas center, so Move carries only the actual content rather than the whole canvas.
-    func setVectorTransform(_ transform: LayerTransform, layerIndex: Int, pivot: CGPoint) {
-        guard layers.indices.contains(layerIndex),
-              let celIdx = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame),
-              let vector = layers[layerIndex].cels[celIdx].vector else { return }
-        // Open the undo bracket on this gesture's *first* write, capturing the transform as it stood
-        // before it. Gated on the flag rather than unconditional: a bracket opened by a caller no
-        // flag-clear ever follows would never close, which is the leak this whole design is about.
-        if isVectorTransforming, vectorTransformBracket == nil {
-            vectorTransformBracket = VectorTransformBracket(vector: vector,
-                                                            layerID: layers[layerIndex].id,
-                                                            celID: layers[layerIndex].cels[celIdx].id,
-                                                            before: vector.transform)
-        }
-        vector.setTransform(VectorCanvas.affine(from: transform, pivot: pivot))
-        if vectorTransformBracket != nil {
-            // The step does not exist yet, but the artist can already revert this drag — `undo()`
-            // closes the bracket first (`finalizePendingGesturesForHistoryAction`), exactly as it
-            // does for a lifted fill or shape. So the affordance has to be live now, not at close.
-            // *After* the write, not at open: at open the layer has not moved yet and the answer is
-            // still "nothing to undo". Cheap enough to run per gesture event — it is six comparisons,
-            // and it only republishes on the one event that flips the answer.
-            refreshUndoRedoState()
-        }
-        // VectorCanvas is a reference type, so mutating it doesn't trip the @Published layers
-        // republish; the coordinator refreshes the canvas view directly, and this debounced regen
-        // updates the layer-panel thumbnail.
-        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIdx)
-    }
-
-    /// Closes the vector-transform bracket, recording **exactly one** undo step for the whole gesture
-    /// — or none, when the layer ended up where it started.
-    ///
-    /// **What the step restores is the cel's `VectorCanvas.transform`, both ways, and that is
-    /// lossless.** `setTransform` *replaces* the affine outright rather than composing onto it (see
-    /// `VectorCanvas.setTransform`), so the value read at open time is the complete state the gesture
-    /// is about; putting it back reconstructs the layer exactly, at full resolution, with no
-    /// re-rasterization anywhere. Redo is the mirror image for the same reason. Nothing else in the
-    /// cel is touched by a transform, so nothing else needs capturing.
-    ///
-    /// **One cel, matching `setVectorTransform`.** That function resolves `activeCelIndex(...)` and
-    /// writes one cel's canvas, so a multi-cel vector layer transformed on frame 3 and again on frame
-    /// 20 has genuinely had two different `VectorCanvas` objects changed — and two undo steps, each
-    /// naming its own, is what reverts them independently. A step that reached across every cel of the
-    /// layer would undo a transform the artist never made on the other frames.
-    private func closeVectorTransformBracket() {
-        guard let bracket = vectorTransformBracket else { return }
-        vectorTransformBracket = nil
-        // Runs on both exits: the recording one refreshes anyway via `recordUndo`, and the no-op one
-        // has to put `canUndo` back to whatever the committed stack says after the open lit it.
-        defer { refreshUndoRedoState() }
-        let after = bracket.vector.transform
-        // A drag that ended where it began must not push a no-op step. Compared with a tolerance
-        // rather than `==` because the overlay round-trips through `layerTransform(pivot:)` and
-        // `affine(from:pivot:)` — atan2 out, sin/cos back — so even a bare tap on a handle returns a
-        // transform that is equal to the artist's eye and not bit-equal to the one it came from.
-        guard !Self.vectorTransformsAreIndistinguishable(bracket.before, after) else { return }
-        let vector = bracket.vector, layerID = bracket.layerID, celID = bracket.celID
-        let before = bracket.before
-        // Nominal cost, the figure `recordStructureChange` uses: what is actually retained is two
-        // affines, plus a reference to a `VectorCanvas` that the structure snapshots on the same
-        // stack are already holding.
-        recordUndo(label: .transform, cost: 4096, undo: { [weak self] in
-            vector.setTransform(before)
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        }, redo: { [weak self] in
-            vector.setTransform(after)
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        })
-    }
-
-    /// Whether two layer transforms are the same drawing on screen. See `closeVectorTransformBracket`
-    /// for why the overlay makes an exact comparison the wrong test. The linear part is unitless and
-    /// near 1, the translation is in canvas points, so they get separate tolerances; both are orders
-    /// of magnitude below one pixel at any canvas this app opens, and orders of magnitude above the
-    /// double-precision round-trip error they exist to absorb.
-    static func vectorTransformsAreIndistinguishable(_ a: CGAffineTransform, _ b: CGAffineTransform) -> Bool {
-        let linear: CGFloat = 1e-6
-        let translation: CGFloat = 1e-4
-        return abs(a.a - b.a) <= linear && abs(a.b - b.b) <= linear
-            && abs(a.c - b.c) <= linear && abs(a.d - b.d) <= linear
-            && abs(a.tx - b.tx) <= translation && abs(a.ty - b.ty) <= translation
-    }
-
-    /// Whether a vector-layer transform gesture is mid-flight with something to revert — what makes
-    /// the Undo affordance live before the bracket has closed. `refreshUndoRedoState`'s counterpart to
-    /// `fillGestureActive`/`shapeGestureActive`.
-    var vectorTransformGestureHasChange: Bool {
-        guard let bracket = vectorTransformBracket else { return false }
-        return !Self.vectorTransformsAreIndistinguishable(bracket.before, bracket.vector.transform)
-    }
-
     /// Converts a vector layer to raster in place: each cel's full content is folded into `raster`
     /// (not `bakedImage` — a raster-layer cel must hold its content in exactly one tier at rest, or
     /// the eraser can never reach it), `vector` is cleared, `kind` becomes `.raster`. No-op if the
@@ -451,14 +281,8 @@ final class CanvasManager: ObservableObject {
     func rasterizeLayer(layerIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .vector,
               let canvasSize else { return }
-        // **This line must stay above `withStructureUndo`, and now it is load-bearing rather than
-        // tidy.** Clearing the flag closes the transform's undo bracket synchronously (see
-        // `isVectorTransforming`'s `didSet`), so the transform step is pushed *before* the rasterize
-        // step. Undo pops last-first, which walks back through the rasterize and then the transform —
-        // the order the artist performed them in. Moved inside or below the scope, the two steps swap
-        // and undo would try to un-transform a cel whose `vector` it has not put back yet.
-        if isVectorTransforming && currentLayerIndex == layerIndex { isVectorTransforming = false }
-        // **The float's version of the line above, and it is silent artwork loss without it.** A
+        // **The float's settle must stay above `withStructureUndo`, and it is silent artwork loss
+        // without it.** A
         // float suppresses its ids out of the layer's own render; the suppression setter invalidates,
         // so `PixelOps.RasterizeKey` misses and `rasterizeUncached` flattens through
         // `cel.vector?.render(quality:)` *honouring* the suppression — and then the loop below sets
@@ -515,53 +339,19 @@ final class CanvasManager: ObservableObject {
     @Published var brushSize: CGFloat = 5.0
     @Published var brushOpacity: Double = 1.0
     @Published var brushColor: Color = .black
-    /// Every writer of this property runs the `didSet` below by construction, which is what makes it
-    /// the chokepoint that closes an engaged whole-layer vector Move on a **real** tool switch — see
-    /// `isVectorTransforming`'s own doc comment, the fifth of its five closers, and `Tool.isMomentary`
-    /// for what "real" excludes. The six call sites today: `TopToolbar`'s brush/eraser/fill buttons,
-    /// `CanvasManager.selectEyedropper` and `leaveEyedropper`, and `enterTextMode`.
+    /// **This property's `didSet` used to be the fifth closer of an engaged whole-layer vector Move**
+    /// — a real tool switch cleared `isVectorTransforming`, which the six writers of this property
+    /// (`TopToolbar`'s brush/eraser/fill buttons, `selectEyedropper`, `leaveEyedropper`,
+    /// `enterTextMode`) therefore did by construction rather than one door at a time. TODO item (12)
+    /// stage 2 deleted the flag, and with it the reason: Move with no selection is a `vectorFloat`
+    /// now, and a float is settled by `commitAllInteractiveState()`, which `TopToolbar` already calls
+    /// *before* it writes this property.
+    /// `LassoMoveLogicTests.testAWholeCelMoveIsSettledByCommitAllInteractiveStateAndHandsTheCanvasBack`
+    /// is where that is pinned; the tool-switch doors that do **not** route through that chokepoint
+    /// are TODO item (16), and they were never this `didSet`'s business.
     @Published var selectedTool: Tool = .pen {
         didSet {
             guard oldValue != selectedTool else { return }
-            // The artist picking an explicit new tool ends an engaged whole-layer Move exactly like
-            // `commitAllInteractiveState()` settles a floating piece or vector float for the same
-            // event — except this one cannot live *in* that function. `TopToolbar.toggleMove()` calls
-            // `commitAllInteractiveState()` unconditionally, before it ever touches
-            // `isVectorTransforming`, so clearing the flag inside the commit would zero it on *every*
-            // tap of the Move button, and the `.toggle()` immediately after would then only ever flip
-            // it back on — the box could never be dismissed from its own button. Closing it here
-            // instead, on the property every tool switch already writes through, covers all six call
-            // sites by construction rather than by remembering each door individually — the same shape
-            // as `isVectorTransforming`'s own `didSet`.
-            //
-            // Without this, the flag stayed on after a plain tool switch and
-            // `CanvasTouchInputs.activeHostIsInteractive`'s `isVectorTransforming` clause kept the
-            // canvas stroke host non-interactive for the vector layer — silently swallowing the
-            // artist's first stroke with the newly-selected brush while the toolbar showed it as
-            // selected. Not a hard lock: `handleMoveBoxCommit` already closes Move on any single *tap*
-            // on the canvas away from the box, so one stray tap and the next brush touch worked — a
-            // drag never fires that tap recognizer, though, so the artist's actual first *stroke* was
-            // the one that went missing, which is what made this read as "I can't click on a brush"
-            // rather than a lock the owner could name.
-            //
-            // **Entering the eyedropper is exempt outright (`selectedTool.isMomentary`); leaving it
-            // needs a second check, and a first attempt here that used `Tool.isMomentary` on *both*
-            // sides was wrong — caught by
-            // `testSwitchingToARealToolStillEndsAnEngagedWholeLayerMoveWhileTheEyedropperIsArmed`.**
-            // `oldValue == .eyedropper` is not by itself "the eyedropper returning": the artist can
-            // arm it and then tap a *different* toolbar tool before ever touching the canvas
-            // (`selectEraserToolAndTogglePanel` writes `selectedTool` directly, with no idea the
-            // eyedropper was armed), and that is a real switch, not a round trip — leaving it exempt
-            // would silently reopen this exact bug behind one extra tap. The two are told apart by
-            // `toolBeforeEyedropper`: `leaveEyedropper()` computes its new value *from* it
-            // (`toolBeforeEyedropper ?? .pen`) and clears it only on the line after, so it still holds
-            // that same value here — a write that matches it is the revert; a write that does not is
-            // a genuine pick and ends the Move like any other.
-            let isEyedropperRoundTrip = selectedTool.isMomentary
-                || (oldValue == .eyedropper && selectedTool == (toolBeforeEyedropper ?? .pen))
-            if !isEyedropperRoundTrip, isVectorTransforming {
-                isVectorTransforming = false
-            }
             ActionRecorder.ifRecording { $0.model("selectedTool", String(describing: selectedTool)) }
         }
     }
@@ -2489,12 +2279,6 @@ final class CanvasManager: ObservableObject {
         } else if textGestureActive {
             commitInteractiveText()
         }
-        // The vector-layer transform's version of the same rule, and the reason it needs stating: the
-        // artist stays in Move mode across an undo (there is no gesture end to hang a commit on), so
-        // without this the open bracket holds the only record of the drag and undo reaches past it —
-        // which is the whole bug. Closing here pushes the step; `isVectorTransforming` stays on and
-        // the next drag opens a fresh bracket against whatever the undo left behind.
-        closeVectorTransformBracket()
         // The lasso move's version of the same three-way rule — see
         // `finalizeVectorFloatForHistoryAction`, where the zero-nudge case is the one that has to be
         // un-happened rather than stepped back from.
@@ -2507,16 +2291,13 @@ final class CanvasManager: ObservableObject {
         // A live text session joins the fill and the shape: it is an undoable action in its own
         // right (undo finalizes it, then reverts it), so the affordance must be live even on an
         // empty committed stack.
-        // A vector-layer transform mid-gesture joins them: the drag has already changed the document
-        // and `finalizePendingGesturesForHistoryAction` will turn it into a step the moment undo is
-        // pressed, so the affordance must be live even on an empty committed stack. Asks whether the
-        // layer has actually *moved*, not merely whether a bracket is open — a drag that returned to
-        // where it started records nothing, and an Undo button lit for it would be lying.
         // A lasso move's float is one too, and it is live from the moment of the lift rather than
         // from the first nudge: with zero nudges, undo closes a hole the artist can see, so the
-        // affordance must be lit even on an empty committed stack.
+        // affordance must be lit even on an empty committed stack. It absorbed the whole-layer
+        // transform's own clause when that path was deleted (TODO item (12) stage 2): Move with no
+        // selection is a float now, so `vectorFloat != nil` is the whole answer for both.
         let newCanUndo = fillGestureActive || shapeGestureActive || textGestureActive
-            || vectorTransformGestureHasChange || vectorFloat != nil || history.canUndo
+            || vectorFloat != nil || history.canUndo
         let newCanRedo = !fillGestureActive && !shapeGestureActive && !textGestureActive && history.canRedo
         if canUndo != newCanUndo { canUndo = newCanUndo }
         if canRedo != newCanRedo { canRedo = newCanRedo }

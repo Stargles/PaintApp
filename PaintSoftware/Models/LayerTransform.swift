@@ -1,8 +1,8 @@
 import CoreGraphics
 
 /// Position/scale/rotation, in canvas point space (same coordinate system as everything drawn into
-/// a Cel's raster). Used for a `VectorImageElement`'s own placement, and for driving/reading a
-/// vector layer's overall transform via `ObjectTransformOverlayView` while `isVectorTransforming`.
+/// a Cel's raster). Used for a `VectorImageElement`'s own placement, and as the pose
+/// `ObjectTransformOverlayView`'s Move box reads and writes for a lifted `VectorFloat`.
 struct LayerTransform: Equatable {
     var position: CGPoint
     var scale: CGFloat

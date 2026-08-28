@@ -1,7 +1,10 @@
 import XCTest
 
-/// Walks the **whole** input space of "who owns this canvas touch" — 3,840 combinations for each
-/// (tool, fill mode) pair, 490 of them states the app can actually be in — rather than sampling it.
+/// Walks the **whole** input space of "who owns this canvas touch" — 1,920 combinations for each
+/// (tool, fill mode) pair, 440 of them states the app can actually be in — rather than sampling it.
+///
+/// Both figures halved on 2026-08-27 when TODO item (12) stage 2 deleted the `isVectorTransforming`
+/// axis: 3,840 and 490 are the numbers with it.
 ///
 /// **Exhaustion is the point.** Every defect this type was extracted to retire was a combination
 /// nobody thought to try: the pick tool with the Select panel open (owned by nobody), a shape's
@@ -50,33 +53,28 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         // `beginVectorLassoMove` runs on the active vector layer, and `updateTransformOverlay`'s
         // first arm re-checks that the float's layer is still in the document.
         if i.hasVectorFloat && i.activeLayer != .vector { return false }
-        // `isVectorTransforming` is toggled only on a vector layer, and `toggleMove` bakes any
-        // float before it touches the flag.
-        if i.isVectorTransforming && i.activeLayer != .vector { return false }
-        if i.isVectorTransforming && (i.hasFloatingPiece || i.hasVectorFloat) { return false }
 
         switch i.chrome {
         case .none:
             return true
         case .transformBoxOrHandle:
-            // The Move box is on screen for exactly two states (`updateTransformOverlay`). The
-            // whole-layer arm tests `isLayerEffectivelyVisible` before it activates the overlay —
-            // "a layer inside a hidden group isn't on screen either, and the handles shouldn't be" —
-            // so a hidden layer reaches this chrome only through a lassoed float, whose arm does not
-            // ask.
+            // The Move box is on screen for exactly one state (`updateTransformOverlay`): a piece is
+            // floating. It does not consult visibility, deliberately — see
+            // `CanvasTouchInputs.moveBoxIsUp`, which carries the ruling — so a hidden layer reaches
+            // this chrome too. There was a second arm, a whole vector layer mid-`isVectorTransforming`,
+            // which *did* ask; it went with the flag (TODO item (12) stage 2).
             return i.hasVectorFloat
-                || (i.isVectorTransforming && i.activeLayer == .vector && i.activeLayerIsOnScreen)
         case .shapeHandleOrOutline, .textBoxOrBand, .textHandle:
             // A pending shape and a live text session are both baked by
             // `commitAllInteractiveState()`, which every route into Move and every toolbar toggle
             // calls; and both need a layer with pixels to have started on.
             //
-            // **Visibility is deliberately not required.** Neither `updateShapeOverlay` nor
-            // `updateTextOverlay` consults `isLayerEffectivelyVisible` — unlike
-            // `updateTransformOverlay` above, which does — so hiding the layer a shape or a text box
+            // **Visibility is deliberately not required**, as it is not for the Move box above:
+            // neither `updateShapeOverlay` nor `updateTextOverlay` consults
+            // `isLayerEffectivelyVisible`, so hiding the layer a shape or a text box
             // is pending on leaves its handles on screen and grabbable. That is what produces the
             // `shapeOverlay+catchAllNotice` and `textOverlay+catchAllNotice` rows below.
-            if i.hasFloatingPiece || i.hasVectorFloat || i.isVectorTransforming { return false }
+            if i.hasFloatingPiece || i.hasVectorFloat { return false }
             return i.activeLayer == .raster || i.activeLayer == .vector
         case .guideGrip:
             // Guides are an orthogonal mode: `GuideOverlayView` is interactive whenever
@@ -93,15 +91,13 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                 for panel in ActivePanel.allCases {
                     for hasFloatingPiece in [false, true] {
                         for hasVectorFloat in [false, true] {
-                            for isVectorTransforming in [false, true] {
-                                for activeLayer in CanvasActiveLayer.allCases {
-                                    for onScreen in [false, true] {
+                            for activeLayer in CanvasActiveLayer.allCases {
+                                for onScreen in [false, true] {
                                     for chrome in CanvasTouchChrome.allCases {
                                         let inputs = CanvasTouchInputs(
                                             tool: tool, fillMode: fillMode, panel: panel,
                                             hasFloatingPiece: hasFloatingPiece,
                                             hasVectorFloat: hasVectorFloat,
-                                            isVectorTransforming: isVectorTransforming,
                                             activeLayer: activeLayer,
                                             activeLayerIsOnScreen: onScreen, chrome: chrome)
                                         // `.none` normalises visibility to false, so the `true` half
@@ -109,7 +105,6 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                                         guard inputs.activeLayerIsOnScreen == onScreen else { continue }
                                         guard isReachable(inputs) else { continue }
                                         body(inputs)
-                                    }
                                     }
                                 }
                             }
@@ -127,7 +122,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     private func signature(_ i: CanvasTouchInputs) -> String {
         let mode = i.tool == .fill ? "/\(i.fillMode.rawValue)" : ""
         return "tool=\(i.tool)\(mode) select=\(i.panel == .select) float=\(i.hasFloatingPiece)"
-            + " vfloat=\(i.hasVectorFloat) vxform=\(i.isVectorTransforming)"
+            + " vfloat=\(i.hasVectorFloat)"
             + " layer=\(i.activeLayer.rawValue) visible=\(i.activeLayerIsOnScreen)"
             + " chrome=\(i.chrome.rawValue)"
     }
@@ -155,20 +150,17 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
                 for panel in ActivePanel.allCases {
                     for float in [false, true] {
                         for vfloat in [false, true] {
-                            for vxform in [false, true] {
-                                for layer in CanvasActiveLayer.allCases {
-                                    for onScreen in [false, true] {
+                            for layer in CanvasActiveLayer.allCases {
+                                for onScreen in [false, true] {
                                     for chrome in CanvasTouchChrome.allCases {
                                         totalByPair[pair, default: 0] += 1
                                         let inputs = CanvasTouchInputs(
                                             tool: tool, fillMode: fillMode, panel: panel,
                                             hasFloatingPiece: float, hasVectorFloat: vfloat,
-                                            isVectorTransforming: vxform,
                                             activeLayer: layer,
                                             activeLayerIsOnScreen: onScreen, chrome: chrome)
                                         guard inputs.activeLayerIsOnScreen == onScreen else { continue }
                                         if isReachable(inputs) { reachableByPair[pair, default: 0] += 1 }
-                                    }
                                     }
                                 }
                             }
@@ -181,12 +173,12 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         let pairs = Tool.allCases.count * FillMode.allCases.count
         XCTAssertEqual(totalByPair.count, pairs, "every (tool, fill mode) pair should have been walked")
         for (pair, count) in totalByPair.sorted(by: { $0.key < $1.key }) {
-            XCTAssertEqual(count, 3_840,
+            XCTAssertEqual(count, 1_920,
                            "\(pair): the enumerated space changed — a case was added to `ActivePanel`, "
                            + "`CanvasActiveLayer` or `CanvasTouchChrome`")
         }
         for (pair, count) in reachableByPair.sorted(by: { $0.key < $1.key }) {
-            XCTAssertEqual(count, 490,
+            XCTAssertEqual(count, 440,
                            "\(pair): the reachability rules changed; re-read `isReachable`'s clauses. "
                            + "A figure that differs *between* pairs means a clause has started reading "
                            + "the tool, which this file's per-pair counting assumes it does not.")
@@ -224,14 +216,15 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// gate: the touch simply does nothing and the app says nothing. Three families survived the
     /// extraction, all of them on a vector layer:
     ///
-    ///  1. **Vector layer mid-Move, brush selected, touch away from the box.** `shouldInteract` is
-    ///     false (`isVectorTransforming`), the catch-all is off (the layer is visible and has a
-    ///     surface), and a paint tool has no recognizer of its own.
-    ///  2. **Lassoed vector piece floating, brush selected, touch away from the box.** The same
+    ///  1. **Vector layer mid-Move, brush selected, touch away from the box.** `shouldInteract` was
+    ///     false (`isVectorTransforming`, since deleted), the catch-all is off (the layer is visible
+    ///     and has a surface), and a paint tool has no recognizer of its own.
+    ///  2. **A vector piece floating, brush selected, touch away from the box.** The same
     ///     hole, plus the structural one: `FloatingPieceOverlayView` covers the whole container and
     ///     commits a raster piece on a tap outside it, while a vector float's
-    ///     `ObjectTransformOverlayView` claims only its own grips.
-    ///  3. **Lassoed vector piece floating with the Select panel open — every tool but the pick.**
+    ///     `ObjectTransformOverlayView` claims only its own grips. Family 1 collapsed into this one
+    ///     when Move with no selection became a float (TODO item (12) stage 1).
+    ///  3. **A vector piece floating with the Select panel open — every tool but the pick.**
     ///     The selection overlay stands aside for `vectorFloat`, the fill and text presses for the
     ///     Select panel, and nothing took over.
     ///
@@ -240,10 +233,10 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// what took them, and this test is now the statement that nothing is left.
     ///
     /// Watched failing with `.moveBoxCommit` taken back out of `contenders(in:)`: **122 reachable
-    /// inputs in 15 signatures**, the first of them *tool=eraser select=false float=false vfloat=false
-    /// vxform=true layer=vector visible=true chrome=none*. (The report of this defect quoted 118. 122
-    /// is what this enumeration measures and what the assertion above holds; the four-state gap is
-    /// not reconciled, and the assertion is on zero either way.)
+    /// inputs in 15 signatures** on the input space as it stood on 2026-08-22, which carried a
+    /// `vxform` axis this file no longer enumerates. (The report of this defect quoted 118. 122 was
+    /// what the enumeration measured then; the four-state gap was never reconciled, and the assertion
+    /// is on zero either way.)
     func testNoReachableTouchIsOwnedByNobody() {
         var found = Set<String>()
         var reachableInputs = 0
@@ -298,34 +291,42 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         XCTAssertEqual(CanvasTouchOwner.owner(in: brush), .moveBoxCommit)
     }
 
-    /// The whole-layer half of the same ruling, and the reason it is here rather than left out: it is
-    /// the *same box*, put up by `updateTransformOverlay`'s other arm, and the same asymmetry — the
-    /// raster counterpart of Move-with-no-selection is a floating piece, which has always committed
-    /// on a tap away.
+    /// **The visibility question, decided rather than dropped.** `moveBoxIsUp` used to have two arms
+    /// and they disagreed about `activeLayerIsOnScreen`: the whole-layer transform's asked, the
+    /// float's did not. TODO item (12) stage 2 deleted the arm that asked, so the answer had to be
+    /// chosen for the one that is left rather than left to fall out of the deletion.
     ///
-    /// **The visibility clause is the part worth checking**, because the two arms of
-    /// `updateTransformOverlay` differ on it: the whole-layer arm asks `isLayerEffectivelyVisible`
-    /// and the float arm does not. A box that is not on screen must not be claiming taps — there the
-    /// catch-all's "this layer is hidden" is still the right answer.
-    func testAWholeLayerVectorMoveCommitsOnATouchAwayOnlyWhileItsBoxIsOnScreen() {
-        let onScreen = CanvasTouchInputs(tool: .pen, isVectorTransforming: true, activeLayer: .vector,
-                                         activeLayerIsOnScreen: true)
-        XCTAssertEqual(CanvasTouchOwner.owner(in: onScreen), .moveBoxCommit)
-
-        let hidden = CanvasTouchInputs(tool: .pen, isVectorTransforming: true, activeLayer: .vector,
+    /// **Ruled: the box stays up on a hidden layer**, because a float is a *lift* — the moved ids are
+    /// suppressed out of the layer's own render and the only copy of them is in `VectorFloat` — so the
+    /// box is the grip on geometry that is currently out of the document, not decoration over content
+    /// the artist cannot see. Adding the visibility term would take `chrome ==
+    /// .transformBoxOrHandle` out of `moveBoxIsUp` and leave a lift the artist cannot grab.
+    /// The whole-layer arm could afford the check precisely because it lifted nothing.
+    ///
+    /// The tap *away* is untouched by the ruling and lands on the notice either way: `.catchAllNotice`
+    /// precedes `.moveBoxCommit`, so a touch off the box on a hidden layer says "this layer is
+    /// hidden" instead of settling silently. (j) was about touches that did *nothing*, not about
+    /// touches that already explained themselves.
+    func testAMoveBoxStaysUpOnAHiddenLayerBecauseTheLiftIsStillOutOfTheDocument() {
+        let hidden = CanvasTouchInputs(tool: .pen, hasVectorFloat: true, activeLayer: .vector,
                                        activeLayerIsOnScreen: false)
-        XCTAssertEqual(CanvasTouchOwner.owner(in: hidden), .catchAllNotice,
-                       "no box on screen, so the notice is still the right answer")
-        XCTAssertFalse(CanvasTouchOwner.contenders(in: hidden).contains(.moveBoxCommit),
-                       "and the tap-away is not even offered it")
+        XCTAssertTrue(hidden.moveBoxIsUp, "the ruling, stated on the property it is about")
+        XCTAssertTrue(hidden.moveBoxCommitIsEnabled)
 
-        // …and the float's arm, which does not consult visibility, keeps its box. The notice still
-        // speaks first there — it is ahead in the precedence, and (j) was about touches that did
-        // nothing, not about touches that already explained themselves.
-        let hiddenFloat = CanvasTouchInputs(tool: .pen, hasVectorFloat: true, activeLayer: .vector,
-                                            activeLayerIsOnScreen: false)
-        XCTAssertEqual(CanvasTouchOwner.owner(in: hiddenFloat), .catchAllNotice)
-        XCTAssertTrue(CanvasTouchOwner.contenders(in: hiddenFloat).contains(.moveBoxCommit))
+        // The grips still claim their own touches, which is the half the ruling is for.
+        let onGrip = CanvasTouchInputs(tool: .pen, hasVectorFloat: true, activeLayer: .vector,
+                                       activeLayerIsOnScreen: false, chrome: .transformBoxOrHandle)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: onGrip), .objectTransformOverlay,
+                       "a hidden layer's float must still be grabbable, or the lift is stranded")
+
+        // The tap away defers to the notice, ahead of it in the precedence.
+        XCTAssertEqual(CanvasTouchOwner.owner(in: hidden), .catchAllNotice)
+        XCTAssertTrue(CanvasTouchOwner.contenders(in: hidden).contains(.moveBoxCommit))
+
+        // And on a visible layer the tap away is the settle, unchanged.
+        let visible = CanvasTouchInputs(tool: .pen, hasVectorFloat: true, activeLayer: .vector,
+                                        activeLayerIsOnScreen: true)
+        XCTAssertEqual(CanvasTouchOwner.owner(in: visible), .moveBoxCommit)
     }
 
     /// A touch **on** the box is a drag, not a commit. The two are one feature and two owners, the
@@ -505,8 +506,8 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             "textTransformOverlay+eyedropper",
             "textTransformOverlay+fillPress",
             "textTransformOverlay+catchAllNotice",
-            // The Move box itself, on a vector layer mid-transform or with a lassoed piece floating.
-            // No `+moveBoxCommit`: a touch on the box is a drag, and the tap-away is not offered it.
+            // The Move box itself, with a piece floating. No `+moveBoxCommit`: a touch on the box is
+            // a drag, and the tap-away is not offered it.
             "objectTransformOverlay+eyedropper",
             "objectTransformOverlay+fillPress",
             "objectTransformOverlay+textPress",
@@ -518,7 +519,12 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
             "fillPress+moveBoxCommit",
             "textPress+moveBoxCommit",
             "lassoFill+moveBoxCommit",
-            "selectionOverlay+moveBoxCommit",
+            // No `selectionOverlay+moveBoxCommit`, and its disappearance is the one behavioural
+            // trace TODO item (12) stage 2 left on this list. `selectionOverlayIsCapturing` requires
+            // `!hasVectorFloat`, and `moveBoxIsUp` is now exactly `hasVectorFloat`, so the two are
+            // mutually exclusive by construction. The row existed only through the deleted
+            // whole-layer arm: `isVectorTransforming` put a box up *without* a float, which the
+            // selection overlay's guard did not exclude.
             // The catch-all's own two, with no overlay involved.
             "floatingPiece+catchAllNotice",
             "selectionOverlay+catchAllNotice",

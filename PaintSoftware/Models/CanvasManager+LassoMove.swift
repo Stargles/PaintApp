@@ -272,8 +272,8 @@ extension CanvasManager {
     /// resolves by id; once the layer has been removed or its `vector` set to nil there is nothing
     /// left to resolve, and the suppression is stranded on a canvas the undo stack still holds a
     /// reference to (`captureStructure` snapshots `layers`, and a `VectorCanvas` is a reference
-    /// type). So the settle has to happen *before* the edit, not after — which is the same
-    /// before-the-scope rule `rasterizeLayer`'s `isVectorTransforming` line already follows.
+    /// type). So the settle has to happen *before* the edit, not after — which is why
+    /// `rasterizeLayer` calls this above its own `withStructureUndo` scope.
     ///
     /// Gated on the float's own layer rather than unconditional: an edit to some other layer leaves
     /// this one's canvas alone, and a float the artist is still holding should not be settled by it.

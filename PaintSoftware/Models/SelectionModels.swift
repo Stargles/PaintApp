@@ -244,11 +244,6 @@ extension CanvasManager {
         if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
             selection = nil
         }
-        // Leaving the layer/frame ends any in-progress vector-layer transform — and, through the
-        // `didSet` on that flag, closes its undo bracket and records the step. This runs *after*
-        // `currentLayerIndex`/`currentFrame` have already moved, which is exactly why the bracket
-        // holds the cel it opened on by reference rather than re-resolving an index at close time.
-        if isVectorTransforming { isVectorTransforming = false }
         // The working set of vector cels has just moved, so this is the moment the ones left behind
         // stop being worth a cached render. See `evictDistantVectorRenderCaches`.
         evictDistantVectorRenderCaches()
@@ -300,7 +295,7 @@ extension CanvasManager {
     ///
     /// Two independent things can each turn it on, the same shape Move's own highlight already
     /// uses (`TopToolbar.iconButton` for the move icon is driven by `floatingPiece != nil ||
-    /// isVectorTransforming`, not by which panel is open): the Select panel being open — today's
+    /// vectorFloat != nil`, not by which panel is open): the Select panel being open — today's
     /// only driver, unchanged — or a selection being live regardless of which tool is now current.
     ///
     /// A static function on `CanvasManager` rather than inlined into `TopToolbar.body`, purely so a

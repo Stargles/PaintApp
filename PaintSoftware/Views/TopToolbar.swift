@@ -38,7 +38,7 @@ struct TopToolbar: View {
                 .accessibilityIdentifier("toolbar.actionsButton")
             iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
                 .accessibilityIdentifier("toolbar.selectButton")
-            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil || canvasManager.isVectorTransforming) { toggleMove() }
+            iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { toggleMove() }
                 .accessibilityIdentifier("toolbar.moveButton")
 
             Spacer()
@@ -83,7 +83,7 @@ struct TopToolbar: View {
     /// Brush/eraser/fill are mutually exclusive with Select and Move: only one of these "which tool is
     /// active" indicators should ever read as engaged. Select and Move are each driven by their own
     /// independent state (`CanvasManager.selectIconIsActive` — the Select panel being open, or a
-    /// selection being live — and floating-piece/vector-transform respectively) rather than
+    /// selection being live — and floating-piece/vector-float respectively) rather than
     /// `selectedTool`, so without this, switching to Select while a paint tool was active left that
     /// paint tool's icon highlighted too — both showing selected at once. Layers is deliberately not
     /// part of this: it's a utility panel, not a tool, so it highlights independent of whichever tool
@@ -94,7 +94,6 @@ struct TopToolbar: View {
     /// which is a second instance of that same exception rather than a new one.
     private var isToolHighlightSuppressed: Bool {
         activePanel == .select || canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil
-            || canvasManager.isVectorTransforming
     }
 
     private func toggle(_ panel: ActivePanel) {
@@ -151,12 +150,14 @@ struct TopToolbar: View {
                 return
             }
             // No loop: the whole cel travels, through the *same* float. This used to toggle
-            // `isVectorTransforming`, which wrote `VectorCanvas._transform` — and a cel carrying a
-            // shrink clips every later canvas-space stroke to the canvas rect scaled about the old
-            // ink's centre, because `render()` rasterizes the display list at the local origin and
-            // applies the transform to the finished bitmap afterwards. That was live artwork loss on
-            // the owner's iPad (2026-08-27). A float moves geometry and writes no transform, so the
-            // clip has nowhere to come from. See `CanvasManager.beginVectorWholeCelMove`.
+            // `CanvasManager.isVectorTransforming`, which wrote `VectorCanvas._transform` — and a cel
+            // carrying a shrink clips every later canvas-space stroke to the canvas rect scaled about
+            // the old ink's centre, because `render()` rasterizes the display list at the local origin
+            // and applies the transform to the finished bitmap afterwards. That was live artwork loss
+            // on the owner's iPad (2026-08-27). A float moves geometry and writes no transform, so the
+            // clip has nowhere to come from. See `CanvasManager.beginVectorWholeCelMove`. The flag and
+            // every consumer of it were deleted in TODO item (12) stage 2, once this line had made it
+            // permanently false.
             //
             // The second tap is the `vectorFloat != nil` arm at the top of this method, which is why
             // this is a plain begin rather than a toggle.

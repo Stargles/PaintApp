@@ -190,7 +190,7 @@ enum CanvasActiveLayer: String, CaseIterable, Hashable {
     /// failure that would follow from gathering one of these wrongly (a gate reads the shared value,
     /// the value is wrong, the canvas goes dead) is precisely what this type exists to prevent, and
     /// it is the half of the arrangement a logic test cannot reach. This mapping was the only part
-    /// of that gathering with a decision in it; moving it leaves nine one-line field reads that a
+    /// of that gathering with a decision in it; moving it leaves eight one-line field reads that a
     /// reader can check by eye, and puts the exhaustive `switch` — the one that makes a fourth
     /// `LayerKind` answer at compile time — where the enum it answers for lives.
     init(kind: LayerKind?) {
@@ -273,20 +273,19 @@ enum CanvasTouchChrome: String, CaseIterable, Hashable {
 /// of `TopToolbar.swift` for this type to exist at all). So a field gathered from the wrong property
 /// would answer every test in `CanvasTouchOwnerLogicTests` correctly and still take the canvas out.
 /// Three things stand in for the test that cannot be written, and none of them is a substitute for
-/// reading those nine lines when one is added:
+/// reading those eight lines when one is added:
 ///
 ///  * the only part of the gathering with a decision in it is `CanvasActiveLayer.init(kind:)`, which
 ///    is here and is tested (`testALayersKindMapsToTheKindTheGatesMakeOfIt`);
-///  * three of the nine fields are exercised end-to-end by named XCUITests —
+///  * three of the eight fields are exercised end-to-end by named XCUITests —
 ///    `SelectionAndMoveUITests.testTheEyedropperPicksWhileTheSelectPanelIsOpenAndHandsTheLassoBack`
 ///    covers `tool` and `panel` through the gates that read them, and
 ///    `testEnteringTextModeClosesTheSelectPanelSoTextsOwnGuardCannotBite` covers `panel` against
 ///    `textPressIsEnabled`;
-///  * the remaining five (`fillMode`, `hasFloatingPiece`, `hasVectorFloat`, `isVectorTransforming`,
-///    `activeLayerIsOnScreen`) are covered only by whatever XCUITest happens to exercise the feature
-///    they belong to. **That is the live gap.** Closing it properly means the gathering moving
-///    somewhere the test target can link, which is a change to where `activePanel` lives and is not
-///    this refactor.
+///  * the remaining four (`fillMode`, `hasFloatingPiece`, `hasVectorFloat`, `activeLayerIsOnScreen`)
+///    are covered only by whatever XCUITest happens to exercise the feature they belong to. **That is
+///    the live gap.** Closing it properly means the gathering moving somewhere the test target can
+///    link, which is a change to where `activePanel` lives and is not this refactor.
 struct CanvasTouchInputs: Hashable {
     var tool: Tool
     var fillMode: FillMode
@@ -297,8 +296,6 @@ struct CanvasTouchInputs: Hashable {
     /// **A different input from `hasFloatingPiece`, and the asymmetry between them is a live
     /// defect** — see `CanvasTouchOwnerLogicTests`' conflict table.
     var hasVectorFloat: Bool
-    /// `CanvasManager.isVectorTransforming` — Move engaged on a vector layer with no selection.
-    var isVectorTransforming: Bool
     var activeLayer: CanvasActiveLayer
     /// `isLayerEffectivelyVisible(currentLayerIndex)` — the layer's own switch *and* every enclosing
     /// folder's (§4.1). `reconcileLayers` sets `host.isHidden = !this`, and UIKit delivers no touch
@@ -316,7 +313,6 @@ struct CanvasTouchInputs: Hashable {
          panel: ActivePanel = .none,
          hasFloatingPiece: Bool = false,
          hasVectorFloat: Bool = false,
-         isVectorTransforming: Bool = false,
          activeLayer: CanvasActiveLayer = .raster,
          activeLayerIsOnScreen: Bool = true,
          chrome: CanvasTouchChrome = .none) {
@@ -325,7 +321,6 @@ struct CanvasTouchInputs: Hashable {
         self.panel = panel
         self.hasFloatingPiece = hasFloatingPiece
         self.hasVectorFloat = hasVectorFloat
-        self.isVectorTransforming = isVectorTransforming
         self.activeLayer = activeLayer
         // Normalised rather than stored as given: a layer that does not exist is not on
         // screen, and letting the value type hold that pair would be the same class of
@@ -399,7 +394,6 @@ extension CanvasTouchInputs {
             && !selectPanelIsOpen
             && !hasFloatingPiece
             && !hasVectorFloat
-            && !(isVectorTransforming && activeLayer == .vector)
             && !activeLayer.hasNoDrawingSurface
     }
 
@@ -472,16 +466,30 @@ extension CanvasTouchInputs {
 
     /// Whether the vector Move box is on screen — **the fifteenth gate, and the one (j) needed.**
     ///
-    /// The two arms are `updateTransformOverlay`'s two arms, restated: a lassoed piece floating, or
-    /// the whole active vector layer mid-transform. The asymmetry between them is real and is copied
-    /// here rather than tidied — the float's arm does not consult visibility (so its box is up even
-    /// on a hidden layer) and the whole-layer arm does, because "a layer inside a hidden group isn't
-    /// on screen either, and the handles shouldn't be". `CanvasTouchOwnerLogicTests.isReachable`
-    /// cites the same asymmetry for `.transformBoxOrHandle`, and the two have to agree or a box the
-    /// artist cannot see would be claiming taps.
-    var moveBoxIsUp: Bool {
-        hasVectorFloat || (isVectorTransforming && activeLayer == .vector && activeLayerIsOnScreen)
-    }
+    /// `updateTransformOverlay`'s one remaining arm, restated: a lassoed or whole-cel piece floating.
+    /// It had a second, `isVectorTransforming && activeLayer == .vector && activeLayerIsOnScreen`,
+    /// and the asymmetry between the two — the float's arm never consulted visibility, the
+    /// whole-layer arm did — used to be documented here as deliberate. The whole-layer arm is gone
+    /// with the transform it drove (TODO item (12) stage 2); what its visibility term asked is not.
+    ///
+    /// **Ruled: a Move box may be up on a hidden layer, and it is the float's arm that is right.**
+    /// A float is a *lift* — `beginVectorLassoMove`/`beginVectorWholeCelMove` suppress the moved ids
+    /// out of the layer's own render and hold the only copy of them in `VectorFloat` — so the box is
+    /// not decoration over content the artist cannot see, it is the handle on content that is
+    /// currently out of the document. Adding the visibility term would make a hidden layer's grips
+    /// stop claiming touches (`chrome == .transformBoxOrHandle` reaches
+    /// `.objectTransformOverlay` only while the box is up), which is a *lift the artist can no longer
+    /// grab*: the same shape `rasterizeLayer`'s float-settle line calls "silent artwork loss", one
+    /// affordance further out. The whole-layer arm could afford the check precisely because it lifted
+    /// nothing — the flag going false left the cel whole — so its rule does not transfer.
+    ///
+    /// The tap *away* is not affected either way: `.catchAllNotice` precedes `.moveBoxCommit` in
+    /// `contenders(in:)`, so on a hidden layer a touch off the box already says "this layer is
+    /// hidden" rather than settling silently, which is the better of the two answers and is what the
+    /// float's arm has always done.
+    /// `CanvasTouchOwnerLogicTests.testAMoveBoxStaysUpOnAHiddenLayerBecauseTheLiftIsStillOutOfTheDocument`
+    /// pins it, and `isReachable` no longer has an asymmetry to cite.
+    var moveBoxIsUp: Bool { hasVectorFloat }
 
     /// `moveBoxCommitRecognizer.isEnabled` — the state-only half, which is all a recognizer gate can
     /// read.

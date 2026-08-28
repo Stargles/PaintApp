@@ -1571,20 +1571,18 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Vector-layer transform overlay
 
-        /// Drives `ObjectTransformOverlayView` from the active vector layer's aggregate transform
-        /// while `isVectorTransforming` is on — the only remaining user of this overlay.
-        /// **A producer, not a consumer of `CanvasTouchOwner`.** Whether the Move box is up turns on
-        /// `activeCelIsInBetween`, `canvasSize` and whether the active cel even holds a
-        /// `VectorCanvas` — none of which `CanvasTouchInputs` carries, and adding them would make the
-        /// input space of the ownership question the whole document. What this feeds into the shared
-        /// answer is `ObjectTransformOverlayView.claimsTouch(at:)`, via `canvasChrome(at:)`. Note the
-        /// whole-layer arm below tests `isLayerEffectivelyVisible` and the float arm does not — the
-        /// asymmetry `CanvasTouchOwnerLogicTests.isReachable` cites.
+        /// Drives `ObjectTransformOverlayView` from the lifted piece the Move tool is holding — the
+        /// only remaining user of this overlay, and since TODO item (12) stage 2 its only arm.
+        ///
+        /// **A producer, not a consumer of `CanvasTouchOwner`.** What this feeds into the shared
+        /// answer is `ObjectTransformOverlayView.claimsTouch(at:)`, via `canvasChrome(at:)`.
+        ///
+        /// **It does not consult layer visibility, deliberately** — see
+        /// `CanvasTouchInputs.moveBoxIsUp`, which is this function restated and carries the ruling.
+        /// The second arm it used to have, a whole vector layer mid-`isVectorTransforming`, did
+        /// consult it; that arm and its flag are gone.
         func updateTransformOverlay() {
             guard let overlay = transformOverlay, let container = containerView else { return }
-            // **Ahead of the whole-layer arm.** A lasso move's box is about a *region* of the cel, so
-            // it must win wherever both could be true, and it does not consult
-            // `isVectorTransforming` at all — Move with a selection never turns that flag on.
             if let float = canvasManager.vectorFloat,
                canvasManager.layerIndex(ofID: float.layerID) != nil {
                 let pose = liveVectorFloatPose ?? Self.pose(of: float)
@@ -1597,69 +1595,25 @@ struct CanvasView: UIViewRepresentable {
                 container.bringSubviewToFront(overlay)
                 return
             }
-            guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else {
-                deactivateTransformOverlay()
-                return
-            }
-            let layer = canvasManager.layers[canvasManager.currentLayerIndex]
-
-            // Vector layer being transformed: box just the layer's own content, in local space, so
-            // Move only carries the drawn content, matching the raster Move tool. Also checks
-            // `activeCelIsInBetween` since the playhead can move onto an interpolated cel while the
-            // transform is already on, where the box would be handles over a frame it can't move.
-            // `isLayerEffectivelyVisible` rather than `layer.isVisible` (§4.1): a layer inside a
-            // hidden group isn't on screen either, and the handles shouldn't be either.
-            if layer.kind == .vector, canvasManager.isLayerEffectivelyVisible(canvasManager.currentLayerIndex),
-               canvasManager.isVectorTransforming, !canvasManager.activeCelIsInBetween,
-               let canvasSize = canvasManager.canvasSize,
-               let celIdx = canvasManager.activeCelIndex(inLayer: canvasManager.currentLayerIndex, atFrame: canvasManager.currentFrame),
-               let vector = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIdx].vector {
-                let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
-                let pivot = CGPoint(x: localBounds.midX, y: localBounds.midY)
-                let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
-                                                 contentSize: localBounds.size)
-                overlay.update(isActive: true, frame: frame, canvasScale: canvasContentScale)
-                container.bringSubviewToFront(overlay)
-                return
-            }
-
             deactivateTransformOverlay()
         }
 
         /// Hides the box, and ends any drag it was in the middle of.
         ///
-        /// The second half is not belt and braces. `isVectorTransforming` can go false under the
-        /// artist's own finger — `rasterizeLayer` and `handleActiveContextChanged` both do it, which
-        /// is the leak `CanvasManager.vectorTransformBracket` exists to close — and a live transform
-        /// left latched on the stroke view would leave the layer showing a Core Animation transform
+        /// The second half is not belt and braces. A float can be settled out from under the artist's
+        /// own finger — `rasterizeLayer` and `handleActiveContextChanged` both do it — and a live drag
+        /// left latched on the stroke view would leave the piece showing a Core Animation transform
         /// nothing ever clears.
         private func deactivateTransformOverlay() {
             endObjectTransformDrag()
             transformOverlay?.deactivate()
         }
 
-        // MARK: - One Move drag
+        // MARK: - The Move tool's floating piece
 
-        /// The Move tool's drag in flight. Everything expensive about a whole-layer transform is
-        /// resolved **once**, here, rather than on every delta.
-        private struct ActiveObjectTransform {
-            let drag: ObjectTransformDrag
-            let layerIndex: Int
-            let layerID: UUID
-            /// The pivot and the box's size, latched with the rest. Both come from
-            /// `localContentBounds()`, which is *invariant* under the transform being applied — the
-            /// content does not move in its own local space — so recomputing them per delta bought
-            /// nothing and cost a canvas-sized rasterize plus an alpha scan each time.
-            let pivot: CGPoint
-            let contentSize: CGSize
-        }
-        private var activeObjectTransform: ActiveObjectTransform?
-
-        // MARK: - The lasso move's floating piece
-
-        /// The float's handle drag in flight. A separate latch from `activeObjectTransform` because
-        /// the two answer different questions — one is about the whole layer, one about a region —
-        /// and folding them together would mean every branch below asking which it was.
+        /// The float's handle drag in flight. It used to have a sibling, `activeObjectTransform`, for
+        /// the whole-layer arm; that arm is gone (TODO item (12) stage 2) and every Move drag on a
+        /// vector layer — lassoed region or whole cel — is now this one latch.
         private var activeVectorFloatDrag: ObjectTransformDrag?
 
         /// Where the box is *right now*, while the finger is down — its similarity **and** its
@@ -1734,33 +1688,19 @@ struct CanvasView: UIViewRepresentable {
         }
 
         func beginObjectTransformDrag(_ handle: ObjectTransformFrame.Handle, at point: CGPoint) {
-            // A lasso move's float first, and **without `beginStructureGesture()`**:
-            // `StructureSnapshot` captures `layers` by value while `Cel.vector` is a class reference,
-            // so it would record a step that reverts nothing. The float writes its own step per
-            // gesture end instead.
-            if let float = canvasManager.vectorFloat {
-                // **The mode is latched here, once**, with the rest of the drag — see
-                // `ObjectTransformDrag.isFreeform`. The Move bar's picker stays live while a piece
-                // floats, and reading it per delta would change what the finger already down means.
-                activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle,
-                                                            at: point,
-                                                            freeform: canvasManager.vectorFloatIsFreeform)
-                canvasManager.beginVectorFloatDrag()
-                // Synchronously, not on the next SwiftUI pass: the first delta can arrive before one.
-                updateVectorFloat()
-                return
-            }
-            guard let resolved = resolveVectorTransformTarget() else { return }
-            let frame = ObjectTransformFrame(transform: resolved.vector.layerTransform(pivot: resolved.pivot),
-                                             contentSize: resolved.contentSize)
-            activeObjectTransform = ActiveObjectTransform(
-                drag: ObjectTransformDrag(frame: frame, handle: handle, at: point),
-                layerIndex: resolved.index, layerID: resolved.layerID,
-                pivot: resolved.pivot, contentSize: resolved.contentSize)
-            canvasManager.beginStructureGesture()
-            // From here until lift the layer is shown through Core Animation and rasterizes nothing
-            // — see `StrokeCanvasView.beginLiveLayerTransform`.
-            layerHosts[resolved.layerID]?.strokeView.beginLiveLayerTransform(base: resolved.vector.transform)
+            // **Without `beginStructureGesture()`**: `StructureSnapshot` captures `layers` by value
+            // while `Cel.vector` is a class reference, so it would record a step that reverts
+            // nothing. The float writes its own step per gesture end instead.
+            guard let float = canvasManager.vectorFloat else { return }
+            // **The mode is latched here, once**, with the rest of the drag — see
+            // `ObjectTransformDrag.isFreeform`. The Move bar's picker stays live while a piece
+            // floats, and reading it per delta would change what the finger already down means.
+            activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle,
+                                                        at: point,
+                                                        freeform: canvasManager.vectorFloatIsFreeform)
+            canvasManager.beginVectorFloatDrag()
+            // Synchronously, not on the next SwiftUI pass: the first delta can arrive before one.
+            updateVectorFloat()
         }
 
         /// One delta. **The whole per-touch-move cost of a Move drag is this function**, so what is
@@ -1781,54 +1721,18 @@ struct CanvasView: UIViewRepresentable {
                                                                      aspect: pose.aspect,
                                                                      allowedHandles: float.frame.allowedHandles),
                                          canvasScale: canvasContentScale)
-                return
             }
-            guard let active = activeObjectTransform,
-                  canvasManager.layers.indices.contains(active.layerIndex),
-                  canvasManager.isVectorTransforming, !canvasManager.activeCelIsInBetween,
-                  let celIdx = canvasManager.activeCelIndex(inLayer: active.layerIndex, atFrame: canvasManager.currentFrame),
-                  let vector = canvasManager.layers[active.layerIndex].cels[celIdx].vector else { return }
-            let transform = active.drag.transform(draggedTo: point)
-            canvasManager.setVectorTransform(transform, layerIndex: active.layerIndex, pivot: active.pivot)
-            layerHosts[active.layerID]?.strokeView.updateLiveLayerTransform(vector.transform)
-            transformOverlay?.update(isActive: true,
-                                     frame: ObjectTransformFrame(transform: transform,
-                                                                 contentSize: active.contentSize),
-                                     canvasScale: canvasContentScale)
         }
 
         func endObjectTransformDrag() {
-            if activeVectorFloatDrag != nil {
-                let pose = liveVectorFloatPose
-                activeVectorFloatDrag = nil
-                liveVectorFloatPose = nil
-                // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
-                // `beginObjectTransformDrag`.
-                if let pose { canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect) }
-                updateVectorFloat()
-                return
-            }
-            guard let active = activeObjectTransform else { return }
-            activeObjectTransform = nil
-            // The one rasterize of the whole gesture.
-            layerHosts[active.layerID]?.strokeView.endLiveLayerTransform()
-            canvasManager.commitStructureGesture(label: .transform)
-        }
-
-        /// The active vector cel a whole-layer transform would act on, with the box's pivot and size
-        /// — the guards `updateTransformOverlay` applies, in one place both it and the drag can use.
-        private func resolveVectorTransformTarget()
-            -> (index: Int, layerID: UUID, vector: VectorCanvas, pivot: CGPoint, contentSize: CGSize)? {
-            let index = canvasManager.currentLayerIndex
-            guard canvasManager.layers.indices.contains(index),
-                  canvasManager.isVectorTransforming, canvasManager.layers[index].kind == .vector,
-                  !canvasManager.activeCelIsInBetween,
-                  let canvasSize = canvasManager.canvasSize,
-                  let celIdx = canvasManager.activeCelIndex(inLayer: index, atFrame: canvasManager.currentFrame),
-                  let vector = canvasManager.layers[index].cels[celIdx].vector else { return nil }
-            let localBounds = vector.localContentBounds() ?? CGRect(origin: .zero, size: canvasSize)
-            return (index, canvasManager.layers[index].id, vector,
-                    CGPoint(x: localBounds.midX, y: localBounds.midY), localBounds.size)
+            guard activeVectorFloatDrag != nil else { return }
+            let pose = liveVectorFloatPose
+            activeVectorFloatDrag = nil
+            liveVectorFloatPose = nil
+            // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
+            // `beginObjectTransformDrag`.
+            if let pose { canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect) }
+            updateVectorFloat()
         }
 
         /// Spawns a block on the active layer when the stroke that is *just now beginning* landed on
@@ -1897,10 +1801,10 @@ struct CanvasView: UIViewRepresentable {
         func canvasTouchInputs(chrome: CanvasTouchChrome = .none) -> CanvasTouchInputs {
             let index = canvasManager.currentLayerIndex
             let layer = canvasManager.layers.indices.contains(index) ? canvasManager.layers[index] : nil
-            // **Nine one-line reads and no decision, which is the point.** The one part of this that
+            // **Eight one-line reads and no decision, which is the point.** The one part of this that
             // had a decision in it — a layer's kind mapped to the kind the gates make of it — is
             // `CanvasActiveLayer.init(kind:)`, in the model, where a logic test can reach it. What is
-            // left is nine fields, each the property it is named for, because this function is the
+            // left is eight fields, each the property it is named for, because this function is the
             // half of the arrangement nothing in the fast tier can link (see that initialiser's
             // comment, and `CanvasTouchInputs`' own, for the gap that leaves and what covers it).
             return CanvasTouchInputs(
@@ -1909,7 +1813,6 @@ struct CanvasView: UIViewRepresentable {
                 panel: activePanel,
                 hasFloatingPiece: canvasManager.floatingPiece != nil,
                 hasVectorFloat: canvasManager.vectorFloat != nil,
-                isVectorTransforming: canvasManager.isVectorTransforming,
                 activeLayer: CanvasActiveLayer(kind: layer?.kind),
                 activeLayerIsOnScreen: layer != nil && canvasManager.isLayerEffectivelyVisible(index),
                 chrome: chrome)
@@ -2961,12 +2864,12 @@ struct CanvasView: UIViewRepresentable {
         /// would at least have raised a banner. The owner chose this over leaving it silent and over
         /// raising a notice.
         ///
-        /// **Both arms, because both are the same asymmetry.** A lassoed float settles through
-        /// `commitVectorFloatIfNeeded()` and a whole-layer transform through `isVectorTransforming =
-        /// false` — the two branches `TopToolbar.toggleMove` already takes when Move is engaged, so
-        /// tapping away and tapping the Move button are the same two calls. Neither records a step of
-        /// its own: a float's nudges are already on the stack one apiece (LASSO_MOVE.md §5) and the
-        /// transform's bracket closes on the flag's `didSet`, which is what pushes *its* step.
+        /// **One arm, where there were two.** A float settles through `commitVectorFloatIfNeeded()` —
+        /// the branch `TopToolbar.toggleMove` already takes when Move is engaged, so tapping away and
+        /// tapping the Move button are the same call. It records no step of its own: a float's nudges
+        /// are already on the stack one apiece (LASSO_MOVE.md §5). The second arm settled a whole-layer
+        /// transform with `isVectorTransforming = false`; TODO item (12) stage 2 deleted it, because
+        /// Move with no selection lifts a float now and takes the first branch.
         @objc func handleMoveBoxCommit(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended, let container = containerView else { return }
             // Before the ownership guard, as every canvas touch is: a tap that this handler declines
@@ -2975,11 +2878,7 @@ struct CanvasView: UIViewRepresentable {
             let canvasPoint = recognizer.location(in: container)
             let touch = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
             guard CanvasTouchOwner.owner(in: touch) == .moveBoxCommit else { return }
-            if canvasManager.vectorFloat != nil {
-                canvasManager.commitVectorFloatIfNeeded()
-            } else if canvasManager.isVectorTransforming {
-                canvasManager.isVectorTransforming = false
-            }
+            canvasManager.commitVectorFloatIfNeeded()
         }
 
         /// The text tool's placement tap: put a box where the artist tapped and raise the keyboard.

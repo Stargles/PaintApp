@@ -375,16 +375,18 @@ final class StrokeCanvasView: UIView {
     /// headlessly across all twelve inputs, because this file is not in the UI-test target and the
     /// only other way to check the three roles is a 22-minute suite.
     func refreshDisplay() {
-        // While the Move tool is dragging this whole layer, Core Animation is already showing every
-        // delta (see `beginLiveLayerTransform`) and a rasterize here would be the redundant work
-        // item 11 removed from the stroke path. `displayedVectorVersion` is deliberately left stale,
-        // so the first `refreshDisplayIfStale` after the drag repaints even if `endLiveLayerTransform`
-        // were never reached.
+        // While the Move tool is dragging a lifted piece, Core Animation is already showing every
+        // delta (see `beginVectorFloat`) and a rasterize here would be the redundant work
+        // [PERFORMANCE.md](PERFORMANCE.md) item 11 removed from the stroke path: the moved ids are
+        // suppressed from the source for the float's life, so the source's pixels genuinely do not
+        // change across nudges and a rasterize here would produce the image already on screen.
+        // `displayedVectorVersion` is deliberately left stale, so the first `refreshDisplayIfStale`
+        // after the drag repaints even if `endVectorFloat` were never reached.
         //
-        // A lasso move's float is the same bargain on the same grounds: the moved ids are suppressed
-        // from the source for the float's life, so the source's pixels genuinely do not change across
-        // nudges and a rasterize here would produce the image already on screen.
-        guard liveLayerTransformBase == nil, vectorFloatBase == nil else { return }
+        // A second latch, `liveLayerTransformBase`, guarded this line until TODO item (12) stage 2:
+        // the Move tool used to write a whole-layer affine per touch-move and show it the same way.
+        // Move with no selection lifts a float now, so there is one latch for both.
+        guard vectorFloatBase == nil else { return }
         displayedRasterVersion = raster?.version ?? -1
         guard let vectorCanvas else {
             showScratch(nil)
@@ -413,65 +415,10 @@ final class StrokeCanvasView: UIView {
         if plan.publishesLivePreviewFrame { livePreviewFrames += 1 }
     }
 
-    // MARK: - The Move tool's live whole-layer transform
-
-    /// The layer transform this view's rasterized image was rendered at, latched while the Move
-    /// tool's box is being dragged. Nil at all other times, and its nil-ness is the whole switch:
-    /// `refreshDisplay` is suppressed while it is set.
-    private var liveLayerTransformBase: CGAffineTransform?
-
-    /// Start showing whole-layer transform deltas through Core Animation instead of through the
-    /// rasterizer.
-    ///
-    /// **This is [PERFORMANCE.md](PERFORMANCE.md) item 11's lesson applied to the other
-    /// per-input-event path on a vector layer.** A move drag used to spend, per touch-move, two
-    /// full-canvas rasterizations of every stroke in the layer plus a canvas-sized alpha scan — one
-    /// inside `VectorCanvas.localContentBounds()` and one inside `render()`, whose memo
-    /// `setTransform` had just invalidated. The owner measured the result at 5 fps on their iPad on
-    /// 2026-08-21. Item 11's fix was not a faster re-render but *no* re-render, because Core
-    /// Animation was compositing the result anyway; a layer transform is the most
-    /// Core-Animation-friendly operation there is, since the pixels do not change at all — only
-    /// where they land.
-    ///
-    /// `base` is the affine the currently displayed image was rendered at. Every later delta is
-    /// expressed relative to it, so the drag needs no transform-free render to work from.
-    func beginLiveLayerTransform(base: CGAffineTransform) {
-        // Before the latch, or a stale image would be the one the whole drag is expressed against.
-        refreshDisplayIfStale()
-        liveLayerTransformBase = base
-        imageView.transform = .identity
-    }
-
-    /// Shows the layer at `current` without rasterizing anything. Costs one `UIView.transform`
-    /// assignment.
-    func updateLiveLayerTransform(_ current: CGAffineTransform) {
-        guard let base = liveLayerTransformBase else { return }
-        // `UIView.transform` is applied about the view's centre, so the size is load-bearing rather
-        // than incidental: taken as zero it would conjugate about the origin and put a visible
-        // offset in every scale and every rotation. `bounds` is the canvas rect once the host has
-        // been laid out; the canvas's own size is the same number, and is the answer before then.
-        let size = bounds.width > 0 && bounds.height > 0 ? bounds.size : (vectorCanvas?.size ?? .zero)
-        imageView.transform = LiveLayerTransform.viewTransform(from: base, to: current,
-                                                              inBoundsOfSize: size)
-    }
-
-    /// Ends the drag and rasterizes **once**, at whatever transform the layer finished on.
-    ///
-    /// Idempotent, and it has to be: the drag can end by lift, by cancellation, or by the artist
-    /// leaving the layer mid-gesture, and a view left holding a Core Animation transform with no
-    /// matching latch would show the layer permanently doubly-transformed.
-    func endLiveLayerTransform() {
-        guard liveLayerTransformBase != nil else { return }
-        liveLayerTransformBase = nil
-        imageView.transform = .identity
-        refreshDisplay()
-    }
-
     // MARK: - The lasso move's floating piece
 
     /// The layer transform the float's image was rendered at, latched for the float's life. Nil at all
-    /// other times, and its nil-ness is the switch that suppresses `refreshDisplay`, exactly as
-    /// `liveLayerTransformBase`'s is.
+    /// other times, and its nil-ness is the switch that suppresses `refreshDisplay`.
     private var vectorFloatBase: CGAffineTransform?
 
     /// Whether a lasso move's piece is currently latched over this layer — read by `CanvasView` so it
@@ -482,12 +429,16 @@ final class StrokeCanvasView: UIView {
     /// out of. `image` is canvas-space (`VectorCanvas.renderIsolated(ids:)`), `base` the layer's own
     /// transform at the moment of the lift.
     ///
-    /// **This latch is the whole performance story of a lasso move.** Three canvas-sized renders for
+    /// **This latch is the whole performance story of a Move.** Three canvas-sized renders for
     /// the entire move — the hole, the float, and the bake — independent of how many times the artist
-    /// nudges it, against re-minting a preview per nudge.
+    /// nudges it, against re-minting a preview per nudge. It is
+    /// [PERFORMANCE.md](PERFORMANCE.md) item 11's lesson applied to the other per-input-event path on
+    /// a vector layer: a move drag used to spend, per touch-move, two full-canvas rasterizations of
+    /// every stroke in the layer plus a canvas-sized alpha scan — the owner measured 5 fps on their
+    /// iPad on 2026-08-21 — and the fix was not a faster re-render but *no* re-render, because Core
+    /// Animation was compositing the result anyway.
     func beginVectorFloat(image: UIImage?, base: CGAffineTransform) {
-        // Before the latch, or a stale hole would be the picture the whole drag is expressed against
-        // — `beginLiveLayerTransform`'s reason, verbatim.
+        // Before the latch, or a stale hole would be the picture the whole drag is expressed against.
         refreshDisplayIfStale()
         vectorFloatBase = base
         floatView.transform = .identity
@@ -501,9 +452,10 @@ final class StrokeCanvasView: UIView {
     /// Shows the piece at `current` without rasterizing anything. Costs one `UIView.transform`.
     func updateVectorFloat(_ current: CGAffineTransform) {
         guard let base = vectorFloatBase else { return }
-        // `UIView.transform` applies about the view's centre, so the size is load-bearing here for the
-        // reason `updateLiveLayerTransform` gives: taken as zero it would conjugate about the origin
-        // and put a visible offset in every scale and every rotation.
+        // `UIView.transform` applies about the view's centre, so the size is load-bearing rather than
+        // incidental: taken as zero it would conjugate about the origin and put a visible offset in
+        // every scale and every rotation. `bounds` is the canvas rect once the host has been laid
+        // out; the canvas's own size is the same number, and is the answer before then.
         let size = bounds.width > 0 && bounds.height > 0 ? bounds.size : (vectorCanvas?.size ?? .zero)
         floatView.transform = LiveLayerTransform.viewTransform(from: base, to: current,
                                                                inBoundsOfSize: size)
@@ -511,7 +463,7 @@ final class StrokeCanvasView: UIView {
 
     /// Drops the latch and rasterizes once, at whatever the layer holds now.
     ///
-    /// **Idempotent**, and it has to be, for `endLiveLayerTransform`'s reason: a float ends by commit,
+    /// **Idempotent**, and it has to be: a float ends by commit,
     /// by cancel, by an undo, or by the artist leaving the layer, and a view left holding a Core
     /// Animation transform with no matching latch shows its content permanently doubly-transformed.
     func endVectorFloat() {
