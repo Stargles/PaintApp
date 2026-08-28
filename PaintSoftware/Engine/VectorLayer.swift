@@ -1688,9 +1688,27 @@ final class VectorCanvas {
     /// exists exactly when some stored sample is inside. Early-exit on the first; nothing here needs
     /// a crossing bisected, since no cut is made.
     ///
-    /// Returns every kind, images and erasers included: this answers containment, not eligibility.
-    /// Which kinds a given edit may touch is that edit's business — `recolorSelection` skips placed
-    /// images (no colour to change) and `.erase` strokes (`.destinationOut` reads only alpha).
+    /// **This answers containment, not eligibility, and the distinction is load-bearing rather than
+    /// tidy.** Every kind is answered for, images and `.erase` strokes included; which kinds a given
+    /// edit may then *touch* is that edit's business and belongs at the call site.
+    ///
+    /// `recolorSelection` skips placed images (`VectorImageElement` has no colour field) and `.erase`
+    /// strokes (`.destinationOut` reads only alpha, so recolouring one changes no pixel). **A lasso
+    /// move rules the exact opposite for the same two kinds** — LASSO_MOVE.md §5.7, verbatim: *"If
+    /// the hole is fully inside, it moves it"* — because a hole has a position even though it has no
+    /// colour. Bake either edit's kind filter in here and the other one silently inherits a rule its
+    /// owner ruled against; for Move that failure is invisible, because the ink simply does not
+    /// travel and nothing goes red.
+    ///
+    /// That is not hypothetical. The owner has asked for a three-way membership rule on Move — move
+    /// everything the loop *touches*, move only what is *wholly inside*, or today's cut-at-the-
+    /// boundary — and the first of those is this predicate exactly. It is meant to be reused as it
+    /// stands.
+    ///
+    /// `LassoMoveLogicTests.testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips` pins
+    /// this: it asserts an eraser and a photo inside the loop come back in the set, so moving the
+    /// recolour's skip down into this function fails a test *today* rather than at the moment Move
+    /// reuses it.
     func elementIDs(insideLocalPath loop: CGPath) -> Set<UUID> {
         lock.lock()
         defer { lock.unlock() }
@@ -1719,12 +1737,17 @@ final class VectorCanvas {
                 let fillRule: CGPathFillRule = fill.evenOddFill ? .evenOdd : .winding
                 if !path.intersection(loop, using: fillRule).isEmpty { insideIDs.insert(fill.id) }
 
+            // **A placed image and a text box are answered by their *centre*, which is a third rule
+            // — neither "touching" nor "wholly enclosed".** It is `splitForLassoMove`'s existing rule
+            // for both kinds, and it stays (owner, 2026-08-28: text keeps the centre rule for the
+            // recolour). Recorded as a rule rather than as arithmetic because it is a *choice*: the
+            // owner is being asked which of the three these two kinds should follow under Move's new
+            // membership modes, and a mode that wants a different answer changes these two arms
+            // rather than discovering that centre-membership was assumed everywhere.
             case .image(let image):
                 if loop.contains(image.transform.position, using: rule) { insideIDs.insert(image.id) }
 
             case .text(let text):
-                // The box **centre**, which is `splitForLassoMove`'s rule for text and stays its rule
-                // here (owner, 2026-08-28): one containment answer for type, not one per feature.
                 let boundingBox = text.frame.boundingBox
                 if loop.contains(CGPoint(x: boundingBox.midX, y: boundingBox.midY), using: rule) {
                     insideIDs.insert(text.id)

@@ -3387,6 +3387,53 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(colour.blue, b, accuracy: 1e-6, message, file: file, line: line)
     }
 
+    /// **The containment predicate answers for every kind — including the two a recolour skips.**
+    ///
+    /// `VectorCanvas.elementIDs(insideLocalPath:)` is a *geometric* membership test; the kind filter
+    /// lives in `recolorSelection`, one level up. This test exists to keep it there, because the
+    /// tempting simplification — skip erasers and images inside the predicate, since the only caller
+    /// today skips them anyway — is a trap with no red test of its own.
+    ///
+    /// A lasso **move** rules the exact opposite for those two kinds (LASSO_MOVE.md §5.7: *"If the
+    /// hole is fully inside, it moves it"*), and the owner has asked for a Move membership mode that
+    /// would reuse this very predicate. If the recolour's skip were baked in here, that Move mode
+    /// would silently stop carrying erasers and photos — and the failure announces itself only as ink
+    /// that quietly does not travel, which nothing else in this suite would catch.
+    ///
+    /// Drives the engine seam directly rather than through `recolorSelection`, because the whole
+    /// point is that the two disagree about eligibility while agreeing about geometry.
+    func testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips() {
+        let (_, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 18), to: CGPoint(x: 40, y: 18), size: 5))
+        vector.addStroke(stroke(from: CGPoint(x: 22, y: 22), to: CGPoint(x: 38, y: 22),
+                                size: 4, composite: .erase))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 18, y: 26, width: 20, height: 6),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                          rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                          size: CGSize(width: 6, height: 6)),
+                                           transform: LayerTransform(position: CGPoint(x: 30, y: 36),
+                                                                     scale: 1, rotation: 0)))
+        var recipe = TextRecipe(string: "hi")
+        recipe.typography.pointSize = 12
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 26, y: 40),
+                                                             size: CGSize(width: 10, height: 6))))
+
+        let path = loop(CGRect(x: 8, y: 8, width: 48, height: 48))
+        let caught = vector.elementIDs(insideLocalPath: vector.localPath(fromCanvas: path)
+                                                              .normalized(using: VectorCanvas.lassoFillRule))
+
+        XCTAssertEqual(caught, Set(vector.elements.map(\.id)),
+                       """
+                       every kind inside the loop must come back — the eraser and the photo included. \
+                       A recolour skips those two at the call site; a lasso move must carry them \
+                       (LASSO_MOVE.md §5.7), so the skip may not live in the predicate.
+                       """)
+    }
+
     /// **A straddling stroke is recoloured whole and is not cut.** The owner's sentence, stated as an
     /// assertion: same element count, same id, same samples — only the hue moved.
     ///
