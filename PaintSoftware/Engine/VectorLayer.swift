@@ -314,6 +314,75 @@ enum VectorElement: Identifiable {
     }
 }
 
+/// **Which of three rules decides what a lasso move carries** — how much of a drawing travels when
+/// the loop covers only part of it.
+///
+/// The owner, 2026-08-28: *"There should be an option of three where instead of cutting the lines
+/// outside the selection, it moves all the lines including the ones partially inside the selection,
+/// or only the ones fully inside. The third option is the current behaviour."* (TODO item (20).)
+///
+/// **Ordered by how much travels, with the default in the middle**, which is what lets the picker
+/// read as a dial rather than as three unrelated buttons: `enclosed` takes the least, `cutting`
+/// takes exactly what is inside, `touching` takes the most. `.cutting` is the default and is
+/// bit-for-bit the behaviour that shipped, so nothing changes until the artist touches the picker.
+///
+/// **The two new modes are cheaper and safer than the one that ships**, which inverts the usual
+/// expectation: neither cuts anything, so there is no bisection, no boundary dab, no fresh ids, no
+/// lattice re-keying and — the one that matters — no interpolation-tier demotion, since the stroke
+/// count is unchanged. `VectorCanvas.liftWholeCel` is the working proof that a float which splits
+/// nothing shares every nudge, bake and teardown path with one that does.
+///
+/// **Not persisted, deliberately** (owner's ask, 2026-08-28): this is per-drawing intent, the line
+/// `CanvasManager.preserveMovePrecision` already draws. Storing it would make *last used* the
+/// default, which is not what was asked for. It lives on `CanvasManager.lassoMoveMembership` for the
+/// length of a session and nowhere else — there is no `@AppStorage` anywhere in this project.
+enum LassoMembership: String, CaseIterable, Identifiable {
+    /// **Enclosed** — only what lies *entirely* inside the loop travels, whole and uncut. A stroke
+    /// that pokes out anywhere is left where it is.
+    ///
+    /// This is the one mode that can catch nothing on a loop full of ink, which is why
+    /// `CanvasManager.beginVectorLassoMove` says so rather than failing silently: LASSO_MOVE.md
+    /// §5.9's silent empty lasso was over blank paper, where the artist can see the reason.
+    case enclosed
+    /// **Cut** — the shipped rule, and the default. A stroke crossing the loop is cut in two at the
+    /// boundary and the inside piece travels (LASSO_MOVE.md §5.1–5.2); a fill loses the chunk that
+    /// was inside; and text and a placed image, which cannot be cut, keep the **centre** rule that
+    /// has always been the cut rule rounded to the nearest whole object.
+    case cutting
+    /// **Touching** — anything the loop touches at all travels, whole and uncut, ink outside the
+    /// loop included. This is `VectorCanvas.elementIDs(insideLocalPath:)`'s existing predicate, the
+    /// one item (19)'s Change Colour already uses, with images and text answered by their own quad
+    /// rather than their centre.
+    case touching
+
+    var id: String { rawValue }
+
+    /// The segment's label. Three words the artist can hold in their head, not the internal names.
+    var displayName: String {
+        switch self {
+        case .enclosed: return "Enclosed"
+        case .cutting:  return "Cut"
+        case .touching: return "Touching"
+        }
+    }
+
+    /// One line under the picker saying what the selected segment does — the same job
+    /// `MoveTransformBottomBar`'s "Coming soon — acts like Uniform for now" caption does, and needed
+    /// for the same reason: the difference between the three is invisible until the artist has
+    /// already moved something.
+    var explanation: String {
+        switch self {
+        case .enclosed: return "Moves only what lies completely inside the loop."
+        case .cutting:  return "Cuts at the loop and moves what is inside."
+        case .touching: return "Moves anything the loop touches, whole."
+        }
+    }
+
+    /// Whether this mode cuts geometry at the boundary. Only `.cutting` does, and that is the whole
+    /// difference in the engine: the other two classify and lift, and change no element at all.
+    var cutsAtTheBoundary: Bool { self == .cutting }
+}
+
 /// How much fidelity a render is asked for. `.preview` stamps one stroked `CGPath` per stroke instead
 /// of hundreds of dabs — ~100x cheaper, which is what makes scrubbing usable — at the cost of per-dab
 /// pressure ramping, grain, scatter, rotation jitter, and dab alpha build-up. Shape, position, colour,
@@ -1540,6 +1609,142 @@ final class VectorCanvas {
     /// carry `evenOddFill`.
     static let lassoFillRule: CGPathFillRule = .winding
 
+    /// **A placed image's four corners as a closed path, in local space** — mapped exactly the way
+    /// `draw(image:into:)` maps them, so the quad this returns is the rectangle the artist can see.
+    ///
+    /// Not `bounds(of:)`, which is the *circumscribing disc* of the scaled size: that is deliberately
+    /// rotation-independent and therefore loose, which is right for a punch-overlap test and wrong
+    /// for a membership rule the artist is going to check against the picture. And **not the four
+    /// corners tested one at a time** — four corners inside a crescent-shaped loop does not mean the
+    /// rectangle is inside it.
+    static func quad(of element: VectorImageElement) -> CGPath {
+        let size = element.image.size
+        var t = CGAffineTransform(translationX: element.transform.position.x,
+                                  y: element.transform.position.y)
+            .rotated(by: element.transform.rotation)
+            .scaledBy(x: element.transform.scale, y: element.transform.scale)
+        return CGPath(rect: CGRect(x: -size.width / 2, y: -size.height / 2,
+                                   width: size.width, height: size.height), transform: &t)
+    }
+
+    /// **A text box's four corners as a closed path.** `TextFrame.corners` *is* the frame — already
+    /// turned, stretched or mirrored by whatever has been done to it — so this is exact for every
+    /// pose a box can reach, where `boundingBox` is its axis-aligned hull and therefore loose the
+    /// moment the box is not upright.
+    static func quad(of frame: TextFrame) -> CGPath {
+        let path = CGMutablePath()
+        path.addLines(between: frame.corners)
+        path.closeSubpath()
+        return path
+    }
+
+    /// **Does `loop` catch `element` under `membership`?** The one place the per-kind membership rule
+    /// is decided, for all three modes and all four kinds — so `splitForLassoMove`,
+    /// `elementIDs(insideLocalPath:membership:)` and every mode of the Move picker cannot come to
+    /// disagree about what "inside" means.
+    ///
+    /// `loopBounds` is `loop.boundingBoxOfPath` hoisted out by the caller: it is an `O(n)` walk of a
+    /// path that can carry 1,500 points, and asking for it per element would put that walk inside the
+    /// display-list loop.
+    ///
+    /// **Strokes are answered by the centre line in all three modes** (LASSO_MOVE.md §5.4), and the
+    /// consequence under `.enclosed` is visible and benign: a thick stroke whose spine is enclosed
+    /// travels whole even where its ink pokes out. The alternative — an outline-based Enclosed —
+    /// fails the other way, leaving such a stroke behind *silently*, and ink membership has no
+    /// primitive in this codebase anyway (§1, and §3 stage 4 keeps it on the board as a named
+    /// deferred option).
+    ///
+    /// **`samples.contains` / `samples.allSatisfy`, not `membershipRuns`, and that is exact rather
+    /// than an approximation.** `StrokeGeometry.membershipRuns` decides membership by
+    /// `inside(sample.point)` alone and bisects only where two consecutive samples disagree, so a run
+    /// marked inside exists exactly when some stored sample is inside, and every sample is inside
+    /// exactly when no run is marked outside. Skipping it skips ~40 bisections per crossing for an
+    /// answer that is the same bit.
+    ///
+    /// **Text and a placed image follow the mode in Touching and Enclosed and keep the centre in
+    /// Cut** (owner, 2026-08-28), so each of the two new modes has one sentence true of every kind
+    /// while Cut keeps what it has always been: the cut rule rounded for kinds that cannot be cut.
+    /// Both are asked with the *same two `CGPath` booleans the fill arm uses*, on the element's own
+    /// quad.
+    ///
+    /// **An area rule catches nothing with no area, and that is right rather than an edge case.**
+    /// `.enclosed` asks for an intersection as well as an empty remainder, because a degenerate quad
+    /// — an empty text box, a zero-size image — subtracts to nothing wherever it sits, and would
+    /// otherwise report itself enclosed by a loop on the other side of the canvas. It draws nothing,
+    /// so neither area mode carries it; `.cutting` still answers it by its centre.
+    static func caught(_ element: VectorElement, by loop: CGPath, bounds loopBounds: CGRect,
+                       using rule: CGPathFillRule, membership: LassoMembership) -> Bool {
+        /// Both area rules, on one closed path: "the loop reaches it" and "the loop covers all of
+        /// it". The `subtracting` runs first under `.enclosed` because it is the cheap reject.
+        func area(_ path: CGPath, using pathRule: CGPathFillRule) -> Bool {
+            switch membership {
+            case .enclosed:
+                guard path.subtracting(loop, using: pathRule).isEmpty else { return false }
+                return !path.intersection(loop, using: pathRule).isEmpty
+            case .cutting, .touching:
+                return !path.intersection(loop, using: pathRule).isEmpty
+            }
+        }
+
+        switch element {
+        case .stroke(let stroke):
+            guard !stroke.samples.isEmpty else { return false }
+            switch membership {
+            case .enclosed:
+                return stroke.samples.allSatisfy { loop.contains($0.point, using: rule) }
+            case .cutting, .touching:
+                return stroke.samples.contains { loop.contains($0.point, using: rule) }
+            }
+
+        case .fill(let fill):
+            // Each fill asked with **its own** rule, as the split cuts it: a clear-selection hole is
+            // stored `evenOddFill`, and testing it as a winding path would report the very hole it
+            // exists to make as solid ink the loop had caught.
+            guard let path = fill.cgPath, path.boundingBoxOfPath.intersects(loopBounds) else {
+                return false
+            }
+            return area(path, using: fill.evenOddFill ? .evenOdd : .winding)
+
+        case .image(let image):
+            guard membership != .cutting else {
+                return loop.contains(image.transform.position, using: rule)
+            }
+            let quad = Self.quad(of: image)
+            guard quad.boundingBoxOfPath.intersects(loopBounds) else { return false }
+            return area(quad, using: .winding)
+
+        case .text(let text):
+            guard membership != .cutting else {
+                let box = text.frame.boundingBox
+                return loop.contains(CGPoint(x: box.midX, y: box.midY), using: rule)
+            }
+            let quad = Self.quad(of: text.frame)
+            guard quad.boundingBoxOfPath.intersects(loopBounds) else { return false }
+            return area(quad, using: .winding)
+        }
+    }
+
+    /// Every element `loop` catches under `membership`, **cutting nothing**. Caller must hold `lock`.
+    ///
+    /// The shared body of `elementIDs(insideLocalPath:membership:)` and of `splitForLassoMove`'s two
+    /// non-cutting arms, so the picker's Touching cannot drift from the recolour's answer for the
+    /// kinds where the two agree.
+    private func caughtIDs(insideLocalPath loop: CGPath, bounds loopBounds: CGRect,
+                           strokeCandidates: Set<Int>, membership: LassoMembership) -> Set<UUID> {
+        let rule = Self.lassoFillRule
+        var insideIDs: Set<UUID> = []
+        for (index, element) in _elements.enumerated() {
+            // `strokeIndex()` holds centrelines only, so fills, images and text take a linear scan
+            // against their own bounds inside `caught` — the same limitation, and the same shape, as
+            // `splitForLassoMove`'s cutting arm.
+            if element.stroke != nil, !strokeCandidates.contains(index) { continue }
+            if Self.caught(element, by: loop, bounds: loopBounds, using: rule, membership: membership) {
+                insideIDs.insert(element.id)
+            }
+        }
+        return insideIDs
+    }
+
     /// The display list split along `loop`, so that everything inside it can move on its own.
     ///
     /// Returns the new list, the ids of the elements that are inside — the ones a float carries — and
@@ -1568,7 +1773,20 @@ final class VectorCanvas {
     /// app's own "the eraser is a stroke" decision applied once more. Its consequence is that a float
     /// made only of punches renders blank while it is dragged and lands when it bakes — see
     /// `renderIsolated(ids:)`.
-    func splitForLassoMove(insideLocalPath loop: CGPath)
+    ///
+    /// **`membership` is a parameter on this function rather than a sibling beside it** (TODO item
+    /// (20)). A sibling would duplicate the broad phase, `lassoFillRule`, the linear scan for the
+    /// three kinds the index does not hold, the `insideIDs.isEmpty` contract below and the
+    /// `mayDiverge` call — five things that have to agree for the three modes to feel like one
+    /// feature. It defaults to `.cutting`, so every call site and every test written before the modes
+    /// existed compiles and passes untouched, which is the regression proof that Cut is unchanged.
+    ///
+    /// **The two new modes return `_elements` verbatim and cut nothing.** They are the classifier
+    /// above, and the tuple is `liftWholeCel`'s shape: same lift, same nudges, same bake, same
+    /// teardown. `mayDiverge` is still asked and is still needed — under `.enclosed` it fires *more*
+    /// often rather than less, because fewer moved ids means more unmoved punches sitting above the
+    /// lowest moved index.
+    func splitForLassoMove(insideLocalPath loop: CGPath, membership: LassoMembership = .cutting)
         -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
         lock.lock()
         defer { lock.unlock() }
@@ -1579,6 +1797,13 @@ final class VectorCanvas {
         // strokes only, so fills, images and text take a linear scan against their own bounds below.
         let strokeCandidates = Set(strokeIndex().segments(near: box).map(\.elementIndex))
         let rule = Self.lassoFillRule
+
+        guard membership.cutsAtTheBoundary else {
+            let insideIDs = caughtIDs(insideLocalPath: loop, bounds: box,
+                                      strokeCandidates: strokeCandidates, membership: membership)
+            guard !insideIDs.isEmpty else { return nil }
+            return (_elements, insideIDs, Self.mayDiverge(_elements, movedIDs: insideIDs))
+        }
 
         var result: [VectorElement] = []
         result.reserveCapacity(_elements.count + 2)
@@ -1673,13 +1898,14 @@ final class VectorCanvas {
     /// same `lassoFillRule`, same centre-line and centre-point rules — the whole point is that
     /// "what did the lasso catch" has one answer in this file, whatever the caller then does with it.
     ///
-    /// **A sibling rather than a parameter on `splitForLassoMove`, because that function cannot
-    /// answer this question.** Its fast path inserts a stroke's id only when the stroke is *wholly*
-    /// inside; a straddling stroke is cut, and only the fresh inside piece enters the set. That is
-    /// right for a move — only what is inside travels (LASSO_MOVE.md §5.1) — and wrong for a
-    /// recolour, which the owner ruled splits nothing: *"It's alright if part of the stroke is
-    /// outside the selection"* (2026-08-28). An element this returns is recoloured **whole**, ink
-    /// outside the loop included.
+    /// **A sibling rather than a parameter on `splitForLassoMove`, because that function's *cutting*
+    /// arm cannot answer this question.** That arm inserts a stroke's id only when the stroke is
+    /// wholly inside; a straddling stroke is cut, and only the fresh inside piece enters the set.
+    /// That is right for a move under Cut — only what is inside travels (LASSO_MOVE.md §5.1) — and
+    /// wrong for a recolour, which the owner ruled splits nothing: *"It's alright if part of the
+    /// stroke is outside the selection"* (2026-08-28). An element this returns is recoloured
+    /// **whole**, ink outside the loop included. The two functions now share their body through
+    /// `caughtIDs`, and `splitForLassoMove`'s two non-cutting arms *are* this predicate.
     ///
     /// **For a stroke the predicate collapses to "any stored sample inside", and that is not an
     /// approximation of the move's rule — it is bit-for-bit the same rule.**
@@ -1700,16 +1926,22 @@ final class VectorCanvas {
     /// owner ruled against; for Move that failure is invisible, because the ink simply does not
     /// travel and nothing goes red.
     ///
-    /// That is not hypothetical. The owner has asked for a three-way membership rule on Move — move
-    /// everything the loop *touches*, move only what is *wholly inside*, or today's cut-at-the-
-    /// boundary — and the first of those is this predicate exactly. It is meant to be reused as it
-    /// stands.
+    /// That was not hypothetical, and it has arrived. Move's three membership modes (TODO item (20))
+    /// are `membership` below, and `.touching` is this predicate for strokes and fills exactly.
+    ///
+    /// **`membership` defaults to `.cutting`, which is the recolour's rule and not a coincidence.**
+    /// Under `.cutting` a placed image and a text box are answered by their **centre** — a third rule,
+    /// neither "touching" nor "wholly enclosed" — and that is what the owner ruled on 2026-08-28 for
+    /// both the recolour and Move's Cut mode: it is the cut rule rounded for kinds that cannot be
+    /// cut. The two new modes answer those kinds by their own quad instead, so that each of them has
+    /// one sentence true of every kind. See `caught(_:by:bounds:using:membership:)`.
     ///
     /// `LassoMoveLogicTests.testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips` pins
     /// this: it asserts an eraser and a photo inside the loop come back in the set, so moving the
     /// recolour's skip down into this function fails a test *today* rather than at the moment Move
     /// reuses it.
-    func elementIDs(insideLocalPath loop: CGPath) -> Set<UUID> {
+    func elementIDs(insideLocalPath loop: CGPath,
+                    membership: LassoMembership = .cutting) -> Set<UUID> {
         lock.lock()
         defer { lock.unlock() }
         guard !_elements.isEmpty else { return [] }
@@ -1718,43 +1950,8 @@ final class VectorCanvas {
         // `strokeIndex()` holds centrelines only, so fills, images and text take a linear scan
         // against their own bounds — the same limitation, and the same shape, as `splitForLassoMove`.
         let strokeCandidates = Set(strokeIndex().segments(near: box).map(\.elementIndex))
-        let rule = Self.lassoFillRule
-
-        var insideIDs: Set<UUID> = []
-        for (index, element) in _elements.enumerated() {
-            switch element {
-            case .stroke(let stroke):
-                guard strokeCandidates.contains(index) else { continue }
-                if stroke.samples.contains(where: { loop.contains($0.point, using: rule) }) {
-                    insideIDs.insert(stroke.id)
-                }
-
-            case .fill(let fill):
-                guard let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) else { continue }
-                // Each fill asked with **its own** rule, as the split asks it: a clear-selection hole
-                // is stored `evenOddFill`, and testing it as a winding path would report the very
-                // hole it exists to make as solid ink the loop had caught.
-                let fillRule: CGPathFillRule = fill.evenOddFill ? .evenOdd : .winding
-                if !path.intersection(loop, using: fillRule).isEmpty { insideIDs.insert(fill.id) }
-
-            // **A placed image and a text box are answered by their *centre*, which is a third rule
-            // — neither "touching" nor "wholly enclosed".** It is `splitForLassoMove`'s existing rule
-            // for both kinds, and it stays (owner, 2026-08-28: text keeps the centre rule for the
-            // recolour). Recorded as a rule rather than as arithmetic because it is a *choice*: the
-            // owner is being asked which of the three these two kinds should follow under Move's new
-            // membership modes, and a mode that wants a different answer changes these two arms
-            // rather than discovering that centre-membership was assumed everywhere.
-            case .image(let image):
-                if loop.contains(image.transform.position, using: rule) { insideIDs.insert(image.id) }
-
-            case .text(let text):
-                let boundingBox = text.frame.boundingBox
-                if loop.contains(CGPoint(x: boundingBox.midX, y: boundingBox.midY), using: rule) {
-                    insideIDs.insert(text.id)
-                }
-            }
-        }
-        return insideIDs
+        return caughtIDs(insideLocalPath: loop, bounds: box,
+                         strokeCandidates: strokeCandidates, membership: membership)
     }
 
     /// `splitForLassoMove`'s answer for **Move with no selection**: the whole cel travels, and

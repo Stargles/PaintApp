@@ -3808,6 +3808,268 @@ final class LassoMoveLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - Three membership rules (TODO item (20))
+    //
+    // `Enclosed · Cut · Touching`, ordered by how much travels with the default in the middle. These
+    // drive the **engine** seam — `VectorCanvas.splitForLassoMove(insideLocalPath:membership:)` —
+    // because that is where the rule lives; the picker that chooses it, and what a re-lift costs, are
+    // asserted in the section below this one.
+
+    /// The split as one of the three rules produces it, from a canvas-space rectangle — both
+    /// preconditions applied exactly as `beginVectorLassoMove` applies them.
+    private func split(_ vector: VectorCanvas, _ rect: CGRect, _ membership: LassoMembership)
+        -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
+        vector.splitForLassoMove(insideLocalPath: vector.localPath(fromCanvas: loop(rect))
+                                                        .normalized(using: VectorCanvas.lassoFillRule),
+                                 membership: membership)
+    }
+
+    /// **The one test that says what the three modes are**, on the case that separates them: one
+    /// stroke straddling the loop, one wholly inside it.
+    ///
+    ///  * **Cut** splits the straddler and carries the inside half — four samples' worth of geometry
+    ///    where there were three, and a fresh id.
+    ///  * **Touching** carries the straddler **whole**, ink outside the loop included, and cuts
+    ///    nothing: same count, same ids.
+    ///  * **Enclosed** leaves the straddler where it is and carries only the stroke that is wholly
+    ///    inside — again cutting nothing.
+    ///
+    /// The element *count* is the load-bearing assertion in the two new modes. It is what says they
+    /// mint no geometry: no bisection, no fresh ids, no lattice re-keying, and no interpolation-tier
+    /// demotion, since the stroke count a keyframe pair is matched on does not change.
+    func testTheThreeModesCutTouchOrEncloseAStraddlingStroke() {
+        let (_, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 36, y: 40), to: CGPoint(x: 50, y: 40), size: 6))
+        let straddler = vector.elements[0].id
+        let wholly = vector.elements[1].id
+        let rect = CGRect(x: 30, y: 2, width: 30, height: 60)
+
+        let cut = split(vector, rect, .cutting)
+        XCTAssertEqual(cut?.elements.count, 3, "Cut splits the straddler in two and leaves the other")
+        XCTAssertEqual(cut?.insideIDs.count, 2)
+        XCTAssertFalse(cut?.insideIDs.contains(straddler) ?? true,
+                       "the parent is gone under Cut — both halves are fresh ids")
+
+        let touching = split(vector, rect, .touching)
+        XCTAssertEqual(touching?.elements.count, 2, "Touching cuts nothing")
+        XCTAssertEqual(touching?.insideIDs, [straddler, wholly],
+                       "and carries the straddler whole, ink outside the loop included")
+        XCTAssertEqual(touching?.elements.map(\.id), vector.elements.map(\.id),
+                       "the display list comes back verbatim — no fresh ids, nothing re-ordered")
+
+        let enclosed = split(vector, rect, .enclosed)
+        XCTAssertEqual(enclosed?.elements.count, 2, "Enclosed cuts nothing either")
+        XCTAssertEqual(enclosed?.insideIDs, [wholly],
+                       "and leaves the straddler behind — it is not completely inside")
+    }
+
+    /// **Under Enclosed a stroke is still selected by its centre line** (LASSO_MOVE.md §5.4), so a
+    /// thick stroke whose spine is enclosed travels whole even where its ink pokes out of the loop.
+    ///
+    /// Asserted as **correct**, not as a defect. The alternative — an outline-based Enclosed — fails
+    /// in the worse direction, leaving such a stroke behind *silently* with nothing on screen to
+    /// explain it; and ink membership has no primitive in this codebase (§1). The ink genuinely does
+    /// hang outside, which is what the first assertion measures rather than assumes.
+    func testAThickStrokeWhoseSpineIsEnclosedTravelsWholeEvenWhereItsInkPokesOut() {
+        let (_, _, vector) = fixture()
+        // Spine along y = 30, 60 pt wide: the ink reaches y = 0 and y = 60.
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 30), to: CGPoint(x: 54, y: 30), size: 60))
+        let id = vector.elements[0].id
+        // The loop holds the whole spine (x 10…54, y 30) and none of the ink's top or bottom.
+        let rect = CGRect(x: 4, y: 10, width: 56, height: 40)
+        let ink = inkBounds(vector)
+        XCTAssertLessThan(ink?.minY ?? 99, rect.minY, "the ink really does hang out of the loop above")
+        XCTAssertGreaterThan(ink?.maxY ?? 0, rect.maxY, "and below")
+
+        let enclosed = split(vector, rect, .enclosed)
+        XCTAssertEqual(enclosed?.insideIDs, [id],
+                       "the spine is inside, so the stroke travels whole — §5.4, in every mode")
+        XCTAssertEqual(enclosed?.elements.count, 1, "and is not cut")
+    }
+
+    /// **Text follows the mode in Touching and Enclosed, and keeps the centre rule in Cut** (owner,
+    /// 2026-08-28) — so each of the two new modes has one sentence true of every kind, while Cut
+    /// keeps what it has always been: the cut rule rounded for a kind that cannot be cut.
+    ///
+    /// The interesting pose is a box whose **centre is in and whose corner is out**: Cut and Touching
+    /// take it, Enclosed does not. Then a loop that swallows the box whole, where all three agree.
+    func testATextBoxCentreInButNotEnclosedFollowsTheModeAndKeepsTheCentreRuleInCut() {
+        let (_, _, vector) = fixture()
+        var recipe = TextRecipe(string: "hi")
+        recipe.typography.pointSize = 12
+        let element = VectorTextElement(id: UUID(), recipe: recipe,
+                                        frame: TextFrame(origin: CGPoint(x: 20, y: 20),
+                                                         size: CGSize(width: 16, height: 10)))
+        vector.upsertText(element)
+
+        // The box spans x 20…36; the loop starts at x = 24, so the left strip is outside it. Its
+        // centre (28, 25) is inside.
+        let clipped = CGRect(x: 24, y: 18, width: 20, height: 20)
+        XCTAssertEqual(split(vector, clipped, .cutting)?.insideIDs, [element.id],
+                       "Cut keeps the centre rule — the box's middle is inside the loop")
+        XCTAssertEqual(split(vector, clipped, .touching)?.insideIDs, [element.id],
+                       "Touching takes it too — the loop reaches the box")
+        XCTAssertNil(split(vector, clipped, .enclosed),
+                     "Enclosed does not: a corner of the box is outside the loop")
+
+        let swallowed = CGRect(x: 14, y: 14, width: 30, height: 24)
+        for membership in LassoMembership.allCases {
+            XCTAssertEqual(split(vector, swallowed, membership)?.insideIDs, [element.id],
+                           "a box wholly inside the loop travels under \(membership.displayName)")
+        }
+    }
+
+    /// **A placed image is answered by its own quad in Touching and Enclosed, and by its centre in
+    /// Cut** — the same ruling as text, and the case that shows the two really are different rules is
+    /// a loop that clips a corner of the photo without covering its middle.
+    ///
+    /// A corners-only containment test would be wrong here and is not what this asks: `subtracting`
+    /// is a region operation, so a loop that leaves any part of the rectangle uncovered fails
+    /// Enclosed however its four corners happen to fall.
+    func testAPlacedImageFollowsItsOwnQuadInTouchingAndEnclosedAndItsCentreInCut() {
+        let (_, _, vector) = fixture()
+        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                          rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                                                          size: CGSize(width: 6, height: 6)),
+                                           transform: LayerTransform(position: CGPoint(x: 30, y: 36),
+                                                                     scale: 1, rotation: 0)))
+        let id = vector.elements[0].id
+        // The photo occupies x 27…33, y 33…39, centred at (30, 36).
+
+        // A loop that clips its right-hand strip and misses the centre entirely.
+        let clipping = CGRect(x: 32, y: 30, width: 16, height: 16)
+        XCTAssertNil(split(vector, clipping, .cutting),
+                     "Cut asks for the centre, and the centre is outside this loop")
+        XCTAssertEqual(split(vector, clipping, .touching)?.insideIDs, [id],
+                       "Touching asks the quad, and the loop reaches it")
+        XCTAssertNil(split(vector, clipping, .enclosed), "and Enclosed is a long way from satisfied")
+
+        // A loop holding the centre but not the left edge.
+        let partial = CGRect(x: 28, y: 30, width: 20, height: 20)
+        XCTAssertEqual(split(vector, partial, .cutting)?.insideIDs, [id])
+        XCTAssertEqual(split(vector, partial, .touching)?.insideIDs, [id])
+        XCTAssertNil(split(vector, partial, .enclosed), "x 27…28 of the photo is still outside")
+
+        let swallowed = CGRect(x: 20, y: 30, width: 20, height: 20)
+        XCTAssertEqual(split(vector, swallowed, .enclosed)?.insideIDs, [id],
+                       "and a loop that covers the whole photo takes it")
+    }
+
+    /// **An eraser mark inside the loop travels in all three modes** — LASSO_MOVE.md §5.7, verbatim:
+    /// *"If the hole is fully inside, it moves it."*
+    ///
+    /// The failure this guards against is silent: item (19)'s recolour skips `.erase` strokes and
+    /// placed images at its own call site, and folding that skip down into the shared predicate would
+    /// make the two new Move modes quietly stop carrying holes. Nothing renders wrong — the ink just
+    /// does not travel.
+    func testAnEraserMarkInsideTheLoopTravelsInEveryMode() {
+        let (_, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 4, y: 32), to: CGPoint(x: 60, y: 32), size: 24))
+        vector.addStroke(stroke(from: CGPoint(x: 30, y: 32), to: CGPoint(x: 40, y: 32),
+                                size: 10, composite: .erase))
+        let punch = vector.elements[1].id
+        let rect = CGRect(x: 26, y: 24, width: 24, height: 18)
+
+        for membership in LassoMembership.allCases {
+            let caught = split(vector, rect, membership)?.insideIDs ?? []
+            XCTAssertTrue(caught.contains(punch),
+                          "a hole wholly inside the loop travels under \(membership.displayName) — §5.7")
+        }
+    }
+
+    /// A fill straddling the loop: **Cut takes the chunk, the other two take the fill whole or not at
+    /// all**, and neither of them re-archives a path.
+    func testAFillFollowsTheModeAndIsCutOnlyUnderCut() {
+        let (_, _, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 44, height: 30),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        let id = vector.elements[0].id
+        let straddling = CGRect(x: 24, y: 2, width: 40, height: 60)
+
+        XCTAssertEqual(split(vector, straddling, .cutting)?.elements.count, 2, "Cut splits the fill")
+        let touching = split(vector, straddling, .touching)
+        XCTAssertEqual(touching?.elements.count, 1, "Touching cuts nothing")
+        XCTAssertEqual(touching?.insideIDs, [id], "and carries the fill whole, its own id intact")
+        XCTAssertNil(split(vector, straddling, .enclosed), "and Enclosed leaves it where it is")
+
+        let swallowed = CGRect(x: 2, y: 2, width: 60, height: 44)
+        XCTAssertEqual(split(vector, swallowed, .enclosed)?.insideIDs, [id],
+                       "a fill wholly inside the loop travels under Enclosed, uncut")
+        XCTAssertEqual(split(vector, swallowed, .enclosed)?.elements.count, 1)
+    }
+
+    /// **`mayDiverge` is still asked in the two new modes — and Enclosed fires it *less* often, not
+    /// more.**
+    ///
+    /// The scoping pass for this item predicted the opposite (*"fewer moved ids means more punches
+    /// above the lowest"*), and the arithmetic says otherwise: an element that is *wholly* inside the
+    /// loop is moved under Cut as well as under Enclosed, so Enclosed's moved set is a **subset** of
+    /// Cut's, its lowest moved index is therefore at least as high, and the scan for unmoved punches
+    /// above it covers a subset of the same rows. Touching's moved set is a superset the other way.
+    /// So the latch drops at least as often under Touching as under Cut, and at least as often under
+    /// Cut as under Enclosed.
+    ///
+    /// This is the arrangement that separates all three: a straddling paint stroke at the bottom, an
+    /// eraser punch above it that the loop never reaches, and a stroke wholly inside at the top.
+    /// Under Cut and Touching the straddler travels (whole or in half) from *below* the punch, which
+    /// strands the punch above moving ink; under Enclosed only the top stroke moves and the punch is
+    /// beneath it, where it changes nothing.
+    ///
+    /// Keeping the latch in every mode is what makes the artist's preview the truth between gestures.
+    func testMayDivergeIsAskedInEveryModeAndEnclosedFiresItLeastOften() {
+        let (_, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 8, y: 50), to: CGPoint(x: 16, y: 50),
+                                size: 8, composite: .erase))
+        vector.addStroke(stroke(from: CGPoint(x: 36, y: 40), to: CGPoint(x: 50, y: 40), size: 6))
+        let rect = CGRect(x: 30, y: 2, width: 30, height: 60)
+
+        XCTAssertEqual(split(vector, rect, .touching)?.mayDiverge, true,
+                       "the straddler travels from below the punch, so the punch is stranded above it")
+        XCTAssertEqual(split(vector, rect, .cutting)?.mayDiverge, true,
+                       "and its inside half does the same")
+        XCTAssertEqual(split(vector, rect, .enclosed)?.mayDiverge, false,
+                       "under Enclosed only the top stroke moves, and nothing punches above it")
+    }
+
+    /// **Touching is item (19)'s predicate, reused rather than re-derived** — for the two kinds where
+    /// the recolour and Move agree about geometry, the same loop must give the same answer through
+    /// both doors.
+    ///
+    /// The two deliberately **disagree** about text and images, which is the ruling this test pins
+    /// the other half of: `elementIDs` defaulted (the recolour's rule) answers those two by their
+    /// centre, and Touching answers them by their quad.
+    func testTouchingIsTheSamePredicateTheRecolourAsksThroughItsOwnDoor() {
+        let (_, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 30, width: 44, height: 10),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        var recipe = TextRecipe(string: "hi")
+        recipe.typography.pointSize = 12
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 20, y: 44),
+                                                             size: CGSize(width: 16, height: 10))))
+        let text = vector.elements[2].id
+        let rect = CGRect(x: 30, y: 2, width: 30, height: 60)
+        let local = vector.localPath(fromCanvas: loop(rect)).normalized(using: VectorCanvas.lassoFillRule)
+
+        XCTAssertEqual(split(vector, rect, .touching)?.insideIDs,
+                       vector.elementIDs(insideLocalPath: local, membership: .touching),
+                       "one answer to 'what did the loop catch', whichever door asks it")
+
+        // The text box spans x 20…36 and its centre is at x = 28 — outside the loop, which starts at
+        // x = 30, while its right-hand strip is inside it.
+        XCTAssertFalse(vector.elementIDs(insideLocalPath: local).contains(text),
+                       "the recolour's defaulted rule answers text by its centre, and misses it")
+        XCTAssertTrue(vector.elementIDs(insideLocalPath: local, membership: .touching).contains(text),
+                      "Touching answers it by its quad, and takes it")
+    }
+
     // MARK: - Helpers
 
     /// The float's ink **as it currently sits in the document**, expressed in the drawn box's own
