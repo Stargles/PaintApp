@@ -19,7 +19,8 @@ exceptions written into its own doc comment. What is missing is the *arithmetic 
 dialog, an undo contract, and the answer to what happens on cel 400 of 800.
 
 §0 is the census of what exists and is the most useful part of this document. §1 enumerates every
-tier. §2 is the decisions. §4 stages it. §5 is the settled rulings. §6 is what needs the owner.
+tier. §2 is the decisions. §4 stages it. §5 is the settled rulings. §6 is the owner's rulings — five
+questions, all now answered.
 
 ---
 
@@ -215,7 +216,7 @@ closed off explicitly: **the header and every buffer move together, in one opera
 | `copiedCel` | `CanvasManager.swift:481` | **clear it** — see §0 | same |
 | `canvasPadding` | `CanvasManager.swift:27` | preserved literally, in points | preserved literally — see §5 |
 | every size-keyed cache | `PixelOps.RasterizeKey`, `MaskResolver.CacheKey`, `EffectPipelines.scratchSize`, `OnionSkinRasterCache` | self-invalidating; purge to reclaim the bytes | same |
-| compositor admission | `MetalCompositor.swift:505-520` | — | **re-checked implicitly.** Growing the canvas raises `peakCompositeTextures × w·h·4` against `CompositorBudget.textureBudgetBytes`, and the refusal is silent — see §6 |
+| compositor admission | `MetalCompositor.swift:516-525` | — | **re-checked implicitly, and the gate is about memory, not speed** — jetsam kills the process before `Metal.makeTexture` would return nil (`:505-506`). Growing the canvas raises `peakCompositeTextures × w·h·4` against `CompositorBudget.textureBudgetBytes`, a threshold set by the document's layer/effect structure as much as by the canvas. The live canvas is pre-shrunk below it by `affordableSize` and softens instead of refusing; the dialog warns and proceeds — §5 rule 14, §6 Q5 |
 
 **A resize that handles the active cel and forgets the other 999 is a data-loss bug**, and the shape
 of that bug is already in the tree: PERFORMANCE.md item 14 records three independently-scoped
@@ -234,7 +235,7 @@ of every layer eagerly, and it must not become the reason that eviction design g
 Old extent `O = (Ow, Oh)`, new extent `N = (Nw, Nh)`, both ≥ 1 canvas point.
 
 ```
-k  = scaleContent ? min(Nw/Ow, Nh/Oh) : 1          // the letterbox factor
+k  = scaleContent ? (fill ? max(Nw/Ow, Nh/Oh) : min(Nw/Ow, Nh/Oh)) : 1   // Fit (default) or Fill
 Cw = k·Ow ,  Ch = k·Oh                             // the content rect in the new canvas
 dx = (Nw − Cw)/2 ,  dy = (Nh − Ch)/2               // centred
 if !scaleContent { dx = dx.rounded() ; dy = dy.rounded() }
@@ -245,10 +246,14 @@ M  = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: k, y: k)
 2026-08-27): the matrix form and the hand form agree to `< 1e-12`, and the `.scaledBy` spelling is the
 one that means *scale first, then translate* — the other order is wrong and reads identically.
 
-**Why `min` and not `max`.** `min` fits the content inside the new extent, leaving genuine empty
-canvas on the axis that did not bind. That is the owner's *"just scaling the stuff so it fits"*, and
-the leftover is real paper — `canvasBackgroundColor` — not a painted bar. `max` would cover the new
-extent and crop the overflow; it is a different feature and §6 asks whether it is wanted.
+**`min` is Fit, `max` is Fill — the same map either way, and this is not disturbed by offering both**
+(§6 Q4). `min` fits the content inside the new extent, leaving genuine empty canvas — real paper,
+`canvasBackgroundColor`, never a painted bar — on the axis that did not bind; that is the owner's
+*"just scaling the stuff so it fits"* and stays the default. `max` covers the new extent and lets the
+overflow hang off the edges instead. Fill is not a second feature: `M` is the one formula above with a
+different choice of ratio, and `VectorCanvas.mapping(_:throughSimilarity:)` accepts it unchanged,
+because Fill is still a single uniform scale. What Fill does cost is a second instance of the
+vector/raster asymmetry below.
 
 **Why centred and not top-left.** `setCanvasPadding` is centred (`:31-32`), which is the precedent, and
 a drawing on a canvas being grown belongs in the middle of the larger one. Under scale, exactly one of
@@ -321,7 +326,7 @@ upscale invents them. It is irreversible in the ordinary sense — round-trippin
 0.5× and a 2× leaves a visibly softer image. Crop/expand is worse still on the shrink: pixels outside
 the new bounds are simply gone.
 
-Two consequences, both settled in §5:
+Three consequences, the first two settled in §5:
 
 1. **The undo of a resize restores the geometry exactly and the pixels approximately**, and the
    operation says so at the moment it happens rather than at the moment the artist presses undo.
@@ -330,6 +335,14 @@ Two consequences, both settled in §5:
    invertible resize. That is not a corner case: it is what the owner's real packages measure as
    (PERFORMANCE.md item 14 — three cels on the device's largest live project, all with a fully
    transparent raster tier, all now omitted from the save entirely).
+3. **Under Fill, the asymmetry gets a second instance, and it is the interesting one** (§5 rule 2,
+   §6 Q4). Content that overflows the new canvas is *kept* on the vector tier — an off-canvas element
+   is still an element, exactly as §6 Q1 already established for stored coordinates that leave
+   `[0, extent)`, which they do routinely — but every raster tier is cropped destructively, because a
+   raster tier is a buffer of exactly the canvas extent and the overflow has nowhere to live. This is
+   not a rule 11 refusal case: nothing is unmappable, `M` is defined everywhere, and a raster tier
+   losing pixels off its own edges is the same thing an ordinary crop/expand shrink already does,
+   above.
 
 ### The spacing floor: a large downscale changes how a stroke stamps, not only where
 
@@ -417,8 +430,15 @@ including the resize itself. That door is closed. So:
 
 ### Memory and time: per-cel, bounded fan-out, and never `regenerateAllThumbnails`
 
-The budget is 192 MiB and an over-budget composite is declined *silently*, dropping the whole cache
-process-wide. The arithmetic that matters, all **INFERRED** from `w·h·4`:
+The budget is 192 MiB on the owner's iPad 9 (`physicalMemory / 16`, clamped `[64 MiB, 768 MiB]`,
+`Compositor.swift:167-171`), and it exists for memory rather than speed — `Metal.makeTexture` does not
+return nil under this pressure, jetsam kills the process first (`MetalCompositor.swift:505-506`). An
+over-budget composite is declined (`:516-525`), but nothing is purged there: the cache-dropping purge
+belongs to the *other*, dynamic gate (`os_proc_available_memory()` pressure, `:530-538`), which reacts
+to the OS rather than to canvas size. On the live canvas the size gate never fires at all —
+`makeSandwichRequests` sizes its request through `CompositorBudget.affordableSize` first, so an
+over-large document composites fewer pixels instead of being refused (§6 Q5). The arithmetic that
+matters, all **INFERRED** from `w·h·4`:
 
 | | 2048×1024 | growing to 4096×2048 |
 |---|---|---|
@@ -641,8 +661,9 @@ buffer agree.
 `scaleContent == true`. Raster through the widened `placing:` rect at `.high` interpolation; vector
 through `mapping(_:throughSimilarity:)` per element plus the `_transform` translation rewrite from §2;
 lattices through `M` with `restCellSize *= k`, and `LocalEdit` strokes through the same `mapping`
-**once, in rest space, not again in canvas space**. Guides through `M`. The dialog's floor sentence.
-Still not undoable.
+**once, in rest space, not again in canvas space**. Guides through `M`. A Fit/Fill choice beside the
+scale toggle, defaulting to Fit, picks `min` or `max` for `k` in the same formula — no second code
+path (§5 rule 2). The dialog's floor sentence. Still not undoable.
 *Tests:* the two `swiftc`-verified identities in §2 as XCTest assertions on real types; the letterbox
 invariant (content fits, exactly one axis has slack, slack is split evenly); a vector round-trip at
 `k = 0.25` then `k = 4` asserting samples return to within 1e-9; and the floor boundary, which
@@ -670,9 +691,13 @@ mapper.
 
 1. **Two modes, one toggle.** *Crop / Expand* keeps the artwork at its own size; *Scale artwork* scales
    it with the canvas. One switch, defaulting to Crop / Expand, because that is the non-destructive one.
-2. **On an aspect change, fit — never stretch, never bar.** `k = min(Nw/Ow, Nh/Oh)`. The leftover is
-   empty canvas at the document's own background colour, not a painted band. This is the owner's ask
-   and independently the only shape `mapping(_:throughSimilarity:)` accepts.
+2. **On an aspect change, the artist picks Fit or Fill — never stretch, never bar, in either arm.**
+   *Fit* — `k = min(Nw/Ow, Nh/Oh)`, the default — lands the whole drawing inside the new extent; the
+   leftover is empty canvas at the document's own background colour, never a painted band. *Fill* —
+   `k = max(Nw/Ow, Nh/Oh)` — covers the new extent and lets the overflow hang off the edges. Both are
+   the one map `M` from §2 with a different choice of ratio, and `mapping(_:throughSimilarity:)`
+   accepts either unchanged, since Fill is still a single uniform scale. The ask was fit only; **Fill
+   is the addition the owner accepted, 2026-08-28** (§6 Q4).
 3. **Content is centred, in both modes.** Matching `setCanvasPadding`'s existing placement.
 4. **Crop/expand offsets round to whole canvas points; scale offsets do not.** Crop/expand must never
    resample; under scale the two tiers must agree with each other more than they must land on a
@@ -687,7 +712,7 @@ mapper.
 9. **`canvasPadding` is preserved literally, in canvas points, and never scales.** It is a working
    margin the artist set with a separate control, not artwork; scaling it would make two controls fight
    over one number. The width and height the artist types therefore mean the **artwork rect**, and the
-   buffer extent becomes `typed + 2 × canvasPadding`. (§6 asks the owner to confirm this reading.)
+   buffer extent becomes `typed + 2 × canvasPadding`. **Confirmed by the owner, 2026-08-28** (§6 Q3).
 10. **The history stack is cleared, then the resize is recorded as one step.** Depth 1 afterwards.
     Undo runs the inverse resize; it restores geometry exactly and raster pixels approximately, and the
     app says so when the resize happens rather than when undo is pressed.
@@ -696,6 +721,13 @@ mapper.
 12. **No disk write happens during a resize, and no save may start during one.**
 13. **The dab-spacing floor, the dab-diameter floor and pencil grain are inherited, knowingly.** The
     dialog says once that brush texture re-stamps at the new size; nothing in the engine changes.
+14. **A resize that would push the document past the compositor's admission gate warns and lets the
+    artist proceed — it never refuses and there is nothing to fall back silently from.** The warning
+    has two halves (§6 Q5). The live canvas itself never reaches the gate: past it, the canvas
+    composites at reduced resolution instead, softer rather than slower. But the eyedropper's colour
+    pick does reach it and falls to the CPU reference for that one pick; the live-mask preview on a
+    masked layer runs on the CPU reference unconditionally, gate or no gate, so it only gets slower as
+    the canvas grows. Export and the project thumbnail are unaffected at any canvas size.
 
 ---
 
@@ -714,23 +746,104 @@ mapper.
    question cannot be re-opened by a resize: the sample tier is genuinely out of §2's way. See §2's
    correction and TODO.md's item (8) for the number and the rest of its rulings.
 
-2. **Undo of a resize with raster content.** Vector is exactly invertible; raster is not — a downscale
-   discards pixels and the undo restores a resample. Options: (a) undo it anyway and say so in a banner
-   — the recommendation, and strictly better than today's no-undo; (b) keep whole-document geometry ops
-   non-undoable as `flipCanvas` is, and clear the stack; (c) stage 4's scratch-directory version, which
-   is exact but is its own design. Note this bites nobody today: the packages measured on the iPad have
-   no raster content at all.
+2. **Undo of a resize with raster content. ANSWERED — (a), 2026-08-28: undo it anyway, and say so.**
+   Vector geometry returns exactly; raster pixels return as a resample after a downscale, and the app
+   announces that at the moment the resize happens, not at the moment undo is pressed (§5 rule 10). The
+   owner's own reason for picking it: strictly better than today, where Canvas Padding has no undo at
+   all. (b) keeping the operation non-undoable like `flipCanvas`, and (c) stage 4's exact
+   scratch-directory version, were the alternatives declined. This bites nobody today: the packages
+   measured on the iPad have no raster content at all.
 
-3. **What does the width/height field mean — the artwork rect, or the padded buffer?** §5 rule 9
-   recommends the artwork rect, with padding preserved literally and never scaled. The alternative is
-   that the typed number is the buffer and padding eats into it, which makes the two Actions controls
-   interact in a way neither of them shows.
+3. **What does the width/height field mean — the artwork rect, or the padded buffer? ANSWERED — the
+   artwork rect, exactly as §5 rule 9 recommended, 2026-08-28.** `canvasPadding` is preserved literally
+   and never scales; the buffer extent is `typed + 2 × canvasPadding`. The alternative — the typed
+   number is the buffer, and padding eats into it — was rejected because it would make the two Actions
+   controls interact in a way neither of them shows.
 
-4. **Fit only, or fit *and* fill?** The ask says fit. Fill (`max` instead of `min`, cover the new
-   extent and crop the overflow) is the other thing artists reach for on an aspect change, and it is
-   one line. Worth having, or is one behaviour clearer than two?
+4. **Fit only, or fit *and* fill? ANSWERED — both, as a choice, 2026-08-28. Fit stays the default.**
+   Fill (`max` instead of `min`) covers the new extent and lets the overflow hang off the edges. It is
+   not the data-loss operation the "crop the overflow" framing above suggested: the vector tier keeps
+   the overflowing elements exactly as it already keeps any off-canvas element (§6 Q1), and only the
+   raster tiers are cropped, destructively, because a raster tier is a buffer of exactly the canvas
+   extent (§2, "the vector/raster asymmetry"). Not a rule 11 refusal case — nothing is unmappable. §5
+   rule 2.
 
-5. **A resize can grow a document past the compositor's admission gate, which declines silently and
-   drops the whole texture cache process-wide** (`MetalCompositor.swift:505-520`; the budget itself is
-   ruled off-limits by PERFORMANCE.md §5). Should the dialog refuse a size that would, warn and let the
-   artist proceed, or say nothing and let the app fall back to the CPU compositor?
+5. **The compositor's admission gate on a resize that grows the canvas. ANSWERED — warn, and let the
+   artist proceed, 2026-08-28.** This question's own premise — that the gate "declines silently and
+   drops the whole texture cache process-wide" — is not what a resize does to the live canvas, and the
+   correction matters more than the choice.
+
+   **The gate is about memory, not speed.** `MetalCompositor.attempt` refuses before it allocates
+   anything (`MetalCompositor.swift:516-525`) because `Metal.makeTexture` does not return nil under
+   this pressure — jetsam kills the process first (`:505-506`; `RenderTree.swift:522-531` makes the
+   same point independently). "Just take longer" was never one of the options at the point the guard
+   sits: the alternative to refusing is the app dying.
+
+   **The budget is `physicalMemory / 16`, clamped to `[64 MiB, 768 MiB]`** (`Compositor.swift:167-171`)
+   — 192 MiB on the owner's 3 GB iPad 9, 512 MiB on an 8 GB iPad Pro, the 768 MiB cap above 12 GB. It is
+   checked against `peakCompositeTextures × canvasBytes` (`RenderTree.swift:542`), so the size a
+   document tips over at depends on its **layer and effect structure**, not on the canvas alone.
+
+   **On the live canvas the gate never fires, and there is no CPU fallback.** `makeSandwichRequests`
+   sizes its request through `CompositorBudget.affordableSize` before `attempt` ever sees it
+   (`RenderRequest.swift:697-701`; the scaling itself is `Compositor.swift:221-246`, `sqrt(budget /
+   wanted)`). An over-large document therefore stays on the GPU and composites **fewer pixels** — the
+   canvas gets *softer*, not slower, on an image the artist is already told is a preview
+   (`RenderResolution`). The thing that actually purges the whole cache, `purgeLocked()`, belongs to a
+   *different*, dynamic gate (`os_proc_available_memory()` pressure, `:530-538`) that reacts to the OS
+   rather than to canvas size; the static, size-based refusal a resize can cause just declines that one
+   composite (`:516-525`) and purges nothing.
+
+   **Export is unaffected — but that is only half the answer, and it is not the half that matters
+   most.** The app has no separate export feature; the only full-document composite on the save path is
+   the manifest thumbnail (`ProjectStore.swift:270-294`), and since `2f4b737` (2026-08-20, "Composite
+   the gallery tile at the tile's size, not the whole canvas") it is bounded to a 320×320 box
+   (`fittingWithin: Self.thumbnailBounds`) that routes through the same `renderSize(fitting:within:)` →
+   `CompositorBudget.affordableSize` pipeline as the live canvas (`RenderRequest.swift:527-545`). At
+   that bound the composite can never approach even the 64 MiB budget floor, on any canvas size —
+   saving and thumbnailing are unaffected by this gate regardless of how large the canvas grows. The
+   native-size arm is not empty, though; it just is not the thumbnail any more.
+
+   **Two ordinary, in-session gestures live on that native-size arm, and they reach it by two different
+   routes.** `makeRenderRequest`'s own doc comment says so directly (`RenderRequest.swift:522-524`):
+   passing no `fittingWithin` bound is what makes the eyedropper, the live-mask resolve and every parity
+   test composite at native size, "an identity that `affordableSize` does not promise." The eyedropper
+   (`CanvasManager+Eyedropper.swift:47-52`) is uncapped on purpose — a reduced composite would blend
+   neighbouring pixels into the sampled colour, and a wrong colour looks exactly like a right one — and
+   its request runs through `Compositor.composite`, so on a document over the gate it genuinely falls
+   back to `CoreGraphicsCompositor` for that one pick (`Compositor.swift:365-366`). **The live-mask
+   preview (`CanvasView.swift:1367`, `resolveLiveMask`) does not go through the gate at all, in either
+   direction.** `MaskResolver.coverage` calls `CoreGraphicsCompositor.composite` directly and
+   unconditionally, once per mask source (`MaskResolver.swift:9-14`, `:180-181` — "Always the CPU
+   reference, whichever backend asked"), which is a parity decision and not a fallback, so it never
+   touches `MetalCompositor` and cannot "reach" this gate the way the eyedropper does. Its cost still
+   grows with native canvas size on every stroke begun on a masked layer; it simply pays that cost
+   always, gate or no gate, rather than only once the document is over it.
+
+   **Either way, this is where the 7047 ms vs 18.8 ms figure actually bites, during an interactive
+   gesture rather than offline** — though the figure needs its own scope stated rather than borrowed
+   whole. It is for a single-pass grade over 4.2M pixels, Debug
+   (`PerfBaselineTests.testEffectCompositeCostOnBothBackends`, quoted at `Compositor.swift:207-208`),
+   i.e. the cost of a document with a grading layer in the tree, not of a plain stack — a plain stack's
+   CPU/GPU gap is the much smaller per-layer-slope and fixed-intercept pair in `Compositor.swift`'s own
+   table, above. A document large or effect-heavy enough to sit over the gate pays the large figure on
+   every eyedropper tap that reaches the fallback; the live-mask preview sits somewhere on that same
+   curve on every stroke begun on a masked layer, scaled by canvas size and by how many sources the
+   mask has.
+
+   **Three in-source comments carried the stale claim, corrected in place rather than only here.**
+   `MetalCompositor.swift:518-523` and `RenderTree.swift:529-531` each named `ProjectStore`'s thumbnail
+   as the consumer that reaches this gate at native size; both now name the eyedropper instead, which is
+   the one that actually does. `MetalCompositor.swift:563-566` made the same size claim in passing, for
+   an unrelated point about the upload cache holding two composite sizes per session; it now states the
+   thumbnail's true, `affordableSize`-bounded size rather than repeating "native." All three were true
+   when written (`ca1680b`, 2026-08-16) and stopped being true four days later when `2f4b737` bounded the
+   thumbnail's composite; none were updated to match. This document's own §1 row and §2 "Memory and
+   time" section carried the same stale claim and are corrected alongside this answer.
+
+   **The dialog's warning therefore has two halves.** Past a size that depends on this document's layer
+   stack: the canvas itself composites at reduced resolution and looks softer while you work — not
+   "falls back to CPU," which is not what the artist experiences on the canvas. And picking a colour, or
+   beginning a stroke on a masked layer, can pay the CPU reference's cost for that one composite — which
+   is where "falls back to CPU" is actually true, just not on the canvas itself. Saving and exporting
+   pay neither cost. §5 rule 14.

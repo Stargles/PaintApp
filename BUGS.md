@@ -3,6 +3,49 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Picking a colour or starting a masked stroke can pay a full CPU composite mid-gesture (2026-08-28)
+
+Found while writing CANVAS_RESIZE.md §6 Q5, and it is independent of that feature — nothing about it
+needs a resize to exist, since Canvas Padding already reaches the sizes that trigger it. The "Raising
+the canvas maximum reaches a raster-storage cost `CompositorBudget` never bounds" entry already
+establishes that TODO item (13) raised the canvas maximum to 16383.
+
+**Two different mechanisms, both native-size and both deliberately uncapped by
+`CompositorBudget.affordableSize`** (`RenderRequest.swift:522-524`: passing no `fittingWithin` bound is
+what lets the eyedropper and the live-mask resolve skip it, "an identity `affordableSize` does not
+promise").
+
+1. **The eyedropper falls back to the CPU reference once the document is over the compositor's
+   admission gate.** `eyedropperRequest()` (`CanvasManager+Eyedropper.swift:47-52`) composites at
+   native canvas size on purpose — a downscaled composite would blend neighbouring pixels into the
+   sampled colour, and a wrong colour looks exactly like a right one — so once `peakCompositeTextures
+   × canvasBytes` exceeds `CompositorBudget.textureBudgetBytes` (`MetalCompositor.swift:516-525`),
+   every tap runs `CoreGraphicsCompositor.composite` instead of Metal (`Compositor.swift:365-366`).
+   That entry computes the owner's own crash-scene shape (6 `peakCompositeTextures`) tips
+   over the iPad 9's 192 MiB budget at **2896²** — reachable today through Canvas Padding alone, well
+   under the new 16383 maximum.
+
+2. **The live-mask preview is on the CPU reference unconditionally, gate or no gate.**
+   `MaskResolver.coverage` calls `CoreGraphicsCompositor.composite` directly, once per mask source,
+   "whichever backend asked" — a parity decision, not a fallback, so it never touches `MetalCompositor`
+   at all (`MaskResolver.swift:9-14`, `:180-181`). `resolveLiveMask` (`CanvasView.swift:1367`) runs it
+   once at the start of every stroke on a layer clipped by a non-empty mask (`liveMaskStrokeBegan`),
+   before the result is cached.
+
+**The cost, transferred rather than newly measured.** Both call the identical
+`CoreGraphicsCompositor.composite`/`.grade` that `Compositor.swift`'s own device table and
+`PerfBaselineTests.testEffectCompositeCostOnBothBackends` already measured: **203.3 ms** (iPad 9,
+Release, warm, 2048²) for one grading layer in the stack, **7047 ms** (Debug, 4.2M px) for the same
+operation off-device. MEASURED for those tests, not for this path directly — the transfer is sound
+because it is the same function call, not a resembling one, but no test has timed an actual eyedropper
+tap or mask resolve. A mask whose sources include a grading layer pays that cost on every stroke begun
+on the layer it clips; an eyedropper tap on a document over the gate pays it on every tap.
+
+Not fixed here — flagged, the same posture as the raster-storage entry just named. A fix means either
+budgeting these two consumers too (which contradicts why each is uncapped: correctness for the
+eyedropper, backend parity for the mask) or caching further up the call chain; both are
+product/architecture decisions outside this document's scope.
+
 ## An in-between's interpolation recipe vanishes with no report if it will not decode (2026-08-27)
 
 `ProjectStore.swift:1213` reads a cel's recipe as

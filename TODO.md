@@ -55,12 +55,14 @@ whatever the canvas becomes.
 - [ ] The owner: *"a resize canvas option in actions would be nice ... They should be able to control
       whether it gets cropped/expanded, or if everything gets scaled."* On an aspect change it
       letterboxes — *"Not in the conventional sense of adding black, just scaling the stuff so it fits."*
-      **[CANVAS_RESIZE.md](CANVAS_RESIZE.md) is the specification and it is written.** Its §0 records that
-      two thirds of this already exists under other names (`setCanvasPadding` is a whole-document
-      crop/expand; `VectorCanvas.mapping(_:throughSimilarity:)` is the exact vector scaler), §5 carries
-      thirteen settled behaviours, and **§6 is five questions the owner must answer before it is built** —
-      chiefly what the width/height field means and what undo does over raster content. §6's question on
-      the encoding is answered by (8).
+      **[CANVAS_RESIZE.md](CANVAS_RESIZE.md) is the specification, it is written, and its §6 is answered
+      in full (2026-08-28) — this item is unblocked.** Its §0 records that two thirds of this already
+      exists under other names (`setCanvasPadding` is a whole-document crop/expand;
+      `VectorCanvas.mapping(_:throughSimilarity:)` is the exact vector scaler). The owner's four rulings
+      are folded into §5: the width/height field means the artwork rect (rule 9); a lossy resize undoes
+      anyway and says so up front (rule 10); an aspect change offers Fit *and* Fill, Fit still the
+      default (rule 2); and the compositor's admission gate warns and lets the artist proceed — which
+      also corrects a stale reading of what that gate does (rule 14, CANVAS_RESIZE.md §6 Q5).
       **BUGS.md carries a defect on this path**: Canvas Padding while a vector Move is held cancels
       pre-resize geometry onto the resized cel. Left unfixed on purpose, because this item rebuilds that
       path.

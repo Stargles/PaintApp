@@ -526,8 +526,9 @@ extension Array where Element == RenderNode {
     /// return nil under this pressure — jetsam takes the process first. The `guard wanted <= budget`
     /// that reads this number is the only gate there is. Over-counting is not free either: at 4096²
     /// against a 3 GB device, each texture this claims and does not need costs the live composite
-    /// several hundred pixels a side and lowers the size at which an offline thumbnail is refused the
-    /// GPU altogether.
+    /// several hundred pixels a side and lowers the size at which the eyedropper's own composite —
+    /// the one live consumer that skips `affordableSize` and can reach this gate — is refused the GPU
+    /// altogether.
     ///
     /// **Visibility is not consulted, here or in `uploadableLeafCount`, for the reason
     /// `needsCompositorOnCanvas` gives for the same choice.** A hidden layer costs the walk nothing,

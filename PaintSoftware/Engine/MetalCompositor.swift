@@ -518,8 +518,9 @@ final class CompositorMetalEngine {
             // `.unavailable`, not `.underPressure`: this is a *static* verdict about the device and
             // the canvas size, and the CPU reference is the only thing that can render this frame at
             // all. On the live canvas it should never fire, because `makeSandwichRequests` has
-            // already sized the request against the same budget — it is the offline consumers
-            // (`ProjectStore`'s thumbnail) that composite at native size and can reach it.
+            // already sized the request against the same budget — it is a request built with no
+            // `fittingWithin` bound (the eyedropper, `CanvasManager+Eyedropper.swift`, composites at
+            // native size on purpose so a colour pick never blends in a downscale) that reaches it.
             return .unavailable
         }
         // Cold means the pool has to be built from nothing, so the whole working set is a new
@@ -562,7 +563,8 @@ final class CompositorMetalEngine {
         // **The upload cache used to be dropped with it, on the grounds that "a canvas has one size
         // at a time". That stopped being true when `RenderResolution` shipped**, and the correction
         // matters more than it looks: the live canvas composites at the artist's chosen scale while
-        // `ProjectStore`'s thumbnail composites at the native canvas size, so a save landing during a
+        // `ProjectStore`'s thumbnail composites at its own small, `affordableSize`-bounded size —
+        // never native, since `2f4b737` bounded it to `thumbnailBounds` — so a save landing during a
         // drawing session alternates the two sizes and the old line wiped every entry each way. The
         // keys carry the dimensions, so the other size's entries are merely unreachable rather than
         // wrong — which is precisely what an LRU with a byte budget is for. `trimToBudget` in the
