@@ -23,9 +23,15 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **Nothing.** Items (8) `e277f82` and (14) `7eef540` are merged, and so is all three phases of
-  Move stage 3b — the box-only knob `330efd4`, the stretch axis `c78de6e`, the re-fitting box
-  `5b5577e`. **The five-item storage refit is down to (9) alone.**
+- **(9) stage 1**, `tmp/resize1` — "Resize Canvas" in Actions, crop/expand only, today's contract with
+  an arbitrary rectangle instead of a symmetric margin.
+- **(19) Change Color**, `tmp/recolor` — the owner's new ask, below.
+- **(9) stage 0 is merged** (`ea51607`): a failed save now raises the `CanvasNotice` banner instead of
+  failing silently, which this feature needs because after a resize the in-memory document is the only
+  copy. **It is only visible on the autosave path** — on "leave to gallery" the banner is raised and
+  the screen flips to the gallery in the same render pass, so nothing is seen. Making that visible
+  means holding the artist in the editor on failure, which needs a retry affordance that does not
+  exist; **unruled, and not blocking anything.**
 
 ## How a brush stroke is stored — one feature in five items
 
@@ -68,6 +74,31 @@ whatever the canvas becomes.
       path.
 
 ## Open
+
+### (19) Change Color — recolour a lasso selection to the picked colour
+
+- [ ] The owner, 2026-08-28: *"When the user uses select, there should be an option called something
+      like change color which changes the color of all the strokes and fills inside the [selection] to
+      the current picked color. It's alright if part of the stroke is outside the selection."*
+      **That last sentence is the load-bearing one: a recolour splits nothing.** A selected element is
+      recoloured whole, deliberately unlike a lasso *move*, which splits at the boundary into two
+      independent strokes ([LASSO_MOVE.md](LASSO_MOVE.md) §5). It also means the whole class of Move's
+      engineering risk is absent — no boundary dab, no interpolation-tier demotion, because a recolour
+      changes no stroke count and no geometry.
+      **Three rulings, 2026-08-28.** Opacity does **not** travel: only the hue changes, so a faint mark
+      stays faint. **Text is recoloured too**, caught by its box centre as §5.3 already has it. **Pixel
+      layers are out of scope** — the action says why it is unavailable there, in
+      `mirrorUnavailableReason`'s voice, because pixels can only be cut at the loop and a half-recoloured
+      stroke contradicts the ask's own rule.
+      **Erasers and placed images are skipped, and skipped from the count**, so a lasso catching only
+      those costs no undo step: an eraser composites `.destinationOut` and reads only alpha, so writing
+      its colour is an inert no-op that would lie about what happened.
+      **The obvious code to reuse is the wrong code.** `splitForLassoMove`'s `insideIDs` holds a stroke
+      only when it is *wholly* inside; a straddling stroke is cut and only the inside piece enters the
+      set — exactly what the ask rules out. Membership is its own predicate over the same broad phase.
+      **Known and not a defect**: recolouring a keyframe changes its in-betweens live and does not tween
+      the colour, so the span cross-fades old against new. That is `InterpolationEvaluator` reading both
+      ends at draw time, and it will be reported as a bug once.
 
 ### (18) The bottom bars should be as tall as their contents — attempted, reverted, still open
 
