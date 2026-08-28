@@ -3,19 +3,218 @@ import UIKit
 
 // MARK: - Document
 //
-// Whole-canvas operations: the drawable padding margin around the artwork, and mirroring the canvas.
-// Both rewrite every cel's buffers in place and so are deliberately not undoable. Extracted from
-// CanvasManager.swift as an extension — all state still lives on the class itself (see that file's
-// header), so every view binding is unchanged.
+// Whole-canvas operations: resizing the canvas, the drawable padding margin around the artwork, and
+// mirroring the canvas. All of them rewrite every cel's buffers in place and so are deliberately not
+// undoable. Extracted from CanvasManager.swift as an extension — all state still lives on the class
+// itself (see that file's header), so every view binding is unchanged.
+
+/// CANVAS_RESIZE.md §2's single resize map `M`, computed once and applied to every tier.
+///
+/// **One map, expressed once.** Not "a draw rect for the raster and a scale factor for the vector":
+/// those are the same geometry written twice, and two expressions of one geometry are how they come
+/// to disagree. `RasterLayerTexture.flippedImage`'s doc comment sets the precedent for the flip, in
+/// as many words — the three raster tiers move *in exact lockstep* or content lands on the wrong
+/// side of the canvas relative to the rest.
+///
+/// A struct rather than four locals inside the resize so the arithmetic is reachable from a headless
+/// test without building a document (`CanvasResizeLogicTests`), and so the inverse — which stage 3's
+/// undo runs backwards — has one home rather than being re-derived at the point of use.
+///
+/// Dimensions here are **buffer** extents (`CanvasManager.canvasSize`, which already includes
+/// `canvasPadding` on every side), not artwork extents. At `k == 1` the two agree exactly: padding is
+/// symmetric, so `(Nw + 2p − Ow − 2p)/2 == (Nw − Ow)/2`, and centring in either space gives the same
+/// offset. See `CanvasManager.resizeCanvas(to:scaleContent:)` for which one the *artist* types.
+struct CanvasResizeMap: Equatable {
+
+    let oldSize: CGSize
+    let newSize: CGSize
+
+    /// The letterbox factor: `min(Nw/Ow, Nh/Oh)` under scale, exactly `1` under crop/expand.
+    ///
+    /// `min` and not `max` because the owner asked for *"just scaling the stuff so it fits"* — the
+    /// leftover on the axis that did not bind is real paper at the document's background colour, not
+    /// a painted bar. `max` (cover, and crop the overflow) is a different feature; §6 asks for it.
+    let scale: CGFloat
+
+    /// Where the old canvas's origin lands in the new one. Centred, matching `setCanvasPadding`'s
+    /// long-standing placement, and because a drawing on a canvas being grown belongs in the middle
+    /// of the larger one.
+    let offset: CGPoint
+
+    /// - Parameters:
+    ///   - oldSize: the buffer extent the document has now.
+    ///   - newSize: the buffer extent it is becoming.
+    ///   - scaleContent: false crops/expands (artwork keeps its own size); true letterboxes.
+    init(from oldSize: CGSize, to newSize: CGSize, scaleContent: Bool) {
+        let k: CGFloat
+        if scaleContent, oldSize.width > 0, oldSize.height > 0 {
+            k = min(newSize.width / oldSize.width, newSize.height / oldSize.height)
+        } else {
+            k = 1
+        }
+        var dx = (newSize.width - k * oldSize.width) / 2
+        var dy = (newSize.height - k * oldSize.height) / 2
+        // **Whole points when `k == 1`, and deliberately not when it isn't.** A bitmap drawn at a
+        // half-point offset is filtered, so a crop/expand that did not round would be a lossy
+        // operation pretending not to be. Under scale the draw is a resample anyway, and rounding
+        // there would put the raster tier half a point from the vector tier on the same cel — the one
+        // thing that must not happen. §5 rule 4.
+        if k == 1 { dx.round(); dy.round() }
+        self.oldSize = oldSize
+        self.newSize = newSize
+        self.scale = k
+        self.offset = CGPoint(x: dx, y: dy)
+    }
+
+    /// Where the old canvas's whole extent lands in the new one — the `placing:` rect every raster
+    /// and vector primitive draws into.
+    var contentRect: CGRect {
+        CGRect(x: offset.x, y: offset.y, width: scale * oldSize.width, height: scale * oldSize.height)
+    }
+
+    /// `M` itself: a point `p` of the old canvas maps to `k·p + d`.
+    ///
+    /// `.scaledBy` *after* `translationX:` is the spelling that means **scale first, then
+    /// translate**; the other order reads identically and is wrong.
+    var transform: CGAffineTransform {
+        CGAffineTransform(translationX: offset.x, y: offset.y).scaledBy(x: scale, y: scale)
+    }
+
+    func apply(_ point: CGPoint) -> CGPoint { point.applying(transform) }
+
+    /// The resize that undoes this one.
+    ///
+    /// At `k == 1` this is **exactly** the identity when composed: `Double.rounded()` rounds half away
+    /// from zero, which is symmetric about zero, so `((Ow − Nw)/2).rounded() == −((Nw − Ow)/2).rounded()`
+    /// even when the difference is odd. Pinned by
+    /// `CanvasResizeLogicTests.testCropExpandOutAndBackIsExactlyTheIdentity`. Under scale the geometry
+    /// returns to within float noise and the *pixels* do not — CANVAS_RESIZE.md §2's permanent
+    /// vector/raster asymmetry, which stage 3's undo has to announce rather than hide.
+    var inverse: CanvasResizeMap {
+        CanvasResizeMap(from: newSize, to: oldSize, scaleContent: scale != 1)
+    }
+}
+
+extension InterpolationRecipe {
+
+    /// This recipe with every piece of geometry it owns shifted by `d` — the crop/expand arm of
+    /// CANVAS_RESIZE.md §1's interpolation rows.
+    ///
+    /// An in-between's *content* is derived and so there is nothing here to redraw. What there is, is
+    /// the space it is derived **through**: a `Lattice`'s `restOrigin` and `vertices` are canvas
+    /// points, and a lattice left behind while the keyframes it interpolates moved would re-pose the
+    /// drawing relative to a grid that no longer sits over it.
+    ///
+    /// **`LocalEdit.stroke` moves too, and moves exactly once.** Its samples are in the lattice's
+    /// *rest* space (`Lattice.carriedToRest`), which is a grid laid out in canvas coordinates — so
+    /// translating the grid without translating the stroke would slide the stroke into different
+    /// cells. Translating both by the same `d` is what "it moves with the lattice" means. The trap §1
+    /// names is the other error: mapping it a second time in canvas space, on top of the lattice it
+    /// already rode through.
+    ///
+    /// `cols`, `rows`, `activeCells`, `t`, `spacing`, `guideIDs` and `references` carry no canvas
+    /// geometry — cell topology, normalised time and identities — and are untouched. `restCellSize`
+    /// is a length and is untouched *at `k == 1`*; stage 2 scales it.
+    func translated(by d: CGPoint) -> InterpolationRecipe {
+        guard d != .zero else { return self }
+        let t = CGAffineTransform(translationX: d.x, y: d.y)
+        var moved = self
+        moved.groups = groups.map { binding in
+            var binding = binding
+            binding.lattices = binding.lattices.map { lattice in
+                Lattice(cols: lattice.cols, rows: lattice.rows,
+                        restOrigin: CGPoint(x: lattice.restOrigin.x + d.x, y: lattice.restOrigin.y + d.y),
+                        restCellSize: lattice.restCellSize,
+                        vertices: lattice.vertices.map { CGPoint(x: $0.x + d.x, y: $0.y + d.y) },
+                        activeCells: lattice.activeCells)
+            }
+            return binding
+        }
+        moved.localEdits = localEdits.map { edit in
+            var edit = edit
+            if case .stroke(let stroke) = VectorCanvas.mapping(.stroke(edit.stroke), throughSimilarity: t) {
+                edit.stroke = stroke
+            }
+            return edit
+        }
+        return moved
+    }
+}
 
 extension CanvasManager {
 
+    // MARK: - Resize (CANVAS_RESIZE.md stage 1)
+
+    /// The artwork rect the artist is looking at: `canvasSize` inset by `canvasPadding` on every side.
+    ///
+    /// Nil before a canvas exists. **This is the number the resize dialog shows and takes**, per §5
+    /// rule 9 (owner-confirmed 2026-08-28): the padding is a working margin the artist set with a
+    /// *separate* control, so it is preserved literally in canvas points and never scales, and the
+    /// typed width/height therefore mean the artwork. The alternative — the typed number being the
+    /// buffer, with padding eating into it — makes the two Actions controls fight over one number in
+    /// a way neither of them shows.
+    var artworkSize: CGSize? {
+        guard let canvasSize else { return nil }
+        return CGSize(width: max(1, canvasSize.width - 2 * canvasPadding),
+                      height: max(1, canvasSize.height - 2 * canvasPadding))
+    }
+
+    /// What `resizeCanvas(to:)` will accept for an artwork dimension, given the padding already on
+    /// this document.
+    ///
+    /// **Not simply `1...maxCanvasExtent`, and the difference is the padding.** `canvasSize` includes
+    /// the margin, and `maxCanvasExtent` bounds `canvasSize` — so on a document with 1024 pt of
+    /// padding the largest *artwork* that fits is 16383 − 2048. `CanvasSizePickerView` needs no such
+    /// inset because it creates a document with no padding at all. Clamping rather than refusing, for
+    /// the same reason the padding slider clamps: the artist gets the largest thing that fits, not an
+    /// error.
+    var resizableArtworkExtentRange: ClosedRange<CGFloat> {
+        1...max(1, Self.maxCanvasExtent - 2 * canvasPadding)
+    }
+
+    /// Resizes the whole document to an arbitrary artwork rectangle — the Actions menu's "Resize
+    /// Canvas". CANVAS_RESIZE.md stage 1.
+    ///
+    /// **Exactly `setCanvasPadding`'s contract with an arbitrary rectangle instead of a symmetric
+    /// margin**, and literally the same loop: both entry points call `performCanvasResize` below.
+    /// Every content tier of every cel of every layer moves, plus document-level guides; transient
+    /// state is baked and discarded; `history` is cleared and this is not undoable; it runs
+    /// synchronously on the main actor. Undo, off-main work and a busy modal are stage 3 and are
+    /// deliberately absent rather than forgotten.
+    ///
+    /// `newArtworkSize` is the **artwork** rect (see `artworkSize`); the buffer becomes
+    /// `newArtworkSize + 2 × canvasPadding`, and `canvasPadding` itself does not move.
+    ///
+    /// - Parameter scaleContent: stage 2. `true` is **refused** today rather than silently
+    ///   crop/expanding, because a caller that asked for a letterbox and got a crop has lost artwork
+    ///   and been told it succeeded. The parameter exists now so the call sites stage 2 adds are the
+    ///   only thing it has to change.
+    /// - Returns: whether the document changed.
+    @discardableResult
+    func resizeCanvas(to newArtworkSize: CGSize, scaleContent: Bool = false) -> Bool {
+        guard !scaleContent else { return false }
+        guard canvasSize != nil else { return false }
+        let range = resizableArtworkExtentRange
+        let clampedArtwork = CGSize(
+            width: min(max(newArtworkSize.width.rounded(), range.lowerBound), range.upperBound),
+            height: min(max(newArtworkSize.height.rounded(), range.lowerBound), range.upperBound))
+        let newSize = CGSize(width: clampedArtwork.width + 2 * canvasPadding,
+                             height: clampedArtwork.height + 2 * canvasPadding)
+        return performCanvasResize(toBuffer: newSize, padding: canvasPadding, scaleContent: false)
+    }
+
     /// Sets the light-grey drawable margin around the artwork, resizing every layer/cel buffer so the
-    /// existing artwork stays centred (a uniform translate — no resampling of vector content, and
-    /// raster/baked/fill content is re-placed at the offset). Growing the margin shifts content by a
-    /// positive offset; shrinking crops whatever falls outside the new bounds. Not undoable — buffer
-    /// dimensions change, so the active layer's stroke-undo stack is cleared (inactive layers' stacks
-    /// clear on next activation, see `updateActiveLayerAndTool`).
+    /// existing artwork stays centred. Growing the margin shifts content outward; shrinking crops
+    /// whatever falls outside the new bounds. Not undoable — buffer dimensions change, so the active
+    /// layer's stroke-undo stack is cleared (inactive layers' stacks clear on next activation, see
+    /// `updateActiveLayerAndTool`).
+    ///
+    /// **The artwork does not change size here; the buffer does.** That is why this cannot be written
+    /// as a call to `resizeCanvas(to:)` — the two controls move different numbers — and why both go
+    /// through `performCanvasResize` instead. Before CANVAS_RESIZE.md stage 1 this held the walk
+    /// itself, and the three defects the walk had (guides left behind, a stale clipboard, and a
+    /// full-document thumbnail regen) were this function's as much as the resize's; sharing the loop
+    /// is what fixes them here for free.
     func setCanvasPadding(_ newPadding: CGFloat) {
         guard let oldSize = canvasSize else { return }
         // **Rounded, because `ActionsMenu`'s slider has no `step:` and this value is folded into
@@ -33,14 +232,34 @@ extension CanvasManager {
         let delta = clamped - canvasPadding
         guard delta != 0 else { return }
 
+        let newSize = CGSize(width: oldSize.width + 2 * delta, height: oldSize.height + 2 * delta)
+        performCanvasResize(toBuffer: newSize, padding: clamped, scaleContent: false)
+    }
+
+    /// The one walk. Every canvas resize in the app goes through here.
+    ///
+    /// - Parameters:
+    ///   - newSize: the new **buffer** extent (`canvasSize`, padding included).
+    ///   - newPadding: what `canvasPadding` becomes — unchanged by `resizeCanvas`, moved by
+    ///     `setCanvasPadding`.
+    ///   - scaleContent: see `CanvasResizeMap`. Stage 1 only ever passes `false`.
+    @discardableResult
+    private func performCanvasResize(toBuffer newSize: CGSize, padding newPadding: CGFloat,
+                                     scaleContent: Bool) -> Bool {
+        guard let oldSize = canvasSize else { return false }
+        guard newSize != oldSize else {
+            canvasPadding = newPadding
+            return false
+        }
+
         // Every transient buffer here is canvas-sized, so all of them have to be baked before the
         // size changes underneath them (a shape/fill preview rendered at the old size would land
         // mis-scaled once it eventually committed).
         commitAllInteractiveState()
         selection = nil
 
-        let offset = CGPoint(x: delta, y: delta)
-        let newSize = CGSize(width: oldSize.width + 2 * delta, height: oldSize.height + 2 * delta)
+        let map = CanvasResizeMap(from: oldSize, to: newSize, scaleContent: scaleContent)
+        let placement = map.contentRect
 
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices {
@@ -58,26 +277,57 @@ extension CanvasManager {
                 // changed here — see CANVAS_RESIZE.md §0.
                 autoreleasepool {
                     layers[layerIndex].cels[celIndex].raster =
-                        layers[layerIndex].cels[celIndex].raster.resized(to: newSize, offset: offset)
+                        layers[layerIndex].cels[celIndex].raster.resized(to: newSize, placing: placement)
                     if let fill = layers[layerIndex].cels[celIndex].fillImage {
-                        layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, offset: offset)
+                        layers[layerIndex].cels[celIndex].fillImage = PixelOps.resizedCanvasImage(fill, to: newSize, placing: placement)
                     }
                     if let baked = layers[layerIndex].cels[celIndex].bakedImage {
-                        layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, offset: offset)
+                        layers[layerIndex].cels[celIndex].bakedImage = PixelOps.resizedCanvasImage(baked, to: newSize, placing: placement)
                     }
                     if let vector = layers[layerIndex].cels[celIndex].vector {
-                        layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, offset: offset)
+                        layers[layerIndex].cels[celIndex].vector = vector.resized(to: newSize, placing: placement)
                     }
+                    // An in-between's content is *derived*, so there is nothing here to redraw — but
+                    // the lattice it is derived through is geometry in canvas coordinates and would
+                    // otherwise stay behind while the keyframes it interpolates moved. §1.
+                    if let recipe = layers[layerIndex].cels[celIndex].interpolation {
+                        layers[layerIndex].cels[celIndex].interpolation = recipe.translated(by: map.offset)
+                    }
+                    // Nil rather than re-rendered, and picked up by the deferred backfill below.
+                    layers[layerIndex].cels[celIndex].thumbnail = nil
                 }
             }
         }
 
+        // **Document-level geometry, missed by this walk until CANVAS_RESIZE.md stage 1.** A guide's
+        // `TimedSample.x/y` are absolute canvas points, so every use of the padding slider left every
+        // interpolation guide `delta` points off the artwork it was drawn over. `pressure` and `time`
+        // are unit-free and untouched.
+        for guideIndex in guideStrokes.indices {
+            for sampleIndex in guideStrokes[guideIndex].samples.indices {
+                let moved = map.apply(guideStrokes[guideIndex].samples[sampleIndex].point)
+                guideStrokes[guideIndex].samples[sampleIndex].x = moved.x
+                guideStrokes[guideIndex].samples[sampleIndex].y = moved.y
+            }
+        }
+
+        // **The timeline clipboard is a canvas-sized payload and nothing else clears it.** `pasteCel`
+        // does no size check, so a copy-resize-paste installed a cel whose `RasterLayerTexture.size`
+        // was the *old* canvas's. Cleared rather than resized: a clipboard is a transient, and §5
+        // rule 8 puts it with the interactive state that is baked and discarded above.
+        copiedCel = nil
+
         canvasSize = newSize
-        canvasPadding = clamped
+        canvasPadding = newPadding
 
         history.removeAll()
         refreshUndoRedoState()
-        regenerateAllThumbnails()
+        // **`startThumbnailBackfill()`, never `regenerateAllThumbnails()`** — §2. The deferred
+        // `.utility` pass PERFORMANCE.md item 9(c) already shipped, which batches by layer, walks
+        // layer *ids* not indices and version-checks each install. The synchronous regen was 22% of
+        // this operation's wall clock (MEASURED 2026-08-27) for a picture nothing is waiting on.
+        startThumbnailBackfill()
+        return true
     }
 
     func flipCanvas(horizontal: Bool) {
@@ -94,6 +344,7 @@ extension CanvasManager {
                 if let bakedImage = layers[layerIndex].cels[celIndex].bakedImage {
                     layers[layerIndex].cels[celIndex].bakedImage = Self.flippedImage(bakedImage, canvasSize: canvasSize, horizontal: horizontal)
                 }
+                layers[layerIndex].cels[celIndex].thumbnail = nil
             }
             // NOTE: vector-layer content (strokes/shapes/fills/images, all stored as geometry in
             // `cel.vector` — see `VectorCanvas`) is not mirrored by this loop at all, unlike
@@ -105,7 +356,10 @@ extension CanvasManager {
         // (pre-flip) orientation if left on the stack.
         history.removeAll()
         refreshUndoRedoState()
-        regenerateAllThumbnails()
+        // Deferred, for the reason the resize walk above states: this is the same whole-document
+        // thumbnail pass, and nothing on screen is waiting on it. CANVAS_RESIZE.md §4 names fixing it
+        // here as a free consequence of fixing it there.
+        startThumbnailBackfill()
     }
 
     /// Mirrors a cel's raster content (fillImage or bakedImage) about the canvas center, so a flipped

@@ -445,7 +445,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(sample.y, 41, accuracy: 1e-9)
     }
 
-    /// **`resized(to:offset:)` bakes its shift, so `setCanvasPadding` stops being a producer of
+    /// **`resized(to:placing:)` bakes its shift, so `setCanvasPadding` stops being a producer of
     /// non-identity cel transforms** — the other half of stage 3, and the one that makes the claim
     /// "no path in this app writes a cel transform" true rather than nearly true.
     ///
@@ -453,7 +453,8 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     /// nothing, so none of `mapping`'s three floors can bind.
     func testResizingBakesTheShiftIntoTheGeometryInsteadOfCarryingIt() throws {
         let canvas = VectorCanvas(size: Self.canvasSize, strokes: [stroke(1)], fills: [fill(1)])
-        let grown = canvas.resized(to: CGSize(width: 128, height: 128), offset: CGPoint(x: 32, y: 32))
+        let grown = canvas.resized(to: CGSize(width: 128, height: 128),
+                                   placing: CGRect(origin: CGPoint(x: 32, y: 32), size: Self.canvasSize))
 
         XCTAssertTrue(grown.transform.isIdentity,
                       "a padded cel must not carry a translation — that is what clipped later ink")

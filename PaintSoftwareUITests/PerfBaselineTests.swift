@@ -3335,15 +3335,21 @@ final class PerfBaselineTests: XCTestCase {
                           "The parallel snapshot must not cost multiples of the serial walk — that is contention on a lock, not scheduling")
     }
 
-    /// **What the Actions menu's Canvas Padding slider costs on a real document**, split into the
-    /// per-cel buffer walk and the `regenerateAllThumbnails()` that follows it.
+    /// **What the Actions menu's Canvas Padding slider costs on a real document** — now the per-cel
+    /// buffer walk and nothing else, measured beside the thumbnail pass that used to follow it.
     ///
     /// `CanvasManager.setCanvasPadding` is a whole-document crop/expand — CANVAS_RESIZE.md §0 reads it
-    /// as the resize it is — and it runs **synchronously on the main actor over every layer × every
-    /// cel**, rewriting `raster`, `fillImage`, `bakedImage` and `vector`, then regenerating every
-    /// thumbnail through a pass whose own doc comment says it is *deliberately* not debounced. On the
+    /// as the resize it is, and as of stage 1 it *is* one, sharing `performCanvasResize`'s walk with
+    /// "Resize Canvas". It runs **synchronously on the main actor over every layer × every cel**,
+    /// rewriting `raster`, `fillImage`, `bakedImage`, `vector` and the interpolation lattices. On the
     /// 1-4-cel documents actually on the owner's iPad (PERFORMANCE.md item 14) that is imperceptible.
     /// Nobody had measured it on the 300-1000-cel document the owner intends.
+    ///
+    /// **`regenerateAllThumbnails()` is no longer part of it, and that is what changed here.** Stage 1
+    /// swapped it for `startThumbnailBackfill()` — the deferred `.utility` pass PERFORMANCE.md item
+    /// 9(c) already shipped — so `thumbnailsAlone` below is measured on its own and reported as *what
+    /// came off this path*, not as a share of it. Before the swap it was 84 ms of a 390 ms call (22%,
+    /// MEASURED 2026-08-27); subtracting it from the total now would report a negative walk.
     ///
     /// **Read `msPerCel`, not `total`** — the total is a property of this fixture, the per-cel figure
     /// is what transfers, for the reason `testWhatOpeningAMultiCelProjectCosts` states at length.
@@ -3374,15 +3380,20 @@ final class PerfBaselineTests: XCTestCase {
         // over the same cels in the other direction and leaves the fixture where it started.
         var whole = (seconds: Double.greatestFiniteMagnitude, peakBytes: UInt64(0))
         var thumbnailSeconds = Double.greatestFiniteMagnitude
+        var deferredThumbnails = false
         for iteration in 0..<3 {
             PixelOps.clearRasterizeCache()
             let grow = measuringPeakMemory { manager.setCanvasPadding(64) }
             if grow.seconds < whole.seconds { whole = grow }
             whole.peakBytes = Swift.max(whole.peakBytes, grow.peakBytes)
+            // Read here rather than at the end: the regen two lines down fills them back in.
+            if iteration == 0 {
+                deferredThumbnails = manager.layers.allSatisfy { $0.cels.allSatisfy { $0.thumbnail == nil } }
+            }
 
-            // Cold again, so this is the same kind of number as the pass inside `setCanvasPadding`:
-            // that one is guaranteed cache-cold because the walk above left every cel with a new
-            // texture identity, and measuring a warm regen here would measure the memo instead.
+            // Cold, so this is the same kind of number the pass *used* to contribute from inside
+            // `setCanvasPadding`: guaranteed cache-cold there because the walk left every cel with a
+            // new texture identity, and measuring a warm regen here would measure the memo instead.
             PixelOps.clearRasterizeCache()
             thumbnailSeconds = Swift.min(thumbnailSeconds,
                                          measuringPeakMemory { manager.regenerateAllThumbnails() }.seconds)
@@ -3390,13 +3401,12 @@ final class PerfBaselineTests: XCTestCase {
             if iteration < 2 { manager.setCanvasPadding(0) }
         }
         let thumbnails = thumbnailSeconds
-        let walk = Swift.max(whole.seconds - thumbnails, 0)
         report("canvas padding resize — \(layerCount) layers x \(celsPerLayer) cels at 2048x1024", [
             ("cels", "\(celCount)"),
-            ("total", milliseconds(whole.seconds)),
-            ("thumbnailsAlone", milliseconds(thumbnails)),
-            ("bufferWalk", milliseconds(walk)),
-            ("thumbnailShare", String(format: "%.2f", whole.seconds > 0 ? thumbnails / whole.seconds : 0)),
+            // The call is the walk now — the thumbnail pass is deferred, so there is nothing to
+            // subtract and the two names would be the same number reported twice.
+            ("bufferWalk", milliseconds(whole.seconds)),
+            ("thumbnailsDeferred", milliseconds(thumbnails)),
             ("msPerCel", String(format: "%.1f", whole.seconds * 1000 / Double(celCount))),
             ("at300Cels", milliseconds(whole.seconds * 300 / Double(celCount))),
             ("at1000Cels", milliseconds(whole.seconds * 1000 / Double(celCount))),
@@ -3404,6 +3414,11 @@ final class PerfBaselineTests: XCTestCase {
         ])
 
         // Structure, not timing — these hold on any machine at any load.
+        XCTAssertTrue(deferredThumbnails, """
+            `setCanvasPadding` left thumbnails behind rather than nil'ing them for \
+            `startThumbnailBackfill`. If it went back to `regenerateAllThumbnails()`, `bufferWalk` \
+            above silently starts including a second whole-document pass — CANVAS_RESIZE.md §2 rule 4.
+            """)
         XCTAssertEqual(manager.canvasSize, CGSize(width: 2048 + 128, height: 1024 + 128),
                        "PREMISE: the resize has to have actually happened, or the timings above are of a `guard` returning")
         XCTAssertEqual(manager.layers.reduce(0) { $0 + $1.cels.count }, celCount,

@@ -230,6 +230,58 @@ final class ToolPanelsUITests: PaintUITestCase {
                        "…and the lift must take it away again rather than stranding it on screen")
     }
 
+    /// TODO item (9), CANVAS_RESIZE.md stage 1: **"Resize Canvas" exists in the Actions menu and
+    /// applies.** The only genuinely UI-shaped part of that stage — the map, the per-tier walk and the
+    /// two fixes are all pinned headlessly in `CanvasResizeLogicTests`, which is the tier to add to.
+    ///
+    /// What is only reachable from here: that the row is in the menu at all, that a `.sheet` raised
+    /// from inside a `DrawingView` dropdown panel actually presents (the panel is swapped in and out
+    /// by `activePanel`, so a sheet anchored to it is not obviously safe), and that the artist's typed
+    /// number reaches the document.
+    ///
+    /// **The row's own title is the probe, and that is deliberate rather than convenient.** The canvas
+    /// extent is not published on `canvas.host`'s label like the transform is, so there is no other
+    /// way to read it from a UI test — and the title showing the live artwork size is a feature in its
+    /// own right (the menu answers "how big is this canvas" without opening anything), so a test that
+    /// reads it is testing something the artist relies on rather than a back door.
+    func testResizeCanvasIsInTheActionsMenuAndAppliesTheTypedSize() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let row = app.buttons["actions.resizeCanvasRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Resize Canvas is a row in the Actions menu")
+        XCTAssertTrue(row.label.contains("2048"),
+                      "PREMISE: the row shows the live artwork size, which is the default 2048 here "
+                      + "(label: \(row.label))")
+        row.tap()
+
+        let widthField = app.textFields["resizeCanvas.widthField"]
+        XCTAssertTrue(widthField.waitForExistence(timeout: 5),
+                      "the row opens the resize sheet — a sheet raised from inside the Actions panel presents")
+        let heightField = app.textFields["resizeCanvas.heightField"]
+        XCTAssertTrue(heightField.exists)
+        XCTAssertEqual(widthField.value as? String, "2048", "the fields are prefilled with the current artwork rect")
+
+        // Cleared with `delete` presses rather than a select-all: the fields raise a number pad, which
+        // has no selection affordances at all.
+        let clear = String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6)
+        widthField.tap()
+        widthField.typeText(clear + "800")
+        heightField.tap()
+        heightField.typeText(clear + "600")
+
+        app.buttons["resizeCanvas.applyButton"].tap()
+        XCTAssertFalse(widthField.waitForExistence(timeout: 3), "applying dismisses the sheet")
+
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the Actions menu is still open underneath")
+        XCTAssertTrue(row.label.contains("800") && row.label.contains("600"), """
+            The typed size never reached the document — the row still reads \(row.label). The two \
+            fields are the *artwork* rect (CANVAS_RESIZE.md §5 rule 9), which with no canvas padding \
+            is also the buffer.
+            """)
+    }
+
 }
 
 final class SelectionAndMoveUITests: PaintUITestCase {

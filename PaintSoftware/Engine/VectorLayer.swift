@@ -524,8 +524,20 @@ final class VectorCanvas {
         return VectorCanvas(size: size, elements: _elements, transform: _transform)
     }
 
-    /// A new canvas sized to `newSize` with all content shifted by `offset`, used by the
-    /// canvas-padding resize.
+    /// A new canvas sized to `newSize` with this canvas's whole extent re-placed into `content` (a
+    /// rectangle in the *new* canvas's point space), used by every canvas resize.
+    ///
+    /// **A rectangle rather than the `offset: CGPoint` this took until CANVAS_RESIZE.md stage 1.** The
+    /// rect is required to be a *uniform* placement — `content.size` is `k` times this canvas's size
+    /// on both axes — because the map it builds is handed to `mapping(_:throughSimilarity:)`, whose
+    /// whole contract is that one scalar `k` stands for both axis widths (a per-axis stretch has no
+    /// correct `stroke.size`; CANVAS_RESIZE.md §3). Stage 1 only ever passes `k == 1`.
+    ///
+    /// **The scale lands in the elements, never in `_transform`** — CANVAS_RESIZE.md §2's one-line
+    /// trap. `render()` rasterizes the display list at canvas size *first* and applies `_transform` to
+    /// that bitmap, so folding a scale into the transform is a bitmap magnify of the vector render
+    /// wearing a vector operation's name. Baking through `mapping` re-stamps the brush at the new
+    /// size on the next render, which is the entire reason the tier exists.
     ///
     /// **The shift is baked into the geometry and the new canvas is identity** — TODO item (12)
     /// stage 3. It used to *append* the translation to `_transform` and hand back the same local
@@ -540,10 +552,16 @@ final class VectorCanvas {
     /// different sub-pixel and re-stamps nothing, so `mapping`'s three floors cannot bind. The
     /// composition with `_transform` is kept rather than assumed away — a canvas handed in with one
     /// (a test, or a document decoded by a build older than stage 3) bakes both at once.
-    func resized(to newSize: CGSize, offset: CGPoint) -> VectorCanvas {
+    func resized(to newSize: CGSize, placing content: CGRect) -> VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
-        let baked = _transform.concatenating(CGAffineTransform(translationX: offset.x, y: offset.y))
+        let k = size.width > 0 ? content.width / size.width : 1
+        assert(size.height <= 0 || abs(content.height / size.height - k) < 1e-9,
+               "resized(to:placing:) takes a uniform placement — `mapping(_:throughSimilarity:)` asserts a similarity, and a per-axis stretch has no correct stroke size (CANVAS_RESIZE.md §3)")
+        // `.scaledBy` after `translationX:` means *scale first, then translate* — the order §2 pins,
+        // and the other one reads identically and is wrong.
+        let placement = CGAffineTransform(translationX: content.minX, y: content.minY).scaledBy(x: k, y: k)
+        let baked = _transform.concatenating(placement)
         let moved = baked.isIdentity ? _elements : _elements.map { Self.mapping($0, throughSimilarity: baked) }
         return VectorCanvas(size: newSize, elements: moved)
     }

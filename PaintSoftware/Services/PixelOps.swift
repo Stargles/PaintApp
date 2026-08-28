@@ -401,14 +401,21 @@ enum PixelOps {
         }
     }
 
-    /// A `newSize` copy of a canvas-sized image with its pixels re-placed at `offset` (canvas point
-    /// space), used by the canvas-padding resize (see `CanvasManager.setCanvasPadding`) for a cel's
-    /// `fillImage`/`bakedImage`. A positive offset (growing padding) keeps content centred; a negative
-    /// one (shrinking) crops whatever falls outside the new bounds.
-    static func resizedCanvasImage(_ image: UIImage, to newSize: CGSize, offset: CGPoint) -> UIImage {
+    /// A `newSize` copy of a canvas-sized image with its whole extent re-placed into `content` (a
+    /// rectangle in the *new* canvas's point space), used by every canvas resize (see
+    /// `CanvasManager.resizeCanvas(to:scaleContent:)`) for a cel's `fillImage`/`bakedImage`.
+    ///
+    /// The rectangle, and the conditional `interpolationQuality`, are exactly
+    /// `RasterLayerTexture.resized(to:placing:)`'s — read that one's doc comment for why. The two are
+    /// separate functions only because one owns a `RasterLayerTexture` and the other a `UIImage`;
+    /// they must keep drawing into the same rectangle or a cel's three raster tiers land in three
+    /// places (`RasterLayerTexture.flippedImage`'s comment states that rule for the flip).
+    static func resizedCanvasImage(_ image: UIImage, to newSize: CGSize, placing content: CGRect) -> UIImage {
         let renderer = UIGraphicsImageRenderer(bounds: CGRect(origin: .zero, size: newSize), format: transparentFormat())
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: offset, size: image.size))
+        let resamples = content.size != image.size
+        return renderer.image { ctx in
+            if resamples { ctx.cgContext.interpolationQuality = .high }
+            image.draw(in: content)
         }
     }
 

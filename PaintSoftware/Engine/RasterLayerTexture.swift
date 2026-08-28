@@ -363,17 +363,28 @@ final class RasterLayerTexture: DabTarget {
         return RasterLayerTexture(size: size, image: flipped, strokeCount: strokeCount)
     }
 
-    /// A new instance sized to `newSize` with this texture's pixels re-placed at `offset` (canvas
-    /// point space), used by the canvas-padding resize (see `CanvasManager.setCanvasPadding`): growing
-    /// the padding shifts existing content by a positive offset so it stays centred; shrinking uses a
-    /// negative offset, cropping whatever falls outside the new bounds. A blank texture (no backing
-    /// bitmap yet) stays blank and free — no bitmap is allocated. Infrequent whole-canvas op, so it
-    /// renders through `UIGraphicsImageRenderer` rather than the incremental stamp path.
-    func resized(to newSize: CGSize, offset: CGPoint) -> RasterLayerTexture {
+    /// A new instance sized to `newSize` with this texture's whole extent re-placed into `content`
+    /// (a rectangle in the *new* canvas's point space). Used by every canvas resize —
+    /// `CanvasManager.setCanvasPadding` and `CanvasManager.resizeCanvas(to:scaleContent:)`, which both
+    /// go through `CanvasResizeMap.contentRect`. A blank texture (no backing bitmap yet) stays blank
+    /// and free — no bitmap is allocated. Infrequent whole-canvas op, so it renders through
+    /// `UIGraphicsImageRenderer` rather than the incremental stamp path.
+    ///
+    /// **A rectangle rather than the `offset: CGPoint` this took until CANVAS_RESIZE.md stage 1**, and
+    /// that one widened parameter is the whole of the raster side of the scale mode (§2). Crop/expand
+    /// passes `CGRect(origin: d, size: size)` and is byte-identical to the old behaviour: the draw
+    /// rect is the source's own size, so nothing resamples. A scale passes a rect of a different size,
+    /// and only then is `interpolationQuality` raised — the app otherwise sets that property exactly
+    /// once, to `.none` (`CanvasManager+Fill`), and a whole-document one-shot resample is worth the
+    /// milliseconds. Setting it unconditionally would change the bytes the crop/expand path produces,
+    /// which is the one thing that must not move here.
+    func resized(to newSize: CGSize, placing content: CGRect) -> RasterLayerTexture {
         guard hasContent else { return RasterLayerTexture(size: newSize, strokeCount: strokeCount) }
         let current = renderToUIImage()
-        let placed = UIGraphicsImageRenderer(size: newSize, format: PixelOps.transparentFormat()).image { _ in
-            current.draw(in: CGRect(origin: offset, size: size))
+        let resamples = content.size != size
+        let placed = UIGraphicsImageRenderer(size: newSize, format: PixelOps.transparentFormat()).image { ctx in
+            if resamples { ctx.cgContext.interpolationQuality = .high }
+            current.draw(in: content)
         }
         return RasterLayerTexture(size: newSize, image: placed, strokeCount: strokeCount)
     }

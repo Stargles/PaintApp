@@ -16,6 +16,11 @@ struct ActionsMenu: View {
     /// release, in `onEditingChanged`, so dragging the thumb doesn't re-render every layer per tick;
     /// this just tracks the thumb + the px readout meanwhile.
     @State private var paddingDraft: Double = 0
+    /// Whether the "Resize Canvas" sheet is up. A sheet rather than an inline section like the padding
+    /// slider, because this one has two typed fields and an irreversible Apply: the padding slider can
+    /// be dragged back, and a resize that cropped artwork cannot (`history.removeAll()`, until
+    /// CANVAS_RESIZE.md stage 3 gives it an undo step).
+    @State private var showingResize = false
 
     var body: some View {
         // Scrolled, not just stacked: the panel that hosts this is capped at a fixed height, and a
@@ -27,6 +32,9 @@ struct ActionsMenu: View {
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
+        .sheet(isPresented: $showingResize) {
+            CanvasResizeSheet(canvasManager: canvasManager)
+        }
     }
 
     private var content: some View {
@@ -57,6 +65,8 @@ struct ActionsMenu: View {
             } label: {
                 row(icon: "arrow.up.and.down", title: "Flip Vertical")
             }
+
+            resizeCanvasRow
 
             paddingControl
 
@@ -249,6 +259,42 @@ struct ActionsMenu: View {
         .padding(.vertical, 8)
     }
 
+    /// TODO item (9) — "Resize Canvas". CANVAS_RESIZE.md stage 1: crop and expand, at an arbitrary
+    /// rectangle instead of the padding slider's symmetric margin.
+    ///
+    /// **Directly above "Canvas Padding", because the two move the same document dimension from
+    /// opposite ends** — this one sets the artwork rect, that one sets the margin around it, and the
+    /// numbers they show have to be read together. The caption says which of the two the fields mean,
+    /// since that is exactly the confusion §6 question 3 was raised about.
+    ///
+    /// The current size is in the row title rather than only inside the sheet, following
+    /// "Bake Precise Strokes": the question "how big is this canvas" is answered by the menu without
+    /// opening anything.
+    private var resizeCanvasRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                showingResize = true
+            } label: {
+                row(icon: "arrow.up.left.and.arrow.down.right",
+                    title: canvasManager.artworkSize.map {
+                        "Resize Canvas (\(Int($0.width.rounded())) × \(Int($0.height.rounded())))"
+                    } ?? "Resize Canvas",
+                    enabled: canvasManager.canvasSize != nil)
+            }
+            .disabled(canvasManager.canvasSize == nil)
+            .accessibilityIdentifier("actions.resizeCanvasRow")
+
+            Text("Crops or expands the artwork area around what you have drawn. "
+                 + "Nothing is scaled, and this cannot be undone.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
+                .padding(.leading, 24)   // clears the row's icon column, as "Add Text" does
+                .padding(.bottom, 6)
+        }
+    }
+
     /// Adjustable light-grey drawable margin around the canvas (see `CanvasManager.setCanvasPadding`).
     /// The px readout follows the thumb live; the actual resize commits on release.
     private var paddingControl: some View {
@@ -296,5 +342,106 @@ struct ActionsMenu: View {
         await MainActor.run {
             canvasManager.insertImage(image)
         }
+    }
+}
+
+/// "Resize Canvas" — CANVAS_RESIZE.md stage 1's dialog. Crop and expand only; the *Scale artwork*
+/// toggle and its letterbox rule are stage 2 and are deliberately not stubbed in here, because a
+/// switch that is present and inert is worse than one that has not arrived.
+///
+/// **The two fields are the artwork rect, not the buffer** — §5 rule 9, owner-confirmed 2026-08-28.
+/// `canvasPadding` is preserved literally and never scales, so the buffer this produces is
+/// `typed + 2 × canvasPadding`; when there is padding the sheet says so under the fields rather than
+/// letting the artist discover it by watching `canvasSize` disagree with what they typed.
+///
+/// The validation is `CanvasSizePickerView`'s, reached through the same single named home
+/// (`CanvasManager.maxCanvasExtent`), **inset by the padding**: that view creates documents with no
+/// margin, so it can use the bound directly and this cannot — 16383 of artwork plus 1024 a side is a
+/// buffer no canvas may have. `CanvasManager.resizableArtworkExtentRange` is where that lives, so the
+/// clamp the button enforces and the clamp the model applies are one value.
+struct CanvasResizeSheet: View {
+
+    @ObservedObject var canvasManager: CanvasManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var widthText: String = ""
+    @State private var heightText: String = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case width, height }
+
+    private var range: ClosedRange<CGFloat> { canvasManager.resizableArtworkExtentRange }
+    private var minDimension: Int { Int(range.lowerBound) }
+    private var maxDimension: Int { Int(range.upperBound) }
+
+    private var width: Int? { Int(widthText) }
+    private var height: Int? { Int(heightText) }
+
+    private var isValid: Bool {
+        guard let width, let height else { return false }
+        return (minDimension...maxDimension).contains(width) && (minDimension...maxDimension).contains(height)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Resize Canvas")
+                .font(.title2).fontWeight(.bold)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    dimensionField("Width", text: $widthText, field: .width)
+                    Text("x").foregroundColor(.secondary)
+                    dimensionField("Height", text: $heightText, field: .height)
+                }
+
+                if !isValid {
+                    Text("Enter values between \(minDimension) and \(maxDimension)")
+                        .font(.caption).foregroundColor(.red)
+                        .accessibilityIdentifier("resizeCanvas.validationMessage")
+                } else if canvasManager.canvasPadding > 0 {
+                    Text("Plus \(Int(canvasManager.canvasPadding.rounded())) px of canvas padding on every side.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+
+                Text("Your artwork keeps its size and stays centred. Anything outside the new edges "
+                     + "is cropped away, and this clears the undo history.")
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .accessibilityIdentifier("resizeCanvas.cancelButton")
+                Spacer()
+                Button("Resize") {
+                    guard let width, let height, isValid else { return }
+                    canvasManager.resizeCanvas(to: CGSize(width: width, height: height))
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isValid)
+                .accessibilityIdentifier("resizeCanvas.applyButton")
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Prefilled from the live artwork rect, so the common edit is changing one number. `onAppear`
+        // rather than an initialiser default: a sheet's body can be built before it is presented, and
+        // the size may have moved since.
+        .onAppear {
+            let current = canvasManager.artworkSize ?? CGSize(width: 2048, height: 2048)
+            widthText = String(Int(current.width.rounded()))
+            heightText = String(Int(current.height.rounded()))
+            focusedField = .width
+        }
+    }
+
+    private func dimensionField(_ title: String, text: Binding<String>, field: Field) -> some View {
+        TextField(title, text: text)
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.center)
+            .focused($focusedField, equals: field)
+            .accessibilityIdentifier(field == .width ? "resizeCanvas.widthField" : "resizeCanvas.heightField")
     }
 }
