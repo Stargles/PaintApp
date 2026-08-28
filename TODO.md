@@ -77,6 +77,16 @@ whatever the canvas becomes.
       crop/expand only, not undoable) are merged. Stage 1 also fixed three defects `setCanvasPadding`
       had all along — guides untransformed, `copiedCel` uncleared, lattices unmoved — because both now
       share one walk; §0 listed two of the three.
+      **Stage 2 `b42a67b`** (the scale toggle and the letterbox rule) is merged; **stage 3 is what is
+      left, and the owner re-scoped it on 2026-08-28**: *"resize freezing canvas isnt that big of an
+      issue, as long as the user knows its loading. It is a one time thing anyway."* §5 rule 15 and §4
+      stage 3 carry it — the busy state becomes the requirement, off-main execution and bounded raster
+      concurrency drop to options, and `isResizing`, the validation refusal and the undo step are
+      unaffected. The same message asked *why* a resize costs anything given fixed-point sample
+      storage; answered in CANVAS_RESIZE.md §2 and PERFORMANCE.md item 18 — right about the file, and
+      the cost is in the resident display list, which is still doubles. That pass also found the 3–4 s
+      figure was a raster-only fixture's: a document shaped like the owner's own resizes at **0.9 ms a
+      cel**, a tenth of it.
       **BUGS.md carries a defect on this path**: Canvas Padding while a vector Move is held cancels
       pre-resize geometry onto the resized cel. Left unfixed on purpose, because this item rebuilds that
       path.

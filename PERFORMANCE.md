@@ -1178,6 +1178,108 @@ in `ObjectTransformLogicTests`.
 
 ---
 
+**18. Where a canvas resize's time actually goes, and whether the vector arm is worth making cheap.
+— MEASURED 2026-08-28. The optimisation is DECLINED; the measurement changes what stage 3 is for.**
+
+The owner, on being told a resize takes 3–4 s at 300 cels and blocks the main thread:
+
+> *"resize freezing canvas isnt that big of an issue, as long as the user knows its loading. It is a
+> one time thing anyway. Although I wonder, why is it like that? since they are stored as signed
+> ints, resizing (not asymetric cropping), shouldnt change the origin point and thus none of the
+> stroke data."*
+
+**Two premises in that, and they part company.** *On disk* it is right, and better than it claims:
+TODO item (8) is a **save-time codec**, `PackedSampleRun` writes the quantisation origin into each
+payload, and nothing on the resize path marks a stroke `precise` — `markedPrecise()`'s only caller
+anywhere is the lasso move (`CanvasManager+LassoMove.swift:758`). So a resize forces no re-encode and
+no decode, and it cannot change what an already-stored coordinate means — the next save writes
+different bytes only because the geometry genuinely moved, never because the format's domain did.
+*In memory* it is not right:
+`VectorSample` is three `CGFloat` (`ShapeGeometry.swift:5-10`) and always has been — item (8) never
+created a resident 16-bit form — so the display list a resize walks is doubles in canvas coordinates,
+and a translation touches every one of them. **The stored-integer intuition is about the file; the
+cost is in the tier above it.**
+
+**MEASURED 2026-08-28**, `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`.
+4 layers × 8 cels at 2048×1024 ↔ 1024×512, out and back, best of three by the whole figure, Debug,
+simulator, **57.3% idle with no other `xcodebuild` running** — the quietest of three whole-test runs,
+the other two at ~40% idle, and the shares moved by at most two points across all three. Every
+absolute figure is a ceiling; the *shares* are the transferable half, because both arms are measured
+on the same cels in the same run. Each cel carries the owner's measured density — **190 strokes**
+(TODO.md, the cel read off their device) × 46 samples.
+
+| document | mode | whole | vector arm | raster arm | remainder |
+|---|---|---|---|---|---|
+| **blank raster tiers** — what the owner's packages actually are | crop/expand | 56.0 ms — **0.9 ms/cel** | **54.5 ms — 97%** | 0.1 ms — 0% | 1.4 ms — 3% |
+| | scale-to-fit | 56.4 ms — **0.9 ms/cel** | 54.1 ms — **96%** | 0.1 ms — 0% | 2.2 ms — 4% |
+| **inked raster tiers** | crop/expand | 280.2 ms — 4.4 ms/cel | 54.3 ms — **19%** | 231.3 ms — **83%** | ~0 |
+| | scale-to-fit | 562.2 ms — 8.8 ms/cel | 53.8 ms — **10%** | 524.4 ms — **93%** | ~0 |
+
+*(The arms are timed separately from `whole`, so the three columns bracket it rather than summing to
+it exactly; a share slightly over 100% on a noisier run is that, not a bookkeeping error.
+`remainder` — the per-cel `autoreleasepool`, `commitAllInteractiveState()`, the guide walk,
+`history.removeAll()`, nil'ing thumbnails, starting the backfill — is **0–4%** in every row.
+`ProjectStore` and the manifest are not a term at all: nothing is written to disk during a resize,
+and the test asserts that against an empty backup root rather than assuming it.)*
+
+**Finding 1 — the 3–4 s figure is a raster figure, and the owner's documents are not that shape.**
+Both existing resize measurements (`testWhatTheCanvasPaddingResizeCosts`,
+`testWhatScalingEveryCelCostsAgainstCroppingIt`) run on `multiCelDocument`, which is **raster-only**:
+its cels carry no `VectorCanvas` at all, so the vector arm's share of those numbers is not "small",
+it is *zero*. Item 14 read the owner's iPad directly on 2026-08-22 and found every raster tier fully
+transparent — and the heal that shipped that day turns such a tier into `.empty(size:)`, which
+`RasterLayerTexture.resized(to:placing:)` early-outs on. **On a real document the raster arm costs
+nothing and the whole resize is 0.9 ms/cel: 0.27 s at 300 cels and 0.89 s at 1000** (INFERRED,
+linear in cel count by construction), in Debug, against 3.0–4.0 s and 9.9–13.3 s for the raster
+fixture. A resize of the owner's own artwork is a *tenth* of what CANVAS_RESIZE.md §2 has been
+planning against, and the difference is entirely whether the raster tiers hold pixels.
+
+*The limit of that claim.* Item 14 read the `raster` tier; `fillImage` and `bakedImage` are separate
+tiers with separate files and no `hasContent` door of their own — only the cel's `if let` skips them.
+A document where the bucket fill or a select-and-move has been used carries one or two more
+canvas-sized redraws a cel and sits between the two rows above. The blank row is a floor for a real
+document, not a promise about every one.
+
+**Finding 2 — inside the vector arm, the arithmetic is not the hot part.** Three probes in the same
+test, over the same 64 cel-resizes:
+
+| | crop/expand, blank raster |
+|---|---|
+| `vectorFloor` — `resized`'s own identity early-out: lock, one `VectorCanvas`, the element array retained rather than rebuilt | **0.1 ms** |
+| `vectorChurn` — every allocation and retain the real walk makes, with `point.applying(t)` replaced by a copy of the same three numbers | **46.0 ms (84%)** |
+| `vectorMaths` — the residual, i.e. the similarity itself | **8.3 ms (15%)** |
+
+Twelve rows across the three runs gave 7.3–10.8 ms of maths against 45.7–59.0 ms of churn — with one
+noisy row landing at 0.0, because the residual between two ~55 ms figures is inside the noise on a
+loaded machine, which is exactly why the quiet run is the one quoted. Read it as **~15% maths, ~84%
+allocation, and a per-cel floor of essentially zero**. `drawn`'s
+`stroke.samples = stroke.samples.map { … }` mints a fresh `[VectorSample]` per stroke — 190 array
+allocations a cel — and that, not the four multiplies and four adds per point, is what a resize
+spends its vector time on.
+
+**Ranked, and declined.** The prize for making crop/expand's vector translate free is 100% of a
+resize on a real document and 19% on a raster-heavy one — but 100% of 0.27 s at 300 cels, in Debug,
+on an operation the owner has just ruled may block as long as it says it is loading (TODO item (9),
+CANVAS_RESIZE.md §5 rule 15). It is not worth a correctness risk and it is not worth a revert; see
+§5's entry, which is where the tempting version of it is ruled out. **If it is ever wanted, the lever
+is the allocation and not the geometry**: taking ownership of the element array and mutating samples
+in place, rather than `map`-ing a new one, is a local change inside `drawn(_:through:widthScale:)`
+with no bearing on where any dab lands. It needs care about who else still holds the old
+`VectorCanvas` (undo closures, the interpolation render cache), which is why it is a note here rather
+than a scheduled item.
+
+*Verified*: `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`.
+
+*One figure this item could not launder.* [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) §9.6 asks for the
+**8,714 samples** on the owner's own cel to be landed here labelled MEASURED with its provenance. It
+still has none — it is not traceable to any run in this repo, and this pass did not find one. What is
+recorded instead is the *190 strokes* beside it, which TODO.md does carry, and a fixture built as
+190 × 46 = 8,740, which reproduces the shape to within a third of a percent without claiming the
+original number's authority. Somebody with the device can settle it in a minute; nobody should quote
+8,714 as MEASURED until they do.
+
+---
+
 ## 4. The onion-skin device re-run (2026-08-18)
 
 The plan this document supersedes said: *"Do not trust the 1302 ms / 190 ms onion-skin figures. They
@@ -1265,6 +1367,20 @@ UNMEASURED at any resolution and scales with area, so the 4K framing overstates 
 the Instruments "Color Copied Images" pass first** — minutes on the device. Schedule nothing, not
 even the narrow version, until it comes back positive and non-trivial. Acting on an unmeasured
 inference is this project's documented failure mode.
+
+**Do not re-introduce a translation-only `VectorCanvas._transform` to make crop/expand cheap.** It is
+the natural reading of the owner's *"resizing … shouldnt change the origin point and thus none of the
+stroke data"*, it is what `resized(to:offset:)` did until TODO item (12) stage 3, and item 18 above
+prices what it would buy: 100% of a 0.27 s operation at 300 cels on a real document, in Debug, on a
+path the owner has ruled may block. **It does not even buy that**, and that is the part worth keeping:
+`VectorCanvasData.init(from:canvas:)` bakes any carried transform through
+`VectorCanvas.mapping` on **encode** and writes `transform = []` (`VectorLayer.swift:3426-3444`), so
+the walk is not removed, it is *moved to the next save* — off a path the artist was told is loading
+and onto one item 15 fought for milliseconds on, with the save's cost now silently depending on
+whether a resize happened. [LAYER_TRANSFORM.md](LAYER_TRANSFORM.md) §10 carries which of that
+document's three defects come back with it (A and C do; B cannot) and the two further costs — the
+item (8) encoder quantises about the *canvas* centre, and `bakePreciseStrokes` snaps onto that same
+grid, both of which are wrong by `d` the moment stored geometry stops being canvas geometry.
 
 **Do not adopt predicted touches as part of a performance pass.** `event.predictedTouches(for:)`
 appears nowhere in the app (grepped, zero matches), and it makes nothing faster — it hides latency. On

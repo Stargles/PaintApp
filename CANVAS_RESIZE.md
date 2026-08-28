@@ -19,8 +19,11 @@ exceptions written into its own doc comment. What is missing is the *arithmetic 
 dialog, an undo contract, and the answer to what happens on cel 400 of 800.
 
 §0 is the census of what exists and is the most useful part of this document. §1 enumerates every
-tier. §2 is the decisions. §4 stages it. §5 is the settled rulings. §6 is the owner's rulings — five
-questions, all now answered.
+tier. §2 is the decisions, and its **split** section is where a resize's time actually goes — read
+that before optimising anything on this path, because the two tables above it are measured on a
+raster-only fixture the owner's own documents are nothing like. §4 stages it. §5 is the settled
+rulings, of which **15 is the newest and the one that changes stage 3**. §6 is the owner's rulings —
+six questions, all now answered.
 
 ---
 
@@ -525,6 +528,57 @@ crop/expand, at 1.5 s and 4.9 s on the same walk, which stage 1 already shipped.
 create the problem; it doubles it**, and stage 3 has to size its bounded-concurrency budget against
 10 ms a cel rather than 5.
 
+### Where that time goes — and the fixture both tables above are measured on is the wrong shape
+
+**MEASURED 2026-08-28**, `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`,
+prompted by the owner asking *why* a resize costs anything (§5 rule 15). Same size pair, same
+best-of-three, Debug, simulator, **57.3% idle, no other `xcodebuild` running** — the quietest of
+three whole-test runs, the other two at ~40%, and no share moved more than two points across them.
+What is new is the fixture: every cel carries a `VectorCanvas` at the owner's own measured density —
+190 strokes × 46 samples — and the raster tier is run both ways.
+
+| document | mode | whole | vector arm | raster arm | remainder |
+|---|---|---|---|---|---|
+| **blank raster tiers** | crop/expand | 56.0 ms — **0.9 ms/cel** | **97%** | 0% | 3% |
+| | scale-to-fit | 56.4 ms — **0.9 ms/cel** | **96%** | 0% | 4% |
+| **inked raster tiers** | crop/expand | 280.2 ms — 4.4 ms/cel | **19%** | **83%** | ~0 |
+| | scale-to-fit | 562.2 ms — 8.8 ms/cel | **10%** | **93%** | ~0 |
+
+**Both tables above this one are raster-only figures, and that is not a caveat, it is the finding.**
+`multiCelDocument` — the fixture `testWhatTheCanvasPaddingResizeCosts` and
+`testWhatScalingEveryCelCostsAgainstCroppingIt` both build — gives its cels **no `VectorCanvas` at
+all**. So the vector arm's share of the 3.0–4.0 s is not small, it is *zero*: there was nothing there
+to walk. And PERFORMANCE.md item 14 read the owner's iPad directly on 2026-08-22 and found every
+raster tier **fully transparent**, which the heal that shipped that day turns into `.empty(size:)` —
+and `RasterLayerTexture.resized(to:placing:)` early-outs on `hasContent`. **On a document shaped like
+the owner's own, the raster arm is free and the whole resize is 0.9 ms a cel: 0.27 s at 300 and
+0.89 s at 1000** (INFERRED, linear by construction), in Debug. That is a tenth of what this section
+has been planning against, and stage 3 should know which of the two documents it is being built for.
+
+**One thing that read does not establish, said plainly.** Item 14 found the `raster` tier transparent;
+it says nothing about `fillImage` and `bakedImage`, which are separate tiers with separate files, and
+`PixelOps.resizedCanvasImage` has no `hasContent` door — the cel's own `if let` is the only thing
+that skips it. A document where the artist has used the bucket fill or a select-and-move carries one
+or two more canvas-sized redraws a cel, and lands somewhere between this table's two rows rather than
+on the cheap one. The blank-raster row is the *floor* for a real document, not a promise about every
+real document.
+
+`remainder` — the per-cel `autoreleasepool`, `commitAllInteractiveState()`, the guide walk,
+`history.removeAll()`, nil'ing thumbnails, starting the backfill — is **0–4%** everywhere.
+`ProjectStore` and the manifest are not a term at all, which the test asserts against an empty backup
+root rather than assuming: rule 1 of "Failure and partial completion" below, pinned.
+
+**And inside the vector arm, the arithmetic is the small half.** Three probes over the same cels:
+the identity early-out costs **0.1 ms** over 64 cel-resizes, the allocation and retain traffic with
+the transform removed costs **46.0 ms**, and the similarity itself is the **8.3 ms** residual —
+~84% churn, ~15% maths, a per-cel floor of essentially nothing. `drawn`'s
+`stroke.samples = stroke.samples.map { … }` mints one fresh array per stroke, 190 a cel, and that is
+what a resize spends its vector time on. PERFORMANCE.md item 18 ranks it (declined) and §5 of that
+document rules out the tempting alternative — putting the translation back into
+`VectorCanvas._transform` — for reasons that turn out not to be about performance at all:
+`VectorCanvasData.init(from:)` bakes a carried transform on **encode**, so that change does not
+remove the walk, it moves it to the next save. LAYER_TRANSFORM.md §10 carries the full verdict.
+
 ### Failure and partial completion: validate first, then a mutation that cannot fail
 
 `ProjectStore.writeAtomically` has three silent failure returns (`:559-562`, `:568-573`, `:574-586`),
@@ -656,6 +710,18 @@ the artist's evidence and the developer's disagree.
 `_transform` to an already-rasterized bitmap, so this is a resample of the vector render dressed as a
 vector operation. §2 carries the argument.
 
+**Put the *translation* in `VectorCanvas._transform`, for crop/expand only — asked 2026-08-28,
+rejected.** A separate question from the one above and a much better one: a translation cannot
+resample, so the bitmap-magnify argument does not reach it, and it is what `resized(to:offset:)` did
+until TODO item (12) stage 3. Rejected on three grounds and not on the obvious one.
+`VectorCanvasData.init(from:)` bakes any carried transform through `mapping` on **encode**, so it does
+not remove the element walk, it moves it to the next save. `render()` rasterizes local content into a
+canvas-sized context *before* applying the transform, so a crop's negative offset clips the very
+content the crop was keeping — LAYER_TRANSFORM.md §2 defect A, reached by a pure translation.
+And the item (8) encoder and `bakePreciseStrokes` both quantise about the *canvas* centre, which is
+only correct while a stored sample is a canvas coordinate. LAYER_TRANSFORM.md §10 is the full verdict;
+§2's split is what says the prize was never large enough to weigh against any of it.
+
 **Per-axis scaling (stretch to fill the new extent).** Rejected by the owner's own ask, and
 independently by the engine: `mapping(_:throughSimilarity:)` asserts equal axis norms, and
 `stroke.size` is a single scalar with no per-axis meaning. Supporting it means a second element mapper,
@@ -727,12 +793,49 @@ plus the survey the dialog asks, the artwork-ratio correction, the Fill asymmetr
 gate's two thresholds.
 *Owed before merge:* **measured** — see §2's table above.
 
-**Stage 3 — undoable, off-main, and a busy state.**
-The validation pass; `isResizing` and the save gate; the `GalleryOpenState`-shaped busy modal with
-`await Task.yield()`; bounded raster concurrency; the cache purge; the `resizeCanvas`
-`HistoryActionLabel` case and the single inverse-resize undo step; the `CanvasNotice` when a raster
-tier was resampled. This is the stage that makes the feature usable on a 300–1000-cel document, and it
-is the stage whose undo cost must be measured rather than asserted.
+**Stage 3 — undoable, told, and safe. Re-scoped 2026-08-28 by §5 rule 15 and §2's split.**
+
+The owner ruled that the block itself is acceptable: *"resize freezing canvas isnt that big of an
+issue, as long as the user knows its loading. It is a one time thing anyway."* That does not delete
+this stage, it re-sorts it — **the busy state is promoted from a courtesy to the load-bearing item,
+and the concurrency work is demoted from a requirement to an option.**
+
+*What stage 3 still genuinely needs, in order:*
+
+1. **The busy state, and it must be visible before the work starts.** This is now the whole of the
+   owner's ask. `GalleryOpenState`'s shape, including the `await Task.yield()` that commits the
+   spinner's frame first — without that yield the flag is set and the block begins in the same turn,
+   so the artist gets the freeze *and* no spinner, which is strictly worse than today. Determinate
+   `n / total` is cheap here and stays worth doing: unlike every other long operation in this app the
+   total is known before the first cel.
+2. **`isResizing` and the save gate.** Not about speed at all. `ScenePhaseSaveGate` fires on
+   `active → !active`, so an artist switching apps mid-resize writes a document that is half old-size
+   and half new — and a *longer* block, which is what this stage now accepts, is a *wider* window for
+   exactly that. Rule 12.
+3. **The validation pass, and the refusal it feeds.** Rule 11. Unchanged, and cheap: a decode, not a
+   render.
+4. **The undo step** — the `resizeCanvas` `HistoryActionLabel` case and the single inverse resize,
+   with its retained cost measured rather than asserted (see "Undo" above). Rule 10.
+5. **The `CanvasNotice` when a raster tier was resampled.** Rule 10's second half.
+
+*What it can drop, or defer to stage 4:*
+
+- **Off-main execution is no longer required.** It was in this list to stop the artist staring at a
+  frozen app; the ruling says a told freeze is fine, and moving a whole-document mutation off the main
+  actor is the part of this stage with real risk in it — every tier it rewrites is `@Published` state
+  the UI reads. Keep it as an option, not a prerequisite. **The one thing that does not survive the
+  drop is the spinner**: a modal that never gets a frame is not a busy state, so if the work stays on
+  the main actor the yield in (1) is doing all of the work and must be tested for, not assumed.
+- **Bounded raster concurrency can go with it.** Its whole purpose was to fan the raster arm out
+  without eight cores × 80 MiB of peak, and there is no fan-out to bound if the walk is serial.
+  §2's derived formula stays written down for whoever wants it later.
+- **The cache purge is a nice-to-have.** The size-keyed caches self-invalidate; purging reclaims
+  bytes sooner and is two lines, but nothing is incorrect without it.
+
+*And one item this stage should now be sized against rather than the old figures.* §2's split says a
+document shaped like the owner's real ones resizes at **0.9 ms a cel** — 0.27 s at 300 cels — because
+its raster tiers are blank. The 3–4 s that motivated the off-main work is a raster-heavy fixture's
+number. Stage 3 should still be correct for the raster-heavy case; it should not be *designed* for it.
 
 **Stage 4 — deferred polish, independent small branches.**
 A preset list (1080p, 2048×1024, square) beside the free-form fields. Anchor choice for crop/expand
@@ -799,6 +902,28 @@ mapper.
     the sandwich's) and asks `CompositorBudget.affordableSize` at the typed extent. Two counts because
     the two thresholds are genuinely different — at 4096×2048 on the owner's iPad 9 the canvas softens
     while the eyedropper still fits.
+15. **A resize may block, provided the app says it is loading. Owner-ruled 2026-08-28**, on being
+    told the operation freezes the main thread for seconds at 300 cels:
+
+    > *"resize freezing canvas isnt that big of an issue, as long as the user knows its loading. It
+    > is a one time thing anyway."*
+
+    This is a ruling about the *contract*, not a licence to leave the block unmeasured, and it moves
+    the bar in one direction only: **the busy state becomes the requirement and off-main execution
+    becomes an option**. §4 stage 3 is re-sorted around it. Three things it does **not** license.
+    A block the artist is not told about is still a bug — an unannounced freeze and an announced one
+    are different products, and the yield that gets the spinner its first frame is the whole
+    difference. It does not license a block during which a *save* can start (rule 12): a longer
+    operation is a wider window for `ScenePhaseSaveGate` to write a half-resized document, so the
+    ruling makes `isResizing` more necessary, not less. And it does not license unbounded memory —
+    "one time" is about the artist's patience, and jetsam does not consult it.
+
+    **The rest of the owner's message was a question, and it is answered in §2**: *"since they are
+    stored as signed ints, resizing … shouldnt change the origin point and thus none of the stroke
+    data."* Right about the file — TODO item (8) is a save-time codec, each payload carries its own
+    quantisation origin, and a resize re-encodes nothing — and not right about memory, where
+    `VectorSample` is three `CGFloat` and a translation touches every one. §2's split measures which
+    half that costs.
 
 ---
 
@@ -918,3 +1043,12 @@ mapper.
    beginning a stroke on a masked layer, can pay the CPU reference's cost for that one composite — which
    is where "falls back to CPU" is actually true, just not on the canvas itself. Saving and exporting
    pay neither cost. §5 rule 14.
+
+6. **May a resize block the app? ANSWERED — yes, if it says it is loading, 2026-08-28.** *"resize
+   freezing canvas isnt that big of an issue, as long as the user knows its loading. It is a one time
+   thing anyway."* §5 rule 15 is the rule and §4 stage 3 is re-sorted around it: the busy state is
+   promoted to the requirement, off-main execution and bounded raster concurrency drop to options,
+   and `isResizing`, the validation refusal and the undo step are untouched by the ruling. The same
+   message asked *why* a resize costs anything given fixed-point storage; §2's split is the answer,
+   and it also refutes the 3–4 s figure the question was put in response to — that number is a
+   raster-only fixture's, and the owner's own documents resize at a tenth of it.

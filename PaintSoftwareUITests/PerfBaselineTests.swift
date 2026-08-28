@@ -3531,6 +3531,351 @@ final class PerfBaselineTests: XCTestCase {
                       "Every cel's buffer moves with the header, or the document is half-resized")
     }
 
+    // MARK: - Where a resize spends its time (CANVAS_RESIZE.md §4 stage 3)
+
+    /// One of the owner's own cels, in the two numbers that decide what a resize costs it: **190
+    /// strokes** — the figure TODO.md carries for the cel measured on their device — and **8,714
+    /// samples** across them, which LAYER_TRANSFORM.md §4 priced the whole-cel Move bake against and
+    /// whose §9.6 asked to have landed here with its provenance. 190 × 46 is 8,740, that figure to
+    /// within a third of a percent, so the fixture below spells it as a rectangle rather than
+    /// carrying a ragged table.
+    ///
+    /// **OWNER-STATED / MEASURED-ON-DEVICE, not synthesised.** It is the one cel-shaped number this
+    /// repo has from real artwork, and it is what makes the per-cel vector figure below transferable
+    /// rather than a property of a fixture somebody chose.
+    private static let ownersStrokesPerCel = 190
+    private static let ownersSamplesPerStroke = 46
+
+    /// One cel's worth of vector ink at the owner's measured density — `ownersStrokesPerCel` strokes
+    /// of `ownersSamplesPerStroke` samples, spread over the canvas so no two cels are the same
+    /// geometry and nothing degenerates onto a single row.
+    ///
+    /// **Deliberately plain strokes with no `lattice`.** A lattice is a cut piece's parent walk and
+    /// `VectorCanvas.mapping` maps it *as well as* `samples`, so a document full of cut pieces walks
+    /// roughly twice the points this one does. The ordinary drawn stroke is the case to size the
+    /// feature against; the lattice case is a multiplier on top of it, named here rather than
+    /// silently averaged in.
+    private static func ownersCelStrokes(brush: Brush, canvas: CGSize, seed: Int) -> [VectorStroke] {
+        let colour = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+        var strokes: [VectorStroke] = []
+        strokes.reserveCapacity(ownersStrokesPerCel)
+        for strokeIndex in 0..<ownersStrokesPerCel {
+            let row = CGFloat((strokeIndex + seed) % 19) / 19
+            let phase = CGFloat((strokeIndex * 7 + seed) % 23) / 23 * .pi * 2
+            var samples: [VectorSample] = []
+            samples.reserveCapacity(ownersSamplesPerStroke)
+            for step in 0..<ownersSamplesPerStroke {
+                let t = CGFloat(step) / CGFloat(ownersSamplesPerStroke - 1)
+                samples.append(VectorSample(
+                    x: canvas.width * (0.04 + 0.92 * t),
+                    y: canvas.height * (0.03 + 0.94 * row) + sin(t * .pi * 2 + phase) * canvas.height * 0.03,
+                    pressure: 0.4 + 0.6 * sin(t * .pi)))
+            }
+            strokes.append(VectorStroke(brush: brush, color: colour, size: 12, opacity: 1,
+                                        samples: samples))
+        }
+        return strokes
+    }
+
+    /// `layerCount` **vector** layers of `celsPerLayer` cels each at the owner's 2048×1024, every cel
+    /// carrying `ownersCelStrokes`.
+    ///
+    /// **`inkRaster: false` is not a cheap shortcut — it is what the owner's documents actually
+    /// are.** PERFORMANCE.md item 14 read their iPad directly on 2026-08-22: every cel of the largest
+    /// live package carried a raster PNG that was *fully transparent*, alpha min = max = 0, including
+    /// the one on the raster layer, and the heal that shipped that day turns such a tier into
+    /// `.empty(size:)` on load. `RasterLayerTexture.resized(to:placing:)` early-outs on `hasContent`
+    /// and allocates nothing, so on a real document the raster arm of a resize is **free** and the
+    /// vector arm is the whole of it. `inkRaster: true` is the other extreme — every raster tier
+    /// carrying pixels — and the two together bracket what a resize can cost.
+    @MainActor
+    private func vectorCelDocument(layerCount: Int, celsPerLayer: Int, inkRaster: Bool) -> CanvasManager {
+        let canvas = Self.ownersCanvasSize
+        let manager = CanvasManager()
+        manager.canvasSize = canvas
+        manager.fps = 24
+        manager.sceneFrameCount = celsPerLayer * 2
+        let brush = Brush(name: "PerfVector", shape: .hardRound, size: 12, hardness: 1)
+        for layerIndex in 0..<layerCount {
+            manager.addVectorLayer(name: "Vector \(layerIndex)")
+            manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
+                let seed = layerIndex * celsPerLayer + celIndex
+                return Cel(id: UUID(), startFrame: celIndex * 2, frameCount: 2,
+                           raster: .empty(size: canvas),
+                           vector: VectorCanvas(size: canvas,
+                                                strokes: Self.ownersCelStrokes(brush: brush, canvas: canvas, seed: seed)))
+            }
+            if inkRaster {
+                for celIndex in 0..<celsPerLayer {
+                    autoreleasepool {
+                        inkOneCel(manager.layers[layerIndex].cels[celIndex].raster, canvas: canvas,
+                                  brush: manager.selectedBrush,
+                                  seed: layerIndex * celsPerLayer + celIndex)
+                    }
+                }
+            }
+        }
+        return manager
+    }
+
+    /// **Where the wall clock of a canvas resize actually goes**, split between the vector element
+    /// walk, the raster tier redraw, and everything else — the question the owner asked on
+    /// 2026-08-28 on being told a resize takes 3-4 s at 300 cels:
+    ///
+    /// > *"I wonder, why is it like that? since they are stored as signed ints, resizing (not
+    /// > asymetric cropping), shouldnt change the origin point and thus none of the stroke data."*
+    ///
+    /// **The premise is right about the file and wrong about memory, and the split below is what
+    /// says which half of that matters.** TODO item (8)'s fixed point is a *save-time codec*:
+    /// `VectorSample` is three `CGFloat` in memory and always has been (`ShapeGeometry.swift:5-10`),
+    /// and `PackedSampleRun` writes each payload with the origin it was quantised about, so a resize
+    /// re-encodes nothing on disk and decodes nothing either. What it does walk is the resident
+    /// display list, in doubles, and a translation touches every sample of it — which is exactly the
+    /// cost the owner supposed was avoidable, arriving through the in-memory tier rather than the
+    /// stored one.
+    ///
+    /// ## What the two existing resize measurements could not say
+    ///
+    /// `testWhatTheCanvasPaddingResizeCosts` and `testWhatScalingEveryCelCostsAgainstCroppingIt` both
+    /// run on `multiCelDocument`, which is **raster-only**: its cels carry no `VectorCanvas` at all.
+    /// Their 4.9-6.1 ms/cel crop/expand is therefore a pure raster figure, and the vector arm's share
+    /// of it is not "small", it is *zero* — nothing was there to walk. This fixture is the other way
+    /// round, and deliberately: it is the shape the owner's real packages have.
+    ///
+    /// ## How the split is taken
+    ///
+    /// Three quantities, over the same cels, in the same run, at the same load:
+    ///
+    ///  * `whole` — `resizeCanvas` out and back, which is what the artist waits for;
+    ///  * `vectorArm` — the same document's `VectorCanvas.resized(to:placing:)` calls alone, results
+    ///    discarded;
+    ///  * `rasterArm` — the same for `RasterLayerTexture.resized(to:placing:)`.
+    ///
+    /// Everything `whole` has that the two arms do not is the remainder: the per-cel
+    /// `autoreleasepool`, `commitAllInteractiveState()`, the guide walk, `history.removeAll()`,
+    /// nil'ing thumbnails and starting the deferred backfill. **The three are taken from one
+    /// iteration rather than min'd independently**, so the split adds up — the iteration kept is the
+    /// one with the smallest `whole`, which is this file's usual defence against a contended host.
+    ///
+    /// **`ProjectStore` and the manifest are not a term at all, and that is asserted rather than
+    /// assumed**: CANVAS_RESIZE.md §2 rule 1 says no disk write happens during a resize, and the
+    /// empty backup root below is what pins it.
+    ///
+    /// **Thumbnails are not a term either, since stage 1.** `startThumbnailBackfill()` nils and
+    /// defers; the render happens off the main actor afterwards and the artist is not waiting on it.
+    /// The fixture parks a placeholder on every cel once the timings are taken, so that background
+    /// pass does not go and re-stamp 190 strokes × 32 cels underneath whatever test runs next.
+    ///
+    /// ## MEASURED 2026-08-28 — PERFORMANCE.md item 18 and CANVAS_RESIZE.md §2 carry the reading
+    ///
+    /// Simulator, Debug, iPad Pro 13" M4, **57.3% idle with no other `xcodebuild` running** — the
+    /// quietest of three whole-test runs, the other two at ~40%, no share moving more than two points
+    /// across them. Best of three iterations by the whole figure:
+    ///
+    /// | document | mode | whole | vector | raster | remainder |
+    /// |---|---|---|---|---|---|
+    /// | blank raster | crop/expand | 56.0 ms — 0.9 ms/cel | **97%** | 0% | 3% |
+    /// | blank raster | scale-to-fit | 56.4 ms — 0.9 ms/cel | **96%** | 0% | 4% |
+    /// | inked raster | crop/expand | 280.2 ms — 4.4 ms/cel | 19% | **83%** | ~0 |
+    /// | inked raster | scale-to-fit | 562.2 ms — 8.8 ms/cel | 10% | **93%** | ~0 |
+    ///
+    /// Inside the vector arm, over the same cels: the identity early-out is **0.1 ms**, the
+    /// allocation traffic with the transform removed is **46.0 ms**, and the similarity itself is the
+    /// **8.3 ms** residual — ~84% churn, ~15% maths. The arms are timed separately from `whole`, so
+    /// the columns bracket it rather than summing to it; a share a point over 100 on a loaded run is
+    /// that, and it is why the quiet run is the one quoted.
+    ///
+    /// **Two things this refutes.** The 3.0-4.0 s at 300 cels that CANVAS_RESIZE.md §2 plans against
+    /// is a raster-only fixture's: the same walk on a document shaped like the owner's own is
+    /// 0.9 ms/cel, so 0.27 s at 300 and 0.89 s at 1000. And the per-sample arithmetic — the thing the
+    /// owner's question and the obvious optimisation are both about — is the *small* half of the
+    /// vector arm.
+    ///
+    /// Debug, simulator, so every absolute figure is a ceiling — PERFORMANCE.md §1 puts the device at
+    /// ~1.3× the simulator on render work, and CLAUDE.md records Debug at 62× Release on one render
+    /// path, so the *vector* arm in particular (tight scalar arithmetic with no library call in it)
+    /// is the kind of code Debug punishes hardest. Read `vectorShare` and `rasterShare` first: a
+    /// share divides out both the host's load and the build configuration in a way milliseconds do
+    /// not.
+    @MainActor
+    func testWhereACanvasResizeSpendsItsTimeOnAVectorDocument() {
+        let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
+        let celCount = layerCount * celsPerLayer
+        let owners = Self.ownersCanvasSize
+        let half = CGSize(width: owners.width / 2, height: owners.height / 2)
+
+        // A backup root of this test's own, so "no disk write happens during a resize" is a tested
+        // claim. `ProjectStore` writes under this root and nothing else in the process does.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("perf-resize-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        for inkRaster in [false, true] {
+            var manager: CanvasManager?
+            autoreleasepool {
+                manager = vectorCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer,
+                                            inkRaster: inkRaster)
+            }
+            guard let manager else { return XCTFail("fixture") }
+            XCTAssertEqual(manager.canvasPadding, 0,
+                           "PREMISE: the artwork rect and the buffer are the same number here, or the "
+                           + "sizes passed to `resizeCanvas` below are not the ones the maps are built from")
+
+            for mode in [CanvasResizeMode.cropExpand, .scaleToFit] {
+                let down = CanvasResizeMap(from: owners, to: half, padding: 0, mode: mode).contentRect
+                let up = CanvasResizeMap(from: half, to: owners, padding: 0, mode: mode).contentRect
+
+                // The arms, measured over every cel with the result thrown away — the same calls the
+                // walk makes, minus storing them back, which is a reference assignment.
+                func walkVector(to size: CGSize, placing rect: CGRect) {
+                    for layer in manager.layers {
+                        for cel in layer.cels {
+                            autoreleasepool { _ = cel.vector?.resized(to: size, placing: rect) }
+                        }
+                    }
+                }
+                func walkRaster(to size: CGSize, placing rect: CGRect) {
+                    for layer in manager.layers {
+                        for cel in layer.cels {
+                            autoreleasepool { _ = cel.raster.resized(to: size, placing: rect) }
+                        }
+                    }
+                }
+
+                // **The two probes that price CANVAS_RESIZE.md §7's question**, and they only mean
+                // anything measured next to `walkVector` in the same run.
+                //
+                // `walkVectorNoMath` is `VectorCanvas.mapping`'s stroke arm verbatim with
+                // `point.applying(t)` replaced by a copy of the same three numbers: it pays every
+                // allocation and every retain the real walk pays and does none of its arithmetic, so
+                // `vectorArm − noMath` is what the per-sample maths costs and `noMath` is what the
+                // array churn costs.
+                func walkVectorNoMath(to size: CGSize) {
+                    for layer in manager.layers {
+                        for cel in layer.cels {
+                            autoreleasepool {
+                                guard let vector = cel.vector else { return }
+                                let moved = vector.elements.map { element -> VectorElement in
+                                    guard case .stroke(var stroke) = element else { return element }
+                                    stroke.samples = stroke.samples.map {
+                                        VectorSample(x: $0.x, y: $0.y, pressure: $0.pressure)
+                                    }
+                                    return .stroke(stroke)
+                                }
+                                _ = VectorCanvas(size: size, elements: moved)
+                            }
+                        }
+                    }
+                }
+                // An identity placement takes `resized(to:placing:)`'s own early-out — `baked
+                // .isIdentity ? _elements` — so this is the per-cel floor: the lock, the element
+                // array retained rather than rebuilt, one `VectorCanvas`. **It is also, to within
+                // that one allocation, exactly what a translation-only `_transform` would cost**,
+                // because that shape hands the same array on and puts the shift in a matrix.
+                func walkVectorFloor() {
+                    let identity = CGRect(origin: .zero, size: owners)
+                    for layer in manager.layers {
+                        for cel in layer.cels {
+                            autoreleasepool { _ = cel.vector?.resized(to: owners, placing: identity) }
+                        }
+                    }
+                }
+
+                var best = (whole: Double.greatestFiniteMagnitude, vector: 0.0, raster: 0.0,
+                            noMath: 0.0, floor: 0.0, peak: UInt64(0))
+                for _ in 0..<3 {
+                    PixelOps.clearRasterizeCache()
+                    let vectorDown = measuringPeakMemory { walkVector(to: half, placing: down) }
+                    let rasterDown = measuringPeakMemory { walkRaster(to: half, placing: down) }
+                    let noMathDown = measuringPeakMemory { walkVectorNoMath(to: half) }
+                    let shrink = measuringPeakMemory { manager.resizeCanvas(to: half, mode: mode) }
+
+                    let vectorUp = measuringPeakMemory { walkVector(to: owners, placing: up) }
+                    let rasterUp = measuringPeakMemory { walkRaster(to: owners, placing: up) }
+                    let noMathUp = measuringPeakMemory { walkVectorNoMath(to: owners) }
+                    // `.scaleToFit` back rather than `mode.inverted`: the pair preserves aspect, so
+                    // Fit and Fill are the same number here, and using Fit both ways keeps the
+                    // fixture's own extent the thing being restored.
+                    let grow = measuringPeakMemory { manager.resizeCanvas(to: owners, mode: mode) }
+                    // Taken after the document is back at `owners`, which is the size its own
+                    // early-out needs.
+                    let floor = measuringPeakMemory { walkVectorFloor() }
+
+                    // One iteration's figures kept together, so the split adds up.
+                    let whole = shrink.seconds + grow.seconds
+                    if whole < best.whole {
+                        best = (whole,
+                                vectorDown.seconds + vectorUp.seconds,
+                                rasterDown.seconds + rasterUp.seconds,
+                                noMathDown.seconds + noMathUp.seconds,
+                                floor.seconds * 2,
+                                Swift.max(shrink.peakBytes, grow.peakBytes))
+                    }
+                }
+
+                let remainder = Swift.max(0, best.whole - best.vector - best.raster)
+                func share(_ part: Double) -> String {
+                    String(format: "%.0f%%", best.whole > 0 ? part / best.whole * 100 : 0)
+                }
+                let walks = Double(celCount * 2)
+                report("resize split, \(mode == .cropExpand ? "crop/expand" : "scale-to-fit")"
+                       + " — \(inkRaster ? "vector + inked raster" : "vector only, blank raster")"
+                       + " — \(layerCount)x\(celsPerLayer) cels, \(Self.ownersStrokesPerCel) strokes/cel", [
+                    ("celResizes", "\(celCount * 2)"),
+                    ("whole", milliseconds(best.whole)),
+                    ("vectorArm", milliseconds(best.vector)),
+                    ("rasterArm", milliseconds(best.raster)),
+                    ("remainder", milliseconds(remainder)),
+                    ("vectorShare", share(best.vector)),
+                    ("rasterShare", share(best.raster)),
+                    ("remainderShare", share(remainder)),
+                    // The vector arm, opened up: what a translation-free arm would still cost, what
+                    // the array churn costs on top of that, and what the per-sample maths costs.
+                    ("vectorFloor", milliseconds(best.floor)),
+                    ("vectorChurn", milliseconds(Swift.max(0, best.noMath - best.floor))),
+                    ("vectorMaths", milliseconds(Swift.max(0, best.vector - best.noMath))),
+                    ("prizeIfTranslationFree", share(Swift.max(0, best.vector - best.floor))),
+                    ("msPerCel", String(format: "%.1f", best.whole * 1000 / walks)),
+                    ("at300Cels", milliseconds(best.whole * 300 / walks)),
+                    ("at1000Cels", milliseconds(best.whole * 1000 / walks)),
+                    ("peak", megabytes(best.peak)),
+                ])
+            }
+
+            // Structure, not timing — these hold on any machine at any load.
+            XCTAssertEqual(manager.canvasSize, owners,
+                           "PREMISE: the out-and-back has to land back on the fixture's own extent")
+            XCTAssertTrue(manager.layers.allSatisfy {
+                $0.cels.allSatisfy { ($0.vector?.elements.count ?? 0) == Self.ownersStrokesPerCel }
+            }, "PREMISE: every cel still carries the whole display list — a resize maps elements, it "
+             + "does not drop them, and a fixture that lost them would report a walk of nothing")
+            XCTAssertTrue(manager.layers.allSatisfy { $0.cels.allSatisfy { $0.vector?.size == owners } },
+                          "Every cel's vector canvas moves with the header, or the document is half-resized")
+            XCTAssertEqual(inkRaster,
+                           manager.layers.contains { $0.cels.contains { $0.raster.hasContent } },
+                           "PREMISE: the blank-raster fixture must really be blank — that early-out in "
+                           + "`RasterLayerTexture.resized` is the whole reason its raster arm is free")
+
+            // Park a placeholder so `backfillMissingThumbnails` finds no jobs: it would otherwise
+            // re-stamp 190 strokes on every one of these cels off-actor, under whatever runs next.
+            for layerIndex in manager.layers.indices {
+                for celIndex in manager.layers[layerIndex].cels.indices {
+                    manager.layers[layerIndex].cels[celIndex].thumbnail = UIImage()
+                }
+            }
+        }
+
+        let written = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        XCTAssertEqual(written, [],
+                       "CANVAS_RESIZE.md §2 rule 1: nothing is written to disk during a resize, so "
+                       + "`ProjectStore`/manifest work is not a term in the split above. Found \(written).")
+    }
+
     /// **What spreading the per-cel *decode* over cores is worth**, measured against a serial walk of
     /// the same PNGs in the same run — the other half of item 9(b), and the half that turned out to
     /// have a confound worth writing down.

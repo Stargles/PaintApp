@@ -597,4 +597,56 @@ owner's instinct reacted to, without having seen the count.
    behaviour.
 6. **Where did 8,714 samples come from?** The figure is load-bearing for §4 and is not in this repo.
    It belongs in PERFORMANCE.md labelled MEASURED with its provenance, beside the 190 strokes that
-   already is (TODO.md:121).
+   already is (TODO.md:121). **Still unanswered, 2026-08-28, and now recorded as unanswered rather
+   than quietly reused**: PERFORMANCE.md item 18 lands the 190 with its provenance and builds its
+   fixture as 190 × 46 = 8,740, which is this figure's *shape* without claiming its authority. Nobody
+   should quote 8,714 as MEASURED until someone with the device settles it.
+
+---
+
+## 10. Would a *translation-only* transform be safe? — asked 2026-08-28, answered no
+
+The owner, on being told a canvas resize blocks the main thread:
+
+> *"resizing (not asymetric cropping), shouldnt change the origin point and thus none of the stroke
+> data."*
+
+The natural implementation of that instinct is to give crop/expand back the shape `resized(to:offset:)`
+had before TODO item (12) stage 3 — append a **pure translation** to `_transform`, touch no element —
+on the ground that a translation cannot clip ink the way a shrink can, or magnify a bitmap the way a
+scale can. It is a fair question and the answer is worth having in full, because two of §2's three
+defects come back and two costs that did not exist when §2 was written come with them.
+
+| §2 defect | under a translation-only `_transform` |
+|---|---|
+| **A. Drawing on a transformed cel silently loses ink** | **Returns, on the crop arm.** `render()` rasterizes the display list into a context of exactly `size` in *local* space (`VectorLayer.swift:2982`) and applies `_transform` to that finished bitmap afterwards (`:2882`). A crop's offset is negative, so local content occupies `[0, oldSize]` while the renderer keeps `[0, newSize]` — the part of the drawing that the crop was supposed to keep is clipped *before* the shift moves it in. The same arithmetic runs the other way for ink drawn afterwards: `addStroke(canvasSpaceStroke:)` stores `canvas − d`, so on a cropped cel a stroke near the far edge stores a local coordinate past `size` and is clipped. The scale factor is not what makes defect A; the *offset between local and canvas space* is, and a translation is nothing but that offset. |
+| **B. Scaling up is a bitmap magnify** | **Does not return.** A translation moves the bitmap and resamples nothing — with whole-point offsets (CANVAS_RESIZE.md §5 rule 4) not even a filtered one. This is the one the instinct is right about. |
+| **C. Interpolation ignores the transform** | **Returns.** `interpolationContentProvider` still hands the evaluator the raw display list (`CanvasManager+Interpolation.swift:577`) and `InterpolationEvaluator.render` still takes no affine. A resize gives *every* cel the same transform, so registration stays consistent — and that makes it worse rather than better: keyframes render shifted by `d` and every in-between renders unshifted, so the whole document's in-betweens pop by `d` the moment the canvas is resized. Uniform, silent, and on a path with no test that would see it. |
+
+**And two costs that are new since §2 was written.**
+
+1. **It does not remove the walk; it moves it to the save.** `VectorCanvasData.init(from:)` bakes any
+   carried transform through `VectorCanvas.mapping` on **encode** and writes `transform = []`
+   (`VectorLayer.swift:3426-3444`) — the decode-only field stage 3 left behind. So the element walk
+   the resize skipped is paid by the next `ProjectStore.save` instead: off a path the artist has been
+   told is loading (CANVAS_RESIZE.md §5 rule 15) and onto one PERFORMANCE.md item 15 fought for
+   milliseconds on, with the save's cost now depending invisibly on whether a resize happened. The
+   alternative — start writing the key again — is a format change, and it re-opens the compatibility
+   question stage 3 closed.
+2. **It breaks item (8)'s precondition, which is this document's own headline.** The shipped encoder
+   quantises about *the centre of the current canvas* and saturates at ±8,192 pt, and
+   `CanvasManager.bakePreciseStrokes` snaps onto that same grid (`CanvasManager+Document.swift:657-666`).
+   Both read `stroke.samples` as canvas coordinates, which is true today precisely because *"no path
+   in this app writes a non-identity `VectorCanvas._transform` any more"* (this document's own opening
+   note). Re-introduce one and both are wrong by `d` — the clamp fires early on one edge and late on
+   the other, and the bake puts geometry on a grid offset from the one the save uses.
+
+**Verdict: no, and the prize does not argue otherwise.** PERFORMANCE.md item 18 measured what the
+vector arm is worth — 0.9 ms a cel on a document shaped like the owner's real ones, so 0.27 s at 300
+cels and 0.89 s at 1000, in Debug — and it also measured that **~84% of that is array allocation
+rather than the similarity arithmetic**, so even the *tempting* version of the optimisation is aimed
+at the wrong term. The cheap, correctness-free version of the same idea is to stop `drawn`'s
+`stroke.samples.map` minting a new array per stroke; that is a local change and it does not touch
+storage, rendering, interpolation or the encoder. **§8's verdict is unchanged and this strengthens
+it**: the reversibility argument for a stored affine loses again here, on a case chosen to be the
+most favourable one it has.
