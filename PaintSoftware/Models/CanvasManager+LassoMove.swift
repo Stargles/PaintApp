@@ -114,6 +114,12 @@ struct VectorFloat {
     /// into it, the piece is shown stretched **twice**.
     var latchedAspect: CGFloat
 
+    /// `frame.stretchAxis` the latched bitmap was rendered at — the third part of the same value, and
+    /// needed whenever `latchedAspect` is: the two together are the stretch the bitmap already
+    /// carries, and a base that named only one of them would show the piece at the right proportions
+    /// along the wrong axis.
+    var latchedStretchAxis: CGFloat
+
     /// Gesture ends so far. Zero means the split happened and nothing else did, which is the one
     /// state an undo has to *un-happen* rather than step back from.
     var nudges: Int = 0
@@ -188,7 +194,8 @@ extension CanvasManager {
                                   elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: selection,
                                   sourceVersion: vector.contentVersion,
                                   mayDiverge: split.mayDiverge, wantsLatch: true,
-                                  latchedFrameTransform: frame.transform, latchedAspect: frame.aspect)
+                                  latchedFrameTransform: frame.transform, latchedAspect: frame.aspect,
+                                  latchedStretchAxis: frame.stretchAxis)
         celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
         refreshUndoRedoState()
         return true
@@ -274,7 +281,8 @@ extension CanvasManager {
                                   elementsBeforeLift: elementsBeforeLift, selectionBeforeLift: nil,
                                   sourceVersion: vector.contentVersion,
                                   mayDiverge: lift.mayDiverge, wantsLatch: true,
-                                  latchedFrameTransform: frame.transform, latchedAspect: frame.aspect)
+                                  latchedFrameTransform: frame.transform, latchedAspect: frame.aspect,
+                                  latchedStretchAxis: frame.stretchAxis)
         celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
         refreshUndoRedoState()
         return true
@@ -309,6 +317,7 @@ extension CanvasManager {
         float.wantsLatch = true
         float.latchedFrameTransform = float.frame.transform
         float.latchedAspect = float.frame.aspect
+        float.latchedStretchAxis = float.frame.stretchAxis
         vector.suppressedElementIDs = float.insideIDs
         float.sourceVersion = vector.contentVersion
         vectorFloat = float
@@ -326,9 +335,14 @@ extension CanvasManager {
     /// the move band all leave a Freeform stretch alone — the owner's *"a Freeform stretch survives a
     /// switch to Uniform: 3:1 stays 3:1 and scales from there"* (2026-08-26), which falls out of the
     /// default rather than needing a rule.
-    func nudgeVectorFloat(to transform: LayerTransform, aspect: CGFloat? = nil) {
+    /// `stretchAxis` defaults the same way and for the same reason: a Uniform drag, both knobs and the
+    /// move band leave a Freeform stretch — its shape *and* the axis it was made about — exactly where
+    /// the last stretch put it.
+    func nudgeVectorFloat(to transform: LayerTransform, aspect: CGFloat? = nil,
+                          stretchAxis: CGFloat? = nil) {
         applyToVectorFloat(transform: transform,
                            aspect: aspect ?? vectorFloat?.frame.aspect ?? 1,
+                           stretchAxis: stretchAxis ?? vectorFloat?.frame.stretchAxis ?? 0,
                            mirror: vectorFloat?.mirror ?? .identity)
     }
 
@@ -376,7 +390,15 @@ extension CanvasManager {
     /// `frame.transform` for the same reason `mirror` does: `LayerTransform` holds one scale. Unlike
     /// the mirror it is *not* folded in front of the map — it belongs to the box's own axes, so it
     /// rides inside `VectorCanvas.affine(from:aspect:pivot:)` where the box's rotation carries it.
+    ///
+    /// **`stretchAxis` is the fourth**, and it is the one that makes the map general rather than a
+    /// stretch in the box's own axes — LASSO_MOVE.md §5.20, Move stage 3b phase 2. It travels with
+    /// `aspect` everywhere: the two are one value in three pieces (`scale` is the third), and a path
+    /// that carried one without the other would stretch a piece by the right amount along the wrong
+    /// axis. `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` is where they are put back
+    /// together.
     func applyToVectorFloat(transform: LayerTransform, aspect: CGFloat = 1,
+                            stretchAxis: CGFloat = 0,
                             mirror: CGAffineTransform) {
         guard var float = vectorFloat, let vector = vectorCanvas(ofFloat: float) else { return }
         guard vector.contentVersion == float.sourceVersion else { return cancelVectorFloat() }
@@ -392,8 +414,15 @@ extension CanvasManager {
         // `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform`, so a piece would
         // jump the instant the yellow knob was touched.
         // `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is the tripwire.
+        //
+        // **`stretchAxis` is here and is not the same field**, which is the distinction phase 2 rests
+        // on: the box angle is where the box is *now*, and the stretch axis is where the box was when
+        // a stretch was made. Only the second belongs in a map, and reading the first would make a
+        // turn of the yellow knob re-aim a stretch the artist had already committed — with no undo
+        // step to give it back, since §5.21 keeps a box turn off the stack.
         let localDelta = mirror.concatenating(
-            VectorCanvas.affine(from: transform, aspect: aspect, pivot: float.pivot)
+            VectorCanvas.affine(from: transform, aspect: aspect, stretchAxis: stretchAxis,
+                                pivot: float.pivot)
                 .concatenating(float.baseTransform.inverted()))
         // **Which mapping, decided by the pose and not by the mode.** An unstretched float goes
         // through the similarity arm bit for bit, so every Uniform move, rotate and mirror is exactly
@@ -407,6 +436,11 @@ extension CanvasManager {
         // for a similarity; the text arm reduces because it takes that same number as its uniform
         // part, so at `aspect == 1` the residual is nothing and the two write the same box, the same
         // point size and the same corners.
+        //
+        // **`stretchAxis` is not a second term in this question**, and that is arithmetic rather than
+        // an omission: at `aspect == 1` the map is a similarity *whatever* the stretch axis is, since
+        // a scalar commutes with a rotation. `affine` states that as a branch, so the matrix handed
+        // to the similarity arm at `aspect == 1` is bit-for-bit the one it received before phase 2.
         let isStretched = aspect != 1
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
@@ -432,15 +466,18 @@ extension CanvasManager {
         let oldSelection = selection
         let newSelection = Self.moving(float.selectionBeforeLift,
                                        by: Self.canvasDelta(of: float, at: transform,
-                                                            aspect: aspect, mirror: mirror))
+                                                            aspect: aspect, stretchAxis: stretchAxis,
+                                                            mirror: mirror))
         let oldFrameTransform = float.frame.transform
         let oldAspect = float.frame.aspect
+        let oldStretchAxis = float.frame.stretchAxis
         let oldMirror = float.mirror
 
         vector.elements = newElements
         vector.bumpVersion()
         float.frame.transform = transform
         float.frame.aspect = aspect
+        float.frame.stretchAxis = stretchAxis
         float.mirror = mirror
         float.nudges += 1
         // A float whose bitmap is only an approximation of the composite shows the truth between
@@ -463,7 +500,11 @@ extension CanvasManager {
         // preview is measured from *that* render — so the approximation is one gesture's worth of
         // stretch and never accumulates. Making the preview exact instead means the deforming-ink
         // renderer path, which is the toggle's half of the work and not this stage's.
-        if float.mayDiverge || mirror != oldMirror || aspect != oldAspect {
+        // **A changed stretch axis drops it for the aspect's reason, restated.** The two are one
+        // value: the bitmap carries a stretch along one axis and the map now wants it along another,
+        // and neither the amount nor the direction can be corrected for in a bitmap of ink.
+        if float.mayDiverge || mirror != oldMirror || aspect != oldAspect
+            || stretchAxis != oldStretchAxis {
             float.wantsLatch = false
             vector.suppressedElementIDs = []
         }
@@ -476,6 +517,7 @@ extension CanvasManager {
                                      oldSelection: oldSelection, newSelection: newSelection,
                                      oldFrameTransform: oldFrameTransform, newFrameTransform: transform,
                                      oldAspect: oldAspect, newAspect: aspect,
+                                     oldStretchAxis: oldStretchAxis, newStretchAxis: stretchAxis,
                                      oldMirror: oldMirror, newMirror: mirror,
                                      // The first nudge carries the split, so undoing it gives back the
                                      // unsplit stroke and dismisses the float.
@@ -552,12 +594,14 @@ extension CanvasManager {
     /// Freeform: a selection outline is a `CGPath` and carries a non-uniform affine exactly.
     static func canvasDelta(of float: VectorFloat, at transform: LayerTransform,
                             aspect: CGFloat? = nil,
+                            stretchAxis: CGFloat? = nil,
                             mirror: CGAffineTransform? = nil) -> CGAffineTransform {
         // Canvas → local (where the reflection is expressed, about `pivot`) → canvas. Exactly the
         // sandwich `applyToVectorFloat` builds for the geometry, read one space out.
         float.baseTransform.inverted()
             .concatenating(mirror ?? float.mirror)
             .concatenating(VectorCanvas.affine(from: transform, aspect: aspect ?? float.frame.aspect,
+                                               stretchAxis: stretchAxis ?? float.frame.stretchAxis,
                                                pivot: float.pivot))
     }
 
@@ -649,6 +693,7 @@ extension CanvasManager {
                                               oldFrameTransform: LayerTransform,
                                               newFrameTransform: LayerTransform,
                                               oldAspect: CGFloat, newAspect: CGFloat,
+                                              oldStretchAxis: CGFloat, newStretchAxis: CGFloat,
                                               oldMirror: CGAffineTransform,
                                               newMirror: CGAffineTransform,
                                               endsFloat: Bool, layerID: UUID, celID: UUID) {
@@ -668,6 +713,7 @@ extension CanvasManager {
             } else {
                 self.vectorFloat?.frame.transform = oldFrameTransform
                 self.vectorFloat?.frame.aspect = oldAspect
+                self.vectorFloat?.frame.stretchAxis = oldStretchAxis
                 self.vectorFloat?.mirror = oldMirror
                 self.vectorFloat?.sourceVersion = vector.contentVersion
             }
@@ -679,6 +725,7 @@ extension CanvasManager {
             self.selection = newSelection
             self.vectorFloat?.frame.transform = newFrameTransform
             self.vectorFloat?.frame.aspect = newAspect
+            self.vectorFloat?.frame.stretchAxis = newStretchAxis
             self.vectorFloat?.mirror = newMirror
             self.vectorFloat?.sourceVersion = vector.contentVersion
             self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)

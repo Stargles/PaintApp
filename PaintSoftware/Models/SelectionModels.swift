@@ -472,29 +472,18 @@ extension CanvasManager {
     /// A raster piece answers nil: `FloatingTransform` has held `scaleX`/`scaleY` since Move shipped,
     /// which is why the picker was live for it and greyed for a vector float until this stage.
     ///
-    /// **A hand-turned box is the second reason, and it is temporary where the first is not.** A
-    /// stretch made about a box the artist turned with the yellow knob needs a rotation on *both*
-    /// sides of the scale — `R(ρ)·S·R(−φ)` — which is one more stored angle than the box has today.
-    /// The owner ruled that angle in (LASSO_MOVE.md §5.20) and it is stage 3b **phase 2**; until it
-    /// exists, offering a picker that silently stretched along the *ink's* axes instead of the
-    /// visible box's would be the "acts like Uniform for now" caption with no caption. Uniform and
-    /// both rotate knobs keep working at any box angle: a uniform drag scales the ratio of two radii
-    /// from the anchor and reads no rotation at all, and a rotate knob measures a swept angle about
-    /// the same anchor.
-    ///
-    /// **The image reason is checked first on purpose.** Both can hold at once, and straightening the
-    /// box would not help a piece carrying a photo — so the artist is told the thing they cannot fix
-    /// rather than sent to turn a knob that changes nothing. It also keeps `MoveTransformBottomBar`'s
-    /// merged caption honest: a box-angle refusal can only happen on a float that mirrors, so
-    /// `mirrorUnavailableReason` is nil whenever this returns the box line, and the bar shows it
-    /// rather than the merged image sentence.
+    /// **A hand-turned box was a second reason for one commit, and phase 2 removed it.** Stage 3b
+    /// phase 1 refused a stretch while `frame.boxAngle != 0` — *"The box is turned. Straighten it to
+    /// stretch this piece."* — because `ObjectTransformDrag.stretched` measured its axes from the
+    /// *ink's* rotation, which on a hand-turned box is not the box the artist can see. Phase 2 makes
+    /// the drag measure from the drawn box and record the axis it pulled along in
+    /// `ObjectTransformFrame.stretchAxis` (LASSO_MOVE.md §5.20), so there is nothing left to refuse
+    /// and the arm is gone rather than relaxed. **The image arm is the one that stays**, and it is a
+    /// different refusal: it is about what the piece *is*, not about how the box is sitting.
     var freeformUnavailableReason: String? {
         guard let float = vectorFloat else { return nil }
         guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeStretched) else {
             return "Freeform can't stretch a placed image."
-        }
-        guard float.frame.boxAngle == 0 else {
-            return "The box is turned. Straighten it to stretch this piece."
         }
         return nil
     }
@@ -522,6 +511,7 @@ extension CanvasManager {
             .scaledBy(x: horizontal ? -1 : 1, y: horizontal ? 1 : -1)
             .translatedBy(x: -float.pivot.x, y: -float.pivot.y)
         applyToVectorFloat(transform: float.frame.transform, aspect: float.frame.aspect,
+                           stretchAxis: float.frame.stretchAxis,
                            mirror: float.mirror.concatenating(reflection))
     }
 
@@ -541,7 +531,8 @@ extension CanvasManager {
         turned.rotation = FixedAngleRotation.stepped(from: turned.rotation,
                                                      lift: float.liftFrameTransform.rotation,
                                                      eighths: eighths)
-        applyToVectorFloat(transform: turned, aspect: float.frame.aspect, mirror: float.mirror)
+        applyToVectorFloat(transform: turned, aspect: float.frame.aspect,
+                           stretchAxis: float.frame.stretchAxis, mirror: float.mirror)
     }
 
     /// Whether **Reset** has anything to put back. False the instant the piece is already sitting
@@ -574,6 +565,12 @@ extension CanvasManager {
         // The aspect is the third term for the same reason it is the third argument to
         // `applyToVectorFloat`: a piece stretched back to its original *area* and rotation is still
         // not where it was picked up, and Reset is the only way back to a square box.
+        //
+        // **`frame.stretchAxis` is not a fourth term, and does not need to be.** It changes the map
+        // only through the aspect — at `aspect == 1` a scalar commutes with the rotation and the axis
+        // is a no-op — so a piece whose only remaining difference is the axis it was once stretched
+        // about really *is* sitting where it was picked up. `resetFloating` writes 0 into it anyway,
+        // so nothing survives a Reset that could surprise the next stretch.
         return float.frame.transform != float.liftFrameTransform || float.frame.aspect != 1
             || float.mirror != .identity
     }
@@ -603,7 +600,8 @@ extension CanvasManager {
         guard let float = vectorFloat else { return }
         // Aspect 1, not the lift's: a float always lifts unstretched, since the box is built from
         // `layerTransform(pivot:)` and that reads a similarity. See `beginVectorLassoMove`.
-        applyToVectorFloat(transform: float.liftFrameTransform, aspect: 1, mirror: .identity)
+        applyToVectorFloat(transform: float.liftFrameTransform, aspect: 1, stretchAxis: 0,
+                           mirror: .identity)
     }
 
     // MARK: Committing

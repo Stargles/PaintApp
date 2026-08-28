@@ -21,7 +21,9 @@ import Foundation
 ///
 /// **Since stage 3b the box can also be turned on its own** — see `boxAngle`, and the yellow knob off
 /// the bottom edge that writes it. That angle is chrome: it changes where the outline and the grips
-/// are drawn and hit, and reaches no geometry anywhere.
+/// are drawn and hit, and reaches no geometry anywhere. Phase 2's `stretchAxis` is the *other* angle,
+/// and the two are opposites in exactly that respect: `boxAngle` draws and never maps, `stretchAxis`
+/// maps and never draws.
 struct ObjectTransformFrame: Equatable {
 
     /// The layer's aggregate move/scale/rotate, about `contentSize`'s centre.
@@ -117,18 +119,57 @@ struct ObjectTransformFrame: Equatable {
     /// to the frame before this field existed — `drawnAngle` is then `transform.rotation + 0`, which
     /// is `transform.rotation` exactly.
     ///
-    /// **Phase 1 is chrome only**: while this is non-zero, Freeform is refused
-    /// (`CanvasManager.freeformUnavailableReason`), because a stretch along a hand-turned box's axes
-    /// needs the *second* stored angle §5.20 rules on — `R(ρ)·S·R(−φ)` — and that is phase 2.
+    /// **Phase 2 removed the Freeform refusal this field used to carry.** A stretch made about a
+    /// hand-turned box now records the axis it was made about, in `stretchAxis`; `boxAngle` itself
+    /// still reaches no geometry, and turning it after a stretch still moves nothing.
     var boxAngle: CGFloat = 0
 
+    /// **The axis a Freeform stretch was made about — the one angle that maps and never draws**, and
+    /// the exact opposite of `boxAngle` above. Radians, in the same sense, 0 for a piece nobody has
+    /// stretched off-axis. LASSO_MOVE.md §5.20.
+    ///
+    /// **What it is for.** `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` builds
+    /// `R(ρ + φ)·S·R(−φ)` about the pivot, where ρ is `transform.rotation`, `S` is `axisScales` and φ
+    /// is this. At φ = 0 that is `R(ρ)·S` — today's map, written out as today's expression rather
+    /// than computed, so every unstretched document is bit-identical. A stretch made about a box the
+    /// artist turned to φ therefore stretches along the axes they can *see*: the drag latches
+    /// β = ρ + `boxAngle` as the direction, applies `R(β)·F·R(−β)` in canvas space, and the result
+    /// lands here as φ = `boxAngle`.
+    ///
+    /// **It is a rotation on both sides of the scale, which is the singular value decomposition of a
+    /// general 2×2.** Two translations, two angles and two scales is six — *exactly* a general
+    /// affine, so this term completes the box's transform rather than extending it, and there is
+    /// nothing left over for a later stage to invent. (Distort is a homography and needs eight; it is
+    /// stage 5 and is not reachable from here.)
+    ///
+    /// **It is not `boxAngle`, and the difference is a ruling rather than a nicety.** §5.21 makes a
+    /// box-only turn free — no undo step — on the argument that it moves no ink. Folding the *live*
+    /// box angle into the map instead of a recorded one would make a turn of the yellow knob re-aim
+    /// the stretch and drag the artist's drawing, with nothing on the stack to give it back. So the
+    /// stretch records the axis and the knob is left alone; turning the box after a stretch changes
+    /// no sample and no pixel, which
+    /// `LassoMoveLogicTests.testTurningTheBoxAfterAStretchChangesNoSampleAndNoPixel` pins.
+    ///
+    /// **`aspect == 1` makes it a no-op, exactly.** A scalar commutes with a rotation, so
+    /// `R(ρ+φ)·s·R(−φ)` *is* `s·R(ρ)`; `affine` states that as a branch rather than computing it, so
+    /// the two round-trips through `sin`/`cos` cannot leave a similarity that is only nearly one —
+    /// which matters because `applyToVectorFloat` dispatches on `aspect != 1` exactly and
+    /// `mapping(_:throughSimilarity:)` asserts the shape it is handed.
+    ///
+    /// **Transient, and no persistence change is owed.** The float is transient and every nudge bakes
+    /// its map into the geometry, so this lives only on the frame for the life of one lift — like
+    /// `aspect`, which needed no stored field either. The undo record carries it beside the aspect for
+    /// the same reason.
+    var stretchAxis: CGFloat = 0
+
     init(transform: LayerTransform, contentSize: CGSize, aspect: CGFloat = 1,
-         boxAngle: CGFloat = 0,
+         boxAngle: CGFloat = 0, stretchAxis: CGFloat = 0,
          allowedHandles: Set<Handle> = Set(Handle.allCases)) {
         self.transform = transform
         self.contentSize = contentSize
         self.aspect = aspect
         self.boxAngle = boxAngle
+        self.stretchAxis = stretchAxis
         self.allowedHandles = allowedHandles
     }
 
@@ -156,6 +197,88 @@ struct ObjectTransformFrame: Equatable {
 
     var axisScales: (x: CGFloat, y: CGFloat) {
         Self.axisScales(scale: transform.scale, aspect: aspect)
+    }
+
+    // MARK: - Reading a pose back out of a matrix
+
+    /// A pose recovered from a 2×2: **`M = R(rotation + stretchAxis)·diag(x, y)·R(−stretchAxis)`**,
+    /// which is the same expression `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` builds.
+    ///
+    /// The two axis scales are kept apart rather than pre-split into `scale`/`aspect`, because the
+    /// caller floors them (`ObjectTransformDrag.minimumScale`) before the split — the same order the
+    /// stretch arm already applies, and the only order in which one axis can be floored without
+    /// dragging the other with it.
+    struct Decomposition: Equatable {
+        var rotation: CGFloat
+        var x: CGFloat
+        var y: CGFloat
+        var stretchAxis: CGFloat
+
+        var scale: CGFloat { sqrt(x * y) }
+        var aspect: CGFloat { x / y }
+    }
+
+    /// **The single place a matrix is turned back into a pose** — the discipline `axisScales` applies
+    /// to the forward direction, applied to the inverse one, and for the sharper version of the same
+    /// reason: there is exactly one arm that needs it and it must not grow a second.
+    ///
+    /// It is the closed-form 2×2 **singular value decomposition**, in the one arrangement this type's
+    /// four fields can hold. Two stretches made about two different axes compose into a general 2×2
+    /// that `(scale, aspect, rotation, stretchAxis)` cannot hold *as written*; the fix is that the
+    /// form already **is** the SVD, so the answer is to multiply the matrices and read the pose back
+    /// out. `ObjectTransformDrag.stretched(to:)` is the only caller.
+    ///
+    /// ## The arithmetic
+    ///
+    /// The linear part of a `CGAffineTransform` acts on a column vector as `[[a, c], [b, d]]`.
+    /// Writing `M = R(u)·diag(s₁, s₂)·R(−v)` and expanding gives four sums that separate the two
+    /// angles completely:
+    ///
+    /// ```
+    /// (a + d)/2 = (s₁+s₂)/2 · cos(u−v)      (a − d)/2 = (s₁−s₂)/2 · cos(u+v)
+    /// (b − c)/2 = (s₁+s₂)/2 · sin(u−v)      (b + c)/2 = (s₁−s₂)/2 · sin(u+v)
+    /// ```
+    ///
+    /// so `u−v` and `u+v` are two `atan2`s and the singular values two `hypot`s. `rotation` is `u−v`
+    /// — the rotation of the **polar** decomposition, i.e. the nearest rotation to `M`, which is why
+    /// a similarity comes back with its own angle and nothing else.
+    ///
+    /// ## Two representations, one matrix
+    ///
+    /// `R(u)·diag(s₁,s₂)·R(−v)` and `R(u+π/2)·diag(s₂,s₁)·R(−v−π/2)` are the **same matrix** — the
+    /// choice is only which of the box's two axes is called "x". The map is therefore identical
+    /// either way and the choice is pure chrome; what it decides is whether the box is drawn wide or
+    /// tall. `preferringAxisNear` picks the branch closest to an angle the caller already has (the
+    /// pose the drag started from), so a drag cannot flip the box's width and height under the finger
+    /// for a matrix that did not change.
+    ///
+    /// ## What it refuses
+    ///
+    /// `nil` for a **reflection or a collapse**, and that is deliberate rather than defensive: this
+    /// arrangement has no signed axis (`aspect` is a ratio and `axisScales` takes its square root), so
+    /// a negative determinant has nowhere to go and must not be allowed to come back as a rotation —
+    /// a mirror is `VectorFloat.mirror`'s job and rides in front of the map. `det = q² − r²`, so
+    /// `y > 0` is exactly `det > 0`.
+    static func decompose(_ m: CGAffineTransform,
+                          preferringAxisNear reference: CGFloat) -> Decomposition? {
+        let e = (m.a + m.d) / 2, h = (m.b - m.c) / 2
+        let f = (m.a - m.d) / 2, g = (m.b + m.c) / 2
+        let q = hypot(e, h), r = hypot(f, g)
+        var x = q + r, y = q - r
+        guard y > 0, x.isFinite else { return nil }
+        let rotation = atan2(h, e)
+        // `r == 0` is a similarity: the two axes are one number, every axis is a principal axis, and
+        // `atan2(0, 0)` would answer 0 for a direction that does not exist. Zero is the canonical
+        // choice and the one that keeps `stretchAxis` at 0 for every pose that has not been stretched.
+        guard r > 0 else {
+            return Decomposition(rotation: rotation, x: x, y: y, stretchAxis: 0)
+        }
+        var stretchAxis = (atan2(g, f) - rotation) / 2
+        if abs((stretchAxis - reference).remainder(dividingBy: .pi)) > .pi / 4 {
+            stretchAxis += .pi / 2
+            swap(&x, &y)
+        }
+        return Decomposition(rotation: rotation, x: x, y: y, stretchAxis: stretchAxis)
     }
 
     /// A box with no extent draws and hits nothing — the state the overlay hides itself in.
@@ -336,7 +459,15 @@ struct ObjectTransformDrag: Equatable {
 
     /// `ObjectTransformFrame.boxAngle` when the finger went down, latched for the same reason
     /// `startAspect` is. Every arm below passes it through untouched; only `.boxRotation` adds to it.
+    ///
+    /// **The stretch arm reads it without writing it**, which is the whole of phase 2: it is the
+    /// direction the artist can see, so it is the direction a Freeform corner pulls along — and it
+    /// lands in `Pose.stretchAxis`, not back here.
     let startBoxAngle: CGFloat
+
+    /// `ObjectTransformFrame.stretchAxis` when the finger went down. Every arm passes it through
+    /// untouched except the Freeform corner, which is the only gesture that can change it.
+    let startStretchAxis: CGFloat
 
     /// Whether a corner drag stretches the two axes independently (**Freeform**) or scales them
     /// together (**Uniform**).
@@ -372,6 +503,7 @@ struct ObjectTransformDrag: Equatable {
         var transform: LayerTransform
         var aspect: CGFloat
         var boxAngle: CGFloat
+        var stretchAxis: CGFloat
     }
 
     init(frame: ObjectTransformFrame, handle: ObjectTransformFrame.Handle, at point: CGPoint,
@@ -382,6 +514,7 @@ struct ObjectTransformDrag: Equatable {
         self.anchor = frame.centre
         self.startAspect = frame.aspect
         self.startBoxAngle = frame.boxAngle
+        self.startStretchAxis = frame.stretchAxis
         self.isFreeform = freeform
     }
 
@@ -399,24 +532,32 @@ struct ObjectTransformDrag: Equatable {
             var moved = start
             moved.position = CGPoint(x: start.position.x + (point.x - startPoint.x),
                                      y: start.position.y + (point.y - startPoint.y))
-            return Pose(transform: moved, aspect: startAspect, boxAngle: startBoxAngle)
+            return Pose(transform: moved, aspect: startAspect, boxAngle: startBoxAngle,
+                        stretchAxis: startStretchAxis)
         case .topLeft, .topRight, .bottomRight, .bottomLeft:
             guard isFreeform else {
                 return Pose(transform: uniformlyScaled(to: point), aspect: startAspect,
-                            boxAngle: startBoxAngle)
+                            boxAngle: startBoxAngle, stretchAxis: startStretchAxis)
             }
             return stretched(to: point)
         case .rotation:
             var turned = start
             turned.rotation = start.rotation + turnedBy(point)
-            return Pose(transform: turned, aspect: startAspect, boxAngle: startBoxAngle)
+            // **A rotation of the ink leaves the stretch axis alone, and that is arithmetic rather
+            // than a choice.** The map is `R(ρ+φ)·S·R(−φ)`, so adding δ to ρ pre-multiplies the whole
+            // thing by `R(δ)` — a rigid turn of the piece about its centre, whatever it has been
+            // stretched to. Re-aiming φ would instead re-stretch it.
+            return Pose(transform: turned, aspect: startAspect, boxAngle: startBoxAngle,
+                        stretchAxis: startStretchAxis)
         case .boxRotation:
             // **`transform` is `start`, bit for bit.** This is the whole of what makes the box knob
             // chrome: the same angle the green knob adds to `transform.rotation` goes into `boxAngle`
             // instead, so the box turns under the finger and the ink is not touched by any arithmetic
-            // at all — not scaled by 1, not rotated by 0, just passed through.
+            // at all — not scaled by 1, not rotated by 0, just passed through. `stretchAxis` is
+            // passed through with it, which is what keeps a turn free of ink *after* a stretch too.
             return Pose(transform: start, aspect: startAspect,
-                        boxAngle: startBoxAngle + turnedBy(point))
+                        boxAngle: startBoxAngle + turnedBy(point),
+                        stretchAxis: startStretchAxis)
         }
     }
 
@@ -455,12 +596,44 @@ struct ObjectTransformDrag: Equatable {
     /// the aspect untouched exactly. So dragging a corner along the box's own diagonal in Freeform is
     /// Uniform, with no seam for the artist to feel.
     ///
-    /// **`-start.rotation` is the *ink's* angle, not the drawn box's**, and on a hand-turned box the
-    /// two differ. That is precisely what LASSO_MOVE.md §5.20's second stored angle is for —
-    /// `R(ρ)·S·R(−φ)` — and it is phase 2. Until it exists, `CanvasManager.freeformUnavailableReason`
-    /// refuses Freeform outright while `boxAngle != 0`, so this arm never runs on a turned box.
+    /// **The axes are the box's *drawn* ones, `start.rotation + startBoxAngle`** — the edges the
+    /// artist can see, which on a hand-turned box are not the ink's. LASSO_MOVE.md §5.20, phase 2:
+    /// where phase 1 measured from `start.rotation` and `freeformUnavailableReason` refused the whole
+    /// gesture while the box was turned, this pulls along the visible edge and records which edge it
+    /// was in `Pose.stretchAxis`. At `startBoxAngle == 0` it is `-start.rotation` to the bit, so
+    /// every un-turned box stretches exactly as it did.
+    ///
+    /// ## Two arms, and the first one is the one that has to stay exact
+    ///
+    /// The map this pose implies is `R(ρ+φ)·S·R(−φ)`. A stretch by `F` about the visible axis
+    /// β = ρ + `startBoxAngle` is `R(β)·F·R(−β)` in canvas space, applied on top:
+    ///
+    /// ```
+    /// M′ = R(β)·F·R(−β) · R(ρ+φ)·S·R(−φ)
+    /// ```
+    ///
+    /// **When the box is turned to the axis the piece was last stretched about** — `startBoxAngle ==
+    /// startStretchAxis`, which includes the overwhelmingly common case where both are 0 — the two
+    /// rotations in the middle cancel and it collapses to `R(β)·(F·S)·R(−β)`: two diagonal matrices
+    /// multiplied, ρ untouched, φ untouched. **When the piece has never been stretched at all**
+    /// (`startAspect == 1`) `S` is scalar and commutes, so it collapses the same way with φ landing
+    /// on the box angle. Those are the two cases the fast arm answers, in the arithmetic this
+    /// function had before phase 2, so a stretch on a straight box is bit-for-bit what it was.
+    ///
+    /// **Otherwise the two stretches are about different axes and do not commute**, and the product
+    /// is a general 2×2 — which is exactly what `ObjectTransformFrame.decompose` reads a pose back
+    /// out of. Compose the matrices, take the SVD, store the answer: the form already *is* the SVD,
+    /// so nothing is approximated and nothing is dropped.
+    ///
+    /// **The composite genuinely carries a rotation, and `transform.rotation` genuinely changes.**
+    /// Two stretches about different axes multiply to a matrix whose polar factor is not the
+    /// identity — that is a fact about the deformation, not an artifact of this representation, and
+    /// the ink really does turn. The box turns with it, since it is drawn at `rotation + boxAngle`.
+    /// `ObjectTransformLogicTests.testTwoStretchesAboutDifferentAxesComposeIntoTheProductMatrix`
+    /// asserts the pose against the directly-multiplied matrix, which is the only claim worth making
+    /// about it.
     private func stretched(to point: CGPoint) -> Pose {
-        let r = -start.rotation
+        let r = -(start.rotation + startBoxAngle)
         let (d0x, d0y) = inBoxAxes(startPoint, cosR: cos(r), sinR: sin(r))
         let (d1x, d1y) = inBoxAxes(point, cosR: cos(r), sinR: sin(r))
         // A grab on one of the box's own axes has no lever on the *other* one, and dividing by it
@@ -470,11 +643,46 @@ struct ObjectTransformDrag: Equatable {
         let fx = abs(d0x) > 1 ? abs(d1x / d0x) : 1
         let fy = abs(d0y) > 1 ? abs(d1y / d0y) : 1
         let base = ObjectTransformFrame.axisScales(scale: start.scale, aspect: startAspect)
-        let sx = max(base.x * fx, Self.minimumScale)
-        let sy = max(base.y * fy, Self.minimumScale)
+
+        if startAspect == 1 || startBoxAngle == startStretchAxis {
+            return pose(rotation: start.rotation, x: base.x * fx, y: base.y * fy,
+                        stretchAxis: startBoxAngle)
+        }
+
+        let existing = CGAffineTransform.identity
+            .rotated(by: start.rotation + startStretchAxis)
+            .scaledBy(x: base.x, y: base.y)
+            .rotated(by: -startStretchAxis)
+        let pull = CGAffineTransform.identity
+            .rotated(by: -r)
+            .scaledBy(x: fx, y: fy)
+            .rotated(by: r)
+        // `preferringAxisNear` is chrome only — both branches describe the same matrix — and the one
+        // it is asked for is the pose the drag started from, so a delta that changes the map by
+        // nothing changes the drawn box by nothing.
+        guard let decomposed = ObjectTransformFrame.decompose(existing.concatenating(pull),
+                                                              preferringAxisNear: startStretchAxis)
+        else {
+            // Unreachable for a pose this type can hold: both axis scales are floored positive, so
+            // the determinant is positive and `decompose` answers. Refusing the delta beats writing a
+            // pose whose `sqrt(aspect)` is NaN — `axisScales`' own note, one level up.
+            return Pose(transform: start, aspect: startAspect, boxAngle: startBoxAngle,
+                        stretchAxis: startStretchAxis)
+        }
+        return pose(rotation: decomposed.rotation, x: decomposed.x, y: decomposed.y,
+                    stretchAxis: decomposed.stretchAxis)
+    }
+
+    /// The two axis scales floored and re-split into the area factor and the shape — **the one place
+    /// the stretch arm's two branches meet**, so neither can floor differently from the other or
+    /// spell the split its own way.
+    private func pose(rotation: CGFloat, x: CGFloat, y: CGFloat, stretchAxis: CGFloat) -> Pose {
+        let sx = max(x, Self.minimumScale), sy = max(y, Self.minimumScale)
         var stretched = start
+        stretched.rotation = rotation
         stretched.scale = sqrt(sx * sy)
-        return Pose(transform: stretched, aspect: sx / sy, boxAngle: startBoxAngle)
+        return Pose(transform: stretched, aspect: sx / sy, boxAngle: startBoxAngle,
+                    stretchAxis: stretchAxis)
     }
 
     /// `point`'s offset from the anchor, turned back into the box's own unrotated axes.

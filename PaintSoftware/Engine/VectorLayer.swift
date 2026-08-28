@@ -979,7 +979,7 @@ final class VectorCanvas {
     /// its center lands at `t.position`, rotated/scaled about that center. `pivot` must be the same
     /// fixed point used to derive `t` via `layerTransform(pivot:)`.
     static func affine(from t: LayerTransform, pivot: CGPoint) -> CGAffineTransform {
-        affine(from: t, aspect: 1, pivot: pivot)
+        affine(from: t, aspect: 1, stretchAxis: 0, pivot: pivot)
     }
 
     /// The same, for a box the Move bar's **Freeform** has stretched: `aspect` is how much wider than
@@ -992,13 +992,34 @@ final class VectorCanvas {
     /// **This is the only affine in the lasso move that is not a similarity**, and every consumer of
     /// it has to know: `mapping(_:throughSimilarity:)` asserts against exactly that shape, and the
     /// stretched arm is `mapping(_:throughStretch:)`.
-    static func affine(from t: LayerTransform, aspect: CGFloat, pivot: CGPoint) -> CGAffineTransform {
+    ///
+    /// **`stretchAxis` is the axis the stretch was made about** — LASSO_MOVE.md §5.20, Move stage 3b
+    /// phase 2 — and it puts a rotation on the **other** side of the scale: `R(ρ+φ)·S·R(−φ)`. That is
+    /// the singular value decomposition of a general 2×2, so with the position this expression is
+    /// exactly a general affine and has nothing left to be extended by.
+    ///
+    /// **Two poses reduce to the shorter expression, and both reductions are written out rather than
+    /// computed.** `φ == 0` is the pose of every document nobody has stretched off-axis; `aspect == 1`
+    /// is every pose that has not been stretched at all, where `S` is a scalar and commutes with the
+    /// rotation, so `R(ρ+φ)·s·R(−φ)` *is* `s·R(ρ)`. Computing either would round-trip two more
+    /// `sin`/`cos` pairs and leave a similarity that is only nearly one — and "nearly" is not good
+    /// enough twice over: `CanvasManager.applyToVectorFloat` dispatches on `aspect != 1` **exactly**,
+    /// and `mapping(_:throughSimilarity:)` asserts the shape it is handed. So the branch is
+    /// correctness, not speed.
+    static func affine(from t: LayerTransform, aspect: CGFloat, stretchAxis: CGFloat,
+                       pivot: CGPoint) -> CGAffineTransform {
         let s = ObjectTransformFrame.axisScales(scale: t.scale, aspect: aspect)
-        return CGAffineTransform.identity
+        let placed = CGAffineTransform.identity
             .translatedBy(x: t.position.x, y: t.position.y)
-            .rotated(by: t.rotation)
-            .scaledBy(x: s.x, y: s.y)
-            .translatedBy(x: -pivot.x, y: -pivot.y)
+        let linear: CGAffineTransform
+        if stretchAxis == 0 || aspect == 1 {
+            linear = placed.rotated(by: t.rotation).scaledBy(x: s.x, y: s.y)
+        } else {
+            linear = placed.rotated(by: t.rotation + stretchAxis)
+                .scaledBy(x: s.x, y: s.y)
+                .rotated(by: -stretchAxis)
+        }
+        return linear.translatedBy(x: -pivot.x, y: -pivot.y)
     }
 
     /// Bounding box of the layer's own content (strokes/fills/images) in its local, untransformed

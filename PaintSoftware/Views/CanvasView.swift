@@ -1591,6 +1591,7 @@ struct CanvasView: UIViewRepresentable {
                                                            contentSize: float.contentSize,
                                                            aspect: pose.aspect,
                                                            boxAngle: pose.boxAngle,
+                                                           stretchAxis: pose.stretchAxis,
                                                            allowedHandles: float.frame.allowedHandles),
                                canvasScale: canvasContentScale)
                 container.bringSubviewToFront(overlay)
@@ -1635,7 +1636,8 @@ struct CanvasView: UIViewRepresentable {
         /// first SwiftUI pass after the gesture ended.
         private static func pose(of float: VectorFloat) -> ObjectTransformDrag.Pose {
             ObjectTransformDrag.Pose(transform: float.frame.transform, aspect: float.frame.aspect,
-                                     boxAngle: float.frame.boxAngle)
+                                     boxAngle: float.frame.boxAngle,
+                                     stretchAxis: float.frame.stretchAxis)
         }
 
         /// Reconciles the layer host and the marching ants with `canvasManager.vectorFloat`, on every
@@ -1659,7 +1661,9 @@ struct CanvasView: UIViewRepresentable {
                 host.strokeView.beginVectorFloat(
                     image: vector.renderIsolated(ids: float.insideIDs),
                     base: VectorCanvas.affine(from: float.latchedFrameTransform,
-                                              aspect: float.latchedAspect, pivot: float.pivot))
+                                              aspect: float.latchedAspect,
+                                              stretchAxis: float.latchedStretchAxis,
+                                              pivot: float.pivot))
             }
             showVectorFloat(float, at: liveVectorFloatPose ?? Self.pose(of: float))
             if let container = containerView, let overlay = transformOverlay {
@@ -1681,7 +1685,7 @@ struct CanvasView: UIViewRepresentable {
         /// no model write.
         private func showVectorFloat(_ float: VectorFloat, at pose: ObjectTransformDrag.Pose) {
             let placement = VectorCanvas.affine(from: pose.transform, aspect: pose.aspect,
-                                                pivot: float.pivot)
+                                                stretchAxis: pose.stretchAxis, pivot: float.pivot)
             // The piece is measured from where its *bitmap* sits, which is the lift for an ordinary
             // float and the last nudge for a re-armed one — `latchedAspect` as well as
             // `latchedFrameTransform`, or a stretch already in the bitmap would be applied twice.
@@ -1689,6 +1693,7 @@ struct CanvasView: UIViewRepresentable {
             // The ants are measured from where the *model's* selection path sits, which is the last
             // nudge. Identity between gestures, which is when the two are the same thing.
             let written = VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
+                                              stretchAxis: float.frame.stretchAxis,
                                               pivot: float.pivot)
             selectionOverlay?.setLiveSelectionTransform(written.inverted().concatenating(placement))
         }
@@ -1732,6 +1737,7 @@ struct CanvasView: UIViewRepresentable {
                                                                      contentSize: float.contentSize,
                                                                      aspect: pose.aspect,
                                                                      boxAngle: pose.boxAngle,
+                                                                     stretchAxis: pose.stretchAxis,
                                                                      allowedHandles: float.frame.allowedHandles),
                                          canvasScale: canvasContentScale)
             }
@@ -1755,7 +1761,8 @@ struct CanvasView: UIViewRepresentable {
                 } else {
                     // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
                     // `beginObjectTransformDrag`.
-                    canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect)
+                    canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect,
+                                                   stretchAxis: pose.stretchAxis)
                 }
             }
             updateVectorFloat()
