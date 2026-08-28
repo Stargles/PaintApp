@@ -71,6 +71,15 @@ is narrower than it looks, and the code adds three dependencies the owner did no
 
 ## 1. Keyframes
 
+> **SPECIFIED 2026-08-28 — [KEYFRAMES.md](KEYFRAMES.md) supersedes this section.** The conversation this
+> item's entry condition asks for has happened; nineteen rulings came out of it and they are in that
+> file's §2. What is below is the pre-conversation reading of the tree and is kept only because its
+> citations are still accurate. **Do not design from it.** Three of its findings were changed by the
+> conversation: `SpacingCurve` is *not* the curve type to reuse (it is a clamped, monotone, end-pinned
+> time remap and a value channel needs none of that); the per-sample-width problem the transform arm
+> looked to need does not exist once the dab walk is baked in rest space; and text's perspective distort
+> is a **bitmap resample**, so it is not evidence that crisp projective ink is close.
+
 > "Keyframes: (objects within a cel can get keyframed and move for the duration of that cel). Also
 > applies to stuff like sliders for effects. Also includes interpolation curve customization. You
 > should also be able to bake the cel containing animation into multiple cels (frames), and also set

@@ -23,7 +23,7 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **Nothing.**
+- **(21) Keyframes — stage 0.** `renderTree(atFrame:)`, behaviour-neutral, on `tmp/kf-frame`.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
@@ -50,6 +50,27 @@ lands in the next save, off a path the artist is told is loading. See PERFORMANC
 LAYER_TRANSFORM.md.
 
 ## Open
+
+### (21) Keyframes — animating properties across the frames one cel spans
+
+- [ ] The owner: *"Keyframes: (objects within a cel can get keyframed and move for the duration of that
+      cel). Also applies to stuff like sliders for effects. Also includes interpolation curve
+      customization. You should also be able to bake the cel containing animation into multiple cels
+      (frames), and also set frame rate. Transformation layers adds transformation animation to whatever
+      is under it."*
+
+      **[KEYFRAMES.md](KEYFRAMES.md) is the specification.** ROADMAP item (1), designed 2026-08-28 in the
+      conversation that file names as each item's entry condition. **§2 carries nineteen rulings — read
+      it rather than re-deriving them**, and §8 is the build order. The three that shape everything else:
+      a transform key stores a **quad** from day one, so Distort lands later with no migration; posed ink
+      is drawn by **baking the dab walk in rest space** and mapping dab centres, which removes the
+      shimmer *and* the per-sample-width problem at once; and **bake is an authoring feature, never a
+      performance instruction** — smooth playback comes from a cache.
+
+      Stage 0 is `renderTree(atFrame:)` and is behaviour-neutral. §8 also names one prerequisite that is
+      not part of this feature and is worth doing first anyway: VECTOR_INTERPOLATION item 18's
+      `ContentProvider` seam, which is what makes any derived content visible to thumbnails, onion skin
+      and export — and which ROADMAP §0 already flags as blocking item (5).
 
 ### (10) Oklab colour storage and processing, from the Actions menu
 
