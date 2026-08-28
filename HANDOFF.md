@@ -10,9 +10,9 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `ab45074`. **Fast tier 1953 / 1950 / 0 / 3.** **No branches in flight, one
-worktree, clean tree.** For the full-suite result at this commit see "State" below — read it before
-you assume anything about the UI tiers.
+inline. `main` is `21cb9ea`. **Fast tier 1953 / 1950 / 0 / 3. FULL SUITE RUN AND CLEAN one docs commit
+below the tip: 2073 / 2065 / 2 / 6, and both reds passed clean in isolation** — environmental, no fix
+owed. **No branches in flight, one worktree, clean tree.**
 
 **1. TODO.md has one item left, (10) Oklab, and its first move is not to build anything.**
    The recommendation is argued and **not yet seen**: stage A is *not* Oklab, it is compositing in
@@ -70,10 +70,13 @@ is made of.
 `main` = `ab45074`. **Fast tier 1953 / 1950 / 0 / 3** (1956 declared; the 3-line gap is the 3 skips).
 Static `func test` across all test files 1985 → **2076**. No branches, no worktrees but the main one.
 
-**Full suite: see the line the closing session left here.** It was started at `ab45074` on a freshly
-erased simulator at the phase boundary; if this sentence is still the only one here, it did not finish
-before the session ended and **the UI tiers are unverified at this commit** — run it before trusting
-them, `simctl shutdown all` + `erase` immediately before, per CLAUDE.md.
+**FULL SUITE RUN AND CLEAN**, at `ab45074` (one docs commit below the tip), freshly erased simulator:
+**2073 / 2065 / 2 / 6**, and **both reds passed clean on an isolated re-run** —
+`LayerPanelUITests.testDroppingFolderOntoFolderNestsIt` (the one CLAUDE.md already names as
+erase-sensitive) and `EraserAndPersistenceUITests.testEraserCanEraseAFilledSelection`. Environmental,
+no fix owed. Note both classes are named differently from the files they live in, which is the trap
+that makes a filename-derived selector match nothing and report success — resolve the class from
+source before building a `-only-testing` selector.
 
 ## What landed
 
