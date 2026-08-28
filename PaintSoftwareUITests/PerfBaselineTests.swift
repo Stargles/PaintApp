@@ -3427,6 +3427,110 @@ final class PerfBaselineTests: XCTestCase {
                       "Every cel's buffer moves with the header, or the document is half-resized")
     }
 
+    /// **What the *scale* arm of the resize costs, against the crop/expand arm on the same cels** —
+    /// CANVAS_RESIZE.md §4 stage 2's "owed before merge: the wall-clock of one cel's raster resize,
+    /// which has never been measured."
+    ///
+    /// **It is a different number from `testWhatTheCanvasPaddingResizeCosts`', and that is the point
+    /// of measuring it.** Crop/expand hands `RasterLayerTexture.resized(to:placing:)` a rect the size
+    /// of the source, so `draw(in:)` is a copy: nothing is filtered, and `interpolationQuality` is
+    /// deliberately left alone so the bytes are the ones that went in. The scale arm hands it a rect
+    /// of a *different* size and raises the quality to `.high`, so every pixel of every tier of every
+    /// cel goes through CoreGraphics' resampler. §2 chose `.high` for a one-shot whole-document
+    /// resample without knowing what it costs; this is the run that says.
+    ///
+    /// **Both arms in one test, alternating, on one fixture.** The comparison is the whole output —
+    /// a scale figure on its own says nothing about whether it is the resampler or the walk — and the
+    /// two must not be measured in different processes or at different loads, for the reason this
+    /// file states at every other paired comparison (CLAUDE.md: on this Mac a timing under contention
+    /// is not a measurement). Best of three each, minimum, for the same reason.
+    ///
+    /// **Read the ratio first and `msPerCel` second.** The ratio is the transferable figure: both
+    /// arms walk the *same* size pairs in the same run, so it divides out the load this Mac is under.
+    /// The absolute per-cel numbers are for these particular pairs (2048×1024 ↔ 1024×512) and are not
+    /// comparable to `testWhatTheCanvasPaddingResizeCosts`', which grows a canvas rather than halving
+    /// it. The fixture is raster-only: the vector tier goes through `mapping(_:throughSimilarity:)`,
+    /// which is kilobytes of arithmetic per element and is not what §2's memory arithmetic is about.
+    ///
+    /// ## MEASURED 2026-08-28, and the answer §4 stage 2 asked for
+    ///
+    /// Simulator, Debug, iPad Pro 13" M4, **on a contended machine** — 30% idle with another session's
+    /// suite live — so every absolute figure is a ceiling. Best of three each, two runs:
+    ///
+    /// | | scale | crop/expand | ratio |
+    /// |---|---|---|---|
+    /// | run 1 | 854.0 ms (13.3 ms/cel) | 390.7 ms (6.1 ms/cel) | **2.19×** |
+    /// | run 2 | 634.8 ms (9.9 ms/cel) | 311.9 ms (4.9 ms/cel) | **2.04×** |
+    /// | peak resident | ~490 MB | ~305 MB | 1.6× |
+    ///
+    /// **Scaling costs about twice what cropping does, and `.high` is not what it costs.** A third
+    /// run with `interpolationQuality` forced to `.default` in both primitives (experiment, reverted)
+    /// measured 684.3 ms against 300.3 ms — **2.28×**, i.e. no cheaper than `.high` at all once the
+    /// machine's load is divided out. So §2's *"the difference is worth the milliseconds"* is right
+    /// for a stronger reason than it gave: there are no measurable milliseconds to trade. The 2× is
+    /// the cost of resampling *at all* rather than copying, and no quality setting recovers it.
+    ///
+    /// **At the owner's real document size that is 3.0–4.0 s for 300 cels and 9.9–13.3 s for 1000**,
+    /// synchronously on the main actor, at a peak that is linear in cel count. That is not affordable
+    /// — and it is not affordable for crop/expand either, at 1.5 s and 4.9 s on the same walk, which
+    /// stage 1 already shipped. **Scaling does not create the problem; it doubles it.** The fix is
+    /// stage 3's — off the main actor, bounded raster concurrency, streaming cel by cel — and this
+    /// number says stage 3 has to size that budget against 10 ms a cel rather than 5.
+    @MainActor
+    func testWhatScalingEveryCelCostsAgainstCroppingIt() {
+        let layerCount = Self.openLayerCount, celsPerLayer = Self.openCelsPerLayer
+        let celCount = layerCount * celsPerLayer
+        var manager: CanvasManager?
+        autoreleasepool { manager = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer) }
+        guard let manager else { return XCTFail("fixture") }
+        let owners = Self.ownersCanvasSize
+
+        // Half and back rather than a growth: an out-and-back pair leaves the fixture where it
+        // started so three iterations measure the same document, and it keeps both directions of the
+        // resampler in the figure (a downscale discards, an upscale invents; §2's asymmetry).
+        let half = CGSize(width: owners.width / 2, height: owners.height / 2)
+        var scale = (seconds: Double.greatestFiniteMagnitude, peakBytes: UInt64(0))
+        var crop = (seconds: Double.greatestFiniteMagnitude, peakBytes: UInt64(0))
+        for _ in 0..<3 {
+            PixelOps.clearRasterizeCache()
+            let down = measuringPeakMemory { manager.resizeCanvas(to: half, mode: .scaleToFit) }
+            let up = measuringPeakMemory { manager.resizeCanvas(to: owners, mode: .scaleToFit) }
+            if down.seconds + up.seconds < scale.seconds { scale.seconds = down.seconds + up.seconds }
+            scale.peakBytes = Swift.max(scale.peakBytes, Swift.max(down.peakBytes, up.peakBytes))
+
+            PixelOps.clearRasterizeCache()
+            let inward = measuringPeakMemory { manager.resizeCanvas(to: half, mode: .cropExpand) }
+            let outward = measuringPeakMemory { manager.resizeCanvas(to: owners, mode: .cropExpand) }
+            if inward.seconds + outward.seconds < crop.seconds { crop.seconds = inward.seconds + outward.seconds }
+            crop.peakBytes = Swift.max(crop.peakBytes, Swift.max(inward.peakBytes, outward.peakBytes))
+        }
+        // Two resizes per iteration, so the per-cel figure is over twice the cels.
+        let scaleWalks = Double(celCount * 2), cropWalks = Double(celCount * 2)
+        let ratio = crop.seconds > 0 ? scale.seconds / crop.seconds : 0
+
+        report("canvas resize, scale vs crop — \(layerCount) layers x \(celsPerLayer) cels at 2048x1024", [
+            ("celResizes", "\(celCount * 2)"),
+            ("scaleToFit", milliseconds(scale.seconds)),
+            ("cropExpand", milliseconds(crop.seconds)),
+            ("scaleMsPerCel", String(format: "%.1f", scale.seconds * 1000 / scaleWalks)),
+            ("cropMsPerCel", String(format: "%.1f", crop.seconds * 1000 / cropWalks)),
+            ("resamplerCost", String(format: "%.2fx", ratio)),
+            ("scaleAt300Cels", milliseconds(scale.seconds * 300 / scaleWalks)),
+            ("scaleAt1000Cels", milliseconds(scale.seconds * 1000 / scaleWalks)),
+            ("scalePeak", megabytes(scale.peakBytes)),
+            ("cropPeak", megabytes(crop.peakBytes)),
+        ])
+
+        // Structure, not timing — these hold on any machine at any load.
+        XCTAssertEqual(manager.canvasSize, owners,
+                       "PREMISE: the out-and-back has to land back on the fixture's own extent, or the "
+                       + "iterations above are measuring documents of different sizes")
+        XCTAssertEqual(manager.layers.reduce(0) { $0 + $1.cels.count }, celCount,
+                       "PREMISE: and over every cel, which is the whole cost model")
+        XCTAssertTrue(manager.layers.allSatisfy { $0.cels.allSatisfy { $0.raster.size == owners } },
+                      "Every cel's buffer moves with the header, or the document is half-resized")
+    }
+
     /// **What spreading the per-cel *decode* over cores is worth**, measured against a serial walk of
     /// the same PNGs in the same run — the other half of item 9(b), and the half that turned out to
     /// have a confound worth writing down.

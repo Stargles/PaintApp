@@ -403,7 +403,7 @@ enum PixelOps {
 
     /// A `newSize` copy of a canvas-sized image with its whole extent re-placed into `content` (a
     /// rectangle in the *new* canvas's point space), used by every canvas resize (see
-    /// `CanvasManager.resizeCanvas(to:scaleContent:)`) for a cel's `fillImage`/`bakedImage`.
+    /// `CanvasManager.resizeCanvas(to:mode:)`) for a cel's `fillImage`/`bakedImage`.
     ///
     /// The rectangle, and the conditional `interpolationQuality`, are exactly
     /// `RasterLayerTexture.resized(to:placing:)`'s — read that one's doc comment for why. The two are

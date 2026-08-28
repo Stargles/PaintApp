@@ -365,7 +365,7 @@ final class RasterLayerTexture: DabTarget {
 
     /// A new instance sized to `newSize` with this texture's whole extent re-placed into `content`
     /// (a rectangle in the *new* canvas's point space). Used by every canvas resize —
-    /// `CanvasManager.setCanvasPadding` and `CanvasManager.resizeCanvas(to:scaleContent:)`, which both
+    /// `CanvasManager.setCanvasPadding` and `CanvasManager.resizeCanvas(to:mode:)`, which both
     /// go through `CanvasResizeMap.contentRect`. A blank texture (no backing bitmap yet) stays blank
     /// and free — no bitmap is allocated. Infrequent whole-canvas op, so it renders through
     /// `UIGraphicsImageRenderer` rather than the incremental stamp path.

@@ -259,8 +259,9 @@ struct ActionsMenu: View {
         .padding(.vertical, 8)
     }
 
-    /// TODO item (9) — "Resize Canvas". CANVAS_RESIZE.md stage 1: crop and expand, at an arbitrary
-    /// rectangle instead of the padding slider's symmetric margin.
+    /// TODO item (9) — "Resize Canvas". CANVAS_RESIZE.md stages 1 and 2: crop and expand at an
+    /// arbitrary rectangle instead of the padding slider's symmetric margin, or scale the artwork
+    /// with the canvas.
     ///
     /// **Directly above "Canvas Padding", because the two move the same document dimension from
     /// opposite ends** — this one sets the artwork rect, that one sets the margin around it, and the
@@ -284,8 +285,8 @@ struct ActionsMenu: View {
             .disabled(canvasManager.canvasSize == nil)
             .accessibilityIdentifier("actions.resizeCanvasRow")
 
-            Text("Crops or expands the artwork area around what you have drawn. "
-                 + "Nothing is scaled, and this cannot be undone.")
+            Text("Crops or expands the artwork area around what you have drawn, or scales the "
+                 + "drawing with it. This cannot be undone.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
@@ -345,9 +346,8 @@ struct ActionsMenu: View {
     }
 }
 
-/// "Resize Canvas" — CANVAS_RESIZE.md stage 1's dialog. Crop and expand only; the *Scale artwork*
-/// toggle and its letterbox rule are stage 2 and are deliberately not stubbed in here, because a
-/// switch that is present and inert is worse than one that has not arrived.
+/// "Resize Canvas" — CANVAS_RESIZE.md stages 1 and 2's dialog: crop/expand, or scale the artwork with
+/// the canvas and letterbox it when the shape changes.
 ///
 /// **The two fields are the artwork rect, not the buffer** — §5 rule 9, owner-confirmed 2026-08-28.
 /// `canvasPadding` is preserved literally and never scales, so the buffer this produces is
@@ -359,6 +359,19 @@ struct ActionsMenu: View {
 /// margin, so it can use the bound directly and this cannot — 16383 of artwork plus 1024 a side is a
 /// buffer no canvas may have. `CanvasManager.resizableArtworkExtentRange` is where that lives, so the
 /// clamp the button enforces and the clamp the model applies are one value.
+///
+/// ## Three sentences the sheet owes, and each is conditional on something the artist can see
+///
+///  * **Fit or Fill**, offered only when the new shape is a different aspect from the old one — at
+///    the same aspect `min` and `max` are the same number and a picker between them would be a
+///    control that does nothing. Fit is the default (§5 rule 2).
+///  * **The floor sentence** (§2), when this particular document has a stroke the scale would carry
+///    across `BrushStamper.stampSpacing`'s 1 pt floor. Surveyed once at `onAppear` and answered by
+///    binary search after that, so a 1000-cel document is not walked per keystroke.
+///  * **The compositor warning** (§5 rule 14), when the new buffer would put this document's layer
+///    stack past `MetalCompositor`'s size-based admission gate. It warns and lets the artist proceed
+///    — never refuses — and it names what actually happens rather than "falls back to CPU", which is
+///    not what the artist experiences on the canvas.
 struct CanvasResizeSheet: View {
 
     @ObservedObject var canvasManager: CanvasManager
@@ -366,6 +379,11 @@ struct CanvasResizeSheet: View {
 
     @State private var widthText: String = ""
     @State private var heightText: String = ""
+    @State private var scaleContent = false
+    @State private var fillsNewShape = false
+    /// Both taken once, at `onAppear` — see the type doc comments for why they are not recomputed.
+    @State private var floorSurvey = SpacingFloorSurvey(thresholds: [])
+    @State private var compositorGate = CompositorSizeGate(nativeTextures: 0, sandwichTextures: 0)
     @FocusState private var focusedField: Field?
 
     private enum Field { case width, height }
@@ -380,6 +398,28 @@ struct CanvasResizeSheet: View {
     private var isValid: Bool {
         guard let width, let height else { return false }
         return (minDimension...maxDimension).contains(width) && (minDimension...maxDimension).contains(height)
+    }
+
+    private var mode: CanvasResizeMode {
+        guard scaleContent else { return .cropExpand }
+        return fillsNewShape ? .scaleToFill : .scaleToFit
+    }
+
+    /// The map the Resize button would build, or nil while the fields do not parse. Built from the
+    /// **model's own type** rather than from a second copy of the arithmetic, so the factor the sheet
+    /// describes and the factor the document gets cannot drift.
+    private var previewMap: CanvasResizeMap? {
+        guard let width, let height, isValid, let current = canvasManager.canvasSize else { return nil }
+        let padding = canvasManager.canvasPadding
+        let newBuffer = CGSize(width: CGFloat(width) + 2 * padding, height: CGFloat(height) + 2 * padding)
+        return CanvasResizeMap(from: current, to: newBuffer, padding: padding, mode: mode)
+    }
+
+    /// Whether Fit and Fill would differ — i.e. whether the artist is being asked a real question.
+    private var aspectChanges: Bool {
+        guard let width, let height, isValid, let artwork = canvasManager.artworkSize,
+              artwork.width > 0, artwork.height > 0 else { return false }
+        return abs(CGFloat(width) / artwork.width - CGFloat(height) / artwork.height) > 1e-9
     }
 
     var body: some View {
@@ -402,11 +442,40 @@ struct CanvasResizeSheet: View {
                     Text("Plus \(Int(canvasManager.canvasPadding.rounded())) px of canvas padding on every side.")
                         .font(.caption).foregroundColor(.secondary)
                 }
+            }
 
-                Text("Your artwork keeps its size and stays centred. Anything outside the new edges "
-                     + "is cropped away, and this clears the undo history.")
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Scale artwork", isOn: $scaleContent)
+                    .accessibilityIdentifier("resizeCanvas.scaleToggle")
+
+                if scaleContent && aspectChanges {
+                    Picker("", selection: $fillsNewShape) {
+                        Text("Fit").tag(false)
+                        Text("Fill").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("resizeCanvas.fitFillPicker")
+                }
+
+                Text(explanation)
                     .font(.caption).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("resizeCanvas.explanation")
+
+                if scaleContent, let map = previewMap, floorSurvey.isCrossed(byScaling: map.scale) {
+                    Text("Brush textures will re-stamp at the new size, so some strokes will be "
+                         + "grained or shaded slightly differently.")
+                        .font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("resizeCanvas.brushFloorNotice")
+                }
+
+                if let warning = compositorWarning {
+                    Text(warning)
+                        .font(.caption).foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("resizeCanvas.compositorWarning")
+                }
             }
 
             HStack {
@@ -415,7 +484,7 @@ struct CanvasResizeSheet: View {
                 Spacer()
                 Button("Resize") {
                     guard let width, let height, isValid else { return }
-                    canvasManager.resizeCanvas(to: CGSize(width: width, height: height))
+                    canvasManager.resizeCanvas(to: CGSize(width: width, height: height), mode: mode)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -433,7 +502,46 @@ struct CanvasResizeSheet: View {
             widthText = String(Int(current.width.rounded()))
             heightText = String(Int(current.height.rounded()))
             focusedField = .width
+            floorSurvey = canvasManager.spacingFloorSurvey
+            compositorGate = canvasManager.compositorSizeGate
         }
+    }
+
+    /// What the resize will do to the drawing, in the artist's terms. One sentence per mode, and the
+    /// undo clause every mode shares because stage 3 has not landed.
+    private var explanation: String {
+        let undo = " This clears the undo history."
+        guard scaleContent else {
+            return "Your artwork keeps its size and stays centred. Anything outside the new edges "
+                 + "is cropped away." + undo
+        }
+        if fillsNewShape {
+            return "Your artwork is scaled to cover the new size and stays centred. Whatever hangs "
+                 + "over the edges is cropped from painted layers; drawn strokes and shapes keep "
+                 + "their whole geometry." + undo
+        }
+        return "Your artwork is scaled to fit inside the new size and stays centred. If the shape "
+             + "changes, the leftover is empty canvas — nothing is stretched and no bars are "
+             + "painted." + undo
+    }
+
+    /// §5 rule 14's warning, in the two halves §6 Q5 settled. Nil when the document fits, which is
+    /// every canvas the artist is likely to type.
+    private var compositorWarning: String? {
+        guard let map = previewMap else { return nil }
+        let pressure = compositorGate.pressure(atBufferSize: map.newSize)
+        guard !pressure.isClear else { return nil }
+        var parts: [String] = []
+        if pressure.canvasSoftens {
+            parts.append("At this size the canvas is composited at a reduced resolution while you "
+                         + "work, so it will look slightly softer than what you save.")
+        }
+        if pressure.nativeCompositeFallsToCPU {
+            parts.append("Picking a colour, or starting a stroke on a masked layer, may pause "
+                         + "briefly.")
+        }
+        parts.append("Saving and exporting are unaffected. You can go ahead.")
+        return parts.joined(separator: " ")
     }
 
     private func dimensionField(_ title: String, text: Binding<String>, field: Field) -> some View {

@@ -100,12 +100,22 @@ different shape.
 
 | primitive | file:line | what it does | scales? |
 |---|---|---|---|
-| `RasterLayerTexture.resized(to:offset:)` | [`RasterLayerTexture.swift:372`](PaintSoftware/Engine/RasterLayerTexture.swift) | `current.draw(in: CGRect(origin: offset, size: size))` into a `newSize` renderer. A blank texture stays blank and allocates nothing. | **no** — the draw rect is the *old* size |
-| `PixelOps.resizedCanvasImage(_:to:offset:)` | [`PixelOps.swift:408`](PaintSoftware/Services/PixelOps.swift) | the same, for `fillImage`/`bakedImage` | **no** |
-| `VectorCanvas.resized(to:offset:)` | [`VectorLayer.swift:431`](PaintSoftware/Engine/VectorLayer.swift) | appends a translation to the canvas-level `_transform`; touches no element. Lossless. | **no** |
+| `RasterLayerTexture.resized(to:placing:)` | [`RasterLayerTexture.swift:380`](PaintSoftware/Engine/RasterLayerTexture.swift) | `current.draw(in: content)` into a `newSize` renderer, raising `interpolationQuality` only when `content.size != size`. A blank texture stays blank and allocates nothing. | **yes**, when the rect is a different size |
+| `PixelOps.resizedCanvasImage(_:to:placing:)` | [`PixelOps.swift:414`](PaintSoftware/Services/PixelOps.swift) | the same, for `fillImage`/`bakedImage` | **yes** |
+| `VectorCanvas.resized(to:placing:)` | [`VectorLayer.swift:624`](PaintSoftware/Engine/VectorLayer.swift) | derives `k` from the placement rect and **bakes** `_transform ∘ placement` into every element through `mapping(_:throughSimilarity:)`, returning an identity-transform canvas. Lossless at `k == 1`, exact at any `k`. | **yes** |
 
-All three take a `CGPoint` offset and draw at the source's own size. Widening that one parameter from
-a point to a **destination rectangle** is the whole of the raster side of the scale mode — see §2.
+**That last row is stage 2's correction to this section, and it went in the feature's favour.** It read
+*"appends a translation to the canvas-level `_transform`; touches no element"* until stage 2 checked
+it — true when this document was written, and false since TODO item (12) stage 3 made the primitive
+bake instead. So §2's *"the scale must go into the elements, never into `_transform`"* was **already
+satisfied by the existing primitive**, and the vector arm of stage 2 required no code at all: stage 1
+widened the parameter to `placing:` with a uniformity assertion, and passing a rect of a different
+size is the whole of it. §2 keeps its closed-form derivation as the *stated* form the shipped
+primitive is pinned against, not as work outstanding.
+
+The two raster primitives take a **destination rectangle**; crop/expand passes one the size of the
+source (a copy, nothing filtered) and the scale mode passes one of a different size (a resample at
+`.high`). That one widened parameter is the whole of the raster side of the scale mode — see §2.
 
 ### `VectorCanvas.mapping(_:throughSimilarity:)` is the exact vector scaler, already written and already tested
 
@@ -199,8 +209,8 @@ closed off explicitly: **the header and every buffer move together, in one opera
 | `Cel.raster` | `Cel.swift:9`, `RasterLayerTexture` | redraw at offset; blank stays blank and free | **resample** — lossy, irreversible |
 | `Cel.fillImage` | `Cel.swift:12` | redraw at offset | **resample** — lossy |
 | `Cel.bakedImage` | `Cel.swift:15` | redraw at offset | **resample** — lossy |
-| `Cel.vector` elements | `VectorLayer.swift:244` | nothing (the canvas `_transform` carries it) | `mapping(_:throughSimilarity:)` per element — **exact** |
-| `VectorCanvas._transform` | `VectorLayer.swift:245` | append the translation (today's `resized`) | rewrite the translation only — see §2 |
+| `Cel.vector` elements | `VectorLayer.swift:244` | `mapping(_:throughSimilarity:)` per element, with the translation baked in | the same call with `k != 1` — **exact** |
+| `VectorCanvas._transform` | `VectorLayer.swift:245` | **comes out identity in both arms.** `resized(to:placing:)` bakes it into the elements (TODO item (12) stage 3), so nothing in the app produces a non-identity cel transform | same |
 | `VectorCanvas.size` | `VectorLayer.swift:233` | new size | new size |
 | `Cel.thumbnail` | `Cel.swift:26` | nil it; `startThumbnailBackfill()` | same |
 | `Cel.interpolation` lattices | `InterpolationRecipe.swift:109` → `Lattice.swift:40-45` | `restOrigin` + `vertices` translate | `restOrigin`, `vertices` through `M`; `restCellSize *= k`; `cols`/`rows`/`activeCells` untouched |
@@ -235,16 +245,39 @@ of every layer eagerly, and it must not become the reason that eviction design g
 Old extent `O = (Ow, Oh)`, new extent `N = (Nw, Nh)`, both ≥ 1 canvas point.
 
 ```
-k  = scaleContent ? (fill ? max(Nw/Ow, Nh/Oh) : min(Nw/Ow, Nh/Oh)) : 1   // Fit (default) or Fill
-Cw = k·Ow ,  Ch = k·Oh                             // the content rect in the new canvas
-dx = (Nw − Cw)/2 ,  dy = (Nh − Ch)/2               // centred
+k  = scaleContent ? (fill ? max(Nw'/Ow', Nh'/Oh') : min(Nw'/Ow', Nh'/Oh')) : 1   // Fit (default) or Fill
+Cw = k·Ow ,  Ch = k·Oh                             // the old *buffer* placed in the new canvas
+dx = p + (Nw' − k·Ow')/2 − k·p ,  dy = …           // centred, in artwork space
 if !scaleContent { dx = dx.rounded() ; dy = dy.rounded() }
 M  = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: k, y: k)
 ```
 
 `M` maps a point `p` in the old canvas to `k·p + d` in the new one. MEASURED (scratch `swiftc`,
 2026-08-27): the matrix form and the hand form agree to `< 1e-12`, and the `.scaledBy` spelling is the
-one that means *scale first, then translate* — the other order is wrong and reads identically.
+one that means *scale first, then translate* — the other order is wrong and reads identically. Both
+identities are now XCTest assertions on the shipped types rather than scratch findings
+(`CanvasResizeLogicTests.testTheMapIsScaleThenTranslateAndNotTheOtherWayRound` and
+`…IsSection2sClosedForm`), the second over §2's own 324-case grid.
+
+**`O` and `N` here are buffer extents; `O'` and `N'` are those extents inset by `canvasPadding` on
+every side, and `k` is the ratio of the *primed* pair.** This section wrote `k = min(Nw/Ow, …)` until
+stage 2 built it, and the unprimed reading is wrong on any document with a margin. On 10 pt of padding,
+growing a 100 pt artwork to 200 gives a buffer ratio of `220/120 = 1.833` where the artist typed a
+number meaning 2: their drawing comes out 183 pt wide inside a margin that has silently grown to 18.33.
+That is exactly the "two Actions controls fighting over one number" §6 Q3 rejected, arriving through
+the scale arm instead of through the fields, and §5 rule 9 is what settles it — the padding is a
+working margin in canvas points and never scales, so it is the artwork that has to land where the
+artist asked. At `k == 1` the two readings are identical (`(Nw − 2p) − (Ow − 2p) == Nw − Ow`), which is
+why nothing caught it in stage 1. The consequence, stated rather than hidden: with padding, Fit places
+`k × oldBuffer`, which exceeds the new buffer by `2p(k − 1)`, so **ink drawn out in the old margin can
+overflow even under Fit** — the same crop Fill applies to everything, applied to the margin only.
+Pinned by `CanvasResizeLogicTests.testTheScaleFactorIsTheArtworkRatioAndNotTheBufferRatio`.
+
+**`M⁻¹` flips Fit to Fill, and that is not a detail of stage 3's undo.** `k = min(rx, ry)` going out
+wants `1/k = max(1/rx, 1/ry)` coming back, which is Fill's rule on the reversed ratios. Deriving the
+inverse from `scale != 1` — what `CanvasResizeMap.inverse` did while only crop/expand could run —
+picks Fit both ways and returns `1/max(rx, ry)`, the wrong factor on every aspect change. Latent
+rather than live, and fixed in stage 2 because stage 2 is the first thing that can reach it.
 
 **`min` is Fit, `max` is Fill — the same map either way, and this is not disturbed by offering both**
 (§6 Q4). `min` fits the content inside the new extent, leaving genuine empty canvas — real paper,
@@ -470,10 +503,27 @@ and a jetsam. The rules:
    stage 1 (it is what the app has); determinate `n / total` at stage 3, because unlike every other
    long operation here the total is known before the first cel.
 
-**What is not measured, and must be before stage 2 ships:** the wall-clock cost of one cel's raster
-resize. `setCanvasPadding` performs exactly this operation today and nobody has ever timed it. The
-neighbouring figures — 15.2 ms/cel for the save's PNG encode, 8.0 MiB INFERRED for the load path's
-full-canvas draw — bracket it but do not give it.
+**MEASURED 2026-08-28, `PerfBaselineTests.testWhatScalingEveryCelCostsAgainstCroppingIt`** — the
+figure §4 stage 2 owed. 4 layers × 8 cels at 2048×1024 ↔ 1024×512, best of three, simulator, Debug,
+**on a contended machine (30% idle)**, so every absolute figure is a ceiling:
+
+| | scale | crop/expand | ratio |
+|---|---|---|---|
+| run 1 | 854.0 ms — **13.3 ms/cel** | 390.7 ms — 6.1 ms/cel | **2.19×** |
+| run 2 | 634.8 ms — **9.9 ms/cel** | 311.9 ms — 4.9 ms/cel | **2.04×** |
+| peak resident | ~490 MB | ~305 MB | 1.6× |
+
+**Scaling costs about twice what cropping does, and `.high` is not what it costs.** A third run with
+`interpolationQuality` forced to `.default` in both primitives (experiment, reverted) measured
+**2.28×** — no cheaper than `.high` once load is divided out. So the `.high` decision above is right
+for a stronger reason than it gave: there are no measurable milliseconds to trade, because the 2× is
+the cost of resampling *at all* rather than of the quality setting, and no setting recovers it.
+
+At the owner's real document size that is **3.0–4.0 s for 300 cels and 9.9–13.3 s for 1000**,
+synchronously on the main actor, at a peak linear in cel count. Not affordable — and neither is
+crop/expand, at 1.5 s and 4.9 s on the same walk, which stage 1 already shipped. **Scaling does not
+create the problem; it doubles it**, and stage 3 has to size its bounded-concurrency budget against
+10 ms a cel rather than 5.
 
 ### Failure and partial completion: validate first, then a mutation that cannot fail
 
@@ -657,18 +707,25 @@ per-tier walk (a document of N layers × M cels has every tier at the new size a
 guide and clipboard fixes, and a round-trip through `ProjectStore` proving the manifest and every
 buffer agree.
 
-**Stage 2 — the scale toggle and the letterbox rule.**
-`scaleContent == true`. Raster through the widened `placing:` rect at `.high` interpolation; vector
-through `mapping(_:throughSimilarity:)` per element plus the `_transform` translation rewrite from §2;
-lattices through `M` with `restCellSize *= k`, and `LocalEdit` strokes through the same `mapping`
-**once, in rest space, not again in canvas space**. Guides through `M`. A Fit/Fill choice beside the
-scale toggle, defaulting to Fit, picks `min` or `max` for `k` in the same formula — no second code
-path (§5 rule 2). The dialog's floor sentence. Still not undoable.
-*Tests:* the two `swiftc`-verified identities in §2 as XCTest assertions on real types; the letterbox
-invariant (content fits, exactly one axis has slack, slack is split evenly); a vector round-trip at
-`k = 0.25` then `k = 4` asserting samples return to within 1e-9; and the floor boundary, which
-`LassoMoveLogicTests` already knows how to state.
-*Owed before merge:* the wall-clock of one cel's raster resize, which has never been measured.
+**Stage 2 — the scale toggle and the letterbox rule. DONE (2026-08-28).**
+`CanvasResizeMode` replaces the `scaleContent: Bool` — three cases, one map, no second code path, and
+a `Bool` pair could reach a state the model cannot mean. **The vector arm needed nothing**:
+`VectorCanvas.resized(to:placing:)` already derives `k` from the placement rect and bakes
+`_transform ∘ placement` into every element through `mapping(_:throughSimilarity:)`, returning an
+identity-transform canvas — TODO item (12) stage 3's doing, and *stronger* than §2's prescribed
+"rewrite the translation only", which this document now keeps as the stated derivation the shipped
+primitive is pinned against. The raster arm needed nothing either: stage 1's `placing:` rect and its
+conditional `.high` are the whole of it. What stage 2 actually built is the mode, the artwork-ratio
+correction above, `InterpolationRecipe.mapped(through:)` (lattices through `M` with
+`restCellSize *= k`, `LocalEdit` strokes through the same `mapping` **once, in rest space**), the
+inverse's mode flip, and the dialog: a Scale toggle, a Fit/Fill picker shown only when the aspect
+actually changes, the floor sentence, and §5 rule 14's compositor warning. Still not undoable.
+*Tests:* `CanvasResizeLogicTests`, 31 tests — §2's two identities on the real types (the second over
+its own 324-case grid), the letterbox invariant and its Fill dual, the round trip at `k = 0.25`/`4`
+*and* at `0.625`/`1.6` where the mode flip is load-bearing, the floor boundary through the dab walk
+plus the survey the dialog asks, the artwork-ratio correction, the Fill asymmetry, and the compositor
+gate's two thresholds.
+*Owed before merge:* **measured** — see §2's table above.
 
 **Stage 3 — undoable, off-main, and a busy state.**
 The validation pass; `isResizing` and the save gate; the `GalleryOpenState`-shaped busy modal with
@@ -697,7 +754,9 @@ mapper.
    `k = max(Nw/Ow, Nh/Oh)` — covers the new extent and lets the overflow hang off the edges. Both are
    the one map `M` from §2 with a different choice of ratio, and `mapping(_:throughSimilarity:)`
    accepts either unchanged, since Fill is still a single uniform scale. The ask was fit only; **Fill
-   is the addition the owner accepted, 2026-08-28** (§6 Q4).
+   is the addition the owner accepted, 2026-08-28** (§6 Q4). The choice is offered only when the
+   aspect actually changes: at an unchanged aspect `min` and `max` are the same number and the picker
+   would be a control that does nothing. **And Fit's inverse is Fill, not Fit** — §2.
 3. **Content is centred, in both modes.** Matching `setCanvasPadding`'s existing placement.
 4. **Crop/expand offsets round to whole canvas points; scale offsets do not.** Crop/expand must never
    resample; under scale the two tiers must agree with each other more than they must land on a
@@ -713,6 +772,8 @@ mapper.
    margin the artist set with a separate control, not artwork; scaling it would make two controls fight
    over one number. The width and height the artist types therefore mean the **artwork rect**, and the
    buffer extent becomes `typed + 2 × canvasPadding`. **Confirmed by the owner, 2026-08-28** (§6 Q3).
+   Under scale this is also what makes `k` an *artwork* ratio rather than a buffer one — §2 — with the
+   one consequence that ink drawn out in the old margin can overflow even under Fit.
 10. **The history stack is cleared, then the resize is recorded as one step.** Depth 1 afterwards.
     Undo runs the inverse resize; it restores geometry exactly and raster pixels approximately, and the
     app says so when the resize happens rather than when undo is pressed.
@@ -721,6 +782,10 @@ mapper.
 12. **No disk write happens during a resize, and no save may start during one.**
 13. **The dab-spacing floor, the dab-diameter floor and pencil grain are inherited, knowingly.** The
     dialog says once that brush texture re-stamps at the new size; nothing in the engine changes.
+    **Shipped in stage 2** as `SpacingFloorSurvey`: one walk when the sheet opens collecting
+    `size × spacingFraction` per stroke, and a binary search per keystroke, because a stroke crosses at
+    factor `k` exactly when its threshold lies in `[min(1, 1/k), max(1, 1/k))`. The sentence is
+    conditional on this document actually having such a stroke, not shown whenever scaling.
 14. **A resize that would push the document past the compositor's admission gate warns and lets the
     artist proceed — it never refuses and there is nothing to fall back silently from.** The warning
     has two halves (§6 Q5). The live canvas itself never reaches the gate: past it, the canvas
@@ -728,6 +793,12 @@ mapper.
     pick does reach it and falls to the CPU reference for that one pick; the live-mask preview on a
     masked layer runs on the CPU reference unconditionally, gate or no gate, so it only gets slower as
     the canvas grows. Export and the project thumbnail are unaffected at any canvas size.
+    **Shipped in stage 2, not stage 3**, because the warning is a property of the dialog rather than of
+    undo: `CompositorSizeGate` holds the two texture counts the live tree gives
+    (`peakCompositeTextures` for the eyedropper's native-size request, plus `uploadableLeafCount` for
+    the sandwich's) and asks `CompositorBudget.affordableSize` at the typed extent. Two counts because
+    the two thresholds are genuinely different — at 4096×2048 on the owner's iPad 9 the canvas softens
+    while the eyedropper still fits.
 
 ---
 
