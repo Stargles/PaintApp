@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import UIKit
 
 /// **A lasso move moves only what is inside the loop.**
@@ -3346,6 +3347,417 @@ final class LassoMoveLogicTests: XCTestCase {
             XCTAssertEqual(after.boxAngle, 0.6, accuracy: 1e-12, "and the hand-fit rode along — \(label)")
             XCTAssertNotEqual(after.transform.rotation, before.transform.rotation,
                               "fixture precondition: the ink really turned — \(label)")
+        }
+    }
+
+    // MARK: - Change Colour (the lasso edit that splits nothing)
+
+    // A recolour and a move ask the same containment question and answer it with the same rules —
+    // `VectorCanvas.elementIDs(insideLocalPath:)` is `splitForLassoMove`'s sibling — and then do
+    // opposite things with the answer. A move cuts a straddling stroke in two and takes the inside
+    // half (§5.2); a recolour cuts nothing and recolours the whole element, ink outside the loop
+    // included:
+    //
+    // > *"changes the color of all the strokes and fills inside the selection to the current picked
+    // > color. It's alright if part of the stroke is outside the selection."* — owner, 2026-08-28.
+    //
+    // These live in this file, next to the split they contradict, because the contradiction is the
+    // design: a later session that "unifies" the two seams breaks exactly one of these two sections.
+
+    /// The picked colour, as the artist's swatch hands it over.
+    private func picked(_ r: Double, _ g: Double, _ b: Double, _ a: Double = 1) -> Color {
+        Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
+
+    /// Undo steps recorded **since the fixture was built**. `fixture()` calls `addLayer` and
+    /// `addVectorLayer`, each of which records one, so an absolute count here would be an assertion
+    /// about the fixture rather than about the recolour — and "the stack is empty" would be false
+    /// before the action under test had done anything at all.
+    private func stepsSince(_ baseline: Int, _ manager: CanvasManager) -> Int {
+        manager.history.undoStack.count - baseline
+    }
+
+    private func assertRGB(_ colour: CodableColor?, _ r: Double, _ g: Double, _ b: Double,
+                           _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let colour else {
+            return XCTFail("no colour to read — \(message)", file: file, line: line)
+        }
+        XCTAssertEqual(colour.red, r, accuracy: 1e-6, message, file: file, line: line)
+        XCTAssertEqual(colour.green, g, accuracy: 1e-6, message, file: file, line: line)
+        XCTAssertEqual(colour.blue, b, accuracy: 1e-6, message, file: file, line: line)
+    }
+
+    /// **A straddling stroke is recoloured whole and is not cut.** The owner's sentence, stated as an
+    /// assertion: same element count, same id, same samples — only the hue moved.
+    ///
+    /// The element count is the load-bearing half. Reaching for `splitForLassoMove` here (the obvious
+    /// reuse, and the first thing a scoping pass suggested) would leave two strokes where the artist
+    /// drew one, with only the inside piece recoloured — the artist would see their line change
+    /// colour halfway along and would then have to undo a split they never asked for.
+    func testAStrokeStraddlingTheLoopIsRecolouredWholeAndIsNotCut() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let originalID = vector.elements[0].id
+        let originalSamples = vector.elements[0].stroke?.samples.count
+
+        // x ≥ 30: the middle and end samples are inside, the first one is not. `beginVectorLassoMove`
+        // on this very loop makes two strokes out of it — see `testAStrokeCrossingTheLoop…`.
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.brushColor = picked(1, 0, 0)
+        manager.recolorSelection()
+
+        XCTAssertEqual(vector.elements.count, 1, "a recolour splits nothing — the stroke stays one stroke")
+        XCTAssertEqual(vector.elements[0].id, originalID, "and keeps its identity")
+        XCTAssertEqual(vector.elements[0].stroke?.samples.count, originalSamples, "and every sample")
+        assertRGB(vector.elements[0].stroke?.color, 1, 0, 0,
+                  "the whole stroke takes the picked colour, including the part outside the loop")
+    }
+
+    /// **Selection is by the centre line here too.** A 40 pt stroke whose spine is outside the loop is
+    /// not recoloured, even though its ink is inside — the same knowing consequence of LASSO_MOVE.md
+    /// §5.4 that `testAThickStrokeWhoseSpineIsOutside…` pins for the move, asserted again for the
+    /// recolour so the two can never drift into two different answers.
+    func testAThickStrokeWhoseSpineIsOutsideIsNotRecolouredEvenThoughItsInkIsInside() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 10, y: 8), to: CGPoint(x: 54, y: 8), size: 40))
+        select(manager, layerIndex, loop(CGRect(x: 4, y: 16, width: 56, height: 40)))
+        manager.brushColor = picked(1, 0, 0)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the spine is outside, so nothing is caught")
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "and nothing is recorded")
+    }
+
+    /// **An eraser inside the loop is untouched, and does not count as a change.** `.erase` is
+    /// composited `.destinationOut`, which reads only alpha — recolouring one changes no pixel, so
+    /// doing it would spend an undo press on an edit the artist cannot see.
+    ///
+    /// Note this is the one place the recolour and the move part company on *which kinds* they act on.
+    /// A move treats an eraser as an ordinary element (owner, 2026-08-22) because a hole has a
+    /// position; a recolour skips it because a hole has no colour.
+    func testAnEraserInsideTheLoopIsNotRecolouredWhileThePaintStrokeBesideItIs() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 20), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 24, y: 20), to: CGPoint(x: 40, y: 20),
+                                size: 4, composite: .erase))
+
+        select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 48, height: 30)))
+        manager.brushColor = picked(0, 1, 0)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        let strokes = vector.elements.compactMap(\.stroke)
+        assertRGB(strokes.first { $0.composite == .paint }?.color, 0, 1, 0, "the paint stroke takes the colour")
+        assertRGB(strokes.first { $0.composite == .erase }?.color, 0, 0, 0, "the eraser keeps whatever it had")
+        XCTAssertEqual(strokes.filter { $0.composite == .erase }.count, 1, "and is still an eraser")
+        XCTAssertEqual(stepsSince(baseline, manager), 1, "one step, for the one thing that changed")
+    }
+
+    /// **A loop that catches only an eraser and a placed photo records nothing at all.** Neither kind
+    /// has a colour a recolour could change, so neither is counted — and a step that undoes to an
+    /// identical document is worse than no step, because the artist presses undo expecting their own
+    /// last real edit back.
+    func testALoopCatchingOnlyAnEraserAndAPhotoRecordsNoHistoryStep() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 20),
+                                size: 6, composite: .erase))
+        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+                                                                          rect: CGRect(x: 0, y: 0, width: 12, height: 12),
+                                                                          size: CGSize(width: 12, height: 12)),
+                                           transform: LayerTransform(position: CGPoint(x: 30, y: 26),
+                                                                     scale: 1, rotation: 0)))
+        let before = vector.elements
+
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 50, height: 34)))
+        manager.brushColor = picked(1, 0, 1)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        XCTAssertEqual(stepsSince(baseline, manager), 0,
+                       "nothing recolourable was caught, so no undo step is owed")
+        XCTAssertEqual(vector.elements.map(\.id), before.map(\.id), "and the list is untouched")
+        XCTAssertEqual(vector.elements.compactMap(\.image).count, 1, "the photo is still there")
+        assertRGB(vector.elements.compactMap(\.stroke).first?.color, 0, 0, 0,
+                  "the eraser's colour is left alone")
+    }
+
+    /// A lasso around bare paper is the same nothing, reached by the other door.
+    func testALoopAroundBarePaperRecordsNoHistoryStep() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 4, y: 4), to: CGPoint(x: 12, y: 6)))
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 30, width: 20, height: 20)))
+        manager.brushColor = picked(1, 0, 0)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        XCTAssertEqual(stepsSince(baseline, manager), 0)
+        assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the far-away stroke is not touched")
+    }
+
+    /// **A fill that merely overlaps the loop is recoloured whole, and keeps its fill rule.** The rule
+    /// matters more than it looks: a clear-selection hole is stored `evenOddFill`, and a recolour that
+    /// rebuilt the element with the default would fill in the very hole it exists to make.
+    func testAFillOverlappingTheLoopIsRecolouredWholeAndKeepsItsEvenOddRule() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 44, height: 30),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1, evenOddFill: true))
+        let originalID = vector.elements[0].id
+        let originalPath = vector.elements[0].fill?.pathData
+
+        // Overlaps the fill's right-hand end only — a move would cut it in two here.
+        select(manager, layerIndex, loop(CGRect(x: 40, y: 2, width: 24, height: 60)))
+        manager.brushColor = picked(1, 0.5, 0)
+        manager.recolorSelection()
+
+        XCTAssertEqual(vector.elements.count, 1, "a recolour splits no fill either")
+        XCTAssertEqual(vector.elements[0].id, originalID)
+        XCTAssertEqual(vector.elements[0].fill?.pathData, originalPath, "and moves no geometry")
+        XCTAssertEqual(vector.elements[0].fill?.evenOddFill, true, "the fill rule survives the rewrite")
+        assertRGB(vector.elements[0].fill?.color, 1, 0.5, 0, "the whole fill takes the picked colour")
+    }
+
+    /// **Text is caught by its box centre, and only by its box centre.** That is the rule
+    /// `splitForLassoMove` already uses for type (LASSO_MOVE.md §5.3, and `ADD_TEXT.md` §5.4 for the
+    /// eraser), kept rather than replaced: one containment answer for a text box, not one per feature.
+    ///
+    /// Both halves in one test on purpose — the interesting assertion is the second, where a box the
+    /// loop visibly overlaps is *not* recoloured. A stroke in that position would be.
+    func testTextIsRecolouredWhenItsBoxCentreIsInsideAndNotWhenItIsOutside() {
+        for (name, loopRect, expectsRecolour) in [
+            ("centre inside", CGRect(x: 10, y: 10, width: 44, height: 40), true),
+            // The box spans x 20…36; this loop starts at x 34, so it overlaps the box's right end
+            // while leaving the centre at (28, 25) outside.
+            ("overlapping, centre outside", CGRect(x: 34, y: 2, width: 28, height: 60), false),
+        ] as [(String, CGRect, Bool)] {
+            let (manager, layerIndex, vector) = fixture()
+            var recipe = TextRecipe(string: "hi")
+            recipe.typography.pointSize = 17
+            recipe.color = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+            let element = VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 20, y: 20),
+                                                             size: CGSize(width: 16, height: 10)))
+            vector.upsertText(element)
+
+            select(manager, layerIndex, loop(loopRect))
+            manager.brushColor = picked(0, 0, 1)
+            let baseline = manager.history.undoStack.count
+            manager.recolorSelection()
+
+            let text = vector.elements.compactMap(\.text).first
+            if expectsRecolour {
+                assertRGB(text?.recipe.color, 0, 0, 1, "\(name): the box centre is inside")
+                XCTAssertEqual(text?.recipe.typography.pointSize, 17, "\(name): a recolour restyles nothing else")
+                XCTAssertEqual(text?.recipe.string, "hi", "\(name): nor retypes it")
+                XCTAssertEqual(text?.frame.size, CGSize(width: 16, height: 10), "\(name): nor re-flows it")
+            } else {
+                assertRGB(text?.recipe.color, 0, 0, 0, "\(name): overlap is not enough for type")
+                XCTAssertEqual(stepsSince(baseline, manager), 0, "\(name): and nothing is recorded")
+            }
+        }
+    }
+
+    /// **Only the hue travels.** A faint stroke stays faint, a solid one stays solid, and a fill keeps
+    /// the transparency it was made with (owner, 2026-08-28).
+    ///
+    /// The two numbers that must *not* appear anywhere in the result are the ones a careless read of
+    /// the picker would pick up: `brushColor`'s own alpha and `brushOpacity`. Every kind is carried
+    /// through here at a different opacity, and the three kinds store it three different ways — a
+    /// stroke in `opacity` beside an opaque `color`, a fill with it folded into `color.alpha` (which
+    /// is what `fillSelection` writes), and text in `recipe.opacity`. Leaving both fields alone is
+    /// what makes one write pattern right for all three.
+    func testARecolourCarriesTheHueAndLeavesEveryOpacityExactlyWhereItWas() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                      size: 5, opacity: 0.6,
+                                      samples: [VectorSample(x: 20, y: 20, pressure: 1),
+                                                VectorSample(x: 32, y: 20, pressure: 1)]))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 16, y: 26, width: 20, height: 8),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 0.25),
+                                         opacity: 0.5))
+        var recipe = TextRecipe(string: "hi")
+        recipe.opacity = 0.7
+        recipe.color = CodableColor(red: 0, green: 0, blue: 0, alpha: 0.4)
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 22, y: 36),
+                                                             size: CGSize(width: 12, height: 8))))
+
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 44)))
+        // Neither of these two may reach the artwork.
+        manager.brushColor = picked(0.2, 0.4, 0.8, 0.9)
+        manager.brushOpacity = 0.2
+        manager.recolorSelection()
+
+        let stroke = vector.elements.compactMap(\.stroke).first
+        assertRGB(stroke?.color, 0.2, 0.4, 0.8, "the stroke takes the hue")
+        XCTAssertEqual(stroke?.color.alpha, 1, "and not the picker's alpha")
+        XCTAssertEqual(stroke?.opacity, 0.6, "and keeps its own opacity, not brushOpacity")
+
+        let fill = vector.elements.compactMap(\.fill).first
+        assertRGB(fill?.color, 0.2, 0.4, 0.8, "the fill takes the hue")
+        XCTAssertEqual(fill?.color.alpha, 0.25,
+                       "a fill stores its transparency in the alpha channel — it must survive untouched")
+        XCTAssertEqual(fill?.opacity, 0.5, "and its multiplier too")
+
+        let text = vector.elements.compactMap(\.text).first
+        assertRGB(text?.recipe.color, 0.2, 0.4, 0.8, "the text takes the hue")
+        XCTAssertEqual(text?.recipe.color.alpha, 0.4)
+        XCTAssertEqual(text?.recipe.opacity, 0.7)
+    }
+
+    /// **One undo press puts every colour back**, across all three kinds and one step.
+    func testOneUndoPressRestoresEveryColour() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 18, y: 18), to: CGPoint(x: 44, y: 18), size: 5))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 16, y: 26, width: 22, height: 8),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        var recipe = TextRecipe(string: "hi")
+        recipe.color = CodableColor(red: 0, green: 0.5, blue: 0, alpha: 1)
+        vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
+                                            frame: TextFrame(origin: CGPoint(x: 22, y: 36),
+                                                             size: CGSize(width: 12, height: 8))))
+
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 44)))
+        manager.brushColor = picked(1, 0, 0)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+        XCTAssertEqual(stepsSince(baseline, manager), 1, "three elements, one step")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .recolorSelection)
+
+        manager.undo()
+
+        assertRGB(vector.elements.compactMap(\.stroke).first?.color, 0, 0, 0, "the stroke's black is back")
+        assertRGB(vector.elements.compactMap(\.fill).first?.color, 0, 0, 1, "the fill's blue is back")
+        assertRGB(vector.elements.compactMap(\.text).first?.recipe.color, 0, 0.5, 0, "the text's green is back")
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "and it was one press, not three")
+    }
+
+    /// **The recolour is visible on screen, which is a different claim from "the model changed".**
+    ///
+    /// `VectorCanvas.elements`'s setter deliberately does not invalidate, and both the memoized
+    /// `render()` and `PixelOps.rasterize`'s cache key on `version` — so an edit that writes the array
+    /// and forgets `bumpVersion()` is correct in the document and invisible to the artist until
+    /// something unrelated happens to move the counter. Nothing else in this file catches that: every
+    /// other assertion here reads the model.
+    ///
+    /// The flatten is taken **before** the recolour on purpose. Without it there is no stale entry in
+    /// the cache to be served, and the test would pass with the bump removed.
+    ///
+    /// Watched failing with `bumpVersion()` commented out: *the picked colour must reach the flatten
+    /// — found 0 red pixels*, the pre-recolour bitmap served straight back out of the cache.
+    func testTheRecolourReachesTheFlattenAndNotOnlyTheModel() throws {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 16, y: 32), to: CGPoint(x: 48, y: 32), size: 8))
+
+        func redPixelCount() throws -> Int {
+            let cel = manager.layers[layerIndex].cels[0]
+            let flat = PixelOps.rasterize(cel: cel, canvasSize: Self.size)
+            let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(flat.cgImage)))
+            return stride(from: 0, to: bytes.count, by: 4).count {
+                bytes[$0] > 200 && bytes[$0 + 1] < 60 && bytes[$0 + 2] < 60 && bytes[$0 + 3] > 200
+            }
+        }
+
+        XCTAssertEqual(try redPixelCount(), 0, "fixture precondition: the stroke is black")
+
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 48)))
+        manager.brushColor = picked(1, 0, 0)
+        manager.recolorSelection()
+
+        XCTAssertGreaterThan(try redPixelCount(), 0,
+                             "the picked colour must reach the flatten, not just the display list")
+    }
+
+    /// **A pixel layer refuses, and says why.** Change Colour rewrites a colour field on a stored
+    /// element; a raster cel has pixels and no elements (owner, 2026-08-28: pixel layers are out of
+    /// scope). `mirrorUnavailableReason` is the precedent — the artist gets a sentence, not a button
+    /// that looks live and does nothing.
+    func testChangeColourRefusesAPixelLayerWithAReasonRatherThanGoingQuietlyGrey() {
+        let (manager, _, _) = fixture()
+        manager.currentLayerIndex = 0                       // the raster layer the fixture starts with
+        select(manager, 0, loop(CGRect(x: 8, y: 8, width: 40, height: 40)))
+        manager.brushColor = picked(1, 0, 0)
+
+        let reason = manager.recolorUnavailableReason
+        XCTAssertNotNil(reason, "a raster layer must say why, not go grey")
+        XCTAssertFalse(reason?.isEmpty ?? true)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "and the action itself is a no-op")
+    }
+
+    /// **An in-between refuses too**, for `TopToolbar.toggleMove`'s reason: an interpolated cel's
+    /// frame is derived, so the write would land on a `VectorCanvas` the displayed image is not
+    /// computed from and the artist would see nothing change.
+    ///
+    /// `fillSelection` and `clearSelectionPixels` are *missing* this guard — a pre-existing hole
+    /// recorded in BUGS.md rather than fixed here, since changing when Fill and Clear refuse is a
+    /// behaviour change nobody has put to the owner.
+    func testChangeColourRefusesAnInBetweenCel() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 18, y: 20), to: CGPoint(x: 44, y: 20), size: 5))
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 40)))
+        manager.brushColor = picked(1, 0, 0)
+
+        XCTAssertNil(manager.recolorUnavailableReason, "fixture precondition: a keyframe is fine")
+        manager.layers[layerIndex].cels[0].interpolation = InterpolationRecipe(references: [], t: 0.5)
+
+        XCTAssertNotNil(manager.recolorUnavailableReason, "a derived cel must say why")
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+        assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "and write nothing")
+        XCTAssertEqual(stepsSince(baseline, manager), 0)
+    }
+
+    /// **A recolour to the colour something already is records nothing.** The same rule as the empty
+    /// catch, reached from the other side: an undo step that undoes to an identical document costs
+    /// the artist a press and gives them back nothing they asked for.
+    func testRecolouringToTheColourSomethingAlreadyIsRecordsNoHistoryStep() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 18, y: 20), to: CGPoint(x: 44, y: 20), size: 5))
+        select(manager, layerIndex, loop(CGRect(x: 8, y: 8, width: 48, height: 40)))
+        manager.brushColor = picked(0, 0, 0)              // exactly what the stroke already is
+
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        XCTAssertEqual(stepsSince(baseline, manager), 0)
+    }
+
+    /// **Every fill keeps its z-position.** `addFill` appends, so a canvas can hold fills above *and*
+    /// below the same stroke — a recolour that gathered the kinds into buckets and assigned them back
+    /// would drag a fill the artist had just put on top back underneath the line art.
+    ///
+    /// The order is asserted by id rather than by kind, which is the only way to see a restack that
+    /// preserves the counts.
+    func testARecolourPreservesTheZOrderOfInterleavedFillsAndStrokes() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 12, y: 12, width: 30, height: 10),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1))
+        vector.addStroke(stroke(from: CGPoint(x: 14, y: 24), to: CGPoint(x: 44, y: 24), size: 5))
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 12, y: 30, width: 30, height: 10),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 1, blue: 0, alpha: 1),
+                                         opacity: 1))
+        let before = vector.elements.map(\.id)
+        XCTAssertNotNil(vector.elements[1].stroke, "fixture precondition: a stroke between two fills")
+
+        select(manager, layerIndex, loop(CGRect(x: 6, y: 6, width: 50, height: 44)))
+        manager.brushColor = picked(1, 0, 0)
+        manager.recolorSelection()
+
+        XCTAssertEqual(vector.elements.map(\.id), before, "the display list is rewritten in place")
+        for element in vector.elements {
+            assertRGB(element.fill?.color ?? element.stroke?.color, 1, 0, 0, "and all three took the colour")
         }
     }
 

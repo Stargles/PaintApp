@@ -1664,6 +1664,76 @@ final class VectorCanvas {
         return (result, insideIDs, Self.mayDiverge(result, movedIDs: insideIDs))
     }
 
+    /// Which elements the loop catches — **without cutting anything**. The seam for an edit that
+    /// changes an element's *appearance* rather than its geometry, of which Change Colour
+    /// (`CanvasManager.recolorSelection`) is the first.
+    ///
+    /// `loop` carries `splitForLassoMove`'s two mandatory preconditions unchanged: local space
+    /// (`localPath(fromCanvas:)`) and normalized (`CGPath.normalized(using:)`). Same broad phase,
+    /// same `lassoFillRule`, same centre-line and centre-point rules — the whole point is that
+    /// "what did the lasso catch" has one answer in this file, whatever the caller then does with it.
+    ///
+    /// **A sibling rather than a parameter on `splitForLassoMove`, because that function cannot
+    /// answer this question.** Its fast path inserts a stroke's id only when the stroke is *wholly*
+    /// inside; a straddling stroke is cut, and only the fresh inside piece enters the set. That is
+    /// right for a move — only what is inside travels (LASSO_MOVE.md §5.1) — and wrong for a
+    /// recolour, which the owner ruled splits nothing: *"It's alright if part of the stroke is
+    /// outside the selection"* (2026-08-28). An element this returns is recoloured **whole**, ink
+    /// outside the loop included.
+    ///
+    /// **For a stroke the predicate collapses to "any stored sample inside", and that is not an
+    /// approximation of the move's rule — it is bit-for-bit the same rule.**
+    /// `StrokeGeometry.membershipRuns` decides membership by `inside(sample.point)` alone and only
+    /// ever looks for a crossing where two *consecutive samples* disagree, so a run marked inside
+    /// exists exactly when some stored sample is inside. Early-exit on the first; nothing here needs
+    /// a crossing bisected, since no cut is made.
+    ///
+    /// Returns every kind, images and erasers included: this answers containment, not eligibility.
+    /// Which kinds a given edit may touch is that edit's business — `recolorSelection` skips placed
+    /// images (no colour to change) and `.erase` strokes (`.destinationOut` reads only alpha).
+    func elementIDs(insideLocalPath loop: CGPath) -> Set<UUID> {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !_elements.isEmpty else { return [] }
+        let box = loop.boundingBoxOfPath
+        guard !box.isNull, !box.isEmpty else { return [] }
+        // `strokeIndex()` holds centrelines only, so fills, images and text take a linear scan
+        // against their own bounds — the same limitation, and the same shape, as `splitForLassoMove`.
+        let strokeCandidates = Set(strokeIndex().segments(near: box).map(\.elementIndex))
+        let rule = Self.lassoFillRule
+
+        var insideIDs: Set<UUID> = []
+        for (index, element) in _elements.enumerated() {
+            switch element {
+            case .stroke(let stroke):
+                guard strokeCandidates.contains(index) else { continue }
+                if stroke.samples.contains(where: { loop.contains($0.point, using: rule) }) {
+                    insideIDs.insert(stroke.id)
+                }
+
+            case .fill(let fill):
+                guard let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) else { continue }
+                // Each fill asked with **its own** rule, as the split asks it: a clear-selection hole
+                // is stored `evenOddFill`, and testing it as a winding path would report the very
+                // hole it exists to make as solid ink the loop had caught.
+                let fillRule: CGPathFillRule = fill.evenOddFill ? .evenOdd : .winding
+                if !path.intersection(loop, using: fillRule).isEmpty { insideIDs.insert(fill.id) }
+
+            case .image(let image):
+                if loop.contains(image.transform.position, using: rule) { insideIDs.insert(image.id) }
+
+            case .text(let text):
+                // The box **centre**, which is `splitForLassoMove`'s rule for text and stays its rule
+                // here (owner, 2026-08-28): one containment answer for type, not one per feature.
+                let boundingBox = text.frame.boundingBox
+                if loop.contains(CGPoint(x: boundingBox.midX, y: boundingBox.midY), using: rule) {
+                    insideIDs.insert(text.id)
+                }
+            }
+        }
+        return insideIDs
+    }
+
     /// `splitForLassoMove`'s answer for **Move with no selection**: the whole cel travels, and
     /// nothing is cut. Same tuple, so `CanvasManager.beginVectorWholeCelMove` builds the identical
     /// `VectorFloat` the lasso builds and every nudge, undo, bake and teardown path is shared.

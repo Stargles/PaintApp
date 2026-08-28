@@ -727,6 +727,162 @@ extension CanvasManager {
         }
     }
 
+    // MARK: Change Colour (a one-shot recolour of what the selection caught)
+
+    /// Why **Change Colour** is unavailable on the active cel, or nil when it is available. Shown in
+    /// the Select panel, in the artist's terms, rather than the button going quietly grey — the same
+    /// rule and the same voice as `mirrorUnavailableReason` on the Move bar.
+    ///
+    /// Says nothing about whether a selection exists: the whole action row is already disabled
+    /// without one (`SelectPanel.hasSelection`), so folding that in would put two captions on screen
+    /// saying the same thing.
+    ///
+    /// **Pixel layers are out of scope** (owner, 2026-08-28). A recolour rewrites a colour *field* on
+    /// a stored element; a raster cel has pixels and no elements, and the nearest raster equivalent
+    /// — replace-colour, or hue-shift the selected pixels — is a different feature with its own
+    /// tolerance question. Saying so beats a button that looks live and does nothing.
+    ///
+    /// **And an in-between refuses, for `TopToolbar.toggleMove`'s reason**: an interpolated cel's
+    /// frame is derived, so the write would land on a `VectorCanvas` the displayed image is not
+    /// computed from. Note `fillSelection` and `clearSelectionPixels` are *missing* that guard — see
+    /// BUGS.md; the hole is pre-existing and is deliberately not fixed here, since changing when Fill
+    /// and Clear refuse is a behaviour change nobody has asked the owner about.
+    var recolorUnavailableReason: String? {
+        guard layers.indices.contains(currentLayerIndex) else { return nil }
+        guard layers[currentLayerIndex].kind == .vector,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              layers[currentLayerIndex].cels[celIndex].vector != nil else {
+            return "Change Colour works on vector layers only."
+        }
+        if activeCelIsInBetween { return "Change Colour can't edit an in-between frame." }
+        return nil
+    }
+
+    /// Every stroke, fill and text object the selection caught takes the picked colour — **whole**,
+    /// even where it hangs outside the loop.
+    ///
+    /// > *"When the user uses select, there should be an option called something like change color
+    /// > which changes the color of all the strokes and fills inside the selection to the current
+    /// > picked color. It's alright if part of the stroke is outside the selection."* — owner,
+    /// > 2026-08-28.
+    ///
+    /// That last sentence is the load-bearing one, and it makes this deliberately **unlike** a lasso
+    /// move: a move splits a straddling stroke into two independent strokes at the boundary
+    /// (LASSO_MOVE.md §5.2), a recolour splits nothing. `VectorCanvas.elementIDs(insideLocalPath:)`
+    /// is the seam that says so, and its doc comment is why `splitForLassoMove` could not be reused.
+    ///
+    /// **Only the hue travels; the opacity stays** (owner, 2026-08-28): a faint stroke stays faint, a
+    /// solid one stays solid, a fill keeps the transparency it was made with. That is one write
+    /// pattern for all three kinds and not, as it first looks, two — **replace the RGB triple and
+    /// touch nothing else.** The asymmetry between the kinds is in how they are *constructed*, not in
+    /// what preserving their opacity requires when one is edited in place: a stroke is built with
+    /// `brushOpacity` in its own `opacity` field, while `fillSelection` folds it into `color.alpha`
+    /// and leaves `opacity` at 1 — but a fill's effective alpha is `color.alpha * opacity` either
+    /// way, so leaving both fields alone preserves it bit for bit whichever path made the fill.
+    /// Reading `brushColor`'s alpha instead would overwrite it, and folding in `brushOpacity` would
+    /// overwrite it twice.
+    ///
+    /// **Three kinds, not four, and one stroke composite of the two.** A placed image has no colour
+    /// field at all (`VectorImageElement`). An `.erase` stroke is composited `.destinationOut`, which
+    /// reads only alpha — recolouring one changes no pixel, so it would be an undo step that lies
+    /// about what happened. Neither is counted either, so a lasso that caught only a photo and a
+    /// punch reports nothing changed and records nothing. Detected *shapes* need no arm: a shape
+    /// bakes into a plain `VectorStroke` (`CanvasManager+Shape.swift`), so they are already covered.
+    ///
+    /// **In-betweens inherit a keyframe's recolour live and do not tween it.**
+    /// `InterpolationEvaluator.warped(...)` carries `color` through unchanged, so recolouring
+    /// keyframe A changes A's contribution to every in-between across the span while B's stays as it
+    /// was, and the artist sees the two colours cross-fade. That is what deriving a frame from two
+    /// drawings means, it needs no code, and it will be reported as a bug at least once.
+    func recolorSelection() {
+        let requested = selection
+        // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection outlives a Move lift (see
+        // `beginMove`), so without settling the piece first this would rewrite colours on a cel that
+        // is currently showing a hole, and the float would then bake its own old colours over the top.
+        commitAllInteractiveState()
+        guard recolorUnavailableReason == nil,
+              let selection = requested,
+              layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].id == selection.layerID,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return }
+
+        // Both preconditions `splitForLassoMove` states, for the same two reasons: `selection.path`
+        // is canvas space and stored geometry is local, and Core Graphics leaves the boolean ops
+        // undefined on the self-intersecting path a lasso becomes the moment the artist loops back
+        // over their own line.
+        let loop = vectorCanvas.localPath(fromCanvas: selection.path)
+                               .normalized(using: VectorCanvas.lassoFillRule)
+        let caught = vectorCanvas.elementIDs(insideLocalPath: loop)
+        guard !caught.isEmpty else { return }
+
+        // `brushColor`, not `activeEditColor`: after `commitAllInteractiveState()` the two are
+        // identical, and reading the computed one only opens a window in which they could differ.
+        let picked = brushColor.rgbaComponents
+        /// The element's own alpha kept, the hue replaced — see the ruling above.
+        func recoloured(_ existing: CodableColor) -> CodableColor {
+            CodableColor(red: picked.r, green: picked.g, blue: picked.b, alpha: existing.alpha)
+        }
+
+        // Rewritten **in place** at each index rather than gathered into per-kind buckets and
+        // assigned back. Since `addFill` appends (LASSO_FILL.md §2a) a canvas can hold fills above
+        // *and* below the same stroke, and a recolour must not be what silently restacks them.
+        let elementsBefore = vectorCanvas.elements
+        var newElements = elementsBefore
+        var changed = 0
+        for (index, element) in elementsBefore.enumerated() {
+            switch element {
+            case .stroke(var stroke):
+                guard caught.contains(stroke.id), stroke.composite == .paint,
+                      recoloured(stroke.color) != stroke.color else { continue }
+                stroke.color = recoloured(stroke.color)
+                newElements[index] = .stroke(stroke)
+                changed += 1
+
+            case .fill(var fill):
+                guard caught.contains(fill.id), recoloured(fill.color) != fill.color else { continue }
+                fill.color = recoloured(fill.color)
+                newElements[index] = .fill(fill)
+                changed += 1
+
+            case .text(var text):
+                guard caught.contains(text.id),
+                      recoloured(text.recipe.color) != text.recipe.color else { continue }
+                text.recipe.color = recoloured(text.recipe.color)
+                newElements[index] = .text(text)
+                changed += 1
+
+            case .image:
+                continue
+            }
+        }
+        // Nothing changed, nothing recorded — a loop that caught only erasers and a photo, or one
+        // whose contents are already the picked colour, must not cost the artist an undo press for
+        // an edit they cannot see. `bakePreciseStrokes` states the same idiom.
+        guard changed > 0 else { return }
+
+        vectorCanvas.elements = newElements
+        // **Not optional.** The `elements` setter deliberately does not invalidate, and both
+        // `PixelOps.RasterizeKey` and `LayerContentVersion` key on `vectorVersion` — without this the
+        // recolour happens in the model and is invisible on screen.
+        vectorCanvas.bumpVersion()
+        // Clear the transient tier, or a stale pre-recolour fill preview composites over the top.
+        setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
+        registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                   newElements: vectorCanvas.elements,
+                                   layerID: layers[currentLayerIndex].id,
+                                   celID: layers[currentLayerIndex].cels[celIndex].id,
+                                   label: .recolorSelection)
+        // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
+        // on the undo and redo sides but **not** on the initial apply — `clearSelectionPixels` gets
+        // away with that only because `setFillImage` publishes through `@Published layers`, which is
+        // an accident of its shape rather than a guarantee. `bakePreciseStrokes` calls this
+        // explicitly and so does this.
+        celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id,
+                                       celID: layers[currentLayerIndex].cels[celIndex].id)
+    }
+
     /// Subtracts `excludePath` from `path` by composing them into a single even-odd filled path
     /// (the overlapping region becomes a hole). Returns nil if the result is empty.
     private static func clipPath(_ path: CGPath, excluding excludePath: CGPath) -> CGPath {

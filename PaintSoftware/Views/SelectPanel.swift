@@ -3,13 +3,27 @@ import SwiftUI
 /// The Select tool's bottom-docked bar (Procreate reference: mode tabs across the top of the bar,
 /// action icons across the bottom), shown whenever the Select tool is engaged — see `DrawingView`,
 /// which docks this near the bottom the same way `MoveTransformBottomBar` docks for Move. The action
-/// row (Duplicate/Fill/Clear/Deselect) is disabled until a selection actually exists; the mode
-/// tabs and the outside-interaction toggle are available immediately so a mode can be picked before
-/// the first selection is drawn.
+/// row (Duplicate/Fill/Recolour/Clear/Deselect) is disabled until a selection actually exists; the
+/// mode tabs and the outside-interaction toggle are available immediately so a mode can be picked
+/// before the first selection is drawn.
+///
+/// **Recolour sits beside Fill** rather than at the end of the row, because the two are the pair
+/// that apply the currently picked colour and reading them together is what tells them apart. It is
+/// captioned in one word for a plain layout reason: five tabs share a 360 pt bar, so 72 pt each, and
+/// "Duplicate" was already the longest caption `.caption2` had to fit.
+///
+/// **It is the one action here that can refuse**, and it says why rather than going quietly grey —
+/// `CanvasManager.recolorUnavailableReason`, the rule and the voice `MoveTransformBottomBar` states
+/// for Mirror. At most one caption is ever on screen: the refusal replaces the "draw a selection"
+/// hint rather than stacking under it.
 struct SelectPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
     private var hasSelection: Bool { canvasManager.selection != nil }
+
+    /// Why Change Colour is off, or nil. Read once per body pass and used twice — to gate the button
+    /// and to caption it — so the two can never disagree.
+    private var recolorReason: String? { canvasManager.recolorUnavailableReason }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +53,9 @@ struct SelectPanel: View {
                     .accessibilityIdentifier("selectPanel.duplicateButton")
                 actionTab(icon: "paintbrush.fill", title: "Fill") { canvasManager.fillSelection() }
                     .accessibilityIdentifier("selectPanel.fillButton")
+                actionTab(icon: "paintpalette.fill", title: "Recolour",
+                          enabled: recolorReason == nil) { canvasManager.recolorSelection() }
+                    .accessibilityIdentifier("selectPanel.recolorButton")
                 actionTab(icon: "xmark.square", title: "Clear") { canvasManager.clearSelectionPixels() }
                     .accessibilityIdentifier("selectPanel.clearButton")
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
@@ -69,8 +86,8 @@ struct SelectPanel: View {
             .accessibilityIdentifier("selectPanel.allowOutsideToggle")
             .accessibilityAddTraits(canvasManager.allowsPaintingOutsideSelection ? [.isSelected] : [])
 
-            if !hasSelection {
-                Text("Draw a selection on the canvas with the mode above, or tap Move to transform the whole layer.")
+            if let caption {
+                Text(caption)
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.horizontal, 16)
@@ -121,18 +138,33 @@ struct SelectPanel: View {
         .accessibilityIdentifier("selectPanel.mode.\(mode.rawValue)")
     }
 
-    private func actionTab(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    /// The one line under the bar, or none. Ordered by what the artist is most likely to have just
+    /// pressed against: without a selection nothing in the row does anything, so that hint comes
+    /// first; with one, a refusal is about the button they can now see is dim.
+    private var caption: String? {
+        if !hasSelection {
+            return "Draw a selection on the canvas with the mode above, or tap Move to transform the whole layer."
+        }
+        return recolorReason
+    }
+
+    /// `enabled` is *additional* to `hasSelection`, never instead of it — every tab in this row is
+    /// selection-scoped, and an action that is also unavailable for a reason of its own says so in
+    /// the caption above.
+    private func actionTab(icon: String, title: String, enabled: Bool = true,
+                           action: @escaping () -> Void) -> some View {
+        let live = hasSelection && enabled
+        return Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.body)
                 Text(title)
                     .font(.caption2)
             }
-            .foregroundColor(hasSelection ? .white : .white.opacity(0.3))
+            .foregroundColor(live ? .white : .white.opacity(0.3))
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
-        .disabled(!hasSelection)
+        .disabled(!live)
     }
 }

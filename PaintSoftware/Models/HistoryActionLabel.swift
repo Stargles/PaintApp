@@ -35,6 +35,10 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// loop back reads "undo fill" as the wrong thing having gone.
     case lassoFill
     case clearSelection
+    /// Change Colour on a selection — every stroke, fill and text object the loop caught takes the
+    /// picked colour, whole. Named apart from `.fill` for the reason `.lassoFill` is: an artist who
+    /// wants their old colours back reads "undo fill" as the wrong thing having gone.
+    case recolorSelection
     /// Baking a floating Move piece into its target cel.
     case move
     /// Baking a floating Duplicate piece — distinct from `.duplicateLayer`/`.duplicateFrame`/
@@ -146,6 +150,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .fill: return "fill"
         case .lassoFill: return "lasso fill"
         case .clearSelection: return "clear selection"
+        case .recolorSelection: return "recolour selection"
         case .move: return "move"
         case .duplicatePiece: return "duplicate"
         case .insertImage: return "insert image"
