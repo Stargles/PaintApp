@@ -25,7 +25,12 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 - **Nothing.** The effect backdrop's six stages are merged.
 
-## Canvas geometry, and how a coordinate is stored
+## How a brush stroke is stored — one feature in five items
+
+**The owner's own framing, 2026-08-27:** *"there are alot of tasks in there currently which are all
+parts of the same feature, being the refit to the way brush strokes are stored. (8), (12), (13), with
+(9) and (14) are features of the feature."* Read the five as one refit and sequence them together;
+splitting them across sessions is what let their premises drift apart in the first place.
 
 **Five asks, one programme**, sharing one number. **16,384 pt is the span of a stored coordinate, the
 maximum canvas, and the canvas-plus-padding budget**, and it should be defined once in the code.
@@ -210,15 +215,55 @@ same way and are folded into it below: the memory win and the bit budget.
 ### (10) Oklab colour storage and processing, from the Actions menu
 
 - [ ] The owner: *"I also want the option in actions to switch the color storage and processing to oklab
-      or other future models. Oklab may give better compositing."* A **document-level switch with room for
-      future models**, not a one-way conversion.
-      **Not a memory argument** — colour is per *stroke*, not per sample (32 bytes x 190 strokes = 6 KB on
-      a cel measured on the owner's own device). The argument is quality: perceptually uniform blending,
-      better gradients, and better interpolation between keyframes, where RGB goes muddy through the middle
-      between two saturated hues. Their *"better compositing"* is the sharpest version and is the thing to
-      verify: compositing happens in `Composite.metal`, so a real Oklab mode is a shader change and not
-      only a storage change. Costs a conversion at stamp time and a decision about whether the picker works
-      in Oklab.
+      or other future models. Oklab may give better compositing."* They then asked for a recommendation on
+      whether to **store** Oklab or convert at use, guessing that storing it avoids a transform and is
+      therefore faster, and asked for the call to be made for them.
+
+      **RECOMMENDATION, 2026-08-27: do not store Oklab, and do not put it in the compositor. Three
+      stages, and the first one is not Oklab at all.**
+
+      **Storing Oklab moves a conversion rather than removing one, and moves it somewhere worse.** Colour
+      is per *stroke* — 32 bytes x 190 strokes = 6 KB on the owner's own cel — while compositing is per
+      *pixel*, every frame. Storing Oklab saves converting 190 colours once and does nothing for the
+      composite; meanwhile every swatch, every export and every PNG needs sRGB, so the conversion is paid
+      per *display* instead. The owner's performance intuition is the one part of their guess that
+      inverts.
+
+      **Three blockers, all specific to this tree.** Every texture is `rgba8Unorm`
+      (`MetalCompositor.swift:173`), and Oklab's a/b are small signed values that band at 8 bits on
+      exactly the saturated colours this is for — 16-bit float doubles every canvas-sized buffer, which
+      is the resource `CompositorBudget`, `peakCompositeTextures` and the iPad 9 crash test all exist to
+      manage. `CompositorParityLogicTests` gates the two backends **byte for byte**, with eleven blend
+      modes additionally gated against `CGBlendMode`, and Oklab needs a **cube root** whose Metal and
+      Foundation implementations are not guaranteed bit-identical — `Composite.metal`'s header says the
+      byte-identical comparison is the whole reason the textures are unmanaged. And coverage compositing
+      is averaging light, so a perceptual space is the wrong home for it regardless; Oklab's real win is
+      **interpolating between two colours**, which is what the owner's "better gradients" and "better
+      keyframe interpolation" instincts are actually about.
+
+      **The finding that is probably bigger than the ask.** The compositor blends in **sRGB,
+      unlinearized**, deliberately (`Composite.metal:8-12`). That is the classic gamma problem: a
+      half-covered edge between two saturated hues lands at the sRGB midpoint rather than the light
+      midpoint and reads muddy — which is nearly word for word the symptom this item already described as
+      *"RGB goes muddy through the middle between two saturated hues"*. It is a **linear-light** problem,
+      not an Oklab one.
+
+      **And the distinction that decides the whole item: sRGB-to-linear is a *per-channel* function, so on
+      8-bit input it is a 256-entry lookup table and therefore bit-identical on both backends by
+      construction. Oklab's cube root sits *after* a matrix mix of the three channels and cannot be tabled
+      that way.** One is compatible with the parity gate; the other is not.
+
+      - **Stage A — composite in linear light through a 256-entry LUT.** Same class of win, cheaper,
+        probably the thing the owner is seeing, and provably keeps parity. Verify the muddy-edge symptom
+        first with a rendered A/B rather than assuming it.
+      - **Stage B — Oklab for *interpolation only***: gradient map, keyframe colour tweens, the picker's
+        gradients. Per-colour rather than per-pixel-per-frame, so the cost is nil, and all of it sits
+        outside the parity gate.
+      - **Stage C — Oklab blend modes**, only if A and B leave the owner still wanting them, and knowing
+        it breaks the `CGBlendMode` gate for eleven modes.
+
+      The *"document-level switch with room for future models"* the owner asked for should therefore be a
+      property of **interpolation**, not of storage. Storage does not change.
 
 ## Carried — deliberate, and not an ask
 
