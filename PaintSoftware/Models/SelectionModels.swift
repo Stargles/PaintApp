@@ -737,6 +737,11 @@ extension CanvasManager {
     /// without one (`SelectPanel.hasSelection`), so folding that in would put two captions on screen
     /// saying the same thing.
     ///
+    /// **Both sentences say "Recolour", which is the word on the button** — not "Change Colour",
+    /// which is the owner's name for the feature and appears nowhere the artist can see. A refusal
+    /// that names something other than the control it is about is a refusal the artist has to
+    /// translate; the screenshot of the raster case is what made that obvious.
+    ///
     /// **Pixel layers are out of scope** (owner, 2026-08-28). A recolour rewrites a colour *field* on
     /// a stored element; a raster cel has pixels and no elements, and the nearest raster equivalent
     /// — replace-colour, or hue-shift the selected pixels — is a different feature with its own
@@ -752,9 +757,9 @@ extension CanvasManager {
         guard layers[currentLayerIndex].kind == .vector,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               layers[currentLayerIndex].cels[celIndex].vector != nil else {
-            return "Change Colour works on vector layers only."
+            return "Recolour works on vector layers only."
         }
-        if activeCelIsInBetween { return "Change Colour can't edit an in-between frame." }
+        if activeCelIsInBetween { return "Recolour can't edit an in-between frame." }
         return nil
     }
 
