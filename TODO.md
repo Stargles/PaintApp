@@ -111,23 +111,24 @@ same way and are folded into it below: the memory win and the bit budget.
       lasso float, which bakes into canvas coordinates, and that closed the ink loss the owner reproduced.
       **What remains is the clean-up the owner asked for in the same sentence**: *"of course clean up and
       remove the legacy code cleanly."*
-      - **Stage 2 — delete the legacy path.** `TopToolbar` was the only writer that could set
-        `isVectorTransforming`, so the flag is now permanently false and every consumer is dead-but-live:
-        the flag and its `didSet` bracket, `setVectorTransform`, `closeVectorTransformBracket`, the
-        `CanvasTouchInputs` dimension, and both `CanvasView` arms. **Two things the deletion must decide
-        rather than drop**: `moveBoxIsUp` loses its layer-visibility term with the whole-layer arm, so
-        decide explicitly whether a Move box may be up on a hidden layer; and `CanvasTouchOwnerLogicTests`
-        loses an enumerated input dimension, so **take the xcresult count before and after** — a test that
-        stops running still prints green. ~1,300 lines of test exist solely to pin what is being deleted,
-        including the negative control inside the new ink-loss regression test, which must be removed
-        deliberately.
-      - **Stage 3 — persistence goes advisory.** Bake the stored transform on decode and write identity on
-        encode, keeping the field so an old build reads identity and draws baked geometry. Also bake
-        `resized(to:offset:)` so `setCanvasPadding` stops writing a non-identity value. **Existing
-        documents change appearance on first open** — a shrunk cel un-hides ink it was clipping — and that
-        must be announced rather than discovered.
-      - **Stage 4 — optional, judge after stage 1 has been on the iPad.** Delete `_transform` itself and
-        the eleven entry points that invert it away. Buys clarity, not behaviour.
+      - **Stages 2 and 3 are merged** (`683983c`, `2fa1725`). Stage 2 deleted the whole-layer path after
+        verifying its premise rather than assuming it — five sites wrote `isVectorTransforming` and every
+        one wrote `false`. The brief's deletion list was **incomplete**: four more things were dead with
+        it, including `StrokeCanvasView`'s entire `liveLayerTransformBase` latch trio and `Tool.isMomentary`.
+        `moveBoxIsUp` is now exactly `hasVectorFloat`, and the question it forced was ruled: **a Move box
+        may be up on a hidden layer**, because the lift is already out of the document. Test count
+        1802 → 1782, accounted test by test (−22 for `VectorTransformUndoLogicTests`, whose every test
+        drove the deleted flag; −2 for `Tool.isMomentary`; +4 persistence).
+        **Stage 3 found a second door onto the owner's own ink loss.** After stage 2, `setCanvasPadding`
+        was the *only* remaining producer of a non-identity cel transform, and it walks every cel of every
+        layer — so one use of the padding slider left a non-identity transform on every cel in the
+        document, each of which then clipped later canvas-space ink in local space. The same loss the
+        owner reproduced through the Move box, reachable through the Actions menu instead. Baking
+        `resized(to:offset:)` is what makes "no path writes a cel transform" true rather than nearly true.
+      - **Stage 4 — judged and declined, not forgotten.** `_transform` is dead-*valued*, not trivially
+        dead: ~20 read sites remain and five test files exercise non-identity transforms deliberately.
+        LAYER_TRANSFORM.md §7 prices the removal at 2-3 days for clarity and no behaviour. Its two
+        genuinely zero-caller accessors were taken. Re-open only if something else makes it cheap.
       **The future shape is on record and changes how this is built**: *"when I add keyframes, I want a
       special type of layer called a transformation layer in which the stuff under it can be moved."* An
       adjustment-layer shape, applied at render time to the layers below and never baked into their
@@ -151,25 +152,21 @@ same way and are folded into it below: the memory win and the bit budget.
         moved ink, so rotate +45 degrees then -45 returns a bigger box, monotonically over repeated
         gestures. **(14) is the cure and the owner named it as the follow-up.**
 
-### (13) Canvas padding shares one 16k budget, and the base maximum rises
+### (13) Canvas padding shares one 16k budget — MERGED `83f7c0d`
 
-- [ ] The owner: *"the canvas plus the padding should have the maximum size of 16k ... Right now canvas
-      padding just has a set maximum of something like 500px, I kind of want to make that maximum a bit
-      higher like 1000, unless of course it is bounded by the 16k canvas+padding limit."*
-      Their memory was nearly exact: `canvasPaddingRange` is `0...512`, a flat constant.
-      **The rule**: padding's upper bound becomes `min(1024, (16383 - artworkExtent) / 2)` — 1024 on
-      ordinary canvases, shrinking to nothing as the canvas approaches 16k. The base rises 512 to **1024**,
-      and `CanvasSizePickerView.maxDimension` rises 8192 to **16383**.
-      **Three numbers here were checked against the code on 2026-08-27 and two of them moved.**
-      `k = 2` is confirmed — `setCanvasPadding` adds `2 * delta` to each dimension, so padding is
-      per-side, exactly as this item guessed. But **16384 is one too large**: a signed 16-bit
-      quarter-pixel field addresses up to +8191.75, so the largest dimension that encodes without
-      clamping inside the artwork is **16383** (see (8)). And `canvasSize` **already includes** the
-      padding (`CanvasManager.swift:22-27`, `ProjectManifest.swift:8-10` both say it is folded in), so
-      the budget is simply `canvasSize <= 16383` and the formula's second operand must be the
-      *artwork* extent — `canvasSize - 2 * padding` — or the padding is subtracted twice.
-      **Only two constants in the app spell either bound** — `canvasPaddingRange` (`0...512`) and
-      `CanvasSizePickerView.minDimension`/`maxDimension` — so "defined once" is a small change.
+- [x] Built as ruled. `canvasPaddingRange` is a live instance property bounded by
+      `min(1024, (16383 - artworkExtent) / 2)`; `CanvasManager.maxCanvasExtent = 16383` is the single
+      named home and `CanvasSizePickerView.maxDimension` reads it. All three of the item's corrected
+      numbers held against the code — `k = 2`, 16383 not 16384, and `canvasSize` already including the
+      padding.
+      **What raising the maximum exposed is bigger than the feature, and is filed in BUGS.md rather
+      than fixed.** The compositor degrades gracefully — `affordableSize` scales a 16383² preview down
+      to about 2896² on the owner's own iPad 9 before allocating anything, and a blank cel is lazy
+      enough to cost nothing. But `CompositorBudget` only ever bounded compositor **scratch**: the
+      persistent raster, fill and baked buffers a cel materialises once something is actually drawn on
+      it go through no budget at all, and **one of them at 16383² is ~1.02 GB** — more than a 3 GB
+      iPad's entire process budget. Whether a near-maximum canvas is understood to be vector-only is a
+      product call, not a one-line fix.
 
 ### (9) Resize the canvas from the Actions menu
 
