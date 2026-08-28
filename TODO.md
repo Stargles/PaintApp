@@ -11,6 +11,13 @@ the question that prompted it, and the owner asked for it back. **A question the
 being a question** — the answer goes into the item and the exchange goes to [HANDOFF.md](HANDOFF.md).
 What happened this pass belongs there and in `git log`, not here.
 
+**No document written so far has to survive.** The owner, 2026-08-27: *"Don't worry about legacy
+documents right now, everything on the ipad right now is expendable."* So a format change needs no
+migration, no decode default for a field that never existed, and no "existing documents change
+appearance on first open" warning — **which is what unblocks (12) stage 3, and through it (8)**. This is
+a standing permission and not a one-off; it lapses the day the owner starts keeping real artwork in the
+app, and whoever notices that should come back and say so rather than assuming it still holds.
+
 **The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1, not here**: the owner works at
 2048x1024, and every figure collected before 2026-08-17 was taken at 4096 squared, eight times the pixels.
 
