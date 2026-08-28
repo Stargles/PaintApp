@@ -60,6 +60,8 @@ struct ActionsMenu: View {
 
             paddingControl
 
+            bakePrecisionRow
+
             Rectangle()
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 1)
@@ -146,6 +148,39 @@ struct ActionsMenu: View {
                     .padding(.leading, 24)   // clears the row's icon column, so it reads as the row's own note
                     .padding(.bottom, 6)
             }
+        }
+    }
+
+    /// **TODO item (14) — the other half of the Move bar's "Keep Full Precision".** Snaps every stroke
+    /// in the document that is stored exactly back onto the quarter-pixel grid, recovering the file
+    /// size the option costs. Above the divider, because everything above it acts on the drawing.
+    ///
+    /// **The count is in the title rather than in the caption**, so "is there anything to bake" is
+    /// answered by the row itself and not by reading a sentence under it — and the row greys out at
+    /// zero rather than disappearing, for the reason "Add Text" states: a hidden row is a feature with
+    /// no signpost, and an artist who has never turned the toggle on would never learn what undoes it.
+    private var bakePrecisionRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                canvasManager.bakePreciseStrokes()
+            } label: {
+                row(icon: "square.grid.3x3",
+                    title: "Bake Precise Strokes (\(canvasManager.preciseStrokeCount))",
+                    enabled: canvasManager.preciseStrokeCount > 0)
+            }
+            .disabled(canvasManager.preciseStrokeCount == 0)
+            .accessibilityIdentifier("actions.bakePrecisionRow")
+
+            Text(canvasManager.preciseStrokeCount == 0
+                 ? "Nothing to bake — no stroke here is stored at full precision."
+                 : "Snaps them back to the normal storage grid, which is smaller on disk. "
+                   + "Shrinking and regrowing them after a save will lose a little accuracy again.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
+                .padding(.leading, 24)   // clears the row's icon column, as "Add Text" does
+                .padding(.bottom, 6)
         }
     }
 

@@ -25,6 +25,22 @@ struct VectorStroke: Identifiable, Codable {
     var size: CGFloat
     var opacity: Double
     var samples: [VectorSample]
+    /// Whether `samples` is **stored** at full precision rather than on the quarter-pixel grid —
+    /// TODO item (14), and the owner's *"when the option is turned on, it gets stored as doubles"*.
+    ///
+    /// **Not its own persisted key.** It is *derived* from the wire form on decode (a run declared
+    /// float32 → precise) and *drives* the wire form on encode; `VectorSample.decodeRun` and
+    /// `VectorSample.packed(_:for:precise:)` are the two ends of that. A key of its own would be a
+    /// second copy of a fact the run already states, and the two could disagree — the argument
+    /// `Lattice`'s persistence extension makes about derivable data.
+    ///
+    /// In memory this changes nothing: `samples` was three `CGFloat` before item (8), still is, and a
+    /// Move has always been exact within one sitting. What the flag buys is the *round trip* — a
+    /// stroke shrunk to 2% and stored comes back **8.57 pt** out on the quarter-pixel grid and
+    /// **5.0e-5 pt** out on this one (MEASURED; `PackedSampleRun.Precision.float32` carries the table).
+    /// It costs **1.72x** the bytes a sample until the artist bakes it
+    /// (`CanvasManager.bakePreciseStrokes`).
+    var precise: Bool = false
     /// `.erase` routes this stroke through `BrushStamper.stampStroke(..., isEraser: true)` — same
     /// pipeline as paint, composited `.destinationOut`, punching a hole in everything beneath it.
     ///
@@ -78,6 +94,12 @@ struct DabLattice: Codable, Equatable {
     var parameters: [CGFloat]
     /// The parent's id, so `BrushStamper.seed(for:)` replays the parent's dab RNG.
     var seedID: UUID
+    /// `VectorStroke.precise` for *this* walk — same field, same derivation, same reason. A piece's
+    /// lattice is its parent's whole walk and is mapped by the very transform the piece's own samples
+    /// are, so a precise piece whose lattice stayed quantised would come back with its dabs on a
+    /// coarser grid than its own centre line. The invariant that keeps the two in step is stated and
+    /// enforced at the one site that sets either — `VectorStroke.markedPrecise()`.
+    var precise: Bool = false
 
     /// The parent parameters this piece shows. Nil-return keeps the renderer honest on a decoded
     /// file rather than crashing, even though empty `parameters` shouldn't occur for a real stroke.
@@ -106,7 +128,10 @@ struct DabLattice: Codable, Equatable {
 extension DabLattice {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        samples = try VectorSample.decodeRun(from: c, forKey: .samples)
+        let run = try VectorSample.decodeRun(from: c, forKey: .samples)
+        samples = run.samples
+        // Derived from the run's own shape, exactly as a stroke's is — see `precise`.
+        precise = run.precise
         parameters = try c.decode([CGFloat].self, forKey: .parameters)
         seedID = try c.decode(UUID.self, forKey: .seedID)
     }
@@ -115,9 +140,30 @@ extension DabLattice {
     /// saturates has already said so through the stroke it was cut from.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(VectorSample.packed(samples, for: encoder), forKey: .samples)
+        try c.encode(VectorSample.packed(samples, for: encoder, precise: precise), forKey: .samples)
         try c.encode(parameters, forKey: .parameters)
         try c.encode(seedID, forKey: .seedID)
+    }
+}
+
+extension VectorStroke {
+
+    /// This stroke marked as stored at full precision — **and the lattice it walks with it**.
+    ///
+    /// **The one site that sets either flag, so the invariant is stated once and cannot be half-kept.**
+    /// A piece's `lattice.samples` is the parent's whole walk, and `VectorCanvas.mapping` maps it by
+    /// the very transform it maps `samples` by (see `drawn(_:through:widthScale:)`), so the two are
+    /// one geometry with one provenance. Marking the stroke and leaving the lattice quantised would
+    /// store a centre line the artist can regrow exactly and a dab walk they cannot — the piece would
+    /// come back with its dabs re-phased against its own spine, which is precisely the failure
+    /// `DabLattice` exists to prevent.
+    ///
+    /// Idempotent, and cheap on a stroke that is already precise: nothing here touches `samples`.
+    func markedPrecise() -> VectorStroke {
+        var copy = self
+        copy.precise = true
+        copy.lattice?.precise = true
+        return copy
     }
 }
 
@@ -131,7 +177,10 @@ extension VectorStroke {
         color = try c.decode(CodableColor.self, forKey: .color)
         size = try c.decode(CGFloat.self, forKey: .size)
         opacity = try c.decode(Double.self, forKey: .opacity)
-        samples = try VectorSample.decodeRun(from: c, forKey: .samples)
+        let run = try VectorSample.decodeRun(from: c, forKey: .samples)
+        samples = run.samples
+        // Derived, never read from a key of its own — see `precise`.
+        precise = run.precise
         // Absent key → `.paint`, so legacy files load.
         composite = try c.decodeIfPresent(StrokeComposite.self, forKey: .composite) ?? .paint
         // Absent is the normal case; only a stroke cut out of another one carries a lattice.
@@ -149,16 +198,25 @@ extension VectorStroke {
         try c.encode(color, forKey: .color)
         try c.encode(size, forKey: .size)
         try c.encode(opacity, forKey: .opacity)
-        // TODO item (8): quarter-pixel fixed point, five bytes a sample. `packed` reads the
-        // quantisation origin off the encoder and writes it into the payload, so a decoder needs no
-        // context; see `PackedSampleRun`.
-        let packed = VectorSample.packed(samples, for: encoder)
+        // TODO item (8): quarter-pixel fixed point, five bytes a sample — or item (14)'s float32
+        // layout when this stroke is marked precise, at nine. `packed` reads the quantisation origin
+        // off the encoder and writes it into the payload, so a decoder needs no context; see
+        // `PackedSampleRun`.
+        let packed = VectorSample.packed(samples, for: encoder, precise: precise)
         if packed.clampedCount > 0 {
             VectorStroke.log.error("""
                 \(packed.clampedCount, privacy: .public) of \(samples.count, privacy: .public) samples on \
                 stroke \(id.uuidString, privacy: .public) are outside the storable range about \
                 (\(packed.origin.x, privacy: .public), \(packed.origin.y, privacy: .public)) and saturate — \
                 that ink is flattened onto the boundary. See BUGS.md's unclamped zoom.
+                """)
+        }
+        if packed.nonFiniteCount > 0 {
+            VectorStroke.log.error("""
+                \(packed.nonFiniteCount, privacy: .public) of \(samples.count, privacy: .public) samples on \
+                stroke \(id.uuidString, privacy: .public) have a coordinate that is not a number and are \
+                stored at the origin — a defect upstream of storage, and it is reported in both layouts \
+                because a precise stroke has no clamp to notice it instead.
                 """)
         }
         try c.encode(packed, forKey: .samples)

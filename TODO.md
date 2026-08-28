@@ -54,9 +54,9 @@ the canvas becomes.
       it is reversible, and add an option in actions to bake everything down back to 16bits."* It
       arrived unprompted as the answer to the strongest objection against (12) — that a layer
       transform was the only exactly reversible operation in the app.
-      **Scoped 2026-08-27, and the scope came back saying the mechanism already exists.** Nothing here
-      is built or merged, so the item stays; but what remains of it is one owner question, not a
-      branch.
+      **Scoped, then ruled on, then built — 2026-08-27.** The scope found that the mechanism half
+      already existed and that both stated residues were misdiagnosed; the owner then named a defect
+      none of that had touched, and the branch below is their cure. Not merged, so the item stays.
 
       **The doubles half already holds.** Every nudge maps `float.liftedInside` — the elements exactly
       as the lift produced them — so a drag is an *absolute* map from the lift rather than an
@@ -67,12 +67,29 @@ the canvas becomes.
       already scales a lassoed piece 2.5×, turns it 0.7 rad, drags the box back to the lift pose and
       asserts the drawing is pixel-identical.
 
-      **The bake half has no referent.** (8) made the 16-bit form a *save* format: `PackedSampleRun`
-      quantises on the way to disk and decodes back to `CGFloat`, so there is no resident 16-bit
-      representation for an Actions item to bake down *to*. One save is one rounding — measured at
-      0.0 pt drift over a hundred consecutive saves. If the owner still wants the option, what it
-      would mean today is "snap every sample to the storage grid on demand", which is a different
-      feature and worth asking about before building.
+      **The defect the owner found, and it survives all of the above, is about scale.** The
+      quantisation grid is a fixed size in *canvas* points, so a stroke shrunk before a save has fewer
+      usable bits and whatever it lost is multiplied by however much it is grown back by — and it only
+      shows after a reopen. MEASURED (200 samples, real codec, shrink → store → regrow): 50% costs
+      0.33 pt, 10% costs 1.75 pt, **2% costs 8.57 pt**. Rotation and translation are exact, a shrink
+      and regrow *without* a save drifts 6.0e-11 pt, and a hundred consecutive saves of an untouched
+      project drift 0.0 pt. Scale across a store is the whole of it.
+
+      **The cure, in the owner's words:** *"when the option is turned on, it gets stored as doubles.
+      Then there is an item in actions to bake any strokes stored as doubles on the canvas as 16bit
+      integers."* **They chose float32 over float64** on the costs: 12.18 bytes a sample on the wire
+      against the packed form's 7.10 (**1.72x**), and 5.0e-5 pt of error where float64 would give
+      2.9e-12 — the extra 1.5x buys nothing an artist can see.
+
+      **Built on `tmp/revmove`.** `PackedSampleRun` gains a float32 record layout declared by a `p`
+      key written *only* in that mode, so an ordinary stroke's bytes are byte-for-byte unchanged;
+      `VectorStroke.precise`/`DabLattice.precise` are derived from the run's shape rather than stored
+      beside it; `CanvasManager.preserveMovePrecision` (off by default) is a "Keep Full Precision"
+      toggle on the Move bar that marks every stroke a Move writes, at `applyToVectorFloat` so the
+      flag rides in the undo step with the geometry; and Actions gains **Bake Precise Strokes**, one
+      step over every layer and cel. **float32 does not clamp** — a precise stroke cannot be flattened
+      onto the storage boundary by BUGS.md's unclamped zoom, which is a real behavioural difference
+      and is documented as one.
 
       **Both stated residues were misdiagnosed, and both corrections are now executable.**
       - **`BrushStamper.stampSpacing`'s 1 pt floor is not a Move residue.** It is
@@ -94,12 +111,9 @@ the canvas becomes.
         tracks the tilt in both directions and never ratchets
         (`testARotateBakeAndReliftInflatesTheBoxAndTheRoundTripDeflatesItAgain`).
 
-      **What is left is one question for the owner: should the Move box carry its own rotation?** An
-      oriented rectangle around tilted ink is the only thing that would make a re-lift measure the
-      same box twice, and it changes what the handles look like — a visible behaviour change, so it is
-      the owner's call rather than ours. The existing acceptance — *"Accept all three, ship stage 1,
-      then the double precision move comes later and integrates in with it."* — was given against the
-      monotonic reading of the box, so the corrected one is worth putting in front of them with it.
+      **The Move box stays axis-aligned** — the owner ruled on 2026-08-27, so the question the scope
+      left open ("should the box carry its own tilt?") is answered and closed. `localBounds(of:)` is
+      not to grow a box tilt, and the re-lift inflation above stands as accepted.
 
 ### (9) Resize the canvas from the Actions menu
 

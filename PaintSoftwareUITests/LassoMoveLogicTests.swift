@@ -2347,6 +2347,134 @@ final class LassoMoveLogicTests: XCTestCase {
                       "with a paint tool selected the layer's own stroke recognizer must be live again")
     }
 
+    // MARK: - Keep Full Precision (TODO item (14))
+
+    /// **The Move marks what it wrote, on both arms, and only when the option is on.**
+    ///
+    /// The site is `applyToVectorFloat`, which is the one function a vector Move writes geometry from
+    /// — so this is really asserting that the lasso arm and the whole-cel arm reach the same place,
+    /// which is `beginVectorWholeCelMove`'s whole design. A test that drove only the lasso would pass
+    /// against a fix applied at the lasso lift and leave Move-with-no-selection storing coarse.
+    ///
+    /// Also asserts what it must *not* touch: the flag is per stroke, so ink that was never lifted
+    /// stays on the grid however many times its neighbours are moved.
+    func testAMoveMarksWhatItWroteOnlyWhenKeepFullPrecisionIsOn() {
+        for kind in LiftKind.allCases {
+            for keepPrecision in [false, true] {
+                let (manager, layerIndex, vector) = fixture()
+                // Inside the lasso arm's loop (x ≥ 24), and outside it.
+                vector.addStroke(stroke(from: CGPoint(x: 30, y: 10), to: CGPoint(x: 50, y: 10)))
+                vector.addStroke(stroke(from: CGPoint(x: 4, y: 40), to: CGPoint(x: 16, y: 40)))
+                manager.preserveMovePrecision = keepPrecision
+
+                XCTAssertTrue(lift(kind, manager, layerIndex), "\(kind.rawValue): lift")
+                manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+                manager.commitVectorFloatIfNeeded()
+
+                let moved = vector.elements.compactMap(\.stroke)
+                    .filter { $0.samples.contains { $0.x > 24 } }
+                XCTAssertFalse(moved.isEmpty, "\(kind.rawValue): setup — something travelled")
+                for stroke in moved {
+                    XCTAssertEqual(stroke.precise, keepPrecision,
+                                   "\(kind.rawValue), option \(keepPrecision): a moved stroke's storage mode "
+                                   + "must follow the option that was on when it moved")
+                }
+                if kind == .lasso {
+                    let untouched = vector.elements.compactMap(\.stroke)
+                        .filter { $0.samples.allSatisfy { $0.x < 24 } }
+                    XCTAssertFalse(untouched.isEmpty, "setup — something stayed behind")
+                    for stroke in untouched {
+                        XCTAssertFalse(stroke.precise,
+                                       "ink the lasso left alone is not marked by somebody else's move")
+                    }
+                }
+            }
+        }
+    }
+
+    /// **Undo gives the flag back with the geometry, because they travel in the same step.**
+    ///
+    /// This is why the mark is made in `applyToVectorFloat` and not in `commitVectorFloatIfNeeded`:
+    /// the commit records nothing (every nudge is already on the stack), so a flag set there would be
+    /// a change to the saved document with no step carrying it — undo would return the artist's
+    /// geometry and leave the storage mode behind.
+    func testUndoingAMoveTakesTheFlagBackWithIt() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 30, y: 10), to: CGPoint(x: 50, y: 10)))
+        manager.preserveMovePrecision = true
+
+        XCTAssertTrue(lift(.wholeCel, manager, layerIndex))
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 6, dy: 0))
+        manager.commitVectorFloatIfNeeded()
+        XCTAssertTrue(vector.elements.compactMap(\.stroke).allSatisfy(\.precise))
+
+        manager.undo()
+        XCTAssertTrue(vector.elements.compactMap(\.stroke).allSatisfy { !$0.precise },
+                      "the step that put the geometry back put the storage mode back with it")
+    }
+
+    /// **The Actions bake: every precise stroke on the canvas, one undo step.**
+    ///
+    /// "On the canvas" is the owner's own scope — all layers, all cels, not the one the artist is
+    /// standing on. So the fixture puts precise strokes on two different layers and leaves an ordinary
+    /// one beside them, and the assertion is that one press of Undo restores *all* of it.
+    ///
+    /// The geometry check is the load-bearing one: clearing the flag without moving the samples would
+    /// leave a stroke that writes five bytes a sample and shifts a quarter pixel on the very next
+    /// save, which is the silent kind of loss this repo keeps paying for.
+    func testTheBakeSnapsEveryPreciseStrokeClearsTheFlagsAndIsOneUndoStep() {
+        let (manager, _, vector) = fixture()
+        manager.addVectorLayer()
+        let secondIndex = manager.currentLayerIndex
+        guard let second = manager.layers[secondIndex].cels[0].vector else { return XCTFail("no canvas") }
+
+        /// Deliberately off the quarter-pixel grid, so a bake has somewhere to move it to.
+        func offGrid(_ x: CGFloat, _ y: CGFloat) -> VectorSample {
+            VectorSample(x: x + 0.13, y: y + 0.07, pressure: 1)
+        }
+        var precise = VectorStroke(brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
+                                   samples: [offGrid(10, 10), offGrid(20, 12), offGrid(30, 14)])
+        precise.lattice = DabLattice(samples: [offGrid(10, 10), offGrid(30, 14)],
+                                     parameters: [0, 1], seedID: UUID())
+        vector.addStroke(precise.markedPrecise())
+        second.addStroke(precise.markedPrecise())
+        let ordinary = VectorStroke(brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
+                                    samples: [offGrid(40, 40), offGrid(50, 44)])
+        vector.addStroke(ordinary)
+
+        XCTAssertEqual(manager.preciseStrokeCount, 2, "one on each layer, and the ordinary one uncounted")
+        let geometryBefore = (vector.strokes + second.strokes).map(\.samples)
+        let stepsBefore = manager.history.undoStack.count
+
+        XCTAssertEqual(manager.bakePreciseStrokes(), 2)
+
+        XCTAssertEqual(manager.preciseStrokeCount, 0, "nothing is stored at full precision afterwards")
+        XCTAssertTrue((vector.strokes + second.strokes).allSatisfy { $0.lattice?.precise != true },
+                      "and neither is any lattice — the invariant holds through the bake too")
+        for stroke in vector.strokes + second.strokes where (stroke.samples.first?.x ?? 0) < 35 {
+            for sample in stroke.samples + (stroke.lattice?.samples ?? []) {
+                XCTAssertEqual(sample.x.truncatingRemainder(dividingBy: PackedSampleRun.quantum), 0,
+                               accuracy: 1e-9, "\(sample.x) is not on the quarter-pixel grid")
+                XCTAssertEqual(sample.y.truncatingRemainder(dividingBy: PackedSampleRun.quantum), 0,
+                               accuracy: 1e-9, "\(sample.y) is not on the quarter-pixel grid")
+            }
+        }
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1,
+                       "one menu tap costs one press of Undo, however many cels it touched")
+
+        manager.undo()
+        let geometryAfter = (vector.strokes + second.strokes).map(\.samples)
+        XCTAssertEqual(geometryAfter, geometryBefore, "undo restores the pre-bake geometry on every layer")
+        XCTAssertEqual(manager.preciseStrokeCount, 2, "…and the flags with it")
+
+        // A second press with nothing to bake must not put a no-op on the stack.
+        _ = manager.bakePreciseStrokes()
+        let stepsAfterBake = manager.history.undoStack.count
+        XCTAssertEqual(manager.bakePreciseStrokes(), 0)
+        XCTAssertEqual(manager.history.undoStack.count, stepsAfterBake,
+                       "baking nothing records nothing")
+    }
+
     // MARK: - Helpers
 
     /// The pose a **Freeform** corner drag that grows the box by `(fx, fy)` on its own two axes

@@ -371,8 +371,23 @@ extension CanvasManager {
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
             guard let lifted = float.liftedInside[element.id] else { return element }
-            return isStretched ? VectorCanvas.mapping(lifted, throughStretch: localDelta)
-                               : VectorCanvas.mapping(lifted, throughSimilarity: localDelta)
+            let moved = isStretched ? VectorCanvas.mapping(lifted, throughStretch: localDelta)
+                                    : VectorCanvas.mapping(lifted, throughSimilarity: localDelta)
+            // **TODO item (14): the Move marks what it wrote, here and nowhere else.** This is the
+            // one function a vector Move writes geometry from — both arms lift into the same float
+            // and every nudge, Rotate press, Mirror and Reset comes back through it — so one line
+            // covers a lassoed piece and a whole cel alike.
+            //
+            // **At the nudge rather than at the bake, and that is the load-bearing half.**
+            // `commitVectorFloatIfNeeded` records nothing ("every nudge is already on the stack"), so
+            // a flag set there would be a change to the saved document that no undo step carries: the
+            // artist presses Undo, gets their geometry back, and keeps a stroke that still writes
+            // nine bytes a sample. Set here it rides in `newElements`, which the step already swaps
+            // whole — so undo returns the flag with the geometry it belongs to, and turning the
+            // toggle off after the fact leaves the strokes it already applies to alone, which is what
+            // the Actions bake is for.
+            guard preserveMovePrecision, case .stroke(let stroke) = moved else { return moved }
+            return .stroke(stroke.markedPrecise())
         }
         let oldSelection = selection
         let newSelection = Self.moving(float.selectionBeforeLift,

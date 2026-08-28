@@ -337,6 +337,18 @@ final class CanvasManager: ObservableObject {
     // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
     @Published var selectionMode: SelectionMode = .lasso
     @Published var transformMode: TransformMode = .uniform
+    /// **TODO item (14) — "Keep full precision" on the Move bar.** While this is on, every stroke a
+    /// committed vector Move writes is marked `VectorStroke.precise`, so its samples are *stored* as
+    /// float32 instead of on the quarter-pixel grid.
+    ///
+    /// Off by default, and that is the ruling rather than caution: the packed form is the compaction
+    /// feature item (8) shipped, and the precise one costs ~1.7x the bytes a sample. It buys exactly
+    /// one thing — a stroke the artist shrinks, saves, reopens and grows again comes back where it
+    /// was — and only a Move can shrink one, so only a Move turns it on.
+    ///
+    /// Not persisted across launches, unlike `pencilOnlyDrawing`: that one is about the artist's
+    /// hardware and this one is about the drawing in front of them.
+    @Published var preserveMovePrecision: Bool = false
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection?
     @Published var floatingPiece: FloatingPiece? {

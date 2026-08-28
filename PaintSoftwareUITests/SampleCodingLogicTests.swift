@@ -20,6 +20,13 @@ import UIKit
 /// The second-most useful is `testEncodingIsAFixedPoint`. The format is lossy exactly once: quantising
 /// a value that is already on the grid must return the same bytes, or every save of an untouched
 /// project would walk the artwork a quarter pixel at a time.
+///
+/// **TODO item (14) adds a second layout to the same type** — float32 x, float32 y, 8 bits of
+/// pressure, nine bytes — declared on the wire by a `p` key that is written *only* in that mode. Its
+/// tests are the last section, and the one that earns its keep there is
+/// `testShrinkingToTwoPercentBeforeStoringCostsPointsOnTheGridAndNothingAtFullPrecision`: the whole
+/// feature exists because the grid is a fixed size in canvas points, so a stroke shrunk before a save
+/// has fewer usable bits and whatever it lost is multiplied by the scale-up afterwards.
 @MainActor
 final class SampleCodingLogicTests: XCTestCase {
 
@@ -123,6 +130,24 @@ final class SampleCodingLogicTests: XCTestCase {
                        "…and past the bottom, at the bottom")
         XCTAssertGreaterThan(back.x, origin.x, "it must NOT reappear on the far side — that is wrapping")
         XCTAssertLessThan(back.y, origin.y, "…in either direction")
+    }
+
+    /// A NaN is a defect upstream in *either* layout, so both count it. float32 has no clamp to notice
+    /// it with — `clampedCount` stays 0 there, correctly — and going quiet about a lost coordinate on
+    /// precisely the strokes the artist asked to keep exactly is the worst place in the codec to be
+    /// quiet, which is why `nonFiniteCount` exists beside it rather than being folded into it.
+    func testANonFiniteCoordinateIsCountedInBothLayouts() {
+        let bad = [VectorSample(x: .nan, y: 0, pressure: 1), VectorSample(x: 1, y: 2, pressure: 1)]
+
+        let grid = PackedSampleRun(bad, about: .zero)
+        XCTAssertEqual(grid.nonFiniteCount, 1)
+        XCTAssertEqual(grid.clampedCount, 1, "the grid notices it as a saturation as well, and always did")
+
+        let precise = PackedSampleRun(bad, about: .zero, precision: .float32)
+        XCTAssertEqual(precise.nonFiniteCount, 1, "float32 must still say a coordinate was lost")
+        XCTAssertEqual(precise.clampedCount, 0, "…but not by calling it a clamp, which it has no bound for")
+        XCTAssertEqual(precise.samples.first?.x, 0, "the lost coordinate lands at the origin, not in a trap")
+        XCTAssertEqual(precise.samples.last?.x, 1, "and the sample beside it is untouched")
     }
 
     /// A defect upstream must not take the app down inside a save. There is no legitimate way to draw
@@ -287,6 +312,165 @@ final class SampleCodingLogicTests: XCTestCase {
                           "packed \(packed) B against \(today) B for \(run.count) samples")
         XCTAssertLessThan(Double(packed) / Double(run.count), 8.0,
                           "and under 8 bytes a sample on the wire")
+    }
+
+    // MARK: - Item (14): the precision the grid cannot hold
+
+    /// **The test that states why item (14) exists**, and the only one here that is about the artist
+    /// rather than about the format.
+    ///
+    /// The quantisation grid is a fixed size in *canvas* points, so a stroke the artist shrank before
+    /// a save has fewer usable bits — and whatever they lose is then multiplied by however much they
+    /// grow it back by. Rotation and translation are fine; scale is not, and only scale is. The loss
+    /// is one per store and it only materialises after a reopen, which is what makes it hard to see
+    /// and easy to blame on the brush.
+    ///
+    /// Both numbers are in both messages on purpose: a failure here should say which of the two moved
+    /// and by how much, not merely that a threshold was crossed.
+    func testShrinkingToTwoPercentBeforeStoringCostsPointsOnTheGridAndNothingAtFullPrecision() {
+        let pivot = CGPoint(x: 1024, y: 512)
+        let original = Self.realisticRun(count: 200)
+
+        /// The worst sample's displacement across shrink → store → regrow, in canvas points.
+        func errorAfterRoundTrip(_ precision: PackedSampleRun.Precision) -> CGFloat {
+            var shrink = CGAffineTransform(translationX: pivot.x, y: pivot.y)
+            shrink = shrink.scaledBy(x: 0.02, y: 0.02)
+            shrink = shrink.translatedBy(x: -pivot.x, y: -pivot.y)
+            let regrow = shrink.inverted()
+            func mapped(_ samples: [VectorSample], through t: CGAffineTransform) -> [VectorSample] {
+                samples.map {
+                    let p = $0.point.applying(t)
+                    return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
+                }
+            }
+            let stored = PackedSampleRun(mapped(original, through: shrink),
+                                         about: pivot, precision: precision).samples
+            return zip(original, mapped(stored, through: regrow))
+                .map { hypot($0.x - $1.x, $0.y - $1.y) }.max() ?? 0
+        }
+
+        let onTheGrid = errorAfterRoundTrip(.quarterPixel)
+        let atFullPrecision = errorAfterRoundTrip(.float32)
+        let both = "quarter-pixel lost \(onTheGrid) pt, float32 lost \(atFullPrecision) pt"
+
+        XCTAssertGreaterThan(onTheGrid, 1.0,
+                             "the defect this feature cures must still be there on the grid — \(both). "
+                             + "If this drops below a point the grid changed, and the feature's premise "
+                             + "with it.")
+        XCTAssertLessThan(atFullPrecision, 0.01,
+                          "a stroke stored at full precision must survive the same round trip — \(both)")
+    }
+
+    /// **A precise stroke declares itself and an ordinary one is byte-for-byte what it always was.**
+    ///
+    /// The literal below is the fixed point, written out here rather than kept in a golden file: two
+    /// `Int16` quarter-pixel coordinates and a byte of pressure, base64'd, under exactly the two keys
+    /// item (8) shipped. A `p` appearing in that string would mean every stroke in every project on
+    /// the owner's iPad had grown by a key — which is the whole reason the mode is written only when
+    /// it is not the default.
+    func testAnOrdinaryRunIsUnchangedByteForByteAndAPreciseOneSaysSo() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let fixture = [VectorSample(x: 3.5, y: 4.5, pressure: 0.5),
+                       VectorSample(x: 10.25, y: -2.75, pressure: 1)]
+
+        XCTAssertEqual(String(decoding: try encoder.encode(PackedSampleRun(fixture, about: .zero)), as: UTF8.self),
+                       #"{"d":"DgASAIApAPX\/\/w==","o":[0,0]}"#,
+                       "an ordinary run's bytes must be exactly what they were before item (14)")
+        XCTAssertEqual(String(decoding: try encoder.encode(
+                                PackedSampleRun(fixture, about: .zero, precision: .float32)), as: UTF8.self),
+                       #"{"d":"AABgQAAAkECAAAAkQQAAMMD\/","o":[0,0],"p":"f32"}"#,
+                       "and a precise run is the same two keys plus the mode token")
+
+        // The same statement one level up, where a stroke decides which it writes.
+        func samplesObject(of stroke: VectorStroke) throws -> [String: Any] {
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: try JSONEncoder().encode(stroke)) as? [String: Any])
+            XCTAssertNil(object["precise"],
+                         "`precise` is derived from the run's shape, never a key of its own")
+            return try XCTUnwrap(object["samples"] as? [String: Any])
+        }
+        XCTAssertEqual(Set(try samplesObject(of: Self.stroke()).keys), ["o", "d"],
+                       "an ordinary stroke writes two keys and no third")
+        let precise = try samplesObject(of: Self.stroke().markedPrecise())
+        XCTAssertEqual(Set(precise.keys), ["o", "d", "p"])
+        XCTAssertEqual(precise["p"] as? String, "f32")
+    }
+
+    /// `precise` is not stored, so the only thing that can carry it across a save is the shape of the
+    /// run itself — on the stroke **and on its lattice**, which is the parent's whole walk and is
+    /// mapped by the very transform the stroke's own samples are.
+    ///
+    /// A real `ProjectStore` round trip rather than a bare `JSONEncoder`, for
+    /// `testInkNearTheEdgeOfAWideCanvasSurvivesASaveAndReload`'s reason: the derivation has to survive
+    /// the whole path, and a source scan would not have tested it.
+    func testPreciseSurvivesASaveAndReloadOnTheStrokeAndItsLattice() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let walk = Self.realisticRun(count: 24)
+        var piece = VectorStroke(brush: manager.selectedBrush,
+                                 color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                 size: 8, opacity: 1, samples: Array(walk.prefix(8)))
+        piece.lattice = DabLattice(samples: walk, parameters: [0, 1], seedID: UUID())
+        manager.layers[1].cels[0].vector?.addStroke(piece.markedPrecise())
+        manager.layers[1].cels[0].vector?.addStroke(
+            VectorStroke(brush: manager.selectedBrush,
+                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                         size: 8, opacity: 1, samples: Array(walk.suffix(8))))
+
+        let url = ProjectStore.createNewProjectURL(name: "Precise Round Trip")
+        saveAndWait(manager, to: url)
+        let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
+        let strokes = try XCTUnwrap(reloaded.layers[1].cels[0].vector?.strokes)
+
+        XCTAssertEqual(strokes.count, 2)
+        XCTAssertTrue(strokes[0].precise, "the marked stroke comes back marked")
+        XCTAssertEqual(strokes[0].lattice?.precise, true,
+                       "and so does its lattice — one invariant, not two independent flags")
+        XCTAssertFalse(strokes[1].precise, "the stroke beside it is untouched and stays on the grid")
+
+        // And the point of the flag: the coordinates come back far better than a quarter pixel.
+        for (before, after) in zip(piece.samples, strokes[0].samples) {
+            XCTAssertEqual(after.x, before.x, accuracy: 0.001)
+            XCTAssertEqual(after.y, before.y, accuracy: 0.001)
+        }
+    }
+
+    /// **float32 does not clamp, and that is a real behavioural difference rather than a detail.**
+    /// BUGS.md's unclamped zoom makes a ~1.6-million-point coordinate reachable from a real drag; the
+    /// quarter-pixel form flattens it onto the storage boundary and counts it, and a precise stroke
+    /// cannot be flattened that way at all. Both behaviours are wanted — the first keeps the bug
+    /// boring, the second keeps the artist's *"store it exactly"* promise for geometry that is nowhere
+    /// near the canvas.
+    func testFullPrecisionDoesNotClampWhereTheGridSaturates() throws {
+        let origin = CGPoint(x: 1024, y: 512)
+        let far = VectorSample(x: 1_638_400, y: -1_638_400, pressure: 1)
+
+        let precise = PackedSampleRun([far], about: origin, precision: .float32)
+        let survived = try XCTUnwrap(precise.samples.first)
+        XCTAssertEqual(precise.clampedCount, 0, "float32 has no boundary to flatten onto")
+        XCTAssertEqual(survived.x, far.x, accuracy: 1)
+        XCTAssertEqual(survived.y, far.y, accuracy: 1)
+
+        let onTheGrid = PackedSampleRun([far], about: origin)
+        let saturated = try XCTUnwrap(onTheGrid.samples.first)
+        XCTAssertEqual(onTheGrid.clampedCount, 1)
+        XCTAssertEqual(saturated.x, origin.x + PackedSampleRun.representable.upperBound,
+                       "…where the quarter-pixel form saturates and says so")
+    }
+
+    /// A damaged float32 blob is a damaged file, and it has to be reported rather than trapped for
+    /// `testAMalformedRunThrowsRatherThanTrapping`'s reason — plus one this mode adds: a length that
+    /// is a whole number of *quarter-pixel* records is not a whole number of float32 ones, so the
+    /// check has to be against the declared mode's width and not against a constant.
+    func testAMalformedFullPrecisionRunThrowsRatherThanTrapping() {
+        for bad in [#"{"o":[0,0],"d":"AAAAAAAAAAAAAA==","p":"f32"}"#,   // ten bytes: two grid records, not a whole float32 one
+                    #"{"o":[0,0],"d":"AAAA","p":"f32"}"#,               // three bytes
+                    #"{"o":[0,0],"d":"","p":"f64"}"#,                   // a mode this build does not know
+                    #"{"o":[0,0],"d":"","p":""}"#] {                    // …including the empty one
+            XCTAssertThrowsError(try JSONDecoder().decode(PackedSampleRun.self, from: Data(bad.utf8)),
+                                 "\(bad) must be reported, not accepted")
+        }
     }
 
     // MARK: - Helpers

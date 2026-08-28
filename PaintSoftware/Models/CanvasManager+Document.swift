@@ -121,6 +121,118 @@ extension CanvasManager {
     }
 }
 
+// MARK: - Baking full-precision strokes back onto the grid (TODO item (14))
+//
+// The owner: *"then there is an item in actions to bake any strokes stored as doubles on the canvas
+// as 16bit integers."* **On the canvas** is their word and it is the scope: every layer, every cel,
+// not the one the artist happens to be standing on — the precise strokes a Move made are spread
+// wherever they moved things, and an artist who wants their file back to size wants all of them.
+//
+// **Unlike `setCanvasPadding` and `flipCanvas` above, this one is undoable**, and it has to be: those
+// two rewrite every cel's *buffers*, which is why they clear the history instead. This rewrites
+// geometry, which is what `registerVectorElementsUndo` already swaps whole for a fill, a text commit
+// and every Move nudge. So it follows that path rather than `withStructureUndo` — which would not
+// work here anyway: a `StructureSnapshot` copies the `Layer` structs, and `Cel.vector` is a *class
+// reference*, so the snapshot and the document share the very array this walk mutates.
+
+extension CanvasManager {
+
+    /// How many strokes in the document are stored at full precision — what the Actions row counts,
+    /// and what greys it out at zero.
+    ///
+    /// Computed rather than cached: a Move writes the flag inside an undo step, so a cached count
+    /// would need invalidating from `applyToVectorFloat`, from both directions of every undo of one,
+    /// and from a project load. The walk is over value-type arrays with no rasterization anywhere in
+    /// it, and it runs when the Actions panel lays out.
+    var preciseStrokeCount: Int {
+        layers.reduce(0) { total, layer in
+            total + layer.cels.reduce(0) { $0 + ($1.vector?.strokes.filter(\.precise).count ?? 0) }
+        }
+    }
+
+    /// Snaps every precise stroke in the document onto the quarter-pixel grid and clears the flags —
+    /// **one undo step**, whatever it touched.
+    ///
+    /// The snap is `PackedSampleRun` itself, about the same origin `ProjectStore.writeCel` encodes
+    /// about (the centre of the canvas), so what the artist gets is exactly the geometry the next save
+    /// would have written had the stroke never been marked. Doing it through the codec rather than by
+    /// rounding here is what keeps the two from drifting: there is one definition of "on the grid",
+    /// and pressure is 8 bits on that grid too.
+    ///
+    /// `commitAllInteractiveState()` first, for the reason `flipCanvas` states: a float still under
+    /// the artist's finger holds geometry this walk would otherwise bake at the wrong pose — and, on
+    /// this path specifically, a float whose strokes this very session marked precise.
+    @discardableResult
+    func bakePreciseStrokes() -> Int {
+        commitAllInteractiveState()
+
+        struct Edit {
+            let canvas: VectorCanvas
+            let layerID: UUID
+            let celID: UUID
+            let before: [VectorElement]
+            let after: [VectorElement]
+        }
+
+        var edits: [Edit] = []
+        var baked = 0
+        for layer in layers {
+            for cel in layer.cels {
+                guard let vector = cel.vector else { continue }
+                let before = vector.elements
+                var touched = 0
+                let after = before.map { element -> VectorElement in
+                    guard case .stroke(var stroke) = element, stroke.precise else { return element }
+                    touched += 1
+                    // `vector.size` rather than `canvasSize` only where the document has none: the
+                    // encoder measures from the *document* canvas's centre, and a per-canvas centre
+                    // would put the bake on a different grid from the save.
+                    let extent = canvasSize ?? vector.size
+                    let centre = CGPoint(x: extent.width / 2, y: extent.height / 2)
+                    stroke.samples = PackedSampleRun(stroke.samples, about: centre).samples
+                    if var lattice = stroke.lattice {
+                        lattice.samples = PackedSampleRun(lattice.samples, about: centre).samples
+                        lattice.precise = false
+                        stroke.lattice = lattice
+                    }
+                    stroke.precise = false
+                    return .stroke(stroke)
+                }
+                guard touched > 0 else { continue }
+                baked += touched
+                edits.append(Edit(canvas: vector, layerID: layer.id, celID: cel.id,
+                                  before: before, after: after))
+            }
+        }
+        guard !edits.isEmpty else { return 0 }
+
+        for edit in edits {
+            edit.canvas.elements = edit.after
+            edit.canvas.bumpVersion()
+            celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
+        }
+
+        // One `recordUndo` over every cel it touched — the whole point of collecting `edits` first
+        // rather than registering per cel, which would cost the artist one press per cel to take back
+        // a single menu tap.
+        let cost = edits.reduce(0) { $0 + ($1.before.count + $1.after.count) * 512 }
+        recordUndo(label: .bakePrecision, cost: cost, undo: { [weak self] in
+            for edit in edits {
+                edit.canvas.elements = edit.before
+                edit.canvas.bumpVersion()
+                self?.celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
+            }
+        }, redo: { [weak self] in
+            for edit in edits {
+                edit.canvas.elements = edit.after
+                edit.canvas.bumpVersion()
+                self?.celContentChangedOutsideStroke(layerID: edit.layerID, celID: edit.celID)
+            }
+        })
+        return baked
+    }
+}
+
 // MARK: - Deferred thumbnail backfill (PERFORMANCE.md item 9(c))
 //
 // **What a project open used to do last, and now does after.** `ProjectStore.load` finished by

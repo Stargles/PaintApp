@@ -116,6 +116,8 @@ struct MoveTransformBottomBar: View {
             .disabled(!modeIsAdjustable)
             .opacity(modeIsAdjustable ? 1 : 0.45)
 
+            precisionToggle
+
             if let caption {
                 Text(caption)
                     .font(.caption2)
@@ -130,6 +132,36 @@ struct MoveTransformBottomBar: View {
 
     private var divider: some View {
         Rectangle().fill(Color.white.opacity(0.25)).frame(width: 1, height: 24)
+    }
+
+    /// **TODO item (14) — "Keep Full Precision".** Named for what the artist gets rather than for what
+    /// it stores: `CanvasManager.preserveMovePrecision` is the flag, `float32` is the layout, and
+    /// neither is a thing anybody drawing has an opinion about. What they *do* have an opinion about
+    /// is shrinking a drawing, saving, coming back and finding it grew back rough.
+    ///
+    /// **Its help line says what it costs**, in the voice this file already uses for "Coming soon —
+    /// acts like Uniform for now": there is a price, it is paid in file size, and there is a way to
+    /// stop paying it. A toggle whose cost is invisible is one an artist leaves on for a year.
+    ///
+    /// Never disabled. Unlike Mirror and the mode picker there is no piece it cannot apply to — a
+    /// fill, a text box and a placed image simply have no samples to keep, and the strokes beside them
+    /// in the same lasso still do.
+    private var precisionToggle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: $canvasManager.preserveMovePrecision) {
+                Text("Keep Full Precision").foregroundColor(.white)
+            }
+            .tint(.blue)
+            .accessibilityIdentifier("moveBar.keepFullPrecisionToggle")
+
+            Text("Strokes you move are stored exactly, so shrinking them now and growing them back "
+                 + "after a save loses nothing. They take about 1.7× the file space until you run "
+                 + "Bake Precise Strokes in Actions.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 360)
     }
 
     /// `enabled: false` uses `.disabled` rather than dropping the button, so the row does not reflow

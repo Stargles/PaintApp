@@ -80,6 +80,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case deleteFolder
     case renameFolder
     case rasterize
+    /// TODO item (14): snapping every full-precision stroke in the document back onto the
+    /// quarter-pixel storage grid. One step, however many cels it touched.
+    case bakePrecision
     case reorderLayer
     case reorderFolder
     case groupLayers
@@ -170,6 +173,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .deleteFolder: return "delete folder"
         case .renameFolder: return "rename folder"
         case .rasterize: return "rasterize layer"
+        case .bakePrecision: return "bake precision"
         case .reorderLayer: return "reorder layer"
         case .reorderFolder: return "reorder folder"
         case .groupLayers: return "group layers"

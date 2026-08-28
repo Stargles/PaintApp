@@ -733,15 +733,32 @@ extension CodingUserInfoKey {
     static let sampleQuantisationOrigin = CodingUserInfoKey(rawValue: "PaintSoftware.sampleQuantisationOrigin")!
 }
 
-/// A run of `VectorSample`s in its **persisted** form: signed 16-bit quarter-pixel coordinates about a
-/// stored origin, plus 8 bits of pressure — 5 bytes a sample, base64'd into one JSON string.
+/// A run of `VectorSample`s in its **persisted** form: coordinates about a stored origin plus 8 bits
+/// of pressure, base64'd into one JSON string. Two record layouts, both little-endian and both
+/// relative to the same `origin` — see `Precision`.
 ///
-/// TODO.md item (8). In memory a sample is three `CGFloat` and stays that way; this type exists only
-/// between `encode(to:)` and the file.
+/// TODO.md item (8), plus item (14)'s float32 mode. In memory a sample is three `CGFloat` and stays
+/// that way; this type exists only between `encode(to:)` and the file.
 ///
-/// MEASURED (scratch `swiftc -O`, 2026-08-27, 1,000 samples, `.sortedKeys`): **7.10 bytes a sample on
-/// the wire** — 5.00 of payload, 1.67 of base64 expansion, and the rest `JSONEncoder` escaping
-/// base64's `/` as `\/`. Against the **~77 bytes a sample** TODO.md measures in the owner's own
+/// **The wire grammar, in full.** `o` is the quantisation origin as `[x, y]` in canvas points; `d` is
+/// the base64 of `bytes`; `p` is the precision token and is written **only** in float32 mode, so an
+/// ordinary stroke's payload is byte-for-byte what it was before item (14) — the same
+/// `encodeIfPresent` idiom `VectorStroke.encode` already uses for `lattice` and `motionGroupID`. An
+/// absent `p` is the quarter-pixel layout; `"f32"` is the float32 one; **any other value throws**,
+/// because a mode this build does not know is a file it must not guess at.
+///
+/// **float32 does not clamp, and that is a behavioural difference rather than a detail.** `Float32`
+/// reaches ~3.4e38, so no coordinate a canvas can hold saturates and `clampedCount` is always 0 in
+/// that mode. A precise stroke therefore *cannot* be flattened onto the storage boundary by BUGS.md's
+/// unclamped zoom — where the quarter-pixel form saturates at ±8192 and says so, this one stores the
+/// 1.6-million-point coordinate and hands it back. That is the intended trade: the artist asked for
+/// their geometry kept exactly, and "exactly" includes geometry that is nowhere near the canvas.
+///
+/// MEASURED (scratch `swiftc -O`, 2026-08-27, 1,000 samples, `.sortedKeys`, this file compiled
+/// standalone): **7.10 bytes a sample on the wire** in quarter-pixel mode — 5.00 of payload, 1.67 of
+/// base64 expansion, and the rest `JSONEncoder` escaping base64's `/` as `\/`. **float32 is 12.18**,
+/// 9.00 of it payload: **1.72x** the packed form, which is the number the Move bar's help line rounds
+/// to 1.7 and the price the owner accepted for item (14). Against the **~77 bytes a sample** TODO.md measures in the owner's own
 /// `Untitled.paintproj` that is **~11x**. The ratio is a property of the *coordinates*, not of this
 /// code: it is however many digits `Double`'s shortest round-trip spelling needs, so the same probe
 /// over shorter decimals measured 60.5 and 8.6x. The packed form is smaller at every length,
@@ -779,70 +796,170 @@ extension CodingUserInfoKey {
 /// guards the canvas half of the same discipline.
 struct PackedSampleRun {
 
+    /// Which of the two record layouts a run holds. **The mode is a property of the run, not of the
+    /// document**: an ordinary stroke and one the artist asked to keep exactly can sit in the same
+    /// cel, the same file and the same array.
+    enum Precision: Equatable {
+        /// `Int16` x, `Int16` y, `UInt8` pressure — five bytes, quarter-pixel, saturating. What every
+        /// stroke writes unless it has been marked precise (`VectorStroke.precise`).
+        case quarterPixel
+        /// `Float32` x, `Float32` y, `UInt8` pressure — nine bytes, and no clamp at all.
+        ///
+        /// TODO item (14): the quantisation grid is a fixed size in canvas points, so a stroke the
+        /// artist shrank before a save has fewer usable bits and comes back coarse when they grow it
+        /// again. MEASURED (same probe, 200 samples about (1024, 512), worst sample, shrink about the
+        /// origin → store → regrow): quarter-pixel costs **0.33 pt at 50%, 1.75 pt at 10% and 8.57 pt
+        /// at 2%**; this layout costs **3.3e-5, 3.9e-5 and 5.0e-5 pt** for the same three. The loss is
+        /// one per store, multiplied by any later scale-up, and it only shows after a reopen —
+        /// rotation and translation are already exact in both.
+        case float32
+
+        /// The record width, derived from the field types rather than restated.
+        var bytesPerSample: Int {
+            switch self {
+            case .quarterPixel: return MemoryLayout<Int16>.size * 2 + MemoryLayout<UInt8>.size
+            case .float32: return MemoryLayout<Float32>.size * 2 + MemoryLayout<UInt8>.size
+            }
+        }
+
+        /// The value of the wire's `p` key. **Nil for the default mode, which writes no key at all**
+        /// — that is what keeps an ordinary stroke's bytes unchanged by item (14).
+        var token: String? {
+            switch self {
+            case .quarterPixel: return nil
+            case .float32: return "f32"
+            }
+        }
+
+        /// The mode a `p` value names, or nil if this build does not know it.
+        static func named(_ token: String?) -> Precision? {
+            switch token {
+            case nil: return .quarterPixel
+            case Precision.float32.token: return .float32
+            default: return nil
+            }
+        }
+    }
+
     /// The coordinate step. The owner's *"last two bits for quarter pixel res"*, and it is
-    /// `BrushStamper`'s sub-pixel dab placement that needs it.
+    /// `BrushStamper`'s sub-pixel dab placement that needs it. Quarter-pixel mode only — float32 has
+    /// no grid.
     static let quantum: CGFloat = 0.25
-    /// Two `Int16` coordinates plus one `UInt8` pressure: 16 + 16 + 8 = 40 bits.
-    static let bytesPerSample = 5
-    /// What a coordinate may be, relative to `origin`, before it saturates.
+    /// Two `Int16` coordinates plus one `UInt8` pressure: 16 + 16 + 8 = 40 bits. The **quarter-pixel**
+    /// width; `Precision.bytesPerSample` is the general answer.
+    static let bytesPerSample = Precision.quarterPixel.bytesPerSample
+    /// What a coordinate may be, relative to `origin`, before it saturates — **in quarter-pixel mode**.
+    /// float32 has no such bound, which is exactly what `Precision.float32` is for.
     static let representable: ClosedRange<CGFloat> =
         (CGFloat(Int16.min) * quantum)...(CGFloat(Int16.max) * quantum)
 
     /// The point coordinates are measured from, itself snapped to the quarter-pixel grid so that
     /// `decode` then `encode` lands on the same bytes exactly rather than nearly (see `samples`).
     let origin: CGPoint
-    /// `bytesPerSample` per sample, little-endian: `Int16` x, `Int16` y, `UInt8` pressure.
+    /// `precision.bytesPerSample` per sample, little-endian.
     let bytes: Data
     /// How many samples saturated on the way in. Zero for anything decoded — it describes *this
-    /// quantisation*, not the document, which is why it is not part of the encoded form. The one
-    /// caller that has somewhere to say it is `VectorStroke.encode(to:)`.
+    /// quantisation*, not the document, which is why it is not part of the encoded form — and **always
+    /// zero in float32 mode**, which cannot saturate. The one caller that has somewhere to say it is
+    /// `VectorStroke.encode(to:)`.
     let clampedCount: Int
+    /// How many samples arrived with a coordinate that was not a number and were written at the
+    /// origin instead. **Counted in both layouts, unlike `clampedCount`**, and that asymmetry is the
+    /// point: a saturating coordinate is ink the storage range could not hold, which float32 does not
+    /// have, but a NaN is a defect upstream in either mode and going quiet about it on precisely the
+    /// strokes the artist asked to keep exactly would be the worst place in this file to be quiet.
+    /// Like `clampedCount` it describes *this* packing and is not part of the encoded form.
+    let nonFiniteCount: Int
+    /// Which layout `bytes` is in. Written to the file only when it is not the default; derived back
+    /// from the file on the way in, and from there onto `VectorStroke.precise`.
+    let precision: Precision
 
-    /// Quantise `samples` about `rawOrigin`.
+    /// Pack `samples` about `rawOrigin`.
     ///
     /// `rawOrigin` is snapped to the quarter-pixel grid first. That is not tidiness: it is what makes
     /// the format an exact fixed point. A decoded coordinate is `i * quantum + origin`; re-encoding it
     /// computes `((i * quantum + origin) - origin) / quantum`, and with both terms exact multiples of
     /// `quantum` and bounded by ~16k the subtraction is exact in `Double`, so `i` comes back
     /// bit-identical. An unsnapped origin would leave that one rounding away from stable.
-    init(_ samples: [VectorSample], about rawOrigin: CGPoint) {
+    ///
+    /// The snap costs float32 nothing — it moves the origin by at most an eighth of a point and the
+    /// offset absorbs it — and it keeps one origin convention across both layouts, which is what lets
+    /// the bake re-quantise a precise run about the same point the encoder would have used.
+    init(_ samples: [VectorSample], about rawOrigin: CGPoint, precision: Precision = .quarterPixel) {
         let origin = CGPoint(x: PackedSampleRun.snapped(rawOrigin.x),
                              y: PackedSampleRun.snapped(rawOrigin.y))
         var bytes = Data()
-        bytes.reserveCapacity(samples.count * PackedSampleRun.bytesPerSample)
+        bytes.reserveCapacity(samples.count * precision.bytesPerSample)
         var clamped = 0
+        var nonFinite = 0
         for sample in samples {
-            let (x, xClamped) = PackedSampleRun.quantise(sample.x - origin.x)
-            let (y, yClamped) = PackedSampleRun.quantise(sample.y - origin.y)
-            if xClamped || yClamped { clamped += 1 }
-            let ux = UInt16(bitPattern: x), uy = UInt16(bitPattern: y)
-            bytes.append(UInt8(truncatingIfNeeded: ux))
-            bytes.append(UInt8(truncatingIfNeeded: ux >> 8))
-            bytes.append(UInt8(truncatingIfNeeded: uy))
-            bytes.append(UInt8(truncatingIfNeeded: uy >> 8))
+            if !sample.x.isFinite || !sample.y.isFinite { nonFinite += 1 }
+            switch precision {
+            case .quarterPixel:
+                let (x, xClamped) = PackedSampleRun.quantise(sample.x - origin.x)
+                let (y, yClamped) = PackedSampleRun.quantise(sample.y - origin.y)
+                if xClamped || yClamped { clamped += 1 }
+                let ux = UInt16(bitPattern: x), uy = UInt16(bitPattern: y)
+                bytes.append(UInt8(truncatingIfNeeded: ux))
+                bytes.append(UInt8(truncatingIfNeeded: ux >> 8))
+                bytes.append(UInt8(truncatingIfNeeded: uy))
+                bytes.append(UInt8(truncatingIfNeeded: uy >> 8))
+            case .float32:
+                PackedSampleRun.appendFloat(sample.x - origin.x, to: &bytes)
+                PackedSampleRun.appendFloat(sample.y - origin.y, to: &bytes)
+            }
             bytes.append(PackedSampleRun.quantisePressure(sample.pressure))
         }
         self.origin = origin
         self.bytes = bytes
         self.clampedCount = clamped
+        self.nonFiniteCount = nonFinite
+        self.precision = precision
     }
 
     /// The samples this run holds, back in canvas points.
     var samples: [VectorSample] {
         var result: [VectorSample] = []
-        result.reserveCapacity(bytes.count / PackedSampleRun.bytesPerSample)
+        let stride = precision.bytesPerSample
+        result.reserveCapacity(bytes.count / stride)
         bytes.withUnsafeBytes { raw in
             var i = 0
-            while i + PackedSampleRun.bytesPerSample <= raw.count {
-                let x = Int16(bitPattern: UInt16(raw[i]) | (UInt16(raw[i + 1]) << 8))
-                let y = Int16(bitPattern: UInt16(raw[i + 2]) | (UInt16(raw[i + 3]) << 8))
-                result.append(VectorSample(x: CGFloat(x) * PackedSampleRun.quantum + origin.x,
-                                           y: CGFloat(y) * PackedSampleRun.quantum + origin.y,
-                                           pressure: CGFloat(raw[i + 4]) / 255))
-                i += PackedSampleRun.bytesPerSample
+            while i + stride <= raw.count {
+                let dx: CGFloat, dy: CGFloat
+                switch precision {
+                case .quarterPixel:
+                    let x = Int16(bitPattern: UInt16(raw[i]) | (UInt16(raw[i + 1]) << 8))
+                    let y = Int16(bitPattern: UInt16(raw[i + 2]) | (UInt16(raw[i + 3]) << 8))
+                    dx = CGFloat(x) * PackedSampleRun.quantum
+                    dy = CGFloat(y) * PackedSampleRun.quantum
+                case .float32:
+                    dx = CGFloat(PackedSampleRun.float(from: raw, at: i))
+                    dy = CGFloat(PackedSampleRun.float(from: raw, at: i + MemoryLayout<Float32>.size))
+                }
+                result.append(VectorSample(x: dx + origin.x, y: dy + origin.y,
+                                           pressure: CGFloat(raw[i + stride - 1]) / 255))
+                i += stride
             }
         }
         return result
+    }
+
+    /// `value` narrowed to `Float32` and appended little-endian. A non-finite coordinate is a defect
+    /// upstream and lands at the origin, exactly as `quantise` puts it there. It is not counted as
+    /// *clamped* — `clampedCount` means "ink flattened onto the storage boundary" and this layout has
+    /// no boundary — but it is counted, in `nonFiniteCount`, which the caller logs separately for
+    /// exactly that reason.
+    private static func appendFloat(_ value: CGFloat, to bytes: inout Data) {
+        let narrowed = value.isFinite ? Float32(value) : 0
+        withUnsafeBytes(of: narrowed.bitPattern.littleEndian) { bytes.append(contentsOf: $0) }
+    }
+
+    private static func float(from raw: UnsafeRawBufferPointer, at index: Int) -> Float32 {
+        var pattern: UInt32 = 0
+        for byte in 0..<MemoryLayout<Float32>.size {
+            pattern |= UInt32(raw[index + byte]) << (8 * byte)
+        }
+        return Float32(bitPattern: UInt32(littleEndian: pattern))
     }
 
     private static func snapped(_ value: CGFloat) -> CGFloat {
@@ -870,13 +987,20 @@ struct PackedSampleRun {
     }
 }
 
-/// Two keys and nothing else: `o` is the quantisation origin as `[x, y]` in canvas points, `d` is the
-/// base64 of `bytes`. Short because this is the compaction feature and the tax is per stroke; `o` is
-/// spelled out as plain numbers rather than folded into the blob because it is the one field that
-/// decides whether every coordinate in the blob is right, and it should be readable by eye.
+/// Three keys, one of which is usually absent: `o` is the quantisation origin as `[x, y]` in canvas
+/// points, `d` is the base64 of `bytes`, and `p` is the precision token — written only in float32
+/// mode, so an ordinary stroke still writes exactly the two keys it always did. Short because this is
+/// the compaction feature and the tax is per stroke; `o` is spelled out as plain numbers rather than
+/// folded into the blob because it is the one field that decides whether every coordinate in the blob
+/// is right, and it should be readable by eye.
+///
+/// **Every malformed shape throws, none traps** — the argument `Lattice`'s persistence extension
+/// makes, and the reason `VectorCanvasData`'s per-element decode can classify a damaged file at all.
+/// The blob's length is checked against *the declared mode's* record width, so a float32 blob
+/// truncated to a quarter-pixel multiple is still caught.
 extension PackedSampleRun: Codable {
 
-    private enum CodingKeys: String, CodingKey { case o, d }
+    private enum CodingKeys: String, CodingKey { case o, d, p }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -885,24 +1009,32 @@ extension PackedSampleRun: Codable {
             throw DecodingError.dataCorruptedError(forKey: .o, in: c,
                 debugDescription: "a quantisation origin is two numbers, got \(o.count)")
         }
+        let token = try c.decodeIfPresent(String.self, forKey: .p)
+        guard let precision = Precision.named(token) else {
+            throw DecodingError.dataCorruptedError(forKey: .p, in: c,
+                debugDescription: "sample run precision \"\(token ?? "")\" is not one this build knows")
+        }
         let encoded = try c.decode(String.self, forKey: .d)
         guard let bytes = Data(base64Encoded: encoded) else {
             throw DecodingError.dataCorruptedError(forKey: .d, in: c,
                 debugDescription: "sample run is not base64")
         }
-        guard bytes.count % PackedSampleRun.bytesPerSample == 0 else {
+        guard bytes.count % precision.bytesPerSample == 0 else {
             throw DecodingError.dataCorruptedError(forKey: .d, in: c,
-                debugDescription: "sample run is \(bytes.count) bytes, not a multiple of \(PackedSampleRun.bytesPerSample)")
+                debugDescription: "sample run is \(bytes.count) bytes, not a multiple of \(precision.bytesPerSample)")
         }
         self.origin = CGPoint(x: o[0], y: o[1])
         self.bytes = bytes
         self.clampedCount = 0
+        self.nonFiniteCount = 0
+        self.precision = precision
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode([Double(origin.x), Double(origin.y)], forKey: .o)
         try c.encode(bytes.base64EncodedString(), forKey: .d)
+        try c.encodeIfPresent(precision.token, forKey: .p)
     }
 }
 
@@ -912,22 +1044,33 @@ extension VectorSample {
     /// origin**, which encodes correctly for any canvas up to half the field and is what every test
     /// that round-trips a stroke through a bare `JSONEncoder()` gets. It is a smaller addressable
     /// range, never a wrong coordinate: the origin used is written into the payload either way.
-    static func packed(_ samples: [VectorSample], for encoder: Encoder) -> PackedSampleRun {
-        PackedSampleRun(samples, about: encoder.userInfo[.sampleQuantisationOrigin] as? CGPoint ?? .zero)
+    ///
+    /// `precise` is the *only* channel by which item (14)'s mode reaches the file. There is no
+    /// separate persisted key for it: the run's own shape says which layout it is in, and a stroke
+    /// derives its flag back from that on decode. Storing it twice would be storing a copy that can go
+    /// stale, which is the argument `Lattice`'s persistence doc makes about derivable data.
+    static func packed(_ samples: [VectorSample], for encoder: Encoder,
+                       precise: Bool = false) -> PackedSampleRun {
+        PackedSampleRun(samples, about: encoder.userInfo[.sampleQuantisationOrigin] as? CGPoint ?? .zero,
+                        precision: precise ? .float32 : .quarterPixel)
     }
 
-    /// The samples at `key`, from either shape this key has ever held.
+    /// The samples at `key`, from either shape this key has ever held, **and whether they were stored
+    /// at full precision** — the derivation that keeps `VectorStroke.precise` off the wire.
     ///
     /// **Not a migration** — TODO.md's standing permission says no document written so far has to
     /// survive, so nothing here is owed to old files. It is three lines that keep a project written by
     /// yesterday's build openable, and `typeMismatch` is the only error it swallows: an array where an
     /// object was expected is the old shape, and every other failure is a real one and still throws.
+    /// That old shape was full-precision JSON text, but it decodes as *not* precise: the flag says
+    /// "keep writing this exactly", and a file from before the option existed asked for no such thing.
     static func decodeRun<K: CodingKey>(from container: KeyedDecodingContainer<K>,
-                                        forKey key: K) throws -> [VectorSample] {
+                                        forKey key: K) throws -> (samples: [VectorSample], precise: Bool) {
         do {
-            return try container.decode(PackedSampleRun.self, forKey: key).samples
+            let run = try container.decode(PackedSampleRun.self, forKey: key)
+            return (run.samples, run.precision == .float32)
         } catch DecodingError.typeMismatch {
-            return try container.decode([VectorSample].self, forKey: key)
+            return (try container.decode([VectorSample].self, forKey: key), false)
         }
     }
 }
