@@ -4718,4 +4718,194 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertEqual(document?.layers.first?.cels.first?.vector?.strokes.count, strokes.count,
                        "every stroke must come back, or this measured loss rather than economy")
     }
+
+    // MARK: - Engaging the compositor on an in-between (KEYFRAMES §10)
+
+    /// **What removing `isSandwichEngaged`'s interpolation clause costs, per in-between frame.**
+    ///
+    /// The clause takes the compositor off the live canvas whenever any layer's active cel carries a
+    /// recipe, so the artist loses blend modes, effects and mask clipping on every in-between. The
+    /// model-side reason for it is gone (VECTOR_INTERPOLATION item 18), and the reason it is still
+    /// here is this number: on an in-between frame the canvas would newly pay a snapshot and three
+    /// composites *on top of* the ARAP evaluation it already pays for the host preview.
+    ///
+    /// Measured at **2048x1024** — the owner's canvas (PERFORMANCE.md §1), not this file's 2048².
+    /// Two costs, over one cold forward scrub across a span of distinct in-between cels:
+    ///
+    /// - `evalOnly` — today's per-frame cost: one derivation rendered for the layer host.
+    /// - `evalAndSandwich` — the same, plus `makeSandwichRequests` and its three composites, which
+    ///   is what an engaged canvas pays.
+    ///
+    /// It asserts nothing about the ratio. The figures go to PERFORMANCE.md; a threshold here would
+    /// be a wall-clock assertion on a machine CLAUDE.md documents as returning wrong answers under
+    /// contention.
+    @MainActor
+    func testWhatEngagingTheCompositorOnAnInBetweenCosts() throws {
+        let canvas = CGSize(width: 2048, height: 1024)
+        let spanLength = 6
+
+        /// One raster layer, one vector layer with `spanLength` in-betweens between two keyframes,
+        /// and a multiply layer on top — the smallest document that both engages the compositor and
+        /// has something to derive. `interpolated: false` builds the same shape with the recipes left
+        /// off, which is the **control**: what an engaged canvas already costs per frame on a document
+        /// of this size, with no in-between anywhere for the removed clause to have refused.
+        func document(interpolated: Bool = true) throws -> CanvasManager {
+            let manager = CanvasManager()
+            manager.canvasSize = canvas
+            manager.addLayer(name: "Under")
+            manager.addVectorLayer()
+            let vector = manager.layers.count - 1
+
+            func stroke(_ dx: CGFloat) -> VectorStroke {
+                VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                             color: CodableColor(red: 0, green: 0.7, blue: 0.9, alpha: 1),
+                             size: 18, opacity: 1,
+                             samples: stride(from: CGFloat(0), through: 600, by: 40).map {
+                                 VectorSample(x: 300 + dx + $0, y: 300 + 180 * sin($0 / 190),
+                                              pressure: 1)
+                             })
+            }
+
+            let cels = (0..<(spanLength + 2)).map { index in
+                Cel(id: UUID(), startFrame: index, frameCount: 1,
+                    raster: .empty(size: canvas), vector: .empty(size: canvas))
+            }
+            manager.layers[vector].cels = cels
+            cels[0].vector?.addStroke(stroke(0))
+            cels[spanLength + 1].vector?.addStroke(stroke(420))
+
+            if interpolated {
+                manager.enterInterpolateMode()
+                manager.toggleInterpolationReference(celID: cels[0].id, inLayer: manager.layers[vector].id)
+                manager.toggleInterpolationReference(celID: cels[spanLength + 1].id,
+                                                     inLayer: manager.layers[vector].id)
+                for index in 1...spanLength {
+                    XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: vector, celIndex: index),
+                                 "Setup: every cel in the span needs a recipe")
+                    manager.layers[vector].cels[index].interpolation?.t =
+                        CGFloat(index) / CGFloat(spanLength + 1)
+                }
+                manager.exitInterpolateMode()
+            } else {
+                // The control draws the same ink into every cel of the span, so the composite has
+                // comparable work to do — an empty cel would measure a cheaper document rather than
+                // the same document without recipes.
+                for index in 1...spanLength { cels[index].vector?.addStroke(stroke(CGFloat(index) * 60)) }
+            }
+
+            manager.addLayer(name: "Over")
+            manager.setLayerBlendMode(layerIndex: manager.layers.count - 1, to: .multiply)
+            manager.currentLayerIndex = vector
+            return manager
+        }
+
+        /// The derivation the layer host renders — today's whole per-frame cost on an in-between.
+        func evaluate(_ manager: CanvasManager, frame: Int) {
+            let vector = 1
+            guard let celIndex = manager.activeCelIndex(inLayer: vector, atFrame: frame) else { return }
+            let cel = manager.layers[vector].cels[celIndex]
+            _ = manager.derivedCelContent(for: cel, atFrame: frame)?.render(.full)
+        }
+
+        // Warm-up on its own document: the first composite of a process pays Metal device setup and
+        // the first evaluation faults in the lattice code, neither of which is a per-frame cost.
+        do {
+            let warm = try document()
+            evaluate(warm, frame: 1)
+            if let requests = warm.makeSandwichRequests(atFrame: 1, activeLayerIndex: 1) {
+                _ = Compositor.composite(requests.full)
+            }
+        }
+
+        let before = try document()
+        PixelOps.clearRasterizeCache()
+        let evalOnly = measuringPeakMemory {
+            for frame in 1...spanLength {
+                autoreleasepool {
+                    before.currentFrame = frame
+                    evaluate(before, frame: frame)
+                }
+            }
+        }
+
+        let after = try document()
+        PixelOps.clearRasterizeCache()
+        var composites = 0
+        let evalAndSandwich = measuringPeakMemory {
+            for frame in 1...spanLength {
+                autoreleasepool {
+                    after.currentFrame = frame
+                    evaluate(after, frame: frame)
+                    guard let requests = after.makeSandwichRequests(atFrame: frame, activeLayerIndex: 1)
+                    else { return }
+                    _ = Compositor.composite(requests.full)
+                    _ = Compositor.composite(requests.below)
+                    _ = Compositor.composite(requests.above)
+                    composites += 3
+                }
+            }
+        }
+
+        // The sandwich alone on the same in-betweens, with no host preview — which decomposes the
+        // figure above. `updateInterpolationPreviews` renders the derivation for the layer host and
+        // `PixelOps.rasterize` renders it again for the snapshot, through two different memos, so an
+        // engaged in-between frame evaluates the same ARAP solve **twice**. The gap between this and
+        // `evalAndSandwich` is what closing that would be worth.
+        let sandwichOnly = try document()
+        PixelOps.clearRasterizeCache()
+        let sandwichAlone = measuringPeakMemory {
+            for frame in 1...spanLength {
+                autoreleasepool {
+                    sandwichOnly.currentFrame = frame
+                    guard let requests = sandwichOnly.makeSandwichRequests(atFrame: frame, activeLayerIndex: 1)
+                    else { return }
+                    _ = Compositor.composite(requests.full)
+                    _ = Compositor.composite(requests.below)
+                    _ = Compositor.composite(requests.above)
+                }
+            }
+        }
+
+        // The control: the same document with the recipes left off, which is what the artist already
+        // pays per frame today on anything the compositor is engaged for.
+        let control = try document(interpolated: false)
+        PixelOps.clearRasterizeCache()
+        let ordinary = measuringPeakMemory {
+            for frame in 1...spanLength {
+                autoreleasepool {
+                    control.currentFrame = frame
+                    guard let requests = control.makeSandwichRequests(atFrame: frame, activeLayerIndex: 1)
+                    else { return }
+                    _ = Compositor.composite(requests.full)
+                    _ = Compositor.composite(requests.below)
+                    _ = Compositor.composite(requests.above)
+                }
+            }
+        }
+
+        report("engaging the compositor on a span of in-betweens, 2048x1024", [
+            ("backend", "\(Compositor.backend)"),
+            ("spanLength", "\(spanLength)"),
+            ("layers", "\(after.layers.count)"),
+            ("composites", "\(composites)"),
+            ("evalOnly", milliseconds(evalOnly.seconds)),
+            ("evalOnlyPerFrame", milliseconds(evalOnly.seconds / Double(spanLength))),
+            ("evalAndSandwich", milliseconds(evalAndSandwich.seconds)),
+            ("evalAndSandwichPerFrame", milliseconds(evalAndSandwich.seconds / Double(spanLength))),
+            ("ratio", String(format: "%.2fx", evalAndSandwich.seconds / max(evalOnly.seconds, 1e-9))),
+            ("sandwichAlone", milliseconds(sandwichAlone.seconds)),
+            ("sandwichAlonePerFrame", milliseconds(sandwichAlone.seconds / Double(spanLength))),
+            ("ordinaryFrameSandwich", milliseconds(ordinary.seconds)),
+            ("ordinaryFrameSandwichPerFrame", milliseconds(ordinary.seconds / Double(spanLength))),
+            ("evalOnlyPeak", megabytes(evalOnly.peakBytes)),
+            ("evalAndSandwichPeak", megabytes(evalAndSandwich.peakBytes)),
+        ])
+
+        // Structure, so the measurement cannot quietly stop measuring what it names.
+        XCTAssertEqual(composites, spanLength * 3, "every frame of the span must have composited")
+        XCTAssertTrue(after.renderTree(atFrame: 1).needsCompositorOnCanvas,
+                      "the multiply layer is what makes this the document the clause is about")
+        XCTAssertNotNil(after.layers[1].cels[1].interpolation, "the span must actually be in-betweens")
+        XCTAssertNil(control.layers[1].cels[1].interpolation, "the control must not be")
+    }
 }

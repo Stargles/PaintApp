@@ -724,6 +724,107 @@ extension CanvasManager {
                                 above: request(halves.above, background: nil))
     }
 
+    /// **Whether the live canvas shows `makeSandwichRequests`' composite or Core Animation's flat row
+    /// of layer hosts** — §5.2's engagement predicate, and the containment for the whole compositor
+    /// phase.
+    ///
+    /// It lives here rather than in `CanvasView.Coordinator` for `SandwichFullKey`'s reason: a
+    /// `UIViewRepresentable` coordinator is not reachable headlessly, and every input to this answer
+    /// is document state. The coordinator calls it and owns nothing but the call.
+    ///
+    /// **`needsCompositorOnCanvas` is the first clause and is nothing but the containment**: false
+    /// for every document that could exist before phase 5a, and false is what keeps the live canvas
+    /// on today's exact code path — one host per layer, `effectiveOpacity(ofLayer:)` folded in, no
+    /// compositor and no cached images. A document with no blend modes, effects, masks or nodes
+    /// anywhere cannot regress no matter what the rest of this does.
+    ///
+    /// **The clauses after it narrow engagement further, and each is a case where the compositor's
+    /// snapshot is not the whole picture.** `RenderRequest`'s sources are `PixelOps.rasterize(cel:)`
+    /// — the model's pixels — and the live canvas draws things that are in no cel. **This list being
+    /// one short is what the 2026-08-26 bug was**, so it is the list to extend the day something new
+    /// starts being drawn on the canvas and not in a cel:
+    ///
+    /// - A **floating Move piece**: `bakedImageToDisplay` shows `piece.remainderPreview` (the hole)
+    ///   where the cel still holds the un-lifted content, so a composite would show the moved content
+    ///   twice, once at each end of the move.
+    /// - A **lasso move's latched piece**: `updateVectorFloat` renders the lifted elements once into
+    ///   `StrokeCanvasView.floatView` and drags that bitmap under a Core Animation transform, while
+    ///   the model carries `vector.suppressedElementIDs = insideIDs` so the hole really is punched.
+    ///   The piece is therefore in no cel *and* in no composite — the opposite failure from the raster
+    ///   float's, and worse. It went unlisted until 2026-08-26, and the symptom was the artist's
+    ///   lassoed ink **vanishing for the whole move**: with the sandwich engaged and no stroke in
+    ///   flight, `updateSandwich` blanks *every* host, including the one whose `floatView` holds the
+    ///   piece, and the flatten behind it is honestly empty where the piece used to be. The fix is
+    ///   this clause and not "skip blanking for the float's host": that host still draws its own
+    ///   unsuppressed remainder, so unblanking it would lay the whole layer a second time over `full`.
+    ///
+    /// ## The in-between clause, and why it is gone (2026-08-29)
+    ///
+    /// A third clause used to sit beside those two: engagement was refused whenever **any** layer's
+    /// active cel carried an interpolation recipe, because an in-between's pixels came from
+    /// `interpolatedImage(forCel:)` through `setInterpolationImage` while the cel itself was empty, so
+    /// a composite dropped the in-between entirely. KEYFRAMES.md §10 recorded the price: *"blend modes,
+    /// effects and masks fall back to Core Animation for that frame"*, and an effect parameter
+    /// animated near an interpolated cel was authored against a path where effects are off.
+    ///
+    /// `renderSources` hands every flatten its `DerivedCelContent` now (VECTOR_INTERPOLATION item 18),
+    /// so the composite contains in-betweens and the clause has nothing left to protect. **Removing
+    /// it was not free, and the part that was not free is not in this function**: `SandwichKey`'s
+    /// content versions have to carry the derivation too, or the canvas engages on an in-between and
+    /// then freezes on the first one it composited — `t` lives on the `Cel` and moves no version
+    /// number anything else in that key can see. `contentVersion(ofLayer:atFrame:)` below is the
+    /// answer, and it is the same failure KEYFRAMES §4.5 calls invisible, reached from a third door.
+    ///
+    /// **`isScrubbingInterpolation` replaces it, and it is a gesture clause rather than a frame one.**
+    /// The slider writes `recipe.t` on every tick, so with the derivation in the key every tick is a
+    /// new key: one full-quality ARAP evaluation and three canvas-sized composites per tick, against a
+    /// drag the artist expects to track their finger. MEASURED at the owner's 2048x1024 canvas
+    /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §14), a
+    /// rebuild on an in-between frame is far outside a frame budget, and the drag is the one moment
+    /// the artist is looking at the in-between rather than at the picture around it. So the compositor
+    /// comes off for the *drag* and is back the instant it commits — which is what the two clauses
+    /// above already do for the two other gestures that draw outside a cel, rather than a new idea.
+    @MainActor
+    func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
+        guard tree.needsCompositorOnCanvas else { return false }
+        guard floatingPiece == nil, vectorFloat == nil else { return false }
+        return !isScrubbingInterpolation
+    }
+
+    /// One layer's `LayerContentVersion` at `frame`, resolving its derivation — what
+    /// `CanvasView.makeSandwichKey` keys the live composite on.
+    ///
+    /// **It exists so that there is one field list rather than two.** `renderSources` builds this
+    /// value too, and `SandwichKey` is documented as its mirror; a mirror that is short a field is
+    /// exactly the failure KEYFRAMES §4.5 calls invisible, because `SandwichKey` also compares the
+    /// whole node tree and so rebuilds dutifully from a stale leaf. Both callers now go through
+    /// `Self.contentVersion(of:celIndex:atFrame:derived:)`, so a field can only be added to both.
+    ///
+    /// The two differ in exactly one thing and it is not a field: `renderSources` has already resolved
+    /// a `DerivedCelContent` for its own pass 2 and passes it in, while this resolves one and keeps
+    /// only the identity. That costs a derivation resolve per layer per pass — a nil optional test for
+    /// every cel that stores what it shows, which is every cel in a document using neither animation
+    /// system, and it is only reached at all on a document that engages the compositor.
+    @MainActor
+    func contentVersion(ofLayer index: Int, atFrame frame: Int) -> LayerContentVersion? {
+        guard layers.indices.contains(index),
+              let celIndex = activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
+        let layer = layers[index]
+        return Self.contentVersion(of: layer, celIndex: celIndex, atFrame: frame,
+                                   derived: derivedCelContent(for: layer.cels[celIndex], atFrame: frame))
+    }
+
+    /// The field list itself, over a `Layer` the caller already holds. Static and value-only so that
+    /// `renderSources`' pass 1 — which carries `Layer` by value precisely so pass 2 reads nothing off
+    /// `self` — can use it without reaching back into the document.
+    static func contentVersion(of layer: Layer, celIndex: Int, atFrame frame: Int,
+                               derived: DerivedCelContent?) -> LayerContentVersion {
+        LayerContentVersion(cel: layer.cels[celIndex],
+                            valueFill: layer.valueFill,
+                            effect: layer.layerEffect(atFrame: frame),
+                            derived: derived?.identity)
+    }
+
     /// One resolved image per `layers` index, and its content version, or nil where a layer
     /// contributes nothing at this frame.
     ///
@@ -818,9 +919,8 @@ extension CanvasManager {
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
             else { continue }
             let derived = provider.content(for: layer.cels[celIndex])
-            versions[index] = LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill,
-                                                  effect: layer.layerEffect(atFrame: frame),
-                                                  derived: derived?.identity)
+            versions[index] = Self.contentVersion(of: layer, celIndex: celIndex, atFrame: frame,
+                                                  derived: derived)
             guard layer.layerEffect(atFrame: frame) == nil else { continue }
 
             // **§4.5's value layer, resolved here, and this line's *placement* is the one

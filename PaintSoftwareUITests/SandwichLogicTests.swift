@@ -411,12 +411,11 @@ final class SandwichLogicTests: XCTestCase {
         func key(frame: Int = 0, resolution: RenderResolution = .full) -> SandwichFullKey {
             SandwichFullKey(tree: manager.renderTree(atFrame: frame),
                             frame: frame,
-                            contents: manager.layers.indices.map { index -> LayerContentVersion? in
-                                guard let celIndex = manager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
-                                return LayerContentVersion(cel: manager.layers[index].cels[celIndex],
-                                                           valueFill: manager.layers[index].valueFill,
-                                                           effect: manager.layers[index].layerEffect(atFrame: frame))
-                            },
+                            // `contentVersion(ofLayer:atFrame:)` rather than a copy of its field list:
+                            // this stands in for `makeSandwichKey`, and a stand-in that builds the
+                            // value its own way is not testing the builder the app uses — which is
+                            // how the derivation came to be missing from that key in the first place.
+                            contents: manager.layers.indices.map { manager.contentVersion(ofLayer: $0, atFrame: frame) },
                             renderResolution: resolution,
                             canvasBackgroundColor: manager.canvasBackgroundColor,
                             isCanvasBackgroundVisible: manager.isCanvasBackgroundVisible)
@@ -1146,5 +1145,222 @@ final class SandwichLogicTests: XCTestCase {
                        "A source wider than the composite reading it is a garbage frame on the GPU")
         XCTAssertEqual(composite?.height, requests.full.sources.compactMap { $0 }.first?.image.height)
         XCTAssertEqual(composite?.width, 49, "65 * 0.75 = 48.75, rounded once, upstream of both backends")
+    }
+
+    // MARK: - An in-between under the playhead (KEYFRAMES §10)
+
+    /// A three-cel vector layer whose middle cel is a `.generate` in-between, over an opaque backdrop.
+    ///
+    /// The ink is **cyan** and the backdrop is **red**, which is what makes the pixel claim below
+    /// exact rather than approximate. `multiply`'s result is `a·(Cs·Cb) + (1 - a)·Cb`; with
+    /// `Cs = (0, 1, 1)` and `Cb = (1, 0, 0)` the product is black, so the composited green and blue
+    /// channels are **0 for every alpha the in-between happens to have**. Source-over at the same
+    /// pixel gives `(1 - a, a, a)`, whose green is positive wherever there is any ink at all. So one
+    /// pixel separates "the compositor drew this" from "Core Animation drew this" with no tolerance
+    /// and no dependence on what the ARAP solve produced.
+    ///
+    /// The backdrop covers the whole canvas so that premultiplied bytes and straight bytes agree —
+    /// `CanvasFixture.rgbaBytes` is premultiplied-last, and an opaque composite makes the two the
+    /// same numbers.
+    private func inBetweenOverBackdrop() throws -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let size = CanvasFixture.canvasSize
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(red, rect: CGRect(origin: .zero, size: size)))
+        manager.addVectorLayer()
+
+        func stroke(_ points: [CGPoint]) -> VectorStroke {
+            VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                         color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1),
+                         size: 9, opacity: 1,
+                         samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+        }
+        let cels = (0..<3).map { index in
+            Cel(id: UUID(), startFrame: index * 4, frameCount: 4,
+                raster: .empty(size: size), vector: .empty(size: size))
+        }
+        manager.layers[1].cels = cels
+        cels[0].vector?.addStroke(stroke([CGPoint(x: 10, y: 20), CGPoint(x: 30, y: 20), CGPoint(x: 30, y: 40)]))
+        cels[2].vector?.addStroke(stroke([CGPoint(x: 34, y: 20), CGPoint(x: 54, y: 20), CGPoint(x: 54, y: 40)]))
+
+        manager.enterInterpolateMode()
+        for cel in [cels[0], cels[2]] {
+            manager.toggleInterpolationReference(celID: cel.id, inLayer: manager.layers[1].id)
+        }
+        XCTAssertNil(manager.interpolate(mode: .generate, layerIndex: 1, celIndex: 1),
+                     "Setup: Generate must attach a recipe")
+        manager.layers[1].cels[1].interpolation?.t = 0.5
+        manager.exitInterpolateMode()
+        try XCTSkipIf(manager.layers[1].cels[1].interpolation == nil, "Setup: no recipe")
+
+        manager.currentFrame = 5      // inside the middle cel, which spans 4...7
+        manager.currentLayerIndex = 1
+        return manager
+    }
+
+    /// **The behaviour change, as pixels.** Until 2026-08-29 `isSandwichEngaged` refused whenever any
+    /// layer's active cel carried a recipe, so the artist's blend modes, effects and mask clipping
+    /// were silently off on every in-between (KEYFRAMES §10). `renderSources` hands every flatten its
+    /// `DerivedCelContent` now, so the composite contains the in-between and the refusal has nothing
+    /// left to protect.
+    ///
+    /// Three claims, in the order they would fail if this regressed:
+    ///
+    /// 1. The predicate engages. A document with a blend mode and an in-between under the playhead is
+    ///    exactly the case the removed clause refused.
+    /// 2. The in-between is *in* the composite — the same picture with the recipe taken off is a
+    ///    different picture, so this is not asserting about an empty layer.
+    /// 3. The blend actually reached it, at one exact pixel. See `inBetweenOverBackdrop` for why the
+    ///    green channel is a clean discriminator.
+    @MainActor
+    func testAnInBetweenUnderABlendModeCompositesBlendedRatherThanFallingBack() throws {
+        let manager = try inBetweenOverBackdrop()
+        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+
+        let tree = manager.renderTree(atFrame: 5)
+        XCTAssertTrue(tree.needsCompositorOnCanvas, "Setup: a multiply layer needs the compositor")
+        XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree),
+                      "An in-between under the playhead must no longer take the compositor off the canvas")
+
+        guard let requests = manager.makeSandwichRequests(atFrame: 5, activeLayerIndex: 1),
+              let multiplied = Compositor.composite(requests.full) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+
+        // (2) — the same document with the recipe removed. The cel stores nothing, so this is the
+        // picture the canvas would show if the in-between were missing from the composite.
+        let blank = try inBetweenOverBackdrop()
+        blank.setLayerBlendMode(layerIndex: 1, to: .multiply)
+        blank.layers[1].cels[1].interpolation = nil
+        guard let withoutTheInBetween = blank.makeSandwichRequests(atFrame: 5, activeLayerIndex: 1)
+            .flatMap({ Compositor.composite($0.full) }) else {
+            return XCTFail("Control needs a canvas size")
+        }
+        XCTAssertNotEqual(CanvasFixture.rgbaBytes(multiplied), CanvasFixture.rgbaBytes(withoutTheInBetween),
+                          "The composite the canvas now shows has to contain the in-between's ink")
+
+        // (3) — the same document drawn source-over, which is what Core Animation's flat row of hosts
+        // produces and therefore what the artist saw before this change.
+        let plain = try inBetweenOverBackdrop()
+        guard let sourceOver = plain.makeSandwichRequests(atFrame: 5, activeLayerIndex: 1)
+            .flatMap({ Compositor.composite($0.full) }) else {
+            return XCTFail("Control needs a canvas size")
+        }
+
+        // The most-inked pixel of the derived frame, found rather than assumed: an ARAP in-between is
+        // not where either keyframe's stroke is, and hard-coding a coordinate would pin the solver.
+        let cel = manager.layers[1].cels[1]
+        let derived = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 5)?.render(.full),
+                                    "The in-between must derive something to blend")
+        let inkBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(derived.cgImage)))
+        var best = (alpha: 0, x: 0, y: 0)
+        for y in 0..<Int(CanvasFixture.canvasSize.height) {
+            for x in 0..<Int(CanvasFixture.canvasSize.width) {
+                let alpha = Int(inkBytes[(x + y * Int(CanvasFixture.canvasSize.width)) * 4 + 3])
+                if alpha > best.alpha { best = (alpha, x, y) }
+            }
+        }
+        XCTAssertGreaterThan(best.alpha, 0, "The in-between has to have ink somewhere to blend")
+
+        let blended = pixel(multiplied, best.x, best.y)
+        let unblended = pixel(sourceOver, best.x, best.y)
+        XCTAssertGreaterThan(unblended[1], 0,
+                             "Control: source-over puts cyan's green on screen, which is the fallback picture")
+        XCTAssertEqual(blended[1], 0, "multiply(cyan, red) has no green at any alpha — this is the blend")
+        XCTAssertEqual(blended[2], 0, "…and no blue")
+    }
+
+    /// The same claim for an **effect** and for a **mask**, which are the other two things the removed
+    /// clause was silently switching off — and the mask is the one KEYFRAMES §10 does not name and
+    /// `isSandwichEngaged` calls the more visible loss: `updateSandwich`'s disengage branch also calls
+    /// `host.setContentMask(nil)`, so §6.4's clipping came off the canvas on every in-between frame.
+    ///
+    /// Asserted through `needsCompositorOnCanvas` and the predicate rather than through pixels: the
+    /// composite's own correctness for effects and masks is `EffectLayerLogicTests`' and
+    /// `MaskParityLogicTests`' subject, and what is new here is only *whether the canvas asks for it*.
+    @MainActor
+    func testAnAdjustmentLayerAlsoEngagesOnAnInBetween() throws {
+        let cases: [(String, (CanvasManager) -> Void)] = [
+            // A grade is a `.value` layer in effect mode — `setLayerEffect` refuses any other kind —
+            // so the adjustment layer is added rather than set on an existing one.
+            ("an adjustment layer", {
+                $0.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.6)))
+            }),
+            ("a blend mode", { $0.setLayerBlendMode(layerIndex: 1, to: .screen) }),
+        ]
+        for (what, prepare) in cases {
+            let manager = try inBetweenOverBackdrop()
+            prepare(manager)
+            let tree = manager.renderTree(atFrame: 5)
+            XCTAssertTrue(tree.needsCompositorOnCanvas, "Setup: \(what) needs the compositor")
+            XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree),
+                          "\(what) must reach the canvas on an in-between frame")
+        }
+    }
+
+    /// **What the removal did not take with it.** The two gestures that draw outside every cel still
+    /// refuse, and a document with nothing to composite still never engages — the containment.
+    @MainActor
+    func testTheEngagementClausesThatSurvivedTheRemoval() throws {
+        let plain = stack(3)
+        XCTAssertFalse(plain.sandwichEngagesOnCanvas(tree: plain.renderTree(atFrame: 0)),
+                       "A document with no blend, effect, mask or node stays on Core Animation's path")
+
+        let manager = try inBetweenOverBackdrop()
+        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
+        let tree = manager.renderTree(atFrame: 5)
+        XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree), "Baseline")
+
+        // The interpolation slider writes `t` per tick and the derivation is in the key, so every
+        // tick would otherwise be an ARAP evaluation and three canvas-sized composites. The clause is
+        // the drag, not the frame — see `sandwichEngagesOnCanvas` and PERFORMANCE.md §14.
+        manager.beginInterpolationDrag()
+        XCTAssertFalse(manager.sandwichEngagesOnCanvas(tree: tree),
+                       "The compositor comes off for the scrub gesture, not for the frames it lands on")
+        manager.commitInterpolationDrag()
+        XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree),
+                      "…and is back the instant the drag commits")
+    }
+
+    /// **The key that has to move with it, and the reason removing the clause was not a one-line
+    /// change.** `SandwichKey` decides whether to recomposite at all. An in-between's `t` lives on the
+    /// `Cel` and moves no object identity and no version number, so a content version built without
+    /// the derivation is *identical* across a retime — the canvas would engage on an in-between and
+    /// then show the first one it composited for ever, with nothing in the key looking wrong
+    /// (KEYFRAMES §4.5).
+    ///
+    /// It drives `CanvasManager.contentVersion(ofLayer:atFrame:)`, which is the function
+    /// `makeSandwichKey` calls, rather than rebuilding the field list here — a mirror cannot catch a
+    /// field the original is missing. Verified by mutation: dropping `derived:` from that builder
+    /// fails both halves below and leaves the rest of the fast tier green.
+    @MainActor
+    func testTheLiveCompositesKeyMovesWhenAnInBetweensDerivationDoes() throws {
+        let manager = try inBetweenOverBackdrop()
+        let before = manager.contentVersion(ofLayer: 1, atFrame: 5)
+        XCTAssertNotNil(before, "Setup: the layer has a cel at this frame")
+
+        manager.layers[1].cels[1].interpolation?.t = 0.9
+        XCTAssertNotEqual(before, manager.contentVersion(ofLayer: 1, atFrame: 5),
+                          "Retiming an in-between is a new picture and must be a new key")
+
+        // The other silent path, and the one the recipe's whole "derived, never stored" design exists
+        // for: the pixels move because a *different* cel — at a different frame, so in no other field
+        // of this key — was edited.
+        let retimed = manager.contentVersion(ofLayer: 1, atFrame: 5)
+        manager.layers[1].cels[0].vector?.addStroke(
+            VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                         color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1), size: 9, opacity: 1,
+                         samples: [VectorSample(x: 8, y: 52, pressure: 1),
+                                   VectorSample(x: 50, y: 52, pressure: 1)]))
+        XCTAssertNotEqual(retimed, manager.contentVersion(ofLayer: 1, atFrame: 5),
+                          "Editing keyframe A must reach the in-between's entry in the live key")
+
+        // And the companion: a key unique per call would satisfy both while turning the composite
+        // cache off entirely, which is a rebuild per SwiftUI pass that no test would name.
+        XCTAssertEqual(manager.contentVersion(ofLayer: 1, atFrame: 5),
+                       manager.contentVersion(ofLayer: 1, atFrame: 5),
+                       "Nothing moved, so the key must not have")
+        XCTAssertNil(manager.contentVersion(ofLayer: 1, atFrame: 99),
+                     "No cel at this frame is no content version, exactly as the loop it replaced said")
     }
 }

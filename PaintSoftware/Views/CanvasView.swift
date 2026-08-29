@@ -978,64 +978,19 @@ struct CanvasView: UIViewRepresentable {
 
         /// Whether §5.2's sandwich drives the live canvas at all this pass.
         ///
-        /// **`needsCompositorOnCanvas` is the containment for the whole phase** and the first clause
-        /// is nothing but it: false for every document that could exist before phase 5a, and false is
-        /// what keeps the live canvas on today's exact code path — one host per layer,
-        /// `effectiveOpacity(ofLayer:)` folded in, no compositor and no cached images. A document
-        /// with no blend modes anywhere cannot regress no matter what the rest of this section does.
+        /// **The predicate itself is `CanvasManager.sandwichEngagesOnCanvas(tree:)`** — every input to
+        /// it is document state, and a `UIViewRepresentable` coordinator cannot be driven headlessly,
+        /// so it lives beside `makeSandwichRequests` where `SandwichLogicTests` can reach it. That is
+        /// also where the three clauses and the 2026-08-29 removal of the in-between one are written
+        /// down. Nothing but the call is left here.
         ///
-        /// **The clauses after it narrow engagement further, and each is a case where the
-        /// compositor's snapshot is not the whole picture.** `RenderRequest`'s sources are
-        /// `PixelOps.rasterize(cel:)` — the model's pixels — and **the live canvas draws three
-        /// things that are in no cel. This list being one short is what the bug was**, so it is the
-        /// list to extend the day a fourth thing starts being drawn here:
-        ///
-        /// - A **floating Move piece**: `bakedImageToDisplay` shows `piece.remainderPreview` (the
-        ///   hole) where the cel still holds the un-lifted content, so a composite would show the
-        ///   moved content twice, once at each end of the move.
-        /// - An **interpolated in-between**: its pixels come from `interpolatedImage(forCel:)` via
-        ///   `setInterpolationImage`, and the cel's own canvas is empty (see
-        ///   `StrokeCanvasView.refreshDisplay`), so a composite would drop the in-between entirely.
-        ///   **The model-side half of this one is fixed** — `renderSources` now hands every flatten
-        ///   its `DerivedCelContent` (VECTOR_INTERPOLATION item 18), so `makeRenderRequest` *does*
-        ///   contain in-betweens and the project thumbnail, the mask resolve and a future export get
-        ///   them. This clause is therefore removable, which would give the artist blend modes,
-        ///   effects and mask clipping back on in-between frames; it is left in place because taking
-        ///   it out changes what the live canvas draws and wants its own change and its own
-        ///   verification. The other two bullets are still real gaps.
-        /// - A **lasso move's latched piece**: `updateVectorFloat` renders the lifted elements once
-        ///   into `StrokeCanvasView.floatView` and drags that bitmap under a Core Animation
-        ///   transform, while the model carries `vector.suppressedElementIDs = insideIDs` so the
-        ///   hole really is punched. The piece is therefore in no cel *and* in no composite — which
-        ///   is the opposite failure from the raster float's, and worse. It went unlisted until
-        ///   2026-08-26, and the symptom was the artist's lassoed ink **vanishing for the whole
-        ///   move**: with the sandwich engaged and no stroke in flight, `updateSandwich` blanks
-        ///   *every* host, including the one whose `floatView` holds the piece, and the flatten
-        ///   behind it is honestly empty where the piece used to be. Not "sometimes" — on every
-        ///   move of any document `needsCompositorOnCanvas` answers true for, which is any effect,
-        ///   blend, mask or buffering folder anywhere in the tree, above or below the moved layer.
-        ///
-        /// The fix is this clause and not "skip blanking for the float's host": that host still
-        /// draws its own unsuppressed remainder, so unblanking it would lay the whole layer a
-        /// second time over `full`.
-        ///
-        /// All three are pre-existing gaps in `makeRenderRequest` rather than in the sandwich — the
-        /// project thumbnail has them too — and all three want fixing in the model, not here. Until
-        /// then falling back to Core Animation is the safe direction, exactly as the first clause
-        /// is, **and the price is more than the blend mode**: `updateSandwich`'s disengage branch
-        /// also calls `host.setContentMask(nil)`, so §6.4's alpha-mask *clipping* comes off the
-        /// canvas for as long as a piece floats or the playhead sits on an in-between. A clip lost
-        /// is more visible than a blend lost, and the trade is still the right way round — an
-        /// unclipped picture of the artwork beats no picture of it, which is the same argument the
-        /// first two clauses were already making.
+        /// **The price of disengaging is more than the blend mode**, which is worth knowing at the
+        /// call site: `updateSandwich`'s disengage branch also calls `host.setContentMask(nil)`, so
+        /// §6.4's alpha-mask *clipping* comes off the canvas for as long as a piece floats. A clip
+        /// lost is more visible than a blend lost, and the trade is still the right way round — an
+        /// unclipped picture of the artwork beats no picture of it.
         private func isSandwichEngaged(_ tree: [RenderNode]) -> Bool {
-            guard tree.needsCompositorOnCanvas else { return false }
-            guard canvasManager.floatingPiece == nil, canvasManager.vectorFloat == nil else { return false }
-            let frame = canvasManager.currentFrame
-            return !canvasManager.layers.indices.contains { index in
-                guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else { return false }
-                return canvasManager.layers[index].cels[celIndex].interpolation != nil
-            }
+            canvasManager.sandwichEngagesOnCanvas(tree: tree)
         }
 
         /// Which of the three cached images the canvas is showing right now.
@@ -1473,28 +1428,25 @@ struct CanvasView: UIViewRepresentable {
                 if textEditLive, index == active, let latch = textEditHeldContent, latch.layerIndex == index {
                     return latch.content
                 }
-                guard let celIndex = canvasManager.activeCelIndex(inLayer: index, atFrame: frame) else {
+                // **`valueFill`, `effect` and the derivation are all in there, and none of them is
+                // spelled out here any more.** They used to be, and the list was one field short: a
+                // cel's *derivation* — what an interpolated in-between shows rather than stores — was
+                // missing, so the key did not move when `t` moved and the canvas would have frozen on
+                // the first in-between it composited the moment the sandwich started engaging on one.
+                // Nothing about that failure looks wrong: `t` lives on the `Cel` and moves no version
+                // number, and `SandwichKey` goes on comparing the whole node tree, so the composite
+                // rebuilds dutifully from a stale leaf (KEYFRAMES §4.5).
+                //
+                // The answer is not a fourth argument here but **one builder** —
+                // `CanvasManager.contentVersion(ofLayer:atFrame:)`, which `renderSources` also goes
+                // through. `SandwichKey` is documented as that function's mirror; sharing the field
+                // list is what makes the claim structural rather than a promise two files keep by
+                // hand. It resolves at `frame` for the same reason: a mirror that asks a different
+                // question is the one shape a reader checking them will not catch.
+                guard let content = canvasManager.contentVersion(ofLayer: index, atFrame: frame) else {
                     if textEditLive, index == active { textEditHeldContent = (index, nil) }
                     return nil
                 }
-                // `valueFill` and `effect` alongside the cel, exactly as `renderSources` builds it: a
-                // value layer's content is its colour or its grade rather than its (blank) cel, so a
-                // key built from the cel alone would not move when the artist recolours or regrades
-                // one. See `LayerContentVersion`.
-                //
-                // The grade is **belt and braces here**, unlike the colour: `tree` above already
-                // carries it (`RenderNode.effect`, compared by `[RenderNode]`'s synthesized `==`), so
-                // this key moved on a grade change before the field existed. Included anyway because
-                // the two builders are documented as mirrors of each other and a reader checking that
-                // should not find one of them quietly short a field — and because "the tree happens
-                // to carry it" is a property of the derivation, not a promise this key makes.
-                //
-                // Resolved at `frame` above, like the colour beside it and like `renderSources`: the
-                // two builders are mirrors, and a mirror that asks a different question is the one
-                // shape a reader checking them will not catch.
-                let content = LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex],
-                                                  valueFill: canvasManager.layers[index].valueFill,
-                                                  effect: canvasManager.layers[index].layerEffect(atFrame: frame))
                 if textEditLive, index == active { textEditHeldContent = (index, content) }
                 return content
             }
@@ -2130,28 +2082,48 @@ struct CanvasView: UIViewRepresentable {
 
         /// What an interpolated frame's pixels depend on. Recomputing only when this changes makes
         /// the preview affordable: `updateUIView` runs every SwiftUI pass, and evaluating a recipe is
-        /// two lattice embeddings, an ARAP solve and two canvas-sized renders. Reference-canvas
-        /// versions are in the key so editing a keyframe updates its in-betweens for free.
+        /// two lattice embeddings, an ARAP solve and two canvas-sized renders.
+        ///
+        /// **It has no field list of its own, and that is the whole point of this type.** It used to
+        /// enumerate the evaluation's inputs by hand — `celID`, `t`, `thicknessFade`, `hiddenGroups`,
+        /// the reference versions, the local-edit ids, the guides — from a different file than the
+        /// evaluation, and VECTOR_INTERPOLATION settled fact 11 records what that cost: *"It has
+        /// bitten three times."* The failure is silent in the worst way — the canvas shows a stale
+        /// frame forever, with every version number in sight looking right. The list was **still**
+        /// three fields short when this was written: `mode`, `spacing` and the groups' fitted lattices
+        /// were absent, and it survived only because today's UI happens to move a reference cel's
+        /// `version` whenever it moves one of them. `.reproject`'s subject — the cel's *own* vector
+        /// version, which is that mode's entire content — was a fourth.
+        ///
+        /// So the fix is not three more fields. `identity` is `DerivedCelContent.identity`, minted in
+        /// `CanvasManager.derivedCelContent` **from the same locals as the render thunk, twenty lines
+        /// apart**, which is the anti-drift property: an input added to the evaluation is added in
+        /// front of the eyes of whoever is adding it to the identity. There is no longer anywhere here
+        /// for a field to go missing from. What is left is the one input that is genuinely this
+        /// caller's and not the derivation's:
+        ///
+        /// - `preview` — which *quality* to ask for. Deliberately not in the identity: a derivation
+        ///   names the picture, and `render(_:)` takes the quality, so the same in-between at two
+        ///   qualities is one identity and two entries here. That is the shape the memo in
+        ///   `PixelOps.rasterize` relies on, and it must not be pushed down.
+        ///
+        /// The tinted motion-group overlay shares this dictionary and is not a derivation at all, so
+        /// it mints an identity of its own (`MotionGroupOverlayIdentity`). It needs no `overlay` flag
+        /// to keep the two apart: `AnyHashable` compares unequal across types, which is a stronger
+        /// separation than a `Bool` nobody can forget to set.
         private struct InterpolationPreviewKey: Equatable {
-            let celID: UUID
-            let t: CGFloat
+            let identity: AnyHashable
             let preview: Bool
-            /// True for the tinted group overlay rather than an in-between; the two share this
-            /// dictionary so the key has to keep them apart.
-            let overlay: Bool
-            let thicknessFade: Bool
-            /// Solo/mute state — an evaluation input, so it must be in the key.
-            let hiddenGroups: Set<UUID>
-            let referenceVersions: [Int]
-            /// The recipe's local edits, by identity. No version number covers this: an edit at an
-            /// in-between changes the recipe on the `Cel`, not a `VectorCanvas`. IDs rather than
-            /// count, so undo/redo (remove/re-add the same edit) are told apart from a new one.
-            let localEditIDs: [UUID]
-            /// Guides live on `CanvasManager`, not any `VectorCanvas`, so no `referenceVersions`
-            /// entry moves when one is edited — and `updateGuideStroke` keeps a guide's id on
-            /// replace, so an id list wouldn't notice either. Compared by value instead.
-            let guides: [GuideStroke]
         }
+
+        /// The overlay arm's identity — see `InterpolationPreviewKey`. `motionGroups.count` is what a
+        /// retag that leaves the cel alone moves; the cel's own `version` is what an edit moves.
+        private struct MotionGroupOverlayIdentity: Hashable {
+            let celID: UUID
+            let vectorVersion: Int
+            let groupCount: Int
+        }
+
         private var interpolationPreviewKeys: [UUID: InterpolationPreviewKey] = [:]
 
         /// Renders each layer's interpolated frame, where it has one at the current frame, and clears
@@ -2166,39 +2138,32 @@ struct CanvasView: UIViewRepresentable {
                     host.strokeView.setInterpolationImage(nil)
                     continue
                 }
-                guard let recipe = layer.cels[celIndex].interpolation else {
-                    // No recipe here, so this cel is a keyframe or ordinary drawing; the same seam
-                    // carries the tinted motion-group overlay for it instead.
+                let cel = layer.cels[celIndex]
+                // **The derivation is resolved before the key, and it is what the key is made of** —
+                // see `InterpolationPreviewKey`. Nil is "this cel shows what it stores", which for
+                // this loop means a keyframe or an ordinary drawing, so the tinted motion-group
+                // overlay takes the same seam instead.
+                guard let derived = canvasManager.derivedCelContent(for: cel,
+                                                                    atFrame: canvasManager.currentFrame) else {
                     updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
                     continue
                 }
-                let cel = layer.cels[celIndex]
-                let key = InterpolationPreviewKey(
-                    celID: cel.id,
-                    t: recipe.t,
-                    preview: canvasManager.isScrubbingInterpolation,
-                    overlay: false,
-                    thicknessFade: canvasManager.interpolationThicknessFade,
-                    hiddenGroups: canvasManager.isInterpolateMode
-                        ? canvasManager.hiddenMotionGroups : [],
-                    referenceVersions: recipe.referencedCels.map { ref in
-                        canvasManager.celIndices(forCel: ref.celID, inLayer: ref.layerID)
-                            .flatMap { canvasManager.layers[$0.layer].cels[$0.cel].vector?.version } ?? -1
-                    },
-                    localEditIDs: recipe.localEdits.map(\.id),
-                    guides: canvasManager.guides(driving: recipe))
+                let key = InterpolationPreviewKey(identity: derived.identity,
+                                                  preview: canvasManager.isScrubbingInterpolation)
                 guard interpolationPreviewKeys[layer.id] != key else { continue }
                 interpolationPreviewKeys[layer.id] = key
-                host.strokeView.setInterpolationImage(
-                    canvasManager.interpolatedImage(forCel: cel.id, inLayer: layer.id,
-                                                    quality: key.preview ? .preview : .full))
+                // The derivation already in hand, rather than `interpolatedImage(forCel:inLayer:)`,
+                // which would resolve a second one from the ids. Same pixels — that function is a thin
+                // call through `derivedCelContent` — and one resolve instead of two on the path that
+                // runs every SwiftUI pass.
+                host.strokeView.setInterpolationImage(derived.render(key.preview ? .preview : .full))
             }
         }
 
-        /// The tinted motion-group overlay, memoized on the same key as the in-between preview so an
-        /// un-keyed render doesn't re-rasterise every keyframe on every SwiftUI pass. `t: 0` and
-        /// `overlay: true` keep it from colliding with a preview key for the same cel; the cel's own
-        /// `version` is what a retag moves.
+        /// The tinted motion-group overlay, memoized in the same dictionary as the in-between preview
+        /// so an un-keyed render doesn't re-rasterise every keyframe on every SwiftUI pass. Its
+        /// identity is a different *type* from a derivation's, which is what keeps the two from
+        /// colliding on one cel — see `InterpolationPreviewKey`.
         private func updateMotionGroupOverlay(layer: Layer, celIndex: Int, host: LayerHostView) {
             let cel = layer.cels[celIndex]
             guard canvasManager.isInterpolateMode, canvasManager.showMotionGroupOverlay,
@@ -2208,10 +2173,9 @@ struct CanvasView: UIViewRepresentable {
                 return
             }
             let key = InterpolationPreviewKey(
-                celID: cel.id, t: 0, preview: true, overlay: true,
-                thicknessFade: false, hiddenGroups: [],
-                referenceVersions: [version, canvasManager.motionGroups.count],
-                localEditIDs: [], guides: [])
+                identity: AnyHashable(MotionGroupOverlayIdentity(celID: cel.id, vectorVersion: version,
+                                                                 groupCount: canvasManager.motionGroups.count)),
+                preview: true)
             guard interpolationPreviewKeys[layer.id] != key else { return }
             interpolationPreviewKeys[layer.id] = key
             host.strokeView.setInterpolationImage(

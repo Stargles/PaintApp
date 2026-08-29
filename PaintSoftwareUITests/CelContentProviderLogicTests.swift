@@ -277,4 +277,107 @@ final class CelContentProviderLogicTests: XCTestCase {
         XCTAssertFalse(isBlank(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size)),
                        "…and so does the keyframe it derived from, which is baked in the same loop")
     }
+
+    // MARK: - The identity's field list (VECTOR_INTERPOLATION fact 11)
+
+    /// **Every input the evaluation reads has to move the identity, and this is the sweep that says
+    /// so.** It is the pin that replaced a hand-maintained field list.
+    ///
+    /// `CanvasView.InterpolationPreviewKey` used to enumerate these dependencies itself, from another
+    /// file, and settled fact 11 records the result: *"It has bitten three times."* As of 2026-08-29
+    /// that key **is** `DerivedCelContent.identity` plus the render quality, so there is no second
+    /// list left to drift — but that only moves the risk here, to `InterpolatedCelIdentity`, which is
+    /// now the one list in the app that has to be complete. Three of the cases below (`mode`,
+    /// `spacing`, `groups`) are exactly the fields the preview key was missing when fact 11 was
+    /// written; it survived only because today's UI happens to move a reference cel's `version`
+    /// whenever it moves one of them, which is a property of the UI and not a promise.
+    ///
+    /// One mutation per case, each from its own fixture, so a case that passes for another's reason
+    /// is not possible. Verified by mutation: deleting any single field from `InterpolatedCelIdentity`
+    /// fails exactly the case that names it and leaves the rest of the fast tier green.
+    func testEveryEvaluationInputMovesTheDerivationIdentity() throws {
+        func identity(_ manager: CanvasManager) throws -> AnyHashable {
+            let cel = manager.layers[1].cels[1]
+            return try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 4)?.identity)
+        }
+
+        /// Applies `mutate` to a fresh fixture and asserts the identity moved. `preparing` runs
+        /// **before** the baseline is taken, for a case whose subject does not exist in the plain
+        /// fixture — a binding's own fields cannot be varied until there is a binding.
+        func assertMoves(_ what: String,
+                         preparing prepare: (CanvasManager) throws -> Void = { _ in },
+                         _ mutate: (CanvasManager) throws -> Void) throws {
+            let (manager, _, _) = try interpolated()
+            try prepare(manager)
+            let before = try identity(manager)
+            try mutate(manager)
+            XCTAssertNotEqual(before, try identity(manager),
+                              "\(what) is an evaluation input and must move the identity")
+        }
+
+        // The three fact 11 names as missing from the preview key.
+        try assertMoves("the interpolation mode") { $0.layers[1].cels[1].interpolation?.mode = .reproject }
+        try assertMoves("the spacing curve") {
+            $0.layers[1].cels[1].interpolation?.spacing = SpacingCurve(kind: .easeInOut)
+        }
+        try assertMoves("a motion-group binding") {
+            $0.layers[1].cels[1].interpolation?.groups.append(MotionGroupBinding(groupID: UUID()))
+        }
+        // …and a binding's own fields, not merely its presence. `groups` goes into the identity whole
+        // rather than as a list of group ids, which is what makes a per-group easing override — or a
+        // refitted lattice, which is the same field one level down — a different frame.
+        let group = UUID()
+        try assertMoves("a binding's own spacing override",
+                        preparing: { $0.layers[1].cels[1].interpolation?.groups = [MotionGroupBinding(groupID: group)] }) {
+            $0.layers[1].cels[1].interpolation?.groups = [MotionGroupBinding(groupID: group,
+                                                                             spacing: SpacingCurve(kind: .easeIn))]
+        }
+
+        // The ones the preview key did carry, restated against the identity that replaced it.
+        try assertMoves("a guide binding") {
+            $0.layers[1].cels[1].interpolation?.guideIDs.append(UUID())
+        }
+        try assertMoves("a local edit") { manager in
+            manager.layers[1].cels[1].interpolation?.localEdits.append(
+                LocalEdit(stroke: self.stroke([CGPoint(x: 4, y: 4), CGPoint(x: 20, y: 20)])))
+        }
+        try assertMoves("the thickness-fade option") { $0.interpolationThicknessFade.toggle() }
+        try assertMoves("a muted motion group") { manager in
+            // Solo/mute is only an input inside the mode — `interpolationOptions` says so — so the
+            // mutation has to put the document in it, or this would assert about nothing.
+            manager.enterInterpolateMode()
+            manager.hiddenMotionGroups.insert(UUID())
+        }
+
+        // `.reproject`'s content is the cel's *own* display list, which no reference version covers.
+        // The preview key had no field for it at all.
+        try assertMoves("the subject's own strokes under .reproject") { manager in
+            manager.layers[1].cels[1].interpolation?.mode = .reproject
+            manager.layers[1].cels[1].vector?.addStroke(
+                self.stroke([CGPoint(x: 12, y: 48), CGPoint(x: 44, y: 48)]))
+        }
+
+        // The canvas is the space the whole evaluation happens in, and the render takes its size from
+        // the document rather than from the caller (`DerivedCelContent.render`).
+        try assertMoves("the canvas size") { $0.canvasSize = CGSize(width: 96, height: 64) }
+    }
+
+    /// The other half of the sweep: an identity that moved for *everything* would satisfy it while
+    /// caching nothing. `testAnUnchangedDerivedCelIsStillServedFromTheMemo` makes that claim about the
+    /// flatten memo; this makes it about the identity itself, which is what three separate caches now
+    /// key on.
+    func testAnUntouchedRecipeKeepsItsIdentity() throws {
+        let (manager, _, _) = try interpolated()
+        let cel = manager.layers[1].cels[1]
+        let first = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 4)?.identity)
+        let second = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 4)?.identity)
+        XCTAssertEqual(first, second, "Nothing moved, so nothing may invalidate")
+        // And the frame is deliberately *not* in it: an interpolation's `t` is a property of the cel,
+        // so the onion skin and the composite asking for one cel at two frames must not mint two
+        // entries for the same pixels. `CelContentProvider`'s own note rules this, and a pose key —
+        // which does read the frame — will include it.
+        let elsewhere = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: 6)?.identity)
+        XCTAssertEqual(first, elsewhere,
+                       "Interpolation does not read the frame, so its identity must not carry one")
+    }
 }
