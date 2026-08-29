@@ -412,6 +412,58 @@ the export — [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md)'s whole subject is that 
 behind the composite rather than part of it. At what resolution: the canvas, or a chosen one? And is a
 slow, correct export acceptable, given the arithmetic above?
 
+### 5b. Background baking for playback — asked 2026-08-29, and the answer is that it is specified twice
+
+The owner, unprompted, on being told an in-between frame composites live:
+
+> "does the compositor automatically bake in the background so that when playing every frame doesnt need
+> to be composited live as it runs? ... the goal is to allow 24fps playback while conserving memory.
+> Basically the animation bakes in the background, and the data of each frame other than the current
+> frame gradually gets replaced with that baked 'video', so when the play button is run, every single
+> frame does not need to be composited live. When something is modified, only the modified frames are
+> rebaked."
+
+**It does not, today.** `sandwichCacheKey` (`Views/CanvasView.swift:1145`) is a *single* key holding a
+single composite: move the playhead and it recomposites. `MetalCompositor`'s caches are **upload**
+caches — memoized, re-derivable texture uploads dropped under memory pressure — so they make one
+composite cheaper and store no frames. Playback composites every frame, live.
+
+**Worth pursuing, and the reason to write this down now is not the feature — it is that the feature
+already exists in two documents at two scopes, and building them separately would give the app two
+frame caches, two eviction policies and two disk tiers.**
+
+- **§9.2 of [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)** is this proposal almost verbatim, written for
+  the sequencer: priority queue (current frame → neighbours → rest of shot), disk-backed LRU, bake at the
+  shot boundary, evict on edit.
+- **§4.6 of [KEYFRAMES.md](KEYFRAMES.md)** is the same machine scoped to one keyframe span, and the owner
+  **ruled on it on 2026-08-28** (§2.19, §2.20): span-scoped, eager, complete, recompute on settle, cache
+  the **composite**, store it outside the project package.
+
+Unify them before either is built. The two differ in exactly one interesting way and it is worth keeping:
+§4.6 is **eager and complete over a span** because the owner rejected an LRU on the grounds that its hit
+rate is invisible, while §9.2 is a **priority queue over a shot** because a shot does not fit anywhere.
+Both are true, and the reconciliation is that the *policy* is scoped and the *store* is not.
+
+**Three things are already built and should not be rebuilt.** §9.1 shipped: propagating content versions,
+so a leaf edit bumps only its ancestors; **frame-scoped invalidation**, which is the owner's "only the
+modified frames are rebaked" and cost nothing, because a cel already covers
+`[startFrame, startFrame + frameCount)` and editing it invalidates exactly those frames; and a pure
+snapshot-driven `composite(RenderRequest) -> Texture` taking an immutable tree snapshot, built that way
+from day one so that adding a thread later is not a rewrite.
+
+**The memory half of the ask is the hard part and it is already quantified** — §9.2 point 5, restated at
+§5 above: one frame is 16.8 MB at 2048², so ten seconds at 24 fps is 240 frames = **4 GB**, and 15 GB at
+4000². *"Any design that holds baked frames as raw textures dies on the first real sequence."* So the
+owner's "gradually gets replaced with that baked video" is not a nicety, it is the only shape that works:
+compressed to disk, with a small in-memory LRU of recent frames. **INFERRED**: a video codec is the
+obvious store and it is the same encoder item (5) needs, which is a second reason to build the two
+together — but a lossy intermediate is a decision the owner has not been asked for, and a scrub backwards
+through a long-GOP stream is not free.
+
+**Not scheduled.** The owner: *"let me know if it could be worth pursuing as a future task. Otherwise,
+focus on current stuff for now."* This is the answer: yes, and it is nearer than it looks because the
+substrate is in.
+
 ---
 
 ## 6. Video editor
