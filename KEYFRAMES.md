@@ -9,8 +9,8 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty of them,
-all from 2026-08-28 — and TODO.md's rule applies: *a question the owner has answered stops being a
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-two of
+them, twenty from 2026-08-28 and two from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
 question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
 ---
@@ -50,7 +50,7 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
 
 ---
 
-## 2. Rulings — settled 2026-08-28, do not re-litigate
+## 2. Rulings — settled 2026-08-28 and 2026-08-29, do not re-litigate
 
 1. **Tap the keyframe button inserts a key. Hold it 0.8 s enters or exits Animate mode.** In Animate
    mode any non-destructive change at the playhead writes a key on exactly the channel touched. The
@@ -122,6 +122,17 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
     depending on what else happens to be resident — while a span either is cached or is not, and the UI
     can say which. Three amendments in §4.6: recompute **on settle**, cache the **composite**, and store
     it **outside the project package**.
+21. **A folder's effect animates exactly as a layer's does.** 2026-08-29, closing §9.3.
+    `LayerFolder.effect` is a second home for the same grade and it gets the same track, rather than
+    being declared un-animatable in writing. It costs one more storage site and one more arm on the
+    resolver; the alternative costs a slider that silently refuses to key, which nothing reveals until
+    the artist reaches for it.
+22. **The keyframe button lives in the timeline's own control strip**, beside play, fps and add-cel —
+    not in the top toolbar. 2026-08-29. It writes at the playhead and §2.17's drawer grows upward out
+    of the same timeline, so the button, the frames it writes onto and the curve it opens are all in
+    one place. It is chrome and **not a `Tool`**: `Tool`'s seven slots are explicitly full and every
+    switch over it is exhaustive with no `default:` precisely so a new case cannot be missed
+    (`Models/Tool.swift:22-24`, `:48-53`).
 
 ---
 
@@ -272,9 +283,9 @@ the tree: it moves only because stage 0 put the frame-resolved effect *into* the
 that, or a grade that reshapes alpha will serve stale coverage. (Note `LayerContentVersion.hash(into:)`
 deliberately omits `effect` while `==` includes it — legal, and it only costs collisions.)
 
-**Two things §2.4 does not cover and someone must answer.** `LayerFolder.effect`
-(`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:891` — either it
-gets the same track or folder effects are declared un-animatable, in writing. And
+**One thing §2.4 did not cover, now ruled, and one nobody has.** `LayerFolder.effect`
+(`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:891`, and §2.21
+gives it the same track a layer's effect gets. And
 `CanvasManager.compositorSizeGate` (`CanvasManager+Document.swift:546-550`) is frame-invariant **only
 for as long as a key cannot turn an effect on or off**; it counts `effect != nil`, so the day a track
 can add one, the resize dialog's admission gate becomes a function of the playhead and will answer for
@@ -656,18 +667,16 @@ animation systems.
    it is a full-canvas sheet, so posing it means posing a quad and leaving transparency outside —
    plausible. In *effect* mode it holds no pixels at all and grades the accumulator, so there is nothing
    to pose. Same layer kind, two answers.
-3. **Are folder effects animatable?** §2.4 says "on the layer"; `LayerFolder.effect` is a second home
-   the ruling does not cover. Either it gets the same track or it is declared un-animatable in writing.
-4. **What happens to a curve whose two keys have different cardinality?** Two of the thirteen effects
+3. **What happens to a curve whose two keys have different cardinality?** Two of the thirteen effects
    have variable-length parameter arrays — `Curves.points` and `GradientMap.stops`. Tweening a 3-point
    curve to a 5-point curve needs a definition or a refusal.
-5. **Where does the playback cache's disk tier live, and do cached spans outlive the session?**
+4. **Where does the playback cache's disk tier live, and do cached spans outlive the session?**
    §4.6 settles that a disk tier is required rather than optional — 64 MiB of memory is about 32 frames
    at preview resolution and a 48-frame span does not fit — and recommends `Library/Caches` over the
    `Documents/` sibling-folder pattern `ProjectBackupManager` established, knowingly departing from the
    only local precedent because the OS purges Caches under disk pressure and excludes it from backup.
    Unruled: whether a span survives a relaunch at all, and what sweeps it if the OS does not.
-6. **Do generated in-betweens visibly boil today?** The interpolation evaluator *already* re-walks the
+5. **Do generated in-betweens visibly boil today?** The interpolation evaluator *already* re-walks the
    dab lattice per in-between under a non-uniform map — the exact artifact §4.2 exists to prevent. If
    they look clean on the iPad, this whole risk is smaller than it has been sized. **Asked; unanswered.
    It needs the device, not a test.**
