@@ -14,10 +14,10 @@ import Foundation
 /// **The two collapses, which are different things and are easy to conflate.**
 ///
 /// 1. **Channels collapse unconditionally.** A target can key thirteen effect parameters on one frame
-///    and the artist needs to see *a key is here*, not thirteen stacked diamonds. `keyedFrames`
-///    therefore returns a **set** of frames — one marker per (target, frame), at every zoom. Which
+///    and the artist needs to see *a key is here*, not thirteen stacked diamonds. `markers`
+///    therefore works from a **set** of frames — one marker per (target, frame), at every zoom. Which
 ///    channels those are is the channel panel's question, not the marker's.
-/// 2. **Frames collapse by zoom, and only when they actually touch.** See `runs(frames:pixelsPerFrame:)`.
+/// 2. **Frames collapse by zoom, and only when they actually touch.** See `runs(markers:pixelsPerFrame:)`.
 enum TimelineKeyMarkers {
 
     // MARK: - The timeline's zoom limits, declared here so the threshold below is a relationship
@@ -90,7 +90,27 @@ enum TimelineKeyMarkers {
 
     // MARK: - What is on a row
 
-    /// The frames of one target that carry at least one key, deduped and ascending.
+    /// One frame of one target that has something to show, and which of the two kinds it is.
+    struct Marker: Equatable {
+        let frame: Int
+        /// **True when the artist has placed a keyframe here and no channel keys on it** — §2.26's
+        /// bare mark, which is the first step of the whole workflow: *"keyframe A is added, nothing
+        /// is saved."*
+        ///
+        /// The two kinds are drawn differently (hollow against filled) because otherwise the one
+        /// question the artist most needs answered — *did my edit land on a channel?* — has no
+        /// answer on screen, and a keyframe that saved nothing looks exactly like one that saved
+        /// everything.
+        let isBare: Bool
+    }
+
+    /// **Every marker on one target's row: the union of the frames it carries a keyframe mark on and
+    /// the frames its curves key on**, deduped and ascending.
+    ///
+    /// **Neither list contains the other, which is why this is a union rather than one of them.**
+    /// §2.26: a mark with no channel is legal and is the point, and a curve carries keys the artist
+    /// never marked — an auto-key, or a value seeded onto a neighbouring mark. Deriving one from the
+    /// other in either direction loses real frames.
     ///
     /// **Deduping *is* collapse (1) above**, and it happens here rather than at the drawing so the
     /// marker count is a property of the document rather than of the paint code.
@@ -105,13 +125,19 @@ enum TimelineKeyMarkers {
     /// (stage 2), so a track that stores and renders nothing cannot be created; filtering here would
     /// buy nothing and would cost a call to `Effect.parameters`, which rebuilds up to thirty-three
     /// closures and is read from a path that runs on every SwiftUI pass.
-    static func keyedFrames(in tracks: [String: AnimationCurve]) -> [Int] {
-        guard !tracks.isEmpty else { return [] }
-        var frames: Set<Int> = []
+    ///
+    /// - Parameter tracks: the curves whose keys count as landed. The caller decides whether this
+    ///   target's grade is in force at all — see `TimelineLayoutKey.make`, where a layer that is not
+    ///   in effect form passes none, while its marks still pass in full.
+    static func markers(marks: [Int], tracks: [String: AnimationCurve]) -> [Marker] {
+        guard !marks.isEmpty || !tracks.isEmpty else { return [] }
+        var keyed: Set<Int> = []
         for curve in tracks.values {
-            for key in curve.keys { frames.insert(key.frame) }
+            for key in curve.keys { keyed.insert(key.frame) }
         }
-        return frames.sorted()
+        var frames = keyed
+        frames.formUnion(marks)
+        return frames.sorted().map { Marker(frame: $0, isBare: !keyed.contains($0)) }
     }
 
     /// One drawn thing on the band: either a single key, or a run of keys too close together to draw
@@ -126,6 +152,16 @@ enum TimelineKeyMarkers {
         let lastFrame: Int
         /// How many keys the run swallowed. 1 is a plain diamond.
         let count: Int
+        /// **True only when every marker in the run is bare**, so a run that mixes the two kinds
+        /// draws as landed.
+        ///
+        /// The collapse is already lossy — it gives up which interior frames carry keys — and this
+        /// is the same species of loss, resolved the same way, by zooming in. What decides the
+        /// direction is which error is worse: hollow says *nothing here is saved yet*, which is the
+        /// alarming, actionable reading, so claiming it over a run that does contain saved keys
+        /// would send the artist looking for a bug that is not there. Filled says *something is
+        /// here*, which is true of a mixed run.
+        let isBare: Bool
 
         /// A run of one is not collapsed — it is just a key. Derived rather than stored so the two
         /// can never disagree.
@@ -144,26 +180,29 @@ enum TimelineKeyMarkers {
     /// minimum zoom, because they do not collide. Only the parts of the track that are actually dense
     /// collapse, and the rest of the row is untouched.
     ///
-    /// - Parameter frames: ascending and unique — `keyedFrames`' output. Unsorted input would merge
-    ///   the wrong things silently, and the single production caller is that function.
-    static func runs(frames: [Int], pixelsPerFrame: CGFloat) -> [Run] {
-        guard let first = frames.first else { return [] }
+    /// - Parameter markers: ascending and unique — `markers(marks:tracks:)`' output. Unsorted input
+    ///   would merge the wrong things silently, and the single production caller is that function.
+    static func runs(markers: [Marker], pixelsPerFrame: CGFloat) -> [Run] {
+        guard let first = markers.first else { return [] }
         var result: [Run] = []
-        var start = first
-        var last = first
+        var start = first.frame
+        var last = first.frame
         var count = 1
-        for frame in frames.dropFirst() {
-            if CGFloat(frame - last) * pixelsPerFrame < minimumSeparation {
-                last = frame
+        var isBare = first.isBare
+        for marker in markers.dropFirst() {
+            if CGFloat(marker.frame - last) * pixelsPerFrame < minimumSeparation {
+                last = marker.frame
                 count += 1
+                isBare = isBare && marker.isBare
             } else {
-                result.append(Run(firstFrame: start, lastFrame: last, count: count))
-                start = frame
-                last = frame
+                result.append(Run(firstFrame: start, lastFrame: last, count: count, isBare: isBare))
+                start = marker.frame
+                last = marker.frame
                 count = 1
+                isBare = marker.isBare
             }
         }
-        result.append(Run(firstFrame: start, lastFrame: last, count: count))
+        result.append(Run(firstFrame: start, lastFrame: last, count: count, isBare: isBare))
         return result
     }
 
@@ -204,15 +243,19 @@ enum TimelineKeyMarkers {
     // MARK: - What a test can see
 
     /// The band's accessibility value: each run as `frame`, or `first-last` when it collapsed,
-    /// joined by `|`. Frames are 0-based, matching `TimelineRowView`'s `"startFrame,frameCount"`.
+    /// **parenthesised when it is bare**, joined by `|`. So `"(3)|7-9"` is a keyframe at frame 3 that
+    /// has saved nothing yet, beside a collapsed run of landed keys. Frames are 0-based, matching
+    /// `TimelineRowView`'s `"startFrame,frameCount"`.
     ///
     /// **An encoded value on one element rather than one element per marker**, which is
     /// `CurveEditor.encode(points)`' convention and `TimelineFolderRowView`'s. It exists because
     /// XCUITest can see neither a `CGContext` nor a colour, so "there is a diamond at frame 6" is not
-    /// otherwise assertable — and the collapse in particular is *only* visible as a shape, so without
-    /// this the one thing this stage designs would be untestable above the logic tier.
+    /// otherwise assertable — and the collapse and the hollow form are *only* visible as shapes, so
+    /// without this the two things this stage designs would be untestable above the logic tier.
     static func encode(_ runs: [Run]) -> String {
-        runs.map { $0.isCollapsed ? "\($0.firstFrame)-\($0.lastFrame)" : "\($0.firstFrame)" }
-            .joined(separator: "|")
+        runs.map { run in
+            let span = run.isCollapsed ? "\(run.firstFrame)-\(run.lastFrame)" : "\(run.firstFrame)"
+            return run.isBare ? "(\(span))" : span
+        }.joined(separator: "|")
     }
 }

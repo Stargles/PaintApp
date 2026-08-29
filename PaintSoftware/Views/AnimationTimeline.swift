@@ -228,7 +228,7 @@ struct AnimationTimeline: View {
     @ViewBuilder
     private var timelineMenuContent: some View {
         switch timelineMenu?.menu {
-        case .block(let layerIndex, let celIndex):
+        case .block(let layerIndex, let celIndex, let frame):
             if canvasManager.layers.indices.contains(layerIndex) {
                 menuList {
                     // Copy only snapshots the block's content onto the clipboard — it doesn't touch
@@ -245,6 +245,7 @@ struct AnimationTimeline: View {
                     menuButton("Clear", icon: "eraser") {
                         canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
                     }
+                    keyframeItems(layerIndex: layerIndex, celIndex: celIndex, frame: frame)
                     if canvasManager.layers[layerIndex].cels.count > 1 {
                         menuButton("Delete", icon: "trash", role: .destructive) {
                             canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex)
@@ -282,6 +283,46 @@ struct AnimationTimeline: View {
 
         case nil:
             EmptyView()
+        }
+    }
+
+    /// **The cel menu's keyframe section** — §2.26, where a keyframe is placed and taken back.
+    ///
+    /// **Which target.** The layer the tapped block belongs to, by id, through the one conversion
+    /// `KeyframeTarget` exposes. §2.4 puts keys and marks on the layer rather than on the cel, so
+    /// there is nothing about the block itself in the address; the block only says *which layer* and
+    /// *which frame*.
+    ///
+    /// **Which frame.** The one carried in the request, which `handleTapOnCel` set to the playhead at
+    /// the instant the menu opened — the owner's ruling that the two are the same thing here, held by
+    /// the two-stage tap. Reading `currentFrame` now instead would key wherever a running playback
+    /// timer had since carried it.
+    ///
+    /// **What "in that cel" means.** The frames the block covers, `celFrameRange`. A range query, not
+    /// a container lookup: an effect key lives on the layer in absolute document frames, so a cel has
+    /// no list of keyframes to empty and this is the only sense in which it has any.
+    ///
+    /// Both conditional items follow the Delete item's precedent a few lines up — offered only when
+    /// they would do something, rather than shown greyed. Neither is `.destructive`: red is this
+    /// menu's mark for losing a whole drawing, and Clear, which empties the cel's ink, is not red
+    /// either.
+    @ViewBuilder
+    private func keyframeItems(layerIndex: Int, celIndex: Int, frame: Int) -> some View {
+        if let target = canvasManager.keyframeTarget(layerIndex: layerIndex) {
+            menuButton("Add Keyframe", icon: "plus.diamond") {
+                canvasManager.addKeyframe(target, atFrame: frame)
+            }
+            if canvasManager.hasKeyframeMark(target, atFrame: frame) {
+                menuButton("Remove Keyframe", icon: "minus.diamond") {
+                    canvasManager.removeKeyframe(target, atFrame: frame)
+                }
+            }
+            if let range = canvasManager.celFrameRange(layerIndex: layerIndex, celIndex: celIndex),
+               canvasManager.hasKeyframeMark(target, inFrames: range) {
+                menuButton("Clear Keyframes", icon: "xmark.diamond") {
+                    canvasManager.clearKeyframes(target, inFrames: range)
+                }
+            }
         }
     }
 

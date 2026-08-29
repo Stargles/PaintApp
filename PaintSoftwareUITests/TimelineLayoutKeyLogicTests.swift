@@ -204,7 +204,7 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
     /// crash, no failing assertion, just a timeline that stops telling the truth the moment a second
     /// key is written. It is `InterpolationPreviewKey`'s failure reached from the other side, and
     /// KEYFRAMES §10 names it as the single most likely way for the marker work to be quietly wrong.
-    /// The band is drawn *from* `trackKeyFrames` rather than from a second read of the layer, so what
+    /// The band is drawn *from* `trackMarkers` rather than from a second read of the layer, so what
     /// is drawn and what is compared are one array; these tests pin that the array moves when it must.
     private func gradedManager() -> (manager: CanvasManager, target: KeyframeTarget) {
         let m = manager(layerCount: 1)
@@ -220,7 +220,7 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                        "Fixture: the write should land")
         let after = key(m)
         XCTAssertNotEqual(before, after, "A marker has appeared on the track and has to be laid out")
-        XCTAssertNotEqual(before.trackKeyFrames, after.trackKeyFrames,
+        XCTAssertNotEqual(before.trackMarkers, after.trackMarkers,
                           "…and specifically in the marker field, not incidentally in something else")
     }
 
@@ -232,7 +232,7 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         m.setEffectParameterKeys(target, frame: 5, values: ["brightnessContrast.brightness": 2])
         let before = key(m)
         m.setEffectParameterKeys(target, frame: 11, values: ["brightnessContrast.brightness": 3])
-        XCTAssertNotEqual(before.trackKeyFrames, key(m).trackKeyFrames)
+        XCTAssertNotEqual(before.trackMarkers, key(m).trackMarkers)
     }
 
     /// **And it must not move for a value change**, which is the other half of the gate being right.
@@ -277,17 +277,47 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
         XCTAssertNotEqual(before.folders, key(m).folders)
     }
 
-    /// **A layer that is not in effect form grades nothing, so it draws no markers.** Tracks can
-    /// outlive a kind change — `CanvasManager.storedEffect(of:)` reads `layerEffect` rather than the
-    /// raw field for exactly this reason — and a marker for a value the canvas is not showing is worse
-    /// than no marker at all.
-    func testALayerWhoseGradeIsNotInForceDrawsNoMarkers() {
+    /// The bare-mark asymmetry on the folder branch, which is a second `if` in the same loop and
+    /// therefore an easy place to gate what the layer branch does not.
+    func testAFoldersBareMarkDrawsWithNoGradeOnIt() {
+        let m = manager(layerCount: 1)
+        let group = m.addFolder(name: "Plain group")
+        m.restackLayer(m.layers[0].id, above: .folder(group), parentFolderID: group)
+        XCTAssertNil(m.folders.first { $0.id == group }?.effect, "Fixture: an ungraded group")
+        XCTAssertTrue(m.addKeyframe(.folder(id: group), atFrame: 6), "Fixture: the mark should land")
+        XCTAssertEqual(key(m).folders.first?.markers,
+                       [TimelineKeyMarkers.Marker(frame: 6, isBare: true)])
+    }
+
+    /// **A layer that is not in effect form grades nothing, so its curves draw no markers.** Tracks
+    /// can outlive a kind change — `CanvasManager.storedEffect(of:)` reads `layerEffect` rather than
+    /// the raw field for exactly this reason — and a marker for a value the canvas is not showing is
+    /// worse than no marker at all.
+    func testALayerWhoseGradeIsNotInForceDrawsNoMarkersForItsCurves() {
         let m = manager(layerCount: 1)
         XCTAssertNil(m.layers[0].layerEffect, "Fixture: an ordinary drawing layer is not a value layer")
         m.layers[0].effectTracks["brightnessContrast.brightness"] =
             AnimationCurve(keys: [AnimationCurve.Key(frame: 3, value: 1)])
-        XCTAssertEqual(key(m).trackKeyFrames.first, [],
+        XCTAssertEqual(key(m).trackMarkers.first, [],
                        "Storage without a grade in force is not animation")
+    }
+
+    /// **And the same layer must still draw a bare mark**, which is the asymmetry §2.26 forces and the
+    /// half that was missing. A mark is a point in time the artist placed, not a property of an
+    /// effect: `addKeyframe` takes one on a target with no grade whatsoever, and an ordinary drawing
+    /// layer is exactly where the workflow's first step happens. Gating marks on the grade the way
+    /// curves are gated would leave *"keyframe A is added, nothing is saved"* drawing nothing at all,
+    /// which is a feature the artist cannot use rather than one that looks slightly wrong.
+    func testABareMarkDrawsOnALayerWithNoEffectAtAll() {
+        let m = manager(layerCount: 1)
+        let target = KeyframeTarget.layer(id: m.layers[0].id)
+        XCTAssertNil(m.layers[0].layerEffect, "Fixture: an ordinary drawing layer is not a value layer")
+        let before = key(m)
+        XCTAssertTrue(m.addKeyframe(target, atFrame: 4), "Fixture: the mark should land")
+        XCTAssertEqual(key(m).trackMarkers.first,
+                       [TimelineKeyMarkers.Marker(frame: 4, isBare: true)])
+        XCTAssertNotEqual(before.trackMarkers, key(m).trackMarkers,
+                          "…and the layout gate has to see it, or the marker draws once and never again")
     }
 
     // MARK: - The ruler's dirty rect

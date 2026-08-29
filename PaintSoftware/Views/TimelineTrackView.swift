@@ -27,8 +27,16 @@ struct TimelineTrackView: UIViewRepresentable {
     /// `Bool` + payload + anchor apiece, for what was structurally the same "a menu is open here"
     /// state three times over. That is what the owner meant by "these two menus are coded off of
     /// the same engine... make them into one": one request type in, one popover out.
+    ///
+    /// **`.block` carries the frame it was raised on, and that is not redundant with the playhead.**
+    /// The menu only opens on a *second* tap that landed where the playhead already is
+    /// (`handleTapOnCel`), so at that instant the two agree — which is what makes the owner's ruling
+    /// hold, that both the playhead and the frame you tapped are right. They can then diverge: nothing
+    /// stops `AnimationTimeline`'s playback timer, so a menu raised while the scene is playing watches
+    /// `currentFrame` walk away from the block it is anchored over. Capturing the value here fixes the
+    /// menu's frame to the one under the artist's finger for as long as it is up.
     enum MenuRequest: Equatable {
-        case block(layerIndex: Int, celIndex: Int)
+        case block(layerIndex: Int, celIndex: Int, frame: Int)
         case gap(layerIndex: Int, frame: Int)
         case loop(frame: Int)
     }
@@ -289,12 +297,12 @@ struct TimelineTrackView: UIViewRepresentable {
                 // draw once and never move again — silently, which is the family
                 // `InterpolationPreviewKey` has been bitten by four times. Reading the value *out of*
                 // the key makes "drawn from" and "keyed on" the same array by construction instead of
-                // by two people remembering to keep them in step. `trackKeyFrames` is built parallel
+                // by two people remembering to keep them in step. `trackMarkers` is built parallel
                 // to `tracks`, over the same filtered enumeration of `stackRows`, so the slot lines up.
                 row.update(cels: layers[entry.layerIndex].cels,
                            sceneFrameCount: sceneFrameCount,
-                           keyFrames: built.key.trackKeyFrames.indices.contains(slot)
-                               ? built.key.trackKeyFrames[slot] : [])
+                           markers: built.key.trackMarkers.indices.contains(slot)
+                               ? built.key.trackMarkers[slot] : [])
                 // The band a drop counts as landing on runs the full row *pitch*, gaps included, so
                 // there is no dead strip between rows where a drag resolves to nothing.
                 layerRowGeometry.append((layerIndex: entry.layerIndex,
@@ -325,8 +333,8 @@ struct TimelineTrackView: UIViewRepresentable {
                            isVisible: folder?.isVisible ?? true,
                            identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)",
                            // Out of the key, for the layer rows' reason above.
-                           keyFrames: built.key.folders.indices.contains(slot)
-                               ? built.key.folders[slot].keyFrames : [])
+                           markers: built.key.folders.indices.contains(slot)
+                               ? built.key.folders[slot].markers : [])
             }
 
             movePlayhead(totalHeight: totalHeight)
@@ -568,7 +576,11 @@ struct TimelineTrackView: UIViewRepresentable {
             let cel = canvasManager.layers[layerIndex].cels[celIndex]
             let clamped = max(cel.startFrame, min(tappedFrame, cel.endFrame - 1))
             if layerIndex == canvasManager.currentLayerIndex, clamped == canvasManager.currentFrame {
-                onRequestMenu?(.block(layerIndex: layerIndex, celIndex: celIndex), anchor)
+                // `clamped` and `currentFrame` are equal on this branch by the guard just made, so
+                // the menu's frame is the playhead *and* the frame that was tapped — the owner's
+                // ruling, made true by the two-stage tap rather than assumed. It is carried in the
+                // request rather than re-read later; see `MenuRequest`.
+                onRequestMenu?(.block(layerIndex: layerIndex, celIndex: celIndex, frame: clamped), anchor)
             } else {
                 canvasManager.currentLayerIndex = layerIndex
                 canvasManager.goToFrame(clamped)
@@ -765,11 +777,11 @@ private final class TimelineFolderRowView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(span: ClosedRange<Int>?, pixelsPerFrame: CGFloat, isVisible: Bool, identifier: String,
-                keyFrames: [Int]) {
+                markers: [TimelineKeyMarkers.Marker]) {
         accessibilityIdentifier = identifier
         keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
                                   width: bounds.width, height: TimelineKeyMarkers.bandHeight)
-        keyMarkers.update(frames: keyFrames, pixelsPerFrame: pixelsPerFrame,
+        keyMarkers.update(markers: markers, pixelsPerFrame: pixelsPerFrame,
                           identifier: identifier + ".keys")
         bringSubviewToFront(keyMarkers)
         guard let span, span.upperBound > span.lowerBound else {
@@ -832,14 +844,15 @@ private final class TimelineDropIndicatorView: UIView {
 /// `totalHeight` and the name column's hard-coded ruler spacer all stay as they are, and §10's three
 /// height traps are simply not entered.
 ///
-/// **Hidden outright when the row has no keys**, which is almost every row of almost every document —
-/// so an un-animated timeline looks exactly as it did, and the band is also absent from the
-/// accessibility tree, making *"this layer has keys"* a queryable fact rather than a value to parse.
+/// **Hidden outright when the row has no keyframes**, which is almost every row of almost every
+/// document — so an un-animated timeline looks exactly as it did, and the band is also absent from the
+/// accessibility tree, making *"this layer has keyframes"* a queryable fact rather than a value to parse.
 ///
 /// **Fill white, stroke dark.** Blue is the playhead and the current layer; yellow is an interpolation
 /// reference, and §2.8 exists precisely so the two kinds of "keyframe" are never confused — so an
 /// animation key must not be yellow. White over a 1 pt dark outline reads on a pale thumbnail and on a
-/// dark one, which is the only requirement a marker drawn over arbitrary artwork actually has.
+/// dark one, which is the only requirement a marker drawn over arbitrary artwork actually has. The
+/// hollow form a bare mark takes keeps that property — see `paint(_:isBare:)`.
 private final class TimelineKeyMarkerBand: UIView {
     private var runs: [TimelineKeyMarkers.Run] = []
     private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
@@ -856,11 +869,11 @@ private final class TimelineKeyMarkerBand: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// - Parameter frames: ascending and unique — `TimelineKeyMarkers.keyedFrames`' output, carried
+    /// - Parameter markers: ascending and unique — `TimelineKeyMarkers.markers`' output, carried
     ///   here through `TimelineLayoutKey` so what is drawn and what the layout gate compares are the
     ///   same array.
-    func update(frames: [Int], pixelsPerFrame: CGFloat, identifier: String) {
-        let runs = TimelineKeyMarkers.runs(frames: frames, pixelsPerFrame: pixelsPerFrame)
+    func update(markers: [TimelineKeyMarkers.Marker], pixelsPerFrame: CGFloat, identifier: String) {
+        let runs = TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: pixelsPerFrame)
         // A pinch changes `pixelsPerFrame` without changing a single key, and it changes what
         // collapses — so both halves gate the redraw. `relayout` is already gated by the layout key;
         // this is the second gate, for the same reason `appliedDisplacementFrames` is.
@@ -875,8 +888,6 @@ private final class TimelineKeyMarkerBand: UIView {
 
     override func draw(_ rect: CGRect) {
         guard pixelsPerFrame > 0 else { return }
-        let fill = UIColor.white
-        let stroke = UIColor.black.withAlphaComponent(0.6)
         let midY = bounds.midY
         let half = TimelineKeyMarkers.markerWidth / 2
 
@@ -895,13 +906,9 @@ private final class TimelineKeyMarkerBand: UIView {
                                  y: midY - TimelineKeyMarkers.runBarHeight / 2,
                                  width: max(runRect.width - TimelineKeyMarkers.markerWidth, 0),
                                  height: TimelineKeyMarkers.runBarHeight)
-                let path = UIBezierPath(roundedRect: bar,
-                                        cornerRadius: TimelineKeyMarkers.runBarHeight / 2)
-                fill.setFill()
-                path.fill()
-                stroke.setStroke()
-                path.lineWidth = 1
-                path.stroke()
+                paint(UIBezierPath(roundedRect: bar,
+                                   cornerRadius: TimelineKeyMarkers.runBarHeight / 2),
+                      isBare: run.isBare)
             }
 
             let capped = run.isCollapsed ? [run.firstFrame, run.lastFrame] : [run.firstFrame]
@@ -913,12 +920,37 @@ private final class TimelineKeyMarkerBand: UIView {
                 diamond.addLine(to: CGPoint(x: centerX, y: midY + half))
                 diamond.addLine(to: CGPoint(x: centerX - half, y: midY))
                 diamond.close()
-                fill.setFill()
-                diamond.fill()
-                stroke.setStroke()
-                diamond.lineWidth = 1
-                diamond.stroke()
+                paint(diamond, isBare: run.isBare)
             }
+        }
+    }
+
+    /// **Solid white for a keyframe that has saved something, an outline for one that has not** —
+    /// §2.26's bare mark, whose whole point is that placing it saves nothing yet. Without the
+    /// distinction the artist cannot tell a keyframe their edit reached from one it did not, which is
+    /// the single thing about this workflow that would otherwise be unreadable.
+    ///
+    /// **The hollow form is a white line inside a dark one rather than a dark outline around
+    /// nothing**, for the reason the filled form is white over dark: the band sits over an arbitrary
+    /// cel thumbnail, so a marker drawn in one colour disappears against half of them. Stroking the
+    /// same path twice — wide in the dark, narrow in the white — gives the outline its own halo and
+    /// costs one extra `stroke()`.
+    private func paint(_ path: UIBezierPath, isBare: Bool) {
+        let fill = UIColor.white
+        let stroke = UIColor.black.withAlphaComponent(0.6)
+        if isBare {
+            stroke.setStroke()
+            path.lineWidth = 3
+            path.stroke()
+            fill.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        } else {
+            fill.setFill()
+            path.fill()
+            stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
         }
     }
 }
@@ -1048,7 +1080,7 @@ private final class TimelineRowView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(cels: [Cel], sceneFrameCount: Int, keyFrames: [Int]) {
+    func update(cels: [Cel], sceneFrameCount: Int, markers: [TimelineKeyMarkers.Marker]) {
         var result: [Segment] = []
         var cursor = 0
         let ordered = cels.enumerated().sorted { $0.element.startFrame < $1.element.startFrame }
@@ -1116,12 +1148,12 @@ private final class TimelineRowView: UIView {
             view.alpha = (cel.id == hiddenCelID) ? 0 : 1
         }
 
-        // The keys run in absolute document frames (§2.4) and are a property of the *layer*, so the
-        // band spans the whole track — including the frames this layer has no cel on, where a key is
-        // perfectly legal and is exactly the state the artist needs to see.
+        // Marks and keys alike run in absolute document frames (§2.4, §2.26) and are a property of
+        // the *layer*, so the band spans the whole track — including the frames this layer has no cel
+        // on, where a keyframe is perfectly legal and is exactly the state the artist needs to see.
         keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
                                   width: bounds.width, height: TimelineKeyMarkers.bandHeight)
-        keyMarkers.update(frames: keyFrames, pixelsPerFrame: pixelsPerFrame,
+        keyMarkers.update(markers: markers, pixelsPerFrame: pixelsPerFrame,
                           identifier: "timeline.keyMarkers.\(layerIndex)")
         bringSubviewToFront(keyMarkers)
     }

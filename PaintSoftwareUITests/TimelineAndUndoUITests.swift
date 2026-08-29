@@ -169,6 +169,64 @@ final class TimelineGestureUITests: PaintUITestCase {
         XCTAssertEqual(after.start + after.length, 12, "The end frame should stay fixed at 12 while only the start moves, but start+length was \(after.start + after.length)")
     }
 
+    /// **The keyframe workflow's entry point, and the one thing about it a logic test cannot see** —
+    /// KEYFRAMES §2.26: *"select on cel, tap again, tap add keyframe icon in the menu."*
+    ///
+    /// Everything it decides is pinned in `KeyframeControlLogicTests` and `TimelineKeyMarkersLogicTests`
+    /// in seconds. What only a touch can answer is whether the two ends actually meet: that the second
+    /// tap raises a menu carrying the item, that the item writes onto **the frame that was tapped**,
+    /// and that the mark it leaves is *visible* — which is the half that was missing, because a
+    /// keyframe carrying no channel is exactly what this workflow's first step produces and the band
+    /// used to draw it as nothing at all.
+    ///
+    /// The two conditional items are read in both states from one document, which is what makes them
+    /// evidence: Remove is absent before the mark exists and present after.
+    func testTheCelMenuPlacesAndRemovesAKeyframeAtTheTappedFrame() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let cel = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(cel.waitForExistence(timeout: 5))
+        let band = app.otherElements["timeline.keyMarkers.0"]
+        XCTAssertFalse(band.exists, "PREMISE: an untouched document has no markers and hides the band")
+
+        // The same midpoint `testTappingCelBlockMovesPlayheadToTappedFrame` uses. First tap moves the
+        // playhead there, second raises the menu — the gate in `Coordinator.handleTapOnCel`.
+        let target = cel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        target.tap()
+        guard let (tappedFrame, _) = readFrameLabel(app) else {
+            XCTFail("Could not read frame label after the first tap")
+            return
+        }
+        target.tap()
+
+        let add = app.buttons["timeline.menu.Add Keyframe"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "The second tap raises the cel menu")
+        XCTAssertFalse(app.buttons["timeline.menu.Remove Keyframe"].exists,
+                       "There is no mark on this frame yet, so there is nothing to offer to remove")
+        add.tap()
+
+        XCTAssertTrue(band.waitForExistence(timeout: 5), """
+            A keyframe carrying no channel drew nothing on the timeline, so the artist places \
+            keyframe A blind — which is the whole first step of §2.27's workflow
+            """)
+        // The label is 1-based and marker frames are 0-based. Asserting against the label rather than
+        // against a literal is what makes this a pin on *the frame that was tapped* rather than on
+        // where the block happens to sit.
+        XCTAssertEqual(band.value as? String, "(\(tappedFrame - 1))",
+                       "The mark lands on the playhead, and it is bare because nothing has been saved onto it")
+
+        // The playhead has not moved, so one tap is now the second stage.
+        target.tap()
+        let remove = app.buttons["timeline.menu.Remove Keyframe"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5),
+                      "The frame carries a mark now, so the menu offers to take it back")
+        remove.tap()
+
+        XCTAssertTrue(waitForDisappearance(of: band, timeout: 5),
+                      "Removing the only keyframe leaves the row with none, and the band hides again")
+    }
+
 }
 
 final class UndoAndLayerHistoryUITests: PaintUITestCase {

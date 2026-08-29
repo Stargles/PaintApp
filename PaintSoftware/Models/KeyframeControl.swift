@@ -184,6 +184,19 @@ extension CanvasManager {
         keyframeMarks(of: target).contains(frame)
     }
 
+    /// Whether any keyframe sits inside a half-open frame range — `clearKeyframes(_:inFrames:)`'s
+    /// question asked without performing it, so the cel menu can offer "Clear Keyframes" only when
+    /// there is something for it to clear.
+    ///
+    /// **A range query rather than a container lookup, because a cel does not contain keyframes.**
+    /// §2.4 and §2.26 both put keys and marks on the *layer*, in absolute document frames, so "the
+    /// keyframes in that cel" means the ones whose frame falls in the span that cel block covers —
+    /// which is `celFrameRange(layerIndex:celIndex:)`, and is the caller's knowledge rather than
+    /// this predicate's.
+    func hasKeyframeMark(_ target: KeyframeTarget, inFrames frames: Range<Int>) -> Bool {
+        keyframeMarks(of: target).contains { frames.contains($0) }
+    }
+
     /// **The ids of this target's effect channels that carry a curve at all**, in the descriptor
     /// table's order.
     ///

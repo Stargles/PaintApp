@@ -542,6 +542,43 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertFalse(manager.clearKeyframes(target, inFrames: 0 ..< 0), "Nor is an empty range")
     }
 
+    // MARK: - What the cel menu asks before it offers an item
+
+    /// **"Clear Keyframes" is offered only when there is something in that cel to clear**, and the
+    /// question is a range query rather than a container lookup — §2.4 and §2.26 both put keys and
+    /// marks on the *layer*, in absolute document frames, so a cel holds no list of keyframes and
+    /// "the keyframes in that cel" can only mean the ones inside the span its block covers.
+    ///
+    /// The boundary is where a caller gets this wrong, so it is pinned against the same half-open
+    /// convention the writer takes: a mark on the first frame of the *next* block belongs to that
+    /// block's menu, not this one's.
+    func testTheRangeQueryMatchesTheRangeTheWriterWouldClear() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 12)
+
+        XCTAssertTrue(manager.hasKeyframeMark(target, inFrames: 10 ..< 20))
+        XCTAssertTrue(manager.hasKeyframeMark(target, inFrames: 12 ..< 13), "Its own frame")
+        XCTAssertFalse(manager.hasKeyframeMark(target, inFrames: 0 ..< 12),
+                       "Half-open: a block ending at 12 does not own the mark on 12")
+        XCTAssertFalse(manager.hasKeyframeMark(target, inFrames: 13 ..< 30))
+        XCTAssertFalse(manager.hasKeyframeMark(target, inFrames: 12 ..< 12), "An empty range holds nothing")
+    }
+
+    /// The other half of the same menu item: the range it asks about is the tapped block's own span,
+    /// and a block that has since gone answers nil rather than trapping — a menu can outlive the cel
+    /// it was raised on, which is the guard the `.block` branch already carries for its other items.
+    func testACelsFrameRangeIsItsOwnHalfOpenSpan() {
+        let manager = gradedManager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 4), (start: 4, length: 3)])
+
+        XCTAssertEqual(manager.celFrameRange(layerIndex: 0, celIndex: 0), 0 ..< 4)
+        XCTAssertEqual(manager.celFrameRange(layerIndex: 0, celIndex: 1), 4 ..< 7,
+                       "Two touching blocks share a boundary frame and only the later one owns it")
+        XCTAssertNil(manager.celFrameRange(layerIndex: 0, celIndex: manager.layers[0].cels.count))
+        XCTAssertNil(manager.celFrameRange(layerIndex: manager.layers.count, celIndex: 0))
+    }
+
     // MARK: - Which channels are counted
 
     /// Empty until something is keyed, and then the descriptor table's order — not the dictionary's,

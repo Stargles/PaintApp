@@ -168,6 +168,19 @@ extension CanvasManager {
         }
     }
 
+    /// **The frames one cel block covers, half-open**, or nil if that block is not there any more.
+    ///
+    /// The bounds check is the point as much as the arithmetic: a menu can outlive the block it was
+    /// raised on (undo, another gesture), and a caller that subscripted `cels` directly would trap.
+    /// Half-open because that is what every frame-range writer here takes — `clearKeyframes(_:inFrames:)`
+    /// most immediately — and because `endFrame` is already the frame *after* the last one drawn.
+    func celFrameRange(layerIndex: Int, celIndex: Int) -> Range<Int>? {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return nil }
+        let cel = layers[layerIndex].cels[celIndex]
+        return cel.startFrame ..< cel.endFrame
+    }
+
     func extendCelToEnd(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
