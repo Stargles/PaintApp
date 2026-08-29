@@ -473,6 +473,37 @@ the live cost of a derived frame is not held to the frame budget; the prebake is
 item is already load-bearing**: it is the reason a 100 ms frame is allowed to exist on that path, and
 anything that quietly drops it takes that permission with it.
 
+**The owner's second thought on it, 2026-08-29, recorded and not investigated** — they asked explicitly
+that a future ask be written down rather than researched now:
+
+> "for the baking animation as video, I did some research, and it seems for the most part, the ipad gen 9
+> has enough capability to just store that bake on disk, then play it from disk in real time without
+> having to fill the entire animation to memory... So, store as many things on the disk. Only the current
+> cel of the frame could be brought up to memory for example, with everything else that is baked stored in
+> disk. Thus, it does not matter how large your animation is or how many layers or complex your compositor
+> is, it always will play it 24fps while using minimal memory."
+
+**This is an extension of a ruling they already gave**, not a new direction: cels are already specified as
+**streamed, not held resident** (LAYER_TRANSFORM.md:295-296), and the arithmetic agrees — a drawn raster
+cel is **6.558 MiB resident (MEASURED**, PERFORMANCE.md), and the owner's real scenes are 300-1000 cels,
+so a fully-resident document is **2-6.5 GB (INFERRED**, arithmetic only). §9.2 point 5 reached the same
+place from the other end.
+
+**Three couplings that are cheap to note now and expensive to discover late. Nothing here was researched;
+it is what the tree already says.**
+
+1. **Scrubbing backwards is the hard direction, and it is the one an animator uses.** A long-GOP stream
+   decodes forward from a keyframe, so stepping back one frame can mean decoding many. That probably
+   forces an all-intra codec, which is larger on disk — a knowing trade, not a detail.
+2. **Alpha.** [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md)'s whole subject is that the paper is a `UIView`
+   painted *behind* the composite, so the composite is not necessarily opaque. Few codecs carry alpha.
+   Whether the baked store needs it is a real fork and it is unruled.
+3. **It shares an encoder with item (5)**, which does not exist in any form. Whoever builds either should
+   look at the other first.
+
+**Unruled and owed by nobody yet**: whether a baked span survives a relaunch, and what sweeps it if the OS
+purges `Library/Caches` (KEYFRAMES §9.4 asks the same question at span scope).
+
 ---
 
 ## 6. Video editor
