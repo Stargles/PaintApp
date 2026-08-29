@@ -23,11 +23,12 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(21) Keyframes — stages 0, 1 and 2 merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). `654f863`
+- **(21) Keyframes — stages 0 through 3a merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). `654f863`
   `renderTree(atFrame:)`; `c09ddf0` `AnimationCurve`; `c6ecb49` + `6a379bf` the effect
   parameter-descriptor table with the settings bar reading it; `4d55aae` one layer effect parameter
-  animating end to end. Fast tier **2022 / 2019 / 0 / 3**. **Next is stage 3 — the Animate mode and the
-  graph-editor drawer**, the first stage the artist can see.
+  animating end to end; `6158e8b` the same on a folder's grade (§2.21); `f2f85b5` **Animate mode and
+  the keyframe button — the first stage the artist can see**. Fast tier **2066 / 2063 / 0 / 3**.
+  **Next is stage 3b — the channel panel and the graph-editor drawer.**
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
@@ -64,7 +65,7 @@ LAYER_TRANSFORM.md.
       is under it."*
 
       **[KEYFRAMES.md](KEYFRAMES.md) is the specification.** ROADMAP item (1), designed 2026-08-28 in the
-      conversation that file names as each item's entry condition. **§2 carries twenty-two rulings — read
+      conversation that file names as each item's entry condition. **§2 carries twenty-four rulings — read
       it rather than re-deriving them**, and §8 is the build order. The three that shape everything else:
       a transform key stores a **quad** from day one, so Distort lands later with no migration; posed ink
       is drawn by **baking the dab walk in rest space** and mapping dab centres, which removes the

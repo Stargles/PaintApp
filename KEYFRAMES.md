@@ -9,8 +9,8 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-two of
-them, twenty from 2026-08-28 and two from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-four of
+them, twenty from 2026-08-28 and four from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
 question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
 ---
@@ -135,6 +135,21 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
     buttons in that same strip (`AnimationTimeline.swift:406`, `:440`, `:455`), touching none of the
     `Tool` switches. **Note that strip is written out twice** — `collapsedBar` and `miniToolbar` — and a
     button added to one is invisible in the other.
+23. **A channel that is already animated keys on every edit, in or out of Animate mode. Animate mode is
+    only what creates the *first* curve.** 2026-08-29, and it is After Effects' rule. Stage 3a hit the
+    hole and shipped this as an inference; the owner then chose it, and the reasoning is the part to
+    keep, because it is what stops someone undoing it: once the settings bar reads the value resolved at
+    the playhead (which §2.1 requires — see below), an edit that writes the *stored base* instead of a
+    key springs straight back to the curve under the artist's finger. The alternative is not "edit the
+    value", it is a **dead control**. So the choice was between keying and refusing, and refusing costs
+    an 0.8 s hold every time an existing animation is adjusted.
+24. **A plain tap keys every channel that already has a curve, at its current value.** 2026-08-29 —
+    the "hold this pose here" move, and one undo step for the whole tap rather than one per channel. When
+    the target has no tracks at all the button is **dimmed but still hittable**, which is not a detail:
+    a *disabled* control cannot be held either, and the hold is the only way into Animate mode, so
+    disabling it on a fresh document would make the mode unreachable by the exact gesture that creates
+    the first track. The tap is refused; the press lands. The arm that opens the channel panel instead
+    belongs to that panel's stage.
 
 ---
 
@@ -665,7 +680,8 @@ Each stage is mergeable and leaves the app working.
 | **1** ✅ | **`AnimationCurve` + the effect descriptor table** — merged `c09ddf0`, `c6ecb49`, `6a379bf`. | The table is an exhaustive `switch self` with **no `default:`** — `Effect` cannot be `CaseIterable` and every existing all-effects sweep in the suite is a hand-typed literal, so a `default:` would silently miss a fourteenth effect. Make `EffectSettingsBar.rows` *read* the table so the two cannot drift; the 25 slider sites already carry range, format and target. |
 | **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
 | **2b** ✅ | **The same channel on the other grade home: `LayerFolder.effect`** — §2.21. `effectTracks` on the folder, `resolvedEffect(atFrame:)` filled in, `setEffectParameterTrack(folderID:…)`, the optional `FolderManifest` key. Nothing in it is new machinery; the whole stage is the one arm §2.21 costs. | It also closed a **pre-existing** defect §4.1 had recorded as a KNOWN GAP: `MaskResolver`'s cache key is per-*layer* content versions and a folder is not a leaf, so a mask naming a graded folder served coverage resolved under the old grade. A hand edit hit it once; a track hits it every frame, which is what forced it. The key now carries the mask stacks' node grades. |
-| **3** | **The Animate mode and the graph-editor drawer** | §2.1's tap/hold, the channel panel, §2.17's drawer. **Decide which shape each new surface is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. |
+| **3a** ✅ | **Animate mode and the keyframe button** — §2.1's tap/hold, §2.22's home, §2.23 and §2.24. A real `UILongPressGestureRecognizer` at 0.8 s with a `UITapGestureRecognizer` that `require(toFail:)`s it, in **both** halves of the strip, plus an always-on bar so the mode is advertised rather than hidden. `KeyframeTarget` is `.layer(id:)`/`.folder(id:)`, so §2.21's sameness is structural — one writer, one undo step, one set of refusals — and both cases carry an **id rather than an index**, which removes the stale-index hazard from inside the undo closures. | Three things the plan had wrong, all found by building it. **Disabling the button when nothing is animated makes Animate mode unreachable**, because a disabled control cannot be held either. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored effects side by side. And **the resize collision is closed by a number, not by arbitration**: the hold's `allowableMovement` is 4 against the timeline resize drag's `minimumDistance` of 6, and `UILongPressGestureRecognizer`'s default is 10, so that had to be chosen. The 6 moved out of the view file, because a test asserting `4 < 6` against a literal the test target cannot see is green forever. |
+| **3b** | **The channel panel and the graph-editor drawer** | §2.17's drawer and §2.1's channel list. **Decide which shape each surface is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. **§10 carries what the drawer actually attaches to, and it is a constraint rather than a preference.** Timeline key markers land here too. |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with ROADMAP (5). |
