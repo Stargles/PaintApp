@@ -1212,6 +1212,93 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// **Writes, replaces or removes one keyframe track on one effect parameter** — KEYFRAMES.md
+    /// stage 2's write half, and the model behind the Animate mode stage 3 will build on it.
+    ///
+    /// Passing a curve stores it against `parameterID`; passing nil, or an empty curve, removes the
+    /// track. Those two are deliberately the same thing: a curve with no keys evaluates to 0 at every
+    /// frame and `Effect.resolved(atFrame:through:)` skips it, so storing one would be a channel that
+    /// exists, animates nothing, and shows up in a channel list.
+    ///
+    /// **Deliberately not routed through `setLayerEffect`, and not through `withStructureUndo`.** That
+    /// bracket takes a whole-document-structure snapshot — `layers`, `folders`, `viewPresets`,
+    /// `motionGroups` and `guideStrokes`, twice, at a declared cost of 4096 — which is the right price
+    /// for a discrete structural pick and the wrong one for a channel edit; stage 3's Animate mode
+    /// writes a key on every value change, and the recorder of §5 writes one per resampled stop.
+    /// `setLayerEffect` is also *unusable* here for a second reason that has nothing to do with cost:
+    /// it early-outs on `layers[i].effect != effect`, and the value a resolver hands back at a key's
+    /// own frame is by construction equal to the value already stored. The whole write would vanish.
+    ///
+    /// So: one narrow closure pair over one parameter's curve, `cost` sized to the two curves it
+    /// actually retains, and the layer addressed **by id inside the closures** rather than by the
+    /// index passed in — a restack or a deletion between the edit and the undo moves the index, and
+    /// `withStructureUndo`'s whole-array restore is what usually hides that.
+    ///
+    /// **Refused at the door rather than in the resolver**, on three counts, each returning false:
+    /// a layer that is not grading at all (there is no parameter to address); an id that is not a
+    /// parameter of the grade it *is* running; and a parameter this stage cannot drive — see
+    /// `EffectParameter.isScalarAnimatable`, which names why for each of the nine. Storing one anyway
+    /// would be a track that renders as nothing, which is the failure this stage is supposed to make
+    /// impossible rather than merely unlikely.
+    ///
+    /// **Records nothing while an enclosing bracket is open**, which is `withStructureUndo`'s own rule
+    /// and is right for the same reason: that bracket has already snapshotted `layers`, `effectTracks`
+    /// is a field on `Layer`, so the enclosing step restores this edit along with everything else it
+    /// spans. A second step here would split one artist action in two.
+    ///
+    /// - Returns: whether the document changed.
+    @discardableResult
+    func setEffectParameterTrack(layerIndex: Int, parameterID: String, to curve: AnimationCurve?) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              let parameter = layers[layerIndex].layerEffect?.parameters.first(where: { $0.id == parameterID }),
+              parameter.isScalarAnimatable
+        else { return false }
+
+        let layerID = layers[layerIndex].id
+        let before = layers[layerIndex].effectTracks[parameterID]
+        let after = (curve?.isEmpty == false) ? curve : nil
+        guard after != before else { return false }
+
+        // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as
+        // its own earlier step, rather than being swallowed into this one. Re-entrant-safe, so calling
+        // it inside an enclosing bracket that already did is free.
+        beginCanvasEdit()
+        writeEffectParameterTrack(after, parameterID: parameterID, layerID: layerID)
+
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
+        recordUndo(label: .effectKeyframes,
+                   cost: Self.trackUndoCost(before) + Self.trackUndoCost(after),
+                   undo: { [weak self] in
+                       self?.writeEffectParameterTrack(before, parameterID: parameterID, layerID: layerID)
+                   }, redo: { [weak self] in
+                       self?.writeEffectParameterTrack(after, parameterID: parameterID, layerID: layerID)
+                   })
+        return true
+    }
+
+    /// The one mutation both directions of the undo above go through, addressing the layer by id.
+    private func writeEffectParameterTrack(_ curve: AnimationCurve?, parameterID: String, layerID: UUID) {
+        guard let index = layers.firstIndex(where: { $0.id == layerID }) else { return }
+        if let curve {
+            layers[index].effectTracks[parameterID] = curve
+        } else {
+            layers[index].effectTracks.removeValue(forKey: parameterID)
+        }
+    }
+
+    /// Roughly what one retained `AnimationCurve` costs `UndoHistory`'s byte budget.
+    ///
+    /// A key is one `Int`, five `Double`s and two small enum rawValues; 96 bytes is that with the
+    /// array's own slack rounded up, and the 64 is the dictionary entry plus the id string. The number
+    /// matters only in that it is *small*: a 40-key curve is under 4 KiB, so a session that keyframes
+    /// heavily costs the history what a couple of structural edits do, rather than what one 16 MiB
+    /// whole-cel snapshot does. `CanvasManager.approximateImageCost` is the same kind of estimate for
+    /// the other extreme, and says the same thing about precision.
+    private static func trackUndoCost(_ curve: AnimationCurve?) -> Int {
+        guard let curve else { return 0 }
+        return 64 + 96 * curve.keys.count
+    }
+
     /// Renames a layer — **the Rename action's model half, and the one place `hasCustomName` is set.**
     ///
     /// It used to be a bare `canvasManager.layers[index].name = trimmed` in the panel, which is how the

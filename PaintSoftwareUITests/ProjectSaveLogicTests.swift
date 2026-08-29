@@ -685,6 +685,67 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertFalse(reloaded.layers[1].isFillReference, "And the default was re-derived from the visibility that did")
     }
 
+    // MARK: - Keyframe tracks (KEYFRAMES.md §3.5)
+
+    /// **A keyframed effect parameter survives a real save and load, and still resolves afterwards.**
+    ///
+    /// Against a package rather than a hand-built `LayerManifest`, because the failure this guards is
+    /// a field left out of `SaveSnapshot` — which no manifest-level round trip would notice, and which
+    /// this file's header names as the first of the two properties it exists for. Every key's field is
+    /// non-default in the fixture (a hold, a non-zero handle, a `.free` tangent, a step of 2) so a
+    /// dropped one shows up as a changed value rather than as a coincidental match, and the last
+    /// assertion asks the *resolver*, not the dictionary: a track that came back but no longer drove
+    /// anything would pass a storage check and fail the artist.
+    func testAnEffectParameterTrackSurvivesASaveAndLoadAndStillResolves() throws {
+        let manager = makeManager()
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
+        let gradeIndex = try XCTUnwrap(manager.layers.firstIndex { $0.name == "Grade" })
+        let curve = AnimationCurve(keys: [
+            AnimationCurve.Key(frame: 0, value: 4, interpolation: .constant),
+            AnimationCurve.Key(frame: 6, value: 20,
+                               inHandle: .init(deltaFrames: -2, deltaValue: -3),
+                               outHandle: .init(deltaFrames: 1.5, deltaValue: 4),
+                               tangentMode: .free, interpolation: .linear),
+            AnimationCurve.Key(frame: 12, value: 9),
+        ], step: 2)
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "blur.radius", to: curve))
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+
+        let restored = try XCTUnwrap(reloaded.layers.first { $0.name == "Grade" })
+        XCTAssertEqual(restored.effectTracks["blur.radius"], curve,
+                       "Every field of every key, plus the step, came back — `AnimationCurve` is Equatable over all of it")
+        XCTAssertEqual(restored.layerEffect(atFrame: 6), .blur(Effect.Blur(radius: 20)),
+                       "And the curve still drives the grade after the round trip, which is what it is for")
+        XCTAssertEqual(restored.layerEffect(atFrame: 0), .blur(Effect.Blur(radius: 4)))
+    }
+
+    /// §3.5's field-presence versioning, checked from both ends: a document nobody has animated writes
+    /// **no `effectTracks` key at all**, so it is byte-for-byte the manifest it was before this key
+    /// existed — and a manifest with no key decodes to a layer with no tracks rather than failing.
+    ///
+    /// The empty-to-absent mapping is the half worth pinning. `Layer.effectTracks` is a non-optional
+    /// dictionary that is routinely empty; writing it verbatim would put `"effectTracks":{}` into
+    /// every layer of every document in the app, which is not a migration but is a diff.
+    func testALayerWithNoTrackWritesNoEffectTracksKeyAtAll() throws {
+        let manager = makeManager()
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+
+        let data = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
+        XCTAssertFalse(try XCTUnwrap(String(data: data, encoding: .utf8)).contains("effectTracks"),
+                       "An unanimated document writes no key — absence is what \"nothing is keyed\" is")
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        for layer in reloaded.layers {
+            XCTAssertTrue(layer.effectTracks.isEmpty, "\(layer.name): a manifest with no key decodes to no tracks")
+        }
+    }
+
     // MARK: - Compositor nodes (§4.3)
 
     /// A document containing a Mix node saves and loads as the same graph: the node's op, and its

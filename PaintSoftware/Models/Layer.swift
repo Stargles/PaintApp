@@ -72,6 +72,34 @@ struct Layer: Identifiable {
     /// prescribes. `layerEffect` below is what rendering reads — the kind is what decides whether this
     /// is live, and that decision has one home.
     var effect: Effect? = nil
+    /// **The keyframe tracks driving this layer's effect parameters** — KEYFRAMES.md §8 stage 2 —
+    /// keyed by `EffectParameter.id` and evaluated in **absolute document frames**.
+    ///
+    /// §2.4 is the ruling and §3.1 is the arithmetic behind it. An *object* channel rides a cel and is
+    /// therefore stored in cel-local frames, so it survives move, split, duplicate and paste for free.
+    /// A layer channel has no cel to ride: the grade is a property of the layer at every frame of the
+    /// document, including frames on which this layer has no block at all, so there is no `startFrame`
+    /// to be an offset from and a key's frame is the playhead's own number.
+    ///
+    /// **Keyed by the descriptor's stable string, not by a key path, a field name or an index.**
+    /// `EffectParameter.id` is documented as *the persisted address, and the one field there that must
+    /// never change*; it is already decoupled from the Swift property name in two places
+    /// (`hsvShift.hue` addresses `hueDegrees`, `blur.angle` addresses `angleDegrees`). Storing anything
+    /// else here would make a saved document depend on a rename or on the order of a `switch`.
+    ///
+    /// **Empty by default, so every existing `Layer(...)` call site and every saved manifest is
+    /// unchanged by this field arriving** — `effect`'s and `fill`'s recipe, one field over, and
+    /// `LayerManifest.effectTracks` writes no key for an empty one.
+    ///
+    /// **A track whose id is not a parameter of this layer's *current* effect is kept and ignored.**
+    /// `Effect.resolved(atFrame:through:)` walks the effect's own descriptor table and looks each
+    /// parameter up in here, so an id the current effect does not have is never consulted and cannot
+    /// be applied to something else: ids are `"<case>.<field>"`, so `blur.radius` and `bloom.radius`
+    /// are different addresses rather than one name two effects share. *Keeping* it is `valueFill`'s
+    /// asymmetry for the third time — an artist who animates a bloom, tries a blur and goes back finds
+    /// their curve where they left it, and a picker that silently destroyed it would be doing exactly
+    /// what a mode picker must not do. What that costs is one inert dictionary entry.
+    var effectTracks: [String: AnimationCurve] = [:]
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.
     ///
@@ -119,11 +147,19 @@ extension Layer {
     /// mode, which `valueFill` answers. Rendering asks this, never `kind` or `effect` on their own.
     var layerEffect: Effect? { kind == .value ? effect : nil }
 
-    /// **The grade at one frame, and the one function a later keyframe phase changes.**
+    /// **The grade at one frame — the function KEYFRAMES.md stage 2 filled in.**
     ///
-    /// Constant today — it is `layerEffect` above, with the frame ignored — and deliberately still
-    /// stated as a function of the frame, which is exactly `ValueFill.resolvedColor(atFrame:)`'s
-    /// argument one field over. The grade reaches the compositor through `RenderNode.effect`, which
+    /// It was `layerEffect` above with the frame ignored until stage 2; it is now that effect with
+    /// every keyed parameter evaluated at `frame` and written back through the descriptor table's own
+    /// lens (`Effect.resolved(atFrame:through:)`). A layer with no track still returns the stored
+    /// value untouched, by the one `guard` at the top of that method, so nothing about a document
+    /// nobody has animated moves — which is half of what
+    /// `RenderTreeCharacterizationTests` now pins, the other half being that a document somebody
+    /// *has* animated genuinely differs between two frames.
+    ///
+    /// The seam was cut one stage earlier, and the argument for cutting it early was
+    /// exactly `ValueFill.resolvedColor(atFrame:)`'s one field over. The grade reaches the
+    /// compositor through `RenderNode.effect`, which
     /// `CanvasManager.renderNodes(inContainer:atFrame:)` fills in from here; that derivation now takes
     /// the frame, so **the compositor never learns that a grade can be animated** — it receives an
     /// `Effect` like any other node's. Resolving further in (in `Compositor.draw`, or by giving
@@ -142,7 +178,17 @@ extension Layer {
     /// turn a grade *on or off* at a frame, at which point the panel questions become genuinely
     /// ambiguous rather than merely frame-free; `CanvasManager.compositorSizeGate` is the other place
     /// the same assumption is load-bearing, and it says so at length.
-    func layerEffect(atFrame frame: Int) -> Effect? { layerEffect }
+    ///
+    /// **Stage 2 did not spend that assumption, and could not have.** `effectTracks` drives parameter
+    /// *values*; presence is decided one line up by `layerEffect`, which reads `kind` and `effect` and
+    /// knows nothing about a track. The optional-chain below is the whole of the guarantee: a nil
+    /// grade resolves to nil at every frame and a non-nil one stays non-nil, because
+    /// `Effect.resolved(atFrame:through:)` takes an `Effect` and returns an `Effect` with no arm that
+    /// could return nil. Turning a grade on or off at a frame would be a *different* channel — a
+    /// presence channel — and it is that one, not this, that expires the two notes above.
+    func layerEffect(atFrame frame: Int) -> Effect? {
+        layerEffect?.resolved(atFrame: frame, through: effectTracks)
+    }
 
     /// The flat colour this layer *is*, or nil if it draws pixels or is grading instead (§4.5) — and
     /// the **only** place "is this layer a flat colour" is decided, exactly as `layerEffect` is for

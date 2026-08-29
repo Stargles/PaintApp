@@ -1636,3 +1636,94 @@ extension Effect {
         }
     }
 }
+
+// MARK: - §4.1's resolution: one effect, at one frame
+//
+// KEYFRAMES.md §8 stage 2. Stage 0 threaded the frame down to `Layer.layerEffect(atFrame:)` and
+// `LayerFolder.resolvedEffect(atFrame:)` and left both returning the stored constant; stage 1 gave
+// every parameter an address and a lens. This is the body those two were left waiting for.
+
+extension EffectParameter {
+
+    /// **Whether a `Double`-valued `AnimationCurve` may drive this parameter** — which is exactly the
+    /// scope stage 2 takes, and it is narrower than "animatable".
+    ///
+    /// `.continuous` **and** backed by a single `Double`. Three kinds are excluded, and each is
+    /// refused for a reason of its own rather than for want of time — the point of naming them here
+    /// is that a track pointed at one of them must not be quietly stored and quietly do nothing.
+    ///
+    /// * **`.stepped` (six parameters).** `posterize.levels` is an `Int`, `noise.seed` a `UInt32`,
+    ///   `blur.directional` and `noise.monochrome` `Bool`s, `posterize.screen` and `bloom.input`
+    ///   indices into an enum. A curve is `Double`-valued and would hand 2.5 to every one of them;
+    ///   the lens would round it, and the artist would get a staircase the graph editor never drew.
+    ///   Two of the six are worse than merely non-numeric — `blur.directional` rewrites the pass list
+    ///   from two entries to one and `bloom.input` decides whether the compositor performs an entire
+    ///   sub-walk — so there is no midpoint to render even in principle.
+    ///   `EffectParameterAnimation.stepped` already names what these want: evaluate, then **hold**
+    ///   until the next key. That is a channel of its own, not this one with a rounding step bolted
+    ///   on, and it is a later stage.
+    /// * **`.componentwise` (two).** `curves.points` and `gradientMap.stops` are variable-length
+    ///   lists. One curve cannot address a list at all: each element needs its own, plus the
+    ///   same-count-tweens / different-counts-hold rule the owner settled on §9 question 4. That is a
+    ///   channel *set*, and it is a later stage too.
+    /// * **`.continuous` but compound (one, and it is the trap).** `outline.color` is `.continuous`
+    ///   because four colour channels genuinely do tween — but its descriptor comes from
+    ///   `EffectCaseLens.compound`, whose `read` returns nil and whose `write` is the **identity**. A
+    ///   scalar track pointed at it would store, evaluate, write nothing and render exactly as
+    ///   before: green everywhere, wrong on screen, and nothing in the model to point at. It wants
+    ///   four curves and a decision about which colour space they interpolate in, neither of which
+    ///   falls out for free.
+    var isScalarAnimatable: Bool { animation == .continuous && value == .double }
+}
+
+extension Effect {
+
+    /// **This effect with every keyed parameter evaluated at `frame`** — KEYFRAMES.md §4.1's
+    /// `Effect.resolved(atFrame:)`, and the whole of stage 2's evaluation half.
+    ///
+    /// `tracks` is keyed by `EffectParameter.id`, and its keys are read in whatever time base the
+    /// caller's tracks use — **absolute document frames** for the layer channel §2.4 rules on, which
+    /// is the only caller today (`Layer.layerEffect(atFrame:)`). Nothing here knows or cares which;
+    /// the frame arrives already resolved, which is what will let a cel-local object channel reuse
+    /// this method unchanged.
+    ///
+    /// **The walk is over `parameters`, never over `tracks`, and all three of the properties that
+    /// matter come from that direction rather than from the other one:**
+    ///
+    ///  * **A track this effect has no parameter for is never consulted.** The artist who keyed a
+    ///    bloom's intensity and then switched the layer to a blur gets the blur they asked for, not a
+    ///    half-applied bloom, and not a crash. `Layer.effectTracks` argues why the orphaned curve is
+    ///    kept rather than deleted; this is why keeping it is safe.
+    ///  * **The order is the table's, so it is deterministic.** A dictionary's is not, and while no
+    ///    two descriptors in one effect write the same field today, "it happens not to matter" is not
+    ///    a property worth resting on.
+    ///  * **The refusal above lives in one place.** Every write site could otherwise store a track
+    ///    that renders as nothing, and each would have to remember not to.
+    ///
+    /// **Presence is never touched, and that is load-bearing rather than incidental.** This takes an
+    /// `Effect` and returns an `Effect`; there is no arm that returns nil. So a track can change what
+    /// a grade *does* at a frame and can never change whether there *is* one — which is precisely
+    /// what `CanvasManager.compositorSizeGate` and the panel-versus-rendering division in
+    /// `Layer.layerEffect(atFrame:)` each rest on, at length, and each say expires the day a track can
+    /// turn an effect on or off. Stage 2 did not spend either.
+    ///
+    /// **The empty-`tracks` guard is not merely an optimisation.** `parameters` builds its descriptor
+    /// list — thirty-three closures at the largest — on every call, and this method is reached once
+    /// per graded layer per tree derivation, which is several times a frame. The overwhelming
+    /// majority of documents have no track at all, and for those this is one dictionary
+    /// `isEmpty` and a return.
+    func resolved(atFrame frame: Int, through tracks: [String: AnimationCurve]) -> Effect {
+        guard !tracks.isEmpty else { return self }
+        var resolved = self
+        for parameter in parameters {
+            guard parameter.isScalarAnimatable,
+                  let curve = tracks[parameter.id], !curve.isEmpty else { continue }
+            // `evaluate` holds flat outside the outermost keys (`AnimationCurve` decision 2), so a
+            // frame before the first key or after the last is that key's value rather than an
+            // extrapolation — which is what makes a layer channel safe to ask at *any* document
+            // frame, including ones this layer has no cel on.
+            resolved = parameter.write(resolved, curve.evaluate(at: Double(frame)))
+        }
+        return resolved
+    }
+}

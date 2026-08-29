@@ -275,6 +275,22 @@ struct LayerManifest: Codable {
     /// unconditionally by `init(from:)` below regardless of `kind`, and non-nil on a `.value` layer
     /// now *means* effect mode — so remapping the kind string is the only thing left to do.
     var effect: Effect? = nil
+    /// `Layer.effectTracks` — KEYFRAMES.md §3.5's layer-scoped tracks, **written only when there are
+    /// any**, keyed by `EffectParameter.id` and in absolute document frames.
+    ///
+    /// Optional here where the model's is a plain (possibly empty) dictionary, and the two shapes are
+    /// answering different questions. In the model "no tracks" and "an empty dictionary of tracks" are
+    /// the same state and there is no third one to distinguish, so a non-optional field with an empty
+    /// default keeps every `Layer(...)` call site unchanged. On disk the question is whether to write
+    /// a key at all: §3.5's idiom is that the format is versioned **by field presence**, so a document
+    /// with nothing animated must be byte-for-byte the manifest it was before this key existed, and
+    /// `{"effectTracks":{}}` would not be. `ProjectStore` maps empty to nil on the way out and the
+    /// synthesized encoder then omits it, exactly as `alphaMask`, `effect` and `fill` are omitted.
+    ///
+    /// Absence is the whole migration this field needs, in both directions: it is what every project
+    /// saved before keyframes says, and an older build reading a manifest that *does* carry it ignores
+    /// the unknown key and opens the document with its grades static.
+    var effectTracks: [String: AnimationCurve]? = nil
     /// A `.value` layer's flat colour (§4.5), written only when there is one — `ValueFill`'s
     /// persistence note settles the recipe, and it is `effect`'s and `alphaMask`'s: nil is what every
     /// project saved before value layers existed says, so absence is the whole migration this field
@@ -290,7 +306,8 @@ struct LayerManifest: Codable {
     init(id: UUID, name: String, hasCustomName: Bool = false, opacity: Double, isVisible: Bool,
          kind: LayerKind = .raster,
          parentFolderID: String? = nil, blendMode: BlendMode = .normal,
-         alphaMask: AlphaMask? = nil, effect: Effect? = nil, fill: ValueFill? = nil,
+         alphaMask: AlphaMask? = nil, effect: Effect? = nil,
+         effectTracks: [String: AnimationCurve]? = nil, fill: ValueFill? = nil,
          fillReferenceOverride: Bool? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
@@ -302,6 +319,7 @@ struct LayerManifest: Codable {
         self.blendMode = blendMode
         self.alphaMask = alphaMask
         self.effect = effect
+        self.effectTracks = effectTracks
         self.fill = fill
         self.fillReferenceOverride = fillReferenceOverride
         self.cels = cels
@@ -325,13 +343,14 @@ struct LayerManifest: Codable {
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
+        effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
         fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
         fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask
-        case effect, fill, fillReferenceOverride, cels
+        case effect, effectTracks, fill, fillReferenceOverride, cels
     }
 }
 

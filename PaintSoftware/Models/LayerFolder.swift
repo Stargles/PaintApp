@@ -188,11 +188,25 @@ extension LayerFolder {
         return count
     }
 
-    /// **The grade at one frame, and the one function a later keyframe phase changes** — the folder
-    /// half of `Layer.layerEffect(atFrame:)`, and `ValueFill.resolvedColor(atFrame:)`'s argument for
-    /// the third time.
+    /// **The grade at one frame** — the folder half of `Layer.layerEffect(atFrame:)`, and
+    /// `ValueFill.resolvedColor(atFrame:)`'s argument for the third time.
     ///
-    /// Constant today: it is the `effect` field above, with the frame ignored. Stated as a function of
+    /// **Still constant after KEYFRAMES.md stage 2, and that is an unanswered question rather than an
+    /// oversight.** The layer half of this pair now resolves a keyframe track; this one deliberately
+    /// does not, because §2.4's ruling says keys live *on the layer* and a folder is a second home the
+    /// owner has not been asked about. The question is filed as **KEYFRAMES.md §9 open question 3**,
+    /// in the two words it is owed: either a folder effect gets the same track, or folder effects are
+    /// declared un-animatable **in writing**. Nothing here should guess, because both answers are
+    /// cheap now and only one of them is cheap once keys are on disk — a folder track invented here
+    /// and later withdrawn is a decode path we would have to keep forever.
+    ///
+    /// Adding one, when it is ruled on, is small and this file is where it lands: `LayerFolder` grows
+    /// an `effectTracks` beside `effect` exactly as `Layer` did, `FolderManifest` grows the optional
+    /// key, and the body below becomes the same one-line optional chain through
+    /// `Effect.resolved(atFrame:through:)`. The seam that made *that* cheap is the one below, and it
+    /// is why it stays a function of the frame while returning a constant.
+    ///
+    /// It is the `effect` field above, with the frame ignored. Stated as a function of
     /// the frame anyway, because the grade reaches the compositor through `RenderNode.effect` and
     /// `CanvasManager.renderNodes(inContainer:atFrame:)` is the last place the frame is in scope
     /// before it gets there. Resolving further in — in `Compositor.fold`, or by giving `RenderNode` a

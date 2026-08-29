@@ -173,6 +173,12 @@ enum ProjectStore {
             /// A `.value` layer's grade — §4.4's effect mode. A value type, so unlike `vector` it
             /// needs no defensive copy to be safe to encode off main.
             let effect: Effect?
+            /// `Layer.effectTracks` — KEYFRAMES.md stage 2's keyframe tracks on that grade. A value
+            /// type all the way down, so like `effect` it needs no defensive copy to be safe to
+            /// encode off main. Snapshotted whole and unconditionally; deciding whether to *write* a
+            /// key is `writePackage`'s job one level down, for the reason `LayerManifest.effectTracks`
+            /// gives.
+            let effectTracks: [String: AnimationCurve]
             /// A `.value` layer's flat colour — §4.5's other mode. A value type, for `effect`'s
             /// reason. Both are snapshotted unconditionally: the mode is which one is *live*, and a
             /// layer in effect mode still carries the colour it will go back to (`Layer.valueFill`).
@@ -252,7 +258,8 @@ enum ProjectStore {
                              opacity: layer.opacity,
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
-                             alphaMask: layer.alphaMask, effect: layer.effect, fill: layer.fill,
+                             alphaMask: layer.alphaMask, effect: layer.effect,
+                             effectTracks: layer.effectTracks, fill: layer.fill,
                              fillReferenceOverride: layer.fillReferenceOverride,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
@@ -673,6 +680,10 @@ enum ProjectStore {
                 blendMode: layer.blendMode,
                 alphaMask: layer.alphaMask,
                 effect: layer.effect,
+                // Empty maps to absent, which is the whole of §3.5's field-presence versioning here:
+                // a document nobody has animated writes no `effectTracks` key and stays byte-for-byte
+                // the manifest it was. See `LayerManifest.effectTracks`.
+                effectTracks: layer.effectTracks.isEmpty ? nil : layer.effectTracks,
                 fill: layer.fill,
                 fillReferenceOverride: layer.fillReferenceOverride,
                 cels: celManifests
@@ -1311,6 +1322,7 @@ enum ProjectStore {
                 fillReferenceOverride: layerManifest.fillReferenceOverride,
                 kind: layerManifest.kind,
                 effect: layerManifest.effect,
+                effectTracks: layerManifest.effectTracks ?? [:],
                 fill: layerManifest.fill,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,

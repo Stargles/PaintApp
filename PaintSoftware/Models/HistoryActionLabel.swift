@@ -67,6 +67,12 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// A value layer's grade changing, including the live drag of one of its parameters
     /// (`setLayerEffect`, and the panel's `commitStructureGesture(label: .valueLayerEffect)`).
     case valueLayerEffect
+    /// One keyframe track on one effect parameter being written, replaced or removed
+    /// (`setEffectParameterTrack`) — KEYFRAMES.md stage 2. Named apart from `.valueLayerEffect`
+    /// because the two are different things to want back: that one is the grade the artist picked,
+    /// this one is the animation on it, and an artist who deletes a curve by mistake reads "undo
+    /// adjust layer effect" as the wrong thing having gone.
+    case effectKeyframes
     case renameLayer
     case deleteLayer
     case fillReference
@@ -168,6 +174,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addEffectLayer: return "add effect layer"
         case .valueLayerColor: return "change layer colour"
         case .valueLayerEffect: return "adjust layer effect"
+        case .effectKeyframes: return "edit effect keyframes"
         case .renameLayer: return "rename layer"
         case .deleteLayer: return "delete layer"
         case .fillReference: return "fill reference"

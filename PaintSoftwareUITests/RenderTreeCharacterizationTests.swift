@@ -605,31 +605,107 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         assertRenderTreeMatchesFlatOrder(manager)
     }
 
-    // MARK: - The keyframe seam (stage 1)
+    // MARK: - The keyframe seam (stages 1 and 2)
 
-    /// **The pin that keyframe stage 1 changed nothing, and the test a later stage is supposed to
-    /// break.**
+    /// **The two-sided claim that replaced stage 1's one-sided pin, and this half is the survivor.**
     ///
-    /// `renderTree` became `renderTree(atFrame:)` so that a layer's grade could one day be resolved
-    /// as a function of the playhead — `Layer.layerEffect(atFrame:)` and
-    /// `LayerFolder.resolvedEffect(atFrame:)` are where that resolution will happen, and today both
-    /// return the stored constant and ignore their argument. So the whole derivation is currently
-    /// frame-invariant, and this asserts exactly that: same document, four different frames, one
-    /// `[RenderNode]`.
+    /// `renderTree` became `renderTree(atFrame:)` in stage 0 so a layer's grade could be resolved as a
+    /// function of the playhead. Until stage 2 landed, `Layer.layerEffect(atFrame:)` and
+    /// `LayerFolder.resolvedEffect(atFrame:)` both returned the stored constant and ignored their
+    /// argument, so the derivation was frame-invariant *unconditionally* and this test asserted that,
+    /// with a doc comment saying that whoever broke it should replace it with the two-sided claim
+    /// rather than delete it. That is what happened; this is the "and nowhere else" half and
+    /// `testATrackedParameterMakesTheTreeDifferBetweenTwoFrames` below is the other.
     ///
-    /// **When this test fails, stage 2 has landed.** That is its purpose and it is not a regression:
-    /// the moment a grade reads a keyframe track, a tree derived at frame 0 and one derived at frame 7
-    /// stop being equal, and this assertion is the signal that the seam went live. Whoever breaks it
-    /// should replace it with the two-sided claim — that the tree varies *where the track says* and
-    /// nowhere else — rather than deleting it.
+    /// **The claim now: a document with no keyframe track derives one tree at every frame.** That is
+    /// not a weaker statement than the old one for the documents it covers — it is the same statement,
+    /// with the condition that used to be universal now made explicit. It is what makes every other
+    /// fixture in this file, and every existing cache in the app, behave for an unanimated document
+    /// exactly as it did before stage 2.
     ///
-    /// The fixture is deliberately more than the minimum. It exercises **both** new accessors — a
+    /// The fixture is deliberately more than the minimum. It exercises **both** accessors — a
     /// `.value` layer in effect mode for `layerEffect(atFrame:)` on the leaf, a folder carrying a node
     /// effect for `resolvedEffect(atFrame:)` on the node — and gives the floor a block only at frames
     /// 6–9, so frames 0 and 7 are genuinely different frames of a genuinely animated document and
     /// frame 400 is past the end of it. That the tree consults no cel at all is the other half of what
     /// makes it invariant, and is worth having a fixture prove rather than a comment claim.
-    func testTheTreeIsTheSameAtEveryFrame() {
+    func testTheTreeIsTheSameAtEveryFrameForADocumentWithNoTrack() {
+        let manager = gradedFixture()
+
+        let trees = [0, 7, 9, 400].map { (frame: $0, tree: manager.renderTree(atFrame: $0)) }
+        XCTAssertFalse(trees[0].tree.isEmpty, "Fixture premise: there is a tree to compare")
+        XCTAssertTrue(trees[0].tree.contains { $0.effect != nil } || trees[0].tree.contains { node in
+            if case .node(_, let inputs) = node.content { return inputs.flatMap { $0 }.contains { $0.effect != nil } }
+            return false
+        }, "Fixture premise: something in this tree carries a grade, or the pin is vacuous")
+        XCTAssertTrue(manager.layers.allSatisfy { $0.effectTracks.isEmpty },
+                      "Fixture premise: and nothing in it is animated, which is what this half is about")
+
+        for candidate in trees.dropFirst() {
+            XCTAssertEqual(candidate.tree, trees[0].tree,
+                           "With no track the derivation is frame-invariant: frame \(candidate.frame) must equal frame 0")
+        }
+        XCTAssertEqual(manager.renderLeafOrder(atFrame: 400), manager.renderLeafOrder(atFrame: 0),
+                       "And so is the leaf order it is read through — no track moves a layer between containers")
+    }
+
+    /// **The other half: with a track, it genuinely differs — and that is the signal stage 2 landed.**
+    ///
+    /// One curve on one parameter of the value layer's grade, and two frames of the same document
+    /// derive two different `[RenderNode]`s, because `RenderNode.effect` carries the *resolved* grade
+    /// and `RenderNode` is `Equatable` over it. That is the whole of KEYFRAMES.md §4.1's claim that
+    /// invalidation needs no new plumbing; `EffectParameterTrackLogicTests` is where the caches that
+    /// rest on it are checked rather than trusted.
+    ///
+    /// **Only the animated node moves.** The leaf order, the shape, and every other node are the ones
+    /// they were — a track changes a value inside one node and nothing structural, which is what makes
+    /// the frame-varying tree safe for every derivation in this file that reads shape.
+    func testATrackedParameterMakesTheTreeDifferBetweenTwoFrames() {
+        let manager = gradedFixture()
+        guard let gradeIndex = manager.layers.firstIndex(where: { $0.name == "Grade" }) else {
+            return XCTFail("Fixture premise: the value layer is in the stack")
+        }
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "blur.radius",
+                                                      to: AnimationCurve(keys: [
+                                                        .init(frame: 0, value: 4, interpolation: .linear),
+                                                        .init(frame: 8, value: 32, interpolation: .linear),
+                                                      ])),
+                      "Fixture premise: the blur's radius takes a track")
+
+        let gradeID = manager.layers[gradeIndex].id
+        let atZero = manager.renderTree(atFrame: 0)
+        let atEight = manager.renderTree(atFrame: 8)
+        XCTAssertNotEqual(atEight, atZero,
+                          "A keyed grade is a different grade at a different frame, and the tree carries it")
+        XCTAssertEqual(node(gradeID, in: atZero)?.effect, .blur(Effect.Blur(radius: 4)),
+                       "Frame 0 is the first key's value")
+        XCTAssertEqual(node(gradeID, in: atEight)?.effect, .blur(Effect.Blur(radius: 32)),
+                       "Frame 8 is the last key's")
+
+        XCTAssertEqual(manager.renderLeafOrder(atFrame: 8), manager.renderLeafOrder(atFrame: 0),
+                       "Nothing structural moved: a parameter track changes a value inside one node")
+        XCTAssertEqual(zip(flattened(atZero), flattened(atEight)).filter { $0.effect != $1.effect }.map(\.0.id),
+                       [gradeID],
+                       "And exactly one node's grade differs — the one carrying the track")
+        assertRenderTreeMatchesFlatOrder(manager)
+    }
+
+    /// Every node in the tree, depth first, node before its contents — the walk `renderRows` above
+    /// makes for names, made here for the nodes themselves.
+    private func flattened(_ nodes: [RenderNode]) -> [RenderNode] {
+        nodes.flatMap { node -> [RenderNode] in
+            guard case .node(_, let inputs) = node.content else { return [node] }
+            return [node] + inputs.flatMap { flattened($0) }
+        }
+    }
+
+    private func node(_ id: UUID, in tree: [RenderNode]) -> RenderNode? {
+        flattened(tree).first { $0.id == id }
+    }
+
+    /// The document both halves above are asserted against: a floor with a block only at 6–9, a folder
+    /// carrying a node effect, and a `.value` layer in effect mode named "Grade".
+    private func gradedFixture() -> CanvasManager {
         let manager = namedManager(["Floor", "Ink"])
         // The floor holds ink only in the middle of the scene, so "frame 0" and "frame 7" are not two
         // names for the same document.
@@ -641,19 +717,6 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.restackLayer(manager.layers[1].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2)))
         manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
-
-        let trees = [0, 7, 9, 400].map { (frame: $0, tree: manager.renderTree(atFrame: $0)) }
-        XCTAssertFalse(trees[0].tree.isEmpty, "Fixture premise: there is a tree to compare")
-        XCTAssertTrue(trees[0].tree.contains { $0.effect != nil } || trees[0].tree.contains { node in
-            if case .node(_, let inputs) = node.content { return inputs.flatMap { $0 }.contains { $0.effect != nil } }
-            return false
-        }, "Fixture premise: something in this tree carries a grade, or the pin is vacuous")
-
-        for candidate in trees.dropFirst() {
-            XCTAssertEqual(candidate.tree, trees[0].tree,
-                           "The derivation is frame-invariant: frame \(candidate.frame) must equal frame 0")
-        }
-        XCTAssertEqual(manager.renderLeafOrder(atFrame: 400), manager.renderLeafOrder(atFrame: 0),
-                       "And so is the leaf order it is read through")
+        return manager
     }
 }
