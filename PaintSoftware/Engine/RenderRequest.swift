@@ -779,7 +779,7 @@ extension CanvasManager {
     /// The slider writes `recipe.t` on every tick, so with the derivation in the key every tick is a
     /// new key: one full-quality ARAP evaluation and three canvas-sized composites per tick, against a
     /// drag the artist expects to track their finger. MEASURED at the owner's 2048x1024 canvas
-    /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §14), a
+    /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §7), a
     /// rebuild on an in-between frame is far outside a frame budget, and the drag is the one moment
     /// the artist is looking at the in-between rather than at the picture around it. So the compositor
     /// comes off for the *drag* and is back the instant it commits — which is what the two clauses

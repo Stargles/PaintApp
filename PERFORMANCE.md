@@ -1515,6 +1515,13 @@ right budget, and trimming to half (~6) on a memory warning is the right respons
 now, not guesses wearing constants' clothes — see item 13. What is left open is only the empirical
 question of whether a real session ever gets near either number, which no longer gates anything.
 
+**Is an in-between frame's 1.86× still acceptable on the device, in Release?** §7 measured the cost
+of engaging the compositor on in-betweens at the owner's canvas and shipped it, on the argument that
+the extra frames join a bill the document was already paying. Every figure there is a Debug
+simulator. *The measurement*: the owner scrubs across a span of in-betweens on a document with a
+blend mode or an adjustment layer, in a Release build on their iPad, and says whether it tracks.
+The same run also settles whether §7's double evaluation is worth closing.
+
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
 before backgrounding, on the device.
@@ -1533,3 +1540,71 @@ And whether iOS's memory compressor absorbs cold cel residency — a mostly-tran
 long runs of zeros, every figure in this document was taken where nothing was ever compressed, and
 this is the one term that could move the answer by a factor rather than a percentage.
 
+
+---
+
+## 7. What engaging the compositor on an in-between costs (2026-08-29)
+
+Until this date `isSandwichEngaged` refused whenever any layer's active cel carried an interpolation
+recipe, so the artist's blend modes, effects and §6.4 mask clipping were silently off on every
+in-between frame (KEYFRAMES.md §10). `renderSources` hands every flatten its `DerivedCelContent` as
+of `531cb0a`, so the composite contains in-betweens and the refusal has nothing left to protect —
+but taking it out means the live canvas now composites on frames it used to skip, **and every one of
+those frames also evaluates a derivation**. This is that cost, measured before shipping the removal.
+
+**MEASURED 2026-08-29**, `PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, iPad
+Pro 13-inch (M4) **simulator**, Debug, `Compositor.backend == .automatic`, canvas **2048×1024** (§1 —
+the owner's, not this file's default 2048²), three layers with one `.multiply`, a cold forward scrub
+across six distinct in-between cels, `rasterizeCache` cleared before each arm. Machine at 61% idle
+with no other `xcodebuild` running (§6's contention rule). Three consecutive runs, median quoted;
+spread across the three was under 4% on every figure.
+
+| per frame of the scrub | ms | what it is |
+|---|---|---|
+| in-between frame, **before** | **24.5** | one ARAP evaluation for the layer host. The compositor was refused, so this was all of it |
+| ordinary frame of the same document | 53.8 | the sandwich as it already runs today — snapshot plus three composites, no derivation |
+| in-between frame, sandwich only | 74.2 | …plus the composite's own evaluation of the in-between (+20.4) |
+| in-between frame, **after** | **100.2** | …plus the layer host's evaluation of the *same* in-between, a second time (+26.0) |
+
+**The change costs +75.7 ms per in-between frame, and makes an in-between frame 1.86× an ordinary
+frame of the same document.** That is the number the decision rests on, and the framing that matters
+is the middle row: this is not a new class of cost appearing on a cheap document, it is frames
+joining a bill the document was already paying everywhere else. A document with no blend, effect,
+mask or node never engages at all and is untouched (`needsCompositorOnCanvas`, still the first
+clause). Simulator Debug figures — the device runs ~1.3× the simulator (§1) but Release is a
+different order on this path, so treat the **ratio** as the transferable part and none of the
+absolutes as device numbers.
+
+**The `t` slider is the one interaction this could not absorb, and it gets a clause instead of a
+budget.** `setInterpolationT` writes `recipe.t` on every tick of the drag, and the derivation is in
+`SandwichKey` now, so every tick would be a fresh 100 ms. `sandwichEngagesOnCanvas` disengages while
+`isScrubbingInterpolation` — a **gesture** clause, like the two it sits beside (a floating Move piece,
+a lasso move's latched piece), rather than the frame clause it replaced. The artist loses the blend
+on the drag and has it back on commit; the drag is the one moment they are looking at the in-between
+rather than at the picture around it.
+
+### Found and not fixed: the in-between is evaluated twice per frame
+
+The fourth row costs 26.0 ms more than the third for one reason: `updateInterpolationPreviews`
+renders the derivation for the layer host, and `PixelOps.rasterize` renders **the same derivation
+again** for the snapshot. Two memos, two entry points, one ARAP solve done twice — worth ~26% of the
+after-cost. Neither memo is wrong; they are keyed on different things (`InterpolationPreviewKey` on
+the identity, `RasterizeKey` on cel-plus-identity-plus-quality) and neither can serve the other's
+question as it stands.
+
+Two ways out, neither taken here. **(a)** Skip the host render while the sandwich has the host
+blanked — cheap, but it couples `updateInterpolationPreviews` to sandwich state and has to survive
+the window `updateSandwich` calls "trap 1", where the hosts are deliberately *not* yet blanked.
+**(b)** Memoize `DerivedCelContent.render` itself, which is where both callers meet — structurally
+the better answer, and a new canvas-sized image cache with its own memory story, which
+`CelContentProvider` deliberately left out ("called only on a memo miss, which is why it is a thunk").
+KEYFRAMES §4.6's span-scoped disk-backed cache is the same machinery asked for by a different
+feature, so this probably wants doing there rather than twice.
+
+### The per-pass term, which is small
+
+`makeSandwichKey` now resolves a derivation for every layer on every SwiftUI pass, and `SandwichKey`'s
+`!=` compares the identities it built — including each motion group's fitted lattices, which are
+vertex arrays sized by the drawing rather than by the canvas. Build plus equal-comparison, which is
+what a pass on which nothing changed costs: **0.046 ms** (MEASURED, same run, `keyPerSwiftUIPass`).
+Recorded rather than optimised; it is two orders below the rebuild it gates.

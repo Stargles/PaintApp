@@ -94,16 +94,20 @@ Things that are cheap to break and expensive to relearn.
 10. **A guide's constraint is chord-relative** (`chordDeviation`), which is why the endpoint
     invariant survives — and why a guide drawn in an empty corner works as well as one drawn over the
     character (§4 item 46).
-11. **`InterpolationPreviewKey` must carry every input the evaluation reads.** It has bitten three
-    times; the last was a local edit, which lives on the `Cel` while every version in the key belongs
-    to a `VectorCanvas` the edit never touches. **There are now three such keys**, because the
-    `ContentProvider` seam gave the same evaluation to `PixelOps.RasterizeKey`, `LayerContentVersion`
-    and `OnionSkinRasterCache.Key` — all three carry `DerivedCelContent.identity`, which is minted
-    beside the closure whose inputs it enumerates so the two cannot drift. That identity is a
-    **superset** of the preview key: it also carries `mode`, `spacing` and the groups' fitted
-    lattices, which the preview key omits and gets away with only because today's UI happens to move
-    a reference cel's `version` whenever it moves one of them. Replacing the preview key's field list
-    with the identity is the obvious tidy-up and was deliberately not done in the same pass.
+11. **`DerivedCelContent.identity` must carry every input the evaluation reads — and it is now the
+    only list that has to.** The rule bit three times as `InterpolationPreviewKey`, a hand-maintained
+    field list in `CanvasView` enumerating dependencies that live in `CanvasManager`; the last was a
+    local edit, which lives on the `Cel` while every version in that key belonged to a `VectorCanvas`
+    the edit never touches. **Four caches key on the evaluation now** — `PixelOps.RasterizeKey`,
+    `LayerContentVersion`, `OnionSkinRasterCache.Key` and the preview — and as of 2026-08-29 all four
+    carry the identity, which is minted beside the closure whose inputs it enumerates so the two
+    cannot drift. The preview key is the identity plus the render quality and nothing else. When it
+    was replaced its own list was **still** three fields short (`mode`, `spacing`, the groups' fitted
+    lattices) plus a fourth nobody had named — `.reproject`'s subject version, which is that mode's
+    entire content — and it had got away with all four only because today's UI happens to move a
+    reference cel's `version` alongside. `CelContentProviderLogicTests`'
+    `testEveryEvaluationInputMovesTheDerivationIdentity` sweeps one mutation per field and is what
+    fails when the next one is missed.
 12. **Experiment before believing a fix.** `Engine/Deform` compiles standalone with `swiftc` (~5 s a
     loop vs ~90 s through `xcodebuild test`); one session refuted three plausible fixes that way, one
     of which the literature positively recommended.

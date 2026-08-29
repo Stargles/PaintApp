@@ -1241,6 +1241,13 @@ extension CanvasManager {
     /// call through `derivedCelContent`, so the live canvas's in-between and the one a thumbnail,
     /// onion skin or export flattens are the same pixels by construction rather than by two call
     /// sites happening to pass the same arguments.
+    ///
+    /// **It has no caller in the app as of 2026-08-29** — `updateInterpolationPreviews` used to be
+    /// the one, and now keys on the derivation and renders the one it is already holding rather than
+    /// resolving a second from these ids. Kept because `at:` is the only way to evaluate an override
+    /// `t` by cel id, which is the shape a live scrub wants, and because the interpolation tests
+    /// address cels that way. A reader looking for what draws the canvas's in-between wants
+    /// `derivedCelContent`, not this.
     func interpolatedImage(forCel celID: UUID, inLayer layerID: UUID, at t: CGFloat? = nil,
                            quality: RenderQuality = .full) -> UIImage? {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return nil }

@@ -4883,6 +4883,24 @@ final class PerfBaselineTests: XCTestCase {
             }
         }
 
+        // The per-SwiftUI-pass term this change adds, which is a different shape from the two above:
+        // `makeSandwichKey` resolves a derivation for every layer on every pass, and `SandwichKey`'s
+        // `!=` then compares the identities it built — including each motion group's fitted lattices,
+        // which are vertex arrays the size of the drawing. One build plus one equal-comparison is the
+        // cost of a pass on which *nothing changed*, which is almost all of them.
+        let idle = try document()
+        idle.currentFrame = 3
+        let passes = 200
+        let perPass = measuringPeakMemory {
+            for _ in 0..<passes {
+                autoreleasepool {
+                    let a = idle.layers.indices.map { idle.contentVersion(ofLayer: $0, atFrame: 3) }
+                    let b = idle.layers.indices.map { idle.contentVersion(ofLayer: $0, atFrame: 3) }
+                    XCTAssertEqual(a, b)
+                }
+            }
+        }
+
         report("engaging the compositor on a span of in-betweens, 2048x1024", [
             ("backend", "\(Compositor.backend)"),
             ("spanLength", "\(spanLength)"),
@@ -4897,6 +4915,7 @@ final class PerfBaselineTests: XCTestCase {
             ("sandwichAlonePerFrame", milliseconds(sandwichAlone.seconds / Double(spanLength))),
             ("ordinaryFrameSandwich", milliseconds(ordinary.seconds)),
             ("ordinaryFrameSandwichPerFrame", milliseconds(ordinary.seconds / Double(spanLength))),
+            ("keyPerSwiftUIPass", preciseMilliseconds(perPass.seconds / Double(passes))),
             ("evalOnlyPeak", megabytes(evalOnly.peakBytes)),
             ("evalAndSandwichPeak", megabytes(evalAndSandwich.peakBytes)),
         ])

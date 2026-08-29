@@ -742,17 +742,30 @@ cache entry per frame of a held cel).
 
 ## 10. Traps inherited from elsewhere
 
-- **`InterpolationPreviewKey` must carry every input the evaluation reads** (`Views/CanvasView.swift:2116-2135`).
+- **The evaluation's input list is `InterpolatedCelIdentity`, and it is now the only one.**
   VECTOR_INTERPOLATION settled fact 11: *"It has bitten three times."* Omission is silent — the canvas
-  shows a stale frame forever. **But the rule is narrower than it sounds, and stage 2 established
-  where the line is**: that key covers the in-between *drawing* evaluation — lattice and ARAP over
+  shows a stale frame forever. As of 2026-08-29 `CanvasView.InterpolationPreviewKey` has **no field
+  list of its own**: it is `DerivedCelContent.identity` plus the render quality, and that identity is
+  minted from the same locals as the render thunk, so there is one list rather than two and they
+  cannot drift. Adding an input to the evaluation means adding it to `InterpolatedCelIdentity`, in
+  `CanvasManager.derivedCelContent`, twenty lines from the code that reads it;
+  `CelContentProviderLogicTests.testEveryEvaluationInputMovesTheDerivationIdentity` is the sweep that
+  fails when one is missed. **But the rule is narrower than it sounds, and stage 2 established where
+  the line is**: that identity covers the in-between *drawing* evaluation — lattice and ARAP over
   vector geometry — so it binds **object** channels, which feed the evaluator. A layer-scoped grade is
   applied at composite time through `RenderNode.effect` and is not an input to it, so stage 2 owed the
   key nothing. Ask which side a new channel falls on rather than adding a field reflexively.
-- **The compositor comes off the live canvas whenever an in-between is under the playhead.**
-  `isSandwichEngaged` (`CanvasView.swift:1021-1030`) returns false if *any* layer's active cel carries a
-  recipe, so blend modes, effects and masks fall back to Core Animation for that frame. An effect
-  parameter animated near an interpolated cel is authored against a path where effects are off.
+- ~~**The compositor comes off the live canvas whenever an in-between is under the playhead.**~~
+  **Fixed 2026-08-29.** `isSandwichEngaged` used to return false if *any* layer's active cel carried a
+  recipe, so blend modes, effects and mask clipping fell back to Core Animation for that frame, and an
+  effect parameter animated near an interpolated cel was authored against a path where effects are
+  off. The predicate is `CanvasManager.sandwichEngagesOnCanvas(tree:)` now and engages on in-betweens;
+  what replaced the clause is a **gesture** one, `isScrubbingInterpolation`, because the `t` slider
+  writes per tick. **Removing it needed a second change and that is the part worth remembering**:
+  `SandwichKey`'s content versions carried no derivation, and `t` moves no version number, so the
+  canvas would have engaged on an in-between and frozen on the first one it composited — §4.5's
+  invisible failure, reached from a third door. Cost, MEASURED 2026-08-29 at 2048×1024: see
+  PERFORMANCE.md §7.
 - **0.8 s matches nothing that ships.** Every long-press in the app is 0.5 s (row and block reorder) or
   0.0 s (tool touch-down). It must be a real gesture recognizer — not a `.contextMenu`, which absorbs the
   whole touch, and never `UIDragInteraction`, which **XCUITest cannot drive at all** (verified;

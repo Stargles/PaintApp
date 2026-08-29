@@ -981,8 +981,8 @@ struct CanvasView: UIViewRepresentable {
         /// **The predicate itself is `CanvasManager.sandwichEngagesOnCanvas(tree:)`** — every input to
         /// it is document state, and a `UIViewRepresentable` coordinator cannot be driven headlessly,
         /// so it lives beside `makeSandwichRequests` where `SandwichLogicTests` can reach it. That is
-        /// also where the three clauses and the 2026-08-29 removal of the in-between one are written
-        /// down. Nothing but the call is left here.
+        /// also where its clauses, and the 2026-08-29 removal of the in-between one, are written down.
+        /// Nothing but the call is left here.
         ///
         /// **The price of disengaging is more than the blend mode**, which is worth knowing at the
         /// call site: `updateSandwich`'s disengage branch also calls `host.setContentMask(nil)`, so
@@ -1352,8 +1352,13 @@ struct CanvasView: UIViewRepresentable {
 
         /// What §5.2's three cached composites depend on — everything *except* the live stroke.
         ///
-        /// Modelled on `InterpolationPreviewKey` above, and the same rule governs what may be in it:
-        /// every evaluation input, and nothing that moves per dab. The derived tree carries every
+        /// The same rule governs what may be in it as governs `InterpolationPreviewKey` above: every
+        /// evaluation input, and nothing that moves per dab. **It is no longer *modelled* on that key,
+        /// which as of 2026-08-29 has no field list to model** — it is `DerivedCelContent.identity`
+        /// plus a quality. This one still enumerates by hand, because a composite's inputs are the
+        /// tree and the document rather than one derivation; what it does not enumerate by hand any
+        /// more is `contents`, which comes from `CanvasManager.contentVersion(ofLayer:atFrame:)` so
+        /// that it and `renderSources` cannot be short different fields. The derived tree carries every
         /// structural and group property already (`[RenderNode]` is `Equatable`), so it is most of
         /// the key on its own; the frame and the per-layer content versions are what it does not
         /// carry, and the active index is what decides *where the tree is cut*.
@@ -2139,13 +2144,25 @@ struct CanvasView: UIViewRepresentable {
                     continue
                 }
                 let cel = layer.cels[celIndex]
+                guard cel.interpolation != nil else {
+                    // No recipe here, so this cel is a keyframe or ordinary drawing; the same seam
+                    // carries the tinted motion-group overlay for it instead. Asked of the recipe
+                    // rather than of the derivation below, which also answers nil for a document with
+                    // no canvas size — that is a cel with nothing to *render*, not a cel with nothing
+                    // to *derive*, and it must not be handed to the overlay arm.
+                    updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
+                    continue
+                }
                 // **The derivation is resolved before the key, and it is what the key is made of** —
-                // see `InterpolationPreviewKey`. Nil is "this cel shows what it stores", which for
-                // this loop means a keyframe or an ordinary drawing, so the tinted motion-group
-                // overlay takes the same seam instead.
+                // see `InterpolationPreviewKey`.
                 guard let derived = canvasManager.derivedCelContent(for: cel,
                                                                     atFrame: canvasManager.currentFrame) else {
-                    updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
+                    // `interpolatedImage` answered nil here too, and the seam's contract is that nil
+                    // means "not yet" rather than "empty" — a recipe can be malformed while a
+                    // reference is being re-picked — so the cel falls back to what it stores rather
+                    // than keeping a stale in-between on screen.
+                    interpolationPreviewKeys.removeValue(forKey: layer.id)
+                    host.strokeView.setInterpolationImage(nil)
                     continue
                 }
                 let key = InterpolationPreviewKey(identity: derived.identity,
