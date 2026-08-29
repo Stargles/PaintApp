@@ -1173,3 +1173,466 @@ extension Effect.Outline: Codable {
         threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 0.5
     }
 }
+
+// MARK: - The parameter table
+//
+// **KEYFRAMES.md §8 stage 1.** Until this table existed nothing in the app could *name* an effect
+// parameter. Every knob lived as a literal inside `EffectSettingsBar.rows`' one `switch effect` —
+// 25 `slider(...)` call sites, each hard-coding its own range, its own format and its own
+// write-back — so "Bloom's intensity" was something an artist could drag and not something any
+// other code could refer to. A keyframe track has to store *which* parameter it drives and a graph
+// editor has to draw an axis for it, so both need an address. This is that address space, and
+// `EffectSettingsBar.rows` now reads it rather than repeating it, so the two cannot drift.
+//
+// **The address is (effect case, field), and it is deliberately not `EffectParams`.** That struct
+// looks like the flat parameter space this wants and cannot be it, for three separate reasons:
+//
+// * it is *derived* — a computed property with no setter, so there is nothing to write back through;
+// * it is *lossy* — `case .levels, .curves: break`, so Levels' five sliders and the whole Curves
+//   editor contribute nothing to it at all (they resolve into `lookupTable` instead) and Gradient
+//   Map contributes only `mix`;
+// * it is *aliased* — `offsetX`/`offsetY` are a per-channel displacement for Chromatic Aberration
+//   and a per-tap step vector for a blur pass, and `amount` carries Noise's amount, Sharpen's
+//   amount, Outline's *width* and Sobel's fixed `1/√20`. Four quantities, one name.
+//
+// Addressing through it would key the wrong thing, key nothing at all, or key two parameters at
+// once depending on which effect happened to be under the playhead.
+
+/// **How a keyframe curve carries one parameter between two keys.**
+enum EffectParameterAnimation: String, Equatable {
+    /// Tweened. Every value between the two keys is a value the model renders.
+    case continuous
+    /// **Held until the next key**, because there is no meaningful midpoint. Half a Bayer screen is
+    /// not a screen and half of `true` is not a boolean.
+    ///
+    /// Two of the six are stepped for a stronger reason than "it is not a number": they change the
+    /// *render shape* rather than a value. `Blur.isDirectional` rewrites `passes` from two entries
+    /// to one, and `Bloom.input` decides whether the compositor performs an entire sub-walk into two
+    /// borrowed textures (EFFECT_BACKDROP.md §3 option A). Neither is a quantity that could be
+    /// blended even in principle.
+    case stepped
+    /// A variable-length list, tweened **element by element when the two keys have the same count
+    /// and held when they do not** — the owner's ruling on KEYFRAMES.md §9 question 4. `Curves.points`
+    /// and `GradientMap.stops` are the only two, and both are ordered lists whose *n*-th element has
+    /// an obvious counterpart in another list of the same length and none at all otherwise.
+    case componentwise
+    /// Cannot be keyed at any step. **Nothing answers this today** and it is here so that a later
+    /// parameter which genuinely cannot be animated — a file reference, a device-dependent handle —
+    /// has an answer that is not `.stepped` chosen by default.
+    case notAnimatable
+}
+
+/// The shape of the value behind a parameter. `EffectParameter.read`/`write` bridge the first five
+/// to `Double`; the last three need a channel of their own.
+enum EffectParameterValue: String, Equatable {
+    case double
+    case integer
+    case boolean
+    /// `Noise.seed`, a `UInt32`.
+    case unsignedInteger
+    /// A `CaseIterable` enum, bridged to its index in `allCases`.
+    case option
+    /// `Outline.color`. Tweened per channel — four continuous numbers wearing one name — which is
+    /// why it is `.continuous` above rather than `.componentwise`: the count is fixed at four.
+    case colour
+    case curvePoints
+    case gradientStops
+}
+
+/// Whether every value in `EffectParameter.modelDomain` renders distinctly.
+enum EffectParameterQuantisation: String, Equatable {
+    /// It does.
+    case continuous
+    /// The stored field is an `Int` or a `UInt32`, so the steps are the artist's own and the slider
+    /// readout already shows them.
+    case integral
+    /// **The stored field is a `Double` and the render path rounds it anyway** — the trap this case
+    /// exists to record. `Effect.tapCount` is `min(Int(radius.rounded()), maxBlurTaps)`, so radius
+    /// 8.0 and radius 8.4 produce byte-identical output and a smoothly keyframed blur ramp renders
+    /// as integer steps. It applies to all three radii that reach `tapCount` — `Blur.radius`,
+    /// `Bloom.radius` and `Sharpen.radius` — not only the blur's.
+    ///
+    /// `Outline` sidesteps it and says so in `Effect.params`: it carries its fractional width in the
+    /// `amount` float rather than in the `taps` uint, precisely because a uint would truncate it.
+    /// A graph editor should say this about a channel rather than leave the artist to discover it.
+    case roundedByTheRenderPath
+}
+
+/// **One addressable effect parameter.**
+///
+/// `EffectSettingsBar` builds its sliders from these, and a keyframe track stores `id`.
+struct EffectParameter: Identifiable {
+
+    /// **The persisted address, and the one field here that must never change.**
+    ///
+    /// `"<case>.<parameter>"`, lower-camel after the dot. A keyframe track stores this string and a
+    /// saved document carries it, so it has to **survive a Swift rename**: renaming the enum case,
+    /// the payload struct or the stored property must not change it, and if one of those renames
+    /// makes this string look wrong, the string is what stays. It is decoupled from the field name
+    /// on purpose and already differs from it twice — `hsvShift.hue` addresses `hueDegrees` and
+    /// `blur.angle` addresses `angleDegrees` — which is the property working, not a mistake.
+    let id: String
+
+    /// The artist-facing label. The settings bar's row label for anything with a row.
+    let name: String
+
+    /// The suffix of this control's accessibility identifier in `EffectSettingsBar`, so the bar can
+    /// take its `effectSettings.<x>` name from here rather than repeating it. Separate from `id`
+    /// because the two answer different questions: `id` is what a saved document stores, this is
+    /// what an XCUITest taps, and neither may be changed to make it match the other.
+    ///
+    /// Non-nil for every parameter that has a control today, which is all 33 of them.
+    let controlIdentifier: String?
+
+    let value: EffectParameterValue
+    let animation: EffectParameterAnimation
+    let quantisation: EffectParameterQuantisation
+
+    /// **What the settings-bar slider offers, or nil where the control is not a slider.**
+    /// Non-nil for exactly the 25 parameters `rows` draws a `Slider` for.
+    let uiRange: ClosedRange<Double>?
+
+    /// **Every value the model accepts and renders distinctly** — a different fact from `uiRange`,
+    /// and wider than it far more often than not. `Effect.maxBlurTaps` is 128 while the radius
+    /// slider stops at 64; `Sharpen.amount`'s slider starts at 0 while negative is deliberately
+    /// reachable in the model and `amount: -1` is a pinned test identity (it reproduces a plain
+    /// blur byte for byte). Most of the grades clamp nothing at all, and their domain is infinite.
+    ///
+    /// A graph editor should draw its Y axis over `uiRange` and *allow* a key anywhere in here.
+    /// For a compound value these bound one component: one colour channel, one curve coordinate,
+    /// one gradient stop's position.
+    let modelDomain: ClosedRange<Double>
+
+    /// The `String(format:)` the settings bar prints the live readout with, or nil for a
+    /// non-slider. Carries the unit — `"%.1f px"`, `"%.0f°"`.
+    let format: String?
+
+    /// **The typed address**: a `WritableKeyPath<P, V>` where `P` is this case's payload struct.
+    /// `read` and `write` below are built from it by the factories in `Effect.parameters`, so the
+    /// two cannot disagree about which field this is.
+    let keyPath: AnyKeyPath
+
+    /// This parameter's value on `effect`, as a `Double` — nil if `effect` is a different case, or
+    /// if the value is compound (`.colour`, `.curvePoints`, `.gradientStops`) and has no single
+    /// number. An option reads as its index in `allCases`, a boolean as 0 or 1.
+    let read: (Effect) -> Double?
+
+    /// `effect` with this parameter set. Returns `effect` unchanged if it is a different case or
+    /// the value is compound. Rounds and clamps the way the control does: an `Int` field takes
+    /// `Int(v.rounded())`, an option index is clamped into `allCases`.
+    let write: (Effect, Double) -> Effect
+}
+
+extension EffectParameter {
+    /// The model clamps nothing, so the domain is every finite number. Used by the grades, whose
+    /// transfer functions guard against degenerate values rather than restricting their inputs.
+    static let unbounded: ClosedRange<Double> = (-.infinity)...(.infinity)
+}
+
+/// The pair that turns a key path *into a payload struct* into a read/write on a whole `Effect`.
+///
+/// An enum with associated values has no writable key paths of its own, which is the reason this
+/// exists: `\Effect.Blur.radius` is a perfectly good `WritableKeyPath<Effect.Blur, Double>` and
+/// there is no `\Effect.blur.radius`. One lens per case, built once inside that case's branch of
+/// `Effect.parameters`, closes the gap for every parameter in it.
+private struct EffectCaseLens<P> {
+    let extract: (Effect) -> P?
+    let embed: (P) -> Effect
+
+    func parameter(_ id: String, _ name: String, _ control: String?,
+                   value: EffectParameterValue,
+                   animation: EffectParameterAnimation,
+                   quantisation: EffectParameterQuantisation,
+                   ui: ClosedRange<Double>?, model: ClosedRange<Double>, format: String?,
+                   keyPath: AnyKeyPath,
+                   read: @escaping (P) -> Double?,
+                   write: @escaping (inout P, Double) -> Void) -> EffectParameter {
+        EffectParameter(
+            id: id, name: name, controlIdentifier: control, value: value,
+            animation: animation, quantisation: quantisation,
+            uiRange: ui, modelDomain: model, format: format, keyPath: keyPath,
+            read: { extract($0).flatMap(read) },
+            write: { effect, newValue in
+                guard var payload = extract(effect) else { return effect }
+                write(&payload, newValue)
+                return embed(payload)
+            })
+    }
+
+    /// A `Double` field — 24 of the 33, and every one of them `.continuous`.
+    func double(_ id: String, _ name: String, _ control: String,
+                _ keyPath: WritableKeyPath<P, Double>,
+                ui: ClosedRange<Double>?, model: ClosedRange<Double>, format: String?,
+                quantisation: EffectParameterQuantisation = .continuous) -> EffectParameter {
+        parameter(id, name, control, value: .double, animation: .continuous,
+                  quantisation: quantisation, ui: ui, model: model, format: format,
+                  keyPath: keyPath,
+                  read: { $0[keyPath: keyPath] },
+                  write: { $0[keyPath: keyPath] = $1 })
+    }
+
+    /// An `Int` field. `Posterize.levels` is the only one, and it is `.stepped`: three levels and
+    /// four levels are different pictures with nothing in between them.
+    func integer(_ id: String, _ name: String, _ control: String,
+                 _ keyPath: WritableKeyPath<P, Int>,
+                 ui: ClosedRange<Double>?, model: ClosedRange<Double>, format: String?)
+    -> EffectParameter {
+        parameter(id, name, control, value: .integer, animation: .stepped,
+                  quantisation: .integral, ui: ui, model: model, format: format,
+                  keyPath: keyPath,
+                  read: { Double($0[keyPath: keyPath]) },
+                  // `Int(v.rounded())` is what the settings bar's Levels slider already does.
+                  write: { $0[keyPath: keyPath] = Int($1.rounded()) })
+    }
+
+    func boolean(_ id: String, _ name: String, _ control: String,
+                 _ keyPath: WritableKeyPath<P, Bool>) -> EffectParameter {
+        parameter(id, name, control, value: .boolean, animation: .stepped,
+                  quantisation: .integral, ui: nil, model: 0...1, format: nil,
+                  keyPath: keyPath,
+                  read: { $0[keyPath: keyPath] ? 1 : 0 },
+                  write: { $0[keyPath: keyPath] = $1 >= 0.5 })
+    }
+
+    /// `Noise.seed`. The settings bar rerolls it with a button rather than a slider, and says why:
+    /// *"A seed is not a quantity — nudging it by one is as different a grain as any other value"*.
+    /// That is the same argument as `.stepped`, made about a number.
+    func seed(_ id: String, _ name: String, _ control: String,
+              _ keyPath: WritableKeyPath<P, UInt32>) -> EffectParameter {
+        parameter(id, name, control, value: .unsignedInteger, animation: .stepped,
+                  quantisation: .integral, ui: nil, model: 0...Double(UInt32.max), format: nil,
+                  keyPath: keyPath,
+                  read: { Double($0[keyPath: keyPath]) },
+                  write: { $0[keyPath: keyPath] = UInt32(min(max($1.rounded(), 0),
+                                                             Double(UInt32.max))) })
+    }
+
+    /// A `CaseIterable` enum, addressed by its index in `allCases`.
+    func option<O>(_ id: String, _ name: String, _ control: String,
+                   _ keyPath: WritableKeyPath<P, O>) -> EffectParameter
+    where O: CaseIterable & Equatable, O.AllCases: RandomAccessCollection, O.AllCases.Index == Int {
+        let cases = Array(O.allCases)
+        assert(!cases.isEmpty, "An option parameter over an enum with no cases has no address space")
+        return parameter(id, name, control, value: .option, animation: .stepped,
+                         quantisation: .integral, ui: nil,
+                         model: 0...Double(max(cases.count - 1, 0)), format: nil,
+                         keyPath: keyPath,
+                         read: { payload in
+                             cases.firstIndex(of: payload[keyPath: keyPath]).map(Double.init)
+                         },
+                         write: { payload, newValue in
+                             guard !cases.isEmpty else { return }
+                             let index = Int(min(max(newValue.rounded(), 0),
+                                                 Double(cases.count - 1)))
+                             payload[keyPath: keyPath] = cases[index]
+                         })
+    }
+
+    /// A value with no single number behind it — a colour, a list of curve points, a list of
+    /// gradient stops. `read` returns nil and `write` is the identity, so a scalar channel cannot
+    /// silently half-address one; these need a channel that speaks their own type.
+    func compound(_ id: String, _ name: String, _ control: String,
+                  value: EffectParameterValue,
+                  animation: EffectParameterAnimation,
+                  componentDomain: ClosedRange<Double>,
+                  keyPath: AnyKeyPath) -> EffectParameter {
+        parameter(id, name, control, value: value, animation: animation,
+                  quantisation: .continuous, ui: nil, model: componentDomain, format: nil,
+                  keyPath: keyPath,
+                  read: { _ in nil },
+                  write: { _, _ in })
+    }
+}
+
+extension Effect {
+
+    /// **Every parameter this effect has, in the order `EffectSettingsBar` shows them.**
+    ///
+    /// **Exhaustive, with no `default:`** — the same bargain `Effect.input` takes and the opposite
+    /// of `reshapesCoverage`'s, and here it is load-bearing rather than stylistic. `Effect` cannot
+    /// be `CaseIterable` (it has associated values) and every all-effects sweep in the suite is a
+    /// hand-typed literal, so nothing else in this codebase would notice a fourteenth effect
+    /// missing from this table. A `default:` would hand it an empty parameter list, its keyframe
+    /// channels would silently not exist, and the first symptom would be an artist unable to
+    /// animate a knob they can see.
+    ///
+    /// **Thirteen cases, fourteen menu entries.** Gaussian and Directional Blur are one case split
+    /// by `Blur.isDirectional`, so they share one branch here and `blur.directional` is itself a
+    /// parameter — which is the honest shape, since an artist can flip a Gaussian blur into a
+    /// directional one without changing effect.
+    ///
+    /// **Depends only on the case, never on the values in it.** Two Blurs return the same table,
+    /// and `blur.angle` is listed whether or not the blur is directional right now — the settings
+    /// bar hides that row when it is not, but the *address* has to exist for a channel to be
+    /// authored on it. Nothing here reads an associated value, which is why the branches bind
+    /// nothing.
+    var parameters: [EffectParameter] {
+        switch self {
+
+        case .levels:
+            let l = EffectCaseLens<Levels>(extract: { if case .levels(let p) = $0 { return p }; return nil },
+                                           embed: { .levels($0) })
+            // The four endpoints clamp nowhere: `Levels.transfer` guards against a collapsed or
+            // inverted range rather than restricting the knobs, and `Effect.table` clamps the
+            // *byte* it writes, not the value it was given. So a key outside 0...1 is meaningful.
+            return [
+                l.double("levels.inputBlack", "Input Black", "inputBlack", \.inputBlack,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("levels.inputWhite", "Input White", "inputWhite", \.inputWhite,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+                // `transfer` skips the power entirely when gamma <= 0, so the domain stops at 0.
+                l.double("levels.gamma", "Gamma", "gamma", \.gamma,
+                         ui: 0.1...5, model: 0...(.infinity), format: "%.2f"),
+                l.double("levels.outputBlack", "Output Black", "outputBlack", \.outputBlack,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("levels.outputWhite", "Output White", "outputWhite", \.outputWhite,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+            ]
+
+        case .curves:
+            let l = EffectCaseLens<Curves>(extract: { if case .curves(let p) = $0 { return p }; return nil },
+                                           embed: { .curves($0) })
+            return [
+                l.compound("curves.points", "Points", "curveGraph",
+                           value: .curvePoints, animation: .componentwise,
+                           componentDomain: 0...1, keyPath: \Curves.points),
+            ]
+
+        case .brightnessContrast:
+            let l = EffectCaseLens<BrightnessContrast>(
+                extract: { if case .brightnessContrast(let p) = $0 { return p }; return nil },
+                embed: { .brightnessContrast($0) })
+            return [
+                l.double("brightnessContrast.brightness", "Brightness", "brightness", \.brightness,
+                         ui: 0...2, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("brightnessContrast.contrast", "Contrast", "contrast", \.contrast,
+                         ui: 0...2, model: EffectParameter.unbounded, format: "%.2f"),
+            ]
+
+        case .hsvShift:
+            let l = EffectCaseLens<HSVShift>(extract: { if case .hsvShift(let p) = $0 { return p }; return nil },
+                                            embed: { .hsvShift($0) })
+            return [
+                // Wraps rather than clamps, so 200° is a real value and not an out-of-range one.
+                l.double("hsvShift.hue", "Hue", "hue", \.hueDegrees,
+                         ui: -180...180, model: EffectParameter.unbounded, format: "%.0f°"),
+                l.double("hsvShift.saturation", "Saturation", "saturation", \.saturation,
+                         ui: 0...2, model: EffectParameter.unbounded, format: "%.2f"),
+                l.double("hsvShift.value", "Value", "value", \.value,
+                         ui: 0...2, model: EffectParameter.unbounded, format: "%.2f"),
+            ]
+
+        case .gradientMap:
+            let l = EffectCaseLens<GradientMap>(extract: { if case .gradientMap(let p) = $0 { return p }; return nil },
+                                               embed: { .gradientMap($0) })
+            return [
+                l.compound("gradientMap.stops", "Stops", "gradientPreview",
+                           value: .gradientStops, animation: .componentwise,
+                           componentDomain: 0...1, keyPath: \GradientMap.stops),
+                l.double("gradientMap.mix", "Mix", "mix", \.mix,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+            ]
+
+        case .chromaticAberration:
+            let l = EffectCaseLens<ChromaticAberration>(
+                extract: { if case .chromaticAberration(let p) = $0 { return p }; return nil },
+                embed: { .chromaticAberration($0) })
+            return [
+                l.double("chromaticAberration.offsetX", "Offset X", "offsetX", \.offsetX,
+                         ui: -20...20, model: EffectParameter.unbounded, format: "%.1f px"),
+                l.double("chromaticAberration.offsetY", "Offset Y", "offsetY", \.offsetY,
+                         ui: -20...20, model: EffectParameter.unbounded, format: "%.1f px"),
+            ]
+
+        case .posterize:
+            let l = EffectCaseLens<Posterize>(extract: { if case .posterize(let p) = $0 { return p }; return nil },
+                                             embed: { .posterize($0) })
+            return [
+                // `params` reads `max(2, levels)`, so 2 is a floor the model enforces and the ceiling
+                // is the slider's alone.
+                l.integer("posterize.levels", "Levels", "levels", \.levels,
+                          ui: 2...32, model: 2...(.infinity), format: "%.0f"),
+                l.option("posterize.screen", "Screen", "screen", \.screen),
+                l.double("posterize.screenStrength", "Screen Strength", "screenStrength",
+                         \.screenStrength,
+                         ui: 0...1, model: EffectParameter.unbounded, format: "%.2f"),
+            ]
+
+        case .noise:
+            let l = EffectCaseLens<Noise>(extract: { if case .noise(let p) = $0 { return p }; return nil },
+                                         embed: { .noise($0) })
+            return [
+                l.double("noise.amount", "Amount", "amount", \.amount,
+                         ui: 0...0.5, model: EffectParameter.unbounded, format: "%.3f"),
+                l.boolean("noise.monochrome", "Monochrome", "monochrome", \.isMonochrome),
+                l.seed("noise.seed", "Grain Seed", "reseed", \.seed),
+            ]
+
+        case .blur:
+            let l = EffectCaseLens<Blur>(extract: { if case .blur(let p) = $0 { return p }; return nil },
+                                        embed: { .blur($0) })
+            return [
+                l.double("blur.radius", "Radius", "radius", \.radius,
+                         ui: 0...64, model: 0...Double(Effect.maxBlurTaps), format: "%.1f px",
+                         quantisation: .roundedByTheRenderPath),
+                l.double("blur.angle", "Angle", "angle", \.angleDegrees,
+                         ui: 0...360, model: EffectParameter.unbounded, format: "%.0f°"),
+                // Rewrites the pass list from two entries to one. Not a quantity in any sense.
+                l.boolean("blur.directional", "Directional", "directional", \.isDirectional),
+            ]
+
+        case .bloom:
+            let l = EffectCaseLens<Bloom>(extract: { if case .bloom(let p) = $0 { return p }; return nil },
+                                         embed: { .bloom($0) })
+            return [
+                l.double("bloom.threshold", "Threshold", "threshold", \.threshold,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.double("bloom.radius", "Radius", "radius", \.radius,
+                         ui: 0...64, model: 0...Double(Effect.maxBlurTaps), format: "%.1f px",
+                         quantisation: .roundedByTheRenderPath),
+                l.double("bloom.intensity", "Intensity", "intensity", \.intensity,
+                         ui: 0...4, model: 0...(.infinity), format: "%.2f"),
+                // Decides whether the compositor re-walks everything below into a fresh transparent
+                // buffer. The settings bar shows it as an inverted "Include Canvas Color" toggle.
+                l.option("bloom.input", "Input", "includeCanvasColor", \.input),
+            ]
+
+        case .sobel:
+            // **The zero-parameter effect, and the only one.** Its settings bar is a single caption
+            // and this is an empty list, so anything rendering a channel list has to survive one —
+            // that is not a degenerate case to guard against, it is a shipped effect.
+            return []
+
+        case .sharpen:
+            let l = EffectCaseLens<Sharpen>(extract: { if case .sharpen(let p) = $0 { return p }; return nil },
+                                           embed: { .sharpen($0) })
+            return [
+                l.double("sharpen.radius", "Radius", "radius", \.radius,
+                         ui: 0...32, model: 0...Double(Effect.maxBlurTaps), format: "%.1f px",
+                         quantisation: .roundedByTheRenderPath),
+                // **Negative is deliberately reachable and the slider does not admit it.**
+                // `Sharpen`'s own doc: `amount: -1` reproduces a plain blur byte for byte, and
+                // `EffectMultiPassLogicTests` pins that identity. A graph editor must let a key sit
+                // below 0 even though the bar cannot drag one there.
+                l.double("sharpen.amount", "Amount", "amount", \.amount,
+                         ui: 0...4, model: EffectParameter.unbounded, format: "%.2f"),
+            ]
+
+        case .outline:
+            let l = EffectCaseLens<Outline>(extract: { if case .outline(let p) = $0 { return p }; return nil },
+                                           embed: { .outline($0) })
+            return [
+                // The one parameter whose slider and model agree exactly: `params` clamps width to
+                // `maxOutlineRadius` and the slider's upper bound *is* `maxOutlineRadius`.
+                l.double("outline.width", "Width", "width", \.width,
+                         ui: 0...Effect.maxOutlineRadius, model: 0...Effect.maxOutlineRadius,
+                         format: "%.1f px"),
+                l.double("outline.threshold", "Alpha Threshold", "threshold", \.threshold,
+                         ui: 0...1, model: 0...1, format: "%.2f"),
+                l.compound("outline.color", "Colour", "color",
+                           value: .colour, animation: .continuous,
+                           componentDomain: 0...1, keyPath: \Outline.color),
+            ]
+        }
+    }
+}
