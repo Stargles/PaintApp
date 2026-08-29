@@ -1030,19 +1030,21 @@ where this report is deterministic ("pick Fill and the canvas will not pan"). Th
 ActionRecorder and that answer is now computed from live state rather than from a flag pushed a pass
 earlier — so the `failureRequirement` lines are evidence about the moment of the gesture.
 
-## A mask sourced from a graded group can be stale (2026-08-15)
+## The mask cache key still cannot see the mask stack's *structure* (2026-08-15, narrowed 2026-08-29)
 
-A group used as a mask **source** whose effect reshapes coverage — blur, outline, bloom, Sobel,
-sharpen — can serve a mask computed before the grade changed.
+**The half that shipped.** "A mask sourced from a graded group can be stale" was open here for two
+weeks and is **fixed** — `6158e8b`, `MaskResolver.nodeEffects(readBy:of:)` puts the mask stacks' node
+grades into the cache key. It was filed as needing an artist edit to bite and was therefore deferred;
+KEYFRAMES §2.21's folder tracks made a *keyframe* change that grade on every frame of playback, which
+is what forced it. Worth keeping as a shape: a deferred invalidation gap stops being cheap the moment
+something animates its input.
 
-`MaskResolver`'s cache key is built per-*layer*, from `stack.leafLayerIndices`, and a folder is not a
-leaf: a folder's grade cannot reach the key at all, so changing it does not invalidate anything. Only
-effects that change *coverage* show it; a grade that only moves colour leaves the thresholded alpha
-where it was.
-
-Fixing it means putting node grades into the mask cache key, which is a change of its own and not an
-extension of the per-layer version — the key would have to walk the stack's folders as well as its
-leaves. Deliberately not attempted alongside the effect UI.
+**The half that did not.** The key now carries the leaves' content versions and the nodes' grades, but
+not the arrangement of the nodes. Two graded nodes **swapping** grades inside one mask source's subtree
+leave every version and every `Effect` in the key unchanged, and the mask stays stale. Nothing
+frame-varying can cause it — it needs a structural edit, so no playback reaches it — and closing it
+means putting the `[RenderNode]` stacks themselves in the key, which is a broader invalidation change
+than the pass that found it should have made.
 
 ## Whether UIKit honours a `.began -> .failed` transition is unverified, in both directions (2026-08-15)
 
