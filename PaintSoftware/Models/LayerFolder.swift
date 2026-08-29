@@ -76,8 +76,10 @@ struct LayerFolder: Identifiable {
     /// by `EffectParameter.id` and evaluated in **absolute document frames**.
     ///
     /// **`Layer.effectTracks`'s twin, and deliberately identical in every respect that is observable**
-    /// — same key, same time base, same empty default, same "kept and inert when the current grade has
-    /// no such parameter" rule, same `Effect.resolved(atFrame:through:)` doing the evaluating. §2.21 is
+    /// — same key, same time base, same empty default, same "these are exactly the tracks the current
+    /// grade can drive" rule (`Layer.effectTracks` carries the argument, and
+    /// `Effect.tracksAddressed(by:from:)` is the one implementation both halves call), same
+    /// `Effect.resolved(atFrame:through:)` doing the evaluating. §2.21 is
     /// the ruling and it is a ruling *about* that sameness: the alternative on the table was declaring
     /// a folder's grade un-animatable in writing, and the owner refused it because the artist meets one
     /// slider in two places (`EffectSettingsBar` is raised for a layer and for a node from the same

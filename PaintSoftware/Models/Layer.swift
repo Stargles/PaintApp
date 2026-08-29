@@ -91,14 +91,24 @@ struct Layer: Identifiable {
     /// unchanged by this field arriving** — `effect`'s and `fill`'s recipe, one field over, and
     /// `LayerManifest.effectTracks` writes no key for an empty one.
     ///
-    /// **A track whose id is not a parameter of this layer's *current* effect is kept and ignored.**
-    /// `Effect.resolved(atFrame:through:)` walks the effect's own descriptor table and looks each
-    /// parameter up in here, so an id the current effect does not have is never consulted and cannot
-    /// be applied to something else: ids are `"<case>.<field>"`, so `blur.radius` and `bloom.radius`
-    /// are different addresses rather than one name two effects share. *Keeping* it is `valueFill`'s
-    /// asymmetry for the third time — an artist who animates a bloom, tries a blur and goes back finds
-    /// their curve where they left it, and a picker that silently destroyed it would be doing exactly
-    /// what a mode picker must not do. What that costs is one inert dictionary entry.
+    /// **This layer's tracks are exactly the ones its current effect can drive.** Changing the effect
+    /// destroys the rest, so a channel never outlives the grade it addressed.
+    ///
+    /// A curve whose id no current parameter names is storage the artist has no way to reach: the
+    /// timeline's channel list is built from the current effect's descriptors
+    /// (`KeyframeControl.animatedEffectChannelIDs`), so it is invisible, uneditable and undeletable,
+    /// and it is written into every saved copy of the document all the same. It renders nothing, and
+    /// the artist meets it again only by accident.
+    ///
+    /// `valueFill`'s asymmetry one field over does **not** extend to it, and the difference is what
+    /// makes each right: a fill is one value the artist chose and can see the instant they flip back,
+    /// while a track is a whole channel that has already left the timeline. Keeping the first restores
+    /// a choice; keeping the second is hoarding.
+    ///
+    /// **The rule is by parameter id, not by effect case** — `Effect.tracksAddressed(by:from:)` is the
+    /// one place it is written, and the four writers in `CanvasManager` that touch `effect` all call
+    /// it. So flipping `Blur.isDirectional`, which is one `.blur` case wearing two artist-facing
+    /// names, keeps `blur.radius` and `blur.angle`; Levels → Curves keeps nothing.
     var effectTracks: [String: AnimationCurve] = [:]
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.

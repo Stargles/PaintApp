@@ -1221,6 +1221,19 @@ final class CanvasManager: ObservableObject {
     /// is what makes flipping back restore the artist's colour instead of resetting it to grey. A mode
     /// picker that silently destroys the other mode's setting is not a mode picker.
     ///
+    /// **And it destroys every keyframe track the new grade cannot drive**, which is the one place
+    /// this method is *not* that asymmetry — `Layer.effectTracks` carries the argument for why a track
+    /// is unlike a fill. `Effect.tracksAddressed(by:from:)` is the rule, shared with `setNodeEffect`
+    /// and with the two blend-mode setters that clear a grade; it filters by parameter id, so
+    /// re-picking the grade already set keeps every track and this method's own early-out above is not
+    /// what makes that true.
+    ///
+    /// **Inside the `withStructureUndo` bracket, not through `setEffectParameterTrack`.** The bracket
+    /// has already snapshotted `layers` and `effectTracks` is a field on `Layer`, so the clear rides
+    /// the one step the pick was always going to cost. Routing it through the channel writer would
+    /// record a second step and split one artist action in two — and would leave a reachable state in
+    /// which the grade is back but its channels are not.
+    ///
     /// **The layer renames itself to follow the mode**, unless the artist has named it (owner's call,
     /// asked and answered directly: "yea rename it"). Enter Gaussian Blur and the row reads "Gaussian
     /// Blur"; switch to Levels and it follows; go back to a flat colour and it is "Value n" again. The
@@ -1242,6 +1255,8 @@ final class CanvasManager: ObservableObject {
               layers[layerIndex].effect != effect else { return }
         withStructureUndo(label: effect == nil ? .valueLayerColor : .valueLayerEffect) {
             layers[layerIndex].effect = effect
+            layers[layerIndex].effectTracks = Effect.tracksAddressed(by: effect,
+                                                                     from: layers[layerIndex].effectTracks)
             if !layers[layerIndex].hasCustomName {
                 layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
             }
@@ -1904,8 +1919,9 @@ final class CanvasManager: ObservableObject {
     /// see the checkmark move, and watch nothing change on the canvas. That is the state the row is
     /// meant to make unreachable rather than the state it explains afterwards.
     ///
-    /// Two writes, one undo step, and the rename inside it — `setLayerEffect` argues all three, and a
-    /// layer still named "Gaussian Blur" after the blur was cleared is the same lie told backwards.
+    /// Clearing the grade takes its keyframe tracks with it (`Layer.effectTracks`), so this is three
+    /// writes and one undo step, with the rename inside it — `setLayerEffect` argues all of them, and
+    /// a layer still named "Gaussian Blur" after the blur was cleared is the same lie told backwards.
     /// Ordinary layers are untouched: they have no grade for a blend to conflict with.
     func setLayerBlendMode(layerIndex: Int, to mode: BlendMode) {
         guard layers.indices.contains(layerIndex) else { return }
@@ -1915,6 +1931,10 @@ final class CanvasManager: ObservableObject {
             layers[layerIndex].blendMode = mode
             if clearsEffect {
                 layers[layerIndex].effect = nil
+                // The grade is gone, so its channels go with it — `setLayerEffect`'s rule, reached by
+                // the other door, through the one function that spells it. Nil addresses nothing.
+                layers[layerIndex].effectTracks = Effect.tracksAddressed(by: nil,
+                                                                         from: layers[layerIndex].effectTracks)
                 if !layers[layerIndex].hasCustomName {
                     layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
                 }
@@ -1943,14 +1963,17 @@ final class CanvasManager: ObservableObject {
     /// **Picking a blend clears the grade**, which is the other half of `setNodeEffect`'s rule and the
     /// reason both live next to each other. A node cannot both fold two inputs and grade one: the op
     /// and the effect would be two unrelated answers to "what does this node do", with nothing to say
-    /// which runs first. Two writes, one undo step — the state where both are set never exists, not
-    /// even transiently on the undo stack.
+    /// which runs first. One undo step — the state where both are set never exists, not even
+    /// transiently on the undo stack — and the cleared grade's keyframe tracks go in the same step,
+    /// which is `setLayerBlendMode`'s line on the other grade home.
     func setMixBlendMode(_ folderID: UUID, to mode: BlendMode) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isCompositorNode,
               folders[idx].compositorOp != .mix(mode) || folders[idx].effect != nil else { return }
         withStructureUndo(label: .mixMode) {
             folders[idx].compositorRole = .node(op: .mix(mode))
             folders[idx].effect = nil
+            // …and the grade's channels with it, the folder half of `setLayerBlendMode`'s line.
+            folders[idx].effectTracks = Effect.tracksAddressed(by: nil, from: folders[idx].effectTracks)
             // A node that was named for the grade it no longer has must stop claiming it — the same
             // rule `setLayerEffect` applies to a value layer, in the same undo step. See
             // `renameFolderToFollowItsRole`.
@@ -1982,6 +2005,10 @@ final class CanvasManager: ObservableObject {
     /// count of 2 until the artist drags one out; `canDrop`'s `<` gets that right without help, so no
     /// third child can land and reordering the two that are there stays legal.
     ///
+    /// **Changing the grade destroys the keyframe tracks the new one cannot drive**, exactly as it
+    /// does on a layer and through the same `Effect.tracksAddressed(by:from:)` — `Layer.effectTracks`
+    /// carries the argument and `LayerFolder.effectTracks` is why it is not restated here.
+    ///
     /// One undo step per call, like every other discrete pick.
     func setNodeEffect(_ folderID: UUID, to effect: Effect?) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
@@ -1990,6 +2017,10 @@ final class CanvasManager: ObservableObject {
         guard folders[idx].effect != effect || opNeedsReshaping else { return }
         withStructureUndo(label: effect == nil ? .clearEffect : .valueLayerEffect) {
             folders[idx].effect = effect
+            // `setLayerEffect`'s track clear, on the other grade home and by the same one rule —
+            // `LayerFolder.effectTracks` is `Layer.effectTracks`'s twin in every observable respect
+            // and this is one of them.
+            folders[idx].effectTracks = Effect.tracksAddressed(by: effect, from: folders[idx].effectTracks)
             if opNeedsReshaping { folders[idx].compositorRole = .node(op: .stack) }
             renameFolderToFollowItsRole(idx)
         }

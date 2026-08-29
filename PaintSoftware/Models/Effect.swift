@@ -1687,18 +1687,14 @@ extension Effect {
     /// the frame arrives already resolved, which is what will let a cel-local object channel reuse
     /// this method unchanged.
     ///
-    /// **The walk is over `parameters`, never over `tracks`, and all three of the properties that
-    /// matter come from that direction rather than from the other one:**
+    /// **The walk is over `parameters`, never over `tracks`, and both of the properties that matter
+    /// come from that direction rather than from the other one:**
     ///
-    ///  * **A track this effect has no parameter for is never consulted.** The artist who keyed a
-    ///    bloom's intensity and then switched the layer to a blur gets the blur they asked for, not a
-    ///    half-applied bloom, and not a crash. `Layer.effectTracks` argues why the orphaned curve is
-    ///    kept rather than deleted; this is why keeping it is safe.
     ///  * **The order is the table's, so it is deterministic.** A dictionary's is not, and while no
     ///    two descriptors in one effect write the same field today, "it happens not to matter" is not
     ///    a property worth resting on.
-    ///  * **The refusal above lives in one place.** Every write site could otherwise store a track
-    ///    that renders as nothing, and each would have to remember not to.
+    ///  * **The `isScalarAnimatable` refusal above lives in one place.** Every write site could
+    ///    otherwise store a track that renders as nothing, and each would have to remember not to.
     ///
     /// **Presence is never touched, and that is load-bearing rather than incidental.** This takes an
     /// `Effect` and returns an `Effect`; there is no arm that returns nil. So a track can change what
@@ -1725,5 +1721,42 @@ extension Effect {
             resolved = parameter.write(resolved, curve.evaluate(at: Double(frame)))
         }
         return resolved
+    }
+
+    /// **Which of `tracks` the grade `effect` can drive** — the filter every writer of `Layer.effect`
+    /// and `LayerFolder.effect` runs over the tracks stored beside it, so that a grade's channels do
+    /// not outlive the grade.
+    ///
+    /// A track the current effect has no parameter for renders nothing and can be reached by nothing:
+    /// the timeline builds its channel list from that effect's own descriptors
+    /// (`KeyframeControl.animatedEffectChannelIDs`), so such a curve is invisible, uneditable and
+    /// undeletable, and is nevertheless written into every saved copy of the document. It is storage
+    /// with no way in and no way out, and the artist meets it only by accident. So it goes.
+    ///
+    /// **By parameter id, never by comparing effect cases**, which is what makes the answer exact in
+    /// both directions and a no-op for free when nothing really changed. The two case-shaped tests
+    /// this tree offers are each wrong for it, in opposite ways:
+    ///
+    ///  * `kindCode` is a GPU dispatch code that **merges** distinct cases — `.levels` and `.curves`
+    ///    both answer 0, `.blur` and `.sharpen` both answer 7 — so a "did the kind change" test on it
+    ///    keeps every track across Levels → Curves.
+    ///  * `EffectCatalog.isCurrent` compares `displayName`, which is **finer** than the case: Gaussian
+    ///    Blur and Directional Blur are one `.blur` split by `Blur.isDirectional`, so a test on it
+    ///    would throw away `blur.radius` and `blur.angle` when the artist merely flips that toggle.
+    ///    The ids do not, because `parameters` lists all three of `.blur`'s under either spelling.
+    ///
+    /// Ids are `"<case>.<field>"` (`EffectParameter.id`), so `blur.radius`, `bloom.radius` and
+    /// `sharpen.radius` are three addresses rather than one name three effects share. A nil effect
+    /// therefore keeps nothing, which is what "this layer is not grading" means; and re-picking the
+    /// effect that is already set keeps everything, with no early-out anywhere needed to arrange it.
+    static func tracksAddressed(by effect: Effect?,
+                                from tracks: [String: AnimationCurve]) -> [String: AnimationCurve] {
+        guard !tracks.isEmpty else { return tracks }
+        guard let effect else { return [:] }
+        // `parameters` builds up to thirty-three closures per call, which is why `resolved` above
+        // guards against paying it on every render. Here it is once per discrete pick — the price a
+        // mode picker can afford, and the reason this is not folded into the resolver.
+        let addressable = Set(effect.parameters.map(\.id))
+        return tracks.filter { addressable.contains($0.key) }
     }
 }

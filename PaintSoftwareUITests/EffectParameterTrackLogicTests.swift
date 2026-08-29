@@ -11,8 +11,9 @@ import SwiftUI
 ///
 /// **What this file is for is proving the five things stage 2 exists to prove before any UI is built
 /// on them** — storage, evaluation, invalidation, undo and save/load — plus the two refusals that
-/// keep the stage honest: which parameter kinds are in scope, and what a track that no longer
-/// addresses anything does. The save/load half lives in `ProjectSaveLogicTests`, against a real
+/// keep the stage honest: which parameter kinds are in scope, and the rule that a target's tracks are
+/// **exactly** the channels its current grade can drive, so that changing the grade takes the rest
+/// with it. The save/load half lives in `ProjectSaveLogicTests`, against a real
 /// package rather than a hand-built manifest; the two-sided frame-invariance claim lives in
 /// `RenderTreeCharacterizationTests`, where the pin it replaced was.
 ///
@@ -217,40 +218,125 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         XCTAssertTrue(blur.layers[0].effectTracks.isEmpty)
     }
 
-    // MARK: - A track whose parameter is no longer there
+    // MARK: - A grade's channels do not outlive the grade
 
-    /// **The artist keys a bloom, changes their mind, and picks a blur.** Decided: the orphaned curve
-    /// is **kept and inert** — not deleted, and not applied to anything else.
+    /// **The artist keys a bloom, changes their mind, and picks a blur** — the curve goes with the
+    /// bloom, because nothing on a blur addresses `bloom.intensity` and a channel the timeline cannot
+    /// show is a channel the document has no business carrying.
     ///
-    /// Inert falls out of the resolver walking *the effect's* descriptor table and looking each entry
-    /// up in the track dictionary, rather than the other way round; nothing keyed `bloom.intensity`
-    /// can reach a blur, and the ids being `"<case>.<field>"` means `blur.radius` and `bloom.radius`
-    /// are two addresses rather than one shared name.
-    ///
-    /// Kept is the choice, and it is `Layer.valueFill`'s asymmetry for the third time: a picker that
-    /// silently destroyed the other mode's setting is the one thing a picker must not do. The cost is
-    /// one inert dictionary entry; the alternative loses an authored curve to a dropdown, and the
-    /// artist finds out one flip later.
-    func testATrackForAParameterTheCurrentEffectDoesNotHaveIsKeptAndIgnored() {
+    /// Three assertions, and the third is the one an artist would notice: the tracks are gone, the
+    /// blur is a blur at every frame, and coming back to a bloom finds the bloom the picker built at
+    /// its own default rather than a value some invisible curve describes.
+    func testChangingTheEffectDestroysTheTracksTheNewGradeCannotDrive() {
         let manager = gradedManager(.bloom(Effect.Bloom()))
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "bloom.intensity",
                                         to: linear([(0, 0.5), (10, 3.0)]))
 
         manager.setLayerEffect(layerIndex: gradeIndex, to: .blur(Effect.Blur(radius: 4)))
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks.keys.sorted(), ["bloom.intensity"],
-                       "The curve survives the effect change")
+        XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty,
+                      "The curve does not survive the effect change — nothing addresses `bloom.intensity` now")
         for frame in [0, 5, 10, 99] {
             XCTAssertEqual(manager.layers[gradeIndex].layerEffect(atFrame: frame),
                            .blur(Effect.Blur(radius: 4)),
-                           "frame \(frame): a blur is a blur at every frame — the orphaned curve reaches nothing")
+                           "frame \(frame): a blur is a blur at every frame")
         }
 
         manager.setLayerEffect(layerIndex: gradeIndex, to: .bloom(Effect.Bloom()))
+        XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty,
+                      "…and coming back does not resurrect it")
         guard case .bloom(let params)? = manager.layers[gradeIndex].layerEffect(atFrame: 10) else {
             return XCTFail("The layer is grading with a bloom again")
         }
-        XCTAssertEqual(params.intensity, 3.0, accuracy: 1e-9,
-                       "…and going back finds the animation where the artist left it")
+        XCTAssertEqual(params.intensity, Effect.Bloom().intensity, accuracy: 1e-9,
+                       "The bloom is the one the picker built, not the one the destroyed curve described")
+    }
+
+    /// **Levels → Curves destroys the track, and `Effect.kindCode` cannot see that it should.** That
+    /// field is a GPU dispatch code and merges the two cases — both answer 0, as `.blur` and
+    /// `.sharpen` both answer 7 — so a clear written as "did the kind change" keeps `levels.gamma`
+    /// here and would be green on every other pair in the catalogue.
+    ///
+    /// The rule is by parameter id instead, and `curves` has exactly one parameter (`curves.points`,
+    /// which is `.componentwise` and takes no scalar track at all), so the surviving set is empty by
+    /// construction rather than by the two names happening to differ.
+    func testChangingBetweenTwoEffectsThatShareAKindCodeStillDestroysTheTrack() {
+        let manager = gradedManager(.levels(Effect.Levels()))
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "levels.gamma",
+                                                      to: linear([(0, 1.0), (10, 2.0)])),
+                      "Fixture premise: a levels gamma takes a track")
+        XCTAssertEqual(Effect.levels(Effect.Levels()).kindCode, Effect.curves(Effect.Curves()).kindCode,
+                       "Fixture premise: these two are indistinguishable to `kindCode`, which is the trap")
+
+        manager.setLayerEffect(layerIndex: gradeIndex, to: .curves(Effect.Curves()))
+        XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty,
+                      "A curves grade has no `levels.gamma`, whatever the dispatch code says")
+    }
+
+    /// **Gaussian and Directional Blur are one `.blur`, so flipping between them keeps the curves** —
+    /// the trap on the other side of the same decision. `EffectCatalog.isCurrent` compares
+    /// `displayName`, which splits `.blur` in two by `Blur.isDirectional`, so a clear written against
+    /// *it* would destroy `blur.radius` and `blur.angle` for a toggle the artist reads as one setting
+    /// of one effect.
+    ///
+    /// Parameter ids do not split: `Effect.parameters` lists all three of `.blur`'s under either
+    /// spelling, so the filter keeps both curves and the flip costs nothing. Asserted through the
+    /// resolver as well as through the dictionary, because a track that survives storage and no longer
+    /// drives anything is the failure this stage exists to make impossible.
+    func testFlippingBlurBetweenGaussianAndDirectionalKeepsItsTracks() {
+        let manager = gradedManager(.blur(Effect.Blur(radius: 4)))
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "blur.radius",
+                                                      to: linear([(0, 4.0), (10, 20.0)])))
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "blur.angle",
+                                                      to: linear([(0, 0.0), (10, 90.0)])))
+
+        manager.setLayerEffect(layerIndex: gradeIndex,
+                               to: .blur(Effect.Blur(radius: 4, angleDegrees: 0, isDirectional: true)))
+        XCTAssertEqual(manager.layers[gradeIndex].effectTracks.keys.sorted(), ["blur.angle", "blur.radius"],
+                       "One `.blur` under two names — the artist flipped a toggle, not effects")
+
+        guard case .blur(let params)? = manager.layers[gradeIndex].layerEffect(atFrame: 10) else {
+            return XCTFail("The layer is still grading with a blur")
+        }
+        XCTAssertEqual(params.radius, 20.0, accuracy: 1e-9, "…and both curves still drive it")
+        XCTAssertEqual(params.angleDegrees, 90.0, accuracy: 1e-9)
+        XCTAssertTrue(params.isDirectional)
+    }
+
+    /// **One undo step brings the grade and its channels back together.** The clear rides
+    /// `withStructureUndo`'s existing snapshot — `effectTracks` is a field on `Layer`, so the bracket
+    /// that already captures `layers` restores it for free — rather than `setEffectParameterTrack`'s
+    /// own `recordUndo`, which would record a second step.
+    ///
+    /// Two steps is not merely untidy: undo once would put the bloom back with its animation still
+    /// gone, which is a state the artist can reach and cannot tell from data loss.
+    func testUndoingAnEffectChangeRestoresTheTracksItDestroyed() {
+        let manager = gradedManager(.bloom(Effect.Bloom()))
+        let curve = linear([(0, 0.5), (10, 3.0)])
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "bloom.intensity", to: curve)
+
+        manager.setLayerEffect(layerIndex: gradeIndex, to: .blur(Effect.Blur(radius: 4)))
+        XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty)
+
+        manager.undo()
+        XCTAssertEqual(manager.layers[gradeIndex].effect, .bloom(Effect.Bloom()),
+                       "One step, so the grade is back…")
+        XCTAssertEqual(manager.layers[gradeIndex].effectTracks["bloom.intensity"], curve,
+                       "…and the curve came back in the same one, whole")
+    }
+
+    /// **Picking a blend mode on a graded layer clears the grade, so it clears the tracks too.** The
+    /// second of the two layer-side doors to a grade change, and the one no test would have covered by
+    /// accident: `setLayerBlendMode` writes `effect = nil` directly rather than calling
+    /// `setLayerEffect`, so the rule has to be spelled there as well and this is what says it is.
+    func testPickingABlendModeOnAGradedLayerDestroysItsTracks() {
+        let manager = gradedManager(.bloom(Effect.Bloom()))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "bloom.intensity",
+                                        to: linear([(0, 0.5), (10, 3.0)]))
+
+        manager.setLayerBlendMode(layerIndex: gradeIndex, to: .multiply)
+        XCTAssertNil(manager.layers[gradeIndex].effect, "Fixture premise: the blend pick cleared the grade")
+        XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty,
+                      "A layer that is no longer grading holds no channels for a grade")
     }
 
     // MARK: - Undo
@@ -436,14 +522,19 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// A track written by hand onto a layer that is not grading reaches nothing — the second half of
-    /// the presence guarantee, from the other direction. Only a hand-written manifest or a kind flip
-    /// can produce this state, since the writer refuses it (above), so it is worth pinning that the
-    /// *reader* is safe too rather than relying on the door.
+    /// the presence guarantee, from the other direction. Only a hand-written manifest can produce this
+    /// state: the writer refuses it at the door (above) and the mode picker clears it on the way out.
+    /// So it is worth pinning that the *reader* is safe too, rather than resting on two doors that a
+    /// future edit could open.
+    ///
+    /// **The plant happens after the mode flip, and that ordering is the point.** Written before it,
+    /// the flip to flat colour would clear the value layer's track and this test would pass because
+    /// there was nothing left to resolve rather than because the resolver refused it.
     func testATrackOnALayerThatIsNotGradingResolvesToNothing() {
         let manager = gradedManager()
+        manager.setLayerEffect(layerIndex: gradeIndex, to: nil)
         manager.layers[0].effectTracks[brightnessID] = linear([(0, 1.0), (10, 2.0)])
         manager.layers[gradeIndex].effectTracks[brightnessID] = linear([(0, 1.0), (10, 2.0)])
-        manager.setLayerEffect(layerIndex: gradeIndex, to: nil)
 
         for frame in [0, 5, 10] {
             XCTAssertNil(manager.layers[0].layerEffect(atFrame: frame), "A raster layer has no grade to resolve")
@@ -699,26 +790,55 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         }
     }
 
-    /// The folder half of "a track outlives the effect it was written for" (§3.5): keyed on a bloom,
-    /// switched to a blur, the curve is kept and reaches nothing — and flipping back finds it.
-    func testAFolderTrackForAParameterTheCurrentEffectDoesNotHaveIsKeptAndIgnored() {
+    /// The folder half of "a grade's channels do not outlive the grade": keyed on a bloom, switched to
+    /// a blur, the curve is gone and flipping back does not find it.
+    ///
+    /// Here for `LayerFolder.effectTracks`' own reason rather than for symmetry's sake — the two homes
+    /// are written by two different setters, so the folder's clear could have been forgotten
+    /// independently, and the artist meets one slider in both places.
+    func testAFolderTrackIsDestroyedWhenTheGradeChanges() {
         let (manager, group) = gradedFolderManager(.bloom(Effect.Bloom()))
         manager.setEffectParameterTrack(folderID: group, parameterID: "bloom.intensity",
                                         to: linear([(0, 0.5), (10, 3.0)]))
 
         manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
-        XCTAssertEqual(folder(manager, group)?.effectTracks.keys.sorted(), ["bloom.intensity"],
-                       "The curve survives the effect change")
+        XCTAssertEqual(folder(manager, group)?.effectTracks.isEmpty, true,
+                       "The curve does not survive the effect change")
         for frame in [0, 5, 10, 99] {
             XCTAssertEqual(folder(manager, group)?.resolvedEffect(atFrame: frame), .blur(Effect.Blur(radius: 4)),
-                           "frame \(frame): a blur is a blur at every frame — the orphaned curve reaches nothing")
+                           "frame \(frame): a blur is a blur at every frame")
         }
 
         manager.setNodeEffect(group, to: .bloom(Effect.Bloom()))
+        XCTAssertEqual(folder(manager, group)?.effectTracks.isEmpty, true,
+                       "…and coming back does not resurrect it")
         guard case .bloom(let params)? = folder(manager, group)?.resolvedEffect(atFrame: 10) else {
             return XCTFail("The folder is grading with a bloom again")
         }
-        XCTAssertEqual(params.intensity, 3.0, accuracy: 1e-9,
-                       "…and going back finds the animation where the artist left it")
+        XCTAssertEqual(params.intensity, Effect.Bloom().intensity, accuracy: 1e-9,
+                       "The bloom is the one the picker built, not the one the destroyed curve described")
+    }
+
+    /// **Picking a Mix blend on a graded node clears the grade, so it clears the tracks too** — the
+    /// fourth and last door to a grade change, and the folder half of
+    /// `testPickingABlendModeOnAGradedLayerDestroysItsTracks`.
+    ///
+    /// A node rather than an ordinary group, because `setMixBlendMode` refuses anything that is not
+    /// already a node: an ordinary folder the artist made must not acquire an op by being asked about
+    /// one. `setNodeEffect` is what reshapes the op to `.stack` on the way in, which is the pair of
+    /// setters "each clearing what the other set" seen from the grade's side.
+    func testPickingAMixBlendOnAGradedNodeDestroysItsTracks() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        manager.restackLayer(manager.layers[0].id, above: .folder(node), parentFolderID: node)
+        manager.setNodeEffect(node, to: .bloom(Effect.Bloom()))
+        XCTAssertTrue(manager.setEffectParameterTrack(folderID: node, parameterID: "bloom.intensity",
+                                                      to: linear([(0, 0.5), (10, 3.0)])),
+                      "Fixture premise: the node's bloom intensity takes a track")
+
+        manager.setMixBlendMode(node, to: .screen)
+        XCTAssertNil(folder(manager, node)?.effect, "Fixture premise: the blend pick cleared the grade")
+        XCTAssertEqual(folder(manager, node)?.effectTracks.isEmpty, true,
+                       "A node that folds two inputs holds no channels for a grade it no longer runs")
     }
 }
