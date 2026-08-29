@@ -231,6 +231,12 @@ Doing it once serves both features.
 - **Layer-scoped tracks** (§2.4) go on `LayerManifest` beside `effect`, optional, written only when
   present — the format is versioned by field presence, not by a number, and every persisted field in
   the tree follows that idiom.
+- **A track outlives the effect it was written for, deliberately.** Key `bloom.intensity`, then switch
+  the layer to a blur: the track is **kept and inert**. Inert falls out of evaluation walking the
+  *effect's* descriptors rather than the track dictionary, and ids are `"<case>.<field>"`, so
+  `blur.radius` and `bloom.radius` cannot collide. Kept rather than pruned on `Layer.valueFill`'s own
+  asymmetry — a picker that silently destroys the other mode's setting is what a picker must not do —
+  so flipping back restores the animation.
 - **Precision.** Keys are `Double`. Do **not** route a pose through `PackedSampleRun`: its Int16
   quarter-pixel grid **saturates rather than throwing** (`Engine/ShapeGeometry.swift:783-791`), which for
   a handful of anchor values would silently teleport an out-of-range key. That encoding is tuned for
@@ -256,6 +262,15 @@ moves the key with no new plumbing.
 (`Models/Layer.swift:203`) is `{ color }` today, and its doc comment cut this seam deliberately:
 *"a keyframe phase would then have to cut this seam under a deadline instead of finding it already
 cut."* `Effect.resolved(atFrame:)` is the same shape one level over.
+
+**The cache that actually moves is not the one it looks like.** `SandwichKey` and `SandwichFullKey`
+both carry `frame` outright, so two keys at two frames differ *whatever* the tree says — a test that
+compares them across frames passes on unmodified `main` and proves nothing. Pin it by holding `frame`
+**equal** and deriving the tree at two different frames. And the cache where staleness would actually
+bite is **`MaskResolver`'s**, which is keyed on `LayerContentVersion` and carries neither the frame nor
+the tree: it moves only because stage 0 put the frame-resolved effect *into* the version. Do not remove
+that, or a grade that reshapes alpha will serve stale coverage. (Note `LayerContentVersion.hash(into:)`
+deliberately omits `effect` while `==` includes it — legal, and it only costs collisions.)
 
 **Two things §2.4 does not cover and someone must answer.** `LayerFolder.effect`
 (`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:891` — either it
@@ -608,9 +623,9 @@ Each stage is mergeable and leaves the app working.
 
 | # | stage | notes |
 |---|---|---|
-| **0** | **`renderTree(atFrame:)`** | Behaviour-neutral. Six production call sites, one recursion, ~60 fast-tier test references. Both §2.3 and §2.4 are blocked on it. Ship it alone so the frame-threading diff is not inside a diff that changes pixels. |
-| **1** | **`AnimationCurve` + the effect descriptor table** | The table is an exhaustive `switch self` with **no `default:`** — `Effect` cannot be `CaseIterable` and every existing all-effects sweep in the suite is a hand-typed literal, so a `default:` would silently miss a fourteenth effect. Make `EffectSettingsBar.rows` *read* the table so the two cannot drift; the 25 slider sites already carry range, format and target. |
-| **2** | **One channel end to end: a layer effect parameter** | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
+| **0** ✅ | **`renderTree(atFrame:)`** — merged `654f863`. | Behaviour-neutral. Six production call sites, one recursion, ~60 fast-tier test references. Both §2.3 and §2.4 are blocked on it. Ship it alone so the frame-threading diff is not inside a diff that changes pixels. |
+| **1** ✅ | **`AnimationCurve` + the effect descriptor table** — merged `c09ddf0`, `c6ecb49`, `6a379bf`. | The table is an exhaustive `switch self` with **no `default:`** — `Effect` cannot be `CaseIterable` and every existing all-effects sweep in the suite is a hand-typed literal, so a `default:` would silently miss a fourteenth effect. Make `EffectSettingsBar.rows` *read* the table so the two cannot drift; the 25 slider sites already carry range, format and target. |
+| **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
 | **3** | **The Animate mode and the graph-editor drawer** | §2.1's tap/hold, the channel panel, §2.17's drawer. Every new popover **must** add a `CanvasPresentation` case and route through `.canvasPresentation`, or it reproduces the stroke-teardown bug that census exists to prevent. |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
@@ -661,7 +676,11 @@ animation systems.
 
 - **`InterpolationPreviewKey` must carry every input the evaluation reads** (`Views/CanvasView.swift:2116-2135`).
   VECTOR_INTERPOLATION settled fact 11: *"It has bitten three times."* Omission is silent — the canvas
-  shows a stale frame forever. Every animated channel goes in the key **in the same commit** that adds it.
+  shows a stale frame forever. **But the rule is narrower than it sounds, and stage 2 established
+  where the line is**: that key covers the in-between *drawing* evaluation — lattice and ARAP over
+  vector geometry — so it binds **object** channels, which feed the evaluator. A layer-scoped grade is
+  applied at composite time through `RenderNode.effect` and is not an input to it, so stage 2 owed the
+  key nothing. Ask which side a new channel falls on rather than adding a field reflexively.
 - **The compositor comes off the live canvas whenever an in-between is under the playhead.**
   `isSandwichEngaged` (`CanvasView.swift:1021-1030`) returns false if *any* layer's active cel carries a
   recipe, so blend modes, effects and masks fall back to Core Animation for that frame. An effect
