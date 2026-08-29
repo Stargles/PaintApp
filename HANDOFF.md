@@ -46,12 +46,14 @@ re-run. No branches in flight, one worktree, clean tree. The iPad has current `m
    share one prerequisite — hoisting the playback clock onto the model — which ROADMAP §4 (audio) and
    KEYFRAMES §5 (recording) already require.** That makes the clock the natural first move.
 
-**4. The iPad build is stale again.** It has `6a396e1`, which predates Animate mode, key markers, the
-   `ContentProvider` seam and the compositor change — i.e. everything the artist could actually try.
-   **Offer to redeploy from a worktree, not `deploy.sh`** (it pulls `main` and never ships branch
-   work). `devicectl list devices` first; `unavailable` means the owner must wake it and nothing on
-   this Mac fixes it. It was `available (paired)` this pass and the install took the documented
-   `NWError 54` retry.
+**4. The iPad is current — it has this pass's `main`, Release**, so Animate mode, the key markers, the
+   `ContentProvider` seam and the compositor change are all on the device and the owner can try them.
+   Deployed twice this pass, both times `available (paired)`; the first install needed the documented
+   `NWError 54` retry and the second did not. **When it next goes stale, redeploy from a worktree and
+   not `deploy.sh`** — that script pulls `main` from a different checkout and so never ships branch
+   work. Run `devicectl list devices` first: `unavailable` means the owner must wake and unlock the
+   iPad, `info details` will answer from cache and *look* like it worked, and nothing on this Mac
+   fixes it.
 
 **5. TODO (10) Oklab is still untouched and its first move is still not to build anything.** Stage A
    is **linear-light compositing through a 256-entry LUT**, not Oklab. **Render the A/B and show it
