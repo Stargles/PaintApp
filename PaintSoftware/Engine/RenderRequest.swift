@@ -793,7 +793,11 @@ extension CanvasManager {
     /// new key: one full-quality ARAP evaluation and three canvas-sized composites per tick, against a
     /// drag the artist expects to track their finger. MEASURED at the owner's 2048x1024 canvas
     /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §7): ~100 ms
-    /// a rebuild, so a slider held down would run about six ticks behind the finger. The drag is also
+    /// a rebuild in a Debug simulator, so a slider held down runs many ticks behind the finger. **The
+    /// exact multiple is not known and the clause does not need it** — §7 records why that figure
+    /// shrinks by an unknown factor in Release (its evaluation half is Swift and its composite half is
+    /// framework code, and only the first carries the Debug penalty). The clause needs only that a
+    /// rebuild is far above a touch interval, which it is by any reading. The drag is also
     /// the one moment the artist is looking at the in-between rather than at the picture around it. So
     /// the compositor comes off for the *drag* and is back the instant it commits — which is what the
     /// two clauses above already do for the two other gestures that draw outside a cel, rather than a

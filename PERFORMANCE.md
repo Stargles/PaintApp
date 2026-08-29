@@ -1527,6 +1527,12 @@ and the owner scrubbing a span of in-betweens over a blend mode in a Release bui
 would say whether the live path feels right in the meantime. That is worth an hour of theirs, not a
 week of ours.
 
+**And a re-take of §7's four rows in Release on that device is a real open measurement, not a
+formality** — §7 explains why the Debug quotient is a ceiling rather than a constant (its rows mix
+Swift and framework work in different proportions, and only the Swift half carries the Debug
+penalty). 1.86× is the worst case; nobody knows the real one, and nobody should design against the
+Debug figure.
+
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
 before backgrounding, on the device.
@@ -1576,9 +1582,32 @@ frame of the same document.** That is the number the decision rests on, and the 
 is the middle row: this is not a new class of cost appearing on a cheap document, it is frames
 joining a bill the document was already paying everywhere else. A document with no blend, effect,
 mask or node never engages at all and is untouched (`needsCompositorOnCanvas`, still the first
-clause). Simulator Debug figures — the device runs ~1.3× the simulator (§1) but Release is a
-different order on this path, so treat the **ratio** as the transferable part and none of the
-absolutes as device numbers.
+clause).
+
+**Neither the absolutes nor the ratio are device figures, and an earlier version of this paragraph
+said the ratio was — that was wrong.** It told the reader to treat 1.86× as the transferable part on
+the grounds that a quotient cancels the Debug penalty. It does not, because the penalty is not one
+number applied to one thing. Each row is a sum of two halves that shrink by very different factors
+in Release:
+
+- a **Swift** half — the ARAP polar interpolation, the lattice warp, `BrushStamper`'s dab walk. This
+  is the kind of path CLAUDE.md's *"Debug measured 62x slower than Release"* note is about: tight
+  scalar loops with bounds-checking and no inlining in Debug.
+- a **CoreGraphics/Metal** half — the composites, which are already-optimised framework and driver
+  code and barely notice the configuration.
+
+The rows are not the same mixture of the two. The `before` row is *almost entirely* the Swift half
+(one ARAP evaluation, no composite); the `ordinary frame` row is *almost entirely* the framework
+half (three composites, no evaluation). So Release shrinks the numerator and the denominator by
+different factors and **the quotient moves with them** — and it moves in this change's favour, since
+the arms that shrink most are the evaluation ones the change adds. **Treat 1.86× as a ceiling
+measured under the configuration least kind to it, not as a constant.**
+
+**All four rows want re-taking in Release on the owner's iPad before anyone designs against them**,
+and until they are, the honest use of this table is the *ordering* of the rows and the fact that the
+middle row exists — not any figure in it. §1's ~1.3× device-vs-simulator correction does not rescue
+this either: that ratio was measured for compositing workloads, which is exactly the half of the
+mixture that does *not* dominate the rows this change is about.
 
 ### The ruling, and the reason — OWNER-STATED 2026-08-29
 
@@ -1628,6 +1657,15 @@ rather than at the picture around it.
 **This is the "smarter faster way that doesn't require a lot of code" the ruling above invites**, and
 it is worth taking on its own merits rather than because the frame is slow — one ARAP solve done
 twice is wrong whatever the budget says.
+
+**Stated at its sharpest: with the compositor engaged, 26.0 ms of the 100.2 ms renders an image
+nobody ever sees.** The layer host's evaluation happens, produces a canvas-sized in-between, and is
+then *blanked* — `updateSandwich` masks every host at rest precisely because `full` already contains
+that layer, so the pixels the host just spent an ARAP solve on are covered by the composite in the
+same pass. It is not "the work is done twice and one copy is redundant"; it is that one of the two is
+**discarded by design, every time, on every engaged in-between frame**. That is a quarter of the
+frame's cost going to a bitmap with no viewer, and it is why this is worth doing rather than merely
+tidy.
 
 The fourth row costs 26.0 ms more than the third for one reason: `updateInterpolationPreviews`
 renders the derivation for the layer host, and `PixelOps.rasterize` renders **the same derivation
