@@ -522,10 +522,19 @@ extension CanvasManager {
         // auto-nameable — so a duplicate of a layer they had named would lose that name the next time
         // its mode changed, while the original kept it. What the copy is *called* is derived either
         // way ("… copy"); what is being carried is who gets to decide.
+        // `effectTracks`, `keyframeMarks` and `pendingBaselines` are one feature and a copy takes all
+        // three or none — the same argument `effect` and `fill` make one line up, reached by a third
+        // door. A copy with the curves and no marks is a layer whose animation exists and whose
+        // keyframes are invisible: the timeline shows none, and the next keyframe press has no
+        // neighbour to seed the held value onto.
         var copy = Layer(id: UUID(), name: source.name + " copy", hasCustomName: source.hasCustomName,
                          opacity: source.opacity,
                          isVisible: source.isVisible, fillReferenceOverride: source.fillReferenceOverride,
-                         kind: source.kind, effect: source.effect, fill: source.fill,
+                         kind: source.kind, effect: source.effect,
+                         effectTracks: source.effectTracks,
+                         keyframeMarks: source.keyframeMarks,
+                         pendingBaselines: source.pendingBaselines,
+                         fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
         copy.thumbnail = source.thumbnail

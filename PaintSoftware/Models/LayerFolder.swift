@@ -95,6 +95,15 @@ struct LayerFolder: Identifiable {
     /// **Read through `resolvedEffect(atFrame:)`, never here.** The raw pair is what `setNodeEffect`,
     /// `maxInputCount` and the panel read, for the reason that accessor gives at length.
     var effectTracks: [String: AnimationCurve] = [:]
+
+    /// **The frames on which the artist has placed a keyframe on this folder** — §2.26's bare marks,
+    /// absolute document frames. `Layer.keyframeMarks` carries the whole argument; this is that field
+    /// on the other of the two grade homes, and §2.21 is the ruling that the two must not differ.
+    var keyframeMarks: [Int] = []
+
+    /// **The value each channel held before the first edit since the last mark** — `Layer.pendingBaselines`
+    /// on the folder side, same rules, same reasons.
+    var pendingBaselines: [String: Double] = [:]
 }
 
 // MARK: - Compositor nodes (§4.3)

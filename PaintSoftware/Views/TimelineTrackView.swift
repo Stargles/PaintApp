@@ -97,7 +97,6 @@ struct TimelineTrackView: UIViewRepresentable {
         /// reachable zoom ever collapses anything, set above the base and the default zoom collapses
         /// keys that had room — and this file is not compiled into `PaintSoftwareUITests`, so a test
         /// asserting either against a `10.5` re-typed on the test's side would be green forever.
-        /// Same argument, same shape, as `KeyframeControl.timelineResizeMinimumDistance`.
         private let zoomRange: ClosedRange<CGFloat> = TimelineKeyMarkers.pixelsPerFrameRange
         private(set) var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
         private var pinchStartPixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame

@@ -1729,7 +1729,7 @@ extension Effect {
     ///
     /// A track the current effect has no parameter for renders nothing and can be reached by nothing:
     /// the timeline builds its channel list from that effect's own descriptors
-    /// (`KeyframeControl.animatedEffectChannelIDs`), so such a curve is invisible, uneditable and
+    /// (`CanvasManager.curvedEffectChannelIDs`), so such a curve is invisible, uneditable and
     /// undeletable, and is nevertheless written into every saved copy of the document. It is storage
     /// with no way in and no way out, and the artist meets it only by accident. So it goes.
     ///
@@ -1751,12 +1751,24 @@ extension Effect {
     /// effect that is already set keeps everything, with no early-out anywhere needed to arrange it.
     static func tracksAddressed(by effect: Effect?,
                                 from tracks: [String: AnimationCurve]) -> [String: AnimationCurve] {
-        guard !tracks.isEmpty else { return tracks }
+        channelEntriesAddressed(by: effect, from: tracks)
+    }
+
+    /// **The same rule for any dictionary keyed by `EffectParameter.id`.**
+    ///
+    /// A curve is not the only per-channel thing a grade owns: `Layer.pendingBaselines` holds the value
+    /// each channel had before the artist's first edit since their last keyframe, under the same ids.
+    /// A held value the new grade cannot address is exactly what a track it cannot address is —
+    /// storage nothing can reach, written into every saved copy of the document, and met again only by
+    /// accident. One rule, applied wherever those ids are the key, so the two cannot answer differently.
+    static func channelEntriesAddressed<Value>(by effect: Effect?,
+                                               from entries: [String: Value]) -> [String: Value] {
+        guard !entries.isEmpty else { return entries }
         guard let effect else { return [:] }
         // `parameters` builds up to thirty-three closures per call, which is why `resolved` above
         // guards against paying it on every render. Here it is once per discrete pick — the price a
         // mode picker can afford, and the reason this is not folded into the resolver.
         let addressable = Set(effect.parameters.map(\.id))
-        return tracks.filter { addressable.contains($0.key) }
+        return entries.filter { addressable.contains($0.key) }
     }
 }

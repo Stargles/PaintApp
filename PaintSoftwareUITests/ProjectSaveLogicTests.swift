@@ -813,6 +813,74 @@ final class ProjectSaveLogicTests: XCTestCase {
         }
     }
 
+    /// **§2.26's marks and held values through a real package**, on both grade homes at once.
+    ///
+    /// The baseline is the half that has to be persisted rather than recomputed, and the reason is
+    /// this exact round trip: it is the state *between* keyframe A and keyframe B, and that gap can
+    /// span a save. Lose it and placing B writes two identical keys and produces no animation — a
+    /// wrong result with nothing on screen to explain it. A mark is lost just as silently: the
+    /// timeline shows nothing and the next keyframe press has no neighbour to seed onto.
+    ///
+    /// Both targets in one document because `ProjectStore` builds a `FolderManifest` inside
+    /// `SaveSnapshot` and a `LayerManifest` in `writePackage`, so the two empty-to-absent mappings are
+    /// written in different places and could have been forgotten independently.
+    func testKeyframeMarksAndHeldBaselinesSurviveASaveAndLoad() throws {
+        let manager = makeManager()
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
+        let gradeID = try XCTUnwrap(manager.layers.first { $0.name == "Grade" }?.id)
+        let group = manager.addFolder(name: "Graded group")
+        manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
+        manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
+
+        for target in [KeyframeTarget.layer(id: gradeID), .folder(id: group)] {
+            manager.addKeyframe(target, atFrame: 3)
+            manager.addKeyframe(target, atFrame: 11)
+            manager.holdBaseline(target, parameterID: "blur.radius", value: 4)
+        }
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+
+        let layer = try XCTUnwrap(reloaded.layers.first { $0.id == gradeID })
+        XCTAssertEqual(layer.keyframeMarks, [3, 11])
+        XCTAssertEqual(layer.pendingBaselines["blur.radius"] ?? .nan, 4, accuracy: 1e-9,
+                       "The value the artist is mid-way through holding came back, or B would key twice over the same number")
+
+        let folder = try XCTUnwrap(reloaded.folders.first { $0.id == group })
+        XCTAssertEqual(folder.keyframeMarks, [3, 11])
+        XCTAssertEqual(folder.pendingBaselines["blur.radius"] ?? .nan, 4, accuracy: 1e-9)
+    }
+
+    /// §3.5's field-presence versioning on §2.26's two fields, from both ends: a document nobody has
+    /// keyframed writes neither key, so it is byte-for-byte the manifest it was — and a manifest
+    /// without them decodes to no marks and no held values rather than failing.
+    func testADocumentWithNoKeyframesWritesNeitherKey() throws {
+        let manager = makeManager()
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
+        let group = manager.addFolder(name: "Graded group")
+        manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
+        manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+
+        let text = try XCTUnwrap(String(data: try Data(contentsOf: url.appendingPathComponent("manifest.json")),
+                                        encoding: .utf8))
+        XCTAssertFalse(text.contains("keyframeMarks"), "Absence is what \"no keyframes\" is")
+        XCTAssertFalse(text.contains("pendingBaselines"))
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        for layer in reloaded.layers {
+            XCTAssertTrue(layer.keyframeMarks.isEmpty, "\(layer.name): no key decodes to no marks")
+            XCTAssertTrue(layer.pendingBaselines.isEmpty)
+        }
+        for folder in reloaded.folders {
+            XCTAssertTrue(folder.keyframeMarks.isEmpty, "\(folder.name): no key decodes to no marks")
+            XCTAssertTrue(folder.pendingBaselines.isEmpty)
+        }
+    }
+
     // MARK: - Compositor nodes (§4.3)
 
     /// A document containing a Mix node saves and loads as the same graph: the node's op, and its

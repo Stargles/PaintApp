@@ -179,6 +179,11 @@ enum ProjectStore {
             /// key is `writePackage`'s job one level down, for the reason `LayerManifest.effectTracks`
             /// gives.
             let effectTracks: [String: AnimationCurve]
+            /// `Layer.keyframeMarks` and `Layer.pendingBaselines` — §2.26's bare marks and the value
+            /// each channel is holding between two of them. Value types, snapshotted whole and
+            /// unconditionally for `effectTracks`' reason; empty maps to absent in `writePackage`.
+            let keyframeMarks: [Int]
+            let pendingBaselines: [String: Double]
             /// A `.value` layer's flat colour — §4.5's other mode. A value type, for `effect`'s
             /// reason. Both are snapshotted unconditionally: the mode is which one is *live*, and a
             /// layer in effect mode still carries the colour it will go back to (`Layer.valueFill`).
@@ -248,7 +253,9 @@ enum ProjectStore {
                                // down. It is here rather than there only because a folder is already a
                                // `FolderManifest` by the time the snapshot exists, while a layer is
                                // still a `LayerContent`; the rule is one rule.
-                               effectTracks: folder.effectTracks.isEmpty ? nil : folder.effectTracks)
+                               effectTracks: folder.effectTracks.isEmpty ? nil : folder.effectTracks,
+                               keyframeMarks: folder.keyframeMarks.isEmpty ? nil : folder.keyframeMarks,
+                               pendingBaselines: folder.pendingBaselines.isEmpty ? nil : folder.pendingBaselines)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -265,7 +272,10 @@ enum ProjectStore {
                              isVisible: layer.isVisible, kind: layer.kind,
                              parentFolderID: layer.parentFolderID, blendMode: layer.blendMode,
                              alphaMask: layer.alphaMask, effect: layer.effect,
-                             effectTracks: layer.effectTracks, fill: layer.fill,
+                             effectTracks: layer.effectTracks,
+                             keyframeMarks: layer.keyframeMarks,
+                             pendingBaselines: layer.pendingBaselines,
+                             fill: layer.fill,
                              fillReferenceOverride: layer.fillReferenceOverride,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
@@ -690,6 +700,9 @@ enum ProjectStore {
                 // a document nobody has animated writes no `effectTracks` key and stays byte-for-byte
                 // the manifest it was. See `LayerManifest.effectTracks`.
                 effectTracks: layer.effectTracks.isEmpty ? nil : layer.effectTracks,
+                // Same line for the same reason, on §2.26's two fields.
+                keyframeMarks: layer.keyframeMarks.isEmpty ? nil : layer.keyframeMarks,
+                pendingBaselines: layer.pendingBaselines.isEmpty ? nil : layer.pendingBaselines,
                 fill: layer.fill,
                 fillReferenceOverride: layer.fillReferenceOverride,
                 cels: celManifests
@@ -1302,7 +1315,11 @@ enum ProjectStore {
                         // Absent means "nothing animated", which is what every document saved before
                         // §2.21 says and what a folder nobody has keyed says — one meaning, so the
                         // model's non-optional dictionary takes them both as empty.
-                        effectTracks: f.effectTracks ?? [:])
+                        effectTracks: f.effectTracks ?? [:],
+                        // Absent means "none", one meaning in both directions — §2.26's marks and
+                        // baselines follow `effectTracks`' rule exactly.
+                        keyframeMarks: f.keyframeMarks ?? [],
+                        pendingBaselines: f.pendingBaselines ?? [:])
         }
 
         // Restore view presets.
@@ -1333,6 +1350,8 @@ enum ProjectStore {
                 kind: layerManifest.kind,
                 effect: layerManifest.effect,
                 effectTracks: layerManifest.effectTracks ?? [:],
+                keyframeMarks: layerManifest.keyframeMarks ?? [],
+                pendingBaselines: layerManifest.pendingBaselines ?? [:],
                 fill: layerManifest.fill,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,

@@ -1,17 +1,16 @@
 import XCTest
 import UIKit
 
-/// **Animate mode and the keyframe button, as far as a headless test can reach them** — KEYFRAMES.md
-/// §2.1 and §2.22, stage 3a.
+/// **The keyframe-mark workflow** — KEYFRAMES.md §2.26 and §2.27, stage 3b's model half.
 ///
 /// **Read the target membership before believing a pin here.** `Views/AnimationTimeline.swift`,
 /// `Views/EffectSection.swift` and `Views/DrawingView.swift` are **not** compiled into
 /// `PaintSoftwareUITests` — a test written against any of them is silently a pin against nothing,
-/// which is what commit `6a396e1` was written to record. Everything this stage decides that can be
-/// stated as a function of values therefore lives in `KeyframeControl` and in `CanvasManager`, both of
-/// which *are* in the target, and this file pins those. What is left over is the gesture itself —
-/// whether an 0.8 s hold works and whether it fights the timeline's resize drag — and only an
-/// XCUITest can answer that; `AnimateModeUITests` does.
+/// which is what commit `6a396e1` was written to record. That boundary is why this stage pushed the
+/// whole slider-edit path down into `CanvasManager.applyEffectParameterEdit` rather than leaving a
+/// `switch` in the settings bar's callback: the rule *and* the wiring that feeds it are both on this
+/// side of it now, so `testTheOwnersABWorkflow…` below exercises the same code the artist's finger
+/// does.
 ///
 /// **Every write assertion is made twice, once against a layer and once against a folder**, because
 /// §2.21 is a ruling about the two being *indistinguishable* rather than about the folder working.
@@ -66,10 +65,11 @@ final class KeyframeControlLogicTests: XCTestCase {
     }
 
     private func tracks(_ manager: CanvasManager, _ target: KeyframeTarget) -> [String: AnimationCurve] {
-        switch target {
-        case .layer(let id): return manager.layers.first { $0.id == id }?.effectTracks ?? [:]
-        case .folder(let id): return manager.folders.first { $0.id == id }?.effectTracks ?? [:]
-        }
+        manager.keyframeState(of: target).tracks
+    }
+
+    private func baselines(_ manager: CanvasManager, _ target: KeyframeTarget) -> [String: Double] {
+        manager.keyframeState(of: target).baselines
     }
 
     private func linear(_ pairs: [(Int, Double)]) -> AnimationCurve {
@@ -78,182 +78,505 @@ final class KeyframeControlLogicTests: XCTestCase {
         })
     }
 
-    // MARK: - The hold, and the drag it must not fight
-
-    /// **The one number in this stage that is a relationship rather than a value.**
-    ///
-    /// `AnimationTimeline` carries `simultaneousGesture(resizeGesture)` — a `DragGesture` — on the
-    /// whole top bar, and the keyframe button sits inside it. If the hold tolerated *more* drift than
-    /// the resize needs to start, a wandering 0.8 s press would toggle Animate mode **and** resize the
-    /// panel from one touch. Strictly less, and the two are disjoint by construction: nothing has to
-    /// arbitrate, because they cannot both be live.
-    func testAHoldCancelsBeforeTheTimelineResizeDragCanStart() {
-        XCTAssertLessThan(KeyframeControl.holdAllowableMovement,
-                          KeyframeControl.timelineResizeMinimumDistance,
-                          "A hold that drifts far enough to resize the timeline must already have been cancelled")
-        XCTAssertEqual(KeyframeControl.holdDuration, 0.8, accuracy: 1e-9, "§2.1's number")
+    /// One slider move, through the same entry point the settings bar uses. Named so a test below reads
+    /// as the artist's gesture rather than as a call.
+    @discardableResult
+    private func moveSlider(_ manager: CanvasManager, _ target: KeyframeTarget,
+                            _ parameterID: String, to value: Double,
+                            atFrame frame: Int) -> KeyframeControl.Write? {
+        guard let parameter = manager.storedEffect(of: target)?
+            .parameters.first(where: { $0.id == parameterID })
+        else { return nil }
+        manager.currentFrame = frame
+        return manager.applyEffectParameterEdit(target, parameter: parameter,
+                                                newValue: value, atFrame: frame)
     }
 
-    // MARK: - What a slider edit writes
+    private func storedValue(_ manager: CanvasManager, _ target: KeyframeTarget,
+                             _ parameterID: String) -> Double? {
+        guard let effect = manager.storedEffect(of: target),
+              let parameter = effect.parameters.first(where: { $0.id == parameterID })
+        else { return nil }
+        return parameter.read(effect)
+    }
 
-    /// The routing table in full. Three arms are §2.1 read literally; the fourth — an already-animated
-    /// channel keying outside Animate mode — is **§2.23, ruled 2026-08-29**. It shipped as an
-    /// inference and the owner chose it; `KeyframeControl.write` keeps the reasoning, because that is
-    /// the part that stops it being undone by someone who reads only the rule.
-    func testASliderEditKeysWhenTheModeIsOnOrTheChannelIsAlreadyAnimated() {
-        func write(mode: Bool, animated: Bool) -> KeyframeControl.Write {
-            KeyframeControl.write(isAnimateMode: mode, isScalarAnimatable: true,
-                                  channelIsAnimated: animated)
+    private func keyFrames(_ manager: CanvasManager, _ target: KeyframeTarget,
+                           _ parameterID: String) -> [Int]? {
+        tracks(manager, target)[parameterID]?.keys.map(\.frame)
+    }
+
+    private func keyValue(_ manager: CanvasManager, _ target: KeyframeTarget,
+                          _ parameterID: String, atFrame frame: Int) -> Double {
+        tracks(manager, target)[parameterID]?.key(atFrame: frame)?.value ?? .nan
+    }
+
+    // MARK: - The five-arm routing rule
+
+    /// **§2.26's whole routing table, as a function of values.**
+    ///
+    /// Where an edit goes is decided entirely by where the playhead stands relative to the target's
+    /// keyframe marks, so the whole table is reachable from a headless test.
+    func testTheRoutingRuleHasFiveArms() {
+        func write(curve: Bool, marks: Int, onMark: Bool) -> KeyframeControl.Write {
+            KeyframeControl.write(isScalarAnimatable: true, channelHasCurve: curve,
+                                  markCount: marks, playheadIsOnMark: onMark)
         }
-        XCTAssertEqual(write(mode: false, animated: false), .storedValue,
-                       "Nothing animated and no mode: today's behaviour, unchanged")
-        XCTAssertEqual(write(mode: true, animated: false), .key,
-                       "§2.1 — moving a slider in Animate mode is what creates the first track")
-        XCTAssertEqual(write(mode: true, animated: true), .key)
-        XCTAssertEqual(write(mode: false, animated: true), .key,
-                       "An animated channel keys either way, or its slider springs back to the curve")
+
+        XCTAssertEqual(write(curve: false, marks: 0, onMark: false), .storedValue,
+                       "Arm 5 — with no marks anywhere, a slider is a slider")
+        XCTAssertEqual(write(curve: true, marks: 0, onMark: false), .key,
+                       "Arm 2 — an animated channel keys wherever it is edited, marks or no marks")
+        XCTAssertEqual(write(curve: true, marks: 2, onMark: true), .key,
+                       "…and arm 2 takes precedence over the seed arm, which is only for a channel with no curve")
+        XCTAssertEqual(write(curve: false, marks: 2, onMark: false), .storedValueHoldingBaseline,
+                       "Arm 4 — between marks, the previous value is held for the next keyframe to commit")
+        XCTAssertEqual(write(curve: false, marks: 2, onMark: true), .seedAndKey,
+                       "Arm 3 — standing on B with A already placed, the old value goes to A in one move")
+        XCTAssertEqual(write(curve: false, marks: 1, onMark: true), .storedValueHoldingBaseline,
+                       "…but with only one mark there is no A to seed onto, so the value is held instead")
     }
 
-    /// **The one refusal left, and the one that was deleted.** A parameter a `Double` curve cannot
-    /// drive is `EffectParameter.isScalarAnimatable`'s nine — an `Int`, a `Bool`, a seed, an enum
-    /// index, a colour, a point list — and it still writes a value. The *target* refusal is gone:
-    /// while §2.21's folder storage was being built in parallel this rule had a `targetSupportsTracks`
-    /// argument that was false for a folder, and stage 2b landing made it always true. A parameter
-    /// that is always true is a comment pretending to be a condition, so it was removed rather than
-    /// left to read as a live distinction.
-    func testAParameterACurveCannotDriveStillWritesAValue() {
-        XCTAssertEqual(KeyframeControl.write(isAnimateMode: true, isScalarAnimatable: false,
-                                             channelIsAnimated: false),
-                       .storedValue, "A stepped or compound parameter is not a scalar channel")
-        XCTAssertEqual(KeyframeControl.write(isAnimateMode: false, isScalarAnimatable: false,
-                                             channelIsAnimated: true),
-                       .storedValue,
-                       "…and it stays a value write even on a channel that somehow carries a curve")
-    }
-
-    // MARK: - What the button looks like
-
-    /// **Dimmed is not disabled, and the difference is whether the mode is reachable at all.**
+    /// **Arm 3 needs a neighbour, and `markCount` is what tells it there is one.**
     ///
-    /// On a fresh document nothing is animated, so a genuinely disabled button could not be *held*
-    /// either — and the hold is the only way in. The tap is what is refused; the press still lands.
-    func testTheButtonIsDimmedExactlyWhenATapWouldDoNothing() {
-        XCTAssertTrue(KeyframeControl.isDimmed(isAnimateMode: false, animatedChannelCount: 0),
-                      "Nothing to hold at this frame, so the tap is refused visibly rather than silently")
-        XCTAssertFalse(KeyframeControl.isDimmed(isAnimateMode: false, animatedChannelCount: 1))
-        XCTAssertFalse(KeyframeControl.isDimmed(isAnimateMode: true, animatedChannelCount: 0),
-                       "In Animate mode the button stays live — a slider is what makes the first track")
+    /// This is the case that would be wrong under a bare `hasMarks`: the artist places their very first
+    /// keyframe and moves the slider while still standing on it. Seeding there produces a one-key curve
+    /// pinning the *new* value, and the owner's *"the previous value gets saved to A"* is lost with
+    /// nothing on screen to explain it. `playheadIsOnMark && markCount > 1` is the same statement as
+    /// "there is a mark other than this one", because the playhead's own mark is in the count.
+    func testStandingOnTheOnlyMarkHoldsRatherThanSeeds() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
 
-        XCTAssertFalse(KeyframeControl.tapCanKey(animatedChannelCount: 0))
-        XCTAssertTrue(KeyframeControl.tapCanKey(animatedChannelCount: 3))
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 5, atFrame: 0),
+                       .storedValueHoldingBaseline)
+        XCTAssertNil(tracks(manager, target)[brightnessID],
+                     "No curve yet — one mark cannot make an animation on its own")
+        XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9,
+                       "The value at A is held, exactly as it would be from any other frame")
     }
 
-    /// The icon and the accessibility value are the only two things about the mode a test outside this
-    /// process can see — SwiftUI publishes neither a tint nor a symbol name — so both are derived here
-    /// rather than typed into the view.
-    func testTheSymbolAndStatusValueReportTheMode() {
-        XCTAssertEqual(KeyframeControl.symbolName(isAnimateMode: false), "diamond")
-        XCTAssertEqual(KeyframeControl.symbolName(isAnimateMode: true), "diamond.fill")
-        XCTAssertEqual(KeyframeControl.statusValue(isAnimateMode: false, animatedChannelCount: 0), "off|0")
-        XCTAssertEqual(KeyframeControl.statusValue(isAnimateMode: true, animatedChannelCount: 2), "on|2")
+    /// **The one refusal that is not about marks at all.** A parameter a `Double` curve cannot drive is
+    /// `EffectParameter.isScalarAnimatable`'s nine — an `Int`, a `Bool`, a seed, an enum index, a
+    /// colour, a point list — and it writes a value from every position in the table.
+    func testAParameterACurveCannotDriveAlwaysWritesAValue() {
+        for curve in [false, true] {
+            for marks in [0, 1, 3] {
+                for onMark in [false, true] {
+                    XCTAssertEqual(
+                        KeyframeControl.write(isScalarAnimatable: false, channelHasCurve: curve,
+                                              markCount: marks, playheadIsOnMark: onMark),
+                        .storedValue,
+                        "A stepped or compound parameter is not a scalar channel, from any state")
+                }
+            }
+        }
     }
 
-    // MARK: - Which channels the button counts and keys
+    // MARK: - The owner's workflow, end to end
 
-    /// Empty until something is animated, and then the descriptor table's order — not the dictionary's,
+    /// **The ruling in the owner's own words, executed**: *"keyframe A is added, nothing is saved. A
+    /// slider or something is then adjusted. The previous value is held. Then keyframe B is added. That
+    /// previous value gets saved to A and the new value gets saved to B and the held value is
+    /// discarded."*
+    ///
+    /// It is one test rather than four because the claim is about the sequence: each step is only
+    /// correct given the one before, and three of them are unobservable on their own.
+    func testTheOwnersABWorkflowProducesOneAnimation() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+
+        // A is added at frame 0, and nothing is saved.
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 0))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0])
+        XCTAssertTrue(tracks(manager, target).isEmpty, "\"keyframe A is added, nothing is saved\"")
+
+        // The artist moves to frame 10 and adjusts a slider. The previous value is held.
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 2, atFrame: 10),
+                       .storedValueHoldingBaseline)
+        XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9,
+                       "\"the previous value is held\"")
+        XCTAssertEqual(storedValue(manager, target, brightnessID) ?? .nan, 2, accuracy: 1e-9,
+                       "…and the edit still lands on the stored base, so nothing the artist did is provisional")
+        XCTAssertTrue(tracks(manager, target).isEmpty, "No curve until the second keyframe lands")
+
+        // B is added at frame 10.
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9,
+                       "\"that previous value gets saved to A\"")
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 10), 2, accuracy: 1e-9,
+                       "\"and the new value gets saved to B\"")
+        XCTAssertTrue(baselines(manager, target).isEmpty, "\"and the held value is discarded\"")
+
+        XCTAssertEqual(manager.listedAnimationChannelIDs(of: target), [brightnessID],
+                       "One animation, which is what the channel list is for")
+    }
+
+    /// **The second half of the owner's example**: *"the user modifies another slider while on B. The
+    /// previous value of that other slider goes to A, and the current saves to B. Now there are two
+    /// animations, and each of the keyframes store the values of both."*
+    ///
+    /// This is the seed arm, and it is why arm 3 exists rather than being folded into "hold and wait":
+    /// the artist is standing on B, so there is no third keyframe press coming to commit a baseline.
+    func testModifyingASecondSliderWhileOnBSeedsTheOldValueOntoA() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
+        manager.addKeyframe(target, atFrame: 10)
+
+        // Still on B, a second slider moves.
+        XCTAssertEqual(moveSlider(manager, target, contrastID, to: 3, atFrame: 10), .seedAndKey)
+
+        XCTAssertEqual(keyFrames(manager, target, contrastID), [0, 10])
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 0), 1, accuracy: 1e-9,
+                       "\"the previous value of that other slider goes to A\"")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 10), 3, accuracy: 1e-9,
+                       "\"and the current saves to B\"")
+        XCTAssertEqual(manager.listedAnimationChannelIDs(of: target), [brightnessID, contrastID],
+                       "\"now there are two animations\", in the descriptor table's order")
+
+        // And the point of the whole design: only the two channels that changed are stored.
+        XCTAssertEqual(tracks(manager, target).count, 2,
+                       "\"without having to store every single number on the layer, only the things which change\"")
+    }
+
+    /// **A slider edit on a channel that is already animated keys at that frame**, wherever the
+    /// playhead is — the owner: *"if the current frame is a keyframe, then the value gets updated on
+    /// that keyframe. If it isnt a current keyframe the drag creates a keyframe at that frame."*
+    func testAnAnimatedChannelKeysWhereverItIsEdited() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (10, 2.0)]))
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 10)
+
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 9, atFrame: 10), .key,
+                       "On a mark, the key there is updated")
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 10), 9, accuracy: 1e-9)
+
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 4, atFrame: 5), .key,
+                       "Off a mark, the drag creates a key at that frame")
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 5), 4, accuracy: 1e-9)
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
+    }
+
+    /// **The auto-key arm asks whether a curve exists, not whether it animates anything.**
+    ///
+    /// A curve whose two keys hold the same value is still in force — `Effect.resolved` consults it at
+    /// every frame — so an edit routed to the stored base would be overwritten by it and the slider
+    /// would spring back under the artist's finger. That is the dead control §2.23 refuses, reached
+    /// from a new door, and it is the whole reason the two predicates are separate.
+    func testAFlatCurveStillKeysEvenThoughItIsNotListedAsAnAnimation() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (10, 1.0)]))
+
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: target), [brightnessID],
+                       "It has a curve…")
+        XCTAssertEqual(manager.listedAnimationChannelIDs(of: target), [],
+                       "…and it is not yet an animation, so the channel list does not offer it")
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 7, atFrame: 5), .key,
+                       "The edit must key, or the curve overwrites the base it wrote to")
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 5), 7, accuracy: 1e-9)
+    }
+
+    /// The owner's definition of an animation, on the curve itself: *"two keyframes are placed, and
+    /// something changes in one keyframe which from the other."*
+    func testIsAnimatedNeedsTwoKeysAndADifference() {
+        XCTAssertFalse(AnimationCurve().isAnimated, "No keys")
+        XCTAssertFalse(linear([(0, 1.0)]).isAnimated, "One key holds a value; it does not animate one")
+        XCTAssertFalse(linear([(0, 1.0), (10, 1.0)]).isAnimated, "Two keys, nothing changing")
+        XCTAssertTrue(linear([(0, 1.0), (10, 2.0)]).isAnimated)
+        XCTAssertTrue(linear([(0, 1.0), (5, 1.0), (10, 2.0)]).isAnimated,
+                      "A run of equal keys does not make the whole curve flat")
+    }
+
+    /// **The baseline is written by the *first* edit since the last mark and never overwritten.**
+    ///
+    /// A slider drag calls this on every tick, so a later write would replace the value at A with one
+    /// the artist merely passed through — and the failure is invisible until the next keyframe lands.
+    func testTheBaselineIsHeldOncePerCycle() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+
+        // One drag, three ticks.
+        moveSlider(manager, target, brightnessID, to: 1.4, atFrame: 10)
+        moveSlider(manager, target, brightnessID, to: 1.7, atFrame: 10)
+        moveSlider(manager, target, brightnessID, to: 2.0, atFrame: 10)
+        XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9,
+                       "The first tick's pre-edit value, not the second tick's")
+
+        manager.addKeyframe(target, atFrame: 10)
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9)
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 10), 2, accuracy: 1e-9)
+    }
+
+    // MARK: - `addKeyframe`
+
+    /// **A mark with no channel is legal and is the point.** The whole workflow rests on a keyframe
+    /// being a bare point in time that acquires channels later — a curve cannot express "the artist
+    /// marked this frame and has not changed anything yet".
+    func testAKeyframeOnAnUntouchedLayerIsABareMark() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 4))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [4])
+        XCTAssertTrue(manager.hasKeyframeMark(target, atFrame: 4))
+        XCTAssertFalse(manager.hasKeyframeMark(target, atFrame: 5))
+        XCTAssertTrue(tracks(manager, target).isEmpty)
+        XCTAssertEqual(manager.listedAnimationChannelIDs(of: target), [],
+                       "A mark is not an animation, so nothing appears in the list")
+    }
+
+    /// Marks stay sorted and unique however they arrive, because every reader — the neighbour search in
+    /// particular — assumes both.
+    func testMarksAreSortedAndUnique() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        for frame in [10, 2, 7, 2] { manager.addKeyframe(target, atFrame: frame) }
+        XCTAssertEqual(manager.keyframeMarks(of: target), [2, 7, 10])
+    }
+
+    /// **A second press on a frame that already has a mark is not a no-op**, and refusing it would be
+    /// the failure: it is the owner's *"modifies another slider while on B"* reached by a keyframe press
+    /// instead of by the seed arm, so the held value still has to be committed.
+    func testAddingAKeyframeWhereOneAlreadySitsStillCommitsHeldValues() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 10)
+        // At 10, which is already a mark, a channel with no curve is held rather than seeded only
+        // because the edit is made from frame 3; that is what leaves a baseline to commit here.
+        moveSlider(manager, target, contrastID, to: 6, atFrame: 3)
+        XCTAssertFalse(baselines(manager, target).isEmpty, "Fixture premise: something is held")
+
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10),
+                      "The mark does not move and the write is still a change")
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10], "…and no duplicate mark appeared")
+        XCTAssertEqual(keyFrames(manager, target, contrastID), [0, 10])
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 0), 1, accuracy: 1e-9)
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 10), 6, accuracy: 1e-9)
+    }
+
+    /// **Every channel that already has a curve gets a key holding the value it *resolves* to** —
+    /// §2.24's "hold this pose here". Without it, placing a new mark lets every other animated channel
+    /// drift straight through it.
+    ///
+    /// The playhead is parked mid-segment at 5, which is the only place the resolved value and the
+    /// stored base are different numbers and therefore the only place this is assertable.
+    func testAddingAKeyframeHoldsEveryCurvedChannelAtItsResolvedValue() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (10, 2.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 2.0), (10, 4.0)]))
+
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 5))
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 5), 1.5, accuracy: 1e-9,
+                       "Halfway along a linear 1 → 2")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 5), 3.0, accuracy: 1e-9)
+        // The whole point of holding a value: the curve either side of the new key is unchanged, so
+        // nothing that was already on screen moved.
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
+    }
+
+    /// **One undo step for the whole press — the mark, the committed baselines and every held pose.**
+    /// `bakePreciseStrokes` states the rule this follows: collect, mutate, register one `recordUndo`
+    /// over all of it, *"rather than registering per cel, which would cost the artist one press per cel
+    /// to take back a single menu tap."*
+    func testAddingAKeyframeIsOneUndoStep() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
+        moveSlider(manager, target, contrastID, to: 5, atFrame: 10)
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
+        XCTAssertEqual(tracks(manager, target).count, 2)
+
+        manager.undo()
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0], "The mark came back off")
+        XCTAssertTrue(tracks(manager, target).isEmpty, "Both channels went with it")
+        XCTAssertEqual(baselines(manager, target).count, 2,
+                       "…and the held values came back, or a redo would have nothing to commit")
+        XCTAssertFalse(manager.canUndo, "…because there was only ever one step")
+
+        manager.redo()
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(tracks(manager, target).count, 2)
+        XCTAssertTrue(baselines(manager, target).isEmpty)
+    }
+
+    /// A press that changes nothing records nothing — the rule every setter in `CanvasManager` follows.
+    /// A second press on an unmoved playhead with nothing held is exactly that.
+    func testAKeyframePressThatChangesNothingIsNotAnEdit() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 4)
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+
+        XCTAssertFalse(manager.addKeyframe(target, atFrame: 4))
+        XCTAssertFalse(manager.canUndo)
+        XCTAssertFalse(manager.addKeyframe(.layer(id: UUID()), atFrame: 0),
+                       "And a target that is not in the document answers rather than trapping")
+    }
+
+    /// **A mark is a point in time, not a property of an effect**, so a layer with no grade at all
+    /// still takes one — the later stages key transforms and object channels onto the same marks.
+    func testALayerWithNoGradeStillTakesAMark() {
+        let manager = gradedManager()
+        let plain = KeyframeTarget.layer(id: manager.layers[0].id)
+        XCTAssertNil(manager.storedEffect(of: plain), "Fixture premise: nothing to key on it")
+        XCTAssertTrue(manager.addKeyframe(plain, atFrame: 3))
+        XCTAssertEqual(manager.keyframeMarks(of: plain), [3])
+    }
+
+    /// **Only the immediate neighbours are seeded, and that is behaviourally identical to seeding every
+    /// mark.** `AnimationCurve` extrapolates as a constant hold outside its first and last key
+    /// (documented decision 2 there), so a value on the nearest mark below already holds at every mark
+    /// below that. Fewer keys, same curve — and this test is what stops somebody "fixing" it to seed
+    /// all, because it asserts both halves: the key count *and* the evaluated value out at the far mark.
+    func testSeedingReachesOnlyTheNeighbouringMarksAndTheCurveHoldsBeyondThem() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        for frame in [0, 5, 10, 20] { manager.addKeyframe(target, atFrame: frame) }
+        moveSlider(manager, target, brightnessID, to: 3, atFrame: 12)
+        manager.addKeyframe(target, atFrame: 12)
+
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [10, 12, 20],
+                       "The marks either side of 12, and 12 itself — not 0 and not 5")
+        let curve = tracks(manager, target)[brightnessID]!
+        XCTAssertEqual(curve.evaluate(at: 0), 1, accuracy: 1e-9,
+                       "…and the old value still holds out at the first mark, which is why the extra keys buy nothing")
+        XCTAssertEqual(curve.evaluate(at: 5), 1, accuracy: 1e-9)
+    }
+
+    /// A neighbouring mark that already carries a key is left alone: that key is a value the artist
+    /// authored or a pose an earlier keyframe held, and a baseline must not move a point of the curve
+    /// nobody asked to move.
+    func testSeedingDoesNotOverwriteAKeyThatIsAlreadyOnANeighbouringMark() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        manager.addKeyframe(target, atFrame: 10)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 8.0)]))
+
+        moveSlider(manager, target, contrastID, to: 3, atFrame: 5)
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 3, atFrame: 5),
+                       .storedValueHoldingBaseline, "Fixture premise: brightness is held, contrast keys")
+        manager.addKeyframe(target, atFrame: 5)
+
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 0), 8, accuracy: 1e-9,
+                       "The authored key at 0 survived the neighbour seed")
+    }
+
+    // MARK: - `removeKeyframe` and `clearKeyframes`
+
+    /// Both halves go, because the artist asked for the keyframe to go: leaving the keys behind would
+    /// take the marker off the timeline and leave the animation doing exactly what it did.
+    func testRemovingAKeyframeDropsTheMarkAndEveryKeyOnThatFrame() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (5, 3.0), (10, 2.0)]))
+        for frame in [0, 5, 10] { manager.addKeyframe(target, atFrame: frame) }
+
+        XCTAssertTrue(manager.removeKeyframe(target, atFrame: 5))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
+
+        manager.undo()
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 5, 10], "One step takes both back")
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
+    }
+
+    /// A channel left with no keys is **removed**, not stored empty — `setEffectParameterTrack`'s rule.
+    /// An empty curve is a channel that exists, animates nothing and would show up in a list.
+    func testClearingEveryKeyOnAChannelRemovesTheChannel() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(2, 1.0), (4, 3.0)]))
+        for frame in [2, 4] { manager.addKeyframe(target, atFrame: frame) }
+
+        XCTAssertTrue(manager.clearKeyframes(target, inFrames: 0 ..< 6))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [])
+        XCTAssertTrue(tracks(manager, target).isEmpty, "Gone, not present-and-empty")
+    }
+
+    /// The range is half-open, which is what every frame range in this codebase is, and the boundary is
+    /// the whole of what a caller can get wrong: the cel block that ends at `startFrame + frameCount`
+    /// must not take the next block's first keyframe with it.
+    func testClearKeyframesIsHalfOpenAndOneUndoStep() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (5, 2.0), (10, 3.0)]))
+        for frame in [0, 5, 10] { manager.addKeyframe(target, atFrame: frame) }
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+
+        XCTAssertTrue(manager.clearKeyframes(target, inFrames: 0 ..< 10))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [10], "10 is outside a half-open 0..<10")
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [10])
+
+        manager.undo()
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 5, 10])
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
+        XCTAssertFalse(manager.canUndo, "One step for the whole range")
+
+        XCTAssertFalse(manager.clearKeyframes(target, inFrames: 40 ..< 50),
+                       "A range with nothing in it is not an edit")
+        XCTAssertFalse(manager.clearKeyframes(target, inFrames: 0 ..< 0), "Nor is an empty range")
+    }
+
+    // MARK: - Which channels are counted
+
+    /// Empty until something is keyed, and then the descriptor table's order — not the dictionary's,
     /// which has none. The `effectTracks.isEmpty` fast path is the same one `Effect.resolved` takes and
     /// for the same reason: this is read from a SwiftUI body and `Effect.parameters` rebuilds up to
     /// thirty-three closures per call.
-    func testAnimatedChannelIDsFollowTheDescriptorTable() {
+    func testCurvedChannelIDsFollowTheDescriptorTable() {
         let manager = gradedManager()
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: layerTarget(manager)), [],
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: layerTarget(manager)), [],
                        "A document nobody has keyed has no channels")
 
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
                                         to: linear([(0, 1.0), (10, 2.0)]))
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (10, 2.0)]))
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: layerTarget(manager)),
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: layerTarget(manager)),
                        [brightnessID, contrastID],
                        "Brightness is declared before Contrast in the table, whatever order they were written in")
+        XCTAssertEqual(manager.listedAnimationChannelIDs(of: layerTarget(manager)),
+                       [brightnessID, contrastID], "Both actually animate, so both are listed")
+        XCTAssertTrue(manager.channelIsAnimated(layerTarget(manager), parameterID: brightnessID))
+        XCTAssertFalse(manager.channelIsAnimated(layerTarget(manager), parameterID: "bloom.intensity"))
 
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: .layer(id: manager.layers[0].id)), [],
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: .layer(id: manager.layers[0].id)), [],
                        "A layer with no grade has no channels to animate")
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: .layer(id: UUID())), [],
-                       "And an index off the end answers rather than trapping")
-    }
-
-    /// **The tap** (§2.1): a key on every already-animated channel at the playhead, holding the value
-    /// that channel resolves to *there* — not the value that was typed before anything was animated.
-    /// A mid-segment frame is the case that tells those two apart, which is why the playhead is parked
-    /// at 5 rather than on a key.
-    func testATapKeysEveryAnimatedChannelAtThePlayheadHoldingItsResolvedValue() {
-        let manager = gradedManager()
-        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
-                                        to: linear([(0, 1.0), (10, 2.0)]))
-        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
-                                        to: linear([(0, 2.0), (10, 4.0)]))
-        manager.currentFrame = 5
-
-        XCTAssertEqual(manager.keyAnimatedChannelsAtPlayhead(layerTarget(manager)), 2,
-                       "Both channels carry a curve, so both are held")
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks[brightnessID]?.key(atFrame: 5)?.value ?? .nan,
-                       1.5, accuracy: 1e-9, "Halfway along a linear 1 → 2")
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks[contrastID]?.key(atFrame: 5)?.value ?? .nan,
-                       3.0, accuracy: 1e-9)
-
-        // The whole point of holding a value: the curve either side of the new key is unchanged, so
-        // nothing that was already on screen moved.
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks[brightnessID]?.keys.map(\.frame), [0, 5, 10])
-    }
-
-    /// A tap with nothing animated is refused, which is the state the button draws dimmed. The arm for
-    /// *"nothing is animated yet → open the channel panel"* is stage 3b's, and until it exists the
-    /// honest behaviour is to do nothing visibly rather than nothing silently.
-    func testATapKeysNothingWhenNothingIsAnimated() {
-        let manager = gradedManager()
-        XCTAssertEqual(manager.keyAnimatedChannelsAtPlayhead(layerTarget(manager)), 0)
-        XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty)
-        XCTAssertFalse(manager.canUndo, "A refused tap is not an edit")
-
-        XCTAssertEqual(manager.keyAnimatedChannelsAtPlayhead(.layer(id: manager.layers[0].id)), 0,
-                       "Nor is a tap on a layer that has no grade at all")
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: .layer(id: UUID())), [],
+                       "And an id that is in no document answers rather than trapping")
     }
 
     // MARK: - The write
 
-    /// **One undo step for the whole tap, not one per channel.** `bakePreciseStrokes` states the rule
-    /// this follows: collect, mutate, register one `recordUndo` over all of it, *"rather than
-    /// registering per cel, which would cost the artist one press per cel to take back a single menu
-    /// tap."* A loop over `setEffectParameterTrack` would have cost exactly that.
-    func testATapAcrossTwoChannelsIsOneUndoStep() {
-        let manager = gradedManager()
-        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
-                                        to: linear([(0, 1.0), (10, 2.0)]))
-        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
-                                        to: linear([(0, 2.0), (10, 4.0)]))
-        manager.history.removeAll()
-        manager.refreshUndoRedoState()
-
-        manager.currentFrame = 5
-        XCTAssertEqual(manager.keyAnimatedChannelsAtPlayhead(layerTarget(manager)), 2)
-
-        manager.undo()
-        XCTAssertNil(manager.layers[gradeIndex].effectTracks[brightnessID]?.key(atFrame: 5),
-                     "One undo takes both channels back")
-        XCTAssertNil(manager.layers[gradeIndex].effectTracks[contrastID]?.key(atFrame: 5))
-        XCTAssertFalse(manager.canUndo, "…because there was only ever one step")
-
-        manager.redo()
-        XCTAssertNotNil(manager.layers[gradeIndex].effectTracks[brightnessID]?.key(atFrame: 5))
-        XCTAssertNotNil(manager.layers[gradeIndex].effectTracks[contrastID]?.key(atFrame: 5))
-    }
-
     /// **Undoing a write that *created* a channel must remove it, not leave an empty curve behind.**
     /// An empty curve is not the same state as no curve to anything that lists channels — it is a
     /// channel that exists and animates nothing, which is exactly what `setEffectParameterTrack` maps
-    /// to nil at the door. This is the case a writer that only remembered "the previous curve" would
-    /// get wrong, because there was no previous curve to remember.
+    /// to nil at the door.
     func testUndoingTheWriteThatCreatedAChannelRemovesIt() {
         let manager = gradedManager()
         XCTAssertEqual(manager.setEffectParameterKeys(layerTarget(manager), frame: 3,
@@ -264,13 +587,13 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers[gradeIndex].effectTracks.isEmpty,
                       "The channel is gone, not present-and-empty")
         manager.redo()
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks[brightnessID]?.key(atFrame: 3)?.value ?? .nan,
+        XCTAssertEqual(keyValue(manager, layerTarget(manager), brightnessID, atFrame: 3),
                        1.5, accuracy: 1e-9)
     }
 
     /// A second key on a frame that already has one replaces it — `AnimationCurve` decision 4, reached
-    /// through this writer. This is the common case in Animate mode: every tick of a slider drag writes
-    /// the same frame.
+    /// through this writer. This is the common case under the auto-key arm: every tick of a slider drag
+    /// writes the same frame.
     func testAKeyOnAFrameThatAlreadyHasOneReplacesIt() {
         let manager = gradedManager()
         manager.setEffectParameterKeys(layerTarget(manager), frame: 3, values: [brightnessID: 1.5])
@@ -278,13 +601,12 @@ final class KeyframeControlLogicTests: XCTestCase {
 
         XCTAssertEqual(manager.layers[gradeIndex].effectTracks[brightnessID]?.keys.count, 1,
                        "One key per frame, replaced rather than appended")
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks[brightnessID]?.keys.first?.value ?? .nan,
+        XCTAssertEqual(keyValue(manager, layerTarget(manager), brightnessID, atFrame: 3),
                        1.9, accuracy: 1e-9)
     }
 
     /// A write that changes nothing records nothing — the rule every setter in `CanvasManager` follows,
-    /// and the one a mode that keys on every value change hits constantly. A second tap on an unmoved
-    /// playhead must not fill the history with steps that undo to the same picture.
+    /// and the one an auto-keying slider hits constantly.
     func testAKeyIdenticalToTheOneAlreadyThereIsNotAChange() {
         let manager = gradedManager()
         manager.setEffectParameterKeys(layerTarget(manager), frame: 3, values: [brightnessID: 1.5])
@@ -314,8 +636,8 @@ final class KeyframeControlLogicTests: XCTestCase {
     }
 
     /// **Records nothing while an enclosing bracket is open** — `setEffectParameterTrack`'s rule, and
-    /// the one Animate mode leans on hardest: a slider drag opens a structure gesture and writes a key
-    /// on every tick, so a step per tick would make undo useless. The enclosing commit supplies the
+    /// the one the auto-key arm leans on hardest: a slider drag opens a structure gesture and writes a
+    /// key on every tick, so a step per tick would make undo useless. The enclosing commit supplies the
     /// label, which `DrawingView` sets to `.effectKeyframes` when the drag wrote keys.
     func testKeysWrittenInsideAGestureFoldIntoItsOneStep() {
         let manager = gradedManager()
@@ -325,7 +647,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         manager.setEffectParameterKeys(layerTarget(manager), frame: 0, values: [brightnessID: 1.6])
         manager.commitStructureGesture(label: .effectKeyframes)
 
-        XCTAssertEqual(manager.layers[gradeIndex].effectTracks[brightnessID]?.keys.first?.value ?? .nan,
+        XCTAssertEqual(keyValue(manager, layerTarget(manager), brightnessID, atFrame: 0),
                        1.6, accuracy: 1e-9)
         XCTAssertTrue(manager.canUndo)
         manager.undo()
@@ -339,7 +661,8 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testUndoFindsTheLayerAfterItsIndexHasMoved() {
         let manager = gradedManager()
         let gradeID = manager.layers[gradeIndex].id
-        manager.setEffectParameterKeys(layerTarget(manager), frame: 4, values: [brightnessID: 1.5])
+        manager.addKeyframe(.layer(id: gradeID), atFrame: 4)
+        manager.setEffectParameterKeys(.layer(id: gradeID), frame: 4, values: [brightnessID: 1.5])
 
         manager.deleteLayer(at: 0)
         XCTAssertEqual(manager.layers.firstIndex { $0.id == gradeID }, 0,
@@ -348,66 +671,103 @@ final class KeyframeControlLogicTests: XCTestCase {
         manager.undo()   // the delete
         manager.undo()   // the keys
         XCTAssertTrue(manager.layers.first { $0.id == gradeID }?.effectTracks.isEmpty ?? false)
+        manager.undo()   // the mark
+        XCTAssertEqual(manager.layers.first { $0.id == gradeID }?.keyframeMarks, [])
     }
 
     // MARK: - The target
 
-    /// §2.22 puts the button in the timeline's control strip, so its target is the timeline's own
-    /// notion of what is being worked on: the current layer. A folder has no row for the button to be
-    /// beside — see `keyframeTargetLayerIndex` for why that is the answer to the ambiguity rather than
-    /// an omission.
+    /// §2.22 puts the keyframe control in the timeline's control strip, so its target is the timeline's
+    /// own notion of what is being worked on: the current layer. A folder has no row for the control to
+    /// be beside.
     func testTheKeyframeTargetIsTheCurrentLayer() {
         let manager = gradedManager()
         XCTAssertEqual(manager.keyframeTarget, .layer(id: manager.layers[gradeIndex].id))
         manager.currentLayerIndex = 0
         XCTAssertEqual(manager.keyframeTarget, .layer(id: manager.layers[0].id),
-                       "It follows the highlighted row, which is what the button sits beside")
+                       "It follows the highlighted row, which is what the control sits beside")
     }
 
-    /// A transient, exactly like `isInterpolateMode`: never persisted, never undoable. The keys it
-    /// causes are document content and record their own steps; being *in* the mode is not.
-    func testAnimateModeIsATransientAndRecordsNoUndoStep() {
+    /// **Marks and held values ride a duplicate, because `effectTracks` does.**
+    ///
+    /// A copy that kept the curves and dropped the marks would be a layer whose animation exists and
+    /// whose keyframes are invisible — the timeline would show none and the next keyframe press would
+    /// seed onto nothing. The three fields are one feature and a copy takes all of them or none.
+    func testDuplicatingALayerCarriesItsKeyframeState() {
         let manager = gradedManager()
-        XCTAssertFalse(manager.isAnimateMode, "Off by default")
-        manager.isAnimateMode = true
-        XCTAssertFalse(manager.canUndo, "Entering the mode is not an edit")
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
+        manager.addKeyframe(target, atFrame: 10)
+        moveSlider(manager, target, contrastID, to: 4, atFrame: 15)
+
+        manager.duplicateLayer(at: gradeIndex)
+        let copy = manager.layers[gradeIndex + 1]
+        XCTAssertEqual(copy.name, manager.layers[gradeIndex].name + " copy", "Fixture premise")
+        XCTAssertEqual(copy.keyframeMarks, [0, 10])
+        XCTAssertEqual(copy.effectTracks[brightnessID], manager.layers[gradeIndex].effectTracks[brightnessID],
+                       "The animation came with it, which it did not before this stage")
+        XCTAssertEqual(copy.pendingBaselines[contrastID] ?? .nan, 1, accuracy: 1e-9,
+                       "…and so did the value the copy is mid-way through holding")
+    }
+
+    /// **Changing the grade keeps the marks and drops the held values the new grade cannot address.**
+    ///
+    /// The two halves answer different questions and that is why they differ. A *mark* is a point in
+    /// time — the artist put it on the timeline, later stages key transforms and object channels onto
+    /// the same one, and emptying the timeline as a side effect of picking a different effect would be
+    /// a control destroying work it was not asked about. A *baseline* is per-channel storage under an
+    /// `EffectParameter.id`, exactly as a track is, so a held value the new grade has no parameter for
+    /// is unreachable: invisible, uneditable, undeletable, and written into every saved copy.
+    func testChangingTheGradeKeepsTheMarksAndDropsUnaddressableHeldValues() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        moveSlider(manager, target, brightnessID, to: 2, atFrame: 6)
+        XCTAssertFalse(baselines(manager, target).isEmpty, "Fixture premise: a value is held")
+
+        manager.setLayerEffect(layerIndex: gradeIndex, to: .bloom(Effect.Bloom()))
+
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0],
+                       "The artist's keyframe is not the effect's to delete")
+        XCTAssertTrue(baselines(manager, target).isEmpty,
+                      "A bloom has no `brightnessContrast.brightness`, so the held value is storage nothing can reach")
     }
 
     // MARK: - The folder arm (§2.21)
 
     /// **§2.21 is a ruling about *sameness*, so the pin has to be about sameness too.**
     ///
-    /// The owner's stated reason for giving `LayerFolder.effect` the same track is that the
-    /// alternative *"costs a slider that silently refuses to key, which nothing reveals until the
-    /// artist reaches for it"*. So this is `testATapKeysEveryAnimatedChannelAtThePlayheadHolding…`
-    /// and `testUndoingTheWriteThatCreatedAChannelRemovesIt` run against a folder, and what it asserts
-    /// is that the answers are indistinguishable from the layer's. A divergence here is the ruling not
-    /// being implemented, whatever each number looks like on its own.
-    func testAFolderGradeKeysExactlyAsALayersDoes() {
+    /// The owner's stated reason for giving `LayerFolder.effect` the same track is that the alternative
+    /// *"costs a slider that silently refuses to key, which nothing reveals until the artist reaches
+    /// for it"*. So this is `testTheOwnersABWorkflowProducesOneAnimation` run against a folder, and what
+    /// it asserts is that the answers are indistinguishable from the layer's. A divergence here is the
+    /// ruling not being implemented, whatever each number looks like on its own.
+    func testAFolderRunsTheWholeWorkflowExactlyAsALayerDoes() {
         let (manager, target) = gradedFolderManager()
 
-        // 1. The first write creates the channel, from nothing, exactly as on a layer.
-        XCTAssertEqual(manager.setEffectParameterKeys(target, frame: 0, values: [brightnessID: 1.0]), 1)
-        XCTAssertEqual(manager.setEffectParameterKeys(target, frame: 10, values: [brightnessID: 2.0]), 1)
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: target), [brightnessID])
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 0))
+        XCTAssertTrue(tracks(manager, target).isEmpty)
 
-        // 2. The tap holds the resolved value at a frame between the two keys.
-        manager.currentFrame = 5
-        XCTAssertEqual(manager.keyAnimatedChannelsAtPlayhead(target), 1)
-        XCTAssertEqual(tracks(manager, target)[brightnessID]?.key(atFrame: 5)?.value ?? .nan,
-                       1.5, accuracy: 1e-9, "Halfway along the same 1 → 2 the layer test uses")
-        XCTAssertEqual(tracks(manager, target)[brightnessID]?.keys.map(\.frame), [0, 5, 10])
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 2, atFrame: 10),
+                       .storedValueHoldingBaseline)
+        XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9)
 
-        // 3. And it renders: the resolver reads the track the writer stored.
+        XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
+        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9)
+        XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 10), 2, accuracy: 1e-9)
+
+        // And it renders: the resolver reads the track the writer stored.
         guard case .brightnessContrast(let params)? = manager.resolvedEffect(of: target, atFrame: 5)
         else { return XCTFail("The folder's grade resolves at a frame") }
         XCTAssertEqual(params.brightness, 1.5, accuracy: 1e-9)
     }
 
     /// The undo path is the half most likely to be wired to only one of the two homes, because it is
-    /// the half with a second mutation site. One step for the whole tap, the channel *removed* rather
-    /// than left empty, and the folder found by id.
-    func testAFolderTapIsOneUndoStepAndItsUndoRemovesTheChannel() {
+    /// the half with a second mutation site. One step for the whole press, and the folder found by id.
+    func testAFolderKeyframeIsOneUndoStepAndItsUndoRemovesTheChannel() {
         let (manager, target) = gradedFolderManager()
         XCTAssertEqual(manager.setEffectParameterKeys(target, frame: 0,
                                                       values: [brightnessID: 1.4, contrastID: 2.0]), 2,
@@ -418,7 +778,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertFalse(manager.canUndo, "…because there was only ever one step")
 
         manager.redo()
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: target), [brightnessID, contrastID],
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: target), [brightnessID, contrastID],
                        "Redo restores both, in the descriptor table's order")
     }
 
@@ -436,16 +796,19 @@ final class KeyframeControlLogicTests: XCTestCase {
                        "An id this grade has no parameter for is never stored")
     }
 
-    /// **A folder is a target and still is not the *button's* target.** The button lives in the
-    /// timeline strip beside a row, and a folder's row is a summary band with no grade of its own to
-    /// mean — so the button keeps writing onto the current layer, and a folder's channels are reached
-    /// through the settings bar (now) and the channel panel (stage 3b).
-    func testTheButtonsTargetIsStillTheCurrentLayerEvenWithAGradedFolderPresent() {
+    /// **A folder is a target and still is not the *strip's* target.** The keyframe control lives in
+    /// the timeline beside a row, and a folder's row is a summary band with no grade of its own to
+    /// mean — so it keeps writing onto the current layer, and a folder's channels are reached through
+    /// the settings bar and the channel panel.
+    func testTheStripsTargetIsStillTheCurrentLayerEvenWithAGradedFolderPresent() {
         let (manager, target) = gradedFolderManager()
         manager.setEffectParameterKeys(target, frame: 0, values: [brightnessID: 1.5])
+        manager.addKeyframe(target, atFrame: 0)
 
         XCTAssertEqual(manager.keyframeTarget, .layer(id: manager.layers[0].id))
-        XCTAssertEqual(manager.animatedEffectChannelIDs(of: manager.keyframeTarget!), [],
-                       "The graded folder's channel is not counted against the layer the button means")
+        XCTAssertEqual(manager.curvedEffectChannelIDs(of: manager.keyframeTarget!), [],
+                       "The graded folder's channel is not counted against the layer the strip means")
+        XCTAssertEqual(manager.keyframeMarks(of: manager.keyframeTarget!), [],
+                       "…nor is its mark")
     }
 }

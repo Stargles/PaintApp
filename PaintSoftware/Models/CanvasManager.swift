@@ -111,24 +111,6 @@ final class CanvasManager: ObservableObject {
     /// a transient.
     @Published var isInterpolateMode: Bool = false
 
-    /// **Animate mode** — KEYFRAMES.md §2.1, entered and left by holding the timeline's keyframe
-    /// button for `KeyframeControl.holdDuration`. While it is on, a non-destructive change at the
-    /// playhead writes a key on exactly the channel it touched instead of writing a value.
-    ///
-    /// A flag on the manager rather than a `Tool` case or an `ActivePanel` case, and §2.22 rules all
-    /// three halves of that. It is not a `Tool` because `Tool`'s slots are explicitly full and every
-    /// switch over it is exhaustive with no `default:` precisely so a new case cannot be missed — the
-    /// same argument `isInterpolateMode` and `vectorEraserMode` already make, plus the practical one
-    /// they make: animating is not a thing you *draw with*, so entering the mode must not evict the
-    /// artist's brush. It is not an `ActivePanel` case because it puts nothing modal on the canvas and
-    /// because that enum is a term in `CanvasTouchOwner`'s arbitration, whose logic tests carry
-    /// hand-derived constants a new case would invalidate.
-    ///
-    /// **A transient, never persisted and never undoable**, exactly like `isInterpolateMode`: the keys
-    /// it causes to be written are document content and each records its own step, but being *in* the
-    /// mode is a state of the artist rather than of the drawing.
-    @Published var isAnimateMode: Bool = false
-
     /// The cels the artist has flagged as keyframes, in the order they were flagged — which is time
     /// order only because the artist picks them that way. Highlighted yellow on the timeline.
     ///
@@ -1257,6 +1239,12 @@ final class CanvasManager: ObservableObject {
             layers[layerIndex].effect = effect
             layers[layerIndex].effectTracks = Effect.tracksAddressed(by: effect,
                                                                      from: layers[layerIndex].effectTracks)
+            // A held pre-keyframe value is per-channel storage under the same ids, so it goes by the
+            // same rule — see `Layer.pendingBaselines`. The **marks** stay: a keyframe is a point in
+            // time rather than a property of a grade, and the artist's timeline must not silently
+            // empty because they changed which effect the layer runs.
+            layers[layerIndex].pendingBaselines =
+                Effect.channelEntriesAddressed(by: effect, from: layers[layerIndex].pendingBaselines)
             if !layers[layerIndex].hasCustomName {
                 layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
             }
@@ -1264,7 +1252,7 @@ final class CanvasManager: ObservableObject {
     }
 
     /// **Writes, replaces or removes one keyframe track on one effect parameter** — KEYFRAMES.md
-    /// stage 2's write half, and the model behind the Animate mode stage 3 will build on it.
+    /// stage 2's write half, and the whole-curve writer the graph editor edits through.
     ///
     /// A grade has two homes and so does this: `setEffectParameterTrack(folderID:parameterID:to:)` is
     /// the folder overload (§2.21, stage 2b), and it states only what differs rather than restating
@@ -1278,8 +1266,8 @@ final class CanvasManager: ObservableObject {
     /// **Deliberately not routed through `setLayerEffect`, and not through `withStructureUndo`.** That
     /// bracket takes a whole-document-structure snapshot — `layers`, `folders`, `viewPresets`,
     /// `motionGroups` and `guideStrokes`, twice, at a declared cost of 4096 — which is the right price
-    /// for a discrete structural pick and the wrong one for a channel edit; stage 3's Animate mode
-    /// writes a key on every value change, and the recorder of §5 writes one per resampled stop.
+    /// for a discrete structural pick and the wrong one for a channel edit; an animated channel keys
+    /// on every value change, and the recorder of §5 writes one per resampled stop.
     /// `setLayerEffect` is also *unusable* here for a second reason that has nothing to do with cost:
     /// it early-outs on `layers[i].effect != effect`, and the value a resolver hands back at a key's
     /// own frame is by construction equal to the value already stored. The whole write would vanish.
@@ -1935,6 +1923,8 @@ final class CanvasManager: ObservableObject {
                 // the other door, through the one function that spells it. Nil addresses nothing.
                 layers[layerIndex].effectTracks = Effect.tracksAddressed(by: nil,
                                                                          from: layers[layerIndex].effectTracks)
+                layers[layerIndex].pendingBaselines =
+                    Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
                 if !layers[layerIndex].hasCustomName {
                     layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
                 }
@@ -1974,6 +1964,8 @@ final class CanvasManager: ObservableObject {
             folders[idx].effect = nil
             // …and the grade's channels with it, the folder half of `setLayerBlendMode`'s line.
             folders[idx].effectTracks = Effect.tracksAddressed(by: nil, from: folders[idx].effectTracks)
+            folders[idx].pendingBaselines =
+                Effect.channelEntriesAddressed(by: nil, from: folders[idx].pendingBaselines)
             // A node that was named for the grade it no longer has must stop claiming it — the same
             // rule `setLayerEffect` applies to a value layer, in the same undo step. See
             // `renameFolderToFollowItsRole`.
@@ -2021,6 +2013,8 @@ final class CanvasManager: ObservableObject {
             // `LayerFolder.effectTracks` is `Layer.effectTracks`'s twin in every observable respect
             // and this is one of them.
             folders[idx].effectTracks = Effect.tracksAddressed(by: effect, from: folders[idx].effectTracks)
+            folders[idx].pendingBaselines =
+                Effect.channelEntriesAddressed(by: effect, from: folders[idx].pendingBaselines)
             if opNeedsReshaping { folders[idx].compositorRole = .node(op: .stack) }
             renameFolderToFollowItsRole(idx)
         }

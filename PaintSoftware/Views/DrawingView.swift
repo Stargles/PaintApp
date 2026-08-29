@@ -352,24 +352,16 @@ struct DrawingView: View {
                     effect: editing.effect,
                     canvasManager: canvasManager,
                     onChange: editing.onChange,
+                    // **The routing and every arm's write live in the model, not here** (§2.26's five
+                    // arms, `CanvasManager.applyEffectParameterEdit`). This file is not compiled into
+                    // `PaintSoftwareUITests`, so a `switch` written in the view would be a decision the
+                    // fast tier cannot see — the rule pinned and the wiring feeding it not. What is
+                    // left is which slider moved, by how much, and which undo label the drag earns.
                     onParameterChange: { parameter, newValue in
-                        switch KeyframeControl.write(
-                            isAnimateMode: canvasManager.isAnimateMode,
-                            isScalarAnimatable: parameter.isScalarAnimatable,
-                            channelIsAnimated: editing.animatedChannelIDs.contains(parameter.id)) {
-                        case .key:
-                            if canvasManager.setEffectParameterKeys(
-                                editing.target, frame: canvasManager.currentFrame,
-                                values: [parameter.id: newValue]) > 0 {
-                                effectEditWroteKeyframe = true
-                            }
-                        case .storedValue:
-                            // **`editing.stored`, never `editing.effect`.** The knobs show the grade
-                            // resolved at the playhead; writing that back would bake every *other*
-                            // animated channel's value-at-this-frame into the stored base as a side
-                            // effect of dragging one slider.
-                            editing.onChange(parameter.write(editing.stored, newValue))
-                        }
+                        let wrote = canvasManager.applyEffectParameterEdit(
+                            editing.target, parameter: parameter, newValue: newValue,
+                            atFrame: canvasManager.currentFrame)
+                        if wrote == .key || wrote == .seedAndKey { effectEditWroteKeyframe = true }
                     },
                     animatedChannelIDs: editing.animatedChannelIDs,
                     onEditBegan: {
@@ -469,42 +461,35 @@ struct DrawingView: View {
         let target: KeyframeTarget = canvasManager.folders.contains { $0.id == id }
             ? .folder(id: id) : .layer(id: id)
 
-        guard let stored = canvasManager.storedEffect(of: target),
+        guard canvasManager.storedEffect(of: target) != nil,
               let resolved = canvasManager.resolvedEffect(of: target, atFrame: frame) else { return nil }
 
-        let onChange: (Effect) -> Void
-        switch target {
-        case .folder:
-            onChange = { canvasManager.setNodeEffect(id, to: $0) }
-        case .layer:
-            // By index, because that is the setter's signature; resolved at write time rather than
-            // captured here, so a restack while the bar is open cannot send the write to a neighbour.
-            onChange = { effect in
-                guard let index = canvasManager.layers.firstIndex(where: { $0.id == id }) else { return }
-                canvasManager.setLayerEffect(layerIndex: index, to: effect)
-            }
-        }
-
         return EffectEditing(
-            effect: resolved, stored: stored, target: target,
-            animatedChannelIDs: Set(canvasManager.animatedEffectChannelIDs(of: target)),
-            onChange: onChange)
+            effect: resolved, target: target,
+            // The **loose** predicate, deliberately: the marker means "a curve drives this slider", and
+            // a curve whose keys happen to hold equal values still does. The strict one —
+            // `listedAnimationChannelIDs` — is what the channel list uses, and the two are documented
+            // apart on `AnimationCurve.isAnimated`.
+            animatedChannelIDs: Set(canvasManager.curvedEffectChannelIDs(of: target)),
+            // Which of the two grade homes a whole-`Effect` write goes to is `setStoredEffect`'s
+            // question now, resolved at write time — so a restack while the bar is open cannot send the
+            // write to a neighbour, and the view holds no copy of that switch.
+            onChange: { canvasManager.setStoredEffect(of: target, to: $0) })
     }
 
-    /// **The grade whose knobs are docked, at the playhead — and the grade as stored, because the two
-    /// are different numbers the moment anything is animated.**
+    /// **The grade whose knobs are docked, at the playhead.**
     ///
-    /// The split is KEYFRAMES stage 3a's first repair and it is not cosmetic. Until it, the bar read
-    /// `layers[index].layerEffect` with **no frame**, so it showed the *stored* grade while the canvas
-    /// rendered the *resolved-at-playhead* one and the two disagreed at every frame except where they
-    /// happened to coincide. §2.1's "a change at the playhead writes a key on the channel touched" is
-    /// not implementable on top of a control that is not showing the value at the playhead.
+    /// Showing the value at the playhead is KEYFRAMES stage 3a's first repair and it is not cosmetic.
+    /// Until it, the bar read `layers[index].layerEffect` with **no frame**, so it showed the *stored*
+    /// grade while the canvas rendered the *resolved-at-playhead* one and the two disagreed at every
+    /// frame except where they happened to coincide. "A change at the playhead writes a key on the
+    /// channel touched" is not implementable on top of a control that is not showing the value at the
+    /// playhead.
     ///
-    /// **`stored` is what a plain value write lands on.** Writing `effect` back instead would take
-    /// every animated channel's value-at-this-frame and bake it into the base as a side effect of
-    /// dragging some unrelated slider. That base is invisible while its curve exists — the curve
-    /// overwrites it at every frame — so the corruption would surface only much later, when the artist
-    /// deleted the curve and found a value they never typed.
+    /// **The stored grade a slider write lands on is not carried here**, because slider writes do not
+    /// go through this struct at all: `CanvasManager.applyEffectParameterEdit` re-reads it at write
+    /// time, which is fresher than a copy taken when SwiftUI last evaluated a body and is on the side
+    /// of the target boundary a logic test can reach.
     ///
     /// **The non-slider rows — colour, toggle, picker — still write a whole `Effect` through
     /// `onChange`, and that is knowingly a partial answer.** Such a write carries the resolved values
@@ -523,7 +508,6 @@ struct DrawingView: View {
     /// folder cannot key" — the silent refusal §2.21 exists to prevent. It is gone.
     private struct EffectEditing {
         let effect: Effect
-        let stored: Effect
         let target: KeyframeTarget
         let animatedChannelIDs: Set<String>
         let onChange: (Effect) -> Void

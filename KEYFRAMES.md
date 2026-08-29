@@ -9,8 +9,8 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-five of
-them, twenty from 2026-08-28 and five from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-seven of
+them, twenty from 2026-08-28 and seven from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
 question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
 ---
@@ -52,9 +52,21 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
 
 ## 2. Rulings — settled 2026-08-28 and 2026-08-29, do not re-litigate
 
-1. **Tap the keyframe button inserts a key. Hold it 0.8 s enters or exits Animate mode.** In Animate
+**Three of these are superseded, and they are kept rather than deleted.** §2.1, §2.23 and §2.24 were
+overtaken by §2.26 and §2.27 later on 2026-08-29 — the owner reversing their own ruling, which is not a
+re-litigation. Each is marked in place with the date and the reason, because the reasoning is what stops
+a later session reinstating it by rediscovering the argument that produced it.
+
+1. ~~**Tap the keyframe button inserts a key. Hold it 0.8 s enters or exits Animate mode.** In Animate
    mode any non-destructive change at the playhead writes a key on exactly the channel touched. The
-   button is therefore both an action and a mode, and the channel list is a panel, not a second press.
+   button is therefore both an action and a mode, and the channel list is a panel, not a second press.~~
+   **SUPERSEDED 2026-08-29 by §2.26.** Built as stage 3a and then withdrawn on sight of it: *"I'm not
+   sure if I like the animation mode."* What replaced it keeps the half that was right — the channel
+   list is reached by pressing the button — and drops the mode. Worth keeping because two of its
+   findings outlived it: a mode reached by a hold has to be advertised or it is undiscoverable
+   (`LayerPanel`'s `primaryAction` was reverted for exactly that), and a control that is *disabled*
+   cannot be held either. Neither applies now, and both would apply again to any future mode reached
+   by a gesture.
 2. **Transform channels must eventually cover all three Move modes — Uniform, Freeform and perspective
    Distort** — including the Distort that is not implemented today
    (`TransformMode.distort.isImplemented == false`, `Models/SelectionModels.swift:54`).
@@ -139,17 +151,26 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
     only what creates the *first* curve.** 2026-08-29, and it is After Effects' rule. Stage 3a hit the
     hole and shipped this as an inference; the owner then chose it, and the reasoning is the part to
     keep, because it is what stops someone undoing it: once the settings bar reads the value resolved at
-    the playhead (which §2.1 requires — see below), an edit that writes the *stored base* instead of a
+    the playhead, an edit that writes the *stored base* instead of a
     key springs straight back to the curve under the artist's finger. The alternative is not "edit the
     value", it is a **dead control**. So the choice was between keying and refusing, and refusing costs
     an 0.8 s hold every time an existing animation is adjusted.
+    **Half superseded 2026-08-29 by §2.27.** The mode clause is void with the mode. **The first half is
+    not superseded and is now load-bearing in a new way**: it is why the auto-key arm asks whether a
+    channel has a *curve* rather than whether it is an *animation* by §2.27's stricter definition. A
+    curve whose two keys hold equal values is not in the channel list and is still in force, so routing
+    an edit on it to the stored base reproduces the dead control by a new door.
 24. **A plain tap keys every channel that already has a curve, at its current value.** 2026-08-29 —
     the "hold this pose here" move, and one undo step for the whole tap rather than one per channel. When
     the target has no tracks at all the button is **dimmed but still hittable**, which is not a detail:
     a *disabled* control cannot be held either, and the hold is the only way into Animate mode, so
     disabling it on a fresh document would make the mode unreachable by the exact gesture that creates
-    the first track. The tap is refused; the press lands. The arm that opens the channel panel instead
-    belongs to that panel's stage.
+    the first track. The tap is refused; the press lands.
+    **Superseded 2026-08-29 by §2.26**, which moves placing a keyframe off this button entirely. **The
+    behaviour survives inside `addKeyframe`** and is the whole of its step 3: every channel that already
+    carries a curve takes a key at the new mark holding the value it *resolves* to there, or placing a
+    mark lets every other animated channel drift straight through it. The dimming rule is void — nothing
+    is refused now, because a bare mark is a legal thing to place on an untouched layer.
 25. **The live per-frame cost of a *derived* frame is not held to the 24 fps budget. The prebake is what
     must play at 24 fps.** 2026-08-29, and it is the widest-reaching of these rulings because it decides
     how every future measurement on this path is read. Shown that engaging the compositor on an
@@ -163,6 +184,60 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
     **The corollary is the part to keep**: a frame-time figure on this path is evidence about the bake,
     not about playback, and a future reader who finds a 100 ms frame here should not "fix" it without
     reading this.
+26. **A keyframe is placed from the cel menu, and the timeline button opens the graph editor. Animate
+    mode is removed.** 2026-08-29, and it is the owner reversing §2.1 on sight of the built mode:
+
+    > "I'm not sure if I like the animation mode. Just make it this workflow: select on cel, tap again,
+    > tap add keyframe icon in the menu, everything gets saved at that point. Then select another frame,
+    > edit sliders etc, tap add keyframe again and the new keyframe data at that frame is saved. When
+    > tapping the keyframe button it brings up the list of things being animated and graph editor instead
+    > of placing a keyframe (icon and its name also may have to be changed to graph editor). This means
+    > removing the current keyframe mode UI. This means that animations will be added to the list when
+    > two keyframes are placed, and something changes in one keyframe which from the other."
+
+    **A keyframe is therefore a bare mark in time that acquires channels lazily** — `keyframeMarks` on
+    the layer and on the folder, sorted, unique, absolute document frames, beside `effectTracks` and in
+    §2.4's time base. A mark with no channel is legal and is the point. It cannot be derived from the
+    curves in either direction: a curve carries keys the artist never marked (an auto-key, a seeded
+    neighbour) and a mark carries no key at all until something changes.
+
+    **The last sentence is a second ruling wearing the same paragraph**: what appears in the channel list
+    is a channel with **two or more keys whose values are not all equal**. That is strictly narrower than
+    "has a curve", and §2.23's surviving half is why the two must not be merged.
+27. **Nothing is saved when a keyframe is placed; the previous value is held, and the *next* keyframe
+    commits it.** 2026-08-29, the owner's own architecture, given when asked what "everything gets saved"
+    means:
+
+    > "keyframe A is added, nothing is saved. A slider or something is then adjusted. The previous value
+    > is held. Then keyframe B is added. That previous value gets saved to A and the new value gets saved
+    > to B and the held value is discarded. Thus, A and B are assigned the two states of that one
+    > animation. Then the user modifies another slider while on B. The previous value of that other
+    > slider goes to A, and the current saves to B. Now there are two animations, and each of the
+    > keyframes store the values of both, without having to store every single number on the layer, only
+    > the things which change."
+
+    And, on what a slider edit does once a channel is animated:
+
+    > "if the current frame is a keyframe, then the value gets updated on that keyframe. If it isnt a
+    > current keyframe the drag creates a keyframe at that frame. This only happens when the value is
+    > already being animated (2 keyframes plus the thing being animated changes between those two
+    > frames)."
+
+    **Three consequences that are decisions rather than transcription.**
+
+    - **The held value is stored on the document (`pendingBaselines`) and persisted**, because the gap
+      between A and B can span a save. Lose it across a reopen and placing B writes two identical keys
+      and produces no animation — a wrong result with nothing on screen to explain it.
+    - **The edit still writes the stored base, exactly as it always did.** The owner's description reads
+      as though a slider goes provisional once a mark exists; it must not. A provisional edit that is
+      never committed is lost work, and a slider that means two different things depending on invisible
+      state is worse than either. The baseline is recorded *beside* the ordinary write, not instead of it.
+    - **"Modifies another slider while on B" is its own arm** — seed the old value onto the neighbouring
+      mark and key the new one here, in one write — because standing on B there is no third keyframe
+      press coming to commit a baseline. It needs a *neighbouring* mark to exist: with one mark and the
+      playhead on it, seeding would pin the new value in a one-key curve and lose the old one, so the
+      answer there is to hold the baseline and let B commit it. That is the owner's canonical story and
+      the reason the rule counts marks rather than asking whether any exist.
 
 ---
 
@@ -271,7 +346,10 @@ Doing it once serves both features.
   fixing `interpolationFileName` while the file is open.
 - **Layer-scoped tracks** (§2.4) go on `LayerManifest` beside `effect`, optional, written only when
   present — the format is versioned by field presence, not by a number, and every persisted field in
-  the tree follows that idiom.
+  the tree follows that idiom. **§2.26's `keyframeMarks` and §2.27's `pendingBaselines` join them
+  there and on `FolderManifest`, same idiom, same absence-is-the-migration.** The baseline is the one
+  that looks like a transient and is not: it is the state *between* keyframe A and keyframe B, and
+  that gap can span a save.
 - **A track outlives the effect it was written for, deliberately.** Key `bloom.intensity`, then switch
   the layer to a blur: the track is **kept and inert**. Inert falls out of evaluation walking the
   *effect's* descriptors rather than the track dictionary, and ids are `"<case>.<field>"`, so
@@ -693,8 +771,8 @@ Each stage is mergeable and leaves the app working.
 | **1** ✅ | **`AnimationCurve` + the effect descriptor table** — merged `c09ddf0`, `c6ecb49`, `6a379bf`. | The table is an exhaustive `switch self` with **no `default:`** — `Effect` cannot be `CaseIterable` and every existing all-effects sweep in the suite is a hand-typed literal, so a `default:` would silently miss a fourteenth effect. Make `EffectSettingsBar.rows` *read* the table so the two cannot drift; the 25 slider sites already carry range, format and target. |
 | **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
 | **2b** ✅ | **The same channel on the other grade home: `LayerFolder.effect`** — §2.21. `effectTracks` on the folder, `resolvedEffect(atFrame:)` filled in, `setEffectParameterTrack(folderID:…)`, the optional `FolderManifest` key. Nothing in it is new machinery; the whole stage is the one arm §2.21 costs. | It also closed a **pre-existing** defect §4.1 had recorded as a KNOWN GAP: `MaskResolver`'s cache key is per-*layer* content versions and a folder is not a leaf, so a mask naming a graded folder served coverage resolved under the old grade. A hand edit hit it once; a track hits it every frame, which is what forced it. The key now carries the mask stacks' node grades. |
-| **3a** ✅ | **Animate mode and the keyframe button** — §2.1's tap/hold, §2.22's home, §2.23 and §2.24. A real `UILongPressGestureRecognizer` at 0.8 s with a `UITapGestureRecognizer` that `require(toFail:)`s it, in **both** halves of the strip, plus an always-on bar so the mode is advertised rather than hidden. `KeyframeTarget` is `.layer(id:)`/`.folder(id:)`, so §2.21's sameness is structural — one writer, one undo step, one set of refusals — and both cases carry an **id rather than an index**, which removes the stale-index hazard from inside the undo closures. | Three things the plan had wrong, all found by building it. **Disabling the button when nothing is animated makes Animate mode unreachable**, because a disabled control cannot be held either. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored effects side by side. And **the resize collision is closed by a number, not by arbitration**: the hold's `allowableMovement` is 4 against the timeline resize drag's `minimumDistance` of 6, and `UILongPressGestureRecognizer`'s default is 10, so that had to be chosen. The 6 moved out of the view file, because a test asserting `4 < 6` against a literal the test target cannot see is green forever. |
-| **3b** | **The channel panel and the graph-editor drawer** | §2.17's drawer and §2.1's channel list. **Decide which shape each surface is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. **§10 carries what the drawer actually attaches to, and it is a constraint rather than a preference.** Timeline key markers land here too. |
+| **3a** ✅ | **The effect-parameter channel end to end, from the artist's side** — the settings bar reading the value **resolved at the playhead**, the keyframe writer that keys many channels as one undo step, and `KeyframeTarget` making §2.21's two grade homes one path. | Two findings the plan did not have. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored grades side by side. And **a routing rule that a view holds is a rule the fast tier cannot see**, which is why the whole edit path is a `CanvasManager` method rather than a `switch` in a callback. This stage also shipped Animate mode, which §2.26 withdrew the same day; §2.1 carries what that cost and what it taught. |
+| **3b** | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27. The **model** half is built: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes`, one undo step each; and the five-arm routing rule. What is left is the surfaces. **Decide which shape each one is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. **§10 carries what the drawer actually attaches to, and it is a constraint rather than a preference.** Timeline markers for bare marks land here too, beside the key markers `TimelineKeyMarkers` already draws. |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with ROADMAP (5). |

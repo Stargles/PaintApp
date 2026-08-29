@@ -373,7 +373,7 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// A write that changes nothing records nothing — the rule every setter in `CanvasManager`
-    /// follows, and the one an Animate mode re-writing the value already under the playhead will hit
+    /// follows, and the one an auto-keying slider re-writing the value already under the playhead hits
     /// constantly. An empty curve is the same state as no curve, deliberately: a channel that exists
     /// and animates nothing would show up in a channel list and do nothing.
     func testAWriteThatChangesNothingRecordsNoStep() {

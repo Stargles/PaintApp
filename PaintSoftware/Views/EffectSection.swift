@@ -177,7 +177,7 @@ struct EffectSettingsBar: View {
     /// `onChange` above hands back a whole `Effect` and is still what the colour, toggle and picker
     /// rows use, because none of those is a channel a curve can drive
     /// (`EffectParameter.isScalarAnimatable` names why for each). A slider is different in two ways
-    /// that both need the id: §2.1's Animate mode has to write a key on **exactly the channel
+    /// that both need the id: §2.26's routing has to write a key on **exactly the channel
     /// touched**, and recovering which one moved from a whole-`Effect` diff would be a comparison over
     /// thirty-three closures to learn something the caller already knew. The id is only in scope
     /// inside `slider(_:)`, so that is where the branch is taken.

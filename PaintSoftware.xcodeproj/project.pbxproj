@@ -40,7 +40,6 @@
 		13B7864D0D2FF536BB86130E /* CelContentProviderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */; };
 		7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */; };
 		4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */; };
-		1C82D094469AD83E59DA42BB /* AnimateModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 496934112FCA956179306F6C /* AnimateModeUITests.swift */; };
 		A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */; };
 		C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */; };
 		194F7F121F6B015E2AF2248A /* MemoryBudgetLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */; };
@@ -246,7 +245,6 @@
 		95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelContentProviderLogicTests.swift; sourceTree = "<group>"; };
 		BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/KeyframeControl.swift; sourceTree = "<group>"; };
 		B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyframeControlLogicTests.swift; sourceTree = "<group>"; };
-		496934112FCA956179306F6C /* AnimateModeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimateModeUITests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationCurveLogicTests.swift; sourceTree = "<group>"; };
 		C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectParameterTrackLogicTests.swift; sourceTree = "<group>"; };
 		7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryBudgetLogicTests.swift; sourceTree = "<group>"; };
@@ -500,7 +498,6 @@
 				A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */,
 				95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */,
 				B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */,
-				496934112FCA956179306F6C /* AnimateModeUITests.swift */,
 				C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */,
 				7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */,
 				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
@@ -824,7 +821,6 @@
 				13B7864D0D2FF536BB86130E /* CelContentProviderLogicTests.swift in Sources */,
 				7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */,
 				4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */,
-				1C82D094469AD83E59DA42BB /* AnimateModeUITests.swift in Sources */,
 				A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */,
 				C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */,
 				194F7F121F6B015E2AF2248A /* MemoryBudgetLogicTests.swift in Sources */,

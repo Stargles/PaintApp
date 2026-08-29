@@ -96,7 +96,7 @@ struct Layer: Identifiable {
     ///
     /// A curve whose id no current parameter names is storage the artist has no way to reach: the
     /// timeline's channel list is built from the current effect's descriptors
-    /// (`KeyframeControl.animatedEffectChannelIDs`), so it is invisible, uneditable and undeletable,
+    /// (`CanvasManager.curvedEffectChannelIDs`), so it is invisible, uneditable and undeletable,
     /// and it is written into every saved copy of the document all the same. It renders nothing, and
     /// the artist meets it again only by accident.
     ///
@@ -110,6 +110,40 @@ struct Layer: Identifiable {
     /// it. So flipping `Blur.isDirectional`, which is one `.blur` case wearing two artist-facing
     /// names, keeps `blur.radius` and `blur.angle`; Levels → Curves keeps nothing.
     var effectTracks: [String: AnimationCurve] = [:]
+    /// **The frames on which the artist has placed a keyframe on this layer** — KEYFRAMES.md §2.26,
+    /// the 2026-08-29 workflow. Sorted, unique, **absolute document frames**, the same time base
+    /// `effectTracks` uses and for §2.4's reason.
+    ///
+    /// **A mark with no channel is legal and is the whole point.** The owner's ruling is that adding
+    /// a keyframe saves nothing by itself — *"keyframe A is added, nothing is saved"* — so a mark is a
+    /// bare point in time that acquires channels lazily, when a later mark lands with a held baseline
+    /// to commit (`CanvasManager.addKeyframe(_:atFrame:)`). Storing marks apart from the curves is
+    /// what makes that possible: a curve cannot represent "the artist marked this frame and has not
+    /// yet changed anything".
+    ///
+    /// **Not derivable from `effectTracks`.** A key's frame and a mark are different facts: a curve
+    /// carries keys the artist never placed a mark on (an auto-key at the playhead, a seeded
+    /// neighbour), and a mark carries no key at all until something changes. Deriving one from the
+    /// other in either direction loses the distinction the workflow is built on.
+    ///
+    /// Empty by default, so every existing `Layer(...)` call site and every saved manifest is
+    /// unchanged by this field arriving — `effectTracks`' recipe, one field up.
+    var keyframeMarks: [Int] = []
+    /// **The value each channel held *before* the artist's first edit since the last mark** — the
+    /// owner's *"the previous value is held"*, keyed by `EffectParameter.id` like `effectTracks`.
+    ///
+    /// **Written once per channel per keyframe-placement cycle**, by the first edit after a mark;
+    /// later tweaks in the same cycle must not overwrite it, because the first one is the only one
+    /// that knows the value at A. Consumed and cleared by the next `addKeyframe`.
+    ///
+    /// **The edit still writes the stored base as it always did.** A provisional edit that is never
+    /// committed is lost work and makes one slider mean two things depending on invisible state; this
+    /// records the old value *beside* the ordinary write instead of replacing it.
+    ///
+    /// **Persisted, and that is not incidental.** Saving and reopening between keyframe A and
+    /// keyframe B would otherwise produce two identical keys and no animation — a wrong result with
+    /// nothing on screen to explain it.
+    var pendingBaselines: [String: Double] = [:]
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.
     ///

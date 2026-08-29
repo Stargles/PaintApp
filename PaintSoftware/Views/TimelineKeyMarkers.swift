@@ -23,8 +23,8 @@ enum TimelineKeyMarkers {
     // MARK: - The timeline's zoom limits, declared here so the threshold below is a relationship
 
     /// `TimelineTrackView.Coordinator`'s unzoomed scale, and the two ends of its pinch range —
-    /// **moved out of that file rather than copied**, for `KeyframeControl.timelineResizeMinimumDistance`'s
-    /// reason exactly. The collapse threshold below is only meaningful *relative to* these numbers:
+    /// **moved out of that file rather than copied**, because that file is not compiled into
+    /// `PaintSoftwareUITests`. The collapse threshold below is only meaningful *relative to* these numbers:
     /// too small and no zoom the artist can reach ever collapses anything, too large and the default
     /// zoom collapses keys that had room. A test asserting either relationship against a `10.5`
     /// re-typed into this file would be comparing a constant to a copy of a constant — green forever,

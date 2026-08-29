@@ -190,6 +190,26 @@ struct AnimationCurve: Codable, Equatable {
 
     var isEmpty: Bool { keys.isEmpty }
 
+    /// **Whether this curve is an *animation*** — the owner's own definition, 2026-08-29: *"animations
+    /// will be added to the list when two keyframes are placed, and something changes in one keyframe
+    /// which from the other."* Two or more keys, and not every key holding the same value.
+    ///
+    /// **This is the channel-*list* predicate and nothing else. It is deliberately not what decides
+    /// where an edit goes** — that is `KeyframeControl.write`, which asks the looser question "does
+    /// this channel have a curve at all". The two must not be merged, and the reason is one-directional:
+    /// a curve whose two keys happen to hold equal values is still *in force*, so routing an edit on it
+    /// to the stored base would have the curve overwrite that base at every frame it is consulted at
+    /// and the slider would spring back under the artist's finger. The alternative to keying there is
+    /// not "edit the value", it is a **dead control**. Two predicates, two jobs.
+    ///
+    /// Exact `==` rather than an epsilon, deliberately: the values come from sliders and from this
+    /// curve's own evaluator, "did anything change" is a question about equality rather than about
+    /// nearness, and a tolerance here would be a second, invisible threshold for an artist to fight.
+    var isAnimated: Bool {
+        guard let first = keys.first, keys.count > 1 else { return false }
+        return keys.contains { $0.value != first.value }
+    }
+
     init(keys: [Key] = [], step: Int = 1) {
         self.keys = Self.normalised(keys)
         self.step = step

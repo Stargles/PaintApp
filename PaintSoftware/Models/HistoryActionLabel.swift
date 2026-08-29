@@ -73,6 +73,18 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// this one is the animation on it, and an artist who deletes a curve by mistake reads "undo
     /// adjust layer effect" as the wrong thing having gone.
     case effectKeyframes
+    /// A keyframe being placed (`CanvasManager.addKeyframe`) — KEYFRAMES.md §2.26. Named apart from
+    /// `.effectKeyframes` because they are different things to want back: that one is an adjustment to
+    /// an animation that already exists, this one is the press that *made* one, and an artist who
+    /// pressed the button by mistake reads "undo edit effect keyframes" as the animation itself having
+    /// been altered.
+    case addKeyframe
+    /// One keyframe being taken off a frame, with every channel's key on it (`removeKeyframe`).
+    case removeKeyframe
+    /// Every keyframe in a span going at once (`clearKeyframes(_:inFrames:)`) — the cel menu's "clear
+    /// keyframes". Apart from `.removeKeyframe` because the two undo very different amounts of work
+    /// and the banner is the only thing that says which one just happened.
+    case clearKeyframes
     case renameLayer
     case deleteLayer
     case fillReference
@@ -175,6 +187,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .valueLayerColor: return "change layer colour"
         case .valueLayerEffect: return "adjust layer effect"
         case .effectKeyframes: return "edit effect keyframes"
+        case .addKeyframe: return "add keyframe"
+        case .removeKeyframe: return "remove keyframe"
+        case .clearKeyframes: return "clear keyframes"
         case .renameLayer: return "rename layer"
         case .deleteLayer: return "delete layer"
         case .fillReference: return "fill reference"

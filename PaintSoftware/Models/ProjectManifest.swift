@@ -174,6 +174,15 @@ struct FolderManifest: Codable {
     /// answer "is anything animated" differently depending on which one the artist reached for.
     var effectTracks: [String: AnimationCurve]? = nil
 
+    /// `LayerFolder.keyframeMarks` — §2.26's bare marks, **written only when there are any**.
+    /// `LayerManifest.keyframeMarks` carries the argument for the optional-here / non-optional-in-the-
+    /// model shape; this is that field on the folder.
+    var keyframeMarks: [Int]? = nil
+
+    /// `LayerFolder.pendingBaselines` — the held pre-edit values, **written only when there are any**.
+    /// `LayerManifest.pendingBaselines` carries the argument for persisting them at all.
+    var pendingBaselines: [String: Double]? = nil
+
     /// **Not persisted, and derived at decode time.** True when this folder arrived without the
     /// group-property keys — which is to say it was written while `toggleFolderVisibility` still
     /// wrote through to every descendant. `ProjectStore.load` is the only reader; see the §10.3
@@ -184,7 +193,8 @@ struct FolderManifest: Codable {
          parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
          alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil,
-         effectTracks: [String: AnimationCurve]? = nil) {
+         effectTracks: [String: AnimationCurve]? = nil,
+         keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil) {
         self.id = id
         self.name = name
         self.hasCustomName = hasCustomName
@@ -198,6 +208,8 @@ struct FolderManifest: Codable {
         self.compositorRole = compositorRole
         self.effect = effect
         self.effectTracks = effectTracks
+        self.keyframeMarks = keyframeMarks
+        self.pendingBaselines = pendingBaselines
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -228,6 +240,8 @@ struct FolderManifest: Codable {
         compositorRole = (try? CompositorRole.decodeIfSupported(from: container, forKey: .compositorRole)) ?? nil
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
+        keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
+        pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -238,6 +252,7 @@ struct FolderManifest: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, isExpanded, isVisible, parentFolderID, opacity, blendMode
         case isIsolated, alphaMask, compositorRole, effect, effectTracks
+        case keyframeMarks, pendingBaselines
     }
 }
 
@@ -303,6 +318,24 @@ struct LayerManifest: Codable {
     /// saved before keyframes says, and an older build reading a manifest that *does* carry it ignores
     /// the unknown key and opens the document with its grades static.
     var effectTracks: [String: AnimationCurve]? = nil
+    /// `Layer.keyframeMarks` — §2.26's bare keyframe marks in absolute document frames, **written only
+    /// when there are any**.
+    ///
+    /// Optional here and non-optional in the model for `effectTracks`' reason above, which applies
+    /// word for word: "no marks" and "an empty array of marks" are one state in the model and there is
+    /// no third, while on disk the question is whether to write a key at all — and §3.5's idiom is that
+    /// the format is versioned by field presence, so a document nobody has keyframed must stay
+    /// byte-for-byte the manifest it was.
+    var keyframeMarks: [Int]? = nil
+    /// `Layer.pendingBaselines` — the pre-edit value each channel is holding, **written only when
+    /// there are any**.
+    ///
+    /// **Why an authoring transient is on disk at all.** It is the state between keyframe A and
+    /// keyframe B, and that gap can span a save: an artist who marks A, moves a slider, and closes the
+    /// document would come back with the old value gone, so placing B would write two identical keys
+    /// and produce no animation — a wrong result with nothing on screen to explain it. `effectTracks`'
+    /// field-presence rule covers the cost: a document in no such gap writes no key.
+    var pendingBaselines: [String: Double]? = nil
     /// A `.value` layer's flat colour (§4.5), written only when there is one — `ValueFill`'s
     /// persistence note settles the recipe, and it is `effect`'s and `alphaMask`'s: nil is what every
     /// project saved before value layers existed says, so absence is the whole migration this field
@@ -319,7 +352,9 @@ struct LayerManifest: Codable {
          kind: LayerKind = .raster,
          parentFolderID: String? = nil, blendMode: BlendMode = .normal,
          alphaMask: AlphaMask? = nil, effect: Effect? = nil,
-         effectTracks: [String: AnimationCurve]? = nil, fill: ValueFill? = nil,
+         effectTracks: [String: AnimationCurve]? = nil,
+         keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
+         fill: ValueFill? = nil,
          fillReferenceOverride: Bool? = nil, cels: [CelManifest]) {
         self.id = id
         self.name = name
@@ -332,6 +367,8 @@ struct LayerManifest: Codable {
         self.alphaMask = alphaMask
         self.effect = effect
         self.effectTracks = effectTracks
+        self.keyframeMarks = keyframeMarks
+        self.pendingBaselines = pendingBaselines
         self.fill = fill
         self.fillReferenceOverride = fillReferenceOverride
         self.cels = cels
@@ -356,13 +393,15 @@ struct LayerManifest: Codable {
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
+        keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
+        pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
         fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
         fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask
-        case effect, effectTracks, fill, fillReferenceOverride, cels
+        case effect, effectTracks, keyframeMarks, pendingBaselines, fill, fillReferenceOverride, cels
     }
 }
 
