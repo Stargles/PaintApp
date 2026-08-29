@@ -1515,12 +1515,17 @@ right budget, and trimming to half (~6) on a memory warning is the right respons
 now, not guesses wearing constants' clothes — see item 13. What is left open is only the empirical
 question of whether a real session ever gets near either number, which no longer gates anything.
 
-**Is an in-between frame's 1.86× still acceptable on the device, in Release?** §7 measured the cost
-of engaging the compositor on in-betweens at the owner's canvas and shipped it, on the argument that
-the extra frames join a bill the document was already paying. Every figure there is a Debug
-simulator. *The measurement*: the owner scrubs across a span of in-betweens on a document with a
-blend mode or an adjustment layer, in a Release build on their iPad, and says whether it tracks.
-The same run also settles whether §7's double evaluation is worth closing.
+**~~Is an in-between frame's 1.86× acceptable?~~ Answered 2026-08-29, OWNER-STATED — and what is
+left open is a different question about a different thing.** The owner accepted the cost on seeing
+§7's A/B, for the reason §7 records: the 24 fps budget belongs to the prebake (ROADMAP §5b), not to
+the live path. So "is the live frame fast enough" is **not** open and should not be re-litigated.
+
+What is open is **whether the prebake, once it exists, plays at 24 fps** — which is a measurement
+about §5b's design and not about §7's number, and cannot be taken until something bakes. Until then
+the only live-path figure worth having is a *device* one: every number in §7 is a Debug simulator,
+and the owner scrubbing a span of in-betweens over a blend mode in a Release build on their iPad
+would say whether the live path feels right in the meantime. That is worth an hour of theirs, not a
+week of ours.
 
 **What is the real cache occupancy at background time?** Item 12's ~384 MiB is a budget ceiling, not
 an observation. *The measurement*: sample `residentBytes()` and the upload-cache counters immediately
@@ -1575,6 +1580,41 @@ clause). Simulator Debug figures — the device runs ~1.3× the simulator (§1) 
 different order on this path, so treat the **ratio** as the transferable part and none of the
 absolutes as device numbers.
 
+### The ruling, and the reason — OWNER-STATED 2026-08-29
+
+**This cost was put to the owner with the A/B pictures beside it, and they accepted it.** Their
+words:
+
+> *"if we are planning for this feature, then it is okay for things to take more than 1/24th of a
+> second, including in-betweens. Of course if a smarter faster way is possible which doesnt require a
+> lot of code, then sure. It's a minor worry though since if it prebakes and can play at 24fps after,
+> then the original ask is covered."*
+
+**Read the reason, not just the verdict, because the verdict alone looks like negligence.** A future
+reader who finds a 100 ms frame on the live canvas and does not know why it was allowed will either
+"fix" it at the cost of the artist's blend modes — which is the behaviour this section exists to
+record removing — or conclude the app is broken. It is neither. The ruling is:
+
+**The 24 fps budget belongs to the prebake, not to the live path.** "The feature" the owner names is
+**background baking for playback** ([ROADMAP.md](ROADMAP.md) §5b, asked and recorded the same day):
+the animation bakes in the background, non-current frames are gradually replaced by that baked
+"video", and playback plays frames rather than compositing them. It does not exist today —
+`sandwichCacheKey` holds exactly one composite and playback composites every frame live. Once it
+does, what has to hit 41 ms is the **playback of a baked frame**, and the live composite of the frame
+the artist is *looking at while drawing* is a different budget with a different consumer: one person,
+one frame, at the pace of an edit. [KEYFRAMES.md](KEYFRAMES.md) §2.25 states this as a ruling in its
+own right — *the live per-frame cost of a derived frame is not held to the 24 fps budget; the prebake
+is what must play at 24 fps* — and that is the sentence to read before optimising anything on this
+path.
+
+So this section is **not** an open performance problem awaiting a fix. It is a recorded, accepted,
+reasoned cost. The thing that would make it a problem again is the prebake landing and *still* not
+playing at 24 fps, which is a measurement about §5b and not about this number.
+
+**One door is explicitly open** — *"if a smarter faster way is possible which doesnt require a lot of
+code, then sure"* — and the next subsection is exactly that door. It is a cheap win, not an
+outstanding tax.
+
 **The `t` slider is the one interaction this could not absorb, and it gets a clause instead of a
 budget.** `setInterpolationT` writes `recipe.t` on every tick of the drag, and the derivation is in
 `SandwichKey` now, so every tick would be a fresh 100 ms. `sandwichEngagesOnCanvas` disengages while
@@ -1583,7 +1623,11 @@ a lasso move's latched piece), rather than the frame clause it replaced. The art
 on the drag and has it back on commit; the drag is the one moment they are looking at the in-between
 rather than at the picture around it.
 
-### Found and not fixed: the in-between is evaluated twice per frame
+### The cheap win the owner left the door open for: the in-between is evaluated twice per frame
+
+**This is the "smarter faster way that doesn't require a lot of code" the ruling above invites**, and
+it is worth taking on its own merits rather than because the frame is slow — one ARAP solve done
+twice is wrong whatever the budget says.
 
 The fourth row costs 26.0 ms more than the third for one reason: `updateInterpolationPreviews`
 renders the derivation for the layer host, and `PixelOps.rasterize` renders **the same derivation
@@ -1600,6 +1644,14 @@ the better answer, and a new canvas-sized image cache with its own memory story,
 `CelContentProvider` deliberately left out ("called only on a memo miss, which is why it is a thunk").
 KEYFRAMES §4.6's span-scoped disk-backed cache is the same machinery asked for by a different
 feature, so this probably wants doing there rather than twice.
+
+**And ROADMAP §5b is now a third claimant on the same machine**, which settles it: §5b's whole point
+is that background baking is *already specified twice* (LAYER_COMPOSITING §9.2 for the shot,
+KEYFRAMES §4.6 for the span) and that building them separately would give the app two frame caches
+and two eviction policies. A memo on `DerivedCelContent.render` would be a third. **So (a) is the
+right move if this is taken alone** — it is small, local, and buys ~26 ms of the ~76; **(b) belongs
+to whoever unifies §5b**, and doing it here first would be the exact mistake §5b was written to
+prevent.
 
 ### The per-pass term, which is small
 

@@ -792,11 +792,21 @@ extension CanvasManager {
     /// The slider writes `recipe.t` on every tick, so with the derivation in the key every tick is a
     /// new key: one full-quality ARAP evaluation and three canvas-sized composites per tick, against a
     /// drag the artist expects to track their finger. MEASURED at the owner's 2048x1024 canvas
-    /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §7), a
-    /// rebuild on an in-between frame is far outside a frame budget, and the drag is the one moment
-    /// the artist is looking at the in-between rather than at the picture around it. So the compositor
-    /// comes off for the *drag* and is back the instant it commits — which is what the two clauses
-    /// above already do for the two other gestures that draw outside a cel, rather than a new idea.
+    /// (`PerfBaselineTests.testWhatEngagingTheCompositorOnAnInBetweenCosts`, PERFORMANCE.md §7): ~100 ms
+    /// a rebuild, so a slider held down would run about six ticks behind the finger. The drag is also
+    /// the one moment the artist is looking at the in-between rather than at the picture around it. So
+    /// the compositor comes off for the *drag* and is back the instant it commits — which is what the
+    /// two clauses above already do for the two other gestures that draw outside a cel, rather than a
+    /// new idea.
+    ///
+    /// **This is a responsiveness argument and deliberately not a frame-rate one**, which matters
+    /// because the frame-rate argument is no longer available: the owner ruled on 2026-08-29
+    /// (KEYFRAMES §2.25, ROADMAP §5b) that **the live per-frame cost of a derived frame is not held to
+    /// the 24 fps budget** — the background prebake is what must play at 24 fps. That ruling is what
+    /// lets this function engage on in-betweens at all, and a reader who takes it to mean "latency on
+    /// this path never matters" would delete this clause. It is about a *gesture tracking a finger*,
+    /// which no prebake can help with, because the frame being asked for does not exist until the
+    /// finger asks for it.
     @MainActor
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
         guard tree.needsCompositorOnCanvas else { return false }
