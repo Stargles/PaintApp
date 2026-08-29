@@ -1698,3 +1698,43 @@ prevent.
 vertex arrays sized by the drawing rather than by the canvas. Build plus equal-comparison, which is
 what a pass on which nothing changed costs: **0.046 ms** (MEASURED, same run, `keyPerSwiftUIPass`).
 Recorded rather than optimised; it is two orders below the rebuild it gates.
+
+---
+
+## 8. Playback at 24 fps — the ranked list, written down and not yet investigated (2026-08-29)
+
+The owner's goal, stated while ruling §2.25: *"Basically I want the app to be able to play in realtime
+even with in betweens... if a smarter faster way is possible which doesnt require a lot of code, then
+sure."* This is that list. **Nothing here has been measured for this item** — each entry names what is
+already MEASURED elsewhere in this file and what would have to be established. Written so the next
+session starts from a shortlist instead of a survey.
+
+**Read this first, because it reframes the whole item.** *Composited playback already misses 24 fps
+without any interpolation in the document* — §2 item 5, recorded 2026-08-20: a six-layer sandwich rebuild
+at 2048² is **54.8 ms Metal / 64.7 ms CoreGraphics against a 41.6 ms budget** on the owner's iPad 9 in
+**Release**, and `isSandwichRebuilding` serialises, so a rebuild slower than the frame interval drops
+frames. In-betweens aggravate a recorded miss; they do not create it. Any plan that only addresses §7's
++75.7 ms leaves the stated goal unmet.
+
+| # | the win | what is known | what it needs |
+|---|---|---|---|
+| **1** | **Stop rendering a frame nobody sees.** With the compositor engaged, `updateInterpolationPreviews` renders the derivation for the layer host and `updateSandwich` then blanks it, because `full` already contains that layer. **MEASURED at 26.0 ms of the 100.2 ms** (§7). | The waste is confirmed and both call sites are cited (§7). The fix named there is memoizing `DerivedCelContent.render` on the `identity` it already carries — an identity minted beside the closure it describes, so the key is trustworthy by construction. | Small and self-contained. **Take the local fix, not a third memo** — §5b makes a third claimant on a frame cache after LAYER_COMPOSITING §9.2 and KEYFRAMES §4.6, and building one here first is exactly the mistake §5b exists to prevent. |
+| **2** | **Play in-between frames at `.preview` quality.** The cheap tier — one stroked `CGPath` per stroke instead of the full dab walk — is built, shipped, and pinned by `InterpolationRenderLogicTests.testPreviewIsSubstantiallyCheaperThanFull`. It is selected only by `isScrubbingInterpolation`, which is **false during playback**. | The tier exists and is tested. The gate is one boolean. | Playback state is `@State` on the timeline *view* (`AnimationTimeline.swift:13-14`), so `CanvasManager` cannot see it. **Hoisting the playback clock onto the model is the prerequisite — and ROADMAP §4 and KEYFRAMES §5 already require it for other reasons.** Also a judgement call the owner may want: preview quality during playback is a visible change. |
+| **3** | **Skip the two composite halves that only a stroke can see.** Every tick computes `composite(below)` and `composite(above)` — displayed only mid-stroke — at a **MEASURED 11.0 ms of 22.4 ms** (§3 item 4b). 4b was declined **twice**, both times because making them lazy costs *"a stroke whose first frames have no visible ink, on the most latency-sensitive path in the app"*. **While the playhead runs under a timer, no stroke is starting, so that price does not exist.** | Both the cost and the reason for the two declines are recorded. The argument that the objection lapses during playback is new and is INFERRED. | Same prerequisite as (2): the model must know playback is running. Two wins share one prerequisite, which is what makes the clock hoist the highest-leverage item here. |
+| **4** | **The 50% Render Resolution knob does not reach the expensive half.** `DerivedCelContent.render` is documented as rendering **at canvas size, always** — derived geometry is in canvas coordinates and a smaller render would clip rather than scale — and `rasterizeUncached` then draws that full-size image into the reduced bounds. So the artist's existing escape hatch shrinks the composite and buys nothing on the solve or the two canvas-sized vector renders. | The code fact is verified (`CelContentProvider.swift:55-60`, `PixelOps.swift:311-317`). | Unranked because the fix is not obvious: making the derivation resolution-aware is a geometry change, not a plumbing one. Worth knowing before anyone recommends the knob as a workaround — **it is currently a knob that does not do what a user would assume**. |
+| **5** | **The one multi-frame image cache that already holds in-betweens is too small.** `PixelOps.rasterizeCache` **already keys on `DerivedCelContent.identity`** (since `531cb0a`) and does retain in-between flattens across frames. But it is FIFO, capped at **24 entries** under `CompositorBudget.textureBudgetBytes` (physicalMemory/16, clamped, = **192 MiB** on a 3 GB iPad 9), shared with every ordinary cel and every layer, and emptied on backgrounding and on memory warning. At 8 MiB a flatten that is ~24 frames of one layer, or **~8 frames of a three-layer document**. | Sizes and policy are code facts. The arithmetic is INFERRED from them. | **This is the honest small version of the owner's model** — "an in-between costs what a cel costs" is true exactly when its picture is materialised once and thereafter addressed. Sizing and scoping an existing cache, not inventing one. Reuse `evictDistantVectorRenderCaches`' distance-from-playhead policy (`vectorRenderCacheLimit = 12`) rather than minting a new one. |
+
+**What not to do.** Do not build KEYFRAMES §4.6's span cache for this: **§4.6's own scope line reads
+*"This is machinery for the transformation layer and, later, for export"*, so it was never pointed at
+interpolation in-betweens** — shipping stage 6b exactly as specified leaves a generated in-between costing
+what it costs today. That is a scope gap, not a schedule gap, and it is the single most surprising thing
+found this pass. And do not offer Commit or bake as the performance answer; §2.9 and §6 forbid it in
+writing, and it is the very ruling the owner invoked.
+
+**One measurement is owed and its harness already exists.** §7's four rows want re-taking in **Release**,
+because §7 now retracts its own transferability claim — the rows are different mixtures of a Swift half
+and a GPU half, so the configuration moves the *ratio* as well as the absolutes. The test bodies and run
+script written for an attempt that was abandoned under CPU contention survive in the session scratchpad
+(`attrib_test_body.swift`, `attrib_test2.swift`, `relperf_run.sh`), so this is a re-run rather than a
+rebuild. **Every figure from that attempt is void** — taken between 0% and 34.8% idle, which CLAUDE.md
+says returns wrong answers rather than slow ones.

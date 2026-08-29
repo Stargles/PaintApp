@@ -130,6 +130,22 @@ LAYER_TRANSFORM.md.
       The *"document-level switch with room for future models"* the owner asked for should therefore be a
       property of **interpolation**, not of storage. Storage does not change.
 
+### Playback at 24 fps, with in-betweens — the owner's goal, ranked and not started
+
+- [ ] The owner, 2026-08-29: *"Basically I want the app to be able to play in realtime even with in
+      betweens... if a smarter faster way is possible which doesnt require a lot of code, then sure."*
+
+      **[PERFORMANCE.md](PERFORMANCE.md) §8 is the ranked list** — five entries, each naming what is
+      already measured and what would have to be established. Nothing is started. Two facts decide how it
+      reads: **composited playback already misses 24 fps on the device in Release before interpolation is
+      involved** (§2 item 5), so this is not one delta away; and **KEYFRAMES §4.6's span cache does not
+      cover it**, because §4.6 scopes itself to the transformation layer and export, so shipping stage 6b
+      as specified changes nothing here.
+
+      The two cheapest wins **share one prerequisite** — hoisting the playback clock onto the model, which
+      ROADMAP §4 (audio) and KEYFRAMES §5 (recording) already require for their own reasons. That makes
+      the clock the highest-leverage thing on this list and the natural first move.
+
 ## Carried — deliberate, and not an ask
 
 - **The raster Move's undo half of [LASSO_MOVE.md](LASSO_MOVE.md) §5 rulings 5 and 10 is not built** (the
