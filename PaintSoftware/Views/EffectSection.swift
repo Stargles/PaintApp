@@ -220,31 +220,17 @@ struct EffectSettingsBar: View {
     @ViewBuilder
     private var rows: some View {
         switch effect {
-        case .brightnessContrast(let params):
-            slider("Brightness", params.brightness, 0...2, "brightness") {
-                onChange(.brightnessContrast(Effect.BrightnessContrast(brightness: $0, contrast: params.contrast)))
-            }
-            slider("Contrast", params.contrast, 0...2, "contrast") {
-                onChange(.brightnessContrast(Effect.BrightnessContrast(brightness: params.brightness, contrast: $0)))
-            }
+        case .brightnessContrast:
+            slider("brightnessContrast.brightness")
+            slider("brightnessContrast.contrast")
             note("1.00 is no change, for both.")
 
-        case .levels(var params):
-            slider("Input Black", params.inputBlack, 0...1, "inputBlack") {
-                params.inputBlack = $0; onChange(.levels(params))
-            }
-            slider("Input White", params.inputWhite, 0...1, "inputWhite") {
-                params.inputWhite = $0; onChange(.levels(params))
-            }
-            slider("Gamma", params.gamma, 0.1...5, "gamma") {
-                params.gamma = $0; onChange(.levels(params))
-            }
-            slider("Output Black", params.outputBlack, 0...1, "outputBlack") {
-                params.outputBlack = $0; onChange(.levels(params))
-            }
-            slider("Output White", params.outputWhite, 0...1, "outputWhite") {
-                params.outputWhite = $0; onChange(.levels(params))
-            }
+        case .levels:
+            slider("levels.inputBlack")
+            slider("levels.inputWhite")
+            slider("levels.gamma")
+            slider("levels.outputBlack")
+            slider("levels.outputWhite")
 
         case .curves(let params):
             CurveEditor(points: params.points,
@@ -263,16 +249,10 @@ struct EffectSettingsBar: View {
                 onEditEnded()
             }
 
-        case .hsvShift(var params):
-            slider("Hue", params.hueDegrees, -180...180, "hue", format: "%.0f°") {
-                params.hueDegrees = $0; onChange(.hsvShift(params))
-            }
-            slider("Saturation", params.saturation, 0...2, "saturation") {
-                params.saturation = $0; onChange(.hsvShift(params))
-            }
-            slider("Value", params.value, 0...2, "value") {
-                params.value = $0; onChange(.hsvShift(params))
-            }
+        case .hsvShift:
+            slider("hsvShift.hue")
+            slider("hsvShift.saturation")
+            slider("hsvShift.value")
 
         case .gradientMap(let params):
             GradientStopsEditor(stops: params.stops,
@@ -280,24 +260,16 @@ struct EffectSettingsBar: View {
                                 onChange: { onChange(.gradientMap(Effect.GradientMap(stops: $0, mix: params.mix))) },
                                 onEditBegan: onEditBegan,
                                 onEditEnded: onEditEnded)
-            slider("Mix", params.mix, 0...1, "mix") {
-                onChange(.gradientMap(Effect.GradientMap(stops: params.stops, mix: $0)))
-            }
+            slider("gradientMap.mix")
             note("The pixel's brightness picks a colour from the gradient.")
 
-        case .chromaticAberration(var params):
-            slider("Offset X", params.offsetX, -20...20, "offsetX", format: "%.1f px") {
-                params.offsetX = $0; onChange(.chromaticAberration(params))
-            }
-            slider("Offset Y", params.offsetY, -20...20, "offsetY", format: "%.1f px") {
-                params.offsetY = $0; onChange(.chromaticAberration(params))
-            }
+        case .chromaticAberration:
+            slider("chromaticAberration.offsetX")
+            slider("chromaticAberration.offsetY")
             note("Red is sampled at +offset and blue at −offset.")
 
         case .posterize(var params):
-            slider("Levels", Double(params.levels), 2...32, "levels", format: "%.0f") {
-                params.levels = Int($0.rounded()); onChange(.posterize(params))
-            }
+            slider("posterize.levels")
             pickerRow("Screen", current: params.screen.rawValue.capitalized, identifier: "screen") {
                 ForEach(Effect.Screen.allCases, id: \.self) { screen in
                     Button {
@@ -313,21 +285,17 @@ struct EffectSettingsBar: View {
                 }
             }
             if params.screen != .none {
-                slider("Screen Strength", params.screenStrength, 0...1, "screenStrength") {
-                    params.screenStrength = $0; onChange(.posterize(params))
-                }
+                slider("posterize.screenStrength")
             }
 
         case .noise(var params):
-            slider("Amount", params.amount, 0...0.5, "amount", format: "%.3f") {
-                params.amount = $0; onChange(.noise(params))
-            }
+            slider("noise.amount")
             toggleRow("Monochrome", isOn: params.isMonochrome, identifier: "monochrome") {
                 params.isMonochrome = $0; onChange(.noise(params))
             }
             // A seed is not a quantity — nudging it by one is as different a grain as any other value,
             // so a slider would be a lie about what the control does. A button that rerolls it is what
-            // the parameter actually offers.
+            // the parameter actually offers. `Effect.parameters` says the same thing as `.stepped`.
             actionRow("Reroll Grain", systemImage: "die.face.5", identifier: "reseed") {
                 onEditBegan()
                 params.seed = params.seed &+ 1
@@ -336,30 +304,27 @@ struct EffectSettingsBar: View {
             }
 
         case .blur(var params):
-            slider("Radius", params.radius, 0...64, "radius", format: "%.1f px") {
-                params.radius = $0; onChange(.blur(params))
-            }
+            slider("blur.radius")
             if params.isDirectional {
-                slider("Angle", params.angleDegrees, 0...360, "angle", format: "%.0f°") {
-                    params.angleDegrees = $0; onChange(.blur(params))
-                }
+                slider("blur.angle")
             }
             toggleRow("Directional", isOn: params.isDirectional, identifier: "directional") {
                 params.isDirectional = $0; onChange(.blur(params))
             }
 
         case .bloom(var params):
-            slider("Threshold", params.threshold, 0...1, "threshold") {
-                params.threshold = $0; onChange(.bloom(params))
-            }
-            slider("Radius", params.radius, 0...64, "radius", format: "%.1f px") {
-                params.radius = $0; onChange(.bloom(params))
-            }
-            slider("Intensity", params.intensity, 0...4, "intensity") {
-                params.intensity = $0; onChange(.bloom(params))
-            }
+            slider("bloom.threshold")
+            slider("bloom.radius")
+            slider("bloom.intensity")
             // Off (the default) is `.ink` — today's shipped look, glow from the artwork alone.
             // On is `.backdrop` — the canvas paper itself can be bright enough to glow.
+            //
+            // **The one control whose label is not its parameter's name.** The table calls this
+            // `bloom.input` / "Input", because that is what it is — an `Effect.Input`, and the
+            // artist's only stored answer to EFFECT_BACKDROP.md §4's question. The bar asks it as
+            // an inverted yes/no because that reads better beside a glow, and a channel list built
+            // from the table will say "Input" where the bar says this. Reconciling the two is a
+            // wording decision for stage 3, not something to settle by making the table lie.
             toggleRow("Include Canvas Color", isOn: params.input == .backdrop, identifier: "includeCanvasColor") {
                 params.input = $0 ? .backdrop : .ink; onChange(.bloom(params))
             }
@@ -372,24 +337,17 @@ struct EffectSettingsBar: View {
             // It had an "Include Canvas Color" toggle for a few hours on 2026-08-27; the owner
             // deleted the setting the same day (EFFECT_BACKDROP.md §5.2), and Sobel always grades the
             // canvas colour now. Bloom above keeps the identically-named toggle, which is real.
+            // `Effect.parameters` returns an empty array for it, which is the same fact in the model.
             note("Edge detection. The divisor that keeps the magnitude from clipping is fixed.")
 
-        case .sharpen(var params):
-            slider("Radius", params.radius, 0...32, "radius", format: "%.1f px") {
-                params.radius = $0; onChange(.sharpen(params))
-            }
-            slider("Amount", params.amount, 0...4, "amount") {
-                params.amount = $0; onChange(.sharpen(params))
-            }
+        case .sharpen:
+            slider("sharpen.radius")
+            slider("sharpen.amount")
             note("Radius 0 makes Amount inert — there is no blur to subtract.")
 
         case .outline(var params):
-            slider("Width", params.width, 0...Effect.maxOutlineRadius, "width", format: "%.1f px") {
-                params.width = $0; onChange(.outline(params))
-            }
-            slider("Alpha Threshold", params.threshold, 0...1, "threshold") {
-                params.threshold = $0; onChange(.outline(params))
-            }
+            slider("outline.width")
+            slider("outline.threshold")
             colorRow("Colour", color: params.color, identifier: "color") { picked in
                 params.color = picked; onChange(.outline(params))
             }
@@ -399,6 +357,39 @@ struct EffectSettingsBar: View {
 
     // MARK: Row primitives
 
+    /// **One slider, named by its `Effect.parameters` id.** The label, the range, the format, the
+    /// accessibility identifier and the write-back all come out of the descriptor, so the bar and
+    /// the table cannot drift — which is the whole reason the table exists rather than being a
+    /// second copy of the 25 literals that used to live in `rows`.
+    ///
+    /// The id is a string rather than a typed constant because the descriptor list is data, not a
+    /// type; `sliderParameter` traps on a miss so a typo is a debug-build assertion the effect
+    /// UI tests would hit rather than a row that quietly stops rendering.
+    @ViewBuilder
+    private func slider(_ id: String) -> some View {
+        if let parameter = sliderParameter(id),
+           let range = parameter.uiRange,
+           let value = parameter.read(effect) {
+            sliderRow(parameter.name, value, range,
+                      parameter.controlIdentifier ?? parameter.id,
+                      format: parameter.format ?? "%.2f") { newValue in
+                onChange(parameter.write(effect, newValue))
+            }
+        }
+    }
+
+    /// The descriptor behind one slider row, or nil — with an assertion, because nil here means
+    /// `rows` named a parameter this effect does not have, and the symptom would otherwise be a
+    /// missing knob rather than a failure.
+    private func sliderParameter(_ id: String) -> EffectParameter? {
+        guard let parameter = effect.parameters.first(where: { $0.id == id }),
+              parameter.uiRange != nil else {
+            assertionFailure("\(effect.displayName) has no slider parameter \"\(id)\"")
+            return nil
+        }
+        return parameter
+    }
+
     /// One tunable number. `MaskTuningSection`'s row idiom — label, live readout, slider — with the
     /// undo bracket the mask harness never needed, since that one wrote statics rather than the model.
     ///
@@ -406,9 +397,9 @@ struct EffectSettingsBar: View {
     /// container propagates to its descendants and beats their own (see CLAUDE.md, and the comment at
     /// the foot of `MaskTuningSection.body` that records what that cost), so a name up there would
     /// give every row in this panel the same one.
-    private func slider(_ label: String, _ value: Double, _ range: ClosedRange<Double>,
-                        _ identifier: String, format: String = "%.2f",
-                        onChange change: @escaping (Double) -> Void) -> some View {
+    private func sliderRow(_ label: String, _ value: Double, _ range: ClosedRange<Double>,
+                           _ identifier: String, format: String = "%.2f",
+                           onChange change: @escaping (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(label)
