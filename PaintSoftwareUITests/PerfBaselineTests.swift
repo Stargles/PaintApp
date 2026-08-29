@@ -2436,7 +2436,7 @@ final class PerfBaselineTests: XCTestCase {
         let scene = compositorManager(layerCount: 1)
         scene.addValueLayer(effect: .bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 1)))
         scene.addValueLayer(effect: .blur(Effect.Blur(radius: 8)))
-        let tree = scene.renderTree
+        let tree = scene.renderTree(atFrame: 0)
 
         let canvas = CGSize(width: 4096, height: 4096)
         let perTexture = CompositorBudget.textureBytes(for: canvas)
@@ -2637,7 +2637,7 @@ final class PerfBaselineTests: XCTestCase {
         func tree(layers: Int, effect: Effect? = nil) -> [RenderNode] {
             let manager = compositorManager(layerCount: layers)
             if let effect { manager.addValueLayer(effect: effect) }
-            return manager.renderTree
+            return manager.renderTree(atFrame: 0)
         }
 
         // A grade sends any stack to the GPU, at the smallest layer count that can carry one — the

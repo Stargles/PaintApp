@@ -225,7 +225,7 @@ final class SandwichLogicTests: XCTestCase {
     /// it — `assertRenderTreeMatchesFlatOrder` is the same claim about the whole tree.
     func testEveryTreeSplitsIntoTwoHalvesThatPutTheStackBackTogether() {
         for testCase in battery() {
-            let tree = testCase.manager.renderTree
+            let tree = testCase.manager.renderTree(atFrame: 0)
             guard let halves = tree.split(atLeaf: testCase.active) else {
                 XCTFail("\(testCase.name): the active layer is a leaf of its own tree, so the split must succeed")
                 continue
@@ -243,19 +243,19 @@ final class SandwichLogicTests: XCTestCase {
     /// The sweep above is only worth its runtime if it is sweeping different *shapes* — nine runs of
     /// a flat stack would pass every assertion in this file while testing one code path.
     func testTheBatteryExercisesGenuinelyDifferentTreeShapes() {
-        let shapes = battery().map { shape($0.manager.renderTree) }
+        let shapes = battery().map { shape($0.manager.renderTree(atFrame: 0)) }
         XCTAssertGreaterThanOrEqual(Set(shapes).count, 6,
                                     "Only \(Set(shapes).count) distinct shapes in \(shapes.count) cases: \(shapes)")
         XCTAssertGreaterThanOrEqual(shapes.filter { $0.contains("(") }.count, 5,
                                     "Most of the battery must involve folders — the flat cases cannot exercise a half-group at all. Shapes: \(shapes)")
-        XCTAssertGreaterThanOrEqual(battery().map { depth($0.manager.renderTree) }.max() ?? 0, 3,
+        XCTAssertGreaterThanOrEqual(battery().map { depth($0.manager.renderTree(atFrame: 0)) }.max() ?? 0, 3,
                                     "One case must nest two folders deep, which is where a half-group has to contain another half-group. Shapes: \(shapes)")
     }
 
     func testSplittingAtAnIndexThatIsNotALeafOfTheTreeReturnsNil() {
         let manager = stack(3)
-        XCTAssertNil(manager.renderTree.split(atLeaf: 99), "There is no layer 99")
-        XCTAssertNil(manager.renderTree.split(atLeaf: -1), "Nor a layer -1")
+        XCTAssertNil(manager.renderTree(atFrame: 0).split(atLeaf: 99), "There is no layer 99")
+        XCTAssertNil(manager.renderTree(atFrame: 0).split(atLeaf: -1), "Nor a layer -1")
         XCTAssertNil([RenderNode]().split(atLeaf: 0), "An empty document has no leaf to cut at")
     }
 
@@ -273,7 +273,7 @@ final class SandwichLogicTests: XCTestCase {
         manager.setFolderIsolated(folder, isIsolated: false)
         manager.toggleFolderVisibility(folder)
 
-        guard let halves = manager.renderTree.split(atLeaf: 1),
+        guard let halves = manager.renderTree(atFrame: 0).split(atLeaf: 1),
               let lower = halves.below.first, let upper = halves.above.first else {
             return XCTFail("The group holds layers 0...2, so cutting at 1 must leave a half on each side")
         }
@@ -295,7 +295,7 @@ final class SandwichLogicTests: XCTestCase {
         manager.layers[1].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
 
-        guard let halves = manager.renderTree.split(atLeaf: 0) else {
+        guard let halves = manager.renderTree(atFrame: 0).split(atLeaf: 0) else {
             return XCTFail("The bottom layer of the group is still a leaf of the tree")
         }
         XCTAssertTrue(halves.below.isEmpty,
@@ -312,7 +312,7 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(3)
         manager.addFolder(name: "Empty")
 
-        guard let halves = manager.renderTree.split(atLeaf: 1) else {
+        guard let halves = manager.renderTree(atFrame: 0).split(atLeaf: 1) else {
             return XCTFail("Layer 1 is a leaf of this tree")
         }
         XCTAssertEqual(halves.below.count, 1, "Just layer 0")
@@ -367,7 +367,7 @@ final class SandwichLogicTests: XCTestCase {
               let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture needs a canvas size")
         }
-        XCTAssertEqual(requests.full.tree.leafLayerIndices, manager.renderLeafOrder)
+        XCTAssertEqual(requests.full.tree.leafLayerIndices, manager.renderLeafOrder(atFrame: 0))
         assertPixelsIdentical(Compositor.composite(requests.full), Compositor.composite(reference),
                               "At rest the canvas shows `composite(full)`, which must be the same picture the thumbnail shows")
     }
@@ -409,13 +409,13 @@ final class SandwichLogicTests: XCTestCase {
     func testTheFullKeyIgnoresTheActiveLayerAndNothingElse() {
         let manager = stack(3)
         func key(frame: Int = 0, resolution: RenderResolution = .full) -> SandwichFullKey {
-            SandwichFullKey(tree: manager.renderTree,
+            SandwichFullKey(tree: manager.renderTree(atFrame: frame),
                             frame: frame,
                             contents: manager.layers.indices.map { index -> LayerContentVersion? in
                                 guard let celIndex = manager.activeCelIndex(inLayer: index, atFrame: frame) else { return nil }
                                 return LayerContentVersion(cel: manager.layers[index].cels[celIndex],
                                                            valueFill: manager.layers[index].valueFill,
-                                                           effect: manager.layers[index].layerEffect)
+                                                           effect: manager.layers[index].layerEffect(atFrame: frame))
                             },
                             renderResolution: resolution,
                             canvasBackgroundColor: manager.canvasBackgroundColor,
@@ -640,7 +640,7 @@ final class SandwichLogicTests: XCTestCase {
     /// whole of the phase's risk containment: if this ever answers true for an all-normal document,
     /// every project ever made starts rendering through a path it has never rendered through.
     func testAnAllNormalDocumentDoesNotNeedTheCompositorOnCanvas() {
-        XCTAssertFalse(stack(3).renderTree.needsCompositorOnCanvas, "A flat all-normal stack is Core Animation's own case")
+        XCTAssertFalse(stack(3).renderTree(atFrame: 0).needsCompositorOnCanvas, "A flat all-normal stack is Core Animation's own case")
 
         let nested = stack(4)
         let outer = nested.addFolder(name: "Outer")
@@ -648,7 +648,7 @@ final class SandwichLogicTests: XCTestCase {
         nested.layers[0].parentFolderID = outer
         nested.layers[1].parentFolderID = inner
         nested.layers[2].parentFolderID = inner
-        XCTAssertFalse(nested.renderTree.needsCompositorOnCanvas,
+        XCTAssertFalse(nested.renderTree(atFrame: 0).needsCompositorOnCanvas,
                        "Untouched folders are transparent parentheses — opacity 1, normal, isolated over nothing that blends")
     }
 
@@ -659,8 +659,8 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(2)
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
 
-        XCTAssertFalse(manager.renderTree[1].needsOwnBuffer, "A leaf's mode is an argument to one draw call")
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas,
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[1].needsOwnBuffer, "A leaf's mode is an argument to one draw call")
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                       "A buffers-only predicate would answer false here and leave Multiply showing nothing on canvas again")
     }
 
@@ -675,7 +675,7 @@ final class SandwichLogicTests: XCTestCase {
         manager.layers[2].parentFolderID = inner
         manager.setLayerBlendMode(layerIndex: 2, to: .screen)
 
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas, "Two levels down is still in the document")
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas, "Two levels down is still in the document")
     }
 
     func testABlendingGroupNeedsTheCompositor() {
@@ -684,7 +684,7 @@ final class SandwichLogicTests: XCTestCase {
         manager.layers[1].parentFolderID = folder
         manager.setFolderBlendMode(folder, to: .overlay)
 
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas,
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                       "Core Animation cannot Overlay a group's finished composite against its siblings")
     }
 
@@ -698,9 +698,9 @@ final class SandwichLogicTests: XCTestCase {
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
 
-        XCTAssertFalse(manager.renderTree.needsCompositorOnCanvas, "At opacity 1 it is still a parenthesis")
+        XCTAssertFalse(manager.renderTree(atFrame: 0).needsCompositorOnCanvas, "At opacity 1 it is still a parenthesis")
         manager.setFolderOpacity(folder, to: 0.99)
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas, "Not 1 is the test, not \"visibly faded\"")
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas, "Not 1 is the test, not \"visibly faded\"")
     }
 
     /// The third clause of `needsOwnBuffer`, reached through the group rather than through the leaf.
@@ -715,9 +715,9 @@ final class SandwichLogicTests: XCTestCase {
         manager.setFolderIsolated(folder, isIsolated: true)
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
 
-        XCTAssertTrue(manager.renderTree[1].needsOwnBuffer,
+        XCTAssertTrue(manager.renderTree(atFrame: 0)[1].needsOwnBuffer,
                       "Isolated over something that blends is the clause — the group's children start from transparency, which differs from starting from the backdrop only because one of them blends")
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas)
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas)
     }
 
     // MARK: - The split through a compositor node (§4.3, phase 8)
@@ -939,14 +939,14 @@ final class SandwichLogicTests: XCTestCase {
         let folder = manager.addFolder(name: "Folder")
         manager.layers[1].parentFolderID = folder
 
-        guard case .node(let op, _)? = manager.renderTree.first(where: { $0.id == folder })?.content else {
+        guard case .node(let op, _)? = manager.renderTree(atFrame: 0).first(where: { $0.id == folder })?.content else {
             return XCTFail("The derivation still builds a folder as a node")
         }
         XCTAssertEqual(op, .stack, "Phase 8 adds a case to the op; it does not change what a folder derives to")
         XCTAssertEqual(op.arity, .variadic(min: 1), "Stacking N composites bottom-to-top is not an arity-1 idea")
         XCTAssertNil(op.slotCount, "A variadic op declares no slot count")
         XCTAssertFalse(op.needsOwnBuffer, "Which is what keeps an untouched folder on the direct path")
-        XCTAssertFalse(manager.renderTree.needsCompositorOnCanvas)
+        XCTAssertFalse(manager.renderTree(atFrame: 0).needsCompositorOnCanvas)
     }
 
     // MARK: - The requests

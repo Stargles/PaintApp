@@ -187,4 +187,29 @@ extension LayerFolder {
         guard case .fixed(let count)? = compositorOp?.arity else { return nil }
         return count
     }
+
+    /// **The grade at one frame, and the one function a later keyframe phase changes** — the folder
+    /// half of `Layer.layerEffect(atFrame:)`, and `ValueFill.resolvedColor(atFrame:)`'s argument for
+    /// the third time.
+    ///
+    /// Constant today: it is the `effect` field above, with the frame ignored. Stated as a function of
+    /// the frame anyway, because the grade reaches the compositor through `RenderNode.effect` and
+    /// `CanvasManager.renderNodes(inContainer:atFrame:)` is the last place the frame is in scope
+    /// before it gets there. Resolving further in — in `Compositor.fold`, or by giving `RenderNode` a
+    /// track instead of a value — would put the constant where the frame is not, and a keyframe phase
+    /// would then have to cut this seam under a deadline instead of finding it already cut.
+    ///
+    /// **Named `resolvedEffect` rather than `effect(atFrame:)`, on purpose.** Swift will happily take
+    /// a method whose base name matches the stored property, and `folder.effect` would then differ
+    /// from `folder.effect(atFrame:)` by an argument label alone — one keystroke between "the grade at
+    /// this frame" and "the grade the artist last typed", in a codebase whose sibling accessor
+    /// (`Layer.layerEffect`) already carries a warning about being confused with the raw field.
+    /// `ValueFill` made the same call and for the same reason: it stores `color` and resolves
+    /// `resolvedColor(atFrame:)`.
+    ///
+    /// The raw `effect` field stays what everything *structural* reads — `maxInputCount` above,
+    /// `setNodeEffect`, the panel's rows — because presence is a property of the folder and not of the
+    /// playhead. That division holds only for as long as a track cannot turn a grade on or off at a
+    /// frame; `CanvasManager.compositorSizeGate` is the other place that assumption is load-bearing.
+    func resolvedEffect(atFrame frame: Int) -> Effect? { effect }
 }

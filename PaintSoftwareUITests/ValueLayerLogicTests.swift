@@ -184,7 +184,7 @@ final class ValueLayerLogicTests: XCTestCase {
     /// and neither had to change to render one.
     func testNeitherBackendKnowsAnythingAboutValueLayers() {
         let manager = redUnderAValueLayer()
-        let tree = manager.renderTree
+        let tree = manager.renderTree(atFrame: 0)
 
         XCTAssertEqual(tree.count, 2, "One floor, one value layer, both top-level")
         XCTAssertEqual(tree.leafLayerIndices, [0, 1], "A value layer is an ordinary leaf in evaluation order")

@@ -294,7 +294,7 @@ final class EffectLayerLogicTests: XCTestCase {
 
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
         XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(128), "Got RGBA \(pixel(image, 32, 32))")
-        XCTAssertFalse(manager.renderTree.needsCompositorOnCanvas,
+        XCTAssertFalse(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                        "An unconfigured effect layer costs a document nothing, including its rendering path")
     }
 
@@ -346,7 +346,7 @@ final class EffectLayerLogicTests: XCTestCase {
 
     func testAValueLayerInEffectModeDerivesIntoALeafCarryingItsEffect() {
         let manager = greyUnderAnEffect()
-        let tree = manager.renderTree
+        let tree = manager.renderTree(atFrame: 0)
 
         XCTAssertEqual(tree.count, 2, "One floor, one effect layer, both top-level")
         XCTAssertEqual(tree.leafLayerIndices, [0, 1], "An effect layer is an ordinary leaf in evaluation order")
@@ -360,7 +360,7 @@ final class EffectLayerLogicTests: XCTestCase {
         let manager = greyUnderAnEffect()
         manager.layers[1].kind = .raster
 
-        XCTAssertNil(manager.renderTree[1].effect, "`layerEffect` is both halves or neither")
+        XCTAssertNil(manager.renderTree(atFrame: 0)[1].effect, "`layerEffect` is both halves or neither")
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
         XCTAssertEqual(pixel(image, 32, 32), opaqueGrey(128), "Got RGBA \(pixel(image, 32, 32))")
     }
@@ -380,23 +380,23 @@ final class EffectLayerLogicTests: XCTestCase {
     func testAnEffectLayerCarriesNoBlendModeButStillClipsToBelow() {
         let manager = greyUnderAnEffect()
         manager.layers[1].blendMode = .multiply
-        XCTAssertEqual(manager.renderTree[1].blendMode, .normal, "A mode on an effect layer has nothing to compose")
+        XCTAssertEqual(manager.renderTree(atFrame: 0)[1].blendMode, .normal, "A mode on an effect layer has nothing to compose")
 
         manager.layers[1].blendMode = .clipToBelow
-        XCTAssertEqual(manager.renderTree[1].blendMode, .normal, "Clip to below is never a mode by this point")
-        XCTAssertEqual(manager.renderTree[1].masks.count, 1,
+        XCTAssertEqual(manager.renderTree(atFrame: 0)[1].blendMode, .normal, "Clip to below is never a mode by this point")
+        XCTAssertEqual(manager.renderTree(atFrame: 0)[1].masks.count, 1,
                        "It is a mask whose source is the entry beneath — the same machinery any layer gets")
     }
 
     /// The two predicates phase 9a extended, asserted where they are cheapest to read.
     func testAnEffectLayerEngagesTheCompositorAndBuffersItsEnclosingGroup() {
         let manager = greyUnderAnEffect()
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas,
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                       "Core Animation cannot grade one sibling by what is under it")
 
         let (grouped, folder) = greyFloorUnderAGroupHoldingAnEffect()
         grouped.setFolderIsolated(folder, isIsolated: true)
-        guard let node = grouped.renderTree.first(where: { $0.id == folder }) else {
+        guard let node = grouped.renderTree(atFrame: 0).first(where: { $0.id == folder }) else {
             return XCTFail("The group must be in the tree")
         }
         XCTAssertTrue(node.needsOwnBuffer,
@@ -885,10 +885,10 @@ final class EffectLayerLogicTests: XCTestCase {
         }
         manager.folders[idx].effect = Self.brighten
 
-        XCTAssertEqual(manager.renderTree.first(where: { $0.id == folder })?.blendMode, .normal,
+        XCTAssertEqual(manager.renderTree(atFrame: 0).first(where: { $0.id == folder })?.blendMode, .normal,
                        "Premise: an untouched folder's node still defaults to normal")
         manager.folders[idx].blendMode = .multiply
-        XCTAssertEqual(manager.renderTree.first(where: { $0.id == folder })?.blendMode, .multiply,
+        XCTAssertEqual(manager.renderTree(atFrame: 0).first(where: { $0.id == folder })?.blendMode, .multiply,
                        "A node's blend mode is derived verbatim and is never forced to `.normal` for carrying "
                        + "an effect, unlike the leaf form")
 
@@ -964,11 +964,11 @@ final class EffectLayerLogicTests: XCTestCase {
         // `inner` is nested one level inside `outer`, so it is not in the flat top-level
         // `renderTree` array — only `outer` is — and has to be found by walking `outer`'s own
         // `.node` inputs, the same way the compositor itself descends.
-        guard let plainNode = findNode(inner, in: manager.renderTree) else {
+        guard let plainNode = findNode(inner, in: manager.renderTree(atFrame: 0)) else {
             return XCTFail("The inner folder must be in the tree")
         }
         XCTAssertFalse(plainNode.needsOwnBuffer, "Premise: an untouched folder declines a buffer")
-        guard let plainOuter = findNode(outer, in: manager.renderTree) else {
+        guard let plainOuter = findNode(outer, in: manager.renderTree(atFrame: 0)) else {
             return XCTFail("The outer folder must be in the tree")
         }
         XCTAssertFalse(plainOuter.needsOwnBuffer,
@@ -976,7 +976,7 @@ final class EffectLayerLogicTests: XCTestCase {
 
         manager.folders[innerIdx].effect = Self.brighten
 
-        guard let node = findNode(inner, in: manager.renderTree) else {
+        guard let node = findNode(inner, in: manager.renderTree(atFrame: 0)) else {
             return XCTFail("The inner folder must be in the tree")
         }
         XCTAssertTrue(node.needsOwnBuffer,
@@ -984,7 +984,7 @@ final class EffectLayerLogicTests: XCTestCase {
                       + "the direct/pass-through path draws its children straight onto the parent's accumulator "
                       + "and the grade is silently never applied")
 
-        guard let outerNode = findNode(outer, in: manager.renderTree) else {
+        guard let outerNode = findNode(outer, in: manager.renderTree(atFrame: 0)) else {
             return XCTFail("The outer group must be in the tree")
         }
         XCTAssertTrue(outerNode.needsOwnBuffer,
@@ -1020,11 +1020,11 @@ final class EffectLayerLogicTests: XCTestCase {
             return XCTFail("addFolder must produce a folder")
         }
 
-        XCTAssertNil(manager.renderTree.first(where: { $0.id == folder })?.effect,
+        XCTAssertNil(manager.renderTree(atFrame: 0).first(where: { $0.id == folder })?.effect,
                     "Premise: an untouched folder carries no effect")
 
         manager.folders[idx].effect = Self.brighten
-        XCTAssertEqual(manager.renderTree.first(where: { $0.id == folder })?.effect, Self.brighten,
+        XCTAssertEqual(manager.renderTree(atFrame: 0).first(where: { $0.id == folder })?.effect, Self.brighten,
                        "The node carries the folder's grade verbatim — the same `RenderNode.effect` field the "
                        + "leaf uses, because the wrapper is the position in the tree rather than the data")
     }
@@ -1198,9 +1198,9 @@ final class EffectLayerLogicTests: XCTestCase {
     /// stopped repainting on an effect edit and no amount of content-version work will fix it.
     func testChangingOnlyTheGradeMovesTheDerivedTree() {
         let manager = greyUnderAnEffect()
-        let before = manager.renderTree
+        let before = manager.renderTree(atFrame: 0)
         manager.setLayerEffect(layerIndex: 1, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.9)))
-        XCTAssertNotEqual(before, manager.renderTree,
+        XCTAssertNotEqual(before, manager.renderTree(atFrame: 0),
                           "The tree is what the live canvas's cache key compares — a grade that did not "
                           + "move it would leave the canvas showing the pre-edit composite")
 
@@ -1208,9 +1208,9 @@ final class EffectLayerLogicTests: XCTestCase {
         // reachable from nothing indexed by layer — `contentVersions` is per layer and a folder is not
         // a leaf — so the tree is the only thing that can carry it, which is why this half is here.
         let (grouped, folder) = greyFloorUnderAGroupHoldingAnEffect()
-        let beforeNode = grouped.renderTree
+        let beforeNode = grouped.renderTree(atFrame: 0)
         grouped.setNodeEffect(folder, to: Self.brighten)
-        XCTAssertNotEqual(beforeNode, grouped.renderTree,
+        XCTAssertNotEqual(beforeNode, grouped.renderTree(atFrame: 0),
                           "A folder's grade moves the tree too, and only the tree can carry that")
     }
 
@@ -1233,14 +1233,14 @@ final class EffectLayerLogicTests: XCTestCase {
                         "Premise: there is a stored colour, so the nil below is the mode and not an empty field")
         XCTAssertNil(manager.layers[1].valueFill,
                      "A grading layer has no flat colour for the live canvas to paint into its host")
-        XCTAssertTrue(manager.renderTree.needsCompositorOnCanvas,
+        XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                       "…so the grade has to come from the compositor, or it is drawn nowhere at all")
 
         // And back: the same layer in flat-colour mode is the fast path's own case again.
         manager.setLayerEffect(layerIndex: 1, to: nil)
         XCTAssertNotNil(manager.layers[1].valueFill,
                         "Flipping back restores the colour the artist mixed — `fill` is kept, not cleared")
-        XCTAssertFalse(manager.renderTree.needsCompositorOnCanvas,
+        XCTAssertFalse(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                        "A flat opaque leaf is what Core Animation is good at; the compositor stands down")
     }
 
@@ -1791,7 +1791,7 @@ final class EffectLayerLogicTests: XCTestCase {
         }
 
         let passThrough = fixture(isolated: false)
-        let folderNode = passThrough.renderTree.first { node in
+        let folderNode = passThrough.renderTree(atFrame: 0).first { node in
             if case .node = node.content { return true }
             return false
         }

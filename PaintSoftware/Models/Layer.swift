@@ -119,6 +119,31 @@ extension Layer {
     /// mode, which `valueFill` answers. Rendering asks this, never `kind` or `effect` on their own.
     var layerEffect: Effect? { kind == .value ? effect : nil }
 
+    /// **The grade at one frame, and the one function a later keyframe phase changes.**
+    ///
+    /// Constant today — it is `layerEffect` above, with the frame ignored — and deliberately still
+    /// stated as a function of the frame, which is exactly `ValueFill.resolvedColor(atFrame:)`'s
+    /// argument one field over. The grade reaches the compositor through `RenderNode.effect`, which
+    /// `CanvasManager.renderNodes(inContainer:atFrame:)` fills in from here; that derivation now takes
+    /// the frame, so **the compositor never learns that a grade can be animated** — it receives an
+    /// `Effect` like any other node's. Resolving further in (in `Compositor.draw`, or by giving
+    /// `RenderNode` a track instead of a value) would put the constant somewhere the frame is not in
+    /// scope, and a keyframe phase would then have to cut this seam under a deadline instead of
+    /// finding it already cut.
+    ///
+    /// **The non-frame `layerEffect` stays, and the split between the two is a rule rather than an
+    /// accident.** Everything on a *rendering* path asks this one, because a grade the artist animated
+    /// must be the grade at the frame being drawn — the tree's leaf derivation, `renderSources`'
+    /// elision of a leaf that holds no pixels, and both content-version builders, all of which have a
+    /// frame in hand and are documented as mirrors of each other. Everything on a *panel* path asks
+    /// the property — `LayerPanel`'s effect row, `LayerStackListView`'s badge, `DrawingView`'s
+    /// host-interaction gate — because "is this layer in effect mode" is a question about the layer
+    /// and there is no playhead in the answer. That division holds only for as long as a track cannot
+    /// turn a grade *on or off* at a frame, at which point the panel questions become genuinely
+    /// ambiguous rather than merely frame-free; `CanvasManager.compositorSizeGate` is the other place
+    /// the same assumption is load-bearing, and it says so at length.
+    func layerEffect(atFrame frame: Int) -> Effect? { layerEffect }
+
     /// The flat colour this layer *is*, or nil if it draws pixels or is grading instead (§4.5) — and
     /// the **only** place "is this layer a flat colour" is decided, exactly as `layerEffect` is for
     /// effects. The two are mutually exclusive by construction: both read the same `effect` field, one

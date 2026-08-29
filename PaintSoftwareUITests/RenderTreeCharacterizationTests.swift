@@ -46,12 +46,12 @@ final class RenderTreeCharacterizationTests: XCTestCase {
                 }
             }
         }
-        return describe(manager.renderTree, depth: 0)
+        return describe(manager.renderTree(atFrame: 0), depth: 0)
     }
 
     /// Bottom-to-top leaf names — the flat order, read off the tree.
     private func leafNames(_ manager: CanvasManager) -> [String] {
-        manager.renderLeafOrder.map { manager.layers[$0].name }
+        manager.renderLeafOrder(atFrame: 0).map { manager.layers[$0].name }
     }
 
     // MARK: - The flat case
@@ -67,7 +67,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     func testAnEmptyStackDerivesToAnEmptyTree() {
         let manager = namedManager([])
 
-        XCTAssertTrue(manager.renderTree.isEmpty)
+        XCTAssertTrue(manager.renderTree(atFrame: 0).isEmpty)
         assertRenderTreeMatchesFlatOrder(manager)
     }
 
@@ -103,13 +103,13 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
         // §4.3: a group *is* a compositor node, at arity 1. Phase 8's multi-input nodes are the same
         // case with more slots, which is why this asserts the shape and not just the contents.
-        guard case .node(let op, let inputs) = manager.renderTree[1].content else {
+        guard case .node(let op, let inputs) = manager.renderTree(atFrame: 0)[1].content else {
             return XCTFail("A folder must derive to a node, not a leaf")
         }
         XCTAssertEqual(op, .stack)
         XCTAssertEqual(inputs.count, 1, "A folder is a one-input node")
         XCTAssertEqual(inputs[0].leafLayerIndices, [1, 2])
-        XCTAssertEqual(manager.renderTree[1].id, group, "Every node points back at the model object it came from")
+        XCTAssertEqual(manager.renderTree(atFrame: 0)[1].id, group, "Every node points back at the model object it came from")
     }
 
     func testNestedFoldersDeriveToNestedNodes() {
@@ -124,7 +124,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
                        "A is loose inside Outer and sits below Inner, which holds B then C")
         XCTAssertEqual(leafNames(manager), ["A", "B", "C"])
         assertRenderTreeMatchesFlatOrder(manager)
-        XCTAssertEqual(manager.renderTree.count, 1, "One top-level node — the whole document is inside Outer")
+        XCTAssertEqual(manager.renderTree(atFrame: 0).count, 1, "One top-level node — the whole document is inside Outer")
     }
 
     func testSiblingFoldersDeriveInSpanOrderBottomToTop() {
@@ -153,7 +153,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(leafNames(manager), ["A", "B"], "An empty group contributes nothing to composite")
         assertRenderTreeMatchesFlatOrder(manager)
 
-        guard case .node(_, let inputs) = manager.renderTree[2].content else {
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0)[2].content else {
             return XCTFail("An empty folder must still derive to a node")
         }
         XCTAssertEqual(inputs.count, 1, "Still one input slot")
@@ -207,8 +207,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
         XCTAssertEqual(renderRows(manager), ["0:A", "0:Folder", "1:B", "1:C"])
         assertRenderTreeMatchesFlatOrder(manager)
-        XCTAssertFalse(manager.renderTree[0].isVisible, "A's flag is carried onto its leaf")
-        XCTAssertFalse(manager.renderTree[1].isVisible, "And the folder's onto its node")
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[0].isVisible, "A's flag is carried onto its leaf")
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[1].isVisible, "And the folder's onto its node")
     }
 
     /// **The divergence phase 4 resolved**, and the assertion that changed with it — this test was
@@ -237,8 +237,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
         XCTAssertTrue(manager.layers[0].isVisible)
         XCTAssertFalse(manager.folders[0].isVisible)
-        XCTAssertFalse(manager.renderTree[0].isVisible, "The folder's flag is carried onto its node…")
-        guard case .node(_, let inputs) = manager.renderTree[0].content else {
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[0].isVisible, "The folder's flag is carried onto its node…")
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0)[0].content else {
             return XCTFail("A folder must derive to a node, not a leaf")
         }
         XCTAssertEqual(inputs[0].map(\.isVisible), [true, true],
@@ -258,12 +258,12 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.toggleLayerVisibility(layerIndex: 2)
 
         let flat = manager.layers.enumerated().filter { $0.element.isVisible }.map(\.offset)
-        XCTAssertEqual(manager.renderLeafOrder.filter { manager.layers[$0].isVisible }, flat)
+        XCTAssertEqual(manager.renderLeafOrder(atFrame: 0).filter { manager.layers[$0].isVisible }, flat)
         XCTAssertEqual(visibleLeafNames(manager), ["A", "B", "D"])
     }
 
     private func visibleLeafNames(_ manager: CanvasManager) -> [String] {
-        manager.renderLeafOrder.filter { manager.layers[$0].isVisible }.map { manager.layers[$0].name }
+        manager.renderLeafOrder(atFrame: 0).filter { manager.layers[$0].isVisible }.map { manager.layers[$0].name }
     }
 
     // MARK: - Group properties, and the one buffer rule (§4.1)
@@ -279,7 +279,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.setFolderOpacity(folder, to: 0.4)
         manager.setFolderIsolated(folder, isIsolated: false)
 
-        let node = manager.renderTree[0]
+        let node = manager.renderTree(atFrame: 0)[0]
         XCTAssertEqual(node.opacity, 0.4, accuracy: 0.0001, "The slider's value, not the identity phase 1 hardcoded")
         XCTAssertEqual(node.blendMode, .normal, "Read off the folder — there is one case to read")
         XCTAssertFalse(node.isIsolated, "Pass-through is the folder's own flag")
@@ -294,7 +294,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         let manager = namedManager(["A"])
         manager.layers[0].opacity = 0.25
 
-        let leaf = manager.renderTree[0]
+        let leaf = manager.renderTree(atFrame: 0)[0]
         XCTAssertEqual(leaf.blendMode, .normal)
         XCTAssertFalse(leaf.isIsolated)
         XCTAssertFalse(leaf.needsOwnBuffer, "A leaf's opacity is an argument to one draw call, never a buffer")
@@ -309,19 +309,19 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         let folder = manager.addFolder(name: "Folder")
         manager.layers[0].parentFolderID = folder
 
-        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer,
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[0].needsOwnBuffer,
                        "An untouched folder is opacity 1, normal, and isolated over nothing that blends — the direct path, which is what keeps a folder byte-free")
 
         manager.setFolderIsolated(folder, isIsolated: false)
-        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer,
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[0].needsOwnBuffer,
                        "Pass-through changes nothing while every child is `.normal`, and with one blend mode every child is")
 
         manager.setFolderIsolated(folder, isIsolated: true)
         manager.setFolderOpacity(folder, to: 0.99)
-        XCTAssertTrue(manager.renderTree[0].needsOwnBuffer, "Not 1 is the test, not \"visibly faded\"")
+        XCTAssertTrue(manager.renderTree(atFrame: 0)[0].needsOwnBuffer, "Not 1 is the test, not \"visibly faded\"")
 
         manager.setFolderOpacity(folder, to: 1)
-        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer, "…and putting the slider back puts the direct path back")
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[0].needsOwnBuffer, "…and putting the slider back puts the direct path back")
     }
 
     /// A faded group nested in an untouched one buffers alone: the outer group is still a
@@ -334,10 +334,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.layers[0].parentFolderID = inner
         manager.setFolderOpacity(inner, to: 0.5)
 
-        guard case .node(_, let inputs) = manager.renderTree[0].content else {
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0)[0].content else {
             return XCTFail("Outer must derive to a node")
         }
-        XCTAssertFalse(manager.renderTree[0].needsOwnBuffer, "Outer carries nothing of its own")
+        XCTAssertFalse(manager.renderTree(atFrame: 0)[0].needsOwnBuffer, "Outer carries nothing of its own")
         XCTAssertTrue(inputs[0][0].needsOwnBuffer, "Inner is the one that was faded")
     }
 
@@ -369,7 +369,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.folders[0].parentFolderID = second
         manager.folders[1].parentFolderID = first
 
-        let leaves = manager.renderLeafOrder
+        let leaves = manager.renderLeafOrder(atFrame: 0)
         XCTAssertEqual(leaves.sorted(), [0, 1], "Both layers, once each")
         assertRenderTreeMatchesFlatOrder(manager)
     }
@@ -383,7 +383,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         for index in 0..<3 { manager.layers[index].parentFolderID = ids[index] }
         for index in 0..<3 { manager.folders[index].parentFolderID = ids[(index + 1) % 3] }
 
-        XCTAssertEqual(manager.renderLeafOrder.sorted(), [0, 1, 2])
+        XCTAssertEqual(manager.renderLeafOrder(atFrame: 0).sorted(), [0, 1, 2])
         assertRenderTreeMatchesFlatOrder(manager)
     }
 
@@ -463,7 +463,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(renderRows(manager), ["0:Mix", "1:A", "1:B"],
                        "Bottom-to-top, the backdrop comes first and each operand is an input of its own")
 
-        guard case .node(let op, let inputs) = manager.renderTree.first?.content else {
+        guard case .node(let op, let inputs) = manager.renderTree(atFrame: 0).first?.content else {
             return XCTFail("The node folder should derive to a `.node`")
         }
         XCTAssertEqual(op, .mix(.multiply), "The folder's op is what the compositor switches on")
@@ -484,7 +484,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
         manager.restackLayer(ids[1], above: .bottom, parentFolderID: node)
 
-        guard case .node(_, let inputs) = manager.renderTree.first?.content else {
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0).first?.content else {
             return XCTFail("The node folder should derive to a `.node`")
         }
         XCTAssertEqual(inputs.map { $0.map(\.id) }, [[ids[1]], [ids[0]]],
@@ -514,7 +514,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.folders[index].blendMode = .screen
         setBlendMode(.multiply, ofLayer: ids[0], in: manager)
 
-        guard case .node(_, let inputs) = manager.renderTree.first?.content else {
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0).first?.content else {
             return XCTFail("The node folder should derive to a `.node`")
         }
         XCTAssertEqual(inputs.count, 2)
@@ -540,11 +540,11 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.setFolderBlendMode(node, to: .screen)
 
         XCTAssertEqual(manager.folders.first { $0.id == node }?.blendMode, .screen, "Premise: the field still stores it")
-        XCTAssertEqual(manager.renderTree.first?.blendMode, .normal,
+        XCTAssertEqual(manager.renderTree(atFrame: 0).first?.blendMode, .normal,
                        "…and the derivation does not read it. A node blends its inputs; it does not blend itself onto the stack")
 
         manager.setFolderOpacity(node, to: 0.4)
-        XCTAssertEqual(manager.renderTree.first?.opacity, 0.4, "Opacity is untouched by that decision")
+        XCTAssertEqual(manager.renderTree(atFrame: 0).first?.opacity, 0.4, "Opacity is untouched by that decision")
     }
 
     /// **`Clip to below` must not resolve across a node's inputs.** The derivation clips to the entry
@@ -559,7 +559,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
         setBlendMode(.clipToBelow, ofLayer: ids[1], in: manager)
 
-        guard case .node(_, let inputs) = manager.renderTree.first?.content else {
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0).first?.content else {
             return XCTFail("The node folder should derive to a `.node`")
         }
         XCTAssertEqual(inputs.last?.first?.masks, [],
@@ -577,7 +577,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         manager.restackLayer(ids[1], above: .folder(group), parentFolderID: group)
         setBlendMode(.clipToBelow, ofLayer: ids[1], in: manager)
 
-        guard case .node(_, let inputs) = manager.renderTree.first(where: { $0.id == group })?.content else {
+        guard case .node(_, let inputs) = manager.renderTree(atFrame: 0).first(where: { $0.id == group })?.content else {
             return XCTFail("The folder should derive to a `.node`")
         }
         XCTAssertEqual(inputs.first?.last?.masks.first?.sources, [.layer(ids[0])],
@@ -594,14 +594,66 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         }
         manager.setFolderBlendMode(folder, to: .screen)
 
-        guard case .node(let op, let inputs) = manager.renderTree.first?.content else {
+        guard case .node(let op, let inputs) = manager.renderTree(atFrame: 0).first?.content else {
             return XCTFail("A folder should still derive to a `.node`")
         }
         XCTAssertEqual(op, .stack)
         XCTAssertEqual(inputs.count, 1, "No role means one input, however many children are in it")
         XCTAssertEqual(inputs.first?.count, 2)
-        XCTAssertEqual(manager.renderTree.first?.blendMode, .screen,
+        XCTAssertEqual(manager.renderTree(atFrame: 0).first?.blendMode, .screen,
                        "Only a *node's* mode is pinned — a group's is the whole of how it meets the stack below it")
         assertRenderTreeMatchesFlatOrder(manager)
+    }
+
+    // MARK: - The keyframe seam (stage 1)
+
+    /// **The pin that keyframe stage 1 changed nothing, and the test a later stage is supposed to
+    /// break.**
+    ///
+    /// `renderTree` became `renderTree(atFrame:)` so that a layer's grade could one day be resolved
+    /// as a function of the playhead — `Layer.layerEffect(atFrame:)` and
+    /// `LayerFolder.resolvedEffect(atFrame:)` are where that resolution will happen, and today both
+    /// return the stored constant and ignore their argument. So the whole derivation is currently
+    /// frame-invariant, and this asserts exactly that: same document, four different frames, one
+    /// `[RenderNode]`.
+    ///
+    /// **When this test fails, stage 2 has landed.** That is its purpose and it is not a regression:
+    /// the moment a grade reads a keyframe track, a tree derived at frame 0 and one derived at frame 7
+    /// stop being equal, and this assertion is the signal that the seam went live. Whoever breaks it
+    /// should replace it with the two-sided claim — that the tree varies *where the track says* and
+    /// nowhere else — rather than deleting it.
+    ///
+    /// The fixture is deliberately more than the minimum. It exercises **both** new accessors — a
+    /// `.value` layer in effect mode for `layerEffect(atFrame:)` on the leaf, a folder carrying a node
+    /// effect for `resolvedEffect(atFrame:)` on the node — and gives the floor a block only at frames
+    /// 6–9, so frames 0 and 7 are genuinely different frames of a genuinely animated document and
+    /// frame 400 is past the end of it. That the tree consults no cel at all is the other half of what
+    /// makes it invariant, and is worth having a fixture prove rather than a comment claim.
+    func testTheTreeIsTheSameAtEveryFrame() {
+        let manager = namedManager(["Floor", "Ink"])
+        // The floor holds ink only in the middle of the scene, so "frame 0" and "frame 7" are not two
+        // names for the same document.
+        manager.layers[0].cels = []
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 6, frameCount: 4),
+                      "Fixture premise: the floor has a block at 6–9 and none at 0")
+
+        let group = manager.addFolder(name: "Graded group")
+        manager.restackLayer(manager.layers[1].id, above: .folder(group), parentFolderID: group)
+        manager.setNodeEffect(group, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2)))
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
+
+        let trees = [0, 7, 9, 400].map { (frame: $0, tree: manager.renderTree(atFrame: $0)) }
+        XCTAssertFalse(trees[0].tree.isEmpty, "Fixture premise: there is a tree to compare")
+        XCTAssertTrue(trees[0].tree.contains { $0.effect != nil } || trees[0].tree.contains { node in
+            if case .node(_, let inputs) = node.content { return inputs.flatMap { $0 }.contains { $0.effect != nil } }
+            return false
+        }, "Fixture premise: something in this tree carries a grade, or the pin is vacuous")
+
+        for candidate in trees.dropFirst() {
+            XCTAssertEqual(candidate.tree, trees[0].tree,
+                           "The derivation is frame-invariant: frame \(candidate.frame) must equal frame 0")
+        }
+        XCTAssertEqual(manager.renderLeafOrder(atFrame: 400), manager.renderLeafOrder(atFrame: 0),
+                       "And so is the leaf order it is read through")
     }
 }

@@ -597,7 +597,11 @@ struct CanvasView: UIViewRepresentable {
             // the two sandwich views are in the stack, and `updateSandwich` needs the same tree for
             // its cache key. `renderTree` is O(layers × folders), the same order as the row generation
             // beside it, and deliberately not on the drawing path (§5.2).
-            let tree = canvasManager.renderTree
+            //
+            // At `currentFrame` for the reason the value-layer swatch two hundred lines below already
+            // gives: the frame is the argument a derivation asks for, and a live canvas pass is
+            // always about the frame the playhead is on. Nothing in the tree varies with it yet.
+            let tree = canvasManager.renderTree(atFrame: canvasManager.currentFrame)
             let sandwichEngaged = isSandwichEngaged(tree)
 
             // Derived once for the same reason, and used by both touch gates this function owns —
@@ -1181,7 +1185,7 @@ struct CanvasView: UIViewRepresentable {
         /// layer's content version for the dab's duration, so the key has not moved and the
         /// compositor stays off the drawing path.
         private func applySandwichPresentationNow() {
-            let tree = canvasManager.renderTree
+            let tree = canvasManager.renderTree(atFrame: canvasManager.currentFrame)
             updateSandwich(tree: tree, engaged: isSandwichEngaged(tree))
         }
 
@@ -1362,7 +1366,11 @@ struct CanvasView: UIViewRepresentable {
         /// is false to match what `makeSandwichRequests` passes, though nothing downstream reads it —
         /// `MaskResolver` composites each source stack onto transparency regardless.
         private func resolveLiveMask(forLayerAt index: Int) -> CGImage? {
-            guard let masks = RenderNode.masksClipping(leafAt: index, in: canvasManager.renderTree),
+            // The same frame the request below is built at, and it has to be: the two are compared
+            // against each other by `MaskResolver`'s cache, so a tree derived at one frame and a
+            // request at another would be a cache key describing a document that never existed.
+            guard let masks = RenderNode.masksClipping(leafAt: index,
+                                                       in: canvasManager.renderTree(atFrame: canvasManager.currentFrame)),
                   !masks.isEmpty,
                   let request = canvasManager.makeRenderRequest(atFrame: canvasManager.currentFrame,
                                                                 includeBackground: false),
@@ -1473,9 +1481,13 @@ struct CanvasView: UIViewRepresentable {
                 // the two builders are documented as mirrors of each other and a reader checking that
                 // should not find one of them quietly short a field — and because "the tree happens
                 // to carry it" is a property of the derivation, not a promise this key makes.
+                //
+                // Resolved at `frame` above, like the colour beside it and like `renderSources`: the
+                // two builders are mirrors, and a mirror that asks a different question is the one
+                // shape a reader checking them will not catch.
                 let content = LayerContentVersion(cel: canvasManager.layers[index].cels[celIndex],
                                                   valueFill: canvasManager.layers[index].valueFill,
-                                                  effect: canvasManager.layers[index].layerEffect)
+                                                  effect: canvasManager.layers[index].layerEffect(atFrame: frame))
                 if textEditLive, index == active { textEditHeldContent = (index, content) }
                 return content
             }

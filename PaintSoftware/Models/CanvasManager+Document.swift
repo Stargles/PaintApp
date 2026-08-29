@@ -543,8 +543,25 @@ extension CanvasManager {
     /// The tree walk is O(layers × folders), the same cost as laying out the layer panel, so it is
     /// taken once when the sheet opens; the size-dependent half is pure arithmetic
     /// (`CompositorSizeGate`).
+    ///
+    /// **Derived at `currentFrame`, which is safe today for a reason that has an expiry date.** The
+    /// dialog's question is about the whole document — "will a resize to this size admit?" — and the
+    /// answer must not depend on where the playhead happens to be sitting when the sheet opens. It
+    /// does not, because the two things read off the tree here (`peakCompositeTextures` and
+    /// `uploadableLeafCount`) test `node.effect != nil` for *presence* and never read a parameter out
+    /// of it, and no other frame-varying quantity reaches them. So every frame's tree gives this
+    /// gate the same two numbers, and `currentFrame` is simply the frame that is cheapest to name.
+    ///
+    /// **It stops being safe the moment a keyframe track can turn an effect on or off at a frame.**
+    /// Presence is what these counts read, so an effect that exists at frame 40 and not at frame 0
+    /// would make the admission gate a function of the playhead: the sheet would answer for one frame
+    /// about a document that dies on another, and the artist would be told a resize is fine and then
+    /// watch it fall back to the CoreGraphics reference — or fail — the moment they scrub. When that
+    /// day comes this must take the worst frame in the document, not the current one, which means a
+    /// max over the frames a track has keys on rather than a single derivation. Animating an effect's
+    /// *parameters* changes nothing here; only its presence does.
     var compositorSizeGate: CompositorSizeGate {
-        let tree = renderTree
+        let tree = renderTree(atFrame: currentFrame)
         return CompositorSizeGate(nativeTextures: tree.peakCompositeTextures,
                                   sandwichTextures: tree.peakCompositeTextures
                                       + min(tree.uploadableLeafCount, 4))

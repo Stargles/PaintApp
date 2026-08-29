@@ -311,7 +311,7 @@ struct RenderBackground: Equatable {
 /// One frame's worth of compositor input.
 struct RenderRequest {
 
-    /// The stack as `CanvasManager.renderTree` derived it — bottom-to-top, folders as 1-input nodes.
+    /// The stack as `CanvasManager.renderTree(atFrame:)` derived it — bottom-to-top, folders as 1-input nodes.
     /// A value type all the way down, so it needs no defensive copy.
     let tree: [RenderNode]
 
@@ -530,7 +530,7 @@ extension CanvasManager {
                            fittingWithin bound: CGSize? = nil) -> RenderRequest? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
-        let tree = renderTree
+        let tree = renderTree(atFrame: frame)
         let renderSize: CGSize
         if let bound {
             let wanted = RenderRequest.renderSize(fitting: canvasSize, within: bound)
@@ -639,7 +639,7 @@ extension CanvasManager {
                               activeLayerIndex: Int,
                               quality: RenderQuality = .full) -> SandwichRequests? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
-        let tree = renderTree
+        let tree = renderTree(atFrame: frame)
         guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
 
         // **`renderResolution` is applied here and nowhere else**, which is what makes it a live-canvas
@@ -775,6 +775,14 @@ extension CanvasManager {
             // derivation reads (`RenderTree.renderNodes`) is what keeps the two in step — the leaf is
             // elided here exactly when the compositor is going to reach it by its grade instead.
             //
+            // **And asked *at the frame*, which is what keeps that promise once a grade can be
+            // animated.** The tree derivation takes the frame now and resolves its leaf through
+            // `layerEffect(atFrame:)`; this is the same accessor only if it is asked the same
+            // question. Today both answer identically at every frame, so the argument buys nothing
+            // visible — but a layer that grades at one frame and is a flat colour at another has to
+            // be elided at the first and rasterized at the second, and the version of this line
+            // without the frame would silently elide it at both.
+            //
             // **The two guards below used to be one, and splitting them is phase 9's correction.**
             // `versions` was documented as "nil wherever `sources` is nil, and for the same reason",
             // which held for as long as a leaf's contribution *was* its pixels. It stopped holding
@@ -794,8 +802,8 @@ extension CanvasManager {
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
             else { continue }
             versions[index] = LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill,
-                                                  effect: layer.layerEffect)
-            guard layer.layerEffect == nil else { continue }
+                                                  effect: layer.layerEffect(atFrame: frame))
+            guard layer.layerEffect(atFrame: frame) == nil else { continue }
 
             // **§4.5's value layer, resolved here, and this line's *placement* is the one
             // architectural decision that feature exists to get right.** This function already takes

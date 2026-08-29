@@ -741,24 +741,37 @@ extension RenderNode {
 
 extension CanvasManager {
 
-    /// The current stack as a render tree, bottom-to-top: `renderTree.last` composites over
-    /// `renderTree.first`, the reverse of `layerStackRows`.
+    /// The stack **at one frame** as a render tree, bottom-to-top: the last element composites over
+    /// the first, the reverse of `layerStackRows`.
     ///
     /// Recomputed on demand rather than cached. It is O(layers × folders) like the row generation
     /// beside it, it is not on the drawing path (§5.2's sandwich keeps the compositor out of it), and
     /// a cache here would need the invalidation hook that phase 2's `contentVersion` is going to
     /// introduce anyway — so caching now would mean building that hook twice.
-    var renderTree: [RenderNode] {
-        renderNodes(inContainer: nil)
+    ///
+    /// **A function of the frame that does not yet vary with it, and that is the keyframe seam.** The
+    /// derivation is frame-invariant today — every node it builds is identical at every `frame` — and
+    /// the parameter is threaded through anyway, for `ValueFill.resolvedColor(atFrame:)`'s reason: the
+    /// only two places the frame would have to arrive are `Layer.layerEffect(atFrame:)` and
+    /// `LayerFolder.resolvedEffect(atFrame:)` at the bottom of this recursion, both of which are past
+    /// the point where a caller could supply one. Cutting the seam now costs one argument at six call
+    /// sites; cutting it later means finding those six under a deadline and guessing which frame each
+    /// of them meant. `RenderTreeCharacterizationTests.testTheTreeIsTheSameAtEveryFrame` pins the
+    /// invariance so that the phase which *breaks* it has to say so.
+    func renderTree(atFrame frame: Int) -> [RenderNode] {
+        renderNodes(inContainer: nil, atFrame: frame)
     }
 
     /// Every `layers` index in evaluation order. Characterized as identical to `layers.indices` —
     /// the tree reorders nothing, it only reveals the nesting that the flat array already encodes.
-    var renderLeafOrder: [Int] {
-        renderTree.leafLayerIndices
+    ///
+    /// Takes the frame because the tree does, not because the order could ever depend on it: the
+    /// nesting is document structure and no keyframe track will move a layer between containers.
+    func renderLeafOrder(atFrame frame: Int) -> [Int] {
+        renderTree(atFrame: frame).leafLayerIndices
     }
 
-    private func renderNodes(inContainer container: UUID?) -> [RenderNode] {
+    private func renderNodes(inContainer container: UUID?, atFrame frame: Int) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
         let stack = Array(containerEntries(inContainer: container).reversed())
         // **Whether these entries are a node's operands rather than an ordinary stack.** Three rules
@@ -781,7 +794,7 @@ extension CanvasManager {
             switch entry {
             case .layer(let index):
                 let layer = layers[index]
-                let effect = layer.layerEffect
+                let effect = layer.layerEffect(atFrame: frame)
                 return RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   opacity: layer.opacity, isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
@@ -829,7 +842,7 @@ extension CanvasManager {
                 // An empty folder becomes a node with one empty slot rather than being dropped, so
                 // the group properties below have somewhere to hang even with nothing inside — and
                 // so a group that is empty only at this frame doesn't blink out of the tree.
-                let children = renderNodes(inContainer: folder.id)
+                let children = renderNodes(inContainer: folder.id, atFrame: frame)
                 // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
                 // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
                 // input holding all of them. Splitting the same child list either way is what keeps
@@ -888,7 +901,14 @@ extension CanvasManager {
                                   // source with its own mode (§4.4), which is exactly what the layer
                                   // form cannot have. An effect node is an ordinary `.stack` folder
                                   // carrying a grade, so neither clause above fires on it.
-                                  effect: folder.effect)
+                                  //
+                                  // **`resolvedEffect(atFrame:)`, never the `effect` field** — the
+                                  // same rule the leaf above follows with `layerEffect(atFrame:)`,
+                                  // and for the same reason: the accessor is where a keyframe track
+                                  // lands, and a raw field read is a grade frozen at whatever the
+                                  // artist last typed. Today the two answer identically, which is
+                                  // exactly what makes the mistake invisible until it is expensive.
+                                  effect: folder.resolvedEffect(atFrame: frame))
             }
         }
     }

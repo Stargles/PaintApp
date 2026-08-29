@@ -139,7 +139,7 @@ extension XCTestCase {
     func assertRenderTreeMatchesFlatOrder(_ manager: CanvasManager,
                                           _ message: String = "",
                                           file: StaticString = #filePath, line: UInt = #line) {
-        let derived = manager.renderLeafOrder
+        let derived = manager.renderLeafOrder(atFrame: 0)
         XCTAssertEqual(derived, Array(manager.layers.indices),
                        "The derived bottom-to-top leaf order is \(derived.map { manager.layers[$0].name }), which is not the flat `layers` order \(manager.layers.map(\.name)). \(message)",
                        file: file, line: line)

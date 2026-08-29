@@ -342,7 +342,7 @@ final class MaskParityLogicTests: XCTestCase {
         let manager = clippedManager()
         manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[1].id)])
 
-        XCTAssertEqual(manager.renderTree.last?.masks, [], "The cyclic source is dropped before the compositor sees it")
+        XCTAssertEqual(manager.renderTree(atFrame: 0).last?.masks, [], "The cyclic source is dropped before the compositor sees it")
         guard let image = composite(manager) else { return XCTFail("A cyclic document still renders") }
         XCTAssertEqual(pixel(image, 48, 32), [0, 0, 255, 255], "Ignoring the source means the layer draws unmasked")
     }
@@ -354,7 +354,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.layers[1].alphaMask = AlphaMask(sources: [.layer(lower)])
 
         // Neither survives: each is reachable from the other, so each closes a cycle.
-        XCTAssertEqual(manager.renderTree.map(\.masks), [[], []], "A mutual pair resolves to no masks at all")
+        XCTAssertEqual(manager.renderTree(atFrame: 0).map(\.masks), [[], []], "A mutual pair resolves to no masks at all")
         XCTAssertNotNil(composite(manager), "…and the document renders rather than hanging")
     }
 
@@ -364,7 +364,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.layers[1].parentFolderID = folder
         manager.layers[1].alphaMask = AlphaMask(sources: [.folder(folder)])
 
-        let inside = RenderNode.find(manager.layers[1].id, in: manager.renderTree)
+        let inside = RenderNode.find(manager.layers[1].id, in: manager.renderTree(atFrame: 0))
         XCTAssertEqual(inside?.masks, [], "Masking with a group that contains you is the same cycle one level up")
         XCTAssertNotNil(composite(manager))
     }
@@ -468,7 +468,7 @@ final class MaskParityLogicTests: XCTestCase {
         manager.layers[1].alphaMask = nil
         manager.setLayerBlendMode(layerIndex: 1, to: .clipToBelow)
 
-        guard let node = manager.renderTree.last else { return XCTFail("Fixture needs the top layer") }
+        guard let node = manager.renderTree(atFrame: 0).last else { return XCTFail("Fixture needs the top layer") }
         XCTAssertEqual(node.blendMode, .normal, "It is not a blend, and nothing downstream is told otherwise")
         XCTAssertEqual(node.masks, [AlphaMask(sources: [.layer(manager.layers[0].id)])],
                        "It is this machinery with the source implied — the entry directly beneath")
@@ -784,7 +784,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// equal-but-separate coverage would mean the key had stopped doing its job.
     func testTheLiveMaskIsTheSameResolutionTheCompositorApplies() {
         let manager = clippedManager()
-        let tree = manager.renderTree
+        let tree = manager.renderTree(atFrame: 0)
         guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
               let node = RenderNode.find(manager.layers[1].id, in: tree),
               let live = RenderNode.masksClipping(leafAt: 1, in: tree) else {
@@ -818,7 +818,7 @@ final class MaskParityLogicTests: XCTestCase {
         }
         XCTAssertEqual(manager.folders[folderIndex].alphaMask, groupMask, "Fixture premise: the group is masked")
 
-        guard let chain = RenderNode.masksClipping(leafAt: 2, in: manager.renderTree) else {
+        guard let chain = RenderNode.masksClipping(leafAt: 2, in: manager.renderTree(atFrame: 0)) else {
             return XCTFail("The nested leaf must be in the tree")
         }
         XCTAssertEqual(chain, [groupMask, leafMask], "Outermost first, and both of them")
@@ -826,9 +826,9 @@ final class MaskParityLogicTests: XCTestCase {
 
     func testAnUnmaskedLeafHasAnEmptyChainAndAMissingOneHasNoChain() {
         let manager = CanvasFixture.manager(layerCount: 2)
-        XCTAssertEqual(RenderNode.masksClipping(leafAt: 1, in: manager.renderTree), [],
+        XCTAssertEqual(RenderNode.masksClipping(leafAt: 1, in: manager.renderTree(atFrame: 0)), [],
                        "In the tree, clipped by nothing")
-        XCTAssertNil(RenderNode.masksClipping(leafAt: 9, in: manager.renderTree),
+        XCTAssertNil(RenderNode.masksClipping(leafAt: 9, in: manager.renderTree(atFrame: 0)),
                      "Not in the tree at all, which is a different answer from 'clipped by nothing'")
     }
 
@@ -930,8 +930,8 @@ final class MaskParityLogicTests: XCTestCase {
     /// leaf — which is the common case — so this is a clause of its own rather than a consequence.
     func testAMaskedDocumentEngagesTheCompositorOnCanvas() {
         let plain = CanvasFixture.manager(layerCount: 2)
-        XCTAssertFalse(plain.renderTree.needsCompositorOnCanvas, "Fixture premise: an unmasked, unblended stack does not")
-        XCTAssertTrue(clippedManager().renderTree.needsCompositorOnCanvas,
+        XCTAssertFalse(plain.renderTree(atFrame: 0).needsCompositorOnCanvas, "Fixture premise: an unmasked, unblended stack does not")
+        XCTAssertTrue(clippedManager().renderTree(atFrame: 0).needsCompositorOnCanvas,
                       "A masked leaf is exactly what Core Animation's flat row cannot express")
     }
 
