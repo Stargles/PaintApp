@@ -469,6 +469,9 @@ extension CanvasManager {
             guard let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
                   let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame) else { return }
 
+            // No `ContentProvider` here on purpose: both layers went through `rasterizeLayer` two
+            // lines up, which flattens every derived cel *through* the seam and then clears both the
+            // geometry and the recipe. By this point neither cel can derive anything.
             let flattened = PixelOps.flatten(
                 bottom: PixelOps.rasterize(cel: layers[bottomIndex].cels[bottomCel], canvasSize: canvasSize),
                 bottomOpacity: layers[bottomIndex].isVisible ? layers[bottomIndex].opacity : 0,

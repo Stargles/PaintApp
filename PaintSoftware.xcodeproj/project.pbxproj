@@ -36,6 +36,8 @@
 		B2C3D4E5F600112233445602 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */; };
 		B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */; };
 		A11CE0DE0000000000000004 /* PaintSoftware/Models/AnimationCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000003 /* PaintSoftware/Models/AnimationCurve.swift */; };
+		1989A975A4272ED4D7FF9935 /* PaintSoftware/Models/CelContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */; };
+		13B7864D0D2FF536BB86130E /* CelContentProviderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */; };
 		A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */; };
 		C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */; };
 		194F7F121F6B015E2AF2248A /* MemoryBudgetLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */; };
@@ -235,6 +237,8 @@
 		B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeHoldClock.swift; sourceTree = "<group>"; };
 		B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShapeHoldClockLogicTests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000003 /* PaintSoftware/Models/AnimationCurve.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AnimationCurve.swift; sourceTree = "<group>"; };
+		748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CelContentProvider.swift; sourceTree = "<group>"; };
+		95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelContentProviderLogicTests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationCurveLogicTests.swift; sourceTree = "<group>"; };
 		C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EffectParameterTrackLogicTests.swift; sourceTree = "<group>"; };
 		7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MemoryBudgetLogicTests.swift; sourceTree = "<group>"; };
@@ -484,6 +488,7 @@
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */,
+				95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */,
 				C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */,
 				7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */,
 				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
@@ -568,6 +573,7 @@
 				B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */,
 				B2C3D4E5F600112233445601 /* PaintSoftware/Engine/ShapeHoldClock.swift */,
 				A11CE0DE0000000000000003 /* PaintSoftware/Models/AnimationCurve.swift */,
+				748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */,
 				9A7B5C3D1E2F000000000A01 /* PaintSoftware/Engine/StrokeGeometry.swift */,
 				9A7B5C3D1E2F000000000B01 /* PaintSoftware/Engine/StrokeSpatialIndex.swift */,
 				9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */,
@@ -799,6 +805,8 @@
 				B2C3D4E5F600112233445602 /* PaintSoftware/Engine/ShapeHoldClock.swift in Sources */,
 				B2C3D4E5F600112233445502 /* ShapeHoldClockLogicTests.swift in Sources */,
 				A11CE0DE0000000000000004 /* PaintSoftware/Models/AnimationCurve.swift in Sources */,
+				1989A975A4272ED4D7FF9935 /* PaintSoftware/Models/CelContentProvider.swift in Sources */,
+				13B7864D0D2FF536BB86130E /* CelContentProviderLogicTests.swift in Sources */,
 				A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */,
 				C33AFF1E0000000000000002 /* EffectParameterTrackLogicTests.swift in Sources */,
 				194F7F121F6B015E2AF2248A /* MemoryBudgetLogicTests.swift in Sources */,

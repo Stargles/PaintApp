@@ -675,13 +675,19 @@ Each stage is mergeable and leaves the app working.
 | **9** | **Real Distort** | §2.13. Raster tier first (the gesture is `TextFrameDrag.distortedFrame` and the bake is `ImageWarp`), then ink through §4.2's point map, then placed images behind Move stage 3c. |
 | **10** | **The timing recorder** | §7. Small, sits on 7. |
 
-**Stage 0 has one prerequisite that is not in this feature and is worth doing first anyway.** Derived
-content is invisible to `PixelOps.rasterize(cel:)`, so thumbnails, ordinary onion skin and export see an
-animated cel as **empty** — VECTOR_INTERPOLATION item 18, which names the fix as a passed-in
-`ContentProvider` and **not** a back-reference from `Cel` to the manager. Every derivation source
-inherits that hole at once, and it is the same gap ROADMAP §0 flags as blocking item (5). It is the
-highest-leverage groundwork on the roadmap: it serves bake, export, thumbnails and onion skin, for both
-animation systems.
+**Stage 0's one prerequisite — the `ContentProvider` seam — is built.** ✅ Derived content used to be
+invisible to `PixelOps.rasterize(cel:)`, so thumbnails, ordinary onion skin and the composite an export
+walks saw an animated cel as **empty** (VECTOR_INTERPOLATION item 18). `PixelOps.rasterize` now takes a
+`DerivedCelContent`, resolved from a passed-in `CelContentProvider` — not a back-reference from `Cel`.
+
+**What stage 5 inherits, and what it still owes.** The provider is **frame-aware** already
+(`CelContentProvider.frame`, rebindable with `at(_:)`), so a pose channel adds a derivation source and
+touches no call site a second time. §4.5's trap is closed for both keys it names: `PixelOps.RasterizeKey`
+and `LayerContentVersion` each carry `DerivedCelContent.identity`, and `CelContentProviderLogicTests`
+pins both — the second by mutation. What stage 5 owes is the *identity*: a derivation builds its own,
+beside the closure it belongs to, and a pose one must include the frame (interpolation's does not,
+deliberately, because interpolation does not read it and a spurious frame field would mint a second
+cache entry per frame of a held cel).
 
 ---
 

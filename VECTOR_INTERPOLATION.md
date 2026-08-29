@@ -34,6 +34,13 @@ App layer:
   `SpacingCurve`, `MotionGroupBinding`, `LocalEdit`), `MotionGroup.swift`, `GuideStroke.swift`,
   and `CanvasManager+Interpolation.swift` (every mutation with its undo bracket, plus render-cache
   eviction). `Cel.interpolation` is where a recipe lives.
+- **The seam** — `CelContentProvider.swift` (`DerivedCelContent`, `CelContentProvider`) plus
+  `CanvasManager.derivedCelContent(for:atFrame:)`. **What a cel *shows* when that is not what it
+  *stores*.** `PixelOps.rasterize(cel:canvasSize:derived:)` takes one, so thumbnails, the ordinary
+  onion skin, the composite an export will walk, and `rasterizeLayer`'s bake all see an in-between as
+  the frame it displays instead of as nothing. Passed in, never a back-reference from `Cel`. It is
+  **frame-aware** for the derivation that comes next (a cel spans frames; a pose key varies across
+  them) even though interpolation's own `t` does not read the frame.
 - **Evaluation** — `InterpolationEvaluator.swift`: `evaluate(recipe:at:content:)` →
   forward/backward/local-edit display lists plus blend weights; `composite`, `render`, `flattened`
   (Commit), `planLocalEdit` (the inverse map an edit at *t* travels back through).
@@ -89,7 +96,14 @@ Things that are cheap to break and expensive to relearn.
     character (§4 item 46).
 11. **`InterpolationPreviewKey` must carry every input the evaluation reads.** It has bitten three
     times; the last was a local edit, which lives on the `Cel` while every version in the key belongs
-    to a `VectorCanvas` the edit never touches.
+    to a `VectorCanvas` the edit never touches. **There are now three such keys**, because the
+    `ContentProvider` seam gave the same evaluation to `PixelOps.RasterizeKey`, `LayerContentVersion`
+    and `OnionSkinRasterCache.Key` — all three carry `DerivedCelContent.identity`, which is minted
+    beside the closure whose inputs it enumerates so the two cannot drift. That identity is a
+    **superset** of the preview key: it also carries `mode`, `spacing` and the groups' fitted
+    lattices, which the preview key omits and gets away with only because today's UI happens to move
+    a reference cel's `version` whenever it moves one of them. Replacing the preview key's field list
+    with the identity is the obvious tidy-up and was deliberately not done in the same pass.
 12. **Experiment before believing a fix.** `Engine/Deform` compiles standalone with `swiftc` (~5 s a
     loop vs ~90 s through `xcodebuild test`); one session refuted three plausible fixes that way, one
     of which the literature positively recommended.
@@ -264,17 +278,18 @@ saturation curve `1 − (1 − a)^k` would fix it; invisible for the opaque brus
 via `referencedCels`/`isWellFormed`, and the evaluator answers "not yet" rather than crashing, so the
 effect is accumulation and a silently-shrinking keyframe count, not a crash.
 
-**18. An interpolated cel is blank everywhere except the canvas at the current frame.** Thumbnails,
-the ordinary onion skin and export all go through `PixelOps.rasterize(cel:canvasSize:)`, which reads
-`cel.vector` and finds an interpolated cel empty. Fixing it means giving `rasterize` a way to evaluate
-a recipe — the `ContentProvider` seam — and it must be a passed-in provider, **not** a back-reference
-from `Cel` to the manager.
-
 **26. A vector cel still carries `fillImage` and `bakedImage`, so raster features allocate
 canvas-sized bitmaps on a vector layer.** Select+move, Clear and bucket fill all go through the raster
 path even on a `.vector` layer. **The product owner wants vector fully divorced from raster
-features.** It reaches well past interpolation (it is really about what a vector layer *is*) and
-should be designed alongside item 18's seam.
+features.** It reaches well past interpolation (it is really about what a vector layer *is*).
+
+Item 18's seam was expected to constrain this and **does not** — checked when the seam was built. The
+seam's currency is *pixels*, forced by fact 9 rather than by anything item 26 decides, and none of the
+four destructive raster paths can reach a derived cel today: Move refuses an in-between outright
+(`TopToolbar.toggleMove`, `CanvasManager.activeVectorMoveTarget`), and recolour and clear take their
+vector arm on a vector layer. Only the magic wand's read-only flatten was reachable, and it now goes
+through the provider. So item 26 can be designed whenever the owner wants it, with no migration owed
+to the seam.
 
 **2. No turn-count control for rotations past 180°.** The lattice cannot tear, but the global branch
 always takes the short way round, because nothing in two keyframes distinguishes a 200° turn from a

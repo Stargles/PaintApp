@@ -996,6 +996,13 @@ struct CanvasView: UIViewRepresentable {
         /// - An **interpolated in-between**: its pixels come from `interpolatedImage(forCel:)` via
         ///   `setInterpolationImage`, and the cel's own canvas is empty (see
         ///   `StrokeCanvasView.refreshDisplay`), so a composite would drop the in-between entirely.
+        ///   **The model-side half of this one is fixed** — `renderSources` now hands every flatten
+        ///   its `DerivedCelContent` (VECTOR_INTERPOLATION item 18), so `makeRenderRequest` *does*
+        ///   contain in-betweens and the project thumbnail, the mask resolve and a future export get
+        ///   them. This clause is therefore removable, which would give the artist blend modes,
+        ///   effects and mask clipping back on in-between frames; it is left in place because taking
+        ///   it out changes what the live canvas draws and wants its own change and its own
+        ///   verification. The other two bullets are still real gaps.
         /// - A **lasso move's latched piece**: `updateVectorFloat` renders the lifted elements once
         ///   into `StrokeCanvasView.floatView` and drags that bitmap under a Core Animation
         ///   transform, while the model carries `vector.suppressedElementIDs = insideIDs` so the

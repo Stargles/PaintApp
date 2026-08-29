@@ -1236,18 +1236,103 @@ extension CanvasManager {
     /// evaluable. Nil is "not yet", not an error — the caller should fall back to the cel's own
     /// content rather than show a failure. `at` overrides the recipe's stored `t` so a live drag can
     /// render without writing to the document on every tick.
+    ///
+    /// **One evaluation implementation, shared with the `ContentProvider` seam.** This is now a thin
+    /// call through `derivedCelContent`, so the live canvas's in-between and the one a thumbnail,
+    /// onion skin or export flattens are the same pixels by construction rather than by two call
+    /// sites happening to pass the same arguments.
     func interpolatedImage(forCel celID: UUID, inLayer layerID: UUID, at t: CGFloat? = nil,
                            quality: RenderQuality = .full) -> UIImage? {
-        guard let canvasSize,
-              let at = celIndices(forCel: celID, inLayer: layerID),
-              let recipe = layers[at.layer].cels[at.cel].interpolation else { return nil }
-        // A reprojection's content is the cel's own display list, which no `ContentProvider` can
-        // reach — the recipe holds no reference to the cel it lives on, by design.
-        let subject = recipe.mode == .reproject ? (layers[at.layer].cels[at.cel].vector?.elements ?? []) : []
-        return InterpolationEvaluator.render(recipe: recipe, at: t ?? recipe.t, size: canvasSize,
-                                             content: interpolationContentProvider, subject: subject,
-                                             guides: guides(driving: recipe),
-                                             quality: quality, options: interpolationOptions)
+        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return nil }
+        let cel = layers[at.layer].cels[at.cel]
+        return derivedCelContent(for: cel, atFrame: cel.startFrame, overridingT: t)?.render(quality)
+    }
+
+    // MARK: - The ContentProvider seam (VECTOR_INTERPOLATION item 18)
+
+    /// This document's derivations, bound to `frame` — what a caller hands `PixelOps.rasterize` so
+    /// that a derived cel stops flattening blank. See `CelContentProvider`.
+    func celContentProvider(atFrame frame: Int) -> CelContentProvider {
+        CelContentProvider(frame: frame) { [weak self] cel, frame in
+            self?.derivedCelContent(for: cel, atFrame: frame)
+        }
+    }
+
+    /// The provider at the playhead — the frame every caller that is showing "now" wants.
+    var celContentProvider: CelContentProvider { celContentProvider(atFrame: currentFrame) }
+
+    /// What `cel` displays when that is not what it stores: today, an interpolated in-between.
+    ///
+    /// **Returns nil on a field test before doing any work.** This is called for every cel of every
+    /// rasterize, including in documents that have never seen the interpolation feature, so the
+    /// no-recipe path must cost one optional test.
+    ///
+    /// ## The two halves are minted here together, and that is the anti-drift argument
+    ///
+    /// `DerivedCelContent.identity` has to carry every input `render` reads. Both are built from the
+    /// same locals in the same twenty lines, so an input added to one is in front of the eyes of
+    /// whoever adds it to the other — unlike `InterpolationPreviewKey`, which enumerates the same
+    /// dependencies from a different file and has been wrong four times.
+    ///
+    /// ## The closure is deliberately pure
+    ///
+    /// The reference keyframes' display lists are **resolved now**, on the main actor, into a plain
+    /// dictionary the closure captures — rather than capturing `interpolationContentProvider`, which
+    /// reads `layers`. `RenderRequest.renderSources` calls `render` from `PixelOps.parallelMap`'s
+    /// worker threads, and `[VectorElement]` is a value type with copy-on-write storage, so this
+    /// costs a retain per reference rather than a copy of the ink.
+    ///
+    /// `overridingT` is for a live scrub, which evaluates without writing `t` to the document; it is
+    /// part of the identity, so two positions of the slider are two cache entries and never one.
+    func derivedCelContent(for cel: Cel, atFrame frame: Int,
+                           overridingT overrideT: CGFloat? = nil) -> DerivedCelContent? {
+        guard let recipe = cel.interpolation, let canvasSize else { return nil }
+
+        let t = overrideT ?? recipe.t
+        let options = interpolationOptions
+        let guideStrokes = guides(driving: recipe)
+        // A reprojection's content is the cel's own display list, which no evaluator-side
+        // `ContentProvider` can reach — the recipe holds no reference to the cel it lives on, by
+        // design (see `InterpolationEvaluator.evaluate`'s `subject`).
+        let subject = recipe.mode == .reproject ? (cel.vector?.elements ?? []) : []
+
+        let references = recipe.referencedCels
+        var resolved: [CelRef: [VectorElement]] = [:]
+        var referenceVersions: [Int] = []
+        referenceVersions.reserveCapacity(references.count)
+        for ref in references {
+            guard let at = celIndices(forCel: ref.celID, inLayer: ref.layerID) else {
+                referenceVersions.append(-1)
+                continue
+            }
+            let source = layers[at.layer].cels[at.cel].vector
+            resolved[ref] = source?.elements ?? []
+            referenceVersions.append(source?.version ?? -1)
+        }
+        let content: InterpolationEvaluator.ContentProvider = { resolved[$0] ?? [] }
+
+        let identity = InterpolatedCelIdentity(
+            celID: cel.id,
+            t: t,
+            mode: recipe.mode.rawValue,
+            spacing: recipe.spacing,
+            groups: recipe.groups,
+            guideIDs: recipe.guideIDs,
+            localEditIDs: recipe.localEdits.map(\.id),
+            references: references,
+            referenceVersions: referenceVersions,
+            guides: guideStrokes,
+            thicknessFade: options.thicknessFade,
+            hiddenGroups: options.hiddenGroups,
+            subjectVersion: cel.vector?.version ?? -1,
+            canvasWidth: Int(canvasSize.width.rounded()),
+            canvasHeight: Int(canvasSize.height.rounded()))
+
+        return DerivedCelContent(identity: AnyHashable(identity)) { quality in
+            InterpolationEvaluator.render(recipe: recipe, at: t, size: canvasSize,
+                                          content: content, subject: subject, guides: guideStrokes,
+                                          quality: quality, options: options)
+        }
     }
 
     // MARK: - Guides
@@ -1590,5 +1675,68 @@ extension CanvasManager {
                 }
             }
         }
+    }
+}
+
+/// Everything an in-between's pixels depend on, as one value `PixelOps`' flatten memo,
+/// `LayerContentVersion` and the onion skin's own store can all key on.
+///
+/// **The list is a superset of `CanvasView.InterpolationPreviewKey`'s, and the three extra entries
+/// are the point.** That key omits `mode`, `spacing` and `groups` — so a per-group easing change or
+/// a re-registration that rewrites a binding's lattices reaches the evaluator without reaching the
+/// key. It has survived that because the operations which move those fields happen to move a
+/// reference cel's `version` as well; that is a coincidence of today's UI rather than a guarantee,
+/// and this key does not rely on it. VECTOR_INTERPOLATION fact 11 — *"it has bitten three times"* —
+/// is about exactly this kind of omission, and a fourth was found in `MaskResolver` in `6158e8b`.
+///
+/// **Hashed by hand, and only to skip the four members that are `Equatable` but not `Hashable`** —
+/// `SpacingCurve`, `MotionGroupBinding`, `GuideStroke` and `ThicknessFade`. Conforming them plus
+/// `Lattice` and `VectorSample` would be six declarations in service of nothing but bucket spread:
+/// hashing is allowed to collide, **equality** decides a cache hit, and equality is synthesized and
+/// does include all four. This is `LayerContentVersion`'s argument verbatim, one file over.
+///
+/// `InterpolationEvaluator.Options.arap` is knowingly absent: `interpolationOptions` builds it fresh
+/// from defaults on every call and nothing in the app varies it. A UI that ever does must add it
+/// here — and to the preview key.
+private struct InterpolatedCelIdentity: Hashable {
+    let celID: UUID
+    /// The *effective* `t` — a live scrub's override, not necessarily the one on the recipe.
+    let t: CGFloat
+    let mode: String
+    let spacing: SpacingCurve
+    /// Carries each binding's fitted lattices, which is the bulk of what a re-registration changes.
+    let groups: [MotionGroupBinding]
+    let guideIDs: [UUID]
+    /// Ids rather than count, so undo/redo of one edit is told apart from a different edit —
+    /// `InterpolationPreviewKey`'s reasoning, and the bug that produced it.
+    let localEditIDs: [UUID]
+    /// *Which* cels are read, beside what version they were at: re-pointing a reference at another
+    /// cel of the same version is a different picture.
+    let references: [CelRef]
+    let referenceVersions: [Int]
+    /// Compared by value: `updateGuideStroke` replaces a guide **keeping its id**, so no id list and
+    /// no version number anywhere moves when one is edited.
+    let guides: [GuideStroke]
+    let thicknessFade: InterpolationEvaluator.ThicknessFade
+    let hiddenGroups: Set<UUID>
+    /// `.reproject` evaluates the cel's *own* display list. `PixelOps.RasterizeKey` carries this
+    /// too, but this value has to stand alone — the onion skin's store keys on it at a size the
+    /// shared memo never sees.
+    let subjectVersion: Int
+    let canvasWidth: Int
+    let canvasHeight: Int
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(celID)
+        hasher.combine(t)
+        hasher.combine(mode)
+        hasher.combine(guideIDs)
+        hasher.combine(localEditIDs)
+        hasher.combine(references)
+        hasher.combine(referenceVersions)
+        hasher.combine(hiddenGroups)
+        hasher.combine(subjectVersion)
+        hasher.combine(canvasWidth)
+        hasher.combine(canvasHeight)
     }
 }

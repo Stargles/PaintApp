@@ -1136,13 +1136,20 @@ extension CanvasManager {
             // to itself no matter what the artist drew in between.
             let jobs = ThumbnailBatch(entries: layers[layerIndex].cels
                 .filter { $0.thumbnail == nil }
-                .map { ThumbnailBatch.Entry(cel: $0, version: LayerContentVersion(cel: $0)) })
+                .map { cel in
+                    let derived = derivedCelContent(for: cel, atFrame: cel.startFrame)
+                    return ThumbnailBatch.Entry(
+                        cel: cel,
+                        version: LayerContentVersion(cel: cel, derived: derived?.identity),
+                        derived: derived)
+                })
             guard !jobs.entries.isEmpty else { continue }
 
             let rendered: ThumbnailImages = await withCheckedContinuation { continuation in
                 Self.thumbnailBackfillQueue.async {
                     let images = PixelOps.parallelMap(jobs.entries.count) {
-                        CanvasManager.celThumbnailImage(for: jobs.entries[$0].cel, canvasSize: canvasSize)
+                        CanvasManager.celThumbnailImage(for: jobs.entries[$0].cel, canvasSize: canvasSize,
+                                                        derived: jobs.entries[$0].derived)
                     }
                     continuation.resume(returning: ThumbnailImages(images: images))
                 }
@@ -1183,6 +1190,10 @@ extension CanvasManager {
         struct Entry {
             let cel: Cel
             let version: LayerContentVersion
+            /// The `ContentProvider` seam's answer for this cel, resolved on the main actor with the
+            /// version above and carried across because `DerivedCelContent.render` is pure and this
+            /// batch is rendered off the actor. Nil for a cel that shows what it stores.
+            let derived: DerivedCelContent?
         }
         let entries: [Entry]
     }

@@ -44,16 +44,15 @@ is narrower than it looks, and the code adds three dependencies the owner did no
 - **(6) requires (5) — agreed, but narrower than it reads.** Item (6) is really two features, and only
   one of them needs (5). Organising documents into scenes needs no renderer at all; *exporting the
   movie* does. See item (6).
-- **Unnamed: (5) is blocked on a model-side gap in the interpolation feature.**
-  `makeRenderRequest` does not include a derived in-between — the cel's own canvas is empty and its
-  pixels come from `interpolatedImage(forCel:)` in the **view** layer
-  (`PaintSoftware/Models/CanvasManager+Interpolation.swift:1239-1251`, sole caller
-  `PaintSoftware/Views/CanvasView.swift:2174`). `CanvasView.swift:985-1012` enumerates the three things
-  no composite contains and says so outright: *"All three are pre-existing gaps in `makeRenderRequest`
-  … the project thumbnail has them too … and all three want fixing in the model, not here."*
-  **An export written today would silently omit every interpolated in-between**, in an app whose
-  interpolation engine is one of its largest subsystems. Fixing that is a prerequisite of (5), not a
-  polish item.
+- **Unnamed: (5) was blocked on a model-side gap in the interpolation feature. That one is fixed.** ✅
+  `makeRenderRequest` did not include a derived in-between — the cel's own canvas is empty and its
+  pixels came only from `interpolatedImage(forCel:)`, reached from the **view** layer — so **an export
+  written then would silently have omitted every interpolated in-between**. The `ContentProvider` seam
+  (VECTOR_INTERPOLATION item 18, `Models/CelContentProvider.swift`) closes it: `renderSources` resolves
+  a provider per frame and hands each flatten its derived content, so the composite an exporter walks
+  contains in-betweens. `CanvasView.swift:985-1012` lists the other two things no composite contains,
+  and those are still open — read it before writing the exporter rather than assuming this closed all
+  three.
 - **Unnamed: (4) needs a real playback clock, and there is none.** Playback is a
   `Timer.scheduledTimer(withTimeInterval: 1.0/fps)` whose callback re-dispatches onto the main queue
   and increments an `Int` (`PaintSoftware/Views/AnimationTimeline.swift:729-734`); the state lives on

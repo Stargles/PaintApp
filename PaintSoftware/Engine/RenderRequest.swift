@@ -158,11 +158,19 @@ struct LayerContentVersion: Hashable {
     let bakedImage: ObjectIdentifier?
     let valueFill: ValueFill?
     let effect: Effect?
+    /// **The `ContentProvider` seam's half of this key** — the identity of whatever the cel *shows*
+    /// rather than stores (`DerivedCelContent`). KEYFRAMES §4.5 names this and `PixelOps.RasterizeKey`
+    /// as the pair that both need it, and explains why forgetting either is invisible: `SandwichKey`
+    /// compares the whole `[RenderNode]`, so the composite rebuilds dutifully — from the stale
+    /// flatten underneath. Nil for a cel with no derivation, which is every cel in a document using
+    /// neither animation system.
+    let derived: AnyHashable?
 
-    init(cel: Cel, valueFill: ValueFill? = nil, effect: Effect? = nil) {
+    init(cel: Cel, valueFill: ValueFill? = nil, effect: Effect? = nil, derived: AnyHashable? = nil) {
         celID = cel.id
         self.valueFill = valueFill
         self.effect = effect
+        self.derived = derived
         raster = ObjectIdentifier(cel.raster)
         rasterVersion = cel.raster.version
         vector = cel.vector.map(ObjectIdentifier.init)
@@ -181,6 +189,7 @@ struct LayerContentVersion: Hashable {
         hasher.combine(fillImage)
         hasher.combine(bakedImage)
         hasher.combine(valueFill)
+        hasher.combine(derived)
     }
 }
 
@@ -752,7 +761,14 @@ extension CanvasManager {
         // Layers that need a cel flattened, and which cel. Carries the `Layer` by value: it is a
         // struct, so this is a copy of the metadata and a retain of the texture objects, and pass 2
         // therefore reads nothing off `self`.
-        var rasterJobs: [(index: Int, layer: Layer, celIndex: Int)] = []
+        //
+        // **`derived` is resolved here, in pass 1, and that placement is load-bearing.** Resolving a
+        // `CelContentProvider` reads the document (`layers`, the guide registry, the mode flags) and
+        // pass 2 runs on `PixelOps.parallelMap`'s worker threads — the same rule the tuple's own note
+        // above states, extended to the seam. What crosses into pass 2 is a `DerivedCelContent` whose
+        // closure captures only values.
+        var rasterJobs: [(index: Int, layer: Layer, celIndex: Int, derived: DerivedCelContent?)] = []
+        let provider = celContentProvider(atFrame: frame)
         for index in layers.indices {
             let layer = layers[index]
             // The visibility check is an elision, not the compositing rule — `RenderNode.isVisible`
@@ -801,8 +817,10 @@ extension CanvasManager {
             guard layer.isVisible || maskSourceLayers.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
             else { continue }
+            let derived = provider.content(for: layer.cels[celIndex])
             versions[index] = LayerContentVersion(cel: layer.cels[celIndex], valueFill: layer.valueFill,
-                                                  effect: layer.layerEffect(atFrame: frame))
+                                                  effect: layer.layerEffect(atFrame: frame),
+                                                  derived: derived?.identity)
             guard layer.layerEffect(atFrame: frame) == nil else { continue }
 
             // **§4.5's value layer, resolved here, and this line's *placement* is the one
@@ -832,14 +850,15 @@ extension CanvasManager {
                 }
                 continue
             }
-            rasterJobs.append((index, layer, celIndex))
+            rasterJobs.append((index, layer, celIndex, derived))
         }
 
         // Pass 2. `parallelMap` returns in index order and runs inline below two jobs, so a one- or
         // two-layer document behaves exactly as it did before this split.
         let images = PixelOps.parallelMap(rasterJobs.count) { job in
             PixelOps.rasterize(cel: rasterJobs[job].layer.cels[rasterJobs[job].celIndex],
-                               canvasSize: canvasSize, quality: quality).cgImage
+                               canvasSize: canvasSize, quality: quality,
+                               derived: rasterJobs[job].derived).cgImage
         }
         for (job, image) in zip(rasterJobs, images) {
             guard let image else { continue }

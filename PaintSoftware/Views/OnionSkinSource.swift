@@ -857,8 +857,13 @@ enum OnionSkinRasterCache {
         let bakedImage: ObjectIdentifier?
         let width: Int
         let height: Int
+        /// The `ContentProvider` seam's half of this key — see `PixelOps.RasterizeKey.derived`. This
+        /// store is the "second memo keyed like the preview's" that `OnionSkinSettingsSource`'s own
+        /// note said a derived skin would need.
+        let derived: AnyHashable?
 
-        init(cel: Cel, size: CGSize) {
+        init(cel: Cel, size: CGSize, derived: AnyHashable? = nil) {
+            self.derived = derived
             // Identity *and* version for both tiers, exactly as `PixelOps.RasterizeKey` argues: a
             // version alone is monotonic only within one object's lifetime, and reopening a project
             // rebuilds every texture with its counter back at 0 under the same cel id.
@@ -884,19 +889,25 @@ enum OnionSkinRasterCache {
     /// Returns the canvas-size image untouched when no reduction is called for, so a small document
     /// pays nothing at all for this — no extra entry, no extra copy, the same object the compositor
     /// is already holding.
-    static func image(for cel: Cel, canvasSize: CGSize, at size: CGSize) -> UIImage {
+    ///
+    /// `derived` is the `ContentProvider` seam, resolved by the caller. **The evaluation it wraps is
+    /// paid at canvas size and then reduced**, because derived geometry is in canvas coordinates and
+    /// a smaller render would clip rather than scale — so a derived skin costs one full evaluation
+    /// per (cel, identity) and is then served from here for every rebuild after.
+    static func image(for cel: Cel, canvasSize: CGSize, at size: CGSize,
+                      derived: DerivedCelContent? = nil) -> UIImage {
         guard size.width < canvasSize.width || size.height < canvasSize.height else {
             // No reduction called for, so there is nothing for this cache to add: hand back the
             // shared memo the compositor is already holding rather than a second copy of it.
-            return PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+            return PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived)
         }
 
-        let key = Key(cel: cel, size: size)
+        let key = Key(cel: cel, size: size, derived: derived?.identity)
         lock.lock()
         if let hit = entries[key] { lock.unlock(); return hit }
         lock.unlock()
 
-        let reduced = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false)
+        let reduced = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, derived: derived)
 
         lock.lock()
         installMemoryObserverIfNeeded()
@@ -947,14 +958,19 @@ enum OnionSkinRasterCache {
 /// Stateless — every decision comes from `manager.onionSkin` — so the view layer can hold one of
 /// these forever and the panel changing anything is picked up on the next pass.
 ///
-/// **A derived in-between skins as its stored content, not as its evaluated content**, and that is a
-/// deliberate limit rather than an oversight. `CanvasManager.interpolatedImage` runs the ARAP
-/// evaluator, which the live canvas memoizes behind `InterpolationPreviewKey` precisely because it is
-/// too expensive to run per pass — running it for up to ten skins on every playhead move would be
-/// worse than anything else in this file. So a `.generate` in-between is skipped (it stores nothing;
-/// `Cel.isCertainlyBlank` sees that) and a `.reproject` in-between skins as the artist's own drawing
-/// rather than the reposed one. Fixing it properly means a second memo keyed like the preview's, and
-/// wants its own change.
+/// **A derived in-between skins as its evaluated content** — VECTOR_INTERPOLATION item 18, fixed by
+/// the `ContentProvider` seam. This used to read stored content only, so a `.generate` in-between was
+/// skipped outright (it stores nothing; `Cel.isCertainlyBlank` sees that) and a `.reproject` one
+/// skinned as the artist's own drawing rather than the reposed one. The note here said fixing it
+/// "means a second memo keyed like the preview's, and wants its own change" — that memo is
+/// `OnionSkinRasterCache`'s `derived` key field, and this is that change.
+///
+/// **The cost is real and bounded by the memo rather than by a limit.** An evaluation is two lattice
+/// embeddings, an ARAP solve and two canvas-sized renders; with ten slots open on a span of
+/// in-betweens the *first* rebuild after any change pays one per distinct cel. Every rebuild after it
+/// — which, with a playhead moving through a cycle, is nearly all of them — is a cache hit, on the
+/// same key the live preview would compute. If that first pass proves too slow on a real span, the
+/// lever is capping how many derived skins evaluate per rebuild, not going back to blank ghosts.
 struct OnionSkinSettingsSource: OnionSkinSource {
 
     func frames(for manager: CanvasManager) -> [OnionSkinFrame] {
@@ -996,9 +1012,17 @@ struct OnionSkinSettingsSource: OnionSkinSource {
                 // A cel with certainly nothing in it is skipped before it can cost a rasterize and a
                 // canvas-sized draw. Held and blank frames are ordinary in animation, and with ten
                 // slots open they are the common case rather than the corner.
-                guard !cels[celIndex].isCertainlyBlank else { continue }
+                //
+                // **`isCertainlyBlank` is asked second, and only of a cel that derives nothing.** It
+                // answers about *stored* tiers and says so in its own doc comment — a `.generate`
+                // in-between reports blank while displaying a whole drawing, so consulting it first
+                // would skip precisely the cels this seam exists to render.
+                let derived = manager.derivedCelContent(for: cels[celIndex],
+                                                        atFrame: cels[celIndex].startFrame)
+                guard derived != nil || !cels[celIndex].isCertainlyBlank else { continue }
                 let image = OnionSkinRasterCache.image(for: cels[celIndex],
-                                                       canvasSize: canvasSize, at: skinSize)
+                                                       canvasSize: canvasSize, at: skinSize,
+                                                       derived: derived)
                 gathered.append((distance: slot + 1,
                                  frame: OnionSkinFrame(image: image,
                                                        opacity: CGFloat(opacity),
@@ -1067,7 +1091,13 @@ struct InterpolationReferenceOnionSkinSource: OnionSkinSource {
             // otherwise lineart and flats would tint as two separate onion skins.
             let image = UIGraphicsImageRenderer(size: skinSize, format: PixelOps.transparentFormat()).image { _ in
                 for cel in cels {
-                    PixelOps.rasterize(cel: cel, canvasSize: canvasSize).draw(in: bounds)
+                    // Through the seam like every other flatten. A reference keyframe normally
+                    // stores its own ink — `interpolate` refuses `.alreadyInterpolated` for the
+                    // *target* but nothing forbids flagging a derived cel as a keyframe — so this
+                    // costs one optional test on the ordinary path and is right on the other.
+                    PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: cel.startFrame))
+                        .draw(in: bounds)
                 }
             }
             let isPast = startFrame <= manager.currentFrame

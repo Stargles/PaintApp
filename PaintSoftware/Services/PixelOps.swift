@@ -115,12 +115,28 @@ enum PixelOps {
     /// the artwork. The alternative — a second copy of `rasterizeUncached`'s draw order living in the
     /// onion skin — is the "two compositing implementations drift" mistake this file's own header
     /// warns about, one tier down. One flag is cheaper than either.
+    ///
+    /// **`derived` is the `ContentProvider` seam** (VECTOR_INTERPOLATION item 18, KEYFRAMES §8): the
+    /// content a cel *shows* when it is not the content it *stores*. Nil — the default, and what
+    /// every caller passed before the seam existed — is exactly today's behaviour, so the change is
+    /// opt-in call site by call site. Resolved by the caller rather than by a provider held here,
+    /// because this function runs on `parallelMap`'s worker threads and resolving a provider reads
+    /// the document; see `DerivedCelContent.render`.
+    ///
+    /// **Its identity is in the memo key and that is not optional.** The moment this can return
+    /// different pixels for one `Cel`, a key built only from the cel's stored tiers is a key that
+    /// cannot tell them apart — and the symptom is silence, because the caches *above* this one
+    /// (`CanvasView.SandwichKey`, which compares the whole node tree) rebuild happily from the stale
+    /// entry. KEYFRAMES §4.5, "pin this on day one".
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
-                          memoize: Bool = true) -> UIImage {
-        guard memoize else { return rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality) }
-        let key = RasterizeKey(cel: cel, canvasSize: canvasSize, quality: quality)
+                          memoize: Bool = true, derived: DerivedCelContent? = nil) -> UIImage {
+        guard memoize else {
+            return rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality, derived: derived)
+        }
+        let key = RasterizeKey(cel: cel, canvasSize: canvasSize, quality: quality,
+                               derived: derived?.identity)
         if let hit = rasterizeCache.value(for: key) { return hit }
-        let image = rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality)
+        let image = rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality, derived: derived)
         rasterizeCache.store(image, for: key)
         return image
     }
@@ -141,8 +157,18 @@ enum PixelOps {
         let width: Int
         let height: Int
         let quality: RenderQuality
+        /// **The seam's half of the key.** Nil for a cel that shows what it stores, which is every
+        /// cel in a document using neither animation system — so an untouched document's keys are
+        /// exactly the keys it had before `DerivedCelContent` existed. Type-erased because the
+        /// *derivation* owns the enumeration: interpolation folds in the recipe's `t`, mode,
+        /// spacing, group lattices, guides, local-edit ids and its keyframes' content versions, and
+        /// a pose key will fold in the frame, and neither this type nor this file should have to
+        /// learn either list. `AnyHashable` compares unequal across types, so two derivations can
+        /// never collide on one entry.
+        let derived: AnyHashable?
 
-        init(cel: Cel, canvasSize: CGSize, quality: RenderQuality) {
+        init(cel: Cel, canvasSize: CGSize, quality: RenderQuality, derived: AnyHashable? = nil) {
+            self.derived = derived
             celID = cel.id
             // **Identity *and* version, for both tiers, and the identity is the load-bearing half.**
             // A version alone is monotonic only within one object's lifetime, while a cel id outlives
@@ -267,13 +293,23 @@ enum PixelOps {
     /// What the flatten memo is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
     static var rasterizeCacheBytes: Int { rasterizeCache.bytesResident }
 
-    private static func rasterizeUncached(cel: Cel, canvasSize: CGSize, quality: RenderQuality) -> UIImage {
+    private static func rasterizeUncached(cel: Cel, canvasSize: CGSize, quality: RenderQuality,
+                                          derived: DerivedCelContent? = nil) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let strokesImage = cel.raster.renderToUIImage()
         // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
         // not in `raster` — include it so fill, select/move, and cross-layer fill references treat
         // a vector layer's content as pixels just like a raster layer's.
-        let vectorImage = cel.vector?.render(quality: quality)
+        //
+        // **Derived content *replaces* that tier rather than stacking above it**, which matters for
+        // exactly one of the two recipe modes. A `.generate` in-between stores no display list at
+        // all, so either order looks the same; a `.reproject` one keeps the artist's own strokes in
+        // `vector` and the evaluation is those same strokes *re-posed*, so drawing both would show
+        // the drawing twice — once where it was drawn and once where it moved to.
+        //
+        // A nil answer from the thunk is "not yet" (a recipe mid-edit is not evaluable), and falls
+        // back to the stored tier rather than to a hole.
+        let vectorImage = derived?.render(quality) ?? cel.vector?.render(quality: quality)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
             cel.bakedImage?.draw(in: bounds)

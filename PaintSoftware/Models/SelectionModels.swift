@@ -276,7 +276,17 @@ extension CanvasManager {
         beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
-        let image = PixelOps.rasterize(cel: layers[currentLayerIndex].cels[celIndex], canvasSize: canvasSize)
+        // Through the `ContentProvider` seam: the wand samples what the artist can see, and on a
+        // derived in-between the stored tiers are empty. **The only one of this file's five
+        // `rasterize` calls that gets a provider**, because it is the only read-only one — the other
+        // four lift or bake pixels into `bakedImage`/`raster`, and baking an evaluated in-between
+        // would leave the recipe still deriving over the top of it. Move already refuses an
+        // in-between outright (`TopToolbar.toggleMove`, `activeVectorMoveTarget`), and recolour and
+        // clear take their vector arm on a vector layer, so none of the four can reach one today;
+        // divorcing them properly is VECTOR_INTERPOLATION item 26, not this seam.
+        let cel = layers[currentLayerIndex].cels[celIndex]
+        let image = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                       derived: derivedCelContent(for: cel, atFrame: currentFrame))
         guard let path = PixelOps.floodFillMask(image: image, point: point, tolerance: magicWandTolerance) else { return }
         finishSelection(path: path)
     }

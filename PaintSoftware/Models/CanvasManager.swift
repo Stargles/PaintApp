@@ -339,13 +339,31 @@ final class CanvasManager: ObservableObject {
         // settle must be part of the state the snapshot is taken *of*, not of the step it records.
         commitVectorFloatIfLifted(fromLayer: layers[layerIndex].id)
         withStructureUndo(label: .rasterize) {
+            // **Every derivation is resolved before the first cel is mutated, and the ordering is a
+            // correctness requirement rather than tidiness.** An in-between's references are usually
+            // other cels *in this same layer*, and the loop below clears `vector` as it goes — so
+            // resolving cel 5's recipe after cel 2 had been flattened would read an emptied keyframe
+            // and bake a blank in-between. `DerivedCelContent`'s closures capture the display lists
+            // they resolved, so a batch taken here stays valid across the whole loop.
+            let derived = layers[layerIndex].cels.map { derivedCelContent(for: $0, atFrame: $0.startFrame) }
             for celIndex in layers[layerIndex].cels.indices {
                 let cel = layers[layerIndex].cels[celIndex]
-                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+                // **Through the seam, and a derived cel is why this is not cosmetic.** An in-between
+                // stores no display list, so flattening it without a provider baked a blank frame
+                // and then `vector = nil` and `kind = .raster` took away every way back — the same
+                // "silent artwork loss" the float-settle above guards against, arriving by another
+                // door. Item 18's own filing names rasterize as the chokepoint every consumer shares.
+                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                                   derived: derived[celIndex])
                 layers[layerIndex].cels[celIndex].raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
                 layers[layerIndex].cels[celIndex].bakedImage = nil
                 layers[layerIndex].cels[celIndex].fillImage = nil
                 layers[layerIndex].cels[celIndex].vector = nil
+                // The recipe has to go with the geometry, and **both** modes, not just `.reproject`.
+                // The frame is now stored pixels; leaving the recipe would evaluate it a second time
+                // over the bake on every draw, and it has nothing left to read anyway — a `.generate`
+                // recipe on a `.raster` cel is not a state any other code path expects.
+                layers[layerIndex].cels[celIndex].interpolation = nil
             }
             layers[layerIndex].kind = .raster
         }
@@ -1653,10 +1671,17 @@ final class CanvasManager: ObservableObject {
     /// handed and nothing else, which is what lets the deferred backfill render off the main actor
     /// through the *same* code the synchronous path uses. Every tier it touches serialises on its own
     /// lock — see `PixelOps.parallelMap`, which makes the same argument at length.
-    static func celThumbnailImage(for cel: Cel, canvasSize: CGSize) -> UIImage {
-        if cel.bakedImage != nil || cel.vector != nil {
+    ///
+    /// **`derived` is the `ContentProvider` seam** (VECTOR_INTERPOLATION item 18) — resolved by the
+    /// caller, since this must stay pure. It is also in the *gate*: a `.generate` in-between has
+    /// neither `bakedImage` nor `vector`, so without this clause it took the raster branch below and
+    /// rendered a blank timeline thumbnail for a frame the canvas was showing ink on.
+    static func celThumbnailImage(for cel: Cel, canvasSize: CGSize,
+                                  derived: DerivedCelContent? = nil) -> UIImage {
+        if derived != nil || cel.bakedImage != nil || cel.vector != nil {
             // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already.
-            return ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize),
+            return ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                                               derived: derived),
                                             canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
         }
         return ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage,
@@ -1668,7 +1693,12 @@ final class CanvasManager: ObservableObject {
               layers[layerIndex].cels.indices.contains(celIndex),
               let canvasSize else { return }
         thumbnailRegenerationCount += 1
-        let image = Self.celThumbnailImage(for: layers[layerIndex].cels[celIndex], canvasSize: canvasSize)
+        let cel = layers[layerIndex].cels[celIndex]
+        // A cel's thumbnail is the picture at the frame that cel *starts* on. That is the only
+        // honest answer for a held cel — one tile stands for the whole block — and it is the frame
+        // `CelBlockView` draws the tile against.
+        let image = Self.celThumbnailImage(for: cel, canvasSize: canvasSize,
+                                           derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
         installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
     }
 

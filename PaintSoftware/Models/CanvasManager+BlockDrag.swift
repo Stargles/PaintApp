@@ -186,13 +186,19 @@ extension CanvasManager {
                 // Flatten every tier the block carries into `raster` — the one tier a raster layer's
                 // eraser can reach. Same rule `rasterizeLayer` follows: a raster cel holds its
                 // content in exactly one tier at rest.
-                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
+                // Through the `ContentProvider` seam, for `rasterizeLayer`'s reason: an in-between
+                // stores nothing, so flattening it without one baked the block away as blank.
+                let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                                   derived: derivedCelContent(for: cel, atFrame: cel.startFrame))
                 cel.raster = bakedRasterTexture(image: flattened, likeExisting: cel.raster)
                 cel.vector = nil
                 cel.fillImage = nil
                 cel.bakedImage = nil
-                // A recipe that re-poses geometry has nothing left to re-pose.
-                if cel.interpolation?.mode == .reproject { cel.interpolation = nil }
+                // The recipe goes with the geometry — **both** modes now, where this used to drop
+                // only `.reproject`. A `.generate` recipe was harmless while the flatten was blank;
+                // with the seam the frame is baked, so leaving it would evaluate the in-between a
+                // second time over its own pixels.
+                cel.interpolation = nil
             }
 
             cel.startFrame = landingFrame(inLayer: targetIndex, startFrame: startFrame)
