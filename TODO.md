@@ -23,9 +23,11 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(21) Keyframes — stage 0 merged**, `654f863`: `renderTree(atFrame:)` plus the two effect
-  resolvers, behaviour-neutral, fast tier **1954 / 1951 / 0 / 3**. Next is stage 1 (the
-  `AnimationCurve` type and the effect parameter-descriptor table) — [KEYFRAMES.md](KEYFRAMES.md) §8.
+- **(21) Keyframes — stages 0 and 1 merged.** `654f863` `renderTree(atFrame:)` and the two effect
+  resolvers, behaviour-neutral; `c09ddf0` the `AnimationCurve` type; `43cc416` + `f2c46be` the effect
+  parameter-descriptor table, with the settings bar reading it. Fast tier on the merged tree
+  **2005 / 2002 / 0 / 3**. Next is stage 2, one channel end to end — an effect parameter keyed on the
+  layer in absolute frames, through `Effect.resolved(atFrame:)`. [KEYFRAMES.md](KEYFRAMES.md) §8.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 

@@ -284,7 +284,15 @@ actually machine-wide.
 
 The app target auto-includes sources via `PBXFileSystemSynchronizedRootGroup`, but **the UI-test
 target has an explicit `PBXSourcesBuildPhase`**, so a new *test* file must be added to
-`project.pbxproj` by hand. Two branches each adding one therefore each invent an object id — and on
+`project.pbxproj` by hand.
+
+**And so must the app file it tests, which is a second entry pair nobody expects.** A logic test in
+`PaintSoftwareUITests` cannot reach app types by `@testable import`, so any app source a logic test
+touches is compiled into the test target *a second time* and needs its own `PBXFileReference` plus
+`PBXBuildFile` — see `Effect.swift`, `InterpolationRecipe.swift`, `ShapeHoldClock.swift` and
+`AnimationCurve.swift`, all listed by full path rather than by bare filename. **So a new type plus its
+logic test is four object ids, not two**, and a check that looks up a bare filename finds nothing and
+reads as a missing entry when the entry is there under its path. Two branches each adding one therefore each invent an object id — and on
 2026-08-16 two of them independently invented the *same* pair,
 `B2C3D4E5F6001122334455F1`/`F2`, one for `StrokeSampleGate.swift` and one for `ShapeHoldClock.swift`.
 
