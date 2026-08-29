@@ -28,6 +28,18 @@ circle primitive. This is the overhaul.
 
 Everything else on the list below is ordinary work, not architecture risk.
 
+**One coupling arrived from outside this document, 2026-08-29.** Asked whether the in-betweens the
+interpolation feature generates today visibly shimmer, the owner said no — *"I can't notice it"* — and
+then named this feature as the thing that could change that: *"It may possibly be a bigger concern once
+the planned import brush feature comes out with custom brushes."* They are almost certainly right, and
+the reason is the blocker above. A circle has no orientation and no interior, so the small per-frame
+differences in centre and radius that a re-derived dab walk produces are close to invisible; a stamp
+image has both, and the same jitter reads as texture crawl. So **whoever builds stamp-image dabs
+inherits [KEYFRAMES.md](KEYFRAMES.md) §4.2's rest-space dab bake as a dependency**, not as an
+optimisation — and §2.16's ruling that grain is baked per dab when the stroke is drawn is the same
+argument arriving one step earlier. Nothing is scheduled; this is a seam to keep open, like the rest of
+this document.
+
 ---
 
 ## What is already right, and must not be lost

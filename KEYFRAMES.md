@@ -130,9 +130,11 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
 22. **The keyframe button lives in the timeline's own control strip**, beside play, fps and add-cel —
     not in the top toolbar. 2026-08-29. It writes at the playhead and §2.17's drawer grows upward out
     of the same timeline, so the button, the frames it writes onto and the curve it opens are all in
-    one place. It is chrome and **not a `Tool`**: `Tool`'s seven slots are explicitly full and every
-    switch over it is exhaustive with no `default:` precisely so a new case cannot be missed
-    (`Models/Tool.swift:22-24`, `:48-53`).
+    one place. It is chrome and **not a `Tool`** — and not an `ActivePanel` case either. The shipped
+    precedent is exact: onion skin, interpolate and loop are `@Published` flags on `CanvasManager` with
+    buttons in that same strip (`AnimationTimeline.swift:406`, `:440`, `:455`), touching none of the
+    `Tool` switches. **Note that strip is written out twice** — `collapsedBar` and `miniToolbar` — and a
+    button added to one is invisible in the other.
 
 ---
 
@@ -294,6 +296,21 @@ one frame about a document that dies on another.
 ### 4.2 Posed ink: bake the dab walk in rest space
 
 **This is the load-bearing engine idea and it makes posing cheaper than today, not dearer.**
+
+**How big is the risk really? Smaller than this section sizes it — for now.** §9 asked whether the
+in-betweens the interpolation evaluator already generates visibly boil, since it re-walks the dab lattice
+per in-between under a non-uniform map, which is the exact artifact. Checked on the device, 2026-08-29,
+against a build of `main`. The owner: *"the interpolation shimmer seems fine for now, I can't notice it...
+It may possibly be a bigger concern once the planned import brush feature comes out with custom brushes,
+but if it does I'll let you know by then, so disregard for now."* So the rest-space bake is still the
+right construction and still buys the per-sample-width result, but it is **not** rescuing a visible defect
+and must not be scheduled as though it were. **INFERRED, and the owner's instinct about why**: every dab
+that ships today is a circle (`RasterLayerTexture.stampCircle` is the whole drawing surface — see
+[BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md)), and small per-frame differences in a
+circle's centre and radius are close to invisible. An imported `.ABR` or Procreate brush is a **stamp
+image** with orientation and internal texture, where the same jitter becomes texture crawl. That is the
+same mechanism §2.16 rules on for grain, and it means **this risk is coupled to the brush-import feature
+rather than to time**.
 
 Today a mapped stroke re-walks the dab lattice in destination space, so the dab count and phase are
 re-derived per frame. At 24 fps that is the shimmer everyone fears. The fix is to bake the walk **once
@@ -621,10 +638,13 @@ frameCount:)`, already `withStructureUndo`-wrapped. **INFERRED**: the cleanest s
 with a position curve, so it *is* an instance of this feature rather than a special case, and the trail
 is a render style; baking it then falls out of §6.
 
-**It enters through the Actions menu, not the toolbar.** `Tool` has seven slots and is explicitly full —
-`.text` was routed through Actions for exactly that reason (`Models/Tool.swift:22-24`). And every switch
-over `Tool` is exhaustive with **no `default:`** on purpose, because three past bugs shipped from
-someone adding a case and missing a hand-maintained exclusion list (`Tool.swift:48-53`, `:78-104`).
+**It enters through the Actions menu, not the toolbar.** `.text` was routed through Actions because the
+toolbar was full (`Models/Tool.swift:22-24`), and every switch over `Tool` is exhaustive with **no
+`default:`** on purpose, because three past bugs shipped from someone adding a case and missing a
+hand-maintained exclusion list (`Tool.swift:48-53`, `:78-104`). **But do not plan around a slot count.**
+This document said "seven slots" and that was wrong twice over: `Tool` has **six** cases, and the number
+at `Tool.swift:24` is a remark about the *toolbar*, which itself now ships **nine** controls
+(`TopToolbar.swift:33-75`) after the adjust icon was removed. Count the cases before believing either.
 
 ---
 
@@ -637,7 +657,7 @@ Each stage is mergeable and leaves the app working.
 | **0** ✅ | **`renderTree(atFrame:)`** — merged `654f863`. | Behaviour-neutral. Six production call sites, one recursion, ~60 fast-tier test references. Both §2.3 and §2.4 are blocked on it. Ship it alone so the frame-threading diff is not inside a diff that changes pixels. |
 | **1** ✅ | **`AnimationCurve` + the effect descriptor table** — merged `c09ddf0`, `c6ecb49`, `6a379bf`. | The table is an exhaustive `switch self` with **no `default:`** — `Effect` cannot be `CaseIterable` and every existing all-effects sweep in the suite is a hand-typed literal, so a `default:` would silently miss a fourteenth effect. Make `EffectSettingsBar.rows` *read* the table so the two cannot drift; the 25 slider sites already carry range, format and target. |
 | **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
-| **3** | **The Animate mode and the graph-editor drawer** | §2.1's tap/hold, the channel panel, §2.17's drawer. Every new popover **must** add a `CanvasPresentation` case and route through `.canvasPresentation`, or it reproduces the stroke-teardown bug that census exists to prevent. |
+| **3** | **The Animate mode and the graph-editor drawer** | §2.1's tap/hold, the channel panel, §2.17's drawer. **Decide which shape each new surface is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with ROADMAP (5). |
@@ -676,10 +696,6 @@ animation systems.
    `Documents/` sibling-folder pattern `ProjectBackupManager` established, knowingly departing from the
    only local precedent because the OS purges Caches under disk pressure and excludes it from backup.
    Unruled: whether a span survives a relaunch at all, and what sweeps it if the OS does not.
-5. **Do generated in-betweens visibly boil today?** The interpolation evaluator *already* re-walks the
-   dab lattice per in-between under a non-uniform map — the exact artifact §4.2 exists to prevent. If
-   they look clean on the iPad, this whole risk is smaller than it has been sized. **Asked; unanswered.
-   It needs the device, not a test.**
 
 ## 10. Traps inherited from elsewhere
 
@@ -703,7 +719,39 @@ animation systems.
 - **Timeline markers collide at minimum zoom.** `pixelsPerFrame` bottoms out at 10.5, and `CelBlockView`
   draws one thumbnail across the whole cel with **no per-frame subdivision at all** — plus resize-handle
   bars at each end. Key markers need a zoom-aware collapsed form, drawn in the UIKit coordinator rather
-  than as a SwiftUI overlay, for the reason `TimelineTrackView.swift:4-17` already gives.
+  than as a SwiftUI overlay. **This document cited the wrong reason for that.** `TimelineTrackView.swift:4-17`
+  is about *gesture* reliability — SwiftUI sibling gestures silently stopping mid-drag inside a horizontal
+  ScrollView — and says nothing about drawing. The drawing-side reason is **coordinate ownership**, below,
+  and it is the harder constraint of the two.
+- **The drawer cannot be a sibling SwiftUI view, and §2.17 as written does not say where it attaches.**
+  `pixelsPerFrame` is `private(set)` on the `TimelineTrackView.Coordinator` (`:97`), the `UIScrollView` is
+  held `weak` and private, `contentOffset.x` is published nowhere, and `TimelineRulerView` (`:616`) and
+  `TimelinePlayheadView` (`:792`) are `private final class`es inside that file. So **nothing outside the
+  coordinator can map frame N to an x**, and a drawer placed like `InterpolateBar` — above the panel,
+  which is otherwise the right precedent for growing the timeline upward — would drift out of register
+  with the frames the instant the artist pinch-zooms or scrolls. Sharing the ruler and the playhead means
+  living **inside that scroll content**, or hoisting those three things out. Five things follow, and each
+  fails silently:
+  - **`relayout()` early-returns whenever `TimelineLayoutKey` is unchanged** (`:194-217`), and the key
+    holds no curve data and no `currentFrame`. Drawer state that is not in the key renders once and never
+    again — the same family as `InterpolationPreviewKey` above, reached from the other side.
+  - **The content-height formula exists twice** — `contentHeight` in SwiftUI (`AnimationTimeline.swift:169-171`)
+    sizes the host, `totalHeight` in `relayout` (`TimelineTrackView.swift:192`) sizes the scroll content,
+    the playhead and the row bands. A drawer added to one clips or leaves dead space.
+  - **The pinned name column aligns by a hard-coded `Color.clear.frame(height: rulerHeight)` spacer**
+    (`AnimationTimeline.swift:553-554`). Anything inserted above the ruler shifts every row down while the
+    names stay, so layer names label the wrong tracks until that spacer grows by the same amount.
+  - **Any drag inside the scroll content is eaten** unless it calls
+    `scrollView.panGestureRecognizer.require(toFail:)`, which both existing interactive views do (`:232`, `:254`).
+  - **The shared playhead is a *column*, not a hairline** — width `pixelsPerFrame`, so 10.5 to 120 pt of
+    35%-blue over everything, re-fronted every layout (`:331-337`, `:795`). A curve drawn under it is tinted.
+  Two more, outside the scroll view: the ruler is **not pinned** — it sits at y=0 inside content that a
+  SwiftUI vertical `ScrollView` sized to the full `contentHeight` scrolls, so with enough layers the ruler
+  and anything above it scroll away while the tracks stay; and `bottomDock` — which carries
+  `EffectSettingsBar`, the exact surface Animate mode records from — is pinned with a literal
+  `.padding(.bottom, 100)` (`DrawingView.swift:404`) while `timelineHeight` is `@State private` and
+  defaults to 250, so **growing the timeline upward puts more of the bar over the panel and nothing can
+  see the collision**.
 - **A test class is often not named after its file here.** `InterpolationWorkflowUITests` lives in
   `TimelineAndUndoUITests.swift`; `LayerPanelUITests` lives in `LayerUITests.swift`. A `-only-testing:`
   selector derived from a filename matches nothing and reports **success**.
