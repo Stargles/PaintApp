@@ -464,6 +464,15 @@ through a long-GOP stream is not free.
 focus on current stuff for now."* This is the answer: yes, and it is nearer than it looks because the
 substrate is in.
 
+**And planning it settled a live question the same day, which is why this section earns its place rather
+than merely recording an idea.** Told that engaging the compositor on an interpolation in-between costs
++75.7 ms/frame, the owner ruled the cost acceptable *because* of this feature: *"if we are planning for
+this feature, then it is okay for things to take more than 1/24th of a second, including in-betweens...
+if it prebakes and can play at 24fps after, then the original ask is covered."* That is KEYFRAMES §2.25 —
+the live cost of a derived frame is not held to the frame budget; the prebake is. **So this unscheduled
+item is already load-bearing**: it is the reason a 100 ms frame is allowed to exist on that path, and
+anything that quietly drops it takes that permission with it.
+
 ---
 
 ## 6. Video editor

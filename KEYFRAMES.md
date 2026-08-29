@@ -9,8 +9,8 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-four of
-them, twenty from 2026-08-28 and four from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-five of
+them, twenty from 2026-08-28 and five from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
 question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
 ---
@@ -150,6 +150,19 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
     disabling it on a fresh document would make the mode unreachable by the exact gesture that creates
     the first track. The tap is refused; the press lands. The arm that opens the channel panel instead
     belongs to that panel's stage.
+25. **The live per-frame cost of a *derived* frame is not held to the 24 fps budget. The prebake is what
+    must play at 24 fps.** 2026-08-29, and it is the widest-reaching of these rulings because it decides
+    how every future measurement on this path is read. Shown that engaging the compositor on an
+    interpolation in-between costs +75.7 ms/frame, the owner: *"if we are planning for this feature, then
+    it is okay for things to take more than 1/24th of a second, including in-betweens... if it prebakes
+    and can play at 24fps after, then the original ask is covered."* The "feature" is background baking —
+    ROADMAP §5b, asked for the same day, unscheduled, and **already specified twice** (§4.6 here and
+    LAYER_COMPOSITING §9.2). So a derived frame is allowed to be expensive to *compute*; what must be
+    cheap is *replaying* it. One door stayed open — *"if a smarter faster way is possible which doesnt
+    require a lot of code, then sure"* — which is a standing preference for cheap wins, not a reopening.
+    **The corollary is the part to keep**: a frame-time figure on this path is evidence about the bake,
+    not about playback, and a future reader who finds a 100 ms frame here should not "fix" it without
+    reading this.
 
 ---
 

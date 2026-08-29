@@ -65,7 +65,7 @@ LAYER_TRANSFORM.md.
       is under it."*
 
       **[KEYFRAMES.md](KEYFRAMES.md) is the specification.** ROADMAP item (1), designed 2026-08-28 in the
-      conversation that file names as each item's entry condition. **§2 carries twenty-four rulings — read
+      conversation that file names as each item's entry condition. **§2 carries twenty-five rulings — read
       it rather than re-deriving them**, and §8 is the build order. The three that shape everything else:
       a transform key stores a **quad** from day one, so Distort lands later with no migration; posed ink
       is drawn by **baking the dab walk in rest space** and mapping dab centres, which removes the
