@@ -9,7 +9,7 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — nineteen of them,
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty of them,
 all from 2026-08-28 — and TODO.md's rule applies: *a question the owner has answered stops being a
 question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
@@ -115,6 +115,13 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
 19. **Smooth playback comes from a cache, not from baking.** The owner: *"I would like not having to
     bake into frames while keeping performance."* Animation stays live and editable; a playback cache
     makes it fast. §4.6.
+20. **That cache is span-scoped, complete and eager — not a lazy per-frame LRU.** The owner: *"we store
+    the two keyframes, plus the cached frames in between. Then when something changes, the stuff in
+    between can be overwritten using the new keyframes once, before its stored again."* Adopted over the
+    LRU this document first proposed, because an LRU thrashes invisibly — playback is smooth or not
+    depending on what else happens to be resident — while a span either is cached or is not, and the UI
+    can say which. Three amendments in §4.6: recompute **on settle**, cache the **composite**, and store
+    it **outside the project package**.
 
 ---
 
@@ -401,38 +408,102 @@ transformation layer is, and §4.6 is its answer.
 in-betweens. Nobody should ever be told to bake to get a smooth preview, and §6 is written for the first
 reason only.
 
-**The performance answer is a playback cache**, and the architecture for it is already sketched one
-level up: LAYER_COMPOSITING.md §9 decided *"build the substrate now, the thread and the disk cache when
-the sequencer exists"*, and §9.2 defers precisely **the priority queue and the disk-backed LRU**. This
-feature is the first thing that needs them. Three requirements:
+**The shape is the owner's, §2.20: span-scoped, complete and eager.** The frames between two animation
+keys are computed as a unit, kept as a unit, and recomputed as a unit when anything they depend on
+moves. This was chosen over a lazy per-frame LRU for a reason that is about the artist rather than the
+machine: an LRU's hit rate is invisible, so playback is smooth or stuttery depending on what else is
+resident, whereas a span is either cached or not and the timeline can show it. It also removes the
+"first pass is always uncached" concession, which is what the owner objected to.
 
-1. **The pose goes in the cache key.** Required for correctness anyway — §4.5 — so it is not a cost this
-   buys.
-2. **It has to be bigger than what exists, and disk-backed.** The in-memory flatten cache holds on the
-   order of **23 canvas-sized images at 2048²**; a 48-frame shot over six layers wants 288. And
-   LAYER_COMPOSITING §9.2 point 5 already did the arithmetic on the naive version: one frame is 16.8 MB
-   at 2048², so 240 frames is **4 GB** and at 4000² the same shot is 15 GB — *"Any design that holds
-   baked frames as raw textures dies on the first real sequence."* So the cached tier is compressed or
-   on disk, not raw textures in memory.
-3. **Invalidation is the hard part, and the machinery exists.** A cached posed frame dies when the ink
-   changes, the curve changes, the layer's effect changes, or — for a transformation layer — when
-   *anything below it* changes. `LayerContentVersion` is already the propagating-version type for
-   exactly this, which is why §9.1 lists "propagating content versions" as substrate to build now.
+**Amendment 1 — "once" means *on settle*, not *on change*.** A span recomputed on every touch-move of a
+curve handle recomputes sixty times a second. While a gesture is live, fall back to the live path (fast
+for per-object work — §4.5); recompute when it commits, after an idle delay, cancellably.
 
-**Two multipliers that cost almost nothing.**
+**The app has exactly one precedent for this and it is a good one**: thumbnail regeneration is a Combine
+`.debounce(for: .milliseconds(400), scheduler: RunLoop.main)` where the *payload* travels separately in
+an accumulating `pendingThumbnailRegens: Set<CelLocation>` (`Models/CanvasManager.swift:966-981`,
+`:1449-1461`) — so the debounce coalesces the timing while the set loses nothing, and ids are resolved
+back to indices at drain time so a reorder or a delete in the window is survivable. It also keeps an
+explicit **non-debounced** escape hatch for load and canvas resize (`regenerateAllThumbnails()`), on the
+argument that queueing there "would only defer the same work by 400 ms while leaving the timeline
+blank". A span cache wants all three properties. Nothing else in the app debounces a recompute — the
+other `asyncAfter` sites are gesture disambiguation and fade timing.
 
-- **Cache the playback tier at reduced resolution.** The app already ships a Render Resolution setting
-  (Full / 75% / 50%) that *"reaches only what is on screen, never the saved file or the export"*. A
-  preview cache at 50% is **four times the frames per byte**, and reduced-resolution preview is what
-  every animation application does. The crisp re-stamp still happens on the settled frame and at export.
-- **Only invalidate what moved.** §4.5's table is the whole argument: keep the animated content's blast
-  radius as small as the artist's intent. A transformation layer is broad *by definition*, so it is the
-  one case that needs the cache; per-object animation mostly does not.
+**Amendment 2 — cache the composite, not the per-layer flattens.** The owner's "the cached frames in
+between" means the *pictures*, and that is the cheaper unit by roughly the layer count: one image per
+frame rather than one per layer per frame.
 
-**Two limits to state in the UI rather than let someone discover.** The **first pass is always
-uncached** — the cache pays from the second play, which is the After Effects RAM-preview model and is
-the right one. And **editing a curve throws away every cached frame after the edit**, so the cache helps
-review, not authoring.
+*MEASURED*: a canvas texture is 16.8 MB at 2048² (`Engine/MetalCompositor.swift:212`), and
+PERFORMANCE.md's "six canvas-sized textures are 48 MiB at 2048×1024" gives **8 MiB a frame at the
+owner's own working size**. At the 50% Render Resolution the app already ships that is **2 MiB a frame**.
+So a 48-frame span is **384 MiB full-res and 96 MiB at half**.
+
+**And it must key on `RenderResolution`.** `SandwichKey` and `SandwichFullKey` already do
+(`Views/CanvasView.swift:1410`, `Engine/RenderRequest.swift:467`) and their comments say why in the words
+to reuse: otherwise the setting becomes *"a control that visibly does nothing when you use it"*. Note
+also what that setting actually reaches — **only `makeSandwichRequests`, the on-screen live composite**
+(`RenderRequest.swift:195-199`). It does not scale the flatten, the thumbnail, the saved package or a
+future export, and the Actions menu promises the artist exactly that. A preview-resolution span cache is
+therefore consistent with what the control already means; a full-resolution one is a different tier.
+
+**Amendment 3 — "stored" must mean outside the `.paintproj`.** Three reasons and the first is decisive:
+the save path re-encodes **every** cel on **every** save with no skip-unchanged path, at a MEASURED
+15.2 ms/cel of which 95.6% is `pngData()`, so cached frames inside the package would tax every future
+save of that document. Second, `ProjectBackupManager.validateProject` gates the atomic swap on the files
+the manifest names, so a large derived sidecar becomes a new way for a save to be refused. Third,
+derived data living in the document is a class of problem this repo already has and wants out —
+`fillImage` and `bakedImage` are the cautionary tale, and VECTOR_INTERPOLATION item 26 records that the
+owner wants vector fully divorced from raster features. A cache that can be deleted at any moment by
+anyone with zero loss is the only kind worth having.
+
+**Two findings that change the cost, both from the 2026-08-28 survey.**
+
+- **There is no multi-frame composite cache to extend — this is new machinery.** The sandwich holds
+  **exactly one generation** (three canvas-sized images in `sandwichImages`, `CanvasView.swift:1128`),
+  overwritten on every rebuild and **dropped entirely on disengage**, with the comment that names the
+  principle: *"an address for pixels that have been released is not a cache"*
+  (`CanvasView.swift:1500-1501`). There is no dictionary, no LRU and no count budget behind it.
+- **Memory alone cannot hold a span, so the disk tier is required rather than nice to have.** The house
+  rule for a large budget is `physicalMemory / 16` clamped to [64 MiB, 768 MiB] — **192 MiB on the
+  owner's iPad 9** — and three budgets share that one function, pinned equal by
+  `MemoryBudgetLogicTests.testTheThreeLargeBudgetsRunOnOneRule`. But that 192 MiB is already spent: it is
+  the compositor's texture pool *and* `PixelOps.rasterizeCache`'s budget. A feature-scoped budget takes
+  the other shape in the house table — a flat literal justified as a property of the frame rather than of
+  the device, as `OnionSkinBudget.residentBudgetBytes` is at 64 MiB. **At 2 MiB a frame that is 32
+  frames, about 1.3 seconds.** A 48-frame span does not fit.
+
+**Where the disk tier lives is a genuine departure and should be taken knowingly.** The app has **no
+on-disk derived-data store of any kind** — no `Library/Caches`, no temporary directory, not one hit.
+Its only "outside the package" precedent is `ProjectBackupManager`'s named sibling folders under
+`Documents/` (`Projects/`, `Backups/`, `Trash/`), app-managed, rotated by count with a 1 GB global cap
+and purged at launch, never on a low-disk signal. **INFERRED recommendation: use `Library/Caches`
+anyway.** It is the platform's home for exactly this — evictable derived data, purged by the OS under
+disk pressure, excluded from backup — and `Documents/` is backed up and counted against the artist's
+storage, which is wrong for bytes whose whole contract is that losing them costs nothing. This is the
+case where the platform convention should beat the local one, and it is the first time the app would
+need one. Say so in the commit rather than letting it read as an oversight.
+
+**Eviction is by whole span, least-recently-played.** The owner's model is otherwise unbounded, and a
+300–1000 cel document can hold hundreds of animated spans. Span granularity is the better unit anyway:
+a half-evicted span is useless, so keeping fragments buys nothing. Note that
+`PixelOps.rasterizeCache` is **FIFO, not LRU**, 24 entries under the shared byte budget, and is cleared
+wholesale on a memory warning and on backgrounding (`Services/PixelOps.swift:210-250`) — a span cache
+should honour the same two signals.
+
+**Invalidation is the hard part, and it is the same requirement either design had.** A cached span dies
+when the ink changes, when the curve changes, when the layer's effect changes, and — for a
+transformation layer — when *anything below it* changes. `LayerContentVersion` already propagates
+exactly this kind of dependency, which is why LAYER_COMPOSITING §9.1 lists propagating content versions
+as substrate to build now. Get it wrong and §4.5's trap is waiting: the composite rebuilds happily from
+a stale flatten, with green tests and no key that looks wrong.
+
+**Two limits to state in the UI rather than let someone discover.** A span is **uncached until it has
+been computed once**, which after amendment 1 means "until the edit settles" rather than "until you have
+played it" — better, but not free. And **editing a curve throws away that span**, so the cache helps
+review rather than authoring.
+
+**Scope, unchanged: per-object animation needs none of this** (§4.5 — it already fits inside 24 fps).
+This is machinery for the transformation layer and, later, for export.
 
 ---
 
@@ -575,10 +646,12 @@ animation systems.
 4. **What happens to a curve whose two keys have different cardinality?** Two of the thirteen effects
    have variable-length parameter arrays — `Curves.points` and `GradientMap.stops`. Tweening a 3-point
    curve to a 5-point curve needs a definition or a refusal.
-5. **Is the playback cache in memory, on disk, or both?** §4.6 argues it must be compressed or
-   disk-backed because raw textures die on a real sequence, and that a 50% preview tier buys four times
-   the frames per byte. What it does not settle is whether cached frames outlive the app session — a
-   disk tier means a package-size cost and a write path, and a rule for when it is swept.
+5. **Where does the playback cache's disk tier live, and do cached spans outlive the session?**
+   §4.6 settles that a disk tier is required rather than optional — 64 MiB of memory is about 32 frames
+   at preview resolution and a 48-frame span does not fit — and recommends `Library/Caches` over the
+   `Documents/` sibling-folder pattern `ProjectBackupManager` established, knowingly departing from the
+   only local precedent because the OS purges Caches under disk pressure and excludes it from backup.
+   Unruled: whether a span survives a relaunch at all, and what sweeps it if the OS does not.
 6. **Do generated in-betweens visibly boil today?** The interpolation evaluator *already* re-walks the
    dab lattice per in-between under a non-uniform map — the exact artifact §4.2 exists to prevent. If
    they look clean on the iPad, this whole risk is smaller than it has been sized. **Asked; unanswered.
