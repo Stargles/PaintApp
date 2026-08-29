@@ -197,6 +197,99 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                           "Sliding along the row re-previews which blocks move aside")
     }
 
+    // MARK: - Animation key markers (KEYFRAMES stage 3b)
+
+    /// **The trap this section exists for, stated once.** `relayout()` early-returns whenever this key
+    /// is unchanged, so a marker whose input is not in the key draws once and never moves again — no
+    /// crash, no failing assertion, just a timeline that stops telling the truth the moment a second
+    /// key is written. It is `InterpolationPreviewKey`'s failure reached from the other side, and
+    /// KEYFRAMES §10 names it as the single most likely way for the marker work to be quietly wrong.
+    /// The band is drawn *from* `trackKeyFrames` rather than from a second read of the layer, so what
+    /// is drawn and what is compared are one array; these tests pin that the array moves when it must.
+    private func gradedManager() -> (manager: CanvasManager, target: KeyframeTarget) {
+        let m = manager(layerCount: 1)
+        m.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
+        return (m, .layer(id: m.layers[1].id))
+    }
+
+    func testWritingTheFirstKeyOnALayerMovesTheKey() {
+        let (m, target) = gradedManager()
+        let before = key(m)
+        XCTAssertEqual(m.setEffectParameterKeys(target, frame: 5,
+                                                values: ["brightnessContrast.brightness": 2]), 1,
+                       "Fixture: the write should land")
+        let after = key(m)
+        XCTAssertNotEqual(before, after, "A marker has appeared on the track and has to be laid out")
+        XCTAssertNotEqual(before.trackKeyFrames, after.trackKeyFrames,
+                          "…and specifically in the marker field, not incidentally in something else")
+    }
+
+    /// A second key is the mutation the gate is most likely to miss: the *number* of animated channels
+    /// has not changed, only where they are keyed. A key that carried a count, or a bool, would sit
+    /// still here and the second marker would never appear.
+    func testWritingASecondKeyOnAChannelThatIsAlreadyAnimatedMovesTheKey() {
+        let (m, target) = gradedManager()
+        m.setEffectParameterKeys(target, frame: 5, values: ["brightnessContrast.brightness": 2])
+        let before = key(m)
+        m.setEffectParameterKeys(target, frame: 11, values: ["brightnessContrast.brightness": 3])
+        XCTAssertNotEqual(before.trackKeyFrames, key(m).trackKeyFrames)
+    }
+
+    /// **And it must not move for a value change**, which is the other half of the gate being right.
+    /// Dragging a slider on an already-keyed channel rewrites the key's *value* at the playhead on
+    /// every `.changed` sample; none of that moves a marker, and a key that carried the values would
+    /// relayout the whole track — every accessibility identifier, every folder span, the ruler's
+    /// scene-length CoreText loop — on every tick of the drag.
+    func testRewritingAKeysValueAtTheSameFrameDoesNotMoveTheKey() {
+        let (m, target) = gradedManager()
+        m.setEffectParameterKeys(target, frame: 5, values: ["brightnessContrast.brightness": 2])
+        let before = key(m)
+        m.setEffectParameterKeys(target, frame: 5, values: ["brightnessContrast.brightness": -4])
+        XCTAssertEqual(before, key(m),
+                       "The marker is at frame 5 either way — only the value moved")
+    }
+
+    /// The playhead fast path, re-asserted **with keys on the track**. `testMovingThePlayheadDoesNot
+    /// MoveTheKey` above covers the empty document; this covers the one that has markers, because a
+    /// marker field derived from anything playhead-shaped (say, "is there a key at the current
+    /// frame") would put the whole relayout back on every scrub sample.
+    func testScrubbingPastAMarkerStillTakesThePlayheadFastPath() {
+        let (m, target) = gradedManager()
+        m.setEffectParameterKeys(target, frame: 5, values: ["brightnessContrast.brightness": 2])
+        let before = key(m)
+        m.goToFrame(5)
+        XCTAssertEqual(before, key(m), "Landing the playhead on a key moves nothing the track draws")
+    }
+
+    /// §2.21 — a folder's grade animates exactly as a layer's, so the folder row carries a band too
+    /// and its own field has to move. Asserted separately because the folder half of this key is
+    /// built on a different branch of the same loop.
+    func testKeyingAFoldersGradeMovesTheFoldersHalfOfTheKey() {
+        let m = manager(layerCount: 1)
+        let group = m.addFolder(name: "Graded group")
+        m.restackLayer(m.layers[0].id, above: .folder(group), parentFolderID: group)
+        m.setNodeEffect(group, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
+        let before = key(m)
+        XCTAssertFalse(before.folders.isEmpty, "Fixture: there should be a folder row")
+        XCTAssertEqual(m.setEffectParameterKeys(.folder(id: group), frame: 7,
+                                                values: ["brightnessContrast.brightness": 2]), 1,
+                       "Fixture: the folder write should land")
+        XCTAssertNotEqual(before.folders, key(m).folders)
+    }
+
+    /// **A layer that is not in effect form grades nothing, so it draws no markers.** Tracks can
+    /// outlive a kind change — `CanvasManager.storedEffect(of:)` reads `layerEffect` rather than the
+    /// raw field for exactly this reason — and a marker for a value the canvas is not showing is worse
+    /// than no marker at all.
+    func testALayerWhoseGradeIsNotInForceDrawsNoMarkers() {
+        let m = manager(layerCount: 1)
+        XCTAssertNil(m.layers[0].layerEffect, "Fixture: an ordinary drawing layer is not a value layer")
+        m.layers[0].effectTracks["brightnessContrast.brightness"] =
+            AnimationCurve(keys: [AnimationCurve.Key(frame: 3, value: 1)])
+        XCTAssertEqual(key(m).trackKeyFrames.first, [],
+                       "Storage without a grade in force is not animation")
+    }
+
     // MARK: - The ruler's dirty rect
 
     func testTheRulerDrawsOnlyTheColumnsTheDirtyRectTouches() {

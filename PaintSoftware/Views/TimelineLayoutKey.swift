@@ -73,6 +73,10 @@ struct TimelineLayoutKey: Equatable {
         let name: String
         let isVisible: Bool
         let span: ClosedRange<Int>?
+        /// The folder's own animation keys — §2.21 makes a folder's grade animate exactly as a
+        /// layer's, so the folder row draws a marker band like any other row. Its **own** keys, not
+        /// its descendants': a marker says "a key is here on this target", and a target is a row.
+        let keyFrames: [Int]
     }
 
     /// A block in flight. `TimelineTrackView.Coordinator.BlockDrag` mapped down to the parts the
@@ -91,6 +95,20 @@ struct TimelineLayoutKey: Equatable {
     let rows: [LayerStackRow]
     /// Parallel to the `.layer` entries of `rows`, in their order.
     let tracks: [[CelKey]]
+    /// The document frames each of those layers carries an animation key on — ascending, unique, and
+    /// **one entry per frame however many channels key there** (`TimelineKeyMarkers.keyedFrames`).
+    ///
+    /// **A second array rather than a field on `CelKey`, because a key is not on a cel.** §2.4 puts
+    /// effect keys on the *layer*, in absolute document frames, so they exist perfectly well at frames
+    /// the layer has no cel at, and the marker band spans the whole track for that reason.
+    ///
+    /// **Cheap enough to compare on every layout, which is the bar this key has to clear.** Building
+    /// it is a `Dictionary.isEmpty` per layer for the overwhelming majority of documents, which have
+    /// no track at all; for one that does it is a walk of the curves' own key arrays and nothing else
+    /// — in particular it never touches `Effect.parameters`, which rebuilds up to thirty-three
+    /// closures per call. Comparing it is `[Int]` equality over a handful of frames, against a key
+    /// that already carries every cel's id, start, length and thumbnail address.
+    let trackKeyFrames: [[Int]]
     /// Parallel to the `.folder` entries of `rows`, in their order.
     let folders: [FolderKey]
 
@@ -130,17 +148,26 @@ extension TimelineLayoutKey {
                      rulerHeight: CGFloat,
                      drag: DragKey?) -> (key: TimelineLayoutKey, retainedThumbnails: [UIImage]) {
         var tracks: [[CelKey]] = []
+        var trackKeyFrames: [[Int]] = []
         var folders: [FolderKey] = []
         var retained: [UIImage] = []
 
         for row in stackRows {
             if let layerIndex = row.layerIndex, canvasManager.layers.indices.contains(layerIndex) {
-                let cels = canvasManager.layers[layerIndex].cels.map { cel -> CelKey in
+                let layer = canvasManager.layers[layerIndex]
+                let cels = layer.cels.map { cel -> CelKey in
                     if let thumbnail = cel.thumbnail { retained.append(thumbnail) }
                     return CelKey(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                   thumbnail: cel.thumbnail.map(ObjectIdentifier.init))
                 }
                 tracks.append(cels)
+                // `layerEffect` rather than `effect`, matching `CanvasManager.storedEffect(of:)`: a
+                // layer that is not in effect form grades nothing, so tracks left on it by a kind
+                // change are storage rather than animation and must not draw markers for a value the
+                // canvas is not showing.
+                trackKeyFrames.append(layer.layerEffect == nil
+                                      ? []
+                                      : TimelineKeyMarkers.keyedFrames(in: layer.effectTracks))
             } else if let folderID = row.folderID {
                 let folder = canvasManager.folders.first { $0.id == folderID }
                 let childCels = canvasManager.descendantLayerIndices(ofFolder: folderID)
@@ -151,7 +178,10 @@ extension TimelineLayoutKey {
                 folders.append(FolderKey(id: folderID,
                                          name: folder?.name ?? folderID.uuidString,
                                          isVisible: folder?.isVisible ?? true,
-                                         span: span))
+                                         span: span,
+                                         keyFrames: folder?.effect == nil
+                                            ? []
+                                            : TimelineKeyMarkers.keyedFrames(in: folder?.effectTracks ?? [:])))
             }
         }
 
@@ -162,6 +192,7 @@ extension TimelineLayoutKey {
         let key = TimelineLayoutKey(
             rows: stackRows,
             tracks: tracks,
+            trackKeyFrames: trackKeyFrames,
             folders: folders,
             currentLayerIndex: canvasManager.currentLayerIndex,
             pixelsPerFrame: pixelsPerFrame,

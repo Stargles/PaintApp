@@ -92,10 +92,15 @@ struct TimelineTrackView: UIViewRepresentable {
         weak var scrollView: UIScrollView?
         weak var contentView: UIView?
 
-        private let basePixelsPerFrame: CGFloat = 30
-        private let zoomRange: ClosedRange<CGFloat> = (30 * 0.35)...(30 * 4.0)
-        private(set) var pixelsPerFrame: CGFloat = 30
-        private var pinchStartPixelsPerFrame: CGFloat = 30
+        /// **The zoom scale and its limits live in `TimelineKeyMarkers`, not here.** The key-marker
+        /// collapse threshold is a *relationship* to the floor of this range — set below it and no
+        /// reachable zoom ever collapses anything, set above the base and the default zoom collapses
+        /// keys that had room — and this file is not compiled into `PaintSoftwareUITests`, so a test
+        /// asserting either against a `10.5` re-typed on the test's side would be green forever.
+        /// Same argument, same shape, as `KeyframeControl.timelineResizeMinimumDistance`.
+        private let zoomRange: ClosedRange<CGFloat> = TimelineKeyMarkers.pixelsPerFrameRange
+        private(set) var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
+        private var pinchStartPixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
         /// The frame under the fingers at pinch-began, and where those fingers sat in the scroll
         /// view's own bounds — held fixed for the gesture's life so the content under the pinch
         /// stays put as `pixelsPerFrame` changes, instead of the view always zooming from frame 0.
@@ -279,7 +284,18 @@ struct TimelineTrackView: UIViewRepresentable {
                 // moved off simply gets nil here and its blocks ease back on their own, the same way
                 // they eased aside — no separate "undo the preview" path needed.
                 row.dragPreview = (blockDrag?.targetLayerIndex == entry.layerIndex) ? blockDrag : nil
-                row.update(cels: layers[entry.layerIndex].cels, sceneFrameCount: sceneFrameCount)
+                // **Taken from the key rather than re-read off the layer, and that is the point.**
+                // §10's standing hazard here is a marker whose input is not in `TimelineLayoutKey`:
+                // the gate above early-returns whenever the key is unchanged, so such a marker would
+                // draw once and never move again — silently, which is the family
+                // `InterpolationPreviewKey` has been bitten by four times. Reading the value *out of*
+                // the key makes "drawn from" and "keyed on" the same array by construction instead of
+                // by two people remembering to keep them in step. `trackKeyFrames` is built parallel
+                // to `tracks`, over the same filtered enumeration of `stackRows`, so the slot lines up.
+                row.update(cels: layers[entry.layerIndex].cels,
+                           sceneFrameCount: sceneFrameCount,
+                           keyFrames: built.key.trackKeyFrames.indices.contains(slot)
+                               ? built.key.trackKeyFrames[slot] : [])
                 // The band a drop counts as landing on runs the full row *pitch*, gaps included, so
                 // there is no dead strip between rows where a drag resolves to nothing.
                 layerRowGeometry.append((layerIndex: entry.layerIndex,
@@ -308,7 +324,10 @@ struct TimelineTrackView: UIViewRepresentable {
                 row.update(span: span,
                            pixelsPerFrame: pixelsPerFrame,
                            isVisible: folder?.isVisible ?? true,
-                           identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)")
+                           identifier: "timeline.folderTrack.\(folder?.name ?? entry.folderID.uuidString)",
+                           // Out of the key, for the layer rows' reason above.
+                           keyFrames: built.key.folders.indices.contains(slot)
+                               ? built.key.folders[slot].keyFrames : [])
             }
 
             movePlayhead(totalHeight: totalHeight)
@@ -723,6 +742,10 @@ private final class TimelineRulerView: UIView {
 /// child layers' own rows.
 private final class TimelineFolderRowView: UIView {
     private let band = UIView()
+    /// §2.21: a folder's grade animates exactly as a layer's, so a folder row gets the same marker
+    /// band a layer row does. Its own keys only — the folder is a `KeyframeTarget` in its own right,
+    /// and aggregating its descendants' would draw a marker with no target to attribute it to.
+    private let keyMarkers = TimelineKeyMarkerBand()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -734,6 +757,7 @@ private final class TimelineFolderRowView: UIView {
         band.layer.borderWidth = 1
         band.layer.borderColor = UIColor.systemYellow.withAlphaComponent(0.5).cgColor
         addSubview(band)
+        addSubview(keyMarkers)
 
         isAccessibilityElement = true
         accessibilityTraits = .none
@@ -741,8 +765,14 @@ private final class TimelineFolderRowView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(span: ClosedRange<Int>?, pixelsPerFrame: CGFloat, isVisible: Bool, identifier: String) {
+    func update(span: ClosedRange<Int>?, pixelsPerFrame: CGFloat, isVisible: Bool, identifier: String,
+                keyFrames: [Int]) {
         accessibilityIdentifier = identifier
+        keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
+                                  width: bounds.width, height: TimelineKeyMarkers.bandHeight)
+        keyMarkers.update(frames: keyFrames, pixelsPerFrame: pixelsPerFrame,
+                          identifier: identifier + ".keys")
+        bringSubviewToFront(keyMarkers)
         guard let span, span.upperBound > span.lowerBound else {
             band.isHidden = true
             accessibilityValue = "empty"
@@ -785,6 +815,112 @@ private final class TimelineDropIndicatorView: UIView {
         }
         layer.borderColor = tint.cgColor
         backgroundColor = tint.withAlphaComponent(0.15)
+    }
+}
+
+/// **One row's animation-key markers** — KEYFRAMES.md stage 3b. A strip along the bottom of a track
+/// showing which frames that layer or folder carries a key on, and a collapsed form for the runs that
+/// are too dense to draw one at a time. Every decision it makes is `TimelineKeyMarkers`'; this class
+/// is the CoreGraphics half and nothing else, because the file it lives in is not compiled into the
+/// test target.
+///
+/// **Why the markers are here, on the row, and not on a strip of their own.** A key has a *target* —
+/// `KeyframeTarget` is `.layer(id:)` or `.folder(id:)` — and the timeline's rows are exactly those
+/// targets, one apiece, in the same order as the layer panel. A shared strip under the ruler would put
+/// every target's keys on one line and lose the one fact the artist most needs, which is *whose* key
+/// it is; and §2.1's channel panel opens on a target, so a marker you cannot attribute is a marker you
+/// cannot act on. It also costs nothing structurally: no new row height, so `contentHeight`,
+/// `totalHeight` and the name column's hard-coded ruler spacer all stay as they are, and §10's three
+/// height traps are simply not entered.
+///
+/// **Hidden outright when the row has no keys**, which is almost every row of almost every document —
+/// so an un-animated timeline looks exactly as it did, and the band is also absent from the
+/// accessibility tree, making *"this layer has keys"* a queryable fact rather than a value to parse.
+///
+/// **Fill white, stroke dark.** Blue is the playhead and the current layer; yellow is an interpolation
+/// reference, and §2.8 exists precisely so the two kinds of "keyframe" are never confused — so an
+/// animation key must not be yellow. White over a 1 pt dark outline reads on a pale thumbnail and on a
+/// dark one, which is the only requirement a marker drawn over arbitrary artwork actually has.
+private final class TimelineKeyMarkerBand: UIView {
+    private var runs: [TimelineKeyMarkers.Run] = []
+    private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        contentMode = .redraw
+        isUserInteractionEnabled = false
+        isAccessibilityElement = true
+        accessibilityTraits = .none
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// - Parameter frames: ascending and unique — `TimelineKeyMarkers.keyedFrames`' output, carried
+    ///   here through `TimelineLayoutKey` so what is drawn and what the layout gate compares are the
+    ///   same array.
+    func update(frames: [Int], pixelsPerFrame: CGFloat, identifier: String) {
+        let runs = TimelineKeyMarkers.runs(frames: frames, pixelsPerFrame: pixelsPerFrame)
+        // A pinch changes `pixelsPerFrame` without changing a single key, and it changes what
+        // collapses — so both halves gate the redraw. `relayout` is already gated by the layout key;
+        // this is the second gate, for the same reason `appliedDisplacementFrames` is.
+        let changed = runs != self.runs || pixelsPerFrame != self.pixelsPerFrame
+        self.runs = runs
+        self.pixelsPerFrame = pixelsPerFrame
+        isHidden = runs.isEmpty
+        accessibilityIdentifier = identifier
+        accessibilityValue = TimelineKeyMarkers.encode(runs)
+        if changed { setNeedsDisplay() }
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard pixelsPerFrame > 0 else { return }
+        let fill = UIColor.white
+        let stroke = UIColor.black.withAlphaComponent(0.6)
+        let midY = bounds.midY
+        let half = TimelineKeyMarkers.markerWidth / 2
+
+        for run in runs {
+            let runRect = TimelineKeyMarkers.rect(for: run,
+                                                  pixelsPerFrame: pixelsPerFrame,
+                                                  bandHeight: bounds.height)
+            guard runRect.intersects(rect) else { continue }
+
+            // The collapsed form: the run's two end keys, still drawn as keys, joined by a thin bar.
+            // What that keeps is where the animation starts and stops — the one thing a dope sheet
+            // must not lose to a redraw — and what it gives up is which interior frames carry keys,
+            // which is what zooming in is for. Drawn first so the end diamonds cap it.
+            if run.isCollapsed {
+                let bar = CGRect(x: runRect.minX + half,
+                                 y: midY - TimelineKeyMarkers.runBarHeight / 2,
+                                 width: max(runRect.width - TimelineKeyMarkers.markerWidth, 0),
+                                 height: TimelineKeyMarkers.runBarHeight)
+                let path = UIBezierPath(roundedRect: bar,
+                                        cornerRadius: TimelineKeyMarkers.runBarHeight / 2)
+                fill.setFill()
+                path.fill()
+                stroke.setStroke()
+                path.lineWidth = 1
+                path.stroke()
+            }
+
+            let capped = run.isCollapsed ? [run.firstFrame, run.lastFrame] : [run.firstFrame]
+            for frame in capped {
+                let centerX = TimelineKeyMarkers.centerX(frame: frame, pixelsPerFrame: pixelsPerFrame)
+                let diamond = UIBezierPath()
+                diamond.move(to: CGPoint(x: centerX, y: midY - half))
+                diamond.addLine(to: CGPoint(x: centerX + half, y: midY))
+                diamond.addLine(to: CGPoint(x: centerX, y: midY + half))
+                diamond.addLine(to: CGPoint(x: centerX - half, y: midY))
+                diamond.close()
+                fill.setFill()
+                diamond.fill()
+                stroke.setStroke()
+                diamond.lineWidth = 1
+                diamond.stroke()
+            }
+        }
     }
 }
 
@@ -853,6 +989,10 @@ private final class TimelineRowView: UIView {
 
     private var segments: [Segment] = []
     private var celViews: [UUID: CelBlockView] = [:]
+    /// This layer's animation keys, drawn over the bottom edge of the blocks rather than beside them.
+    /// Added in `init` and re-fronted in `update`, because the cel views are created lazily there and
+    /// would otherwise land on top of it.
+    private let keyMarkers = TimelineKeyMarkerBand()
     private var pendingZone: Zone?
     private var activeZone: Zone?
 
@@ -899,6 +1039,7 @@ private final class TimelineRowView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        addSubview(keyMarkers)
         addGestureRecognizer(panRecognizer)
         addGestureRecognizer(tapRecognizer)
         addGestureRecognizer(longPressRecognizer)
@@ -908,7 +1049,7 @@ private final class TimelineRowView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(cels: [Cel], sceneFrameCount: Int) {
+    func update(cels: [Cel], sceneFrameCount: Int, keyFrames: [Int]) {
         var result: [Segment] = []
         var cursor = 0
         let ordered = cels.enumerated().sorted { $0.element.startFrame < $1.element.startFrame }
@@ -975,6 +1116,15 @@ private final class TimelineRowView: UIView {
             // accessibility identifier queryable) so nothing has to be rebuilt when it comes back.
             view.alpha = (cel.id == hiddenCelID) ? 0 : 1
         }
+
+        // The keys run in absolute document frames (§2.4) and are a property of the *layer*, so the
+        // band spans the whole track — including the frames this layer has no cel on, where a key is
+        // perfectly legal and is exactly the state the artist needs to see.
+        keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
+                                  width: bounds.width, height: TimelineKeyMarkers.bandHeight)
+        keyMarkers.update(frames: keyFrames, pixelsPerFrame: pixelsPerFrame,
+                          identifier: "timeline.keyMarkers.\(layerIndex)")
+        bringSubviewToFront(keyMarkers)
     }
 
     /// How far (in frames) each of this row's blocks should slide to open the gap the dragged block
