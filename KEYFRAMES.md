@@ -892,3 +892,113 @@ cache entry per frame of a held cel).
 - **`ImageWarp` is documented as wrong for a per-frame path** — it uploads and reads back per call,
   *"exactly right for a bake that happens once at commit"* (`Engine/ImageWarp.swift:240-241`). A keyframed
   distorted text box or placed image is one GPU round trip per in-between at bake time.
+
+---
+
+## 11. The graph editor
+
+Asks 4, 5 and 6 of 2026-08-29, and §2.17 sharpened by the owner from *"a drawer that grows the timeline
+upward"* to *"it pops up above the layer that has it when on"*. Nothing here is built. Line numbers are
+as of `167e44a` and this document has been wrong about them before — re-take them.
+
+### 11.1 It lives inside the timeline's scroll content
+
+§10's coordinate-ownership finding stops being advisory here. `pixelsPerFrame` is `private(set)` on
+`TimelineTrackView.Coordinator`, `contentOffset.x` is published nowhere, and the ruler and playhead are
+`private final class`es in that file, so **nothing outside the coordinator can map frame N to an x**. A
+band drawn anywhere else drifts out of register on the first pinch-zoom. It is drawn by the coordinator,
+inside `contentView`.
+
+**That placement also dodges a collision §10 records with nothing able to see it.** Growing the *panel*
+upward puts more of `bottomDock` — which carries `EffectSettingsBar`, the surface being edited — over
+the timeline, because that dock is pinned by a literal `.padding(.bottom, 100)`
+(`DrawingView.swift:436`) while `timelineHeight` is `@State private` in `AnimationTimeline`. A band
+inside the scroll *content* grows the scrollable area instead, and the collision never arises.
+
+### 11.2 Stage D1 — variable row height, behaviour-neutral, merged alone
+
+Every row is `rowHeight` (34) and every y origin is a multiplication. Generalise that with all rows
+still equal, so the diff that moves geometry is not inside the diff that draws curves.
+
+| site | today |
+|---|---|
+| `TimelineTrackView.swift:265` `rowY(_:)` | `rulerHeight + position * (rowHeight + 2) + 4` → prefix sum |
+| `TimelineTrackView.swift:196` `totalHeight` | `count * (rowHeight + 2)` → sum of the same array |
+| `AnimationTimeline.swift:169` `contentHeight` | the same formula **independently re-typed** — the duplication is itself the finding |
+| the two `row.frame(…, height: rowHeight)` sites in `relayout` | constant → that row's own height |
+| `layerRowGeometry`, built from `rowY` | same function; `layerIndex(atY:)` is a linear scan and needs **no** change |
+| `layoutDragChrome`'s `height: rowHeight` | that row's height |
+| `AnimationTimeline.swift:585` name-column row | the one site that already tolerates it — `VStack` sizes from the child |
+
+**The one that breaks outright is not in the UIKit file.** `AnimationTimeline.rowOffset(at:)` (`:617`)
+steps by a constant `rowPitch`, and `reorderGesture` computes
+`dragOffsetRows = Int((drag.translation.height / rowPitch).rounded())` (`:690`) — counting rows crossed
+by dividing by a fixed pitch. One tall row makes that wrong for every row past it, and the symptom is a
+layer reorder landing in the wrong slot, silently. It needs a cumulative-offset lookup, not a divisor.
+
+**And the name column has no gap to insert into.** It aligns to the ruler by a hard-coded
+`Color.clear.frame(height: rulerHeight)` (`AnimationTimeline.swift:581`) and then one row per
+`LayerStackRow`. A band added to the track side and not to this column shifts every track down while
+the names stay, so names label the wrong layers — §10's warning, reached by the new door.
+
+### 11.3 Stage D2 — the band, and three ways it renders once and never again
+
+- **`TimelineLayoutKey` gates everything.** `relayout()` early-returns on `built.key == laidOutKey`
+  (`TimelineTrackView.swift:215`). Curve data outside the key renders once and then freezes — §4.5's
+  invisible failure from a third door. `currentFrame` is deliberately absent from the key and takes a
+  `movePlayhead`-style fast path instead; curves should go **in** the key, because unlike the playhead
+  they change shape rather than position.
+- **The playhead is a column, not a hairline** — width `pixelsPerFrame` (`:352`), so 10.5 to 120 pt of
+  35 % blue, `bringSubviewToFront` on every layout. A curve drawn under it is tinted.
+- **Any drag inside the scroll content is eaten** without
+  `scrollView.panGestureRecognizer.require(toFail:)` — set once at view creation, not per relayout
+  (`:236` for the ruler, `:258` for a row).
+
+### 11.4 Stage D3 — the gestures, most of which are already written
+
+`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` (`TimelineKeyMarkers.swift:188`) is the exact inverse of
+`centerX(frame:)` and its own doc says **"Nothing calls this yet and that is deliberate"** — it was
+written for this.
+
+Reuse `CurveEditor`'s gesture grammar (`Views/EffectSection.swift:683` onward), which §3.2 already
+nominates: `DragGesture(minimumDistance: 0)`, `hitRadius` 22 pt, `tapSlop` 5 pt, drag moves,
+tap-on-empty adds. Reuse the **rules and constants, not the widget** — that one is SwiftUI and this is a
+`CGContext` in the coordinator. The hit arithmetic goes in a logic-testable enum beside
+`TimelineKeyMarkers`, for that file's own stated reason.
+
+**`AnimationCurve` needs no model work.** It already carries `setKey`, `removeKey`, bezier handles, five
+tangent modes, per-segment interpolation and the per-channel step, and its decision 1 — the output is
+never clamped — is what makes dragging a handle worth doing.
+
+**Ask 6, the marquee.** The owner: *"the ability to use the select tool on it to select the keyframe
+nodes and move them."* Build it as the band's **own** drag-in-empty-space rather than as an observation
+of `currentTool`. A drag in empty space inside a graph editor has no competing meaning, so routing it
+through the canvas's `Tool` would couple two unrelated surfaces to buy a mode the artist would then have
+to switch into. **The cel half of that ask is future and already has its stub**: "Select Multiple" sits
+in the cel menu today, `.disabled(true)`, and a marquee over cels is what enables it.
+
+### 11.5 Stage D4 — the channel list is a filter, not a navigator
+
+The owner: *"just a button option in the graph editor which brings up a scrollable popup menu, which is
+basically an include or exclude checkmark box for each animation. Animations may have multiple values
+being modified at once (like transform x and y), so those should have a drop down so they are visible or
+invisible like a whole. This is basically like the hide/show layers and layer groups."*
+
+So it is visibility, not selection: the editor shows every animated channel and the list turns them off.
+**Grouping falls out of the id format for free** — parameter ids are `"<case>.<field>"`, so the text
+before the dot *is* the group and no second table is needed; display names come from the descriptor
+table, which already carries them. Membership of the list is `channelIsAnimated` — the strict predicate,
+≥2 keys whose values are not all equal — never the loose one auto-key uses.
+
+Visibility is **transient view state, not document state**: it filters what is drawn, it has no meaning
+with the editor closed, and persisting it would put a field in the manifest that changes no pixel.
+
+### 11.6 Open
+
+- **The y axis when several channels are visible at once.** Per-channel normalisation makes every curve
+  fill the band and legible, and makes two slopes incomparable; one shared axis is honest and leaves a
+  0…1 opacity flat beside a 0…500 blur radius. Blender offers both and the iPad has room for one.
+  **Ask before building.**
+- **The band's height, and whether it is draggable.** Start fixed.
+- **A collapsed folder hides its children's key markers** — found and deliberately deferred on
+  2026-08-29, and this is where it wants a decision.
