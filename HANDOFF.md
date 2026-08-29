@@ -1,4 +1,4 @@
-# Handoff — 2026-08-28 (session 75)
+# Handoff — 2026-08-29 (session 76)
 
 <!-- This file is BOTH the state of the repo and the prompt that starts the next session. It was once
 two files and they drifted apart inside a day, because the same state had to be written twice. Keep it
@@ -10,121 +10,150 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md, KEYFRAMES.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `4d55aae` plus this docs commit above it. **Fast tier 2022 / 2019 / 0 / 3. FULL SUITE RUN at `05a3e7c` (stages 0-1):
-2125 / 2118 / 1 / 6, and the one red passed clean in isolation** — `SandwichCompositingUITests.
-testAMultiplyLayerLooksMultipliedOnTheLiveCanvas`, a keyboard-focus flake, environmental, no fix owed.
-**No branches in flight, one worktree, clean tree.**
+inline. `main` is `0717ed6` plus the close-out commits above it. **Fast tier 2098 / 2095 / 0 / 3.**
+A full-suite run was launched at close on `0717ed6`; **read its result at the top of "State" below
+before trusting anything about the UI tier.** No branches in flight, one worktree, clean tree.
 
-**1. The keyframe feature is designed and its first three stages are merged.**
-   [KEYFRAMES.md](KEYFRAMES.md) is the specification — ROADMAP item (1), designed 2026-08-28 in the
-   conversation that file names as each item's entry condition. **§2 is twenty owner rulings; read them
-   rather than re-deriving them. §8 is the build order and marks what is done.** Stages 0, 1 and 2 are
-   in: the render tree takes the frame, `AnimationCurve` exists, effect parameters have an address, and
-   one layer effect parameter animates end to end with save/load and undo. **Nothing is visible to the
-   artist yet — that is stage 3**, the Animate mode (tap inserts a key, hold 0.8 s toggles the mode) and
-   the graph-editor drawer that grows the timeline.
+**1. Keyframes reached the artist this pass. Stage 3b is next and it is the harder half.**
+   Stages 0–3a are merged: hold the keyframe button 0.8 s to arm **Animate mode**, move an effect
+   slider, and a key lands at the playhead — on a layer's grade or a folder's, through one writer.
+   Key markers are visible on the timeline. **Stage 3b is the channel panel and the graph-editor
+   drawer**, and §8's row for it now carries what §10 established the hard way:
 
-**2. Three things in that spec pay for the rest, and a future session will want to undo them.**
-   A transform key stores a **quad** from day one, so Distort lands later with no migration — six
-   scalars *are* a general affine and Distort needs eight (LASSO_MOVE §5.20). Posed ink is drawn by
-   **baking the dab walk in rest space** and mapping dab centres per frame, which removes the shimmer by
-   construction *and* dissolves the per-sample-width problem, because `Homography.localScale` is the
-   local form of the `sqrt(|det|)` rule §5.17 already settled. And **bake is an authoring feature, never
-   a performance instruction** — smooth playback comes from the span cache in §4.6.
+   **§2.17's drawer is a constraint, not a layout preference.** `pixelsPerFrame` is `private(set)` on
+   `TimelineTrackView.Coordinator`, `contentOffset.x` is published nowhere, and the ruler and playhead
+   are `private final class`es in that file — so **nothing outside the coordinator can map frame N to
+   an x**, and a drawer placed above the panel drifts out of register on the first pinch-zoom. It
+   lives inside the scroll content. §10 lists the five things that then follow, **each of which fails
+   silently**: the `TimelineLayoutKey` early-return, the content-height formula that exists twice, the
+   name column's hard-coded spacer, `panGestureRecognizer.require(toFail:)`, and a playhead that is a
+   *column* up to 120 pt wide rather than a hairline.
 
-**3. §9 has five open questions and one of them is owed by the owner, not by us.**
-   Q6 is a 30-second check on the iPad: **do generated in-betweens visibly boil or crawl?** The
-   interpolation evaluator already re-walks the dab lattice per in-between under a non-uniform map,
-   which is the exact artifact §4.2 exists to prevent. If they look clean the stage-4 risk is smaller
-   than it has been sized. The others: what an invalid in-between pose does; whether a value layer
-   *below* a transform layer poses its sheet; whether folder effects animate; and where the span cache's
-   disk tier lives.
+   And before writing either surface: **decide which shape it is.** `CanvasPresentation` covers only
+   `Binding`-held popovers; an inline docked panel is not one and adding a case for it would be wrong;
+   an `ActivePanel` case is a third thing that re-derives `CanvasTouchOwnerLogicTests`' 1_920/440.
 
-**4. TODO (10) Oklab is untouched and its first move is still not to build anything.**
-   Stage A is **linear-light compositing through a 256-entry LUT**, not Oklab, on the theory that the
-   muddy midpoint is a gamma problem. **Render the A/B and show it before building.**
+**2. The pass's biggest finding was a scope gap, and it was found by the owner asking why a number was
+   big.** **KEYFRAMES §4.6's span cache scopes itself, in its own closing line, to "the transformation
+   layer and, later, for export"** — so it was never pointed at *interpolation* in-betweens. Shipping
+   stage 6b exactly as specified leaves a generated in-between costing precisely what it costs today.
+   Do not plan around that cache covering playback of interpolated spans; it does not.
 
-**5. The iPad build is now well behind** — Release `88a3fb4`, which predates the whole storage refit's
-   tail *and* everything in this pass. Offer to redeploy from a worktree, not `deploy.sh` (it pulls
-   `main` and never ships branch work). `devicectl list devices` first: `unavailable` means the owner
-   must wake it and nothing on this Mac fixes it.
+**3. Realtime playback is a bigger target than it looks, and PERFORMANCE §8 is the shortlist.**
+   **Composited playback already misses 24 fps on the device in Release with no interpolation in the
+   document** — 54.8 ms Metal against a 41.6 ms budget, recorded since 2026-08-20 (§2 item 5). §8's
+   five entries are written from what the tree records; nothing is started. **Its two cheapest entries
+   share one prerequisite — hoisting the playback clock onto the model — which ROADMAP §4 (audio) and
+   KEYFRAMES §5 (recording) already require.** That makes the clock the natural first move.
 
-**Do not re-litigate**: KEYFRAMES.md §2's twenty rulings; LASSO_MOVE.md §5's twenty-five;
-CANVAS_RESIZE.md §5 and §6; EFFECT_BACKDROP.md §5 and §2.1; (10)'s three-stage recommendation.
+**4. The iPad build is stale again.** It has `6a396e1`, which predates Animate mode, key markers, the
+   `ContentProvider` seam and the compositor change — i.e. everything the artist could actually try.
+   **Offer to redeploy from a worktree, not `deploy.sh`** (it pulls `main` and never ships branch
+   work). `devicectl list devices` first; `unavailable` means the owner must wake it and nothing on
+   this Mac fixes it. It was `available (paired)` this pass and the install took the documented
+   `NWError 54` retry.
 
-**The trap this pass paid for, and it is a verification one.** A characterization pin can be weaker
-than it looks because of what is *in the test target*. `Views/EffectSection.swift` is not compiled into
-`PaintSoftwareUITests`, so a fast-tier test **cannot see `EffectSettingsBar.rows` at all** — the pin
-taken before refactoring it covered the table, not the bar. The gap was closed with two XCUITests, an
-assertion that traps a wrong parameter id in debug, and a static id cross-check; the point is that
-"pinned first" was not true in the way it was asked for, and only reading the target membership shows
-that. The same fact has a second face: **a logic test costs four pbxproj ids, not two**, because the app
-source it reaches is compiled into the test target a second time. Both are now in CLAUDE.md.
+**5. TODO (10) Oklab is still untouched and its first move is still not to build anything.** Stage A
+   is **linear-light compositing through a 256-entry LUT**, not Oklab. **Render the A/B and show it
+   before building** — this owner reverses on a picture what they accept on a number, and that
+   happened again this pass.
+
+**Do not re-litigate**: KEYFRAMES §2's **twenty-five** rulings; LASSO_MOVE §5's twenty-five;
+CANVAS_RESIZE §5 and §6; EFFECT_BACKDROP §5 and §2.1; (10)'s three-stage recommendation.
+
+**Two process rules the owner gave this pass, and one is about how you spend their money.**
+**When the owner describes a feature for later, write the ask down — do not commission research.**
+Verbatim: *"the research is ultimately not for a future session, not you. You are supposed to be
+working on the tasks, the asks i give you for future sessions, just write them down."* Two agent
+fleets were stopped mid-flight on that instruction. And **if you ever do stop background work,
+harvest it first** — one of six agents had already returned the pass's biggest finding, and it was
+nearly thrown away.
+
+**The trap this pass paid for is a measurement one, and it was the orchestrator's.** Three
+simulator-bound agents at once took the machine to **1.5% idle while two of them were taking
+performance measurements**, voiding every figure they produced (idle ranged 0–34.8%). CLAUDE.md
+already says this returns *wrong answers rather than slow ones*; it does not say the obvious
+corollary, which is that **the orchestrator is the third caller `simlock`'s two slots do not
+account for**. Serialise anything that measures.
 ```
 
 ---
 
 ## State
 
-`main` = `4d55aae`, plus the close-out docs commit above it. **Fast tier 2022 / 2019 / 0 / 3.** Static `func test` 2076 → **2145**.
-No branches, no worktrees but the main one.
+`main` = `0717ed6` plus the close-out commits above it. **Fast tier 2098 total / 2095 passed / 0 failed
+/ 3 skipped**, up from 2022 at the start of the pass. Static `func test` count moved with it.
 
-**FULL SUITE RUN at `05a3e7c`** (stages 0-1, freshly erased simulator): **2125 / 2118 / 1 / 6**, total
-reconciling exactly — 2073 baseline + 1 (stage 0) + 27 (curve) + 24 (table). The one red,
-`SandwichCompositingUITests.testAMultiplyLayerLooksMultipliedOnTheLiveCanvas`, **passed clean on an
-isolated re-run** (1/1/0/0, zero "Clone" in the log). Environmental. Stage 2 has fast-tier coverage only.
+**FULL SUITE: launched at close on `0717ed6`**, parallel, on a freshly erased `eraser-mutex-test`. Its
+result is the one number this file could not wait for — **read it from the newest xcresult before
+trusting the UI tier**:
+
+```bash
+xcrun xcresulttool get test-results summary --path "$(ls -dt build/DerivedData/Logs/Test/*.xcresult | head -1)"
+```
+
+The last full run was **2125 / 2118 / 1 / 6** at `05a3e7c`, its one red environmental and confirmed by
+isolated re-run. This pass added ~25 UI-visible tests and changed what the live canvas draws, so a
+comparison is meaningful.
+
+No branches. One worktree. Clean tree.
 
 ## What landed
 
-**The keyframe feature went from an unscoped roadmap line to three merged stages in one pass**, via a
-design conversation that produced twenty rulings.
+**Keyframes went from "nothing is visible to the artist" to a feature they can use**, plus one piece of
+groundwork that serves both animation systems.
 
-- **`dc169da` KEYFRAMES.md**, the specification. **`9a20195`** the span-cache ruling, after the owner
-  refused the design this document first proposed.
-- **`654f863` stage 0** — `renderTree(atFrame:)` plus `Layer.layerEffect(atFrame:)` and
-  `LayerFolder.resolvedEffect(atFrame:)`, behaviour-neutral, with a pin asserting frame-invariance whose
-  own comment says breaking it is the signal stage 2 landed.
-- **`c09ddf0` stage 1a** — `AnimationCurve`: authored handles, five tangent modes, per-segment
-  interpolation, per-channel step.
-- **`c6ecb49` + `6a379bf` stage 1b** — the effect parameter-descriptor table, and the settings bar
-  reading it instead of 25 hand-written literals.
-- **`4d55aae` stage 2** — one layer effect parameter animating end to end: storage on the layer in
-  absolute frames, `Effect.resolved(atFrame:through:)`, its own undo path, save/load round trip.
-- **`05a3e7c`** the pbxproj four-ids note.
+- **`444adce`, `8942477`, `965df1a`** — rulings §2.21 to §2.25, each recorded with its *reasoning*,
+  because that is what stops a later session undoing it.
+- **`6158e8b` stage 2b** — a folder's grade animates exactly as a layer's (§2.21), and it forced a
+  two-week-old deferred defect into the open (below).
+- **`531cb0a`** — **`CelContentProvider`**, VECTOR_INTERPOLATION item 18. A derived cel is no longer
+  blank in thumbnails, onion skin, mask resolution, layer flatten or the magic wand.
+- **`f2f85b5` stage 3a** — Animate mode, the keyframe button, and the settings bar finally reading the
+  value at the playhead.
+- **`11862a0`** — timeline key markers, with a gap-based collapse rather than a zoom flag, so **keys on
+  twos stay countable at every zoom** (which §2.10 makes load-bearing).
+- **`5c88276`** — the compositor stays engaged on in-between frames: blend modes, effects and mask
+  clipping work there now, where they were silently off.
+- **`280bbcb`, `64c48dd`, `0717ed6`** — ROADMAP §5b (background baking, asked for, unscheduled),
+  the disk-first ask recorded verbatim, and PERFORMANCE §8's playback shortlist.
 
-## What each stage cost that nobody predicted
+## What this pass learned that outlives it
 
-- **`.autoClamped` needs a handle-*tip* value clamp, not the local-extremum flattening it is usually
-  described as.** Keys at 0, 1, 10 have no extremum anywhere, yet the plain auto tangent drags the
-  *first* segment to **−0.13** — a value going negative between two positive keys, in the mode whose
-  whole job is preventing that. Clamping each tip into the interval between its own key and its
-  neighbour subsumes the extremum case and turns a heuristic into a proof, since all four of a segment's
-  value controls then lie between the key values and a cubic Bézier is a convex combination of them.
-- **UI range and model domain differ in 22 of 25 parameters, not the two the brief guessed.** Only
-  outline width, outline threshold and bloom threshold agree; most grades clamp nothing, so the model
-  domain is infinite. **You can key a value past where the slider will drag.**
-- **Three parameters quantise to whole pixels, not one.** `Blur.radius`, `Bloom.radius` and
-  `Sharpen.radius` all reach `tapCount`, so radius 8.0 and 8.4 are byte-identical and an animated ramp
-  renders as stairs. Recorded in the descriptor rather than left to be reported as a bug.
-- **The cache-key test the stage-2 brief specified would have been vacuous.** Both sandwich keys carry
-  `frame` outright, so two keys at two frames differ on unmodified `main`. The pin holds `frame` equal
-  and derives the tree twice. The cache that would actually serve stale pixels is `MaskResolver`'s.
-- **`withStructureUndo` is not a deep copy** — `StructureSnapshot`'s own doc says `Cel.raster`/`vector`
-  are class references, shared not duplicated, and the 4096 is declared rather than measured. Avoiding
-  it for keyframe writes is still right, but because of its equality early-out, not its price.
-- **§10's `InterpolationPreviewKey` rule is not blanket.** It binds channels that feed the in-between
-  *drawing* evaluation; a layer grade is applied at composite time and owed the key nothing.
+- **A deferred invalidation gap is cheap only while nothing animates its input.** `MaskResolver`'s key
+  is per-*layer* content versions and a folder is not a leaf, so a mask over a graded group had served
+  stale coverage since 2026-08-15 — filed and deferred *because it needed an artist edit to bite*.
+  A keyframe changes that grade on every frame of playback. Fixed, mutation-verified.
+- **Removing a clause can ship a frozen canvas.** Dropping the compositor's in-between exclusion alone
+  would have frozen the canvas on its first composited in-between: the sandwich key was built without
+  the derivation, and `t` moves no version and no object identity. Closed by **one builder both call
+  sites share** rather than two hand-maintained field lists — the same cure the `ContentProvider`
+  identity uses, and the one `InterpolationPreviewKey` still needs.
+- **`InterpolationPreviewKey` was missing a *fourth* field** nobody had named: `.reproject`'s subject
+  version, which is that mode's entire content.
+- **A disabled control cannot be held.** The brief said to disable the keyframe button when nothing is
+  animated; that would have made Animate mode unreachable on a fresh document by the exact gesture that
+  creates the first track.
+- **A parameter that is always true is a comment pretending to be a condition.** `targetSupportsTracks`
+  became `KeyframeTarget`, and §2.21's sameness is structural rather than two arms kept in step.
+- **`pgrep -f` counts substrings, not processes** — about 3x per run, and it matches its own caller.
+  Now in CLAUDE.md, along with the cleanup filter that protected 962 processes out of 962, and the rule
+  that a worker told to wait must be told *how*: block on one wait, do not queue timers.
 
 ## Still open, unchanged
 
-TODO (10) Oklab. `ARCHITECTURE_REVIEW.md` findings 2-4. BUGS.md carries the interactive-gesture CPU
-composites, Fill/Clear on a derived in-between, the raster-storage bound, the unclamped zoom,
-`TextFrame.homography` decoding with no validity check, and PERFORMANCE.md item 14.
+TODO (10) Oklab. `ARCHITECTURE_REVIEW.md` findings 2-4. KEYFRAMES §9 has **four** open questions (the
+owner's boil question is answered — no visible shimmer today, and they named **custom brush import** as
+what would change that, which is now recorded in BRUSH_ENGINE_EXTENSIBILITY.md as a dependency rather
+than an optimisation). BUGS.md carries the interactive-gesture CPU composites, Fill/Clear on a derived
+in-between, the raster-storage bound, the unclamped zoom, `TextFrame.homography` decoding with no
+validity check, PERFORMANCE item 14, and the narrowed mask-cache structural gap.
 
 Two behaviour questions are owed: save semantics when a project loaded with something unreadable, and
-which faces belong in the font picker's favourites strip. Four judgement calls wait on real artwork,
-none of them defects.
+which faces belong in the font picker's favourites strip.
 
-One latent defect found and **not** filed, because it is unreachable: `MonotoneCubic`'s documented
-"the later duplicate wins" is undefined — the dedup filter runs after `sorted(by:)`, which is introsort
-and not stable. `CurveEditor` blocks duplicates upstream, so nothing can reach it.
+**Found and deliberately not fixed this pass**: a collapsed folder hides its children's key markers
+(worth a decision when the channel panel lands); colour/toggle/picker rows still write a whole resolved
+`Effect`; stepped and compound parameters still cannot be keyed; and the **Render Resolution knob does
+not reach the expensive half** of a derived frame — it is currently a control that does not do what a
+user would assume.

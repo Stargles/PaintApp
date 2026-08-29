@@ -199,6 +199,27 @@ run was restarted into the same hazard. Two runs and a wrong diagnosis. Kill onl
 you started the process, or `pkill -f "$PWD"` scoped to your own worktree path; and read a `-308` as
 "someone touched my device", of which contention is only one cause.
 
+**And `pgrep -f` does not count processes, it counts *substrings* — including its own caller.** A run
+is a chain: the zsh wrapper, the `simlock.sh` bash, and the real binary all carry the string, so
+`pgrep -f xcodebuild | wc -l` reads about **3x** the number of runs, and a `grep` for the pattern matches
+the grep. On 2026-08-29 a worker built a wait gate on that count requiring it to reach **zero**, which it
+never could — it was counting itself — and then attributed the load to a session whose worktree had been
+merged and deleted an hour earlier, because it reused a stale `lsof` cwd read instead of re-taking it.
+The same family as reading the banner instead of the count: **a proxy was measured and reported as the
+thing.** Use `pgrep -x xcodebuild` for the count and an `lsof -a -p <pid> -d cwd` read, taken *now*, for
+whose it is.
+
+**Cleaning up after that is its own trap, and the obvious filter matches everything.** Protecting a live
+run by walking a seed's ancestors *and then all of their descendants* protects the entire tree, because
+every shell shares one Claude parent — measured at **962 processes protected out of 962**. The correct
+set is the seed's ancestor **chain** plus the seed's own **subtree**: 13.
+
+**Tell a worker how to wait, not just what to wait for.** Asked to hold until the machine was quiet, that
+same worker polled — and queued each poll as a *background task*, leaving **78 shells** sleeping 1800 to
+2700 seconds. They cost no CPU and fire a stale completion notification each, which reads as a stream of
+finished work that has not happened. A brief that says "wait" should say **block on one wait; do not queue
+timers**.
+
 **A device of your own stops you erasing someone else's. It does not stop you starving the machine —
 wrap every run in [tools/simlock.sh](tools/simlock.sh).**
 
