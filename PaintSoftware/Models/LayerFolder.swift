@@ -71,6 +71,28 @@ struct LayerFolder: Identifiable {
     /// that both blends two inputs and grades one is two unrelated answers to "what does this node
     /// do" and there is nothing to say which runs first.
     var effect: Effect? = nil
+
+    /// **The keyframe tracks driving `effect`'s parameters** — KEYFRAMES.md §2.21, stage 2b — keyed
+    /// by `EffectParameter.id` and evaluated in **absolute document frames**.
+    ///
+    /// **`Layer.effectTracks`'s twin, and deliberately identical in every respect that is observable**
+    /// — same key, same time base, same empty default, same "kept and inert when the current grade has
+    /// no such parameter" rule, same `Effect.resolved(atFrame:through:)` doing the evaluating. §2.21 is
+    /// the ruling and it is a ruling *about* that sameness: the alternative on the table was declaring
+    /// a folder's grade un-animatable in writing, and the owner refused it because the artist meets one
+    /// slider in two places (`EffectSettingsBar` is raised for a layer and for a node from the same
+    /// table) and a slider that keys in one and silently refuses in the other is a defect nothing
+    /// reveals until they reach for it. So the cost is one more storage site and one more arm on the
+    /// resolver, paid here.
+    ///
+    /// **Absolute frames, and for a folder the argument is *stronger* than §2.4's for a layer.** A
+    /// layer at least has cels to be offset from, even though §2.4 rules against using them; a folder
+    /// has none at all — it holds no drawing, only children — so there is no cel-local base a key's
+    /// frame could be measured against even in principle.
+    ///
+    /// **Read through `resolvedEffect(atFrame:)`, never here.** The raw pair is what `setNodeEffect`,
+    /// `maxInputCount` and the panel read, for the reason that accessor gives at length.
+    var effectTracks: [String: AnimationCurve] = [:]
 }
 
 // MARK: - Compositor nodes (§4.3)
@@ -191,27 +213,26 @@ extension LayerFolder {
     /// **The grade at one frame** — the folder half of `Layer.layerEffect(atFrame:)`, and
     /// `ValueFill.resolvedColor(atFrame:)`'s argument for the third time.
     ///
-    /// **Still constant after KEYFRAMES.md stage 2, and that is an unanswered question rather than an
-    /// oversight.** The layer half of this pair now resolves a keyframe track; this one deliberately
-    /// does not, because §2.4's ruling says keys live *on the layer* and a folder is a second home the
-    /// owner has not been asked about. The question is filed as **KEYFRAMES.md §9 open question 3**,
-    /// in the two words it is owed: either a folder effect gets the same track, or folder effects are
-    /// declared un-animatable **in writing**. Nothing here should guess, because both answers are
-    /// cheap now and only one of them is cheap once keys are on disk — a folder track invented here
-    /// and later withdrawn is a decode path we would have to keep forever.
+    /// **Answered by §2.21 and filled in by stage 2b.** This returned the stored constant until
+    /// 2026-08-29, and its doc comment said so at length: §2.4 put keys on the layer and said nothing
+    /// about a folder, so the question — same track, or un-animatable in writing — was filed as §9
+    /// open question 3 and left for the owner rather than guessed at here. The ruling is the first of
+    /// those two, and the prediction that comment made about the cost of adopting it held exactly:
+    /// `LayerFolder` grew an `effectTracks` beside `effect`, `FolderManifest` grew the optional key,
+    /// and this body became the same one-line optional chain the layer half already was.
     ///
-    /// Adding one, when it is ruled on, is small and this file is where it lands: `LayerFolder` grows
-    /// an `effectTracks` beside `effect` exactly as `Layer` did, `FolderManifest` grows the optional
-    /// key, and the body below becomes the same one-line optional chain through
-    /// `Effect.resolved(atFrame:through:)`. The seam that made *that* cheap is the one below, and it
-    /// is why it stays a function of the frame while returning a constant.
+    /// The seam is what made that cheap, and it was cut a stage early on purpose: the grade reaches
+    /// the compositor through `RenderNode.effect`, and `CanvasManager.renderNodes(inContainer:atFrame:)`
+    /// is the last place the frame is in scope before it gets there. Resolving further in — in
+    /// `Compositor.fold`, or by giving `RenderNode` a track instead of a value — would have put this
+    /// where the frame is not, and stage 2b would have had to cut the seam under a deadline instead of
+    /// finding it already cut.
     ///
-    /// It is the `effect` field above, with the frame ignored. Stated as a function of
-    /// the frame anyway, because the grade reaches the compositor through `RenderNode.effect` and
-    /// `CanvasManager.renderNodes(inContainer:atFrame:)` is the last place the frame is in scope
-    /// before it gets there. Resolving further in — in `Compositor.fold`, or by giving `RenderNode` a
-    /// track instead of a value — would put the constant where the frame is not, and a keyframe phase
-    /// would then have to cut this seam under a deadline instead of finding it already cut.
+    /// **Presence is untouched, which is the same guarantee the layer half makes and rests on the same
+    /// line of code.** `Effect.resolved(atFrame:through:)` takes an `Effect` and returns an `Effect`
+    /// with no arm that returns nil, so the chain below is nil at every frame or non-nil at every
+    /// frame. `CanvasManager.compositorSizeGate` and the panel-versus-rendering division below both
+    /// depend on that, and stage 2b did not spend either.
     ///
     /// **Named `resolvedEffect` rather than `effect(atFrame:)`, on purpose.** Swift will happily take
     /// a method whose base name matches the stored property, and `folder.effect` would then differ
@@ -225,5 +246,7 @@ extension LayerFolder {
     /// `setNodeEffect`, the panel's rows — because presence is a property of the folder and not of the
     /// playhead. That division holds only for as long as a track cannot turn a grade on or off at a
     /// frame; `CanvasManager.compositorSizeGate` is the other place that assumption is load-bearing.
-    func resolvedEffect(atFrame frame: Int) -> Effect? { effect }
+    func resolvedEffect(atFrame frame: Int) -> Effect? {
+        effect?.resolved(atFrame: frame, through: effectTracks)
+    }
 }

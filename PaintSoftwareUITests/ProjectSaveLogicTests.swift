@@ -746,6 +746,73 @@ final class ProjectSaveLogicTests: XCTestCase {
         }
     }
 
+    /// **§2.21's folder track through a real package** — `testAnEffectParameterTrackSurvivesASaveAndLoad…`
+    /// on the other of the two grade homes, and here for the reason that one is here: the failure this
+    /// guards is a field left out of `SaveSnapshot`, which no manifest-level round trip would notice.
+    /// A folder is doubly exposed to it, because `ProjectStore` builds its `FolderManifest` inside the
+    /// snapshot rather than in `writePackage`, so the empty-to-absent mapping is written in a different
+    /// place from the layer's and could have been forgotten independently.
+    ///
+    /// Every key's field is non-default for the layer test's reason — a dropped one has to show up as a
+    /// changed value rather than as a coincidental match — and the last assertions ask the *resolver*
+    /// rather than the dictionary.
+    func testAFolderEffectParameterTrackSurvivesASaveAndLoadAndStillResolves() throws {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Graded group")
+        manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
+        manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
+        let curve = AnimationCurve(keys: [
+            AnimationCurve.Key(frame: 0, value: 4, interpolation: .constant),
+            AnimationCurve.Key(frame: 6, value: 20,
+                               inHandle: .init(deltaFrames: -2, deltaValue: -3),
+                               outHandle: .init(deltaFrames: 1.5, deltaValue: 4),
+                               tangentMode: .free, interpolation: .linear),
+            AnimationCurve.Key(frame: 12, value: 9),
+        ], step: 2)
+        XCTAssertTrue(manager.setEffectParameterTrack(folderID: group, parameterID: "blur.radius", to: curve))
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+
+        let restored = try XCTUnwrap(reloaded.folders.first { $0.id == group })
+        XCTAssertEqual(restored.effectTracks["blur.radius"], curve,
+                       "Every field of every key, plus the step, came back — `AnimationCurve` is Equatable over all of it")
+        XCTAssertEqual(restored.resolvedEffect(atFrame: 6), .blur(Effect.Blur(radius: 20)),
+                       "And the curve still drives the folder's grade after the round trip, which is what it is for")
+        XCTAssertEqual(restored.resolvedEffect(atFrame: 0), .blur(Effect.Blur(radius: 4)))
+    }
+
+    /// The folder half of §3.5's field-presence versioning, from both ends: a graded folder nobody has
+    /// keyed writes **no `effectTracks` key at all**, and a `FolderManifest` without one decodes to a
+    /// folder with no tracks rather than failing.
+    ///
+    /// Asserted against the folder's own JSON object rather than against the whole file, because the
+    /// layer test above already owns the whole-file claim and a document that has both would make each
+    /// of them pass for the other's reason.
+    func testAFolderWithNoTrackWritesNoEffectTracksKey() throws {
+        let manager = makeManager()
+        let group = manager.addFolder(name: "Graded group")
+        manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
+        manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+
+        let data = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let folderJSON = try XCTUnwrap(json["folders"] as? [[String: Any]])
+        XCTAssertEqual(folderJSON.count, 1, "Fixture premise: one folder, so the assertion below names it")
+        XCTAssertNotNil(folderJSON[0]["effect"], "Fixture premise: it is graded, or nothing here is about tracks")
+        XCTAssertNil(folderJSON[0]["effectTracks"],
+                     "A folder nobody has animated writes no key — absence is what \"nothing is keyed\" is")
+
+        guard let reloaded = ProjectStore.load(from: url) else { return XCTFail("The package should load") }
+        for folder in reloaded.folders {
+            XCTAssertTrue(folder.effectTracks.isEmpty, "\(folder.name): a manifest with no key decodes to no tracks")
+        }
+    }
+
     // MARK: - Compositor nodes (§4.3)
 
     /// A document containing a Mix node saves and loads as the same graph: the node's op, and its

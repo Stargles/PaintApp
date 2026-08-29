@@ -1215,6 +1215,10 @@ final class CanvasManager: ObservableObject {
     /// **Writes, replaces or removes one keyframe track on one effect parameter** — KEYFRAMES.md
     /// stage 2's write half, and the model behind the Animate mode stage 3 will build on it.
     ///
+    /// A grade has two homes and so does this: `setEffectParameterTrack(folderID:parameterID:to:)` is
+    /// the folder overload (§2.21, stage 2b), and it states only what differs rather than restating
+    /// any of the rules below.
+    ///
     /// Passing a curve stores it against `parameterID`; passing nil, or an empty curve, removes the
     /// track. Those two are deliberately the same thing: a curve with no keys evaluates to 0 at every
     /// frame and `Effect.resolved(atFrame:through:)` skips it, so storing one would be a channel that
@@ -1283,6 +1287,67 @@ final class CanvasManager: ObservableObject {
             layers[index].effectTracks[parameterID] = curve
         } else {
             layers[index].effectTracks.removeValue(forKey: parameterID)
+        }
+    }
+
+    /// **The same write, on a folder's grade** — KEYFRAMES.md §2.21, stage 2b, and the folder twin of
+    /// `setEffectParameterTrack(layerIndex:parameterID:to:)` above.
+    ///
+    /// Every rule that overload's doc comment states holds here verbatim and for the same reasons, so
+    /// they are not restated: nil-or-empty removes the track, `withStructureUndo` is avoided for its
+    /// cost *and* because its equality early-out would swallow the write, non-scalar parameters are
+    /// refused at the door rather than in the resolver, and nothing is recorded while an enclosing
+    /// bracket is open. What follows is only what genuinely differs.
+    ///
+    /// **A folder is addressed by id, not by an index, and that is the shape the rest of the file
+    /// already uses** — `setNodeEffect`, `setMixBlendMode`, `setAlphaMask(_:forFolder:)` and
+    /// `setFolderOpacity` all take a `UUID`, because `folders` carries no ordering an artist can see
+    /// (§4.1: sibling order is derived from the layers each folder holds, not from this array). So the
+    /// by-id addressing the layer overload has to reach for *inside* its undo closures, to survive a
+    /// restack, is simply what a folder's whole signature is — there is no index here to go stale.
+    ///
+    /// **Presence is `effect != nil` outright, with no `folderEffect` accessor to ask.** A layer needs
+    /// one because `kind` and `effect` are two fields that can disagree — a `.raster` layer carrying a
+    /// stale grade must not start grading — while `LayerFolder.effect`'s presence *is* the effect-node
+    /// form (`LayerFolder.effect`, `maxInputCount`), so there is no second field to reconcile. This
+    /// therefore accepts an ordinary group as readily as a compositor node, exactly as `setNodeEffect`
+    /// does and for its stated reason.
+    ///
+    /// - Returns: whether the document changed.
+    @discardableResult
+    func setEffectParameterTrack(folderID: UUID, parameterID: String, to curve: AnimationCurve?) -> Bool {
+        guard let index = folders.firstIndex(where: { $0.id == folderID }),
+              let parameter = folders[index].effect?.parameters.first(where: { $0.id == parameterID }),
+              parameter.isScalarAnimatable
+        else { return false }
+
+        let before = folders[index].effectTracks[parameterID]
+        let after = (curve?.isEmpty == false) ? curve : nil
+        guard after != before else { return false }
+
+        beginCanvasEdit()
+        writeFolderEffectParameterTrack(after, parameterID: parameterID, folderID: folderID)
+
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
+        recordUndo(label: .effectKeyframes,
+                   cost: Self.trackUndoCost(before) + Self.trackUndoCost(after),
+                   undo: { [weak self] in
+                       self?.writeFolderEffectParameterTrack(before, parameterID: parameterID, folderID: folderID)
+                   }, redo: { [weak self] in
+                       self?.writeFolderEffectParameterTrack(after, parameterID: parameterID, folderID: folderID)
+                   })
+        return true
+    }
+
+    /// The one mutation both directions of the undo above go through, addressing the folder by id —
+    /// re-resolved on every call rather than captured, because a folder deleted and restored between
+    /// the edit and the undo is a different position in `folders` and the same id.
+    private func writeFolderEffectParameterTrack(_ curve: AnimationCurve?, parameterID: String, folderID: UUID) {
+        guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        if let curve {
+            folders[index].effectTracks[parameterID] = curve
+        } else {
+            folders[index].effectTracks.removeValue(forKey: parameterID)
         }
     }
 

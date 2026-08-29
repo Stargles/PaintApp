@@ -285,9 +285,16 @@ the tree: it moves only because stage 0 put the frame-resolved effect *into* the
 that, or a grade that reshapes alpha will serve stale coverage. (Note `LayerContentVersion.hash(into:)`
 deliberately omits `effect` while `==` includes it — legal, and it only costs collisions.)
 
-**One thing §2.4 did not cover, now ruled, and one nobody has.** `LayerFolder.effect`
+**And `MaskResolver`'s key had a second hole, on the folder side, which stage 2b closed.** Those
+per-layer versions are gathered from `stack.leafLayerIndices`, and a *folder* is not a leaf — so a mask
+naming a graded folder went on serving the coverage it resolved under the old grade. That was true
+before any of this and was filed in the file as a KNOWN GAP; §2.21 is what made it bite every frame
+instead of once per edit. The key now also carries the node grades in the mask stacks
+(`MaskResolver.nodeEffects(readBy:of:)`).
+
+**One thing §2.4 did not cover, now ruled and built, and one nobody has.** `LayerFolder.effect`
 (`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:891`, and §2.21
-gives it the same track a layer's effect gets. And
+gives it the same track a layer's effect gets — stage 2b. And
 `CanvasManager.compositorSizeGate` (`CanvasManager+Document.swift:546-550`) is frame-invariant **only
 for as long as a key cannot turn an effect on or off**; it counts `effect != nil`, so the day a track
 can add one, the resize dialog's admission gate becomes a function of the playhead and will answer for
@@ -657,6 +664,7 @@ Each stage is mergeable and leaves the app working.
 | **0** ✅ | **`renderTree(atFrame:)`** — merged `654f863`. | Behaviour-neutral. Six production call sites, one recursion, ~60 fast-tier test references. Both §2.3 and §2.4 are blocked on it. Ship it alone so the frame-threading diff is not inside a diff that changes pixels. |
 | **1** ✅ | **`AnimationCurve` + the effect descriptor table** — merged `c09ddf0`, `c6ecb49`, `6a379bf`. | The table is an exhaustive `switch self` with **no `default:`** — `Effect` cannot be `CaseIterable` and every existing all-effects sweep in the suite is a hand-typed literal, so a `default:` would silently miss a fourteenth effect. Make `EffectSettingsBar.rows` *read* the table so the two cannot drift; the 25 slider sites already carry range, format and target. |
 | **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
+| **2b** ✅ | **The same channel on the other grade home: `LayerFolder.effect`** — §2.21. `effectTracks` on the folder, `resolvedEffect(atFrame:)` filled in, `setEffectParameterTrack(folderID:…)`, the optional `FolderManifest` key. Nothing in it is new machinery; the whole stage is the one arm §2.21 costs. | It also closed a **pre-existing** defect §4.1 had recorded as a KNOWN GAP: `MaskResolver`'s cache key is per-*layer* content versions and a folder is not a leaf, so a mask naming a graded folder served coverage resolved under the old grade. A hand edit hit it once; a track hits it every frame, which is what forced it. The key now carries the mask stacks' node grades. |
 | **3** | **The Animate mode and the graph-editor drawer** | §2.1's tap/hold, the channel panel, §2.17's drawer. **Decide which shape each new surface is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |

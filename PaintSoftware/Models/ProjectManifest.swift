@@ -165,6 +165,15 @@ struct FolderManifest: Codable {
     /// migration this field needs.
     var effect: Effect? = nil
 
+    /// `LayerFolder.effectTracks` — KEYFRAMES.md §2.21's folder-scoped tracks on that grade, **written
+    /// only when there are any**, keyed by `EffectParameter.id` and in absolute document frames.
+    ///
+    /// `LayerManifest.effectTracks` carries the whole argument for the optional-here /
+    /// non-optional-in-the-model shape and for absence being the entire migration; this is that field
+    /// on the other of the two grade homes, and the two must stay the same shape or a document would
+    /// answer "is anything animated" differently depending on which one the artist reached for.
+    var effectTracks: [String: AnimationCurve]? = nil
+
     /// **Not persisted, and derived at decode time.** True when this folder arrived without the
     /// group-property keys — which is to say it was written while `toggleFolderVisibility` still
     /// wrote through to every descendant. `ProjectStore.load` is the only reader; see the §10.3
@@ -174,7 +183,8 @@ struct FolderManifest: Codable {
     init(id: UUID, name: String, hasCustomName: Bool = false, isExpanded: Bool, isVisible: Bool,
          parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
-         alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil) {
+         alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil,
+         effectTracks: [String: AnimationCurve]? = nil) {
         self.id = id
         self.name = name
         self.hasCustomName = hasCustomName
@@ -187,6 +197,7 @@ struct FolderManifest: Codable {
         self.alphaMask = alphaMask
         self.compositorRole = compositorRole
         self.effect = effect
+        self.effectTracks = effectTracks
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -216,6 +227,7 @@ struct FolderManifest: Codable {
         // (see `canMask`).
         compositorRole = (try? CompositorRole.decodeIfSupported(from: container, forKey: .compositorRole)) ?? nil
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
+        effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -225,7 +237,7 @@ struct FolderManifest: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, isExpanded, isVisible, parentFolderID, opacity, blendMode
-        case isIsolated, alphaMask, compositorRole, effect
+        case isIsolated, alphaMask, compositorRole, effect, effectTracks
     }
 }
 

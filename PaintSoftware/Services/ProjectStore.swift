@@ -242,7 +242,13 @@ enum ProjectStore {
                                isVisible: folder.isVisible, parentFolderID: folder.parentFolderID,
                                opacity: folder.opacity, blendMode: folder.blendMode,
                                isIsolated: folder.isIsolated, alphaMask: folder.alphaMask,
-                               compositorRole: folder.compositorRole, effect: folder.effect)
+                               compositorRole: folder.compositorRole, effect: folder.effect,
+                               // Empty maps to absent — §3.5's field-presence versioning, and the same
+                               // line `writePackage` applies to `LayerManifest.effectTracks` one level
+                               // down. It is here rather than there only because a folder is already a
+                               // `FolderManifest` by the time the snapshot exists, while a layer is
+                               // still a `LayerContent`; the rule is one rule.
+                               effectTracks: folder.effectTracks.isEmpty ? nil : folder.effectTracks)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -1292,7 +1298,11 @@ enum ProjectStore {
                         isExpanded: f.isExpanded, isVisible: f.isVisible,
                         parentFolderID: f.parentFolderID, opacity: f.opacity,
                         blendMode: f.blendMode, isIsolated: f.isIsolated, alphaMask: f.alphaMask,
-                        compositorRole: f.compositorRole, effect: f.effect)
+                        compositorRole: f.compositorRole, effect: f.effect,
+                        // Absent means "nothing animated", which is what every document saved before
+                        // §2.21 says and what a folder nobody has keyed says — one meaning, so the
+                        // model's non-optional dictionary takes them both as empty.
+                        effectTracks: f.effectTracks ?? [:])
         }
 
         // Restore view presets.

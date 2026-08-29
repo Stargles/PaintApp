@@ -452,23 +452,273 @@ final class EffectParameterTrackLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - Folders, which §9 question 3 has not ruled on
+    // MARK: - Folders (§2.21, stage 2b) — the same channel, on the other grade home
 
-    /// **`LayerFolder.resolvedEffect(atFrame:)` is still constant, deliberately.** §2.4 puts keys on
-    /// the layer and says nothing about a folder; §9 question 3 is the open one. Pinned so that
-    /// whoever answers it has to change a test that says why rather than discovering the gap.
-    func testAFolderEffectIsStillConstantAtEveryFrame() {
+    /// A graded folder holding one inked layer. `effect` on a `LayerFolder` is legal on an ordinary
+    /// group as well as on a compositor node (`setNodeEffect`), so this is a plain folder — the shape
+    /// an artist reaches by grading a group they already had.
+    private func gradedFolderManager(
+        _ effect: Effect = .brightnessContrast(Effect.BrightnessContrast(brightness: 1))
+    ) -> (manager: CanvasManager, folderID: UUID) {
         let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(
+            manager, layerIndex: 0,
+            CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
+                                     rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
         let group = manager.addFolder(name: "Graded group")
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
-        manager.setNodeEffect(group, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2)))
+        manager.setNodeEffect(group, to: effect)
+        return (manager, group)
+    }
 
-        guard let folder = manager.folders.first(where: { $0.id == group }) else {
-            return XCTFail("The folder is in the document")
-        }
+    private func folder(_ manager: CanvasManager, _ id: UUID) -> LayerFolder? {
+        manager.folders.first { $0.id == id }
+    }
+
+    private func folderBrightness(_ manager: CanvasManager, _ id: UUID, atFrame frame: Int) -> Double? {
+        guard case .brightnessContrast(let params)? = folder(manager, id)?.resolvedEffect(atFrame: frame)
+        else { return nil }
+        return params.brightness
+    }
+
+    /// **§2.21, in one assertion each: at the keys, between them, and outside them.**
+    ///
+    /// This is `testAKeyedParameterIsItsKeysAtThemAndTweensBetweenThem` with the grade on a folder
+    /// instead of a layer, and the point of running it twice is exactly that the answers must be
+    /// indistinguishable. The ruling is about sameness — the alternative the owner refused was a
+    /// slider that keys in the layer panel and silently refuses on a node — so a divergence here is
+    /// the ruling not being implemented, whatever the numbers say individually.
+    ///
+    /// The last assertion is the one that is easy to leave out: resolution **derives**, and the stored
+    /// `effect` is still what the artist typed after any number of frames have been drawn.
+    func testAKeyedFolderParameterIsItsKeysAtThemAndTweensBetweenThem() {
+        let (manager, group) = gradedFolderManager()
+        XCTAssertTrue(manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID,
+                                                      to: linear([(0, 1.0), (10, 2.0)])),
+                      "A folder's grade takes a track exactly as a layer's does")
+
+        XCTAssertEqual(folderBrightness(manager, group, atFrame: 0) ?? .nan, 1.0, accuracy: 1e-9)
+        XCTAssertEqual(folderBrightness(manager, group, atFrame: 10) ?? .nan, 2.0, accuracy: 1e-9)
+        XCTAssertEqual(folderBrightness(manager, group, atFrame: 5) ?? .nan, 1.5, accuracy: 1e-9,
+                       "Halfway along a linear segment is the midpoint of its two keys")
+        XCTAssertEqual(folderBrightness(manager, group, atFrame: -8) ?? .nan, 1.0, accuracy: 1e-9,
+                       "Before the first key the curve holds flat, so a folder with no block anywhere "
+                       + "near this frame still answers — which is what an absolute-frame channel is for")
+        XCTAssertEqual(folderBrightness(manager, group, atFrame: 900) ?? .nan, 2.0, accuracy: 1e-9)
+
+        XCTAssertEqual(folder(manager, group)?.effect,
+                       .brightnessContrast(Effect.BrightnessContrast(brightness: 1)),
+                       "The stored grade is untouched: resolving derives a value, it does not write one back")
+    }
+
+    /// A folder nobody has keyed resolves to its stored grade at every frame — the half that keeps
+    /// every existing document byte-identical in behaviour, and the guard at the top of
+    /// `Effect.resolved(atFrame:through:)` is the whole of it.
+    func testAFolderWithNoTrackResolvesToItsStoredEffectAtEveryFrame() {
+        let (manager, group) = gradedFolderManager(.blur(Effect.Blur(radius: 6)))
         for frame in [-3, 0, 7, 400] {
-            XCTAssertEqual(folder.resolvedEffect(atFrame: frame), folder.effect,
-                           "frame \(frame): folder effects are not animatable, and that is KEYFRAMES §9 question 3, unruled")
+            XCTAssertEqual(folder(manager, group)?.resolvedEffect(atFrame: frame),
+                           .blur(Effect.Blur(radius: 6)),
+                           "frame \(frame): no track means the stored constant, as it always did")
         }
+    }
+
+    /// **The refusals are the writer's, on the folder door as much as the layer one.** Storing a track
+    /// that renders as nothing is the failure stage 2 made impossible; §2.21 must not reopen it on the
+    /// other grade home. `EffectParameter.isScalarAnimatable` is one property consulted from both
+    /// overloads, so this is checking the door is wired, not re-deriving which nine are refused —
+    /// `testExactlyTheContinuousScalarParametersAreAnimatableAtThisStage` owns that list.
+    func testTheFolderWriterRefusesEveryTrackThisStageCouldNotRender() {
+        let (noise, noiseGroup) = gradedFolderManager(.noise(Effect.Noise(amount: 0.08)))
+        XCTAssertFalse(noise.setEffectParameterTrack(folderID: noiseGroup, parameterID: "noise.seed",
+                                                     to: linear([(0, 1), (10, 900)])),
+                       "A `.stepped` UInt32 is not drivable by a Double curve, on a folder either")
+        XCTAssertEqual(folder(noise, noiseGroup)?.effectTracks.isEmpty, true, "And nothing was stored")
+        XCTAssertTrue(noise.setEffectParameterTrack(folderID: noiseGroup, parameterID: "noise.amount",
+                                                    to: linear([(0, 0), (10, 0.4)])),
+                      "…while the continuous knob on the same effect is taken")
+
+        let (outline, outlineGroup) = gradedFolderManager(.outline(Effect.Outline(width: 2)))
+        XCTAssertFalse(outline.setEffectParameterTrack(folderID: outlineGroup, parameterID: "outline.color",
+                                                       to: linear([(0, 0), (10, 1)])),
+                       "`outline.color` is continuous and compound — the one that looks free and is not")
+
+        let (blur, blurGroup) = gradedFolderManager(.blur(Effect.Blur(radius: 4)))
+        XCTAssertFalse(blur.setEffectParameterTrack(folderID: blurGroup, parameterID: "bloom.intensity",
+                                                    to: linear([(0, 0), (10, 1)])),
+                       "An id that is not a parameter of the grade this folder is running")
+
+        let plain = blur.addFolder(name: "Ungraded")
+        XCTAssertFalse(blur.setEffectParameterTrack(folderID: plain, parameterID: brightnessID,
+                                                    to: linear([(0, 0), (10, 1)])),
+                       "A folder with no grade has no parameter to address")
+        XCTAssertFalse(blur.setEffectParameterTrack(folderID: UUID(), parameterID: brightnessID,
+                                                    to: linear([(0, 0), (10, 1)])),
+                       "…and neither does a folder id that is not in the document")
+    }
+
+    /// One step per write on a folder too, and the replacement case is the half worth having: undoing
+    /// an edit to a curve that already existed must restore the previous curve, not clear the channel.
+    ///
+    /// The last block is the folder's version of `testUndoFindsTheLayerAfterItsIndexHasMoved`. A
+    /// folder is addressed by id in the signature rather than only inside the closures, so there is no
+    /// index to go stale — but `folders` is still an array whose *positions* move, and the write
+    /// re-resolves the id on every call rather than capturing one.
+    func testWritingReplacingAndClearingAFolderTrackAreEachOneUndoStep() {
+        let (manager, group) = gradedFolderManager()
+        let first = linear([(0, 1.0), (10, 2.0)])
+        let second = linear([(0, 1.0), (4, 0.5), (10, 3.0)])
+
+        manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID, to: first)
+        XCTAssertTrue(manager.canUndo)
+        manager.undo()
+        XCTAssertEqual(folder(manager, group)?.effectTracks.isEmpty, true, "Undo takes the whole channel back")
+        manager.redo()
+        XCTAssertEqual(folder(manager, group)?.effectTracks[brightnessID], first, "And redo brings it back")
+
+        manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID, to: second)
+        manager.undo()
+        XCTAssertEqual(folder(manager, group)?.effectTracks[brightnessID], first,
+                       "Undoing a replacement restores the previous curve, not the absence of one")
+
+        manager.redo()
+        manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID, to: nil)
+        XCTAssertEqual(folder(manager, group)?.effectTracks.isEmpty, true)
+        manager.undo()
+        XCTAssertEqual(folder(manager, group)?.effectTracks[brightnessID], second,
+                       "Clearing is undoable like any other write")
+
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        XCTAssertFalse(manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID, to: second),
+                       "The same curve again is not a change…")
+        XCTAssertFalse(manager.canUndo, "…so there is nothing to undo")
+
+        // A second folder inserted ahead of the graded one, so its position in `folders` is not the
+        // one its track was written at.
+        manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID, to: first)
+        _ = manager.addFolder(name: "Later")
+        XCTAssertGreaterThan(manager.folders.count, 1, "Fixture premise: `folders` has moved on")
+        manager.undo()   // the folder add
+        manager.undo()   // the track
+        XCTAssertEqual(folder(manager, group)?.effectTracks[brightnessID], second,
+                       "The track's undo found its folder by id, not by a captured position")
+    }
+
+    /// **The tree carries the folder's resolved grade, so every cache with a tree in its key moves.**
+    /// `RenderNode.effect` is filled from `resolvedEffect(atFrame:)` (`RenderTree.renderNodes`), and
+    /// `RenderNode` is `Equatable` over it — the same one-line claim §4.1 makes for the layer form, on
+    /// the node form, checked rather than assumed.
+    func testAKeyedFolderGradeMakesTheTreeDifferBetweenTwoFrames() {
+        let (manager, group) = gradedFolderManager(.blur(Effect.Blur(radius: 2)))
+        manager.setEffectParameterTrack(folderID: group, parameterID: "blur.radius",
+                                        to: linear([(0, 2), (10, 40)]))
+
+        let atZero = manager.renderTree(atFrame: 0)
+        let atTen = manager.renderTree(atFrame: 10)
+        XCTAssertNotEqual(atZero, atTen, "A keyed folder grade is a different grade at a different frame")
+        XCTAssertEqual(atZero.first { $0.id == group }?.effect, .blur(Effect.Blur(radius: 2)))
+        XCTAssertEqual(atTen.first { $0.id == group }?.effect, .blur(Effect.Blur(radius: 40)))
+
+        let (untracked, _) = gradedFolderManager(.blur(Effect.Blur(radius: 2)))
+        XCTAssertEqual(untracked.renderTree(atFrame: 0), untracked.renderTree(atFrame: 10),
+                       "And a document with no track derives one tree, which is the other half of the claim")
+    }
+
+    /// **The cache that had no way to see a folder's grade, and now does** — `MaskResolver`'s.
+    ///
+    /// Its key is per-*layer* `LayerContentVersion`s gathered from `stack.leafLayerIndices`, plus the
+    /// masks; a folder is not a leaf, so a grade on the folder a mask names was invisible to it. That
+    /// was written down as a KNOWN GAP when the folder grade shipped and left for a later pass on the
+    /// grounds that it needed an artist to edit the grade before it bit. **§2.21 is what made it
+    /// urgent**: a folder track changes that grade with no edit at all, on every frame of playback,
+    /// which is a different failure to look at.
+    ///
+    /// A blur is the grade because it is one of the five `reshapesCoverage` names — the coverage this
+    /// cache holds really is a different shape at the two frames, so serving the first for the second
+    /// is visibly wrong rather than theoretically wrong. The identity assertion is the one that fails
+    /// on the unfixed code: the cache would hand back the very same `ResolvedMask` object.
+    func testAKeyedFolderGradeInvalidatesTheMaskResolverCache() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.white,
+                                                               rect: CGRect(x: 8, y: 8, width: 24, height: 48)))
+        let group = manager.addFolder(name: "Mask source")
+        manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
+        manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 1)))
+        XCTAssertTrue(manager.setEffectParameterTrack(folderID: group, parameterID: "blur.radius",
+                                                      to: linear([(0, 1), (10, 24)])),
+                      "Fixture premise: the folder's blur radius takes a track")
+
+        let mask = AlphaMask(sources: [.folder(group)])
+        guard let masked = manager.layers.firstIndex(where: { $0.parentFolderID == nil }) else {
+            return XCTFail("Fixture premise: one layer is still outside the folder to be masked")
+        }
+        manager.layers[masked].alphaMask = mask
+
+        guard let atZero = manager.makeRenderRequest(atFrame: 0, includeBackground: false)
+            .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {
+            return XCTFail("The mask must resolve at frame 0")
+        }
+        guard let atTen = manager.makeRenderRequest(atFrame: 10, includeBackground: false)
+            .flatMap({ MaskResolver.coverage(for: [mask], of: $0) }) else {
+            return XCTFail("The mask must resolve at frame 10")
+        }
+
+        XCTAssertFalse(atZero === atTen,
+                       "A folder grade resolved at a different frame is a different key — the same object "
+                       + "back means the cache cannot see the folder's grade at all")
+        XCTAssertNotEqual(atZero.coverage, atTen.coverage,
+                          "…and the coverage really is a different shape, because a blur reshapes alpha")
+    }
+
+    /// **A folder parameter track cannot turn a grade on or off either**, which is the second half of
+    /// the promise `CanvasManager.compositorSizeGate` rests on — that gate counts `node.effect != nil`
+    /// over a tree derived at `currentFrame`, and a *folder* node is exactly what it counts.
+    ///
+    /// Presence on a folder is `effect != nil` outright, decided one line above the resolver, and
+    /// `Effect.resolved(atFrame:through:)` has no arm that returns nil. So the guarantee is the same
+    /// one and rests on the same code; stage 2b did not spend it any more than stage 2 did.
+    func testNoFolderParameterTrackCanMakeAGradeAppearOrDisappearAtAFrame() {
+        let (manager, group) = gradedFolderManager()
+        manager.setEffectParameterTrack(folderID: group, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (5, 0.0), (10, 2.0)]))
+
+        for frame in [-4, 0, 5, 10, 900] {
+            XCTAssertNotNil(folder(manager, group)?.resolvedEffect(atFrame: frame),
+                            "frame \(frame): a value of zero is a grade that does something, not an absent grade")
+        }
+
+        manager.currentFrame = 0
+        let atZero = manager.compositorSizeGate
+        for frame in [1, 5, 10, 11] {
+            manager.currentFrame = frame
+            XCTAssertEqual(manager.compositorSizeGate.nativeTextures, atZero.nativeTextures,
+                           "The resize dialog's admission gate must not become a function of the playhead")
+            XCTAssertEqual(manager.compositorSizeGate.sandwichTextures, atZero.sandwichTextures)
+        }
+    }
+
+    /// The folder half of "a track outlives the effect it was written for" (§3.5): keyed on a bloom,
+    /// switched to a blur, the curve is kept and reaches nothing — and flipping back finds it.
+    func testAFolderTrackForAParameterTheCurrentEffectDoesNotHaveIsKeptAndIgnored() {
+        let (manager, group) = gradedFolderManager(.bloom(Effect.Bloom()))
+        manager.setEffectParameterTrack(folderID: group, parameterID: "bloom.intensity",
+                                        to: linear([(0, 0.5), (10, 3.0)]))
+
+        manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
+        XCTAssertEqual(folder(manager, group)?.effectTracks.keys.sorted(), ["bloom.intensity"],
+                       "The curve survives the effect change")
+        for frame in [0, 5, 10, 99] {
+            XCTAssertEqual(folder(manager, group)?.resolvedEffect(atFrame: frame), .blur(Effect.Blur(radius: 4)),
+                           "frame \(frame): a blur is a blur at every frame — the orphaned curve reaches nothing")
+        }
+
+        manager.setNodeEffect(group, to: .bloom(Effect.Bloom()))
+        guard case .bloom(let params)? = folder(manager, group)?.resolvedEffect(atFrame: 10) else {
+            return XCTFail("The folder is grading with a bloom again")
+        }
+        XCTAssertEqual(params.intensity, 3.0, accuracy: 1e-9,
+                       "…and going back finds the animation where the artist left it")
     }
 }

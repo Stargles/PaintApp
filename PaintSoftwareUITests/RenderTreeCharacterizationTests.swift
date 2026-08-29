@@ -638,8 +638,12 @@ final class RenderTreeCharacterizationTests: XCTestCase {
             if case .node(_, let inputs) = node.content { return inputs.flatMap { $0 }.contains { $0.effect != nil } }
             return false
         }, "Fixture premise: something in this tree carries a grade, or the pin is vacuous")
-        XCTAssertTrue(manager.layers.allSatisfy { $0.effectTracks.isEmpty },
-                      "Fixture premise: and nothing in it is animated, which is what this half is about")
+        XCTAssertTrue(manager.layers.allSatisfy { $0.effectTracks.isEmpty }
+                      && manager.folders.allSatisfy { $0.effectTracks.isEmpty },
+                      "Fixture premise: and nothing in it is animated, which is what this half is about. "
+                      + "**Both** track homes are checked since §2.21: the fixture's folder carries a grade "
+                      + "too, so a premise that only looked at layers would stop meaning what it says the "
+                      + "day somebody keyed the folder instead")
 
         for candidate in trees.dropFirst() {
             XCTAssertEqual(candidate.tree, trees[0].tree,
@@ -687,6 +691,46 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(zip(flattened(atZero), flattened(atEight)).filter { $0.effect != $1.effect }.map(\.0.id),
                        [gradeID],
                        "And exactly one node's grade differs — the one carrying the track")
+        assertRenderTreeMatchesFlatOrder(manager)
+    }
+
+    /// **The same claim for the other grade home** — KEYFRAMES.md §2.21, stage 2b. The fixture's
+    /// folder carries a node effect, and a track on it has to reach the tree through
+    /// `LayerFolder.resolvedEffect(atFrame:)` exactly as the leaf's reaches it through
+    /// `Layer.layerEffect(atFrame:)`.
+    ///
+    /// Worth a test of its own rather than a second assertion in the one above, because the two
+    /// travel by different lines of `renderNodes` and it is precisely the *node* line that used to
+    /// read the raw `effect` field in every other codebase this pattern appears in. "Only the animated
+    /// node moves" is checked here too: a folder track must not disturb the leaf order or any sibling.
+    func testATrackedFolderParameterMakesTheTreeDifferBetweenTwoFrames() {
+        let manager = gradedFixture()
+        guard let group = manager.folders.first(where: { $0.effect != nil })?.id else {
+            return XCTFail("Fixture premise: the graded folder is in the document")
+        }
+        XCTAssertTrue(manager.setEffectParameterTrack(folderID: group,
+                                                      parameterID: "brightnessContrast.brightness",
+                                                      to: AnimationCurve(keys: [
+                                                        .init(frame: 0, value: 1.2, interpolation: .linear),
+                                                        .init(frame: 8, value: 2.4, interpolation: .linear),
+                                                      ])),
+                      "Fixture premise: the folder's brightness takes a track")
+
+        let atZero = manager.renderTree(atFrame: 0)
+        let atEight = manager.renderTree(atFrame: 8)
+        XCTAssertNotEqual(atEight, atZero, "A keyed folder grade is a different grade at a different frame")
+        XCTAssertEqual(node(group, in: atZero)?.effect,
+                       .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2)),
+                       "Frame 0 is the first key's value")
+        XCTAssertEqual(node(group, in: atEight)?.effect,
+                       .brightnessContrast(Effect.BrightnessContrast(brightness: 2.4)),
+                       "Frame 8 is the last key's")
+
+        XCTAssertEqual(manager.renderLeafOrder(atFrame: 8), manager.renderLeafOrder(atFrame: 0),
+                       "Nothing structural moved: a parameter track changes a value inside one node")
+        XCTAssertEqual(zip(flattened(atZero), flattened(atEight)).filter { $0.effect != $1.effect }.map(\.0.id),
+                       [group],
+                       "And exactly one node's grade differs — the folder carrying the track")
         assertRenderTreeMatchesFlatOrder(manager)
     }
 
