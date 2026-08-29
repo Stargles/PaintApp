@@ -23,7 +23,9 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(21) Keyframes — stage 0.** `renderTree(atFrame:)`, behaviour-neutral, on `tmp/kf-frame`.
+- **(21) Keyframes — stage 0 merged**, `654f863`: `renderTree(atFrame:)` plus the two effect
+  resolvers, behaviour-neutral, fast tier **1954 / 1951 / 0 / 3**. Next is stage 1 (the
+  `AnimationCurve` type and the effect parameter-descriptor table) — [KEYFRAMES.md](KEYFRAMES.md) §8.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
