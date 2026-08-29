@@ -47,9 +47,29 @@ screen while the last ground on; ~1,950 s of the run lived in six classes (Tools
 TimelineAndUndo 392 s, VectorShapeAndRecovery 389 s, VectorEraser 357 s, Fill 277 s, Layer 107 s)
 against ~250 s for every logic test together.
 
-**The floor is now one test**: `InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`
-is 189 s and sits alone in its own class precisely so it starts immediately. Going meaningfully below
-~3 min means decomposing that one test, not splitting further.
+**That was true and is no longer.** Measured again 2026-08-29 on the full run at `0717ed6` — **2221
+tests in 25.6 min**, which is where the suite sat *before* the 2026-08-15 split. The gain was not lost to
+general slowness; **one class ate it**:
+
+| class | seconds | tests |
+|---|---|---|
+| **`LayerPanelUITests`** | **517** | 19 |
+| `SelectionAndMoveUITests` | 337 | 10 |
+| `SandwichCompositingUITests` | 307 | 10 |
+| `BlendModesAndCompositorUITests` | 275 | 8 |
+| `CuttingModesUITests` | 188 | 4 |
+| `PerfBaselineTests` | 183 | 53 |
+
+3,607 class-seconds total, so four clones have ~15 min of ideal work in them — and the run takes 25.6
+because **a class is indivisible and `LayerPanelUITests` alone is 517 s**, 2.7x the 189 s test that used
+to be the floor. The lever is the same one that worked before: split that class (it lives in
+`LayerUITests.swift`, which already holds three), and the floor falls back toward ~190 s. Note it is
+*also* the class that produced this run's one environmental red, which is what a class held that long
+under parallel clones tends to do.
+
+Going below ~3 min still means decomposing `testInterpolateModeEndToEndFromGestureToScrub`; but nothing
+below 517 s is reachable at all until `LayerPanelUITests` is cut. **Re-take this table rather than
+trusting it — it has now gone stale once.**
 
 If you split a class again, **verify by test count from the xcresult** — a test that stops running
 still prints green — and take the count *before* you merge as well as after: a split branch cut

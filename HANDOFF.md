@@ -11,8 +11,8 @@ Read HANDOFF.md, then CLAUDE.md, KEYFRAMES.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
 inline. `main` is `0717ed6` plus the close-out commits above it. **Fast tier 2098 / 2095 / 0 / 3.**
-A full-suite run was launched at close on `0717ed6`; **read its result at the top of "State" below
-before trusting anything about the UI tier.** No branches in flight, one worktree, clean tree.
+**Full suite at `0717ed6`: 2221 / 2214 / 1 / 6**, the one red environmental and confirmed by isolated
+re-run. No branches in flight, one worktree, clean tree. The iPad has current `main`.
 
 **1. Keyframes reached the artist this pass. Stage 3b is next and it is the harder half.**
    Stages 0–3a are merged: hold the keyframe button 0.8 s to arm **Animate mode**, move an effect
@@ -84,17 +84,19 @@ account for**. Serialise anything that measures.
 `main` = `0717ed6` plus the close-out commits above it. **Fast tier 2098 total / 2095 passed / 0 failed
 / 3 skipped**, up from 2022 at the start of the pass. Static `func test` count moved with it.
 
-**FULL SUITE: launched at close on `0717ed6`**, parallel, on a freshly erased `eraser-mutex-test`. Its
-result is the one number this file could not wait for — **read it from the newest xcresult before
-trusting the UI tier**:
+**FULL SUITE at `0717ed6`: 2221 total / 2214 passed / 1 failed / 6 skipped**, parallel, on a freshly
+erased `eraser-mutex-test`. Up from **2125 / 2118 / 1 / 6** at `05a3e7c`. The one red —
+`LayerPanelUITests.testTappingSelectedLayerOpensOptionsAndTogglesFillReference`, *"A second tap on the
+now-selected layer should open its options"* — **passed clean in isolation** (24.8 s, zero failures, after
+an erase). Environmental. Nothing owed.
 
-```bash
-xcrun xcresulttool get test-results summary --path "$(ls -dt build/DerivedData/Logs/Test/*.xcresult | head -1)"
-```
-
-The last full run was **2125 / 2118 / 1 / 6** at `05a3e7c`, its one red environmental and confirmed by
-isolated re-run. This pass added ~25 UI-visible tests and changed what the live canvas draws, so a
-comparison is meaningful.
+**But the run took 25.6 minutes, which is where the suite sat *before* the 2026-08-15 split**, and the
+reason is one class: **`LayerPanelUITests` is 517 s across 19 tests**, 2.7x the 189 s test that used to be
+the floor. Total class-work is 3,607 s — about 15 min of ideal work for four clones — so the extra ten
+minutes is that one indivisible class. **Splitting it is the highest-value cheap job available and it is
+the same fix that worked before**; it lives in `LayerUITests.swift`, which already holds three classes.
+The measured table is now in CLAUDE.md's cost-model section, replacing the floor claim it invalidated.
+It is also, not coincidentally, the class that produced the environmental red.
 
 No branches. One worktree. Clean tree.
 
