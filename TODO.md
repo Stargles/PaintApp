@@ -77,6 +77,55 @@ LAYER_TRANSFORM.md.
       `ContentProvider` seam, which is what makes any derived content visible to thumbnails, onion skin
       and export — and which ROADMAP §0 already flags as blocking item (5).
 
+### (22) Keyframe UI — the workflow the owner wants, replacing Animate mode
+
+- [ ] The owner, 2026-08-29, six asks in their own words:
+
+      1. *"clicking on a keyframe's frame should bring up the option to remove it in the pop up, along
+         with the others already implemented (copy, extend to end, select multiple, clear). Also the
+         option to clear all keyframes in that cel."*
+      2. *"right now lets say a layer is set to chromatic aberration, then the effect is changed. This
+         should destroy the keyframes. Right now when you change it and go back they are still there
+         which means they are being stored where they dont have to."*
+      3. *"I'm not sure if I like the animation mode. Just make it this workflow: select on cel, tap
+         again, tap add keyframe icon in the menu, everything gets saved at that point. Then select
+         another frame, edit sliders etc, tap add keyframe again and the new keyframe data at that frame
+         is saved. When tapping the keyframe button it brings up the list of things being animated and
+         graph editor instead of placing a keyframe (icon and its name also may have to be changed to
+         graph editor). This means removing the current keyframe mode UI. This means that animations
+         will be added to the list when two keyframes are placed, and something changes in one keyframe
+         which from the other."*
+      4. *"The graph editor is going to have a lot more control for the animation keyframes (like graph
+         editors are supposed to have, refer to something like maya or blender). The keyframes for the
+         animations (basically anchor points) can be moved, added and removed from there."*
+      5. *"I wonder if we can integrate the graph editor into the animation timeline, like it pops up
+         above the layer that has it when on. That will save a lot of space and make it visually
+         consistent with the timeline. The list of animations though I am not sure where to put.
+         Probably as a scrollable menu may be best."*
+      6. *"for the graph editor, the ability to use the select tool on it to select the keyframe nodes
+         and move them could be a good idea, as well as the ability to use it on cels to select multiple
+         at once in the future."*
+
+      **Ask 3 supersedes KEYFRAMES §2.1, §2.23 and §2.24** — the tap/hold Animate mode, the auto-key on
+      an already-animated channel, and the tap-keys-every-channel rule. That is the owner changing their
+      mind about their own ruling and is not a re-litigation. §2.22 (the button lives in the timeline
+      strip) and §2.17 (the graph editor grows the timeline upward) both survive and ask 5 sharpens §2.17
+      from "above the timeline" to "above the layer row that owns it".
+
+      **The curve model already covers ask 4.** `AnimationCurve` ships with bezier handles, five tangent
+      modes, per-segment interpolation and per-channel step — `setKey` / `removeKey` are there. What is
+      missing is the editor, not the model.
+
+      **Merged 2026-08-29**: ask 2 in `de4e43e` — a grade's keyframes die with the grade, filtered by
+      parameter id because *both* case-shaped tests in this tree are wrong for it (`kindCode` merges
+      Levels with Curves at 0, `EffectCatalog.isCurrent` splits one `.blur` in two). Ask 3's whole model
+      in `167e44a` — bare keyframe marks, held baselines, the five-arm slider rule, `addKeyframe` /
+      `removeKeyframe` / `clearKeyframes`, and Animate mode deleted outright.
+
+      **Still open**: ask 1's menu items and making a bare mark visible at all; asks 4, 5 and 6, the
+      graph editor, whose design is KEYFRAMES §11 and which is four stages — variable row height first
+      and behaviour-neutral, because `AnimationTimeline`'s reorder drag counts rows by dividing by a
+      fixed pitch and one tall row breaks it silently.
 ### (10) Oklab colour storage and processing, from the Actions menu
 
 - [ ] The owner: *"I also want the option in actions to switch the color storage and processing to oklab
