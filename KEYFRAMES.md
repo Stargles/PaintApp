@@ -995,10 +995,14 @@ with the editor closed, and persisting it would put a field in the manifest that
 
 ### 11.6 Open
 
-- **The y axis when several channels are visible at once.** Per-channel normalisation makes every curve
-  fill the band and legible, and makes two slopes incomparable; one shared axis is honest and leaves a
-  0…1 opacity flat beside a 0…500 blur radius. Blender offers both and the iPad has room for one.
-  **Ask before building.**
+- ~~**The y axis when several channels are visible at once.**~~ **Ruled 2026-08-29: each curve is scaled
+  to fill the band.** Shown the trade — per-channel normalisation makes every curve legible and makes two
+  slopes incomparable, one shared axis is honest and leaves a 0…1 opacity flat beside a 0…500 blur radius
+  — the owner took normalisation. The reasoning to keep is that the comparison being given up is not one
+  worth having: a blur radius and an opacity are different units, so their slopes were never comparable in
+  any useful sense, while a band a couple of inches tall makes the shared axis lose the small-range channel
+  outright. Blender and Maya both ship the toggle; this ships the default that suits the screen, and the
+  toggle stays available as a later addition rather than a thing the first version owes.
 - **The band's height, and whether it is draggable.** Start fixed.
 - **A collapsed folder hides its children's key markers** — found and deliberately deferred on
   2026-08-29, and this is where it wants a decision.
