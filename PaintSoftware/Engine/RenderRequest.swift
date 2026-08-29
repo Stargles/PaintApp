@@ -775,6 +775,19 @@ extension CanvasManager {
     /// number anything else in that key can see. `contentVersion(ofLayer:atFrame:)` below is the
     /// answer, and it is the same failure KEYFRAMES §4.5 calls invisible, reached from a third door.
     ///
+    /// **A third thing drawn outside every cel, found while removing that clause and deliberately not
+    /// given a clause of its own.** The tinted motion-group overlay goes on a layer host through
+    /// `setInterpolationImage` (`CanvasView.updateMotionGroupOverlay`), so an engaged sandwich blanks
+    /// it — it is in no cel and therefore in no composite, the lasso float's failure in a milder
+    /// costume. That was **already true on every keyframe frame** of any document the compositor is
+    /// engaged for, so it is a pre-existing gap rather than this change's; what this change does is
+    /// widen it to the in-between frames of a multi-layer document in Interpolate mode, where one
+    /// layer's recipe used to disengage the canvas on the others' behalf. Left alone on purpose: it
+    /// is an authoring tint rather than the artwork, and refusing the compositor whenever the overlay
+    /// is on would trade the artist's blend modes for a debugging aid. The place to fix it is
+    /// `updateMotionGroupOverlay` drawing into an overlay view of its own, as the guides already do
+    /// (`GuideOverlayView`'s own note says why it refused this seam).
+    ///
     /// **`isScrubbingInterpolation` replaces it, and it is a gesture clause rather than a frame one.**
     /// The slider writes `recipe.t` on every tick, so with the derivation in the key every tick is a
     /// new key: one full-quality ARAP evaluation and three canvas-sized composites per tick, against a
