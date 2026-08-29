@@ -28,6 +28,14 @@ struct DrawingView: View {
     /// put the rail back with the same options panel still open, rather than dumping the artist at the
     /// bare stack.
     @State private var showingEffectSettings = false
+    /// Whether the slider drag currently in flight wrote a **keyframe** rather than a value, so the
+    /// undo step it closes can be named for what it did — KEYFRAMES stage 3a.
+    ///
+    /// A flag on the view rather than on the manager because it is a property of *this* gesture, and
+    /// the gesture's two ends are both here: `onEditBegan` clears it, the per-parameter write sets it,
+    /// `onEditEnded` reads it. Putting it on `CanvasManager` would make it a piece of global state
+    /// whose lifetime nothing enforces.
+    @State private var effectEditWroteKeyframe = false
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
@@ -344,8 +352,40 @@ struct DrawingView: View {
                     effect: editing.effect,
                     canvasManager: canvasManager,
                     onChange: editing.onChange,
-                    onEditBegan: { canvasManager.beginStructureGesture() },
-                    onEditEnded: { canvasManager.commitStructureGesture(label: .valueLayerEffect) },
+                    onParameterChange: { parameter, newValue in
+                        switch KeyframeControl.write(
+                            isAnimateMode: canvasManager.isAnimateMode,
+                            isScalarAnimatable: parameter.isScalarAnimatable,
+                            channelIsAnimated: editing.animatedChannelIDs.contains(parameter.id)) {
+                        case .key:
+                            if canvasManager.setEffectParameterKeys(
+                                editing.target, frame: canvasManager.currentFrame,
+                                values: [parameter.id: newValue]) > 0 {
+                                effectEditWroteKeyframe = true
+                            }
+                        case .storedValue:
+                            // **`editing.stored`, never `editing.effect`.** The knobs show the grade
+                            // resolved at the playhead; writing that back would bake every *other*
+                            // animated channel's value-at-this-frame into the stored base as a side
+                            // effect of dragging one slider.
+                            editing.onChange(parameter.write(editing.stored, newValue))
+                        }
+                    },
+                    animatedChannelIDs: editing.animatedChannelIDs,
+                    onEditBegan: {
+                        effectEditWroteKeyframe = false
+                        canvasManager.beginStructureGesture()
+                    },
+                    // **The label follows what the drag actually wrote**, which is the fix for an undo
+                    // step that would otherwise lie: a slider drag opens a structure gesture, so a
+                    // track written inside it records no step of its own and folds into this one. An
+                    // artist who animated a bloom and pressed undo would read "Adjust Layer Effect"
+                    // and conclude the grade itself had gone. `.effectKeyframes` exists for exactly
+                    // this distinction — see `HistoryActionLabel`.
+                    onEditEnded: {
+                        canvasManager.commitStructureGesture(
+                            label: effectEditWroteKeyframe ? .effectKeyframes : .valueLayerEffect)
+                    },
                     onBack: { showingEffectSettings = false },
                     onClose: { layerOptionsID = nil })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -419,15 +459,74 @@ struct DrawingView: View {
     /// so before this moved: it is nil unless the layer is a value layer in effect mode, so an undo
     /// that takes the grade away closes the bar rather than leaving knobs over a layer that no longer
     /// has one. The folder side reads `effect` because §4.4 puts the grade straight on `LayerFolder`.
-    private var effectBeingEdited: (effect: Effect, onChange: (Effect) -> Void)? {
+    private var effectBeingEdited: EffectEditing? {
         guard showingEffectSettings, let id = layerOptionsID else { return nil }
-        if let folder = canvasManager.folders.first(where: { $0.id == id }) {
-            guard let effect = folder.effect else { return nil }
-            return (effect, { canvasManager.setNodeEffect(id, to: $0) })
+        let frame = canvasManager.currentFrame
+
+        // Which of the two grade homes `layerOptionsID` names — and the *only* place this stage has to
+        // ask, because everything downstream of it takes a `KeyframeTarget` and the two arms are the
+        // same code from here on (§2.21).
+        let target: KeyframeTarget = canvasManager.folders.contains { $0.id == id }
+            ? .folder(id: id) : .layer(id: id)
+
+        guard let stored = canvasManager.storedEffect(of: target),
+              let resolved = canvasManager.resolvedEffect(of: target, atFrame: frame) else { return nil }
+
+        let onChange: (Effect) -> Void
+        switch target {
+        case .folder:
+            onChange = { canvasManager.setNodeEffect(id, to: $0) }
+        case .layer:
+            // By index, because that is the setter's signature; resolved at write time rather than
+            // captured here, so a restack while the bar is open cannot send the write to a neighbour.
+            onChange = { effect in
+                guard let index = canvasManager.layers.firstIndex(where: { $0.id == id }) else { return }
+                canvasManager.setLayerEffect(layerIndex: index, to: effect)
+            }
         }
-        guard let index = canvasManager.layers.firstIndex(where: { $0.id == id }),
-              let effect = canvasManager.layers[index].layerEffect else { return nil }
-        return (effect, { canvasManager.setLayerEffect(layerIndex: index, to: $0) })
+
+        return EffectEditing(
+            effect: resolved, stored: stored, target: target,
+            animatedChannelIDs: Set(canvasManager.animatedEffectChannelIDs(of: target)),
+            onChange: onChange)
+    }
+
+    /// **The grade whose knobs are docked, at the playhead — and the grade as stored, because the two
+    /// are different numbers the moment anything is animated.**
+    ///
+    /// The split is KEYFRAMES stage 3a's first repair and it is not cosmetic. Until it, the bar read
+    /// `layers[index].layerEffect` with **no frame**, so it showed the *stored* grade while the canvas
+    /// rendered the *resolved-at-playhead* one and the two disagreed at every frame except where they
+    /// happened to coincide. §2.1's "a change at the playhead writes a key on the channel touched" is
+    /// not implementable on top of a control that is not showing the value at the playhead.
+    ///
+    /// **`stored` is what a plain value write lands on.** Writing `effect` back instead would take
+    /// every animated channel's value-at-this-frame and bake it into the base as a side effect of
+    /// dragging some unrelated slider. That base is invisible while its curve exists — the curve
+    /// overwrites it at every frame — so the corruption would surface only much later, when the artist
+    /// deleted the curve and found a value they never typed.
+    ///
+    /// **The non-slider rows — colour, toggle, picker — still write a whole `Effect` through
+    /// `onChange`, and that is knowingly a partial answer.** Such a write carries the resolved values
+    /// of any animated channel into the stored base along with the field the artist actually changed.
+    /// It is benign rather than merely tolerated: a channel's stored base is unobservable for as long
+    /// as its curve exists, because `Effect.resolved` overwrites it at every frame. What it costs is
+    /// that deleting a curve later falls back to a value from whichever frame a swatch was last
+    /// touched, instead of to the number originally typed. Fixing it properly means a per-field write
+    /// for the compound rows too, which is `EffectParameter.compound`'s identity-`write` problem and
+    /// belongs with the colour channels §9 question 3 already owes an answer for.
+    ///
+    /// **`target` is what makes the two grade homes one path.** §2.21 rules that a folder's effect
+    /// animates exactly as a layer's does, and stage 2b gave the folder its `effectTracks`, so the
+    /// only thing that still differs between them is which setter a *value* write goes through. This
+    /// carried an `Int?` layer index while that storage was being built, and the nil case meant "a
+    /// folder cannot key" — the silent refusal §2.21 exists to prevent. It is gone.
+    private struct EffectEditing {
+        let effect: Effect
+        let stored: Effect
+        let target: KeyframeTarget
+        let animatedChannelIDs: Set<String>
+        let onChange: (Effect) -> Void
     }
 
     /// Runs a notice's one-tap fix. These are the actions the modal alerts carried, kept verbatim:

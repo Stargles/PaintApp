@@ -85,6 +85,12 @@ struct AnimationTimeline: View {
             if canvasManager.isInterpolateMode {
                 InterpolateBar(canvasManager: canvasManager)
             }
+            // Animate mode's strip joins interpolate's, outside the panel and for the same reason:
+            // a mode adds a strip above the timeline rather than eating rows out of it. It is also
+            // half of what keeps a hold-entered mode discoverable — see `AnimateBar`.
+            if canvasManager.isAnimateMode {
+                AnimateBar(canvasManager: canvasManager)
+            }
             timelinePanel
         }
     }
@@ -332,7 +338,12 @@ struct AnimationTimeline: View {
         // upward as the panel grows, so measuring translation in its local frame creates a feedback
         // loop where the handle keeps "running away" from the finger — global coordinates are fixed
         // to the screen and don't have that problem.
-        DragGesture(minimumDistance: 6, coordinateSpace: .global)
+        // The 6 lives in `KeyframeControl` rather than here: the keyframe button sits inside this
+        // gesture's area and its 0.8 s hold has to cancel *before* this drag starts, so the two
+        // numbers are a pair and a test in the fast tier pins the relationship. This file is not in
+        // the test target, so a literal here could not be pinned at all.
+        DragGesture(minimumDistance: KeyframeControl.timelineResizeMinimumDistance,
+                    coordinateSpace: .global)
             .onChanged { value in
                 let proposed = resizeStartHeight ?? timelineHeight
                 if resizeStartHeight == nil { resizeStartHeight = timelineHeight }
@@ -445,6 +456,32 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.loopButton")
     }
 
+    /// **The keyframe button — tap inserts a key, hold 0.8 s toggles Animate mode** (§2.1), here in
+    /// the timeline's own control strip rather than in the top toolbar (§2.22): it writes at the
+    /// playhead and §2.17's graph drawer will grow upward out of this same panel, so the button, the
+    /// frames it writes onto and the curve it opens all end up in one place.
+    ///
+    /// **Rendered from both `collapsedBar` and `miniToolbar`, like every other button in this group.**
+    /// A control added to only one is invisible in the other state, and the collapsed bar is exactly
+    /// where an artist who dragged the timeline down will look for it.
+    ///
+    /// Unlike the three buttons above it this is not a two-stage tap: the second stage of a keyframe
+    /// button is §2.1's channel list, which is stage 3b.
+    private func keyframeButton(pointSize: CGFloat) -> some View {
+        let target = canvasManager.keyframeTarget
+        let channels = target.map { canvasManager.animatedEffectChannelIDs(of: $0) } ?? []
+        return KeyframeButton(
+            isAnimateMode: canvasManager.isAnimateMode,
+            animatedChannelCount: channels.count,
+            pointSize: pointSize,
+            onTap: {
+                guard let target,
+                      KeyframeControl.tapCanKey(animatedChannelCount: channels.count) else { return }
+                canvasManager.keyAnimatedChannelsAtPlayhead(target)
+            },
+            onHold: { canvasManager.isAnimateMode.toggle() })
+    }
+
     /// Interpolate mode's entry point, next to onion skin and loop rather than in the canvas's top
     /// toolbar — the mode's whole subject is the timeline, and so is every control it puts on screen
     /// (`InterpolateBar` right above this bar). Product owner, 2026-08-01.
@@ -499,6 +536,9 @@ struct AnimationTimeline: View {
                 onionSkinButton
                 loopButton
                 interpolateButton
+                // 19pt is `.title3`'s size, which the rest of this bar is set in — the representable
+                // draws its own symbol and so cannot inherit the environment font.
+                keyframeButton(pointSize: 19)
                 Spacer()
                 frameLabel
             }
@@ -518,6 +558,8 @@ struct AnimationTimeline: View {
                 onionSkinButton
                 loopButton
                 interpolateButton
+                // 17pt is body, which this bar is set in — see the collapsed bar's note.
+                keyframeButton(pointSize: 17)
 
                 Spacer()
 

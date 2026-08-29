@@ -172,6 +172,22 @@ struct EffectSettingsBar: View {
     /// signature.
     @ObservedObject var canvasManager: CanvasManager
     var onChange: (Effect) -> Void
+    /// **Where a *slider* edit goes, named by the parameter that moved** — KEYFRAMES.md stage 3a.
+    ///
+    /// `onChange` above hands back a whole `Effect` and is still what the colour, toggle and picker
+    /// rows use, because none of those is a channel a curve can drive
+    /// (`EffectParameter.isScalarAnimatable` names why for each). A slider is different in two ways
+    /// that both need the id: §2.1's Animate mode has to write a key on **exactly the channel
+    /// touched**, and recovering which one moved from a whole-`Effect` diff would be a comparison over
+    /// thirty-three closures to learn something the caller already knew. The id is only in scope
+    /// inside `slider(_:)`, so that is where the branch is taken.
+    ///
+    /// The bar does not decide what the edit *means* — see `KeyframeControl.write`, which is in the
+    /// test target, unlike this file.
+    var onParameterChange: (EffectParameter, Double) -> Void
+    /// Ids of the parameters this target already animates, so a row can say so. Empty for every
+    /// document nobody has keyed, which is nearly all of them.
+    var animatedChannelIDs: Set<String> = []
     /// Brackets a whole slider drag into one undo step, the way the value layer's colour picker
     /// brackets a whole picking session — see `LayerOptionsPanel.valueColorRow`.
     var onEditBegan: () -> Void
@@ -372,8 +388,9 @@ struct EffectSettingsBar: View {
            let value = parameter.read(effect) {
             sliderRow(parameter.name, value, range,
                       parameter.controlIdentifier ?? parameter.id,
-                      format: parameter.format ?? "%.2f") { newValue in
-                onChange(parameter.write(effect, newValue))
+                      format: parameter.format ?? "%.2f",
+                      isAnimated: animatedChannelIDs.contains(parameter.id)) { newValue in
+                onParameterChange(parameter, newValue)
             }
         }
     }
@@ -399,9 +416,19 @@ struct EffectSettingsBar: View {
     /// give every row in this panel the same one.
     private func sliderRow(_ label: String, _ value: Double, _ range: ClosedRange<Double>,
                            _ identifier: String, format: String = "%.2f",
+                           isAnimated: Bool = false,
                            onChange change: @escaping (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
+                // The channel marker, and it is the whole of what this stage shows about a track: the
+                // channel *list* is stage 3b. It earns its place here rather than there because the
+                // readout above it is the value **resolved at the playhead**, and a number that moves
+                // while nobody touches it needs something on screen saying why.
+                if isAnimated {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 8))
+                        .foregroundColor(.blue)
+                }
                 Text(label)
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.85))

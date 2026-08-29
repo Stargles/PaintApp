@@ -111,6 +111,24 @@ final class CanvasManager: ObservableObject {
     /// a transient.
     @Published var isInterpolateMode: Bool = false
 
+    /// **Animate mode** — KEYFRAMES.md §2.1, entered and left by holding the timeline's keyframe
+    /// button for `KeyframeControl.holdDuration`. While it is on, a non-destructive change at the
+    /// playhead writes a key on exactly the channel it touched instead of writing a value.
+    ///
+    /// A flag on the manager rather than a `Tool` case or an `ActivePanel` case, and §2.22 rules all
+    /// three halves of that. It is not a `Tool` because `Tool`'s slots are explicitly full and every
+    /// switch over it is exhaustive with no `default:` precisely so a new case cannot be missed — the
+    /// same argument `isInterpolateMode` and `vectorEraserMode` already make, plus the practical one
+    /// they make: animating is not a thing you *draw with*, so entering the mode must not evict the
+    /// artist's brush. It is not an `ActivePanel` case because it puts nothing modal on the canvas and
+    /// because that enum is a term in `CanvasTouchOwner`'s arbitration, whose logic tests carry
+    /// hand-derived constants a new case would invalidate.
+    ///
+    /// **A transient, never persisted and never undoable**, exactly like `isInterpolateMode`: the keys
+    /// it causes to be written are document content and each records its own step, but being *in* the
+    /// mode is a state of the artist rather than of the drawing.
+    @Published var isAnimateMode: Bool = false
+
     /// The cels the artist has flagged as keyframes, in the order they were flagged — which is time
     /// order only because the artist picks them that way. Highlighted yellow on the timeline.
     ///
