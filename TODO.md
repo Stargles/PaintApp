@@ -122,10 +122,18 @@ LAYER_TRANSFORM.md.
       in `167e44a` — bare keyframe marks, held baselines, the five-arm slider rule, `addKeyframe` /
       `removeKeyframe` / `clearKeyframes`, and Animate mode deleted outright.
 
-      **Still open**: ask 1's menu items and making a bare mark visible at all; asks 4, 5 and 6, the
-      graph editor, whose design is KEYFRAMES §11 and which is four stages — variable row height first
-      and behaviour-neutral, because `AnimationTimeline`'s reorder drag counts rows by dividing by a
-      fixed pitch and one tall row breaks it silently.
+      **Merged since**: ask 1 in `4057e9d` — the cel menu's Add / Remove / Clear Keyframes, and a bare
+      keyframe drawing hollow so the artist can see whether an edit landed on a channel. The graph
+      editor's first stage in `4329e3d` — row geometry as a lookup over per-row heights, behaviour-
+      neutral, because `AnimationTimeline`'s reorder drag counted rows by dividing by a fixed pitch and
+      one tall row would have broken it silently. Both of the owner's device-reported bugs in `a85a316`,
+      which were one divergence: a curve key and a keyframe mark drew identically and were different
+      things, so a diamond could exist that the menu could not remove and the seeding logic skipped.
+      §2.28 is the invariant that closed it.
+
+      **Still open**: asks 4, 5 and 6 — the graph editor itself. **KEYFRAMES §11 is the design**, stages
+      D2 (the band), D3 (the gestures, including the marquee) and D4 (the channel list). §11.3's three
+      silent-failure modes are the brief for D2.
 ### (23) Selection membership modes belong to Select, not to Move — so Recolour can use them
 
 - [ ] The owner, 2026-08-29: *"Right now the enclosed/cut/touching option for the select move is in

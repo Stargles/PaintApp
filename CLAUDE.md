@@ -67,9 +67,18 @@ to be the floor. The lever is the same one that worked before: split that class 
 *also* the class that produced this run's one environmental red, which is what a class held that long
 under parallel clones tends to do.
 
+**Re-taken 2026-08-29 at `4b86966` and it holds** — **2274 tests in 22.3 min, 0 failed, 6 skipped**, the
+first full run in several passes with no environmental red either. `LayerPanelUITests` **515 s / 19**,
+`SelectionAndMoveUITests` 327 / 10, `SandwichCompositingUITests` 297 / 10,
+`BlendModesAndCompositorUITests` 222 / 8, `CuttingModesUITests` 177 / 4, `PerfBaselineTests` 173 / 53,
+plus two the earlier table did not carry — `EraserAndPersistenceUITests` 171 / 7 and
+`TimelineGestureUITests` 144 / 7. 3,542 class-seconds, so four clones hold ~15 min of ideal work against
+a 22.3 min run and **the gap is still one indivisible class**. The 25.6 → 22.3 move is variance, not
+structure: nothing was split.
+
 Going below ~3 min still means decomposing `testInterpolateModeEndToEndFromGestureToScrub`; but nothing
-below 517 s is reachable at all until `LayerPanelUITests` is cut. **Re-take this table rather than
-trusting it — it has now gone stale once.**
+below 515 s is reachable at all until `LayerPanelUITests` is cut. **Re-take this table rather than
+trusting it — it has gone stale once and been confirmed once.**
 
 If you split a class again, **verify by test count from the xcresult** — a test that stops running
 still prints green — and take the count *before* you merge as well as after: a split branch cut
