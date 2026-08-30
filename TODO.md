@@ -3,16 +3,12 @@
 The owner's asks. [BUGS.md](BUGS.md) is for what we find. **An item leaves when merged, not when a
 branch exists.** Three in flight at once unless the extras need no simulator — see `tools/simlock.sh`.
 
-**Before adding an item, check whether one already exists that this is a more detailed version of.** The
-test is not "are these new words?" — it is "is this a restatement?" The owner's memory-and-baking
-architecture arrived on 2026-08-30 in new words and was filed as a new item when an existing one had held
-it since 2026-08-29. The cost of getting it wrong is what they then saw: **one feature specified in six
-documents at three scopes**, which is how it acquired two eviction policies and two disk tiers before a
-line of it was written.
+**Before adding an item, check whether an existing one already covers it in different words.** A
+restatement filed as a new item is how one feature came to be specified in six documents at three scopes,
+with two eviction policies and two disk tiers, before a line of it was written.
 
-**This file is everything.** ROADMAP.md was deleted the same day, at the owner's instruction, because a
-second file meant its features were never built. Items above "Later" are being built or are next; items
-under it are the long-term features, none designed, each needing its own conversation first.
+**Items above "Later" are being built or are next. Items under it are the long-term features** — none
+designed, each needing its own conversation with the owner before it starts.
 
 **Record an ask in the owner's own words, and fold a ruling into the item it rules on.** A quote is
 cheaper to keep than a decision is to rebuild — the perspective-text requirement was nearly re-derived
@@ -140,26 +136,16 @@ LAYER_TRANSFORM.md.
       value layer colour only. That would remove alot of redundant code and tidy up architecture, unless
       there is a reason not to do that."*
 
-      **Investigated 2026-08-30. Verdict: do not — and the investigation refuted the premise this item
-      was created on, which is the more useful half.**
+      **Verdict: do not.**
 
-      **The premise was that the paper is outside the composite. It is not, and has not been since
-      `2a0379d` / `d90b329` / `5c00201` shipped EFFECT_BACKDROP §6.** `makeSandwichRequests` builds `full`
-      and `below` with `background: paper` (`RenderRequest.swift:722-724`); both backends fill it
-      (`Compositor.swift:713-716`, `MetalCompositor.swift:941-974`); thumbnails pass
-      `includeBackground: true` (`ProjectStore.swift:311`); and there is a test called
-      `testEveryBlendModeBlendsAgainstThePaper` (`EffectLayerLogicTests.swift:1491`). **So ink-over-paper
-      IS reachable by effects, blend modes and any colour work — on the compositor-engaged path.** On the
-      disengaged path a plain document is still drawn by Core Animation with the paper as a view behind
-      it (`CanvasView.swift:832-838` argues deliberately for no extra clause there), but that is the case
+      **The paper is already in the composite**, so the tidiness argument is the only one left — the
+      reachability one does not apply. `makeSandwichRequests` builds `full` and `below` with
+      `background: paper` (`RenderRequest.swift:722-724`), both backends fill it
+      (`Compositor.swift:713-716`, `MetalCompositor.swift:941-974`), thumbnails pass
+      `includeBackground: true` (`ProjectStore.swift:311`), and `EffectLayerLogicTests:1491` is
+      `testEveryBlendModeBlendsAgainstThePaper`. Only the disengaged Core Animation path draws the paper
+      as a plain view (`CanvasView.swift:832-838` argues for no extra clause there), and that is the path
       where nothing is being blended anyway.
-
-      **How the false premise got here, because the trap will be walked into again:** it was read out of
-      [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) **§0**, headed *"What is already true, verified rather than
-      assumed"* and carrying the two commits it was checked at. **A spec's what-is-already-true section
-      describes the world before that spec was built.** Once the spec ships, that section becomes the most
-      confidently-worded stale text in the file — it reads exactly like a freshly verified statement of
-      current behaviour, and it is a statement of the past. Check a §0 against the build order below it.
 
       **The three things that break if the paper becomes a bottom value layer**, each named rather than
       hand-waved. (1) **`RenderBackground` is the definition of "ink".** The `.ink` sub-walk is *the same
@@ -193,29 +179,33 @@ LAYER_TRANSFORM.md.
       processing to oklab or other future models. Oklab may give better compositing."* The complaint behind
       it: *"RGB goes muddy through the middle between two saturated hues."*
 
-      **Ruled 2026-08-30, and it splits this item in two.** Shown in plain terms where the app actually
-      mixes two colours — stroke over stroke, layer over layer, and colour ramps — the owner ruled: *"just do the ramps first for now. I do want linear light to be able to be used
-      for compositing blend modes. Maybe instead of a global switch for that, it should be an option in the
-      blend modes, with the global switch just being for the other stuff, like one brush stroke over
-      another."* And on where it sits: *"Task 10) isnt exactly a major priority for me, the other stuff on
-      the roadmap may be more valuable."*
+      **The ruling.** The owner, shown where the app actually mixes two colours: *"I do want linear light
+      to be able to be used for compositing blend modes. Maybe instead of a global switch for that, it
+      should be an option in the blend modes, with the global switch just being for the other stuff, like
+      one brush stroke over another."* On priority: *"Task 10) isnt exactly a major priority for me, the
+      other stuff on the roadmap may be more valuable."*
 
-      **(10a), the Oklab ramps, shipped 2026-08-30** (`e95828a`, `20014c0`) and has left this list.
-      Its pictures are `docs/oklab-ramps/`, its generator `tools/oklab_ramp_ab.swift`, and the owner
-      ruled on its one cost — a black-to-white Gradient Map darkens midtones by up to 31/255 — that the
-      rule applies everywhere, greys included. That ruling lives in `Effect.gradientColour`'s doc. What
-      is left of (10) is the switch:
+      **So linear light is an option ON the blend mode**, not a consequence of a document-wide flag, and
+      the document-wide flag covers only the dab / stroke-over-stroke site. Per-mode opt-in means existing
+      artwork does not move unless the artist asks it to, which removes the largest cost this item
+      otherwise carries — every antialiased grey in every existing drawing getting lighter by up to 73/255
+      (LINEAR_LIGHT_AB.md §4).
 
-      - **(10b) The pipeline switch — deprioritised, and RE-SCOPED by the ruling above.** Linear light for
-        blend modes becomes **an option on the blend mode**, not a consequence of a document-wide flag; the
-        document-wide flag covers only the dab/stroke-over-stroke site. That is a better shape than the one
-        this item was written around and it changes the design: per-mode opt-in means existing artwork does
-        not move unless the artist asks it to, which removes the whole "reopening a finished drawing changes
-        it" cost that LINEAR_LIGHT_AB.md §4 spends its longest section on. **Do not build (10b) from the
-        nine-stage plan drafted on 2026-08-30** — three adversarial reviews found it unbuildable as written
-        (five cache keys serving stale pixels, a document that forgets the setting on reopen, a memoized
-        accumulator format with no invalidation, and a real PNG migration the plan claimed did not exist),
-        *and* the per-mode ruling above invalidates its central architecture anyway.
+      **Five things any implementation must handle**, each found by reading the tree rather than guessed:
+      `PixelOps.RasterizeKey`, `CanvasView.SandwichKey`, `RenderRequest.SandwichFullKey` and
+      `MaskResolver`'s key all carry render inputs and none carries a colour-pipeline field, so a stale
+      composite serves silently; `ProjectStore.swift:1158` rebuilds every tier on load with no format
+      argument, so a document forgets the setting on reopen; `RasterLayerTexture.ensureContext` memoizes
+      the backing format with no invalidation, so the setting cannot change mid-document; six other sites
+      reconstruct a `RasterLayerTexture` and would drop its format; and a linear tier changes the PNG on
+      disk, so the "no migration" claim is false.
+
+      **Two sub-questions are settled, both by rendered evidence in `docs/linear-light-ab/`.** The way
+      *out* of linear is a 12-bit integer-indexed table — an 8-bit linear intermediate collapses a 33-step
+      near-black ramp to 5 levels (`Q1-shadow-banding.png`). And the six non-separable blend modes are
+      **exempted**, keeping today's answer: linearizing their inputs while leaving `Composite.metal:145`
+      alone shifts them by up to 78/255 and makes Lighter/Darker Color return the other layer on 7.81% of
+      colour pairs (`Q2-nonseparable-modes.png`, measured over all 2,985,984 pairs).
 
       **The evidence that settled the two questions this item left unruled**, both rendered rather than
       argued, in `docs/linear-light-ab/` with `tools/linear_light_q1q2.swift` as the generator:
@@ -282,19 +272,12 @@ LAYER_TRANSFORM.md.
       standing expendable-documents permission at the top of this file means today is the cheapest this
       change will ever be.
 
-## Later — the six long-term features, folded in from ROADMAP.md on 2026-08-30
+## Later — the long-term features
 
-**ROADMAP.md is deleted.** The owner: *"I also have a feeling that the stuff in ROADMAP wont really ever
-be done because stuff in TODO keeps on increasing. It may be worth stuffing all the stuff into TODO...
-Remove ROADMAP and push all its stuff into TODO. Don't make it messy or overly longer than it absolutely
-has to be."* So these compete for position with everything above rather than sitting in a file nobody
-opens. The analysis that was in ROADMAP is **compressed, not copied** — what survives is the owner's own
-words, the dependencies, and the findings that would cost a session to rediscover.
-
-**Every one of these carries the same entry condition**, given by the owner with the original list:
+**Every one of these carries the same entry condition**, given by the owner with the list:
 *"When you get to these, prompt me to explain to you in more detail how they work."* **An item built from
-its entry here alone was built wrong.** Its specification is its own document once that conversation has
-happened, the way KEYFRAMES.md exists for (21).
+its entry here alone was built wrong.** Its specification becomes its own document once that conversation
+has happened, the way KEYFRAMES.md exists for (21).
 
 **Dependencies the owner named**: (26)→(21), (27)→(26), (30)→(29). **Three the code adds**: (28) needs a
 real playback clock; (21)'s bake-to-cels and (29)'s exporter are **the same frame walk**, so build it
@@ -381,20 +364,7 @@ once; and (29) was blocked on derived content being invisible to the render walk
       `CanvasManager+Document`'s reassurance that saving is bounded to 320x320 **stops being true the day
       export ships**.
 
-      **The memory architecture is the other half of this item, and the owner has stated it three times.**
-      2026-08-29, on being told an in-between composites live:
-
-      > "does the compositor automatically bake in the background so that when playing every frame doesnt
-      > need to be composited live as it runs? ... the goal is to allow 24fps playback while conserving
-      > memory. Basically the animation bakes in the background, and the data of each frame other than the
-      > current frame gradually gets replaced with that baked 'video', so when the play button is run, every
-      > single frame does not need to be composited live. When something is modified, only the modified
-      > frames are rebaked."
-
-      Then, the same day: *"the ipad gen 9 has enough capability to just store that bake on disk, then play
-      it from disk in real time without having to fill the entire animation to memory... it does not matter
-      how large your animation is or how many layers or complex your compositor is, it always will play it
-      24fps while using minimal memory."* And on 2026-08-30, the first statement to specify a **mechanism**:
+      **The memory architecture is the other half of this item.** The owner:
 
       > "the ipad does not have much memory, so I want the paint program to not use much by storing as many
       > things it can to disk. Probably the current active cel is the only thing required to be in memory.
@@ -408,6 +378,8 @@ once; and (29) was blocked on derived content being invisible to the render walk
       > "(NOTE: This is my thinking on how it may work, it may not be the most optimal. The session is gonna
       > have to make a judgement on how exactly to do this. I eventually want to make it android and windows
       > compatible so dynamic allocation of some sort may be nice.)"
+
+      And on what triggers a rebake: *"When something is modified, only the modified frames are rebaked."*
 
       **So the goal is fixed and the mechanism is delegated in writing.** The goal: a hundred layers and a
       thousand cels without running out, and 24 fps on press-play. **Portability is a stated requirement**
