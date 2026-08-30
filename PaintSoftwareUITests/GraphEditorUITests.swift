@@ -4,10 +4,11 @@ import XCTest
 ///
 /// Deliberately one small class of its own rather than a few methods added to `TimelineAndUndoUITests`
 /// or `LayerPanelUITests`. `xcodebuild` distributes parallel work per test **class**, so a class is
-/// indivisible and the longest one sets the whole suite's critical path — which today is
-/// `LayerPanelUITests` at 515 s against a 22.3 min run (CLAUDE.md's cost model). Two tests hung off
-/// one of those classes cost the suite their whole runtime; the same two in a class of their own cost
-/// it nothing, because a spare clone runs them beside the long one.
+/// indivisible and the longest one sets the whole suite's critical path (CLAUDE.md's cost model).
+/// Tests hung off one of the heavy classes cost the suite their whole runtime; the same tests in a
+/// class of their own cost it nothing, because a spare clone runs them beside the long one. The class
+/// this sentence used to name as the 515 s floor, `LayerPanelUITests`, was split into three on
+/// 2026-08-29 for exactly that reason — so re-take the table rather than quoting a number from here.
 ///
 /// **What is left for this tier and what is not.** Everything the band *draws* — the axis, the
 /// clipping, the colours, the sampling density — is `TimelineGraphBandLogicTests`, run headlessly
