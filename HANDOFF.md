@@ -1,4 +1,4 @@
-# Handoff — 2026-08-29 (session 77)
+# Handoff — 2026-08-30 (session 78)
 
 <!-- This file is BOTH the state of the repo and the prompt that starts the next session. It was once
 two files and they drifted apart inside a day, because the same state had to be written twice. Keep it
@@ -10,137 +10,197 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md, KEYFRAMES.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `4b86966` plus the close-out commits above it. **Fast tier 2153 / 2150 / 0 / 3.**
-**Full suite 2274 / 2268 / 0 / 6 in 22.3 minutes — zero reds, not even an environmental one**, on a
-freshly erased `eraser-mutex-test`. No branches in flight, one worktree, clean tree. **The iPad has
-`a85a316` Release**, so the owner is holding the new keyframe workflow and both bugs they reported
-against it are fixed on the device.
+inline. `main` is `7c38ba2`. **Fast tier 2227 / 2224 / 0 / 3.** **No full suite was run this pass**,
+and two heavy classes were split during it, so **CLAUDE.md's 22.3 min is stale in the *optimistic*
+direction** — the ~15-16 min the arithmetic predicts is labelled INFERRED there and nobody has watched
+a run since. **Take a real full run early**, on a freshly erased simulator, under `tools/simlock.sh`:
+it is the only way to learn what the two splits bought, and every later measurement is read against it.
+No branches, one worktree, clean tree.
 
-**1. The keyframe UI is the owner's design now, not §2.1's. Four of their six asks are merged and the
-   graph editor is the whole of what is left.**
-   Animate mode is deleted — the flag, the bar, the UIKit button host, the hold recognizer, the
-   hoisted constant and every doc comment that argued for them. The workflow is: place a keyframe from
-   the cel menu, move sliders, place another. §2.26 to §2.28 record it and mark §2.1, §2.23 and §2.24
-   superseded with their reasoning intact, which is what stops a later session restoring them.
+**1. The graph editor is built — D1 through D4 — and nothing about it is left that the owner asked
+   for.** KEYFRAMES §11 is the record: D1 row geometry, D2 the band, D3 the gestures (drag a key on
+   both axes, tap to add and remove, a marquee that picks up a set which then travels as one body),
+   D4 the channel list as a *filter*. All six of the owner's asks from §2.26's message are merged, so
+   TODO (22) is down to one line.
+   **The scope ruling is theirs and is not in question**: *"graphs are layer based, so tapping on
+   another layer should just open the other layer's graph."* One band at a time, under the selected
+   layer — which is also the cheapest thing to key, an `Int?` rather than a set.
+   **What is genuinely left, and none of it is an owner ask**: bezier tangent handles (the model
+   already carries `inHandle`/`outHandle` and five tangent modes — what is missing is a second hit
+   target per key and the arbitration against grabbing the key itself, so it is a stage, not an
+   afternoon); ask 6's *cel* marquee, which the owner themselves put in the future and whose stub is
+   "Select Multiple", `.disabled(true)`; and one loose end D3 handed to D4 after D4 had already
+   merged — tapping away a channel's second-to-last key makes it stop satisfying `isAnimated`, so the
+   whole curve leaves the band mid-gesture. It wants a listed-but-flat state or a note in the channel
+   list (KEYFRAMES §11.4, "One thing found and left").
 
-   **The invariant that must not be undone is §2.28's: a keyframe is any frame the target marks
-   explicitly *or* any frame a channel holds a key on.** Both of the owner's device-reported bugs were
-   one divergence — the timeline drew the union while the model knew only the marks, so a diamond you
-   could see was not a keyframe the menu or the seeding logic could find. One accessor computes it now
-   and `TimelineKeyMarkers`' second copy is deleted. **Adding a mark on every key write is the wrong
-   fix and was rejected**: it stores the same fact twice and drifts again the first time a writer
-   forgets, which is the defect, not the cure.
+**2. TODO (10) is the next buildable thing and its route is already decided — do not re-derive it.**
+   The owner ruled, having been shown the A/B: *"toggle option between OKlab and normal… You decide
+   the best route for the oklab."* The route is in TODO (10) and the evidence is
+   [LINEAR_LIGHT_AB.md](LINEAR_LIGHT_AB.md) with five rendered PNGs under `docs/linear-light-ab/`.
+   **The switch's two positions are sRGB and *linear light*, not Oklab**, stored as an extensible enum
+   so Oklab can be a third; the muddy middle is a gamma artefact, worst case MEASURED 73/255. Oklab
+   still gets built, for *interpolation*, where it is per-colour and outside the parity gate.
+   **The scope is three coverage sites and the compositor is the one the artist does not paint on** —
+   every dab is a `CGGradient` into an 8-bit DeviceRGB bitmap — so a compositor-only version leaves
+   the dark ring in place whenever both hues are on one layer, and is not worth shipping.
+   **Two things are unruled on purpose and one of them needs the owner**: how the result comes back
+   *out* of linear (a `pow` on both backends, or an 8-bit-linear quantization that bands the shadows),
+   and what linearizing does to the meaning of Hue/Saturation/Color/Luminosity, whose luminance
+   coefficients are specified on non-linear values.
 
-**2. The graph editor is stages D2 to D4 and KEYFRAMES §11 is the design.** D1 — row geometry as a
-   lookup over per-row heights — is merged and behaviour-neutral (`4329e3d`).
-   **§11.3's three silent-failure modes are the brief for D2**, and one of them is newly sharpened:
-   `TimelineLayoutKey` still carries a **scalar** `rowHeight`, which is sufficient *only* because row
-   heights are a pure function of `(rows, rowHeight)` and `rows` is already in the key. D2 opens a band
-   per layer, so it is the first stage to derive a height from something else — put that input in the
-   key or the row draws once at its old height and never moves again.
-   Also inherited from D1 and not a defect to chase: **the name column and the track have always been
-   2 pt out of vertical register** (track row 0 at `rulerHeight + 4`, name column at `+ 6`, same pitch
-   and same total). Carried through exactly. A band drawn across both columns must know.
+**3. Also open, unchanged: TODO (23)** — the owner's explicitly-not-priority ask that selection
+   membership move from Move to Select so Recolour can use it — and **KEYFRAMES §8 stage 4** onward,
+   the rest-space dab bake. **Distort is stage 5b now**, not last: it needs the transform channel and
+   nothing else, the schedule was delegated and that is the call. Stage numbers 6-10 were left alone,
+   so there is deliberately no stage 9.
 
-**3. One offer is outstanding and the owner has not answered it.** Asked when Move, the transformation
-   layer and Distort arrive, they were given the written order and this lever: **Distort needs only the
-   transform channel (stage 5), not stages 6, 7 or 8**, so pulling it to sit directly after that — which
-   is what §2.13 intended anyway — puts it several weeks earlier than §8's table implies. Ask before
-   assuming the table.
+**4. The traps this pass paid for, all five of them about *evidence* rather than about code.**
+   - **A comment can be true where it was written and false where it was pasted.** D3's tap-vs-drag
+     predicate came from `CurveEditor` with a comment explaining why `didMove` "would be the wrong
+     question" — true there, where the flag is set only after a handle is grabbed; false here, where
+     the marquee sets it too. A drag that changed its mind **deleted the key it was carrying, with no
+     undo step at all**. Read a borrowed comment against the code you pasted it into.
+   - **A judgement made by looking at one example generalises silently.** D2 put the playhead in front
+     of the band "having looked at it" and recorded that a saturated curve reads through the wash.
+     True of the hue it was looked at; three of the palette's eight are washed to grey, and only a
+     screenshot found it.
+   - **Looking at the feature found three things 2,224 passing tests structurally cannot** — a colour,
+     a `CGContext` and a layout that runs off the panel. They are in BUGS.md. **This suite has no tier
+     that can see a rendered pixel**, so when a feature is visual, budget a look at it.
+   - **A worker's completion notification is the only signal its tree is finished.** A worktree was
+     branched this pass from a commit whose agent had not reported, and was re-based off the last
+     reported-complete commit instead.
+   - **Mutation-test your own tests, and a proximity test proves nothing until its fixture holds two
+     candidates.** D3 found one of its own tests could not fail: the fixture put two dots 80 pt apart,
+     so "nearest" and "first" were the same answer. Two independent reviews then found the same class
+     of defect again, one level down.
 
-**4. `LayerPanelUITests` is still 515 s across 19 tests and splitting it is still the cheapest big
-   win.** The table was re-taken this pass and holds: 3,542 class-seconds over four clones is ~15 min of
-   ideal work against a 22.3 min run, and that gap is one indivisible class. It lives in
-   `LayerUITests.swift`, which already holds three. **Verify a split by test count from the xcresult,
-   before and after** — a test that stops running still prints green.
+**5. One process note about talking to the owner.** Asked where the graph editor should open, they
+   answered the question and then said *"I'm missing context. What is a graph band?"* — **"band" was
+   our invented word and the question was unanswerable until it was defined with a picture.** Define
+   invented vocabulary, or better, render it; they judge behaviour, not internals.
 
-**5. TODO (10) Oklab is still untouched and its first move is still not to build anything.** Stage A is
-   **linear-light compositing through a 256-entry LUT**, not Oklab. **Render the A/B and show it before
-   building** — this owner reverses on a picture what they accept on a number, and it happened again.
-
-**Do not re-litigate**: KEYFRAMES §2's rulings, now **twenty-eight**; LASSO_MOVE §5's twenty-five;
-CANVAS_RESIZE §5 and §6; EFFECT_BACKDROP §5 and §2.1; (10)'s three-stage recommendation.
-
-**The process rules that earned their keep this pass.** **Invite every worker to refute its brief** —
-four did, and every catch changed the shipped code, including two defects that were mine. **Remove
-cleanly**: the owner asked that a deleted feature leave no vestigial parameter, no half-live control and
-no "this used to be" comment, with history going to the spec docs and `git log` instead. And **do not
-re-measure a baseline another session already took on the same commit** — at load this suite returns
-wrong answers rather than slow ones.
+**Do not re-litigate**: KEYFRAMES §2's twenty-eight rulings and §11.6's three; LASSO_MOVE §5's
+twenty-five; CANVAS_RESIZE §5 and §6; EFFECT_BACKDROP §5 and §2.1; (10)'s sRGB/linear-light route.
 ```
 
 ---
 
 ## State
 
-`main` = `4b86966` plus the close-out commits above it. **Fast tier 2153 total / 2150 passed / 0 failed
-/ 3 skipped**, up from 2098 at the start of the pass.
+`main` = `7c38ba2`, 21 commits above `0513d06`. **Fast tier 2227 total / 2224 passed / 0 failed / 3
+skipped**, up from 2153 at the start of the pass.
 
-**FULL SUITE: 2274 total / 2268 passed / 0 failed / 6 skipped, in 22.3 minutes**, parallel, on a freshly
-erased `eraser-mutex-test`. Up from **2221 / 2214 / 1 / 6** at `0717ed6`, and **the first full run in
-several passes with no red at all** — the environmental `LayerPanelUITests` failure that has recurred
-did not this time.
+**NO FULL SUITE WAS RUN.** CLAUDE.md's 22.3 min figure predates both of this pass's class splits and is
+therefore stale in the direction that flatters us. The arithmetic there — ~3,542 class-seconds over four
+clones against a new 327 s floor, landing nearer 15-16 min — is labelled INFERRED, and it should stay
+INFERRED until somebody watches a run.
 
-The class table was **re-taken and holds**: `LayerPanelUITests` 515 s / 19 tests, `SelectionAndMove`
-327 / 10, `SandwichCompositing` 297 / 10, `BlendModesAndCompositor` 222 / 8, `CuttingModes` 177 / 4,
-`PerfBaseline` 173 / 53, and two entries the previous table did not carry — `EraserAndPersistence`
-171 / 7 and `TimelineGesture` 144 / 7. 3,542 class-seconds total, so four clones hold ~15 min of ideal
-work and the extra seven minutes is still one indivisible class.
+**Two heavy classes were split, both on measured seconds rather than on test count.**
+`LayerPanelUITests`, 515 s across 19 tests and the whole suite's floor, became
+`LayerFolderAndMaskMenuUITests` (190 s / 7), `LayerPanelControlsUITests` (174 / 7) and
+`LayerStackUITests` (159 / 5) — same file, every test body byte-identical, 523 s against 534 s for the
+same nineteen immediately before the cut. `SelectionAndMoveUITests` at 327 s is the new floor. And `GraphEditorUITests`, which this pass grew
+from ~40 s to a MEASURED 271 s and the suite's second-longest class, split into `GraphEditorUITests`
+(7 / 133) and `GraphEditorGestureUITests` (3 / 136).
 
-No branches. One worktree. Clean tree.
+A Release build of `7c38ba2` was being installed on the iPad as this was written; the last build
+*confirmed* on the device is `a85a316`. Ask the owner rather than assuming.
 
 ## What landed
 
-Six owner asks arrived in one message plus a follow-up; four are merged and two are the graph editor.
+**The graph editor, stages D2 through D4, each adversarially reviewed and each review real.**
 
-- **`de4e43e`** — ask 2. A grade's keyframes die with the grade. The rule is **parameter ids**, because
-  both case-shaped tests in this tree are wrong for it: `kindCode` merges `.levels` with `.curves` at 0
-  and `.blur` with `.sharpen` at 7, and `EffectCatalog.isCurrent` splits one `.blur` into Gaussian and
-  Directional. It also found `duplicateLayer` had been silently dropping `effectTracks`.
-- **`167e44a`** — ask 3's model. Bare keyframe marks, held baselines, the five-arm slider rule,
-  `addKeyframe` / `removeKeyframe` / `clearKeyframes`, and Animate mode deleted outright.
-- **`4057e9d`** — ask 1. Add / Remove / Clear Keyframes in the cel menu, and **a bare keyframe draws at
-  last** — hollow against the filled diamond of one carrying values.
-- **`4329e3d`** — the graph editor's D1. Row geometry is a lookup over per-row heights.
-- **`a85a316`** — both device-reported bugs, one root cause.
-- Docs: `2d9f16e` the six asks verbatim, `68fb98f` KEYFRAMES §11, `fcc3b1f` the y-axis ruling,
-  `fc96b18` TODO (23), `4b86966` a BUGS entry.
+- **`5297c35`** — the owner's three rulings and one delegation, plus the y-axis question answered from
+  a note already in the tree (`Effect.swift`: draw over `uiRange`, key anywhere in `modelDomain`).
+- **`931b859`** — D2, the band. `Views/TimelineGraphBand.swift` holds every number; `TimelineLayoutKey`
+  gains the whole band as one field, because a curve's *shape* moves nothing else on the track.
+- **`b3ec305`** — D2's review: five findings, five real. The band sampled the whole track (a dirty rect
+  is not a clip), a keyframe could not be placed at a frame with no cel, the drop strip and the drag
+  ghost disagreed by 96 pt, a key's dot is off the line above step 1 and is meant to be, and **one test
+  that could not fail** and asserted only that `make` is deterministic.
+- **`327374b` / `b204dd6`** — the reflow the band causes, which is the scope ruling's own cost. A block
+  drag was resolving the drop against moved rows, so **a re-time silently became a cross-layer move**;
+  the band is pinned to its row for the length of that one gesture. The two-stage tap is **not** fixable
+  and that is the answer: one wasted tap per layer switch, paid once. Scroll compensation was what the
+  owner was told the fix would be, and it does not work — the reflow is not a uniform translation.
+- **`bf423f0` / `f543a71` / `1ce12f8`** — D4, the channel list. It is a **filter**, applied inside
+  `graphBandContent` *before* the layout key is built, because applied later it would change what the
+  band should draw without moving the key. The review deleted a chevron whose collapse state was keyed
+  by effect case and scoped to no band, took `Channel.groupName` out of the layout key (`.blur` answers
+  two display names off a toggle, so one tap on Directional relaid out the whole timeline), and killed
+  three more assertions that could not fail.
+- **`56b0479` / `bccbfc2`** — D3, both halves. A key is **stopped** by its neighbour rather than
+  consuming it; a drag clamps to `modelDomain` and never to `uiRange`, with hit-testing on a clamped y
+  so an out-of-range key stays grabbable; one drag is one press of Undo. The marquee's group takes one
+  frame delta clamped by its tightest member, shares a vertical travel in **points** because each
+  channel normalises its own axis, and removes every carried key before inserting any.
+- **`4ea6722` / `dbbe775`** — D3's review. The tap-vs-drag predicate, the unrecoverable delete it
+  allowed, and the fixture that could not tell "nearest" from "first".
+- **`7c38ba2`** — the band moves above the playhead, reversing §11.3's fourth decision. Verified by two
+  screenshots of one fixture, which is the only way it could have been verified.
+- **`e1c002f` / `8507bdc`** — six screenshots under `docs/graph-editor/`, and the three defects looking
+  at them found.
+
+**The colour switch.** `1fd6e23` renders the A/B — five labelled PNGs, a generator, no simulator — and
+`f396aaa` records the owner's ruling and the route it delegated. Worst 8-bit channel difference **73/255**,
+exhaustive over every (backdrop, source, coverage) triple for Normal.
+
+**The cost model.** `7c806b5` split `LayerPanelUITests` after measuring per-test seconds first;
+`4408fd3` fixed a doc comment that named that class as the suite's floor and went stale the same day.
+
+**BUGS.md** gained the popover that re-presents itself when its host returns, the arithmetic on
+`draw(_:)` views as wide as the whole document, and the three the screenshots found.
 
 ## What this pass learned that outlives it
 
-- **A thing that is drawn and a thing that is stored must be the same thing.** The timeline drew the
-  union of marks and curve keys; the model knew only marks. Two owner-visible bugs from one divergence,
-  and the cure was to make the *accessor* the union rather than to write marks harder — the second
-  option preserves the duplication that caused it.
-- **Both obvious "did the effect change" tests in this tree are wrong, in opposite directions.** One
-  merges cases, the other splits one. The exact question is *which parameter ids does the new grade
-  name*, and it needs no case comparison at all.
-- **A guarantee can hold at the instant you check it and not after.** The cel menu's frame was proved
-  equal to the playhead when the menu opened — and **playback keeps running behind a `.popover`**, so
-  during playback the two walk apart. The menu carries the frame it was opened at now.
-- **`pgrep`-style contention checks are not the only shared resource.** A worker was told to reuse a
-  baseline another session measured on the same commit rather than re-run it, because a fast-tier run
-  under two live workers is exactly the load CLAUDE.md says returns wrong answers.
-- **The merge-from-the-main-worktree trap has now fired four times**, this pass on a docs branch: a bare
-  `git merge --ff-only` after a `cd` merges the branch into itself, says "Already up to date", and
-  pushes nothing.
-- **`duplicateLayer` builds its copy from an explicit argument list**, and that list has now missed a
-  newly added field three times. Three fields ride it as of this pass, with one test pinning all three.
+- **A borrowed comment carries its premise, and the premise does not travel.** `CurveEditor`'s `didMove`
+  sentence was true in `CurveEditor` and false one file over, and the difference was a single extra
+  assignment in the pasting site. The predicate is now `TimelineGraphBand.isTap`, where the fast tier
+  can read it — `TimelineTrackView.swift` is not compiled into the test target, which is exactly why a
+  rule this load-bearing went a whole stage with nothing naming it.
+- **"Having looked at it" is a sample size of one.** Both this pass's visual decisions were made that
+  way; one of them was wrong for three hues in eight, and which channel gets which hue is only its
+  position in `Effect.parameters`.
+- **A test that catches a defect *sometimes* is worse than one that never does.** `applying` walks its
+  keys sorted now — which changes no answer it gives — because the unsorted version killed its mutation
+  five runs in six, off Swift's per-process `Dictionary` hash seed. This repo triages a one-off red as
+  environmental until an isolated re-run says otherwise, so an intermittent test spends that judgement
+  for everyone.
+- **A proximity test proves nothing until its fixture holds two candidates.** Three occurrences, three
+  levels: §11.3 found it, D3's five-mutation pass found it again for `nearestKey`, and the review found
+  it a third time one level down in `nearestChannel`.
+- **Split on seconds, never on tests.** `GraphEditorUITests` is 7/3 and not 5/5 because each gesture
+  test spends ~45 s and nearly all of it is authoring an animated curve — the graph editor edits curves
+  and cannot be the thing that makes the first one. A count-balanced split would have left 3 s on one
+  side and 268 on the other.
+- **A class grows past the floor while nobody is looking.** `GraphEditorUITests` went ~40 s → 271 s
+  across three stages, none of which was a suspicious commit, and became the suite's second-longest
+  class without anyone deciding to make it so.
 
-## Still open, unchanged
+## Still open
 
-TODO (10) Oklab. TODO (23), the owner's not-priority ask that selection membership move from Move to
-Select so Recolour can use it. `ARCHITECTURE_REVIEW.md` findings 2-4. KEYFRAMES §9's four open
-questions, and §11.6's two (the band's height, and the collapsed folder that hides its children's key
-markers). BUGS.md carries the interactive-gesture CPU composites, Fill/Clear on a derived in-between,
-the raster-storage bound, the unclamped zoom, `TextFrame.homography` decoding with no validity check,
-PERFORMANCE item 14, the narrowed mask-cache structural gap, and the new folder-row accessibility gap.
+TODO (10) — the colour switch, route decided and unbuilt, with two questions unruled inside it. TODO
+(23) — selection membership moves from Move to Select, the owner's not-priority ask. TODO (22) is now
+one line: ask 6's *cel* marquee, which the owner put in the future themselves.
 
-Two behaviour questions are owed: save semantics when a project loaded with something unreadable, and
-which faces belong in the font picker's favourites strip.
+KEYFRAMES §8 stage 4 onward. §9's four open questions. §11 has no ruled-open items left — §11.6's three
+are all answered — but three things sit outside it: bezier tangent handles, the cel marquee, and the
+channel that vanishes when its second-to-last key is tapped away.
 
-**Found and deliberately not fixed this pass**: colour, toggle and picker rows still write a whole
-resolved `Effect`; stepped and compound parameters still cannot be keyed; the Render Resolution knob
-still does not reach the expensive half of a derived frame; and `setEffectParameterTrack`'s two
-overloads write a whole curve with no mark, which the union makes harmless today and which the graph
-editor will be the first real caller of.
+`ARCHITECTURE_REVIEW.md` findings 2-4. BUGS.md carries the three the screenshots found, the popover
+that re-presents itself, the track's `draw(_:)` view widths, the interactive-gesture CPU composites,
+Fill/Clear on a derived in-between, the raster-storage bound, the unclamped zoom,
+`TextFrame.homography` decoding with no validity check, PERFORMANCE item 14, the narrowed mask-cache
+structural gap, and the folder-row accessibility gap.
+
+Two behaviour questions are still owed: save semantics when a project loaded with something unreadable,
+and which faces belong in the font picker's favourites strip.
+
+**Found and deliberately not fixed this pass**: the band's backing store is `totalWidth × 96` and the
+largest single store on the track, left because *every* view on the track is `totalWidth` wide and the
+fix belongs to the track; colour, toggle and picker rows still write a whole resolved `Effect`; stepped
+and compound parameters still cannot be keyed; and six of the thirteen effects never match an XCUITest
+query, which is almost certainly a scrollable-menu accessibility limit and will read as a broken app to
+whoever reaches for one next.

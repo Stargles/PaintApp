@@ -106,6 +106,18 @@ the old class in one test — so the class holding it earns two fewer. It is als
 remaining floor, because **no split goes below one test**: ~60 s is the limit here and a fourth class
 would buy almost nothing.
 
+**A second class was split the same day, and it is the more instructive one because it grew under
+observation.** `GraphEditorUITests` was ~40 s when the graph editor's first stage created it, and three
+stages later it was a MEASURED **271 s across 10 tests** — the suite's second-longest class, behind only
+`SelectionAndMoveUITests`. Nothing went wrong: each stage added two or three tests to the obvious place,
+and every one of them pays a fixture cost (there is no shorter way to author an animated channel than two
+keyframe marks plus a slider drag). It is now `GraphEditorUITests` (7 tests / **133 s**) and
+`GraphEditorGestureUITests` (3 / **136 s**) in the same file — 269 s of work against 271 s before, so the
+split cost nothing and the work now occupies two clones. **The lesson is that a class grows past the floor
+while nobody is looking**: `LayerPanelUITests` had to be *discovered* at 515 s, and this one would have
+been discovered later at a worse number. Re-take the class table when you add UI tests to an existing
+class, not when the suite feels slow.
+
 Going below ~3 min still means decomposing `testInterpolateModeEndToEndFromGestureToScrub`; the next
 class worth cutting is `SelectionAndMoveUITests` at 327 s. **Re-take this table rather than trusting it —
 it has gone stale once, been confirmed once, and been acted on once.**

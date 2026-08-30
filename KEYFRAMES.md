@@ -1043,11 +1043,15 @@ tap.
   describe what the hash covers or keep it in step, and the cost argument survives because the band
   is nil while it is closed and holds one layer's channels while it is open. The view reads what it
   draws **out of** the key, `trackMarkers`' rule.
-- **The playhead is a column, not a hairline** — width `pixelsPerFrame`, so 10.5 to 120 pt of 35 %
-  blue, `bringSubviewToFront` on every `movePlayhead`. **Left in front, having looked at it**: a
-  saturated 1.8 pt curve reads through the wash perfectly well, and the one thing an artist wants
-  from a graph editor beside the shape is where the playhead crosses it — fronting the band would cut
-  that column into two halves with a gap where the curves are, which is worse than a tint.
+- ~~**The playhead is a column, not a hairline**, and is left in front because a saturated curve reads
+  through the wash.~~ **Reversed by D3 on 2026-08-30 — see §11.4.** The column is still 10.5 to 120 pt
+  of 35 % blue, re-fronted on every `movePlayhead`; what was wrong was "a saturated 1.8 pt curve reads
+  through the wash perfectly well", which was **true of the one hue it was looked at** and false of
+  three of the palette's eight — orange at 28° renders as a grey stub for the column's width. D3 fronts
+  the band instead, and the objection recorded here did not survive contact: the band's background is
+  white at `backgroundAlpha` **0.06**, so the column stays visually unbroken from the ruler through the
+  band to the row below and only the 1.8 pt strokes and key dots lift clear. Verified by rendered
+  before/after images rather than by reasoning about alpha, which is how the original claim went wrong.
 - **Any drag inside the scroll content is eaten** without
   `scrollView.panGestureRecognizer.require(toFail:)`; both sites are inside `relayout()`, not
   `makeUIView`. D2 adds no recogniser and sets `isUserInteractionEnabled = false` on the band, so the

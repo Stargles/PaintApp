@@ -23,12 +23,14 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(21) Keyframes — stages 0 through 3a merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). `654f863`
-  `renderTree(atFrame:)`; `c09ddf0` `AnimationCurve`; `c6ecb49` + `6a379bf` the effect
-  parameter-descriptor table with the settings bar reading it; `4d55aae` one layer effect parameter
-  animating end to end; `6158e8b` the same on a folder's grade (§2.21); `f2f85b5` **Animate mode and
-  the keyframe button — the first stage the artist can see**. Fast tier **2066 / 2063 / 0 / 3**.
-  **Next is stage 3b — the channel panel and the graph-editor drawer.**
+**Nothing.** No branches, no worktrees, clean tree.
+
+- **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
+  half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
+  channel list, `56b0479` + `bccbfc2` the gestures and the marquee. **§8's next unbuilt stage is 4**,
+  the rest-space dab bake — and **Distort is 5b now**, not last. Fast tier **2227 / 2224 / 0 / 3**;
+  the full suite has not been run since two heavy classes were split, so CLAUDE.md's 22.3 min is stale
+  in the optimistic direction.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
@@ -77,63 +79,25 @@ LAYER_TRANSFORM.md.
       `ContentProvider` seam, which is what makes any derived content visible to thumbnails, onion skin
       and export — and which ROADMAP §0 already flags as blocking item (5).
 
-### (22) Keyframe UI — the workflow the owner wants, replacing Animate mode
+### (22) Select multiple cels at once — the half of ask 6 the owner put in the future
 
-- [ ] The owner, 2026-08-29, six asks in their own words:
+- [ ] The owner, 2026-08-29: *"for the graph editor, the ability to use the select tool on it to select
+      the keyframe nodes and move them could be a good idea, as well as the ability to use it on cels to
+      select multiple at once in the future."*
 
-      1. *"clicking on a keyframe's frame should bring up the option to remove it in the pop up, along
-         with the others already implemented (copy, extend to end, select multiple, clear). Also the
-         option to clear all keyframes in that cel."*
-      2. *"right now lets say a layer is set to chromatic aberration, then the effect is changed. This
-         should destroy the keyframes. Right now when you change it and go back they are still there
-         which means they are being stored where they dont have to."*
-      3. *"I'm not sure if I like the animation mode. Just make it this workflow: select on cel, tap
-         again, tap add keyframe icon in the menu, everything gets saved at that point. Then select
-         another frame, edit sliders etc, tap add keyframe again and the new keyframe data at that frame
-         is saved. When tapping the keyframe button it brings up the list of things being animated and
-         graph editor instead of placing a keyframe (icon and its name also may have to be changed to
-         graph editor). This means removing the current keyframe mode UI. This means that animations
-         will be added to the list when two keyframes are placed, and something changes in one keyframe
-         which from the other."*
-      4. *"The graph editor is going to have a lot more control for the animation keyframes (like graph
-         editors are supposed to have, refer to something like maya or blender). The keyframes for the
-         animations (basically anchor points) can be moved, added and removed from there."*
-      5. *"I wonder if we can integrate the graph editor into the animation timeline, like it pops up
-         above the layer that has it when on. That will save a lot of space and make it visually
-         consistent with the timeline. The list of animations though I am not sure where to put.
-         Probably as a scrollable menu may be best."*
-      6. *"for the graph editor, the ability to use the select tool on it to select the keyframe nodes
-         and move them could be a good idea, as well as the ability to use it on cels to select multiple
-         at once in the future."*
+      **The keyframe half shipped** — D3's marquee rubber-bands the keys in the band and carries the set
+      as one body (KEYFRAMES §11.4). **The cel half is what is left**, and it is the owner's own *"in the
+      future"*: "Select Multiple" already sits in the cel menu, `.disabled(true)`, which is the seam.
 
-      **Ask 3 supersedes KEYFRAMES §2.1, §2.23 and §2.24** — the tap/hold Animate mode, the auto-key on
-      an already-animated channel, and the tap-keys-every-channel rule. That is the owner changing their
-      mind about their own ruling and is not a re-litigation. §2.22 (the button lives in the timeline
-      strip) and §2.17 (the graph editor grows the timeline upward) both survive and ask 5 sharpens §2.17
-      from "above the timeline" to "above the layer row that owns it".
+      The shape is settled by the half that shipped and should be copied rather than re-invented: a drag
+      in empty space rubber-bands, a grab on any member carries the whole selection, and the selection is
+      view state that dies with the surface it was made on. What a cel marquee adds is that its members
+      are document objects rather than curve keys, so the undo bracket is the question D3 did not have to
+      answer.
 
-      **The curve model already covers ask 4.** `AnimationCurve` ships with bezier handles, five tangent
-      modes, per-segment interpolation and per-channel step — `setKey` / `removeKey` are there. What is
-      missing is the editor, not the model.
-
-      **Merged 2026-08-29**: ask 2 in `de4e43e` — a grade's keyframes die with the grade, filtered by
-      parameter id because *both* case-shaped tests in this tree are wrong for it (`kindCode` merges
-      Levels with Curves at 0, `EffectCatalog.isCurrent` splits one `.blur` in two). Ask 3's whole model
-      in `167e44a` — bare keyframe marks, held baselines, the five-arm slider rule, `addKeyframe` /
-      `removeKeyframe` / `clearKeyframes`, and Animate mode deleted outright.
-
-      **Merged since**: ask 1 in `4057e9d` — the cel menu's Add / Remove / Clear Keyframes, and a bare
-      keyframe drawing hollow so the artist can see whether an edit landed on a channel. The graph
-      editor's first stage in `4329e3d` — row geometry as a lookup over per-row heights, behaviour-
-      neutral, because `AnimationTimeline`'s reorder drag counted rows by dividing by a fixed pitch and
-      one tall row would have broken it silently. Both of the owner's device-reported bugs in `a85a316`,
-      which were one divergence: a curve key and a keyframe mark drew identically and were different
-      things, so a diamond could exist that the menu could not remove and the seeding logic skipped.
-      §2.28 is the invariant that closed it.
-
-      **Still open**: asks 4, 5 and 6 — the graph editor itself. **KEYFRAMES §11 is the design**, stages
-      D2 (the band), D3 (the gestures, including the marquee) and D4 (the channel list). §11.3's three
-      silent-failure modes are the brief for D2.
+      Everything else in this item's six asks is merged and its history is in `git log` and
+      [HANDOFF.md](HANDOFF.md); KEYFRAMES §11 is the graph editor's record and §2.26-§2.28 the
+      workflow's.
 ### (23) Selection membership modes belong to Select, not to Move — so Recolour can use them
 
 - [ ] The owner, 2026-08-29: *"Right now the enclosed/cut/touching option for the select move is in
