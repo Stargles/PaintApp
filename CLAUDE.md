@@ -95,10 +95,45 @@ so the work is unchanged and only its granularity moved. **The longest of the th
 515 s**, which drops this file below `SelectionAndMoveUITests` and makes *that*, at 327 s, the suite's
 new floor.
 
-**The full run was not re-measured, so 22.3 min above is now stale in the *optimistic* direction.** Every
-number in this subsection comes from running the three classes alone. The arithmetic says ~3,542
-class-seconds over four clones against a 327 s floor should land nearer ~15–16 min, but that is INFERRED,
-and the honest state is that nobody has watched a full suite since the split.
+**MEASURED 2026-08-30 at `72c7cc1`, and it settles the split question while opening a different one —
+2358 tests in 24.4 min, 2351 passed, 1 failed, 6 skipped** — the one failure
+(`SandwichCompositingUITests/testALayerDropsStraightIntoANodeAndBecomesItsFirstInput`) re-ran clean in
+isolation at 26 s, so it is environmental and not a finding. Freshly erased simulator, under `simlock`,
+nothing else on the machine; the build was incremental (~1 min) so almost all of that is test execution.
+**The splits worked.** `LayerPanelUITests`' 515 s floor is gone — its three heirs measured 206 / 191 /
+112 s — and `GraphEditorUITests` came in at 156 / 149. But the ~15–16 min this section INFERRED after the
+splits did not arrive, and **the reason is not another long class**.
+
+| class | seconds | tests |
+|---|---|---|
+| **`SandwichCompositingUITests`** | **344** | 10 |
+| `SelectionAndMoveUITests` | 300 | 10 |
+| `BlendModesAndCompositorUITests` | 286 | 8 |
+| `PerfBaselineTests` | 220 | 53 |
+| `LayerFolderAndMaskMenuUITests` | 206 | 7 |
+| `EraserAndPersistenceUITests` | 194 | 7 |
+| `LayerPanelControlsUITests` | 191 | 7 |
+| `GraphEditorUITests` / `GraphEditorGestureUITests` | 156 / 149 | 7 / 3 |
+
+**3,893 class-seconds across 102 classes. Four clones therefore hold 16.2 min of ideal work against a
+24.4 min run, and the longest class is 5.7 min — so for the first time the gap is NOT the
+indivisible-class story this section has told since 2026-08-15.** About 7 min, ~45% over ideal, is
+scheduling: clone boot, per-class setup, and the tail where classes run out before the clones do.
+**That moves the lever.** Splitting further cannot recover it, and past some point makes it worse
+because every new class pays its own setup — INFERRED from the arithmetic, not from an experiment, and
+the experiment nobody has run is a full suite with the class count deliberately *reduced*.
+
+**`SandwichCompositingUITests` is the new longest class and it is also the one that reds**, which is
+what this file already predicts of a class held long under parallel clones. It is the next split
+candidate on both counts.
+
+**A run measured against a busy machine is not a measurement, and this section nearly recorded one.**
+The first attempt ran concurrently with a research workflow whose agents read files and compiled with
+`swiftc`. It reported **28.5 min** — four minutes worse — while its per-class seconds came out at 3,864
+against the clean run's 3,893, i.e. within noise. **Contention cost wall clock through scheduling and
+left the per-test durations almost untouched**, so the class table looked right while the headline was
+wrong by four minutes. That is the banner-versus-count trap wearing yet another costume: measure the
+suite on an idle machine, or do not write the number down.
 
 **Balance a split on measured seconds, not on test count**, which is why these are 5/7/7 and not 6/6/7:
 `testRepeatedAddDeleteLayersDoesNotCrashOrFreeze` measured 71 s and then 58 s on two runs — a seventh of
@@ -118,9 +153,10 @@ while nobody is looking**: `LayerPanelUITests` had to be *discovered* at 515 s, 
 been discovered later at a worse number. Re-take the class table when you add UI tests to an existing
 class, not when the suite feels slow.
 
-Going below ~3 min still means decomposing `testInterpolateModeEndToEndFromGestureToScrub`; the next
-class worth cutting is `SelectionAndMoveUITests` at 327 s. **Re-take this table rather than trusting it —
-it has gone stale once, been confirmed once, and been acted on once.**
+`testInterpolateModeEndToEndFromGestureToScrub` is **MEASURED at 150 s run alone** (2026-08-30), so it
+is half of its class's floor by itself and decomposing it is still what going below ~3 min would need.
+The next class worth cutting is `SandwichCompositingUITests` at 344 s. **Re-take this table rather than
+trusting it — it has now gone stale twice, been confirmed once, and been acted on once.**
 
 If you split a class again, **verify by test count from the xcresult** — a test that stops running
 still prints green — and take the count *before* you merge as well as after: a split branch cut
