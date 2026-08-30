@@ -1191,6 +1191,26 @@ free run, or shift later cels rightward — are timeline feature design and a se
 brush throws away a size the user just dialled in. Partly intentional per its doc comment — needs a
 product call, not just a fix.
 
+## A folder's key markers are drawn but cannot be asserted (2026-08-29)
+
+`TimelineFolderRowView` sets `isAccessibilityElement = true` on itself, which promotes the whole row to
+one element and takes its children out of the accessibility tree. One of those children is its
+`TimelineKeyMarkerBand`, which publishes `timeline.folderTrack.<name>.keys` with an encoded
+`accessibilityValue` — **and no XCUITest can read it**, because the element it is on is not in the tree.
+
+Layer rows are unaffected: `TimelineRowView` is not an accessibility element, so
+`timeline.keyMarkers.<layerIndex>` is queryable and is what the cel-menu UI test reads.
+
+So a folder's grade animates (§2.21), its keyframes draw, and the only assertion that could catch them
+regressing is unreachable. That is the same species as *"a green backend-parity test does not prove both
+backends ran"* above — the suite is silent about the folder arm rather than green about it, and silence
+reads as coverage.
+
+The fix is one line in the wrong place: dropping `isAccessibilityElement` on the folder row would put its
+markers back in the tree, and would also put everything else in that row back in — which is a change to a
+shipped row's accessibility shape and wants its own branch, not a ride-along. Found while adding the cel
+menu's keyframe items, and deliberately not fixed there.
+
 ## Missing / stubbed, as designed
 
 - Distort/Warp transform modes render and gesture identically to Uniform but still appear in the Move
