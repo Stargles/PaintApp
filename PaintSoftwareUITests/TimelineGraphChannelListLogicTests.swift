@@ -11,7 +11,10 @@ import CoreGraphics
 ///
 /// Several of the tests below exist because the thing they check is a decision that looks arbitrary
 /// from inside the code and would be "tidied" away by the next reader: the list is built from the
-/// **strict** membership predicate, the filter is applied **before** the layout key rather than at
+/// **loose** membership predicate and carries the strict one per row (which is the opposite of what it
+/// did until 2026-08-30 — see
+/// `testTheListsRowsAreEveryCurveAndEachRowSaysWhetherItIsAnAnimation`), the filter is applied
+/// **before** the layout key rather than at
 /// draw time, a channel's colour survives its neighbour being hidden, a group's mixed box resolves
 /// **upward**, and the group's *name* is read at the popup rather than carried on the channel — which
 /// looks like a detour until an effect whose `displayName` moves relays out the whole timeline.
@@ -106,23 +109,40 @@ final class TimelineGraphChannelListLogicTests: XCTestCase {
                        "…in `Effect.parameters` order, which is the order the band draws them in")
     }
 
-    /// **The rows are exactly the band's channels — the strict predicate, never the loose one.**
+    /// **The rows are exactly the band's channels, and each row says which of the two predicates it
+    /// satisfies.**
     ///
-    /// A channel keyed twice at one value is a curve *in force* and is not an animation; the auto-key
-    /// arm has to see it and the list must not, or the artist is offered a checkbox for a flat line
-    /// they never drew. Pinned against the model's own accessor rather than against a literal, which
-    /// is §2.28's rule: two implementations of one invariant is the defect the union was written for.
-    func testTheListsRowsAreExactlyTheBandsChannels() {
+    /// **This assertion was reversed on 2026-08-30 and the reversal is the point.** It used to pin the
+    /// rows equal to `listedAnimationChannelIDs` — the strict predicate — on the argument that a flat
+    /// line the artist did not author must not be offered a checkbox. What that argument did not weigh
+    /// is §11.4's vanishing channel: tapping away a channel's second-to-last key drops it below the
+    /// strict predicate, so the whole curve left the band *mid-gesture*, and a band that does not draw
+    /// a channel is a band no tap can add a key back to. The band now draws both kinds and dashes the
+    /// flat one, so the list lists both and labels them.
+    ///
+    /// Both predicates are still pinned against the model's own accessors rather than against
+    /// literals, which is §2.28's rule and is now doing twice the work it was: membership is
+    /// `curvedEffectChannelIDs`, and `isAnimated` is `listedAnimationChannelIDs`.
+    func testTheListsRowsAreEveryCurveAndEachRowSaysWhetherItIsAnAnimation() throws {
         let manager = bandManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
                                         to: linear([(0, 1.0), (6, 1.0)]))
 
-        let rows = (manager.graphChannelGroups ?? []).flatMap { $0.rows.map(\.parameterID) }
-        XCTAssertEqual(rows, manager.listedAnimationChannelIDs(of: target(manager)))
-        XCTAssertEqual(rows, [brightnessID],
-                       "A flat curve is in force and is still not an animation, so it is not a row")
-        XCTAssertEqual(manager.curvedEffectChannelIDs(of: target(manager)).count, 2,
-                       "PREMISE: the loose predicate does see it, which is what the two are for")
+        let rows = (manager.graphChannelGroups ?? []).flatMap(\.rows)
+        XCTAssertEqual(rows.map(\.parameterID), manager.curvedEffectChannelIDs(of: target(manager)),
+                       "Every channel carrying a curve is a row, in `Effect.parameters` order")
+        XCTAssertEqual(rows.map(\.parameterID), [brightnessID, contrastID])
+        XCTAssertEqual(rows.filter(\.isAnimated).map(\.parameterID),
+                       manager.listedAnimationChannelIDs(of: target(manager)),
+                       "…and the strict predicate is what the flag carries, not what the list omits")
+        XCTAssertEqual(rows.map(\.isAnimated), [true, false],
+                       "A curve keyed twice at one value is in force and is not an animation")
+
+        XCTAssertEqual(drawnIDs(manager), [brightnessID, contrastID],
+                       "The band draws both; the dash is what tells them apart")
+        XCTAssertEqual(TimelineGraphBand.encode(try XCTUnwrap(manager.graphBandContent)),
+                       "brightnessContrast.brightness:0,10|brightnessContrast.contrast~0,6",
+                       "`~` for a flat channel, `:` for an animation — the tier that cannot see the dash")
     }
 
     /// A hidden channel keeps its row. The list is where a channel is switched back on, so a list

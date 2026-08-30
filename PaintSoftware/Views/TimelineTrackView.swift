@@ -1557,10 +1557,14 @@ private final class TimelineGraphBandView: UIView {
             let range = TimelineGraphBand.range(uiRange: channel.uiRange,
                                                 keyValues: channel.curve.keys.map(\.value))
             let colour = TimelineGraphBand.colour(forDescriptorIndex: channel.descriptorIndex)
+            // **A channel that is not an animation is dashed and dimmed, and keeps its hue** —
+            // `TimelineGraphBand.Channel.isAnimated`. The hue is what says *which* channel and must
+            // not move; what the dash says is that this line is flat because there is nothing to
+            // animate, rather than because the artist authored a hold.
             let stroke = UIColor(hue: CGFloat(colour.hue),
                                  saturation: CGFloat(colour.saturation),
                                  brightness: CGFloat(colour.brightness),
-                                 alpha: 1)
+                                 alpha: channel.isAnimated ? 1 : TimelineGraphBand.flatAlpha)
 
             // One sample per point of width — `CurveEditor.curvePath`'s density, which is what makes
             // a bezier read as a curve rather than as a chain of chords. The overshoot a bezier can
@@ -1579,6 +1583,10 @@ private final class TimelineGraphBandView: UIView {
             stroke.setStroke()
             path.lineWidth = TimelineGraphBand.lineWidth
             path.lineJoinStyle = .round
+            if !channel.isAnimated {
+                path.setLineDash(TimelineGraphBand.flatDash, count: TimelineGraphBand.flatDash.count,
+                                 phase: 0)
+            }
             path.stroke()
 
             // A dot per key, so the frames the artist authored are legible against the frames the
@@ -1614,15 +1622,24 @@ private final class TimelineGraphBandView: UIView {
                     stem.stroke()
                 }
 
-                stroke.setFill()
-                UIColor.black.withAlphaComponent(0.6).setStroke()
                 let dot = UIBezierPath(ovalIn: CGRect(x: x - TimelineGraphBand.keyRadius,
                                                       y: y - TimelineGraphBand.keyRadius,
                                                       width: TimelineGraphBand.keyRadius * 2,
                                                       height: TimelineGraphBand.keyRadius * 2))
-                dot.fill()
                 dot.lineWidth = 1
-                dot.stroke()
+                if channel.isAnimated {
+                    stroke.setFill()
+                    UIColor.black.withAlphaComponent(0.6).setStroke()
+                    dot.fill()
+                    dot.stroke()
+                } else {
+                    // **Hollow, in the channel's own colour.** A flat channel's keys still have to be
+                    // findable — they are what a tap removes, and removing the last of them is the
+                    // only way to be rid of the track — but a filled dot on a dashed line reads as an
+                    // animation whose curve has been drawn wrong.
+                    stroke.setStroke()
+                    dot.stroke()
+                }
 
                 // A ring rather than a bigger or differently coloured dot: the dot's own size says
                 // "a key is here" and its colour says which channel, and a selection that changed

@@ -62,6 +62,20 @@ enum TimelineGraphBand {
     static let backgroundWhite: CGFloat = 1
     static let backgroundAlpha: CGFloat = 0.06
 
+    /// **How a channel that is not an animation is told apart from one that is** — `Channel.isAnimated`.
+    ///
+    /// A dash and a dimming, both, and neither is decoration. The dash is the distinction the doc on
+    /// `channels(effect:tracks:)` used to say could not be made — *"a flat line with no way to tell it
+    /// from one the artist authored"* — and it is the one property a flat line still has room for,
+    /// having no shape to carry it. The dimming puts it behind the animations in the same band, which
+    /// is the right order of attention: it is a curve in force, not one being animated.
+    ///
+    /// Its key dots are drawn **hollow** for the same reason and in the same colour, so the channel is
+    /// still identifiable by hue and its keys are still visibly keys — they are what a tap has to be
+    /// able to reach to remove, and what makes the state a door rather than a wall.
+    static let flatDash: [CGFloat] = [4, 3]
+    static let flatAlpha: CGFloat = 0.5
+
     // MARK: - What is on the band
 
     /// One curve. Everything the band draws for a channel, and nothing else — which is what lets
@@ -105,6 +119,24 @@ enum TimelineGraphBand {
         /// and it is distinct per channel by construction — every curve in one band comes from one
         /// layer, hence from one effect, hence from one table.
         let descriptorIndex: Int
+        /// **Whether this curve is an *animation*, or merely a curve in force** —
+        /// `AnimationCurve.isAnimated`: two or more keys whose values are not all equal.
+        ///
+        /// **Both kinds are drawn, and they are drawn differently** — KEYFRAMES.md §11.4's "one thing
+        /// found and left", settled 2026-08-30. A channel that is not an animation is drawn as a
+        /// **dashed, dimmed** line (`flatDash`, `flatAlpha`) with hollow key dots. The objection this
+        /// answers is the one `channels(effect:tracks:)`' doc used to make against drawing such a
+        /// channel at all — *"a flat line in the band with no way to tell it from one the artist
+        /// authored"* — and the answer is the dash: there is now a way to tell, so the two states are
+        /// **distinguished** rather than merged.
+        ///
+        /// What that objection did not weigh is the state it leaves behind. Tapping away a channel's
+        /// second-to-last key drops it below the predicate, and with only animations drawn the whole
+        /// curve left the band **mid-gesture** — under the finger that was editing it. One press of
+        /// Undo brought it back, but nothing on screen said so, and the band was then the one surface
+        /// that could not put it back: a channel the band does not draw is a channel no tap in the
+        /// band can add a key to.
+        let isAnimated: Bool
 
         /// The y axis this channel is drawn against — `range(uiRange:keyValues:)` applied to this
         /// channel's own two inputs, named once so the drawing and the hit-testing cannot pick
@@ -175,18 +207,13 @@ enum TimelineGraphBand {
         return max(max(sceneFrameCount, 0), lastKey.map { $0 + 1 } ?? 0)
     }
 
-    /// **The channels a band draws: the target's *animations*, by the strict predicate.**
+    /// **Every channel the band lists: each of the target's effect parameters that carries a curve at
+    /// all**, in `Effect.parameters` order, each tagged with whether that curve is an *animation*.
     ///
-    /// §11.5's ruling — `AnimationCurve.isAnimated`, two or more keys not all holding the same
-    /// value — and deliberately **not** the loose `curvedEffectChannelIDs` the auto-key arm uses. A
-    /// channel keyed twice at one value is a curve in force and is not an animation; drawing it
-    /// would put a flat line in the band with no way to tell it from one the artist authored.
-    ///
-    /// **This is the same walk `CanvasManager.channelIDs` makes and it must stay so.** Both filter
-    /// `Effect.parameters` by `isScalarAnimatable` and then by the curve predicate; the ids this
-    /// returns are pinned equal to `listedAnimationChannelIDs(of:)` in
-    /// `TimelineGraphBandLogicTests`, because two implementations of one invariant is the defect
-    /// §2.28 was written about.
+    /// This is `CanvasManager.curvedEffectChannelIDs`' membership — the **loose** predicate — with the
+    /// strict one carried on the value rather than applied to it. `channels(effect:tracks:)` below is
+    /// this filtered, so there is one walk and one place the two predicates are stated against each
+    /// other; splitting them into two functions is what would let them drift.
     ///
     /// **A target with no grade contributes nothing**, which is `keyframes(of:)`'s asymmetry read
     /// the same way: a layer that is not in effect form grades nothing, so tracks left on it by a
@@ -197,20 +224,39 @@ enum TimelineGraphBand {
     /// the descriptor comes back with the curve rather than being looked up again per id, which the
     /// obvious spelling (`listedAnimationChannelIDs` then `first(where:)` per id) would make a
     /// linear scan over a rebuilt table per channel.
-    static func channels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
+    static func allChannels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
         guard let effect, !tracks.isEmpty else { return [] }
         return effect.parameters.enumerated().compactMap { index, parameter in
             guard parameter.isScalarAnimatable,
                   let curve = tracks[parameter.id],
-                  curve.isAnimated
+                  !curve.isEmpty
             else { return nil }
             return Channel(parameterID: parameter.id,
                            name: parameter.name,
                            curve: curve,
                            uiRange: parameter.uiRange,
                            modelDomain: parameter.modelDomain,
-                           descriptorIndex: index)
+                           descriptorIndex: index,
+                           isAnimated: curve.isAnimated)
         }
+    }
+
+    /// **The target's *animations*, by the strict predicate** — `AnimationCurve.isAnimated`, two or
+    /// more keys not all holding the same value.
+    ///
+    /// **This is the same walk `CanvasManager.channelIDs` makes and it must stay so.** Both filter
+    /// `Effect.parameters` by `isScalarAnimatable` and then by the curve predicate; the ids this
+    /// returns are pinned equal to `listedAnimationChannelIDs(of:)` in
+    /// `TimelineGraphBandLogicTests`, because two implementations of one invariant is the defect
+    /// §2.28 was written about.
+    ///
+    /// **It is no longer "what the band draws", and that is 2026-08-30's change.** The band draws
+    /// `allChannels` and dashes the ones this refuses — see `Channel.isAnimated` for why, and for the
+    /// objection that used to be recorded here. What this still answers is the model's own question,
+    /// *is this channel an animation*, which is what the pin above is about and what the channel
+    /// list's rows are labelled by.
+    static func channels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
+        allChannels(effect: effect, tracks: tracks).filter(\.isAnimated)
     }
 
     // MARK: - The y axis
@@ -754,7 +800,13 @@ enum TimelineGraphBand {
     // MARK: - What a test can see
 
     /// The band's accessibility value: each channel as `id:frame,frame,…`, joined by `|`, and
-    /// `"empty"` for a band open on a layer that animates nothing.
+    /// `"empty"` for a band open on a layer that carries no curve at all.
+    ///
+    /// **A channel that is not an animation takes a `~` where the `:` would be** — `id~frame,frame,…`
+    /// — because the two states are drawn differently and a value that spelled them the same would
+    /// make the distinction unassertable from the tier that cannot see the dash. One character, and
+    /// it is the separator rather than a suffix so that a reader's eye finds it at the same place in
+    /// every entry.
     ///
     /// **An encoded value on one element rather than one element per curve**, which is
     /// `TimelineKeyMarkers.encode`'s convention and `CurveEditor.encode`'s before it, and it exists
@@ -768,7 +820,8 @@ enum TimelineGraphBand {
     static func encode(_ channels: [Channel]) -> String {
         guard !channels.isEmpty else { return "empty" }
         return channels.map { channel in
-            channel.parameterID + ":" + channel.curve.keys.map { "\($0.frame)" }.joined(separator: ",")
+            channel.parameterID + (channel.isAnimated ? ":" : "~")
+                + channel.curve.keys.map { "\($0.frame)" }.joined(separator: ",")
         }.joined(separator: "|")
     }
 
@@ -776,7 +829,7 @@ enum TimelineGraphBand {
     /// alone can express.**
     ///
     /// A band the artist has emptied by unchecking every box draws the same nothing as a band on a
-    /// layer that animates nothing, and `"empty"` is the wrong word for it: `"empty"` exists because
+    /// layer that carries no curve, and `"empty"` is the wrong word for it: `"empty"` exists because
     /// an artist looking for a curve that was never there is the failure, and here the curves *are*
     /// there. `"hidden"` says the band is blank on purpose and the way back is the list. It is what
     /// the view publishes, and it is why `Content` carries `hiddenCount` rather than only a shorter
@@ -863,8 +916,12 @@ extension CanvasManager {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return nil }
-        let all = TimelineGraphBand.channels(effect: storedEffect(of: target),
-                                             tracks: keyframeState(of: target).tracks)
+        // **`allChannels`, not `channels`** — every curve the layer carries, animation or not, each
+        // tagged. §11.4's vanishing channel: with only animations drawn, tapping away a channel's
+        // second-to-last key took the whole curve out of the band under the finger that was editing
+        // it, and left the band unable to put it back.
+        let all = TimelineGraphBand.allChannels(effect: storedEffect(of: target),
+                                                tracks: keyframeState(of: target).tracks)
         let shown = TimelineGraphChannelList.visible(all,
                                                      hidden: graphChannelFilter.hidden(on: target))
         return TimelineGraphBand.Content(layerIndex: expansion.layerIndex,

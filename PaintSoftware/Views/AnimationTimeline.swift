@@ -657,21 +657,39 @@ struct AnimationTimeline: View {
         .padding(.vertical, 7)
     }
 
+    /// One channel's row.
+    ///
+    /// **A row for a channel that is not an animation looks different, and that is §11.4's ruling of
+    /// 2026-08-30 reaching this surface.** The band draws such a channel as a dashed, dimmed flat line
+    /// (`TimelineGraphBand.Channel.isAnimated`), and the list is where the artist reads what the band
+    /// is showing them — so the swatch is drawn **hollow**, matching the hollow key dots, and the name
+    /// carries the word the picture cannot. Without it the list would say "Brightness, checked" about
+    /// a line that is visibly not an animation, which is the same "no way to tell them apart" the dash
+    /// exists to answer.
     private func graphChannelRow(_ row: TimelineGraphChannelList.Row) -> some View {
         // The swatch is the band's colour for this curve, taken from the **descriptor** index the
         // row carries — the same input the band draws with, so hiding a channel repaints nothing.
         let colour = TimelineGraphBand.colour(forDescriptorIndex: row.descriptorIndex)
+        let swatch = Color(hue: colour.hue, saturation: colour.saturation,
+                           brightness: colour.brightness)
         return Button(action: {
             canvasManager.setGraphChannels([row.parameterID], visible: !row.isVisible)
         }) {
             HStack(spacing: 8) {
                 Image(systemName: row.isVisible ? "checkmark.square.fill" : "square")
-                Circle()
-                    .fill(Color(hue: colour.hue, saturation: colour.saturation,
-                                brightness: colour.brightness))
-                    .frame(width: 8, height: 8)
-                    .opacity(row.isVisible ? 1 : 0.3)
+                Group {
+                    if row.isAnimated {
+                        Circle().fill(swatch)
+                    } else {
+                        Circle().strokeBorder(swatch, lineWidth: 1.5)
+                    }
+                }
+                .frame(width: 8, height: 8)
+                .opacity(row.isVisible ? 1 : 0.3)
                 Text(row.name).font(.caption)
+                if !row.isAnimated {
+                    Text("not animated").font(.caption2).foregroundColor(.secondary)
+                }
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
@@ -682,7 +700,9 @@ struct AnimationTimeline: View {
         .padding(.trailing, 12)
         .padding(.vertical, 6)
         .accessibilityIdentifier("timeline.graphChannels.\(row.parameterID)")
-        .accessibilityValue(row.isVisible ? "on" : "off")
+        // Two facts on one value, comma-separated, because a row has two independent states and
+        // XCUITest gives an element exactly one string to carry them in.
+        .accessibilityValue((row.isVisible ? "on" : "off") + (row.isAnimated ? "" : ",flat"))
     }
 
     /// Interpolate mode's entry point, next to onion skin and loop rather than in the canvas's top

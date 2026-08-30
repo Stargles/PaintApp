@@ -42,10 +42,18 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         })
     }
 
+    /// The model's own answer: the channels that are animations.
     private func channels(_ manager: CanvasManager) -> [TimelineGraphBand.Channel] {
         let target = target(manager)
         return TimelineGraphBand.channels(effect: manager.storedEffect(of: target),
                                           tracks: manager.keyframeState(of: target).tracks)
+    }
+
+    /// What the band lists: every channel carrying a curve, each flagged with whether it is one.
+    private func allChannels(_ manager: CanvasManager) -> [TimelineGraphBand.Channel] {
+        let target = target(manager)
+        return TimelineGraphBand.allChannels(effect: manager.storedEffect(of: target),
+                                             tracks: manager.keyframeState(of: target).tracks)
     }
 
     // MARK: - Which channels the band draws
@@ -68,11 +76,16 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        "…which is `Effect.parameters` order, not dictionary order")
     }
 
-    /// **The strict predicate, not the loose one** (§11.5). A channel keyed twice at the same value
-    /// is a curve *in force* — the auto-key arm has to see it or an edit routed to the stored base
-    /// springs back under the artist's finger — and it is not an animation. Drawing it would put a
-    /// flat line in the band with no way to tell it from one that was authored.
-    func testAFlatCurveIsInForceAndIsStillNotDrawn() {
+    /// **A flat curve is in force, is not an animation, and is drawn — dashed.**
+    ///
+    /// A channel keyed twice at the same value is a curve *in force* (the auto-key arm has to see it
+    /// or an edit routed to the stored base springs back under the artist's finger) and is not an
+    /// animation. `channels` still refuses it, which is what the model's own predicate means; what
+    /// changed on 2026-08-30 is that the *band* draws `allChannels` and tells the two apart by the
+    /// dash rather than by omission. The argument recorded here until then — *"drawing it would put a
+    /// flat line in the band with no way to tell it from one that was authored"* — is answered by
+    /// there now being a way, and §11.4's vanishing channel is what made the trade worth taking.
+    func testAFlatCurveIsInForceIsNotAnAnimationAndIsDrawnDashed() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (10, 1.0)]))
@@ -80,7 +93,52 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.curvedEffectChannelIDs(of: target(manager)), [brightnessID],
                        "Fixture: the loose predicate sees it, which is what auto-key runs on")
         XCTAssertEqual(channels(manager).map(\.parameterID), [],
-                       "…and the band draws nothing, because it is not an animation")
+                       "The strict predicate still refuses it, and still equals the model's own")
+        XCTAssertEqual(allChannels(manager).map(\.parameterID), [brightnessID],
+                       "…and the band lists it anyway")
+        XCTAssertEqual(allChannels(manager).map(\.isAnimated), [false],
+                       "…flagged, which is what the dash and the hollow dots are drawn from")
+        XCTAssertEqual(TimelineGraphBand.encode(allChannels(manager)),
+                       "brightnessContrast.brightness~0,10",
+                       "`~` rather than `:`, so the tier that cannot see a dash can still see this")
+    }
+
+    /// **§11.4's vanishing channel, end to end through the model.**
+    ///
+    /// Tapping away a channel's second-to-last key drops its curve below `isAnimated`. Until
+    /// 2026-08-30 that took the whole curve out of the band *mid-gesture*, under the finger that was
+    /// editing it — one press of Undo away, but nothing on screen said so, and the band was then the
+    /// one surface that could not put it back, a channel it does not draw being a channel no tap in it
+    /// can add a key to. The curve now stays, dashed, and the remaining key stays grabbable.
+    func testRemovingTheSecondToLastKeyLeavesTheCurveOnTheBandRatherThanTakingItAway() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (10, 2.0)]))
+        manager.isGraphEditorOpen = true
+        XCTAssertEqual(TimelineGraphBand.encode(manager.graphBandContent!.channels),
+                       "brightnessContrast.brightness:0,10", "PREMISE: an animation, drawn solid")
+
+        var curve = manager.keyframeState(of: target(manager)).tracks[brightnessID]!
+        curve.removeKey(atFrame: 10)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID, to: curve)
+
+        let after = manager.graphBandContent!
+        XCTAssertEqual(TimelineGraphBand.encode(after.channels), "brightnessContrast.brightness~0",
+                       "The curve is still on the band, and now says it is not an animation")
+        XCTAssertEqual(after.hiddenCount, 0, "It is not hidden — nothing was filtered")
+
+        // …and the key that is left can still be reached, which is what makes the state a door.
+        let remaining = after.channels.first!
+        XCTAssertEqual(TimelineGraphBand.nearestKey(to: dot(remaining, frame: 0),
+                                                    channels: after.channels,
+                                                    pixelsPerFrame: base, bandHeight: band),
+                       TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0))
+
+        // Removing that one too takes the track away entirely, which is the honest end of the path:
+        // `setEffectParameterTrack` drops an empty curve rather than leaving a husk.
+        curve.removeKey(atFrame: 0)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID, to: curve)
+        XCTAssertEqual(TimelineGraphBand.encode(manager.graphBandContent!), "empty")
     }
 
     /// A layer that is not in effect form grades nothing, so tracks left on it by a kind change are

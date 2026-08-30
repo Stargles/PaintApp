@@ -9,10 +9,15 @@ import Foundation
 /// so they are visible or invisible like a whole. This is basically like the hide/show layers and
 /// layer groups."*
 ///
-/// So the band keeps showing **every** animated channel and this list takes some of them away again.
-/// It never adds one: `visible(_:hidden:)` is a `filter`, so whatever a stale id says, the answer is
-/// always a subset of `TimelineGraphBand.channels(effect:tracks:)` — the strict `isAnimated`
-/// predicate, never the loose `curvedEffectChannelIDs` the auto-key arm uses.
+/// So the band keeps showing **every** channel that carries a curve and this list takes some of them
+/// away again. It never adds one: `visible(_:hidden:)` is a `filter`, so whatever a stale id says, the
+/// answer is always a subset of `TimelineGraphBand.allChannels(effect:tracks:)`.
+///
+/// **Membership was the strict `isAnimated` predicate until 2026-08-30 and is now the loose one**, with
+/// the strict answer carried per row as `Row.isAnimated` — §11.4's vanishing channel, and the amendment
+/// to §11.5 it forced. The band draws a channel that is *not* an animation as a dashed flat line, so
+/// the list has to list it: the filter can hide a channel, and a channel hidden while it was an
+/// animation must not reappear the moment a key is tapped away from it, nor become unreachable.
 ///
 /// **Why this is a type and not arithmetic inside `AnimationTimeline`.** The same reason
 /// `TimelineGraphBand` and `TimelineKeyMarkers` are types: `Views/AnimationTimeline.swift` is **not**
@@ -123,6 +128,14 @@ enum TimelineGraphChannelList {
         /// undo that on this surface only, and the two would disagree about which curve is which.
         let descriptorIndex: Int
         let isVisible: Bool
+        /// **Whether the band draws this one as a curve or as a dashed flat line** —
+        /// `TimelineGraphBand.Channel.isAnimated`, passed straight through.
+        ///
+        /// The list shows both because the band draws both (§11.4, settled 2026-08-30), and it has to
+        /// show both for a reason the band alone does not supply: the filter can hide a channel, and a
+        /// channel hidden while it was an animation must not reappear the moment a key is tapped away
+        /// from it. A row the artist cannot see is a row they cannot switch back on.
+        let isAnimated: Bool
     }
 
     /// One group: every channel sharing an id prefix, with the whole-group box the owner asked for.
@@ -180,10 +193,9 @@ enum TimelineGraphChannelList {
 
     /// **The list the popup shows: every channel the band could draw, grouped, with its box's state.**
     ///
-    /// Built from the band's *unfiltered* channels, so the rows are exactly the band's membership —
-    /// `channelIsAnimated`, the strict predicate — and hiding a channel removes it from the band
-    /// without removing it from the list it is switched off in. A list that dropped its own hidden
-    /// rows would be a one-way door.
+    /// Built from the band's *unfiltered* channels, so the rows are exactly the band's membership, and
+    /// hiding a channel removes it from the band without removing it from the list it is switched off
+    /// in. A list that dropped its own hidden rows would be a one-way door.
     ///
     /// Groups and rows both keep `Effect.parameters` order: a group is ordered by where its first
     /// channel appears, so the list cannot reshuffle itself when a channel starts animating.
@@ -199,7 +211,8 @@ enum TimelineGraphChannelList {
                 Row(parameterID: channel.parameterID,
                     name: channel.name,
                     descriptorIndex: channel.descriptorIndex,
-                    isVisible: !hidden.contains(channel.parameterID)))
+                    isVisible: !hidden.contains(channel.parameterID),
+                    isAnimated: channel.isAnimated))
         }
         return order.map { Group(id: $0, name: names[$0] ?? $0, rows: rows[$0] ?? []) }
     }
@@ -229,8 +242,8 @@ extension CanvasManager {
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return nil }
         let effect = storedEffect(of: target)
-        let channels = TimelineGraphBand.channels(effect: effect,
-                                                  tracks: keyframeState(of: target).tracks)
+        let channels = TimelineGraphBand.allChannels(effect: effect,
+                                                     tracks: keyframeState(of: target).tracks)
         return TimelineGraphChannelList.groups(of: channels,
                                                hidden: graphChannelFilter.hidden(on: target),
                                                names: TimelineGraphChannelList.groupNames(of: effect))
@@ -251,8 +264,8 @@ extension CanvasManager {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return }
-        let listed = TimelineGraphBand.channels(effect: storedEffect(of: target),
-                                                tracks: keyframeState(of: target).tracks)
+        let listed = TimelineGraphBand.allChannels(effect: storedEffect(of: target),
+                                                   tracks: keyframeState(of: target).tracks)
             .map(\.parameterID)
         graphChannelFilter = graphChannelFilter.setting(ids, visible: visible,
                                                         on: target, listed: listed)
