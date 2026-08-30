@@ -1,0 +1,23 @@
+scene1 blue on orange: max channel delta 73 at (226,36)
+scene1 red on green: max channel delta 68 at (228,36)
+scene2 blue dab on orange: max channel delta 73 at (211,91)
+scene2 red dab on green: max channel delta 67 at (208,100)
+scene3 orange -> blue: max channel delta 73 at (234,0) i.e. t=0.198
+scene3 green -> red: max channel delta 66 at (223,0) i.e. t=0.189
+scene3 cyan -> red: max channel delta 66 at (223,0) i.e. t=0.189
+scene3 yellow -> violet: max channel delta 64 at (830,0) i.e. t=0.704
+scene4 delta table:
+  coverage 0.0: today 255 -> linear 255  (delta 0)
+  coverage 0.1: today 230 -> linear 243  (delta 13)
+  coverage 0.2: today 204 -> linear 231  (delta 27)
+  coverage 0.3: today 179 -> linear 218  (delta 39)
+  coverage 0.4: today 153 -> linear 203  (delta 50)
+  coverage 0.5: today 128 -> linear 188  (delta 60)
+  coverage 0.6: today 102 -> linear 170  (delta 68)
+  coverage 0.7: today 77 -> linear 149  (delta 72)
+  coverage 0.8: today 51 -> linear 124  (delta 73)
+  coverage 0.9: today 25 -> linear 89  (delta 64)
+  coverage 1.0: today 0 -> linear 0  (delta 0)
+scene5 Multiply blue-on-orange: max delta 73 at (190,32) — interior 4, edge 73
+scene5 Screen blue-on-orange: max delta 73 at (183,32) — interior 22, edge 73
+EXHAUSTIVE (Normal, one channel): worst 8-bit delta 73, backdrop 0, source 252, coverage 0.227
