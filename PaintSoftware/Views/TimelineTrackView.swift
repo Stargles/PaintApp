@@ -119,11 +119,12 @@ struct TimelineTrackView: UIViewRepresentable {
         private var folderRowViews: [TimelineFolderRowView] = []
         private let playheadView = TimelinePlayheadView()
 
-        /// Which `layers` index each laid-out track row belongs to, and where that row sits
-        /// vertically — recorded on every `relayout` so a drag can turn a finger's y into a target
-        /// layer. Folder rows are absent by construction: a folder is a summary of its children and
-        /// has no track of its own to drop a block onto.
-        private var layerRowGeometry: [(layerIndex: Int, minY: CGFloat, maxY: CGFloat)] = []
+        /// Which `layers` index each laid-out track row belongs to, the strip a drop on it counts as
+        /// landing in, and how tall the row itself is — recorded on every `relayout` so a drag can
+        /// turn a finger's y into a target layer and hang its ghost at that row's size. Folder rows
+        /// are absent by construction: a folder is a summary of its children and has no track of its
+        /// own to drop a block onto.
+        private var layerRowGeometry: [(layerIndex: Int, minY: CGFloat, maxY: CGFloat, height: CGFloat)] = []
 
         /// The block currently picked up, if any. See `BlockDrag`.
         private var blockDrag: BlockDrag?
@@ -201,7 +202,8 @@ struct TimelineTrackView: UIViewRepresentable {
             // Same row order the layer panel and the pinned name column use — folder headers
             // included, collapsed folders' children omitted.
             let stackRows = canvasManager.layerStackRows
-            let totalHeight = rulerHeight + CGFloat(max(stackRows.count, 1)) * (rowHeight + 2) + 8
+            let layout = TimelineRowLayout.make(rows: stackRows, rulerHeight: rulerHeight, rowHeight: rowHeight)
+            let totalHeight = layout.contentHeight
 
             let built = TimelineLayoutKey.make(
                 canvasManager: canvasManager,
@@ -270,14 +272,11 @@ struct TimelineTrackView: UIViewRepresentable {
                 rowViews.removeLast().removeFromSuperview()
             }
 
-            func rowY(_ position: Int) -> CGFloat {
-                rulerHeight + CGFloat(position) * (rowHeight + 2) + 4
-            }
-
             layerRowGeometry = []
             for (slot, entry) in layerEntries.enumerated() {
                 let row = rowViews[slot]
-                row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
+                let height = layout.height(ofRow: entry.position)
+                row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth, height: height)
                 row.layerIndex = entry.layerIndex
                 row.layerID = layers[entry.layerIndex].id
                 row.pixelsPerFrame = pixelsPerFrame
@@ -303,11 +302,11 @@ struct TimelineTrackView: UIViewRepresentable {
                            sceneFrameCount: sceneFrameCount,
                            markers: built.key.trackMarkers.indices.contains(slot)
                                ? built.key.trackMarkers[slot] : [])
-                // The band a drop counts as landing on runs the full row *pitch*, gaps included, so
-                // there is no dead strip between rows where a drag resolves to nothing.
+                let band = layout.dropBand(ofRow: entry.position)
                 layerRowGeometry.append((layerIndex: entry.layerIndex,
-                                         minY: rowY(entry.position) - 1,
-                                         maxY: rowY(entry.position) + rowHeight + 1))
+                                         minY: band.minY,
+                                         maxY: band.maxY,
+                                         height: height))
             }
 
             while folderRowViews.count < folderEntries.count {
@@ -321,7 +320,8 @@ struct TimelineTrackView: UIViewRepresentable {
 
             for (slot, entry) in folderEntries.enumerated() {
                 let row = folderRowViews[slot]
-                row.frame = CGRect(x: 0, y: rowY(entry.position), width: totalWidth, height: rowHeight)
+                row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth,
+                                   height: layout.height(ofRow: entry.position))
                 let childIndices = canvasManager.descendantLayerIndices(ofFolder: entry.folderID)
                 let cels = childIndices.flatMap { layers[$0].cels }
                 let span: ClosedRange<Int>? = cels.isEmpty
@@ -555,9 +555,9 @@ struct TimelineTrackView: UIViewRepresentable {
             guard let row = layerRowGeometry.first(where: { $0.layerIndex == drag.targetLayerIndex }) else { return }
 
             let rect = CGRect(x: CGFloat(drag.targetStartFrame) * pixelsPerFrame,
-                              y: row.minY + 1,
+                              y: row.minY + TimelineRowLayout.gap / 2,
                               width: CGFloat(drag.frameCount) * pixelsPerFrame,
-                              height: rowHeight).insetBy(dx: 2, dy: 2)
+                              height: row.height).insetBy(dx: 2, dy: 2)
             dragGhostView.setUntransformedFrame(rect)
             dragGhostView.updateHandlePositions(handleWidth: 0)
             dragGhostView.setDropVerdict(drag.verdict)

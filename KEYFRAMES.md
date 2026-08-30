@@ -898,8 +898,8 @@ cache entry per frame of a held cel).
 ## 11. The graph editor
 
 Asks 4, 5 and 6 of 2026-08-29, and §2.17 sharpened by the owner from *"a drawer that grows the timeline
-upward"* to *"it pops up above the layer that has it when on"*. Nothing here is built. Line numbers are
-as of `167e44a` and this document has been wrong about them before — re-take them.
+upward"* to *"it pops up above the layer that has it when on"*. **D1 is built; D2 onward is not.** Line
+numbers are as of `167e44a` and this document has been wrong about them before — re-take them.
 
 ### 11.1 It lives inside the timeline's scroll content
 
@@ -915,31 +915,37 @@ the timeline, because that dock is pinned by a literal `.padding(.bottom, 100)`
 (`DrawingView.swift:436`) while `timelineHeight` is `@State private` in `AnimationTimeline`. A band
 inside the scroll *content* grows the scrollable area instead, and the collision never arises.
 
-### 11.2 Stage D1 — variable row height, behaviour-neutral, merged alone
+### 11.2 Stage D1 — variable row height, behaviour-neutral, merged alone — **done 2026-08-29**
 
-Every row is `rowHeight` (34) and every y origin is a multiplication. Generalise that with all rows
-still equal, so the diff that moves geometry is not inside the diff that draws curves.
+`Models/TimelineRowLayout.swift` owns the geometry: an array of heights in, and out of it a row's y
+origin (a prefix sum), a row's height, the content height, the drop strip a finger's y resolves
+against, how far a row slides to open a reorder gap, and how many rows a drag has crossed. Both halves
+of the timeline build one from `TimelineRowLayout.make(rows:rulerHeight:rowHeight:)` — the **single**
+derivation, which is what stops the pinned name column and the UIKit track from disagreeing about
+where a row starts. Every row is still 34 pt, so no pixel moved.
 
-| site | today |
-|---|---|
-| `TimelineTrackView.swift:265` `rowY(_:)` | `rulerHeight + position * (rowHeight + 2) + 4` → prefix sum |
-| `TimelineTrackView.swift:196` `totalHeight` | `count * (rowHeight + 2)` → sum of the same array |
-| `AnimationTimeline.swift:169` `contentHeight` | the same formula **independently re-typed** — the duplication is itself the finding |
-| the two `row.frame(…, height: rowHeight)` sites in `relayout` | constant → that row's own height |
-| `layerRowGeometry`, built from `rowY` | same function; `layerIndex(atY:)` is a linear scan and needs **no** change |
-| `layoutDragChrome`'s `height: rowHeight` | that row's height |
-| `AnimationTimeline.swift:585` name-column row | the one site that already tolerates it — `VStack` sizes from the child |
+**Give a row extra height in `make` and both sides take it.** That is the seam D2 attaches to. What
+still has to be decided there is whether the band is part of the row's height or a sibling view — the
+name column has no gap to insert into (it is a `VStack` of one row per `LayerStackRow` under a
+hard-coded `Color.clear.frame(height: rulerHeight)`), so a band the track has and the column does not
+shifts every track down while the names stay and names label the wrong layers. Routing it through the
+row's own height is what makes that impossible rather than merely remembered.
 
-**The one that breaks outright is not in the UIKit file.** `AnimationTimeline.rowOffset(at:)` (`:617`)
-steps by a constant `rowPitch`, and `reorderGesture` computes
-`dragOffsetRows = Int((drag.translation.height / rowPitch).rounded())` (`:690`) — counting rows crossed
-by dividing by a fixed pitch. One tall row makes that wrong for every row past it, and the symptom is a
-layer reorder landing in the wrong slot, silently. It needs a cumulative-offset lookup, not a divisor.
+**The site that broke outright was not in the UIKit file**, and it is the reason this shipped alone.
+`reorderGesture` counted rows by `Int((drag.translation.height / rowPitch).rounded())` — one tall row
+makes that wrong for every row past it, and the symptom is a layer reorder landing in the wrong slot
+with nothing thrown and nothing logged. `rowsCrossed(from:by:)` walks the pitches instead, and is
+**direction-dependent**: from a short row between two unequal neighbours the same travel up and down
+gives different counts, which no single divisor can express. `rowPitch` is gone.
 
-**And the name column has no gap to insert into.** It aligns to the ruler by a hard-coded
-`Color.clear.frame(height: rulerHeight)` (`AnimationTimeline.swift:581`) and then one row per
-`LayerStackRow`. A band added to the track side and not to this column shifts every track down while
-the names stay, so names label the wrong layers — §10's warning, reached by the new door.
+`layerIndex(atY:)` was the one prediction that held exactly — a linear scan over `layerRowGeometry`,
+independent of uniformity, unchanged to the byte.
+
+**What `TimelineLayoutKey` did *not* need.** It still carries a scalar `rowHeight`, which is
+sufficient only because the heights are a pure function of `(rows, rowHeight)` and `rows` is already
+in the key. The first stage that derives a height from anything else — which is D2, since a band
+opens per layer — must put that input in the key or the row draws once at its old height and never
+moves again. §11.3's first bullet, reached from the geometry side.
 
 ### 11.3 Stage D2 — the band, and three ways it renders once and never again
 

@@ -30,9 +30,6 @@ struct AnimationTimeline: View {
         timelineHeight <= collapsedHeight + 2
     }
 
-    /// Vertical distance between two track rows — the row plus the `VStack` spacing between them.
-    private var rowPitch: CGFloat { rowHeight + 2 }
-
     // The timeline's three menus (block options / gap "Add Drawing" / ruler loop-range) are a
     // popover hung off the thing that was tapped rather than a confirmation dialog centred on the
     // panel: `menuAnchor` is that thing's rect in window coordinates, reported up by
@@ -166,9 +163,16 @@ struct AnimationTimeline: View {
         dragHandleHeight + (isCollapsed ? collapsedBarHeight : miniToolbarHeight)
     }
 
-    private var contentHeight: CGFloat {
-        rulerHeight + CGFloat(max(canvasManager.layerStackRows.count, 1)) * rowPitch + 8
+    /// The row geometry both halves of the timeline lay out from — this column and the UIKit track,
+    /// which builds its own from the same `TimelineRowLayout.make`, so the two cannot disagree about
+    /// where a row starts or how tall it is.
+    private var rowLayout: TimelineRowLayout {
+        TimelineRowLayout.make(rows: canvasManager.layerStackRows,
+                               rulerHeight: rulerHeight,
+                               rowHeight: rowHeight)
     }
+
+    private var contentHeight: CGFloat { rowLayout.contentHeight }
 
     // MARK: - Menus
 
@@ -618,27 +622,32 @@ struct AnimationTimeline: View {
     /// collapse state — so the names line up with the track rows `TimelineTrackView` lays out from
     /// the same source. Rows reorder here too: press and hold one, then drag it up or down.
     private var layerNameColumn: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        // Rows, layout and the lifted row's slot are resolved once for the whole column rather than
+        // per row: each of the three used to re-read `layerStackRows`, which walks the layer tree.
+        let rows = canvasManager.layerStackRows
+        let layout = rowLayout
+        let liftedFrom = draggingRowID.flatMap { id in rows.firstIndex { $0.id == id } }
+        return VStack(alignment: .leading, spacing: TimelineRowLayout.gap) {
             Color.clear.frame(height: rulerHeight)
-            ForEach(Array(canvasManager.layerStackRows.enumerated()), id: \.element.id) { position, row in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { position, row in
                 let isLifted = draggingRowID == row.id
                 nameRow(row)
-                    .frame(height: rowHeight, alignment: .leading)
+                    .frame(height: layout.height(ofRow: position), alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(liftedBackground(isLifted: isLifted))
                     .contentShape(Rectangle())
                     .scaleEffect(isLifted ? 1.06 : 1, anchor: .leading)
                     .shadow(color: .black.opacity(isLifted ? 0.6 : 0), radius: 6, y: 3)
-                    .offset(y: rowOffset(at: position))
+                    .offset(y: rowOffset(at: position, liftedFrom: liftedFrom, in: layout))
                     .zIndex(isLifted ? 1 : 0)
                     // The rows opening the gap ease into place; the lifted one must not, or it lags
                     // behind the finger by the animation's duration.
                     .animation(isLifted ? nil : .easeOut(duration: 0.18), value: dragOffsetRows)
-                    .gesture(reorderGesture(for: row))
+                    .gesture(reorderGesture(for: row, at: position, in: layout))
             }
         }
         .frame(width: 110)
-        .padding(.vertical, 4)
+        .padding(.vertical, TimelineRowLayout.verticalInset)
     }
 
     /// The picked-up row gets a card of its own — dark fill, blue rim — so it reads as detached from
@@ -655,16 +664,10 @@ struct AnimationTimeline: View {
 
     /// Where a row sits while a drag is in progress: the lifted one follows the finger, and the rows
     /// it is passing over slide one slot the other way to open the gap it would drop into.
-    private func rowOffset(at position: Int) -> CGFloat {
-        guard let draggingRowID else { return 0 }
-        let rows = canvasManager.layerStackRows
-        guard let from = rows.firstIndex(where: { $0.id == draggingRowID }) else { return 0 }
-        if position == from { return dragTranslation }
-
-        let to = min(max(from + dragOffsetRows, 0), max(rows.count - 1, 0))
-        if from < to, position > from, position <= to { return -rowPitch }
-        if from > to, position >= to, position < from { return rowPitch }
-        return 0
+    private func rowOffset(at position: Int, liftedFrom: Int?, in layout: TimelineRowLayout) -> CGFloat {
+        guard let liftedFrom else { return 0 }
+        if position == liftedFrom { return dragTranslation }
+        return layout.reorderOffset(ofRow: position, liftedFrom: liftedFrom, movedBy: dragOffsetRows)
     }
 
     @ViewBuilder
@@ -712,8 +715,10 @@ struct AnimationTimeline: View {
     }
 
     /// Press and hold for half a second, then drag: the same reorder gesture the layer panel uses,
-    /// resolved here by counting how many fixed-height rows the finger travelled.
-    private func reorderGesture(for row: LayerStackRow) -> some Gesture {
+    /// resolved here by counting the rows the finger travelled over — a walk of their pitches rather
+    /// than a division, so a row that is taller than its neighbours still counts as one row.
+    private func reorderGesture(for row: LayerStackRow, at position: Int,
+                                in layout: TimelineRowLayout) -> some Gesture {
         LongPressGesture(minimumDuration: 0.5)
             .onEnded { _ in
                 // Every row lifts. The one refusal that used to live here — an input slot, whose
@@ -728,7 +733,7 @@ struct AnimationTimeline: View {
             .onChanged { value in
                 guard case .second(_, let drag?) = value, draggingRowID == row.id else { return }
                 dragTranslation = drag.translation.height
-                dragOffsetRows = Int((drag.translation.height / rowPitch).rounded())
+                dragOffsetRows = layout.rowsCrossed(from: position, by: drag.translation.height)
             }
             .onEnded { _ in
                 let delta = dragOffsetRows
