@@ -76,9 +76,39 @@ plus two the earlier table did not carry — `EraserAndPersistenceUITests` 171 /
 a 22.3 min run and **the gap is still one indivisible class**. The 25.6 → 22.3 move is variance, not
 structure: nothing was split.
 
-Going below ~3 min still means decomposing `testInterpolateModeEndToEndFromGestureToScrub`; but nothing
-below 515 s is reachable at all until `LayerPanelUITests` is cut. **Re-take this table rather than
-trusting it — it has gone stale once and been confirmed once.**
+**`LayerPanelUITests` was cut on 2026-08-29 and that floor is gone.** It is three classes now, still in
+`LayerUITests.swift` (which therefore holds five): `LayerStackUITests` — the shape of the stack, add /
+delete / reorder / swipe; `LayerFolderAndMaskMenuUITests` — folders, what a drop onto one resolves to,
+and the mask sub-menu that opens from a folder's options as well as a layer's; and
+`LayerPanelControlsUITests` — the panel's controls rather than its contents, the views dropdown through
+the effect settings bar to the colour swatches. MEASURED serially on a dedicated device, 19 tests,
+0 failed, counted from the xcresult:
+
+| class | seconds | tests |
+|---|---|---|
+| `LayerFolderAndMaskMenuUITests` | 190 | 7 |
+| `LayerPanelControlsUITests` | 174 | 7 |
+| `LayerStackUITests` | 159 | 5 |
+
+523 s in total against **534 s measured for the same 19 tests as one class immediately before the cut**,
+so the work is unchanged and only its granularity moved. **The longest of the three is 190 s against
+515 s**, which drops this file below `SelectionAndMoveUITests` and makes *that*, at 327 s, the suite's
+new floor.
+
+**The full run was not re-measured, so 22.3 min above is now stale in the *optimistic* direction.** Every
+number in this subsection comes from running the three classes alone. The arithmetic says ~3,542
+class-seconds over four clones against a 327 s floor should land nearer ~15–16 min, but that is INFERRED,
+and the honest state is that nobody has watched a full suite since the split.
+
+**Balance a split on measured seconds, not on test count**, which is why these are 5/7/7 and not 6/6/7:
+`testRepeatedAddDeleteLayersDoesNotCrashOrFreeze` measured 71 s and then 58 s on two runs — a seventh of
+the old class in one test — so the class holding it earns two fewer. It is also this file's real
+remaining floor, because **no split goes below one test**: ~60 s is the limit here and a fourth class
+would buy almost nothing.
+
+Going below ~3 min still means decomposing `testInterpolateModeEndToEndFromGestureToScrub`; the next
+class worth cutting is `SelectionAndMoveUITests` at 327 s. **Re-take this table rather than trusting it —
+it has gone stale once, been confirmed once, and been acted on once.**
 
 If you split a class again, **verify by test count from the xcresult** — a test that stops running
 still prints green — and take the count *before* you merge as well as after: a split branch cut

@@ -5,10 +5,22 @@
 // BlendModesAndCompositorUITests, SandwichCompositingUITests) so xcodebuild's
 // per-class parallel scheduling can distribute them independently; test bodies
 // remain unchanged.
+//
+// `LayerPanelUITests` was then cut again (2026-08-29) into the three classes below —
+// LayerStackUITests, LayerFolderAndMaskMenuUITests, LayerPanelControlsUITests — because at
+// 19 tests and 534 s it had become the indivisible class setting the whole suite's floor.
+// The three are balanced by *measured* per-test seconds rather than by test count, which is
+// why the counts are 5/7/7: `testRepeatedAddDeleteLayersDoesNotCrashOrFreeze` alone is 71 s,
+// so the class holding it carries fewer tests. See CLAUDE.md's cost-model section. Test
+// bodies are again unchanged — only the class boundaries moved.
 
 import XCTest
 
-final class LayerPanelUITests: PaintUITestCase {
+/// The stack of rows itself: which layer is active, what adding and deleting do to that, and
+/// reordering by press-and-hold. Everything here changes the *shape* of the stack — see
+/// `LayerFolderAndMaskMenuUITests` for what a drop resolves to and `LayerPanelControlsUITests` for
+/// the panel's own controls.
+final class LayerStackUITests: PaintUITestCase {
 
     /// Regression test: with two layers, activating the bottom (non-topmost) layer and drawing
     /// on the canvas must land the stroke on that layer, not get silently swallowed by the
@@ -120,20 +132,6 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertFalse(app.staticTexts["timeline.layerName.2"].exists, "Only 2 layers should remain in the timeline, staying in sync with the panel")
     }
 
-    /// A freshly added folder must be visible right away — before any layer has been put in it —
-    /// in both the layer panel and the animation timeline's name column.
-    func testAddingFolderShowsItInLayerPanelAndTimeline() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        openLayerPanel(app)
-        addFolderFromAddMenu(app)
-
-        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5),
-                      "A folder should appear in the layer panel as soon as it's created, with no layers in it")
-        XCTAssertTrue(app.staticTexts["timeline.folderName.Folder 1"].waitForExistence(timeout: 5),
-                      "The same folder should appear as a row in the animation timeline")
-    }
-
     /// Reordering must work by press-and-hold + drag alone, with no Edit mode to enter, and the row
     /// must stay where it was dropped rather than snapping back to its old slot.
     func testLongPressDragReordersLayersAndDropSticks() throws {
@@ -162,34 +160,44 @@ final class LayerPanelUITests: PaintUITestCase {
                        "The layers it was dragged past should have shifted up by one")
     }
 
-    /// The views control is a dropdown, not a cycling button: it lists the saved views, adds new
-    /// ones from its own "+", and each saved view swipes left to reveal a delete button.
-    func testViewSelectorDropdownAddsSelectsAndDeletesViews() throws {
+    /// Swiping a layer row reveals Delete and Duplicate — and no Edit, which moved to the options
+    /// menu.
+    func testSwipeRevealsDeleteAndDuplicateButNotEdit() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         openLayerPanel(app)
 
-        let viewsButton = app.buttons["layerPanel.viewsButton"]
-        XCTAssertTrue(viewsButton.waitForExistence(timeout: 5))
-        viewsButton.tap()
+        revealSwipeActions(app, layerIndex: 0)
+        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 5))
+        let duplicate = app.buttons["Duplicate"]
+        XCTAssertTrue(duplicate.exists, "Swipe actions should offer Duplicate")
+        XCTAssertFalse(app.buttons["layerPanel.row.0.edit"].exists, "Edit should no longer be a swipe action")
 
-        let addView = app.buttons["viewMenu.addButton"]
-        XCTAssertTrue(addView.waitForExistence(timeout: 5), "Tapping the views button should open a dropdown with an add button")
-        XCTAssertTrue(app.buttons["viewMenu.row.all"].exists, "The dropdown should list the no-view 'All' entry")
+        duplicate.tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
+                      "Duplicating should add a second layer")
+        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 1 copy")
+    }
+}
 
-        addView.tap()
-        let firstView = app.buttons["viewMenu.row.0"]
-        XCTAssertTrue(firstView.waitForExistence(timeout: 5), "Adding a view should list it in the dropdown")
-        XCTAssertEqual(firstView.value as? String, "1", "The newly added view should be the active one")
+/// Folders — creating them, what a row dropped onto one (or onto a plain layer) resolves to, and
+/// how they nest — together with the mask tuning menu, which is here because §6.2 puts `alphaMask` on
+/// `LayerFolder` as well as `Layer`: the menu opens from a folder's options exactly as from a layer's,
+/// and the panel-reuse case it must not leak across is a folder's too.
+final class LayerFolderAndMaskMenuUITests: PaintUITestCase {
 
-        firstView.swipeLeft()
-        let deleteButton = app.buttons["Delete"]
-        XCTAssertTrue(deleteButton.waitForExistence(timeout: 5), "Views should slide to reveal a delete button, like layer rows do")
-        deleteButton.tap()
+    /// A freshly added folder must be visible right away — before any layer has been put in it —
+    /// in both the layer panel and the animation timeline's name column.
+    func testAddingFolderShowsItInLayerPanelAndTimeline() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+        addFolderFromAddMenu(app)
 
-        XCTAssertTrue(app.buttons["viewMenu.row.0"].waitForNonExistence(timeout: 5), "Deleting a view should remove it from the dropdown")
-        XCTAssertEqual(app.buttons["viewMenu.row.all"].value as? String, "1",
-                       "Deleting the active view should fall back to 'All'")
+        XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5),
+                      "A folder should appear in the layer panel as soon as it's created, with no layers in it")
+        XCTAssertTrue(app.staticTexts["timeline.folderName.Folder 1"].waitForExistence(timeout: 5),
+                      "The same folder should appear as a row in the animation timeline")
     }
 
     /// Dropping one layer squarely onto another **reorders it and creates nothing** — the inverse of
@@ -277,67 +285,6 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 2"].value as? String, "1",
                        "A folder dropped onto another should nest one level inside it")
         XCTAssertEqual(app.staticTexts["layerPanel.folder.Folder 1"].value as? String, "0")
-    }
-
-    /// Swiping a layer row reveals Delete and Duplicate — and no Edit, which moved to the options
-    /// menu.
-    func testSwipeRevealsDeleteAndDuplicateButNotEdit() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        openLayerPanel(app)
-
-        revealSwipeActions(app, layerIndex: 0)
-        XCTAssertTrue(app.buttons["Delete"].waitForExistence(timeout: 5))
-        let duplicate = app.buttons["Duplicate"]
-        XCTAssertTrue(duplicate.exists, "Swipe actions should offer Duplicate")
-        XCTAssertFalse(app.buttons["layerPanel.row.0.edit"].exists, "Edit should no longer be a swipe action")
-
-        duplicate.tap()
-        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
-                      "Duplicating should add a second layer")
-        XCTAssertEqual(app.staticTexts["layerPanel.row.1"].label, "Vector 1 copy")
-    }
-
-    /// Tapping a layer selects it; tapping the selected one again opens its options menu.
-    ///
-    /// Fill reference used to be a labelled switch inside that menu and is now the row's own drop
-    /// button (§6.6), so the toggling half moved here — the claim this keeps that no other test makes
-    /// is the **two-tap sequence**: the first tap only selects, and the menu is what the second one
-    /// is for.
-    func testTappingSelectedLayerOpensOptionsAndTogglesFillReference() throws {
-        let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
-        openLayerPanel(app)
-
-        // A second layer first, so row 0 is *not* the active one. The sequence this pins only exists
-        // for a row that isn't already selected: a fresh document has one layer, `currentLayerIndex`
-        // is already pointing at it, and so its very first tap opens the menu — correctly. An earlier
-        // draft asserted the opposite here and failed on its own false premise rather than on a bug.
-        let addButton = app.buttons["layerPanel.addButton"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addVectorLayerFromOpenPanel(app)
-        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
-                      "The added layer becomes row 1 and takes the selection with it")
-
-        let row = app.staticTexts["layerPanel.row.0"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let summary = app.staticTexts["layerOptions.maskSummary"]
-        XCTAssertFalse(summary.exists, "The options menu should not be showing before any tap")
-
-        row.tap() // select
-        XCTAssertFalse(summary.exists, "…nor after the first tap on an unselected row, which only selects")
-        row.tap() // open options
-
-        XCTAssertTrue(summary.waitForExistence(timeout: 5),
-                      "A second tap on the now-selected layer should open its options")
-
-        let fillRef = app.staticTexts["layerPanel.row.0.fillRef"]
-        XCTAssertEqual(fillRef.value as? String, "1", "Layers start as fill references")
-        let fillRefButton = app.buttons["layerPanel.row.0.fillRefButton"]
-        XCTAssertTrue(fillRefButton.waitForExistence(timeout: 5),
-                      "The drop button appears on the row for as long as the menu is open")
-        fillRefButton.tap()
-        XCTAssertEqual(fillRef.value as? String, "0", "Tapping the row's drop should update the row")
     }
 
     /// The owner's request: "if you click Mask, it brings up a mask tune menu in place of the edit
@@ -446,6 +393,85 @@ final class LayerPanelUITests: PaintUITestCase {
         XCTAssertTrue(app.switches["layerOptions.passThroughToggle"].waitForExistence(timeout: 5),
                       "Swapping the open panel to another folder lands on its edit menu")
         XCTAssertFalse(app.sliders["maskTuning.threshold"].exists)
+    }
+}
+
+/// The panel's controls rather than its contents: the views dropdown, the options menu a second tap
+/// opens and the fill-reference drop on it, the Mode row that turns a value layer into an effect one,
+/// the effect settings bar at the bottom of the window, and the two colour swatches. Nothing here
+/// reorders or removes a row; each test drives a control and reads back what it opened.
+final class LayerPanelControlsUITests: PaintUITestCase {
+
+    /// The views control is a dropdown, not a cycling button: it lists the saved views, adds new
+    /// ones from its own "+", and each saved view swipes left to reveal a delete button.
+    func testViewSelectorDropdownAddsSelectsAndDeletesViews() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        let viewsButton = app.buttons["layerPanel.viewsButton"]
+        XCTAssertTrue(viewsButton.waitForExistence(timeout: 5))
+        viewsButton.tap()
+
+        let addView = app.buttons["viewMenu.addButton"]
+        XCTAssertTrue(addView.waitForExistence(timeout: 5), "Tapping the views button should open a dropdown with an add button")
+        XCTAssertTrue(app.buttons["viewMenu.row.all"].exists, "The dropdown should list the no-view 'All' entry")
+
+        addView.tap()
+        let firstView = app.buttons["viewMenu.row.0"]
+        XCTAssertTrue(firstView.waitForExistence(timeout: 5), "Adding a view should list it in the dropdown")
+        XCTAssertEqual(firstView.value as? String, "1", "The newly added view should be the active one")
+
+        firstView.swipeLeft()
+        let deleteButton = app.buttons["Delete"]
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 5), "Views should slide to reveal a delete button, like layer rows do")
+        deleteButton.tap()
+
+        XCTAssertTrue(app.buttons["viewMenu.row.0"].waitForNonExistence(timeout: 5), "Deleting a view should remove it from the dropdown")
+        XCTAssertEqual(app.buttons["viewMenu.row.all"].value as? String, "1",
+                       "Deleting the active view should fall back to 'All'")
+    }
+
+    /// Tapping a layer selects it; tapping the selected one again opens its options menu.
+    ///
+    /// Fill reference used to be a labelled switch inside that menu and is now the row's own drop
+    /// button (§6.6), so the toggling half moved here — the claim this keeps that no other test makes
+    /// is the **two-tap sequence**: the first tap only selects, and the menu is what the second one
+    /// is for.
+    func testTappingSelectedLayerOpensOptionsAndTogglesFillReference() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        openLayerPanel(app)
+
+        // A second layer first, so row 0 is *not* the active one. The sequence this pins only exists
+        // for a row that isn't already selected: a fresh document has one layer, `currentLayerIndex`
+        // is already pointing at it, and so its very first tap opens the menu — correctly. An earlier
+        // draft asserted the opposite here and failed on its own false premise rather than on a bug.
+        let addButton = app.buttons["layerPanel.addButton"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addVectorLayerFromOpenPanel(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
+                      "The added layer becomes row 1 and takes the selection with it")
+
+        let row = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let summary = app.staticTexts["layerOptions.maskSummary"]
+        XCTAssertFalse(summary.exists, "The options menu should not be showing before any tap")
+
+        row.tap() // select
+        XCTAssertFalse(summary.exists, "…nor after the first tap on an unselected row, which only selects")
+        row.tap() // open options
+
+        XCTAssertTrue(summary.waitForExistence(timeout: 5),
+                      "A second tap on the now-selected layer should open its options")
+
+        let fillRef = app.staticTexts["layerPanel.row.0.fillRef"]
+        XCTAssertEqual(fillRef.value as? String, "1", "Layers start as fill references")
+        let fillRefButton = app.buttons["layerPanel.row.0.fillRefButton"]
+        XCTAssertTrue(fillRefButton.waitForExistence(timeout: 5),
+                      "The drop button appears on the row for as long as the menu is open")
+        fillRefButton.tap()
+        XCTAssertEqual(fillRef.value as? String, "0", "Tapping the row's drop should update the row")
     }
 
     /// §4.4's effect layer, reachable at last: it shipped engine-complete with no way to create one.
@@ -711,6 +737,7 @@ final class LayerPanelUITests: PaintUITestCase {
                        "The pick reached canvasBackgroundColor — the row's own binding, not the brush's")
     }
 }
+
 
 final class BlendModesAndCompositorUITests: PaintUITestCase {
 
