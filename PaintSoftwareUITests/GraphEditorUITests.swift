@@ -174,7 +174,8 @@ final class GraphEditorUITests: PaintUITestCase {
 
         let grabbed = app.otherElements["timeline.cel.1.0"]
         XCTAssertTrue(grabbed.waitForExistence(timeout: 5))
-        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 0, "PREMISE: it starts at 0")
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
+        XCTAssertEqual(cel.start, 0, "PREMISE: it starts at 0")
         XCTAssertFalse(app.otherElements["timeline.cel.0.1"].exists,
                        "PREMISE: the bottom layer has exactly one block")
 
@@ -185,15 +186,20 @@ final class GraphEditorUITests: PaintUITestCase {
         // **Absolute screen coordinates, not the element.** An `XCUIElement` is re-resolved at every
         // touch, so a drag expressed against the block would follow the block as the track reflowed
         // and hide the very thing being tested. A finger does not do that.
+        //
+        // A frame's width is measured rather than assumed: the block spans its cel's whole length
+        // and is inset 2 pt inside it, so one frame is `(width + 4) / length` whatever the timeline's
+        // zoom happens to be. Two frames, so the far end of the drag is still comfortably on screen.
         let block = grabbed.frame
-        let pixelsPerFrame = block.width + 4          // the block is inset 2 pt inside its slot
+        let frameWidth = (block.width + 4) / CGFloat(cel.length)
         let origin = app.coordinate(withNormalizedOffset: .zero)
         let down = origin.withOffset(CGVector(dx: block.midX, dy: block.midY))
-        let across = origin.withOffset(CGVector(dx: block.midX + 5 * pixelsPerFrame, dy: block.midY))
+        let across = origin.withOffset(CGVector(dx: block.midX + 2 * frameWidth, dy: block.midY))
         down.press(forDuration: 0.9, thenDragTo: across)
 
-        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 5,
-                       "The block re-timed five frames along the layer it was picked up from")
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 2,
+                       "The block re-timed two frames along the layer it was picked up from "
+                       + "(block \(block), \(cel.length) frames, one frame \(frameWidth) pt)")
         XCTAssertEqual(readCel(app, layerIndex: 0, celIndex: 0)?.start, 0,
                        "…and the layer below is untouched")
         XCTAssertFalse(app.otherElements["timeline.cel.0.1"].exists,

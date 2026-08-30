@@ -1143,6 +1143,72 @@ any one of them.
   because it reads as coverage; the tell here was that the failure it named was a disagreement between
   two *files* and every symbol in its body came from one.
 
+**The reflow the band causes lands inside the timeline's own gestures, because selection is a side
+effect of half of them.** The scope ruling above is not in question — *"graphs are layer based, so
+tapping on another layer should just open the other layer's graph."* What it costs is that
+`currentLayerIndex` is written by gestures whose subject is a *cel*, and the band is part of a row's
+**height**, so each of those writes moves every row between the old band position and the new one by
+96 pt. Three sites, and they do not have the same answer.
+
+- **A block drag: fixed, and it was changing the document rather than merely detaching a ghost.**
+  `beginBlockDrag` writes `currentLayerIndex` for the layer the block came from and `updateBlockDrag`
+  relayouts inside the same touch. The finger does not move with the rows, so `layerIndex(atY:)`
+  resolves it against the new geometry: three layers with the band open on the top one, a finger 17 pt
+  into the grabbed row's block becomes 113 pt into that row's now-130 pt height, and `dropBand` gives
+  everything past 83 pt to the row **below**. So a re-time became a **cross-layer move** — the 96 pt
+  ghost detachment was the visible half of a defect whose other half moved the artist's drawing to a
+  layer they never touched. `CanvasManager.pinGraphBand()` / `releaseGraphBand()` hold the band on the
+  row it is on for the length of the drag and let it go when the finger lifts. **Only the row is
+  held**, not whether the band is open: the toggle is a button, and a button cannot be pressed by a
+  finger already dragging the track. **And only the block drag takes the pin** — a cel resize, a ruler
+  scrub and the name column's reorder all leave `currentLayerIndex` alone for the length of their
+  gesture, so a call in any of them would be a control that never fires.
+- **The two-stage tap: not fixable, and that is the answer rather than a partial fix.**
+  `handleTapOnCel` and `handleTapOnGap` write `currentLayerIndex` on the *first* tap of the documented
+  "first tap moves the cursor there, a second tap opens it" contract, so with the band open on a row
+  above, the tapped row rises 96 pt between the two taps and the point the artist first touched is
+  inside the band. **The arming survives the move** — it is a cel identity (`layerIndex ==
+  currentLayerIndex && clamped == currentFrame`), never a screen position — so the menu opens on the
+  second tap wherever the row has gone;
+  `GraphEditorUITests.testTheTwoStageTapSurvivesTheBandMovingToTheLayerItTapped` measures the 96 pt of
+  travel and then takes the menu, which is both halves of the claim in one test. What cannot be
+  recovered is the finger: the row *must* move, because the band is a row's height and the ruling puts
+  it under the layer that was just selected. The cost is **one wasted tap per layer switch while the
+  band is open**, paid once — every further two-stage tap on that layer is already in register. This
+  is the same hazard the `.gap` arm's keyframe items are reached through, and it costs them the same
+  one tap.
+- **Compensating the timeline's own scroll offset does not work, and the reason is structural rather
+  than a corner case.** Moving the band from row C to row L below it leaves every row at or above C
+  and every row past L exactly where it was, and lifts only the rows in between — a scroll is a
+  **uniform** translation of all of them, so giving L its 96 pt back displaces every other row by 96 pt
+  the other way. It does not remove the reflow; it moves it onto the rows the artist did not touch.
+  The shortage of range is real too and arrives second: the viewport is `timelineHeight - 12 - 40 - 1`,
+  197 pt at the default 250, against `18 + 8 + 36N + 96` of content, so a **three-layer** document has
+  33 pt of scroll range to pay a 96 pt debt with and **five layers** is where the full 96 pt first
+  exists at all.
+- **Animating the relocation was considered and rejected.** It fixes nothing — the row still ends up
+  96 pt away and the finger still has to follow — and the timeline's row geometry has never animated
+  anywhere else: a folder collapsing, a layer added or deleted, and the band's own open and close all
+  reflow instantly. The failure mode is also invisible from the test tier: the two columns are laid
+  out by SwiftUI and by UIKit, so easing them at different rates is a **new** defect that XCUITest can
+  see only as flakiness in `testOpeningTheBandKeepsEveryNameLinedUpWithItsTrack`. Bridging one
+  transaction into both is not available either — `withAnimation` around the write would put
+  `handleActiveContextChanged`, which bakes floating pieces and commits canvas edits, inside the
+  transaction, and the name column's rows already carry an `.animation(_:value:)` over the same
+  subtree as the height frames.
+- **A tap inside the band does nothing, before this pass and after it.** The band's rectangle is
+  covered by no row view — `TimelineRowView` is sized to `blockHeight` — and the band itself takes no
+  touches, so the touch reaches the scroll view, which pans and nothing else. That is the right answer
+  for D2 because §11.4 claims this area for curve gestures, and wiring it to the row underneath would
+  be building something D3 has to take out again. It is pinned by
+  `GraphEditorUITests.testATapInsideTheBandDoesNothing`, because the plausible regression — sizing the
+  row view to the full expanded height, the simplification §11.2 warns about — would make the band
+  read as that row's cel body and raise a block menu over the curves.
+- **`dropBand`'s deliberate half-and-half survives the pin unchanged.** The pin stops the band
+  *moving* during a drag; it does not remove the band, and every y between two rows still has to
+  resolve to one of them, so all three readings above are still on the table and the arithmetic still
+  picks the same one. The separately recorded `blockTop` stays for the same reason.
+
 **Colour comes from `Effect.parameters` order, not from the drawn list.** Eight hand-picked hues,
 indexed by the channel's descriptor position — hand-picked because a generated palette cannot be told
 that ~211° is the playhead and ~48° is an interpolation reference (§2.8), and descriptor-indexed
