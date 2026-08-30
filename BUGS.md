@@ -3,39 +3,32 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## Three things looking at the graph editor found that 2,224 passing tests did not (2026-08-30)
+## A 250 pt timeline cannot hold four layers plus an open band (2026-08-30) — LEFT, deliberately
 
-All three came from screenshots of the merged band on a simulator
-(`docs/graph-editor/`), taken because the owner had read the feature and never seen it.
-None is caught by any test, and the first two are not *catchable* by the tiers this repo has —
-XCUITest can see neither a colour nor a `CGContext`.
+The bottom row falls off the panel and the artist must drag it taller. **The content scrolls, so
+nothing is broken and nothing is lost**, which is why this was recorded rather than fixed, and it was
+looked at again on 2026-08-30 and left again. The reasoning, so the next reader does not redo it:
 
-**1. The channel-list popover renders in system appearance, on an app that is otherwise black.**
-`TimelineGraphChannelList`'s popup is a light-grey card with dark text floating over the black
-timeline chrome — see `docs/graph-editor/3b-channel-list-full.png`. On a dark-mode iPad it matches;
-on a light-mode one it does not. Every other timeline surface paints its own colours. The fix is a
-`.preferredColorScheme` or an explicit background, and the open question is whether the app should
-declare a scheme globally rather than per surface — which is why this is filed rather than patched.
+- **The band's height is not the lever.** 96 pt is `TimelineGraphBand.height`, ruled fixed and
+  not draggable (KEYFRAMES §11.6, "start fixed"), and shrinking it is the one change that trades a
+  legible curve for a visible row — the band is *for* reading a shape.
+- **Nor is the panel's.** `timelineHeight` is the artist's own drag and defaults to 250; growing it on
+  the band's behalf would take canvas space back without being asked, which
+  `AnimationTimeline.timelineHeight`'s own comment rules out in as many words.
+- **And auto-scrolling the expanded row into view is not free either.** KEYFRAMES §11.3 measured the
+  scroll range a three-layer document has (33 pt against a 96 pt debt) and records that compensating
+  the offset moves the reflow onto rows the artist did not touch rather than removing it.
 
-**2. The band draws every curve flat across the frames past the end of the document.**
-The band view is `totalWidth` wide — `displayedFrameCount * pixelsPerFrame`, which
-`displayedFrameCount(for:)` inflates past `sceneFrameCount` to cover the scroll's look-ahead — and a
-curve is sampled across all of it, so it extends as a flat line into track that holds no frames. At
-25 frames it is a tail; on a 12-frame document more than half the band was flat line in dead space.
-`AnimationCurve`'s constant-hold extrapolation makes the value correct, so this is about where
-drawing should *stop*, not about what it evaluates to. The scene's own frame count is the bound, and
-`TimelineRulerClip.frames(in:pixelsPerFrame:frameCount:)` already takes one.
+So the honest answer is that a taller stack wants a taller panel, the drag is one gesture, and this
+stays a note rather than a fix until the owner says the drag grates.
 
-**3. A 250 pt timeline cannot hold four layers plus an open band.** The bottom row falls off the
-panel and the artist must drag it taller. The content scrolls, so nothing is broken and nothing is
-lost — recorded because it is the first thing an artist meets on a modest stack, and because the
-band's height (96 pt, fixed, KEYFRAMES §11.6 "start fixed") is the number to revisit if it grates.
+## The effects menu only exposes its first few items to XCUITest (2026-08-30)
 
-**And one that is not a bug in the app but will cost a test session.** The effects menu only exposes
-items as far as Gaussian Blur to XCUITest — Bloom, Sharpen, Sobel, Outline, Chromatic Aberration and
-Noise never match, on any query. Almost certainly a scrollable-menu accessibility limit rather than an
-app defect, but a test reaching for one of those six will fail to find an element that a human can see,
-which reads as a broken app. HSV Shift and Gaussian Blur are the reachable multi-slider fixtures.
+Not a bug in the app, and it will cost a test session. The menu exposes items as far as Gaussian Blur
+— Bloom, Sharpen, Sobel, Outline, Chromatic Aberration and Noise never match, on any query. Almost
+certainly a scrollable-menu accessibility limit rather than an app defect, but a test reaching for one
+of those six will fail to find an element that a human can see, which reads as a broken app. HSV Shift
+and Gaussian Blur are the reachable multi-slider fixtures.
 
 ## A popover whose host view disappears re-presents itself when the host comes back (2026-08-29)
 

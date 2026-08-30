@@ -1112,6 +1112,19 @@ any one of them.
   event, and neither call subsumes the other). The viewport is deliberately **not** in
   `TimelineLayoutKey`: it moves faster than the layout, which is `currentFrame`'s argument for
   `movePlayhead` reached from the other axis.
+
+  **And the other half of that clip was wrong until 2026-08-30, which nobody saw because it was
+  *correct*.** `sampling` also clips to a `frameCount`, and the caller passed
+  `displayedFrameCount(for:)` — the track's own length, which the scroll's look-ahead inflates two
+  screenfuls past `sceneFrameCount`. So a curve was sampled across dead track and `AnimationCurve`'s
+  constant-hold extrapolation drew a **correct** flat line out there: on a 12-frame document, more than
+  half the band. The bound is `TimelineGraphBand.drawnFrameCount(sceneFrameCount:channels:)`, and it
+  lives in `Content` rather than beside it, because half its input is in the key (the channels' keys)
+  and half is not (the scene's length) — the exact shape that draws once and freezes. It **widens** for
+  a key past the end of the scene: `moves` clamps at a neighbour and at frame 0 and at no upper bound,
+  and `sceneFrameCount` grows only from cel edits, so such a key is reachable and would otherwise be
+  drawn nowhere while still being grabbable. `tap` takes the same bound, `nearestChannel` naming a
+  curve by proximity to the *drawn* line. `docs/graph-editor/5-*` is the pair.
 - **The backing store is a second question and it is answered "not the band's", with numbers.** The
   band view is `totalWidth` × 96 pt and `draw(_:)`-backed, so UIKit allocates `totalWidth × 96 × 4 ×
   scale²` regardless of what is sampled into it — at scale 2, `totalWidth × 1536` bytes: **13.8 MB**
@@ -1336,12 +1349,40 @@ gesture applies is keyed like everything else the band decides rather than re-de
 which is already in the test target — **no new file, and therefore no `project.pbxproj` entry and no
 object id to collide with anyone's.**
 
-**One thing found and left.** Tapping away a channel's second-to-last key makes the curve stop
-satisfying `isAnimated`, so the whole curve leaves the band mid-gesture. That is §11.5's predicate
-behaving correctly and one press of Undo brings it back, but an artist watching a curve vanish will
-not read it that way. It wants either a listed-but-flat state or a note in D4's channel list, and it
-is D4's to decide because that list is where a channel that is present-but-not-an-animation would have
-to show.
+**One thing found and left — settled 2026-08-30, and it is the listed-but-flat state.** Tapping away a
+channel's second-to-last key makes the curve stop satisfying `isAnimated`, so the whole curve left the
+band mid-gesture. That was §11.5's predicate behaving correctly and one press of Undo brought it back,
+but an artist watching a curve vanish does not read it that way.
+
+**The band now draws every channel that carries a curve, and dashes the ones that are not
+animations** — dimmed to `flatAlpha`, `flatDash`, with **hollow** key dots, and a `~` where the
+accessibility value would put a `:`. The objection recorded against this on
+`TimelineGraphBand.channels` — *"a flat line in the band with no way to tell it from one the artist
+authored"* — is a demand for a **distinction**, not for an omission, and the dash is one; the two
+states are told apart rather than merged, which is the condition the fix had to meet.
+
+**What the objection did not weigh is the state it left behind, and that is what decided this.** A
+channel the band does not draw is a channel no tap in the band can add a key to, so the one surface
+built for editing curves was the one surface that could not undo this edit. The flat state is a
+**door**: tap the dashed line to key it again, tap the hollow dot to remove the last key, at which
+point `setEffectParameterTrack` drops the empty curve and the channel is gone for real.
+
+**One walk, so the §2.28 pin is untouched.** `allChannels(effect:tracks:)` is the loose predicate with
+the strict one carried on the value; `channels(effect:tracks:)` is that filtered, so its ids are still
+exactly `listedAnimationChannelIDs(of:)`. The channel list is built from `allChannels` and labels each
+row — a **deliberate reversal of §11.5's membership ruling**, forced by the filter: a channel hidden
+while it was an animation must not reappear the moment a key is tapped away from it, and a row that is
+not listed cannot be switched back on.
+
+**And mutation-testing that reversal found the §2.28 pin was itself vacuous.**
+`testTheBandDrawsExactlyTheChannelsTheModelCallsAnimations` animated *both* of its fixture's channels,
+so deleting `.filter(\.isAnimated)` returned the identical array and the test stayed green — caught
+only by a neighbour. **A filter is unpinned until its fixture holds something the filter must reject**,
+which is the "nearest, not first" lesson three paragraphs down in a fourth costume. The fixture now
+flattens one channel after asserting the animated case.
+
+Seen rather than reasoned about: `docs/graph-editor/7-before-a-flattened-curve-vanishes.png` and
+`7-after-a-flattened-curve-goes-dashed.png`, one tap apart on the same fixture.
 
 **Five mutations, and the fifth is why this note exists.** Each of D3's load-bearing rules was
 poisoned in turn against the fast tier — remove the neighbour clamp, clamp to `uiRange` instead of
@@ -1493,8 +1534,11 @@ being modified at once (like transform x and y), so those should have a drop dow
 invisible like a whole. This is basically like the hide/show layers and layer groups."*
 
 So it is visibility, not selection: the editor shows every animated channel and the list turns them off.
-Membership of the list is `channelIsAnimated` — the strict predicate, ≥2 keys whose values are not all
-equal — never the loose one auto-key uses. Visibility is **transient view state, not document state**: it
+~~Membership of the list is `channelIsAnimated` — the strict predicate, ≥2 keys whose values are not all
+equal — never the loose one auto-key uses.~~ **Reversed 2026-08-30 by §11.4's vanishing channel:
+membership is the loose predicate (a curve at all) and the strict one is carried per row, because the
+band now draws both kinds and a channel hidden while it was an animation must stay listed to be
+switched back on.** Visibility is **transient view state, not document state**: it
 filters what is drawn, it has no meaning with the editor closed, and persisting it would put a field in
 the manifest that changes no pixel. `TimelineGraphChannelList` holds the grouping, the toggle arithmetic
 and the filter's scope, beside `TimelineGraphBand` and for that file's reason — `AnimationTimeline.swift`
@@ -1612,6 +1656,13 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
 - ~~**The band's height, and whether it is draggable.**~~ **Fixed at 96 pt, D2, not draggable.** There
   is no stored size and nothing to persist; it is `TimelineGraphBand.height`, asked for by
   `CanvasManager.graphBandExpansion` and carried in the layout key so the row it expands can move.
+
+  **Asked again on 2026-08-30 and answered the same way**, because a 250 pt panel does not hold four
+  layers plus an open band. Nothing is lost — the content scrolls — and none of the three levers is
+  free: shrinking the band trades the shape it exists to show, growing `timelineHeight` takes canvas
+  space back without being asked, and auto-scrolling the expanded row into view has 33 pt of range to
+  pay a 96 pt debt with on a three-layer document (§11.3). BUGS.md carries the note; it stays a note
+  until the owner says the drag grates.
 - ~~**A collapsed folder hides its children's key markers.**~~ **Ruled 2026-08-29: it shows nothing, which
   is today's behaviour, so there is no work.** Offered merged per-frame diamonds from the hidden children
   and a single "there is animation in here" indicator, the owner kept the blank row. Recorded as ruled
