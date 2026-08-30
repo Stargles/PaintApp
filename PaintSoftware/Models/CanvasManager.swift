@@ -124,6 +124,17 @@ final class CanvasManager: ObservableObject {
     /// visibility for the same reason. `interpolationThicknessFade` is the nearest precedent.
     @Published var isGraphEditorOpen: Bool = false
 
+    /// **The layer the band is held under while a timeline gesture owns the track**, or nil when it
+    /// is free to follow the selection — KEYFRAMES.md §11.3. Written only through
+    /// `pinGraphBand()` / `releaseGraphBand()`, which is where the reasoning lives.
+    ///
+    /// A layer index rather than a whole `Expansion` because that is the only part of the band a
+    /// gesture must not be allowed to move: opening and closing it is the artist pressing a button,
+    /// which is never a thing that happens under a finger already on the track.
+    ///
+    /// Transient like `isGraphEditorOpen`, and shorter lived than it — one gesture.
+    @Published var graphBandPinnedLayerIndex: Int?
+
     /// The cels the artist has flagged as keyframes, in the order they were flagged — which is time
     /// order only because the artist picks them that way. Highlighted yellow on the timeline.
     ///

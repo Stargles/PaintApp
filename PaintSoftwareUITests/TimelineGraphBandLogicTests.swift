@@ -394,4 +394,74 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.graphBandContent?.channels, [],
                        "…and the floor animates nothing, so the band is open and empty")
     }
+
+    // MARK: - …except while a gesture owns the track
+
+    /// **A selection made by a gesture already in flight must not move the band.**
+    ///
+    /// The band follows the selection (the ruling above), and selection is a *side effect* of half
+    /// the timeline's gestures — `beginBlockDrag` writes `currentLayerIndex` for the layer the block
+    /// came from. Following it there reflows the track by 96 pt inside a touch that has already
+    /// begun, which detaches the ghost from the finger and, because `layerIndex(atY:)` then resolves
+    /// an unmoved finger against moved rows, drops the block on a **different layer**.
+    func testAPinnedBandStaysUnderItsOwnRowWhileTheSelectionMoves() {
+        let manager = gradedManager()
+        manager.isGraphEditorOpen = true
+        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex,
+                       "PREMISE: open on the selected layer")
+
+        manager.pinGraphBand()
+        manager.currentLayerIndex = 0
+        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex,
+                       "The gesture selected another layer; the band is not allowed to follow yet")
+        XCTAssertEqual(manager.graphBandContent?.layerIndex, gradeIndex,
+                       "…and what it draws is held with it, so the curves do not change mid-gesture")
+
+        manager.releaseGraphBand()
+        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, 0,
+                       "The finger is off the track: the band goes where the selection went")
+    }
+
+    /// **The pin defers the reflow; it does not cancel it** — and this is the arithmetic the artist
+    /// actually feels, one step down from the model.
+    ///
+    /// Both halves of the timeline build a `TimelineRowLayout` from `graphBandExpansion`, so holding
+    /// the expansion holds every row origin either of them derives. `y(ofRow:)` on the row *under*
+    /// the band is the one that matters: that is the row a drag most often starts on, and the row
+    /// that moves by exactly one band the moment the band arrives above it.
+    func testTheRowUnderTheBandDoesNotMoveWhileTheBandIsPinned() {
+        let manager = gradedManager()
+        manager.currentLayerIndex = 0
+        manager.isGraphEditorOpen = true
+
+        // Synthetic rows, so layer *n* is row *n* and the test is about the band rather than about
+        // which end of the stack the layer panel puts a new layer on.
+        let rows: [LayerStackRow] = (0..<2).map { .layer(id: UUID(), index: $0, depth: 0) }
+        func y(ofRow row: Int) -> CGFloat {
+            TimelineRowLayout.make(rows: rows, rulerHeight: 18, rowHeight: 34,
+                                   expansion: manager.graphBandExpansion).y(ofRow: row)
+        }
+        let grabbed = 1
+        let before = y(ofRow: grabbed)
+
+        manager.pinGraphBand()
+        manager.currentLayerIndex = 1
+        XCTAssertEqual(y(ofRow: grabbed), before,
+                       "The row the finger is on stays exactly where the finger found it")
+
+        manager.releaseGraphBand()
+        XCTAssertEqual(before - y(ofRow: grabbed), TimelineGraphBand.height,
+                       "…and then moves by exactly one band, because the band arrived above it")
+    }
+
+    /// Releasing a pin nobody took is a no-op, which is what lets `endBlockDrag` release
+    /// unconditionally at the top rather than pairing the call with the guard that decides whether
+    /// there was a drag at all. A pin that outlived its gesture would freeze the band for the
+    /// session.
+    func testReleasingAnUnpinnedBandChangesNothing() {
+        let manager = gradedManager()
+        manager.isGraphEditorOpen = true
+        manager.releaseGraphBand()
+        XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex)
+    }
 }

@@ -531,6 +531,13 @@ struct TimelineTrackView: UIViewRepresentable {
                 targetStartFrame: cel.startFrame,
                 verdict: .allowed
             )
+            // **Before the selection moves, and that ordering is the whole fix.** The write below
+            // is what makes the grabbed layer active, which is right; what is not right is that the
+            // graph editor band is part of a row's *height*, so it would follow that write and
+            // reflow the track by 96 pt inside a touch that has already begun. `pinGraphBand` holds
+            // the band on the row it is on now until `endBlockDrag` lets it go — see its doc for
+            // what the reflow costs, which is not only a detached ghost.
+            canvasManager.pinGraphBand()
             canvasManager.currentLayerIndex = layerIndex
 
             if dragGhostView.superview == nil { contentView.addSubview(dragGhostView) }
@@ -589,6 +596,10 @@ struct TimelineTrackView: UIViewRepresentable {
         /// block goes back exactly where it came from either way, since nothing has been committed
         /// to the model during the drag itself.
         func endBlockDrag(cancelled: Bool) {
+            // Unconditional and first: the finger is off the track, so the band is free to go to the
+            // layer the drag selected, and a pin that outlived its gesture would freeze the band for
+            // the rest of the session. Cheap when nothing is pinned.
+            canvasManager.releaseGraphBand()
             guard let drag = blockDrag else { return }
             blockDrag = nil
             dragGhostView.setLifted(false)

@@ -146,4 +146,135 @@ final class GraphEditorUITests: PaintUITestCase {
         XCTAssertTrue(markers.waitForExistence(timeout: 5),
                       "…and the mark landed: the marker band spans the track, cels or no cels")
     }
+
+    // MARK: - Nothing reflows under a moving finger
+
+    /// **The defect this stage's second pass existed to fix, in the form that changes the document.**
+    ///
+    /// Picking a block up selects the layer it came from (`beginBlockDrag` writes
+    /// `currentLayerIndex`), and the band is part of its row's *height* — so with the band open on a
+    /// row above, that write used to move the grabbed row 96 pt up **inside the touch**. The finger
+    /// does not move with it, so `layerIndex(atY:)` resolves it against the rows' new positions and
+    /// the drop lands one row further down than the finger is: the artist re-times a block and it
+    /// changes layer instead. Not a cosmetic detachment, and not recoverable by looking, because the
+    /// ghost is drawn at the wrong place too.
+    ///
+    /// **Only XCUITest can see this.** The whole failure lives in the ordering of a
+    /// `currentLayerIndex` write, a `relayout()` and a `layerIndex(atY:)` inside
+    /// `TimelineTrackView.swift`, which is not compiled into this target at all; the logic tier can
+    /// pin that the band is held (`TimelineGraphBandLogicTests`) but not that the coordinator asks
+    /// for the held value at the moment it matters.
+    func testABandOnAnotherRowDoesNotDropABlockOnTheWrongLayer() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        // Three rows, so the row below the grabbed one is a real drop target rather than the end of
+        // the stack that `layerIndex(atY:)` clamps back to. Top to bottom: layer 2, layer 1, layer 0.
+        addVectorLayer(app)
+        addVectorLayer(app)
+
+        let grabbed = app.otherElements["timeline.cel.1.0"]
+        XCTAssertTrue(grabbed.waitForExistence(timeout: 5))
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 0, "PREMISE: it starts at 0")
+        XCTAssertFalse(app.otherElements["timeline.cel.0.1"].exists,
+                       "PREMISE: the bottom layer has exactly one block")
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        XCTAssertTrue(app.otherElements["timeline.graphBand"].waitForExistence(timeout: 5),
+                      "PREMISE: the band is open on layer 2 — the row above the one being grabbed")
+
+        // **Absolute screen coordinates, not the element.** An `XCUIElement` is re-resolved at every
+        // touch, so a drag expressed against the block would follow the block as the track reflowed
+        // and hide the very thing being tested. A finger does not do that.
+        let block = grabbed.frame
+        let pixelsPerFrame = block.width + 4          // the block is inset 2 pt inside its slot
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let down = origin.withOffset(CGVector(dx: block.midX, dy: block.midY))
+        let across = origin.withOffset(CGVector(dx: block.midX + 5 * pixelsPerFrame, dy: block.midY))
+        down.press(forDuration: 0.9, thenDragTo: across)
+
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 5,
+                       "The block re-timed five frames along the layer it was picked up from")
+        XCTAssertEqual(readCel(app, layerIndex: 0, celIndex: 0)?.start, 0,
+                       "…and the layer below is untouched")
+        XCTAssertFalse(app.otherElements["timeline.cel.0.1"].exists,
+                       "…in particular it did not receive the block, which is what the reflow did")
+    }
+
+    /// **What a tap inside the band does: nothing, deliberately.**
+    ///
+    /// The band is a sibling of the row pool with `isUserInteractionEnabled = false`, and the row
+    /// view above it is sized to its *block* half — so the band's own rectangle is covered by no row
+    /// and a touch there falls through to the scroll view, which pans and nothing else. That is the
+    /// right answer for D2: §11.4 claims this area for curve gestures, and a stage that wired it to
+    /// the row underneath would be building something D3 has to take out again.
+    ///
+    /// **It is worth a test because the failure is silent and plausible.** Sizing the row view to
+    /// the full expanded height — the obvious simplification, and the one §11.2 warns about — would
+    /// make the band read as that row's cel body: a tap in it would select a frame, and a second one
+    /// would raise a block menu over the curves.
+    func testATapInsideTheBandDoesNothing() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        addVectorLayer(app)
+
+        let block = app.otherElements["timeline.cel.1.0"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5))
+        app.buttons["timeline.graphEditorButton"].tap()
+        XCTAssertTrue(app.otherElements["timeline.graphBand"].waitForExistence(timeout: 5))
+
+        let frameBefore = readFrameLabel(app)?.current
+        let rect = block.frame
+        // Half a band below the block's bottom edge: inside the curves, well clear of both the
+        // blocks above and the row below.
+        let inBand = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: rect.midX, dy: rect.maxY + TimelineGraphBand.height / 2))
+        inBand.tap()
+        inBand.tap()
+
+        XCTAssertFalse(app.buttons["Add Drawing"].waitForExistence(timeout: 1),
+                       "Two taps in the band must not raise an empty slot's menu")
+        XCTAssertFalse(app.buttons["Extend to End"].exists,
+                       "…nor a block's")
+        XCTAssertEqual(readFrameLabel(app)?.current, frameBefore,
+                       "…nor move the playhead")
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 0,
+                       "…nor touch the block above it")
+    }
+
+    /// **The two-stage tap survives the band moving to the layer it tapped — and the row travels.**
+    ///
+    /// Both halves are the point. The armed state is a *cel identity* (`handleTapOnCel` compares the
+    /// tapped layer and frame against `currentLayerIndex` and `currentFrame`), not a screen position,
+    /// so the menu still opens on the second tap after the reflow. But the reflow is real and is
+    /// exactly one band: with the band open above it, the row the artist tapped is 96 pt higher when
+    /// they go to tap it again, and the point they first touched is now inside the band. That is
+    /// inherent to the owner's ruling that the band follows the selected layer — the band is part of
+    /// a row's height, so a band arriving above a row moves it — and this test states the cost rather
+    /// than hiding it. The fixture assertion in the middle is what stops the last tap being a tap on
+    /// a row that never moved.
+    func testTheTwoStageTapSurvivesTheBandMovingToTheLayerItTapped() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        addVectorLayer(app)                 // layer 1 lands on top and selected; layer 0 is below it
+
+        let lower = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(lower.waitForExistence(timeout: 5))
+        app.buttons["timeline.graphEditorButton"].tap()
+        XCTAssertTrue(app.otherElements["timeline.graphBand"].waitForExistence(timeout: 5),
+                      "PREMISE: the band is open on layer 1, the row above the one being tapped")
+
+        let before = lower.frame.minY
+        lower.tap()                         // stage one: select that layer and frame
+
+        var travelled: CGFloat = 0
+        let deadline = Date().addingTimeInterval(5)
+        repeat { travelled = before - lower.frame.minY } while travelled < TimelineGraphBand.height - 2
+            && Date() < deadline
+        XCTAssertEqual(travelled, TimelineGraphBand.height, accuracy: 2,
+                       "The band left the row above and opened here, so this row rose by one band")
+
+        lower.tap()                         // stage two, on the row where it now is
+        XCTAssertTrue(app.buttons["Extend to End"].waitForExistence(timeout: 5),
+                      "The arm is a cel identity, so the second tap still reaches the block's menu")
+    }
 }

@@ -367,10 +367,44 @@ extension CanvasManager {
     /// of 2026-08-29, offered per-layer toggles and an open-every-animated-layer mode. So the state
     /// is one `Bool` and the row is `currentLayerIndex`, which is also the cheapest of the three to
     /// key correctly.
+    ///
+    /// **Except while a gesture owns the track**, when it is the row `pinGraphBand()` recorded.
+    /// Selection is a *side effect* of half the timeline's gestures — picking a block up selects the
+    /// layer it came from — so following `currentLayerIndex` unconditionally reflows the whole track
+    /// by a band height in the middle of a drag. See `pinGraphBand()`.
     var graphBandExpansion: TimelineRowLayout.Expansion? {
-        guard isGraphEditorOpen, layers.indices.contains(currentLayerIndex) else { return nil }
-        return TimelineRowLayout.Expansion(layerIndex: currentLayerIndex,
-                                           height: TimelineGraphBand.height)
+        let row = graphBandPinnedLayerIndex ?? currentLayerIndex
+        guard isGraphEditorOpen, layers.indices.contains(row) else { return nil }
+        return TimelineRowLayout.Expansion(layerIndex: row, height: TimelineGraphBand.height)
+    }
+
+    /// **Hold the band on the row it is on now, for the duration of a gesture that owns the track.**
+    ///
+    /// The band is part of its row's *height* (§11.2's seam), so relocating it moves every row
+    /// between the old position and the new one by 96 pt. That is correct and wanted when the artist
+    /// selects another layer, and ruinous when the selection was a side effect of a gesture already
+    /// in flight: `beginBlockDrag` writes `currentLayerIndex` and then relayouts inside the same
+    /// touch, so the grabbed row travels a band height while the finger does not. The ghost detaches
+    /// by that much, and — worse, because it is silent and changes the document —
+    /// `layerIndex(atY:)` then resolves the unmoved finger against the moved rows and the block is
+    /// dropped on a **different layer** than the one under it.
+    ///
+    /// **Only the row is held, not whether the band is open**: the toggle is a button press, which
+    /// cannot happen under a finger that is already dragging the track.
+    ///
+    /// **Only the block drag takes this.** A cel resize, a ruler scrub and the name column's reorder
+    /// all leave `currentLayerIndex` alone for the length of the gesture, so there is nothing for
+    /// them to hold and a call in them would be a control that never fires. A gesture that starts
+    /// selecting a layer mid-flight must take one.
+    func pinGraphBand() {
+        graphBandPinnedLayerIndex = currentLayerIndex
+    }
+
+    /// Lets the band go where the selection has moved to. Safe to call with nothing pinned, which is
+    /// what makes the release unconditional at the top of `endBlockDrag` rather than paired with the
+    /// guard that decides whether there was a drag at all.
+    func releaseGraphBand() {
+        graphBandPinnedLayerIndex = nil
     }
 
     /// **What the open band draws**, or nil when it is closed.
