@@ -129,24 +129,52 @@ LAYER_TRANSFORM.md.
       value layer colour only. That would remove alot of redundant code and tidy up architecture, unless
       there is a reason not to do that."*
 
-      **Recorded as an ask, not researched — and the owner's instinct has a real defect behind it.** The
-      paper is a `UIView` painted *behind* the layer host (`CanvasView.swift:39-43`, `updatePaper()` at
-      `:540-552`), added before the two image views that carry the composite, and every live-canvas
-      request is built with `background: nil` (`RenderRequest.swift:547`). So the paper is not in the
-      composite, which is why **no effect, no blend mode and no colour-pipeline change can reach
-      ink-over-paper** — the finding that reshaped (10) on the same day.
+      **Investigated 2026-08-30. Verdict: do not — and the investigation refuted the premise this item
+      was created on, which is the more useful half.**
 
-      **There is a reason it is that way and it is written down**, so this is a question to answer rather
-      than a change to make: [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) §0 verified the arrangement at two
-      commits, and §2 rules that an *adjustment layer* grading the paper is what makes the composite
-      opaque, which is why the Behind onion skin has to move above it in z-order. A value layer in
-      flat-colour mode is already a full-canvas sheet, so the shapes genuinely match; what has to be
-      established is what a bottom-most value layer does to the onion skin ordering §2 settled, to
-      `RenderBackground` (`RenderRequest.swift:249-259`, designed for exactly this disagreement), to the
-      layer panel's idea of a deletable layer, and to every document that has no such layer stored.
+      **The premise was that the paper is outside the composite. It is not, and has not been since
+      `2a0379d` / `d90b329` / `5c00201` shipped EFFECT_BACKDROP §6.** `makeSandwichRequests` builds `full`
+      and `below` with `background: paper` (`RenderRequest.swift:722-724`); both backends fill it
+      (`Compositor.swift:713-716`, `MetalCompositor.swift:941-974`); thumbnails pass
+      `includeBackground: true` (`ProjectStore.swift:311`); and there is a test called
+      `testEveryBlendModeBlendsAgainstThePaper` (`EffectLayerLogicTests.swift:1491`). **So ink-over-paper
+      IS reachable by effects, blend modes and any colour work — on the compositor-engaged path.** On the
+      disengaged path a plain document is still drawn by Core Animation with the paper as a view behind
+      it (`CanvasView.swift:832-838` argues deliberately for no extra clause there), but that is the case
+      where nothing is being blended anyway.
 
-      **The prize if it works is larger than tidiness**: it is what would put ink-over-paper inside the
-      composite, which is the case (10) cannot currently improve.
+      **How the false premise got here, because the trap will be walked into again:** it was read out of
+      [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) **§0**, headed *"What is already true, verified rather than
+      assumed"* and carrying the two commits it was checked at. **A spec's what-is-already-true section
+      describes the world before that spec was built.** Once the spec ships, that section becomes the most
+      confidently-worded stale text in the file — it reads exactly like a freshly verified statement of
+      current behaviour, and it is a statement of the past. Check a §0 against the build order below it.
+
+      **The three things that break if the paper becomes a bottom value layer**, each named rather than
+      hand-waved. (1) **`RenderBackground` is the definition of "ink".** The `.ink` sub-walk is *the same
+      tree with `background: nil`* (`Compositor.swift:1040`, `MetalCompositor.swift:659`) and
+      `paperInBackdrop` is literally `request.background != nil` (`Compositor.swift:695`). Make the paper a
+      leaf and that flag is always false, so **Outline reverts to a no-op** (it keys on `src.a > threshold`,
+      `Composite.metal:696-698`) and Bloom's shipped `.ink` default (`Effect.swift:1142`) breaks. (2) **The
+      padding margin.** `RenderBackground.rect` insets by `canvasPadding` (`RenderRequest.swift:605-615`)
+      while `LayerRenderSource.solid` fills the whole `canvasSize` (`:84-102`), so a bottom value layer
+      paints canvas colour over the grey margin — pinned by
+      `testThePaperIsTheArtworkRectAndThePaddingMarginIsNotPaper`. (3) **The Behind onion skin vanishes on
+      the disengaged path**, which is the default: `CanvasView.swift:793-798` fronts every layer host above
+      the onion view, and `paperView` is never fronted — an opaque bottom layer would be.
+
+      **The owner's premise that this removes redundancy is refuted numerically**: ~99 non-comment lines
+      would go, against paper-leaf identity, a per-leaf margin inset, ink-exclusion, delete/reorder/mask
+      guards and a migration. Net deletion is negative. `LayerRenderSource.solid` also allocates a full
+      unmemoized canvas buffer per snapshot (8 MB at 2048x1024) where `RenderBackground` allocates zero.
+
+      **But the owner sensed something real and it is worth keeping.** The canvas colour genuinely has
+      three spellings — `paperView.backgroundColor` (`CanvasView.swift:567`), `UIRectFill`
+      (`Compositor.swift:716`) and a Metal dispatch (`MetalCompositor.swift:969`). **That duplication is
+      not the paper's separateness; it is the two-path live canvas** (Core Animation vs compositor), and a
+      bottom value layer would have two spellings of its own. If the redundancy is the thing worth
+      removing, the target is the dual live-canvas path — a much larger question, and one to put to the
+      owner on its own rather than smuggle in under this item.
 
 ### (10) Colour mixing — (10a) Oklab ramps, build now; (10b) linear light per blend mode, deprioritised
 
@@ -155,8 +183,7 @@ LAYER_TRANSFORM.md.
       it: *"RGB goes muddy through the middle between two saturated hues."*
 
       **Ruled 2026-08-30, and it splits this item in two.** Shown in plain terms where the app actually
-      mixes two colours — stroke over stroke, layer over layer, colour ramps, and *not* ink on blank paper
-      — the owner ruled: *"just do the ramps first for now. I do want linear light to be able to be used
+      mixes two colours — stroke over stroke, layer over layer, and colour ramps — the owner ruled: *"just do the ramps first for now. I do want linear light to be able to be used
       for compositing blend modes. Maybe instead of a global switch for that, it should be an option in the
       blend modes, with the global switch just being for the other stuff, like one brush stroke over
       another."* And on where it sits: *"Task 10) isnt exactly a major priority for me, the other stuff on
