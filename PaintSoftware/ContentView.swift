@@ -46,6 +46,30 @@ struct ContentView: View {
         #if os(iOS)
         .statusBar(hidden: true)
         #endif
+        // **The app is a dark app, and this is where it says so** — BUGS.md, "The channel-list
+        // popover renders in system appearance, on an app that is otherwise black" (2026-08-30).
+        //
+        // That entry asked whether the answer is per surface or global, and the tree answers it. Every
+        // painted surface in the editor already hard-codes its colours — `Color.black.opacity(0.82)`
+        // for the layer rail, `.white` for its labels, and the timeline's chrome the same — so the
+        // ones that came out wrong are exactly the ones that paint *nothing* and inherit the system's
+        // appearance instead. There are about twenty of them and a per-surface fix cannot reach most:
+        // a `Menu`, an `alert`, a `contextMenu` and a stock `ColorPicker` are system chrome with no
+        // background to set. Two of them are not merely inconsistent but unreadable on a light-mode
+        // device — `OnionSkinPanel` and `InterpolatePanel` are white text on no background at all,
+        // which lands white-on-light-grey — and neither had been reported, because nobody had run the
+        // app in light appearance.
+        //
+        // So this is one line against twenty patches, and it is the declaration `GalleryView` and both
+        // `GalleryRecoveryViews` already make for themselves: the app was half-declared dark and the
+        // editor was the half that was not. `GalleryView`'s own call is gone with this, being a direct
+        // child of this view tree; the two recovery views keep theirs because each is the root of a
+        // `.sheet`, which is its own presentation.
+        //
+        // It is a *preference*, not a lock on the device's setting — the artist's own light/dark
+        // choice still drives every other app, and painting an artwork against a black canvas chrome
+        // is what this one is for.
+        .preferredColorScheme(.dark)
         // Both phases, not just the new one: `.inactive` occurs on the way out *and* on the way back,
         // so testing `newPhase` alone saved three times per app switch and stalled the return leg.
         // `ScenePhaseSaveGate` carries the reasoning and the transition matrix.

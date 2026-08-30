@@ -72,7 +72,6 @@ struct GalleryView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
         // Not a scrim over the grid, deliberately: the tile carries its own spinner, and a
         // full-screen cover would hide the one thing that says *which* project is opening. This is
         // only the "no second tap" half of `GalleryOpenState`, expressed where SwiftUI can enforce it
