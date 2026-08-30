@@ -808,12 +808,20 @@ Each stage is mergeable and leaves the app working.
 | **3b** | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27. The **model** half is built: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form are built too** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is now the **union** of marks and curve keys, with a bare mark drawn hollow and a mixed run drawn landed. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. What is left is the channel panel and the drawer. **Decide which shape each one is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. **§10 carries what the drawer actually attaches to, and it is a constraint rather than a preference.** |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
+| **5b** | **Real Distort** | §2.13. **Moved here from the end of this table on 2026-08-29.** Raster tier first (the gesture is `TextFrameDrag.distortedFrame` and the bake is `ImageWarp`), then ink through §4.2's point map, then placed images behind Move stage 3c. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with ROADMAP (5). |
 | **6b** | **The playback cache** | §4.6. Only stage 8 actually needs it — per-object animation fits the budget without it — so it lands beside the transformation layer, not before it. |
 | **7** | **Live recording + editable fps** | §5. Needs the playback clock hoisted onto the model first. |
 | **8** | **The transformation layer** | §4.4. Late because §4.6's cache is its real cost, and because it is the only stage that needs one. |
-| **9** | **Real Distort** | §2.13. Raster tier first (the gesture is `TextFrameDrag.distortedFrame` and the bake is `ImageWarp`), then ink through §4.2's point map, then placed images behind Move stage 3c. |
 | **10** | **The timing recorder** | §7. Small, sits on 7. |
+
+**Why Distort moved, ruled 2026-08-29.** It sat last, which read as a dependency and was not one: Distort
+needs the **transform channel and nothing else** — not bake, not the playback cache, not the
+transformation layer — because §2.13's whole content is that a pose is a quad, which stage 5 stores from
+day one precisely so this lands with no migration. Left at the end it would have waited on three stages it
+does not use. Asked to schedule it, the owner delegated the call; the ordering above is that call, and the
+stage numbers of 6 through 10 were left alone so that references to them elsewhere stay true. There is no
+stage 9 now, deliberately.
 
 **Stage 0's one prerequisite — the `ContentProvider` seam — is built.** ✅ Derived content used to be
 invisible to `PixelOps.rasterize(cel:)`, so thumbnails, ordinary onion skin and the composite an export
@@ -932,7 +940,14 @@ cache entry per frame of a held cel).
 
 Asks 4, 5 and 6 of 2026-08-29, and §2.17 sharpened by the owner from *"a drawer that grows the timeline
 upward"* to *"it pops up above the layer that has it when on"*. **D1 is built; D2 onward is not.** Line
-numbers are as of `167e44a` and this document has been wrong about them before — re-take them.
+numbers are as of `0513d06`, re-taken 2026-08-29 — every one §11.3 and §11.4 carried was stale, because
+`167e44a` is three commits back and 336 lines of the four timeline files have moved since. This document
+has been wrong about them twice now; re-take them again rather than trusting this sentence.
+
+**Scope, ruled 2026-08-29: one band at a time, under the selected layer.** Offered per-layer toggles and
+an open-every-animated-layer mode, the owner took the selected layer. It is also the cheapest of the
+three to key correctly — the expanded row is a single `Int?`, so `TimelineLayoutKey` grows one optional
+field rather than a set, and the timeline's height changes by one band whatever the document holds.
 
 ### 11.1 It lives inside the timeline's scroll content
 
@@ -982,20 +997,35 @@ moves again. §11.3's first bullet, reached from the geometry side.
 
 ### 11.3 Stage D2 — the band, and three ways it renders once and never again
 
+**D2 also repurposes the button, because otherwise nothing can open the band.** §2.22's keyframe button
+(`AnimationTimeline.swift:507`, symbol `diamond`, id `timeline.keyframeButton`) still adds a keyframe at
+the playhead — the owner noted on 2026-08-29 that it is "still here, eventually to get replaced by the
+graph editor icon", which is ask 3's own tail. It becomes the graph-editor toggle: the icon and the
+accessibility identifier change, and the tap opens the band on the selected layer instead of writing a
+mark. **No function is lost** — Add Keyframe moved to the cel menu in `4057e9d` and is the workflow ask 3
+described. The **channel list is not part of this stage**; ask 3 wants the button to raise the list as
+well, and that is D4 hanging a control inside the band rather than a second thing on the button.
+
 - **`TimelineLayoutKey` gates everything.** `relayout()` early-returns on `built.key == laidOutKey`
-  (`TimelineTrackView.swift:215`). Curve data outside the key renders once and then freezes — §4.5's
+  (`TimelineTrackView.swift:225`). Curve data outside the key renders once and then freezes — §4.5's
   invisible failure from a third door. `currentFrame` is deliberately absent from the key and takes a
   `movePlayhead`-style fast path instead; curves should go **in** the key, because unlike the playhead
   they change shape rather than position.
-- **The playhead is a column, not a hairline** — width `pixelsPerFrame` (`:352`), so 10.5 to 120 pt of
-  35 % blue, `bringSubviewToFront` on every layout. A curve drawn under it is tinted.
+- **The playhead is a column, not a hairline** — width `pixelsPerFrame` (`:360`), so 10.5 to 120 pt of
+  35 % blue, `bringSubviewToFront` on every `movePlayhead` (`:363`). A curve drawn under it is tinted, and
+  at maximum zoom that column is 120 pt of the band.
 - **Any drag inside the scroll content is eaten** without
-  `scrollView.panGestureRecognizer.require(toFail:)` — set once at view creation, not per relayout
-  (`:236` for the ruler, `:258` for a row).
+  `scrollView.panGestureRecognizer.require(toFail:)`. **This document said that call is made at view
+  creation and it is not** — both sites are inside `relayout()`, the ruler's at `:246` behind an
+  `if rulerView.superview == nil` guard (`:238`) and a row's at `:268` inside the
+  `while rowViews.count < layerEntries.count` pool-growth loop (`:264`). Each still fires once per view,
+  so the net effect is the one described; but a band added to that pool must sit **inside the same loop**
+  or it is created without arbitration and its drags go to the scroll view. Only the pinch recogniser is
+  attached in `makeUIView` (`:72-73`).
 
 ### 11.4 Stage D3 — the gestures, most of which are already written
 
-`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` (`TimelineKeyMarkers.swift:188`) is the exact inverse of
+`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` (`TimelineKeyMarkers.swift:212`) is the exact inverse of
 `centerX(frame:)` and its own doc says **"Nothing calls this yet and that is deliberate"** — it was
 written for this.
 
@@ -1042,6 +1072,18 @@ with the editor closed, and persisting it would put a field in the manifest that
   any useful sense, while a band a couple of inches tall makes the shared axis lose the small-range channel
   outright. Blender and Maya both ship the toggle; this ships the default that suits the screen, and the
   toggle stays available as a later addition rather than a thing the first version owes.
+
+  **Normalised against what, sharpened 2026-08-29.** Two readings of "fill the band" survive the ruling —
+  the channel's declared `uiRange`, or the extent of the keys actually present — and the tree already
+  answers it. `Effect.swift:1300-1301` says to draw the y axis over **`uiRange`** and to allow a key
+  anywhere in `modelDomain`, which is a note written before this feature and for it. Fitting to the key
+  extent instead would rescale the axis on every drag, so a key would move under the finger that is not
+  dragging it. Take `uiRange`, fall back to the key extent only for a parameter whose `uiRange` is nil,
+  and **clip to the band** — `AnimationCurve`'s decision 1 is that the output is never clamped, so a
+  bezier overshoot genuinely leaves the range and the band must cut it rather than rescale for it.
 - **The band's height, and whether it is draggable.** Start fixed.
-- **A collapsed folder hides its children's key markers** — found and deliberately deferred on
-  2026-08-29, and this is where it wants a decision.
+- ~~**A collapsed folder hides its children's key markers.**~~ **Ruled 2026-08-29: it shows nothing, which
+  is today's behaviour, so there is no work.** Offered merged per-frame diamonds from the hidden children
+  and a single "there is animation in here" indicator, the owner kept the blank row. Recorded as ruled
+  rather than deleted because it was found as a gap and will be found again: the next session to notice
+  a folder swallowing its children's markers should read this and move on.
