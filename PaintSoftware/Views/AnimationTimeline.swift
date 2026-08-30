@@ -169,7 +169,12 @@ struct AnimationTimeline: View {
     private var rowLayout: TimelineRowLayout {
         TimelineRowLayout.make(rows: canvasManager.layerStackRows,
                                rulerHeight: rulerHeight,
-                               rowHeight: rowHeight)
+                               rowHeight: rowHeight,
+                               // The graph editor band grows the row it opens under, so this column
+                               // has to take the same growth or every name below it would label the
+                               // track above the one it belongs to. Both halves read the one
+                               // derivation on `CanvasManager` — KEYFRAMES.md §11.2's seam.
+                               expansion: canvasManager.graphBandExpansion)
     }
 
     private var contentHeight: CGFloat { rowLayout.contentHeight }
@@ -493,26 +498,41 @@ struct AnimationTimeline: View {
         .accessibilityIdentifier("timeline.loopButton")
     }
 
-    /// **Places a keyframe at the playhead on the current layer** (§2.26). Here in the timeline's own
-    /// control strip rather than in the top toolbar (§2.22): it writes at the playhead and §2.17's
-    /// graph drawer grows upward out of this same panel, so the button, the frames it writes onto and
-    /// the curve it opens all end up in one place.
+    /// **Opens the graph editor on the selected layer** — KEYFRAMES.md §11.3, and ask 3's own tail:
+    /// *"When tapping the keyframe button it brings up the list of things being animated and graph
+    /// editor instead of placing a keyframe (icon and its name also may have to be changed to graph
+    /// editor)."*
+    ///
+    /// **The keyframe it used to place is not lost, it moved.** Add / Remove / Clear Keyframes are in
+    /// the cel menu (`keyframeItems`), which is the workflow §2.26 describes and where the artist is
+    /// already standing when they want one — beside the block, at the frame they tapped, rather than
+    /// at wherever a playback timer has since carried the playhead.
+    ///
+    /// **`chart.xyaxis.line`**: a plotted line against a drawn pair of axes, which is what a graph
+    /// editor *is* and what distinguishes it from the neighbouring
+    /// `point.topleft.down.to.point.bottomright.curvepath` on the interpolate button — that one is a
+    /// bare curve between two points, which is in-betweening, and §2.8 is the standing rule that the
+    /// two kinds of "keyframe" must never read as one thing.
+    ///
+    /// **Tinted like `interpolateButton` rather than always white.** The band opens inside the
+    /// timeline's scroll content, so with enough layers it can be open and scrolled out of sight; a
+    /// button that looks the same either way leaves the artist with no way to tell a closed editor
+    /// from one that is simply below the fold.
     ///
     /// **Rendered from both `collapsedBar` and `miniToolbar`, like every other button in this group.**
     /// A control added to only one is invisible in the other state, and the collapsed bar is exactly
-    /// where an artist who dragged the timeline down will look for it.
+    /// where an artist who dragged the timeline down will look for it. It is also where the tint earns
+    /// the most: collapsed, the band is not on screen at all.
     ///
-    /// Unlike the three buttons beside it this is not two-stage: it has no mode to be in, so a second
-    /// tap is simply a second keyframe.
-    private var keyframeButton: some View {
-        Button(action: {
-            guard let target = canvasManager.keyframeTarget else { return }
-            canvasManager.addKeyframe(target, atFrame: canvasManager.currentFrame)
-        }) {
-            Image(systemName: "diamond")
+    /// The channel list ask 3 also wants is **not** on this button — §11.5 makes it a control inside
+    /// the band, because hanging a second popover here would give one control two jobs and one of
+    /// them would have to win the second tap.
+    private var graphEditorButton: some View {
+        Button(action: { canvasManager.isGraphEditorOpen.toggle() }) {
+            Image(systemName: "chart.xyaxis.line")
         }
-        .foregroundColor(.white)
-        .accessibilityIdentifier("timeline.keyframeButton")
+        .foregroundColor(canvasManager.isGraphEditorOpen ? .blue : .white)
+        .accessibilityIdentifier("timeline.graphEditorButton")
     }
 
     /// Interpolate mode's entry point, next to onion skin and loop rather than in the canvas's top
@@ -569,7 +589,7 @@ struct AnimationTimeline: View {
                 onionSkinButton
                 loopButton
                 interpolateButton
-                keyframeButton
+                graphEditorButton
                 Spacer()
                 frameLabel
             }
@@ -589,7 +609,7 @@ struct AnimationTimeline: View {
                 onionSkinButton
                 loopButton
                 interpolateButton
-                keyframeButton
+                graphEditorButton
 
                 Spacer()
 
@@ -632,7 +652,14 @@ struct AnimationTimeline: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { position, row in
                 let isLifted = draggingRowID == row.id
                 nameRow(row)
-                    .frame(height: layout.height(ofRow: position), alignment: .leading)
+                    // **Two frames, and the inner one is what keeps this honest.** The name is
+                    // centred in the *block* half of the row — which is the whole row for every row
+                    // that has no graph editor band, so nothing moved — and that block is then
+                    // pinned to the **top** of the full row. Centring the name in the full height
+                    // instead would float it down beside the middle of the band, labelling the
+                    // curves rather than the cel blocks it is the name of.
+                    .frame(height: layout.blockHeight(ofRow: position), alignment: .leading)
+                    .frame(height: layout.height(ofRow: position), alignment: .top)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(liftedBackground(isLifted: isLifted))
                     .contentShape(Rectangle())

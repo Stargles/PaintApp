@@ -1,0 +1,332 @@
+import CoreGraphics
+import Foundation
+
+/// **What the graph editor band draws, and every number it draws it at** — KEYFRAMES.md §11.3,
+/// stage D2.
+///
+/// **Why this is a type and not arithmetic inside `TimelineTrackView`.** `Views/TimelineTrackView.swift`
+/// and `Views/AnimationTimeline.swift` are **not** compiled into `PaintSoftwareUITests`, so a logic
+/// test written against either is silently a pin against nothing — `TimelineKeyMarkers` states the
+/// rule at length and this file sits beside it for exactly that reason. Everything here is a
+/// function of values; the view keeps only the CoreGraphics calls.
+///
+/// **The band is not `CurveEditor` moved.** `Views/EffectSection.swift:683` is a SwiftUI `Path` in a
+/// square `ZStack` with its own normalised 0…1 space, and none of its drawing is portable to a
+/// `UIView.draw(_:)` inside a scroll view whose x axis belongs to the timeline. What travels is the
+/// *rules* — one sample per point of width, a 1.8 pt stroke, a small handle dot — and those are the
+/// constants below.
+///
+/// **Three decisions the owner settled on 2026-08-29, which the arithmetic here encodes:**
+///
+/// 1. **Each curve is scaled to fill the band** (§11.6). Per-channel normalisation, not one shared
+///    axis, so a 0…1 opacity and a 0…500 blur radius are both legible. What is given up is that two
+///    slopes are no longer comparable — which they never were, being different units.
+/// 2. **The axis is the parameter's `uiRange`** (`Effect.swift:1301`, a note written for this before
+///    the feature existed), with the key extent used only where a parameter declares no `uiRange`.
+///    Fitting to the key extent instead would rescale the axis on every drag, so a key would move
+///    under the finger that is not dragging it.
+/// 3. **And the band clips.** `AnimationCurve`'s decision 1 is that the output is never clamped, so
+///    a bezier overshoot genuinely leaves `uiRange`; cutting it at the band's edge is honest, and
+///    rescaling to admit it would be decision 2 undone once a frame.
+enum TimelineGraphBand {
+
+    // MARK: - How big the band is
+
+    /// **How much height the band adds to the row it opens under.** Fixed, and not draggable — the
+    /// owner's ruling of 2026-08-29 ("start fixed"), so there is no stored size and nothing to
+    /// persist. Roughly three cel rows tall: enough that a curve's shape reads, small enough that
+    /// the neighbouring layers stay on screen at the timeline's default 250 pt.
+    static let height: CGFloat = 96
+
+    /// The margin between the band's edges and the two ends of a channel's range, so a key sitting
+    /// exactly at the top or bottom of `uiRange` is drawn as a dot rather than as a half dot on the
+    /// boundary. It is *not* headroom for overshoot — see decision 3; an overshoot is cut.
+    static let verticalInset: CGFloat = 8
+
+    /// `CurveEditor.curvePath`'s stroke width, kept so the two surfaces read as the same object.
+    static let lineWidth: CGFloat = 1.8
+
+    /// The dot on a key. Smaller than `CurveEditor`'s 9 pt `Circle`, because that one is a *handle*
+    /// sized for a finger and this stage draws no handles — D3 adds the hit target, and
+    /// `CurveEditor.hitRadius` (22 pt) is the constant it will want, not this one.
+    static let keyRadius: CGFloat = 2.5
+
+    /// The band's own background, over the timeline's black, so the strip reads as a panel rather
+    /// than as curves floating between two rows.
+    static let backgroundWhite: CGFloat = 1
+    static let backgroundAlpha: CGFloat = 0.06
+
+    // MARK: - What is on the band
+
+    /// One curve. Everything the band draws for a channel, and nothing else — which is what lets
+    /// `TimelineLayoutKey` carry this value directly and the view read what it draws *out of* the
+    /// key rather than re-fetching it. See `Content`.
+    struct Channel: Equatable {
+        /// `EffectParameter.id`, `"<case>.<field>"`. The band's accessibility value is built from
+        /// these, so a UI test names a channel the way a saved document does.
+        let parameterID: String
+        /// `EffectParameter.name` — the artist-facing label. Unused by the drawing today; D4's
+        /// channel list is what displays it, and it is carried here so that stage needs no second
+        /// walk of `Effect.parameters`.
+        let name: String
+        let curve: AnimationCurve
+        /// `EffectParameter.uiRange`, verbatim, including its nil. `range(uiRange:keyValues:)` is
+        /// what turns it into an axis.
+        let uiRange: ClosedRange<Double>?
+        /// **The channel's position in `Effect.parameters`, which is where its colour comes from.**
+        ///
+        /// Not the position in the *drawn* list: that one shifts when a channel starts animating,
+        /// and every curve below the new one would change colour mid-session. The descriptor table
+        /// is fixed by the source, so this index is stable for a given effect whatever is animated,
+        /// and it is distinct per channel by construction — every curve in one band comes from one
+        /// layer, hence from one effect, hence from one table.
+        let descriptorIndex: Int
+    }
+
+    /// **Everything one open band draws.** One value, so `TimelineLayoutKey` gains a single optional
+    /// field and the whole of §11.3's first silent failure is closed by construction: what the band
+    /// draws *is* what the layout gate compares.
+    struct Content: Equatable {
+        /// Which layer's row the band hangs under — `CanvasManager.currentLayerIndex` at the moment
+        /// the key was built. In the key because the row it expands is a row whose *height* changes.
+        let layerIndex: Int
+        /// The expansion this band asked the row layout for. In the key for §11.2's reason: D2 is
+        /// the first stage to derive a row height from something other than `(rows, rowHeight)`, and
+        /// a height outside the key draws once and never moves again.
+        let height: CGFloat
+        /// In `Effect.parameters` order, which is `listedAnimationChannelIDs`' order.
+        let channels: [Channel]
+    }
+
+    /// **The channels a band draws: the target's *animations*, by the strict predicate.**
+    ///
+    /// §11.5's ruling — `AnimationCurve.isAnimated`, two or more keys not all holding the same
+    /// value — and deliberately **not** the loose `curvedEffectChannelIDs` the auto-key arm uses. A
+    /// channel keyed twice at one value is a curve in force and is not an animation; drawing it
+    /// would put a flat line in the band with no way to tell it from one the artist authored.
+    ///
+    /// **This is the same walk `CanvasManager.channelIDs` makes and it must stay so.** Both filter
+    /// `Effect.parameters` by `isScalarAnimatable` and then by the curve predicate; the ids this
+    /// returns are pinned equal to `listedAnimationChannelIDs(of:)` in
+    /// `TimelineGraphBandLogicTests`, because two implementations of one invariant is the defect
+    /// §2.28 was written about.
+    ///
+    /// **A target with no grade contributes nothing**, which is `keyframes(of:)`'s asymmetry read
+    /// the same way: a layer that is not in effect form grades nothing, so tracks left on it by a
+    /// kind change are storage rather than animation and must not draw a curve for a value the
+    /// canvas is not showing.
+    ///
+    /// One walk of `Effect.parameters` — which rebuilds up to thirty-three closures per call — and
+    /// the descriptor comes back with the curve rather than being looked up again per id, which the
+    /// obvious spelling (`listedAnimationChannelIDs` then `first(where:)` per id) would make a
+    /// linear scan over a rebuilt table per channel.
+    static func channels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
+        guard let effect, !tracks.isEmpty else { return [] }
+        return effect.parameters.enumerated().compactMap { index, parameter in
+            guard parameter.isScalarAnimatable,
+                  let curve = tracks[parameter.id],
+                  curve.isAnimated
+            else { return nil }
+            return Channel(parameterID: parameter.id,
+                           name: parameter.name,
+                           curve: curve,
+                           uiRange: parameter.uiRange,
+                           descriptorIndex: index)
+        }
+    }
+
+    // MARK: - The y axis
+
+    /// **The range a channel's y axis covers.**
+    ///
+    /// `uiRange` where the parameter declares one, which is 25 of the 33 and every parameter that
+    /// has a slider; the extent of the channel's own keys otherwise. A parameter whose `uiRange` is
+    /// degenerate falls through to the keys for the same reason a nil one does — an axis of zero
+    /// height maps every value onto one line.
+    ///
+    /// A key extent that is itself flat is widened by half a unit either side. That case cannot
+    /// arise from `channels(effect:tracks:)`, whose predicate is precisely that the values are *not*
+    /// all equal, but this function is total and a caller with one key must get an axis rather than
+    /// a division by zero.
+    static func range(uiRange: ClosedRange<Double>?, keyValues: [Double]) -> ClosedRange<Double> {
+        if let uiRange, uiRange.upperBound > uiRange.lowerBound { return uiRange }
+        guard let low = keyValues.min(), let high = keyValues.max() else { return 0...1 }
+        guard high > low else { return (low - 0.5)...(high + 0.5) }
+        return low...high
+    }
+
+    /// **The band-local y a value sits at.** Up is more, which is every graph editor's convention
+    /// and the opposite of the view's own coordinate direction.
+    ///
+    /// **Deliberately unclamped.** A bezier overshoot leaves `uiRange` (decision 3 above) and the
+    /// answer for it is a y outside `0...bandHeight`, which the `CGContext` a `draw(_:)` runs in
+    /// cuts at the view's edge for free. Clamping here would draw a flat line along the band's rim —
+    /// a shape the curve does not have — and rescaling would move every other key on screen.
+    static func y(ofValue value: Double, in range: ClosedRange<Double>, bandHeight: CGFloat) -> CGFloat {
+        let usable = max(bandHeight - verticalInset * 2, 1)
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return verticalInset + usable / 2 }
+        let t = (value - range.lowerBound) / span
+        return verticalInset + usable * CGFloat(1 - t)
+    }
+
+    /// Whether a y is inside the band at all — what "the band clips" means as a predicate, so the
+    /// fast tier can assert the cut rather than only the mapping.
+    static func isInsideBand(_ y: CGFloat, bandHeight: CGFloat) -> Bool {
+        y >= 0 && y <= bandHeight
+    }
+
+    // MARK: - The x axis, which belongs to the timeline
+
+    /// **The curve time a band x maps to — the continuous inverse of
+    /// `TimelineKeyMarkers.centerX(frame:)`.**
+    ///
+    /// A different question from `TimelineKeyMarkers.frame(atX:pixelsPerFrame:)`, which asks *which
+    /// column* a point is in and floors to an `Int`. That one is what D3's key hit-testing wants;
+    /// this one is what sampling a curve between two frames wants, and using either for the other's
+    /// job puts the curve half a frame off its own keys. Both exist, and they are inverses of two
+    /// different forward maps.
+    static func time(atX x: CGFloat, pixelsPerFrame: CGFloat) -> Double {
+        guard pixelsPerFrame > 0 else { return 0 }
+        return Double(x / pixelsPerFrame) - 0.5
+    }
+
+    /// Where along the band a frame's key is drawn — `TimelineKeyMarkers.centerX`, named through
+    /// here so the band and the marker band cannot drift apart about what a frame's x is. A key
+    /// diamond on the marker band and its dot on the curve sit on one vertical line.
+    static func x(ofFrame frame: Int, pixelsPerFrame: CGFloat) -> CGFloat {
+        TimelineKeyMarkers.centerX(frame: frame, pixelsPerFrame: pixelsPerFrame)
+    }
+
+    /// The x positions a curve is evaluated at across a dirty rect: one per point of width, which is
+    /// `CurveEditor.curvePath`'s density, clipped to the rect and to the frames the track actually
+    /// lays out.
+    ///
+    /// **A stride rather than an array**, because the whole point of clipping is not to allocate one
+    /// sample per point of a track that can be nine thousand points wide.
+    ///
+    /// **One point of slack on each side**, `TimelineRulerClip`'s reason exactly: a polyline whose
+    /// two endpoints straddle a tile boundary needs the vertex just outside the rect or the curve
+    /// has a hole at the seam, and a hole is harder to spot in review than a redundant sample.
+    struct Sampling: Equatable {
+        let minX: CGFloat
+        let maxX: CGFloat
+        let step: CGFloat
+
+        /// Always at least two, so there is a line rather than a point.
+        var count: Int { max(Int(((maxX - minX) / step).rounded(.up)), 1) + 1 }
+        /// The last sample lands exactly on `maxX` rather than past it, so the polyline ends where
+        /// the clip does.
+        func x(at index: Int) -> CGFloat { min(minX + CGFloat(index) * step, maxX) }
+    }
+
+    static func sampling(in rect: CGRect, pixelsPerFrame: CGFloat, frameCount: Int) -> Sampling? {
+        guard pixelsPerFrame > 0, frameCount > 0, rect.width > 0 else { return nil }
+        let full = CGFloat(frameCount) * pixelsPerFrame
+        let minX = max(0, rect.minX - 1)
+        let maxX = min(full, rect.maxX + 1)
+        guard maxX > minX else { return nil }
+        return Sampling(minX: minX, maxX: maxX, step: 1)
+    }
+
+    // MARK: - Telling the curves apart
+
+    /// A curve's colour as hue/saturation/brightness, so the choice stays a value the fast tier can
+    /// read. The view is what turns it into a `UIColor`.
+    struct Colour: Equatable {
+        /// 0…1.
+        let hue: Double
+        let saturation: Double
+        let brightness: Double
+    }
+
+    /// **Eight hues, hand-picked rather than generated, in degrees.**
+    ///
+    /// Generated hues (a golden-angle walk, a hash) are stable and evenly spread and cannot be told
+    /// where *not* to go, which matters here because two hues are already spoken for on this
+    /// surface: ~211° is the playhead and the current-layer highlight, and ~48° is an interpolation
+    /// reference — §2.8 exists precisely so the two kinds of "keyframe" are never confused. This
+    /// list avoids both, and each neighbouring pair is at least 40° apart.
+    ///
+    /// Saturation is below full and brightness is at it, which is what reads on the timeline's
+    /// black; a fully saturated hue over black is where two adjacent hues stop being distinguishable.
+    static let channelHues: [Double] = [145, 28, 195, 320, 90, 262, 8, 172]
+    static let channelSaturation: Double = 0.68
+    static let channelBrightness: Double = 1
+
+    /// **A channel's colour, from its position in `Effect.parameters`.**
+    ///
+    /// Stable across launches (no `String.hashValue`, which is seeded per process and would repaint
+    /// every curve on every run), stable when a channel starts or stops animating (the descriptor
+    /// table does not move), and collision-free for the first eight channels of an effect — which is
+    /// all of them for 30 of the 33 parameters, since only `Blur`, `Bloom` and the curve grades
+    /// carry more. A ninth animated channel of one effect repeats the first hue; the id is in the
+    /// band's accessibility value and D4's list names it, so the repeat is legible rather than
+    /// ambiguous.
+    static func colour(forDescriptorIndex index: Int) -> Colour {
+        let slot = ((index % channelHues.count) + channelHues.count) % channelHues.count
+        return Colour(hue: channelHues[slot] / 360,
+                      saturation: channelSaturation,
+                      brightness: channelBrightness)
+    }
+
+    // MARK: - What a test can see
+
+    /// The band's accessibility value: each channel as `id:frame,frame,…`, joined by `|`, and
+    /// `"empty"` for a band open on a layer that animates nothing.
+    ///
+    /// **An encoded value on one element rather than one element per curve**, which is
+    /// `TimelineKeyMarkers.encode`'s convention and `CurveEditor.encode`'s before it, and it exists
+    /// for the same reason: XCUITest can see neither a `CGContext` nor a colour, so "there is a
+    /// curve for brightness with keys at 0 and 10" is not otherwise assertable at all.
+    ///
+    /// **`"empty"` is a state worth naming rather than an absence.** The band opens on whichever
+    /// layer is selected, including one with no animation on it — saying so is §5.24's rule in
+    /// LASSO_MOVE read across: a surface that came up holding nothing should say it did, because
+    /// the alternative is an artist looking for a curve that was never there.
+    static func encode(_ channels: [Channel]) -> String {
+        guard !channels.isEmpty else { return "empty" }
+        return channels.map { channel in
+            channel.parameterID + ":" + channel.curve.keys.map { "\($0.frame)" }.joined(separator: ",")
+        }.joined(separator: "|")
+    }
+}
+
+extension CanvasManager {
+
+    /// **The row the graph editor band opens under, and how much height it asks for.**
+    ///
+    /// The **single** derivation, for `TimelineRowLayout.make`'s reason: the pinned name column in
+    /// `AnimationTimeline` and the UIKit track in `TimelineTrackView` each build their own layout,
+    /// and a band one of them knows about and the other does not shifts every track down while the
+    /// names stay put, so a name labels the wrong layer. Both ask this.
+    ///
+    /// **The band follows the selection rather than being toggled per layer** — the owner's ruling
+    /// of 2026-08-29, offered per-layer toggles and an open-every-animated-layer mode. So the state
+    /// is one `Bool` and the row is `currentLayerIndex`, which is also the cheapest of the three to
+    /// key correctly.
+    var graphBandExpansion: TimelineRowLayout.Expansion? {
+        guard isGraphEditorOpen, layers.indices.contains(currentLayerIndex) else { return nil }
+        return TimelineRowLayout.Expansion(layerIndex: currentLayerIndex,
+                                           height: TimelineGraphBand.height)
+    }
+
+    /// **What the open band draws**, or nil when it is closed.
+    ///
+    /// Read once per layout into `TimelineLayoutKey`, and the view draws out of the key rather than
+    /// calling this a second time — §11.3's first silent failure, closed the way `trackMarkers`
+    /// closes it: "drawn from" and "keyed on" are the same array by construction.
+    ///
+    /// Costs nothing while the band is closed, which is every document that has not opened it: one
+    /// `Bool` and a return.
+    var graphBandContent: TimelineGraphBand.Content? {
+        guard let expansion = graphBandExpansion,
+              let target = keyframeTarget(layerIndex: expansion.layerIndex)
+        else { return nil }
+        return TimelineGraphBand.Content(
+            layerIndex: expansion.layerIndex,
+            height: expansion.height,
+            channels: TimelineGraphBand.channels(effect: storedEffect(of: target),
+                                                 tracks: keyframeState(of: target).tracks))
+    }
+}

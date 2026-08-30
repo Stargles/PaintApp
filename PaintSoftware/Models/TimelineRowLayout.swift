@@ -5,8 +5,8 @@ import CoreGraphics
 /// The timeline draws its rows twice — the pinned name column in `Views/AnimationTimeline.swift` and
 /// the scrolling track in `Views/TimelineTrackView.swift` — from two separate reads of
 /// `CanvasManager.layerStackRows`. The two must agree row for row or a name labels the wrong track,
-/// so the heights are derived **once**, by `make(rows:rulerHeight:rowHeight:)`, and both sides ask
-/// this value for the same answers rather than each re-typing the same multiplication.
+/// so the heights are derived **once**, by `make(rows:rulerHeight:rowHeight:expansion:)`, and both
+/// sides ask this value for the same answers rather than each re-typing the same multiplication.
 ///
 /// **Why this is a type and not arithmetic inside the two views.** Neither view file is compiled into
 /// the `PaintSoftwareUITests` target, so a test written against either is a pin against nothing — the
@@ -26,27 +26,93 @@ struct TimelineRowLayout {
     /// Space above the first row and below the last.
     static let verticalInset: CGFloat = 4
 
+    /// **A row given extra height below its blocks.** The graph editor band (KEYFRAMES.md §11.3),
+    /// and today the only such thing — which is why this is one optional rather than a per-row
+    /// array: the owner ruled on 2026-08-29 that exactly one band is open at a time, under the
+    /// selected layer.
+    ///
+    /// Addressed by **layer index rather than by row position** because that is what the caller
+    /// holds (`CanvasManager.currentLayerIndex`) and what survives a folder collapsing above it;
+    /// `make` resolves it to a position against the rows it is given.
+    struct Expansion: Equatable {
+        let layerIndex: Int
+        let height: CGFloat
+    }
+
     let rulerHeight: CGFloat
-    /// Top to bottom, one entry per presented row. Empty for a stack with no rows at all.
+    /// Top to bottom, one entry per presented row, **including any expansion**. Empty for a stack
+    /// with no rows at all.
     let rowHeights: [CGFloat]
     /// What the content reserves when `rowHeights` is empty, so an empty timeline is a row tall
     /// rather than a sliver.
     let placeholderRowHeight: CGFloat
+    /// Which presented row carries the expansion, resolved from `Expansion.layerIndex` — nil when
+    /// nothing is expanded, which is every layout until the artist opens the band.
+    let expandedRow: Int?
+    /// How much of `expandedRow`'s height is the expansion. Zero when `expandedRow` is nil.
+    let expansionHeight: CGFloat
+
+    /// Defaulted so a caller that has no expansion — every test that pins D1's behaviour-neutrality,
+    /// and the layout of a timeline with the band closed — spells the same three arguments it
+    /// always did.
+    init(rulerHeight: CGFloat,
+         rowHeights: [CGFloat],
+         placeholderRowHeight: CGFloat,
+         expandedRow: Int? = nil,
+         expansionHeight: CGFloat = 0) {
+        self.rulerHeight = rulerHeight
+        self.rowHeights = rowHeights
+        self.placeholderRowHeight = placeholderRowHeight
+        self.expandedRow = expandedRow
+        self.expansionHeight = expansionHeight
+    }
 
     /// The single derivation of a row's height, which is what keeps the name column and the track in
-    /// step. Every row is `rowHeight` today; a row that needs more is given it here and both sides
-    /// move together.
-    static func make(rows: [LayerStackRow], rulerHeight: CGFloat, rowHeight: CGFloat) -> TimelineRowLayout {
-        TimelineRowLayout(rulerHeight: rulerHeight,
-                          rowHeights: rows.map { _ in rowHeight },
-                          placeholderRowHeight: rowHeight)
+    /// step. Every row is `rowHeight` unless `expansion` names it, and then **both sides take the
+    /// extra**: that is the whole seam D1 left for the graph editor, and routing the band through
+    /// here is what makes the two columns agreeing structural rather than remembered.
+    ///
+    /// An `expansion` naming a layer that is not on screen — one inside a collapsed folder — resolves
+    /// to no row and is ignored, which is the right answer: there is nothing to open the band under.
+    static func make(rows: [LayerStackRow],
+                     rulerHeight: CGFloat,
+                     rowHeight: CGFloat,
+                     expansion: Expansion? = nil) -> TimelineRowLayout {
+        let expandedRow = expansion.flatMap { wanted in
+            rows.firstIndex { $0.layerIndex == wanted.layerIndex }
+        }
+        let extra = expandedRow == nil ? 0 : (expansion?.height ?? 0)
+        return TimelineRowLayout(
+            rulerHeight: rulerHeight,
+            rowHeights: rows.indices.map { $0 == expandedRow ? rowHeight + extra : rowHeight },
+            placeholderRowHeight: rowHeight,
+            expandedRow: expandedRow,
+            expansionHeight: extra)
     }
 
     var rowCount: Int { rowHeights.count }
 
-    /// The height of row `position`, or the placeholder for a position that is not one.
+    /// The height of row `position`, or the placeholder for a position that is not one. Includes the
+    /// expansion, so every existing caller — the drop bands, the reorder walk, `contentHeight` — is
+    /// right about a tall row without being changed.
     func height(ofRow position: Int) -> CGFloat {
         rowHeights.indices.contains(position) ? rowHeights[position] : placeholderRowHeight
+    }
+
+    /// How much of row `position` is the graph editor band. Zero for every other row.
+    func expansion(ofRow position: Int) -> CGFloat {
+        position == expandedRow ? expansionHeight : 0
+    }
+
+    /// **The part of the row its cel blocks live in** — the row minus its band.
+    ///
+    /// The distinction exists because two things inside `TimelineRowView` are measured from the row
+    /// view's own `bounds.height`: a cel block's rect, and the key-marker band, which is anchored to
+    /// `bounds.height - TimelineKeyMarkers.bandHeight`. Handing that view the full height would
+    /// stretch every thumbnail down over the curves and slide the diamonds off the blocks they
+    /// annotate, so the track sizes the row view to this and hangs the band beside it.
+    func blockHeight(ofRow position: Int) -> CGFloat {
+        height(ofRow: position) - expansion(ofRow: position)
     }
 
     /// The y origin of row `position` in content coordinates. `rowCount` is a legal argument and

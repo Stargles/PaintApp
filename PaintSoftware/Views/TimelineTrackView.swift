@@ -118,6 +118,8 @@ struct TimelineTrackView: UIViewRepresentable {
         private var rowViews: [TimelineRowView] = []
         private var folderRowViews: [TimelineFolderRowView] = []
         private let playheadView = TimelinePlayheadView()
+        /// The graph editor band. One, not a pool: the owner ruled exactly one is open at a time.
+        private let graphBandView = TimelineGraphBandView()
 
         /// Which `layers` index each laid-out track row belongs to, the strip a drop on it counts as
         /// landing in, and how tall the row itself is — recorded on every `relayout` so a drag can
@@ -202,7 +204,13 @@ struct TimelineTrackView: UIViewRepresentable {
             // Same row order the layer panel and the pinned name column use — folder headers
             // included, collapsed folders' children omitted.
             let stackRows = canvasManager.layerStackRows
-            let layout = TimelineRowLayout.make(rows: stackRows, rulerHeight: rulerHeight, rowHeight: rowHeight)
+            // The graph editor band is part of its row's *height* rather than a view laid out beside
+            // the rows, which is what stops the pinned name column and this track disagreeing about
+            // where the row below it starts — `TimelineRowLayout.make`'s whole reason, and
+            // KEYFRAMES.md §11.2's seam. Both halves ask `CanvasManager.graphBandExpansion`.
+            let layout = TimelineRowLayout.make(rows: stackRows, rulerHeight: rulerHeight,
+                                                rowHeight: rowHeight,
+                                                expansion: canvasManager.graphBandExpansion)
             let totalHeight = layout.contentHeight
 
             let built = TimelineLayoutKey.make(
@@ -275,7 +283,13 @@ struct TimelineTrackView: UIViewRepresentable {
             layerRowGeometry = []
             for (slot, entry) in layerEntries.enumerated() {
                 let row = rowViews[slot]
-                let height = layout.height(ofRow: entry.position)
+                // **The row view gets the block half of its height, not the whole row.** A cel
+                // block's rect and the key-marker band's origin are both measured from this view's
+                // own `bounds.height` (`TimelineRowView.update`), so handing it the expanded height
+                // would stretch every thumbnail down across the curves and slide the key diamonds to
+                // the bottom of the band instead of onto the blocks they annotate. The band is a
+                // sibling in `contentView`, hung directly under this frame.
+                let height = layout.blockHeight(ofRow: entry.position)
                 row.frame = CGRect(x: 0, y: layout.y(ofRow: entry.position), width: totalWidth, height: height)
                 row.layerIndex = entry.layerIndex
                 row.layerID = layers[entry.layerIndex].id
@@ -337,7 +351,54 @@ struct TimelineTrackView: UIViewRepresentable {
                                ? built.key.folders[slot].markers : [])
             }
 
+            layoutGraphBand(content: built.key.graphBand, layout: layout, stackRows: stackRows,
+                            totalWidth: totalWidth, frameCount: sceneFrameCount)
+
             movePlayhead(totalHeight: totalHeight)
+        }
+
+        /// **Hangs the graph editor band under the row it belongs to** — KEYFRAMES.md §11.3.
+        ///
+        /// **A sibling of the rows rather than a subview of one**, for two reasons that both bite.
+        /// `TimelineRowView` measures its blocks and its key-marker band from its own
+        /// `bounds.height`, so a band inside it would have to be subtracted back out at three call
+        /// sites; and that row carries a pan, a tap and a 0.5 s long press which decide their zone
+        /// from the touch's *x* alone, so a touch anywhere in the band would resolve to a cel body
+        /// or a gap and drag a block the artist cannot see they are holding.
+        ///
+        /// **It takes no touches at all** (`isUserInteractionEnabled = false`, `TimelineFolderRowView`'s
+        /// setting and for the same reason). D2 is draw-only; D3 adds a recognizer, and the moment it
+        /// does it must also call `scrollView.panGestureRecognizer.require(toFail:)` on it — §11.3's
+        /// third silent failure, and the reason the band is created here beside the row pool rather
+        /// than in `makeUIView`, where no such call is made for anything.
+        ///
+        /// **Drawn from `TimelineLayoutKey`'s copy, never re-read off the model**, which is
+        /// `trackMarkers`' rule one screen up: `relayout()` early-returns on an unchanged key, so a
+        /// curve fetched here instead of taken from the key would draw once and freeze.
+        private func layoutGraphBand(content: TimelineGraphBand.Content?,
+                                     layout: TimelineRowLayout,
+                                     stackRows: [LayerStackRow],
+                                     totalWidth: CGFloat,
+                                     frameCount: Int) {
+            guard let contentView else { return }
+            guard let content,
+                  let position = stackRows.firstIndex(where: { $0.layerIndex == content.layerIndex }),
+                  layout.expansion(ofRow: position) > 0
+            else {
+                graphBandView.isHidden = true
+                return
+            }
+            if graphBandView.superview == nil {
+                graphBandView.isUserInteractionEnabled = false
+                contentView.addSubview(graphBandView)
+            }
+            graphBandView.isHidden = false
+            graphBandView.frame = CGRect(x: 0,
+                                         y: layout.y(ofRow: position) + layout.blockHeight(ofRow: position),
+                                         width: totalWidth,
+                                         height: layout.expansion(ofRow: position))
+            graphBandView.update(content: content, pixelsPerFrame: pixelsPerFrame,
+                                 frameCount: frameCount)
         }
 
         /// The scrub fast path: everything a `currentFrame` change actually moves.
@@ -951,6 +1012,122 @@ private final class TimelineKeyMarkerBand: UIView {
             stroke.setStroke()
             path.lineWidth = 1
             path.stroke()
+        }
+    }
+}
+
+/// **The graph editor band** — one layer's animated effect parameters drawn as curves against the
+/// timeline's own frame axis (KEYFRAMES.md §11.3, stage D2).
+///
+/// **Every decision this class makes is `TimelineGraphBand`'s**, for that type's stated reason: this
+/// file is not compiled into `PaintSoftwareUITests`, so anything decided here is decided where no
+/// fast-tier test can see it. What is left here is `UIBezierPath` and `UIColor`.
+///
+/// **Draw-only.** No recognizer, no hit testing, no drag — D3 is the gestures, and
+/// `TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` is already written and waiting for it.
+///
+/// **The playhead stays on top of it**, which is a decision rather than an oversight. It is a
+/// *column* the width of a frame, not a hairline, so at full zoom 120 pt of 35 % blue lies over the
+/// band — but it is the same column that lies over every cel block on every row, and the one thing
+/// an artist reads a graph editor for beside the shape is *where the playhead crosses it*. Fronting
+/// the band would cut that column into two halves with a gap where the curves are, which is worse
+/// than a tint. `movePlayhead` re-fronts the playhead on every layout, so this needs no z-order code
+/// of its own.
+private final class TimelineGraphBandView: UIView {
+    private var content: TimelineGraphBand.Content?
+    private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
+    private var frameCount: Int = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor(white: TimelineGraphBand.backgroundWhite,
+                                  alpha: TimelineGraphBand.backgroundAlpha)
+        isOpaque = false
+        contentMode = .redraw
+        isUserInteractionEnabled = false
+        isAccessibilityElement = true
+        accessibilityTraits = .none
+        accessibilityIdentifier = "timeline.graphBand"
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// - Parameter content: taken out of `TimelineLayoutKey`, never re-read off the model — see
+    ///   `Coordinator.layoutGraphBand`.
+    func update(content: TimelineGraphBand.Content, pixelsPerFrame: CGFloat, frameCount: Int) {
+        // A pinch changes `pixelsPerFrame` without changing a curve, and it changes every x on the
+        // band — so both halves gate the redraw, exactly as `TimelineKeyMarkerBand.update` does.
+        let changed = content != self.content
+            || pixelsPerFrame != self.pixelsPerFrame
+            || frameCount != self.frameCount
+        self.content = content
+        self.pixelsPerFrame = pixelsPerFrame
+        self.frameCount = frameCount
+        accessibilityValue = TimelineGraphBand.encode(content.channels)
+        if changed { setNeedsDisplay() }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The band's height is fixed but its *width* follows the track, which grows as the artist
+        // scrolls right (`displayedFrameCount`). A resize with no key change would otherwise leave
+        // the curves drawn at the old width and blank past it.
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let content,
+              let sampling = TimelineGraphBand.sampling(in: rect,
+                                                        pixelsPerFrame: pixelsPerFrame,
+                                                        frameCount: frameCount)
+        else { return }
+
+        for channel in content.channels {
+            let range = TimelineGraphBand.range(uiRange: channel.uiRange,
+                                                keyValues: channel.curve.keys.map(\.value))
+            let colour = TimelineGraphBand.colour(forDescriptorIndex: channel.descriptorIndex)
+            let stroke = UIColor(hue: CGFloat(colour.hue),
+                                 saturation: CGFloat(colour.saturation),
+                                 brightness: CGFloat(colour.brightness),
+                                 alpha: 1)
+
+            // One sample per point of width — `CurveEditor.curvePath`'s density, which is what makes
+            // a bezier read as a curve rather than as a chain of chords. The overshoot a bezier can
+            // take outside `uiRange` is drawn at its true y and cut by this view's own context;
+            // clamping it would draw a flat run along the rim that the curve does not have.
+            let path = UIBezierPath()
+            for index in 0..<sampling.count {
+                let x = sampling.x(at: index)
+                let time = TimelineGraphBand.time(atX: x, pixelsPerFrame: pixelsPerFrame)
+                let y = TimelineGraphBand.y(ofValue: channel.curve.evaluate(at: time),
+                                            in: range,
+                                            bandHeight: bounds.height)
+                let point = CGPoint(x: x, y: y)
+                if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+            }
+            stroke.setStroke()
+            path.lineWidth = TimelineGraphBand.lineWidth
+            path.lineJoinStyle = .round
+            path.stroke()
+
+            // A dot per key, so the frames the artist authored are legible against the frames the
+            // evaluator filled in. Filled in the curve's own colour with a dark rim, which is the
+            // key-marker band's answer to the same problem one row up: a single colour disappears
+            // against half the backgrounds it can land on.
+            stroke.setFill()
+            UIColor.black.withAlphaComponent(0.6).setStroke()
+            for key in channel.curve.keys {
+                let x = TimelineGraphBand.x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame)
+                let y = TimelineGraphBand.y(ofValue: key.value, in: range, bandHeight: bounds.height)
+                let dot = UIBezierPath(ovalIn: CGRect(x: x - TimelineGraphBand.keyRadius,
+                                                      y: y - TimelineGraphBand.keyRadius,
+                                                      width: TimelineGraphBand.keyRadius * 2,
+                                                      height: TimelineGraphBand.keyRadius * 2))
+                guard dot.bounds.intersects(rect) else { continue }
+                dot.fill()
+                dot.lineWidth = 1
+                dot.stroke()
+            }
         }
     }
 }

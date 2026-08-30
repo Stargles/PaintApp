@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A4690E8C20463AC5A565BA29 /* PaintSoftware/Views/TimelineGraphBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */; };
+		4D6A8313C18E040312C62A1A /* TimelineGraphBandLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */; };
+		58B36EA2057AB4AC581C9075 /* GraphEditorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BF6162E590EAC39FAD19850 /* GraphEditorUITests.swift */; };
 		5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */; };
 		1A9F57B072F694769F0C5DD0 /* PaintSoftware/Engine/StrokeInterruption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */; };
 		47F81C7C56AE76400C4BE5C5 /* CanvasPresentationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */; };
@@ -212,6 +215,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineGraphBand.swift; sourceTree = "<group>"; };
+		8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineGraphBandLogicTests.swift; sourceTree = "<group>"; };
+		2BF6162E590EAC39FAD19850 /* GraphEditorUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GraphEditorUITests.swift; sourceTree = "<group>"; };
 		B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasPresentation.swift; sourceTree = "<group>"; };
 		31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeInterruption.swift; sourceTree = "<group>"; };
 		B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasPresentationLogicTests.swift; sourceTree = "<group>"; };
@@ -474,6 +480,8 @@
 		7DD8CAB96CBC75B388C33457 /* PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
+				8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */,
+				2BF6162E590EAC39FAD19850 /* GraphEditorUITests.swift */,
 				6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */,
 				A5A68D38B724AC5E7B05CC01 /* TextRecipeCodableLogicTests.swift */,
 				3BC10692C536232621C6BB01 /* VectorTextPersistenceLogicTests.swift */,
@@ -567,6 +575,7 @@
 		C3D4E5F6001122334455A1B2 /* App sources shared with PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
+				63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */,
 				CB14B009A742DC8A41F53301 /* PaintSoftware/Engine/TextObject.swift */,
 				55E0D108930F8329D8CF8501 /* PaintSoftware/Engine/Deform/Quad.swift */,
 				F0CFFEDF4ADD703689965801 /* PaintSoftware/Engine/Deform/Homography.swift */,
@@ -781,6 +790,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A4690E8C20463AC5A565BA29 /* PaintSoftware/Views/TimelineGraphBand.swift in Sources */,
+				4D6A8313C18E040312C62A1A /* TimelineGraphBandLogicTests.swift in Sources */,
+				58B36EA2057AB4AC581C9075 /* GraphEditorUITests.swift in Sources */,
 				CB14B009A742DC8A41F53302 /* PaintSoftware/Engine/TextObject.swift in Sources */,
 				55E0D108930F8329D8CF8502 /* PaintSoftware/Engine/Deform/Quad.swift in Sources */,
 				F0CFFEDF4ADD703689965802 /* PaintSoftware/Engine/Deform/Homography.swift in Sources */,

@@ -362,4 +362,105 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
                                                 pixelsPerFrame: 30, frameCount: 12), 0..<0,
                        "A rect entirely past the end of the scene draws nothing")
     }
+
+    // MARK: - The graph editor band (KEYFRAMES.md §11.3, the first of stage D2's silent failures)
+
+    /// A graded layer with one animated channel and the band open on it. The band draws curve
+    /// *shape*, so this is the fixture the mutation tests below poison.
+    private func bandManager(_ curve: AnimationCurve = .init(keys: [
+        .init(frame: 0, value: 1, interpolation: .bezier),
+        .init(frame: 10, value: 2, interpolation: .bezier)
+    ])) -> CanvasManager {
+        let m = CanvasFixture.manager(layerCount: 1)
+        m.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
+        m.currentLayerIndex = 1
+        m.setEffectParameterTrack(layerIndex: 1, parameterID: "brightnessContrast.brightness", to: curve)
+        m.isGraphEditorOpen = true
+        return m
+    }
+
+    /// **Every mutation below changes a curve's shape and none of them changes a single frame the
+    /// marker band draws** — which is the whole reason `graphBand` had to go in the key. A value, a
+    /// handle, a tangent mode, a segment's interpolation and the channel's step all move the line in
+    /// the band and move nothing else on the track, so before this field they were invisible to the
+    /// gate and the band would have drawn once at its first shape and then frozen.
+    ///
+    /// Written as a mutation test rather than as "the key compiles with the field in it": a key that
+    /// carries a value it never compares is indistinguishable from one that does, and the failure it
+    /// produces is a stale picture with nothing thrown.
+    func testEveryCurveEditThatChangesShapeMovesTheKey() {
+        let id = "brightnessContrast.brightness"
+        let mutations: [(name: String, curve: AnimationCurve)] = [
+            ("a key's value", .init(keys: [.init(frame: 0, value: 1, interpolation: .bezier),
+                                           .init(frame: 10, value: 3, interpolation: .bezier)])),
+            ("a key's frame", .init(keys: [.init(frame: 0, value: 1, interpolation: .bezier),
+                                           .init(frame: 7, value: 2, interpolation: .bezier)])),
+            ("a bezier handle", .init(keys: [
+                .init(frame: 0, value: 1, outHandle: .init(deltaFrames: 4, deltaValue: 0.8),
+                      tangentMode: .free, interpolation: .bezier),
+                .init(frame: 10, value: 2, interpolation: .bezier)])),
+            ("a tangent mode", .init(keys: [
+                .init(frame: 0, value: 1, tangentMode: .vector, interpolation: .bezier),
+                .init(frame: 10, value: 2, interpolation: .bezier)])),
+            ("a segment's interpolation", .init(keys: [
+                .init(frame: 0, value: 1, interpolation: .constant),
+                .init(frame: 10, value: 2, interpolation: .bezier)])),
+            ("the channel's step", .init(keys: [.init(frame: 0, value: 1, interpolation: .bezier),
+                                                .init(frame: 10, value: 2, interpolation: .bezier)],
+                                         step: 2)),
+        ]
+        for mutation in mutations {
+            let m = bandManager()
+            let before = key(m)
+            m.setEffectParameterTrack(layerIndex: 1, parameterID: id, to: mutation.curve)
+            XCTAssertNotEqual(before, key(m),
+                              "Changing \(mutation.name) redraws the band, so the gate must open")
+        }
+    }
+
+    /// The other half of the pin, and the one that proves the test above is about `graphBand` rather
+    /// than about something else in the key already moving. With the band closed nothing on screen
+    /// draws a curve's *value*, so a value-only edit is correctly invisible to the layout — the
+    /// marker band carries frames, and no frame moved.
+    func testAValueOnlyEditIsInvisibleToTheLayoutWhileTheBandIsClosed() {
+        let id = "brightnessContrast.brightness"
+        let m = bandManager()
+        m.isGraphEditorOpen = false
+        let before = key(m)
+        m.setEffectParameterTrack(layerIndex: 1, parameterID: id,
+                                  to: .init(keys: [.init(frame: 0, value: 1, interpolation: .bezier),
+                                                   .init(frame: 10, value: 3, interpolation: .bezier)]))
+        XCTAssertEqual(before, key(m),
+                       "No curve is drawn, so the whole track is unchanged and the gate stays shut")
+    }
+
+    /// Opening the band changes a row's **height**, and D2 is the first stage to derive one from
+    /// anything but `(rows, rowHeight)` — §11.2. Without this the row draws once at 34 pt and never
+    /// moves again, which is the same failure reached from the geometry side.
+    func testOpeningAndClosingTheBandMovesTheKey() {
+        let m = bandManager()
+        m.isGraphEditorOpen = false
+        let closed = key(m)
+        m.isGraphEditorOpen = true
+        let open = key(m)
+        XCTAssertNotEqual(closed, open, "The row it opens under is taller than it was")
+        XCTAssertEqual(open.graphBand?.height, TimelineGraphBand.height)
+        m.isGraphEditorOpen = false
+        XCTAssertEqual(closed, key(m), "…and closing it puts the layout back exactly")
+    }
+
+    /// The band follows the selection, so moving the selection moves what it draws.
+    func testSelectingAnotherLayerMovesTheBand() {
+        let m = bandManager()
+        XCTAssertEqual(key(m).graphBand?.layerIndex, 1)
+        m.currentLayerIndex = 0
+        XCTAssertEqual(key(m).graphBand?.layerIndex, 0)
+        XCTAssertEqual(key(m).graphBand?.channels, [], "The floor animates nothing")
+    }
+
+    /// A document that has never opened the editor pays one optional comparison for all of this,
+    /// which is the cost argument the whole gate rests on.
+    func testAClosedBandIsNilInTheKey() {
+        XCTAssertNil(key(manager()).graphBand)
+    }
 }

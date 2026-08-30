@@ -111,6 +111,19 @@ final class CanvasManager: ObservableObject {
     /// a transient.
     @Published var isInterpolateMode: Bool = false
 
+    /// **Whether the graph editor band is open** — KEYFRAMES.md §11.3, opened and closed by the
+    /// timeline's `timeline.graphEditorButton`.
+    ///
+    /// One `Bool` and not a set, because the owner ruled on 2026-08-29 that exactly one band is open
+    /// at a time and it follows the selection: the row it expands is `currentLayerIndex`, so
+    /// selecting another layer moves the band rather than opening a second one.
+    ///
+    /// **Transient view state, deliberately not persisted.** It changes no pixel of the document and
+    /// has no meaning with the timeline closed, so putting it in the manifest would be a field that
+    /// only ever says which panel was up last — §11.5 makes the same call about the channel list's
+    /// visibility for the same reason. `interpolationThicknessFade` is the nearest precedent.
+    @Published var isGraphEditorOpen: Bool = false
+
     /// The cels the artist has flagged as keyframes, in the order they were flagged — which is time
     /// order only because the artist picks them that way. Highlighted yellow on the timeline.
     ///

@@ -122,9 +122,40 @@ struct TimelineLayoutKey: Equatable {
     let pixelsPerFrame: CGFloat
     let displayedFrameCount: Int
     let contentWidth: CGFloat
+    /// **The height every *unexpanded* row is, which is no longer the whole story.** It was
+    /// sufficient on its own while heights were a pure function of `(rows, rowHeight)` and `rows` was
+    /// already in the key; `graphBand` below is the input that broke that, and it is in the key for
+    /// exactly this reason (KEYFRAMES.md §11.2).
     let rowHeight: CGFloat
     let rulerHeight: CGFloat
     let loopRange: ClosedRange<Int>?
+
+    /// **The graph editor band: which row it expands, by how much, and every curve it draws.**
+    ///
+    /// Three separate things it has to carry, and each one fails silently if it is left out.
+    ///
+    /// 1. **The expanded row and its height**, because `relayout()` early-returns on an unchanged
+    ///    key and D2 is the first stage to derive a row's height from something other than
+    ///    `(rows, rowHeight)`. Without it, opening the band leaves every row exactly where it was
+    ///    and nothing at all happens.
+    /// 2. **The curves themselves**, because unlike the playhead a curve changes *shape* rather than
+    ///    position, so it cannot take a `movePlayhead`-style fast path. `AnimationCurve` is
+    ///    `Equatable`, so this is an ordinary field rather than a hash — and no hash has to be
+    ///    described, audited, or kept in step with the fields it covers.
+    /// 3. **Nothing while the band is closed.** `nil`, so a document that has never opened the
+    ///    editor pays one optional comparison and the cost argument for the whole gate is unchanged.
+    ///
+    /// **Cheap enough to compare every layout, which is the bar this key has to clear.** Only one
+    /// band is open at a time (the owner's scope ruling), so the worst case is one layer's animated
+    /// channels — a handful of curves of a handful of keys — against a key that already carries
+    /// every cel's id, start, length and thumbnail address. Building it walks `Effect.parameters`
+    /// once, and only while the band is open.
+    ///
+    /// **`uiRange` rides along inside `Channel` rather than being looked up at draw time**, so the
+    /// axis a curve is drawn against is keyed too. It is a function of the parameter id today — ids
+    /// are `"<case>.<field>"`, so no two effects share one — but "the drawn value is in the key" is
+    /// the property worth having by construction rather than by that argument.
+    let graphBand: TimelineGraphBand.Content?
 
     /// Interpolate mode highlights reference blocks in yellow. The reference list is carried whole
     /// rather than resolved per cel — it is a short array and `CelRef` is `Equatable`, so this is one
@@ -207,6 +238,7 @@ extension TimelineLayoutKey {
             rowHeight: rowHeight,
             rulerHeight: rulerHeight,
             loopRange: loopRange,
+            graphBand: canvasManager.graphBandContent,
             isInterpolateMode: canvasManager.isInterpolateMode,
             interpolationReferences: canvasManager.isInterpolateMode ? canvasManager.interpolationReferences : [],
             drag: drag

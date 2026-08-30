@@ -214,4 +214,103 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         XCTAssertEqual(layout.reorderOffset(ofRow: 1, liftedFrom: 9, movedBy: 2), 0)
         XCTAssertEqual(uniform(0).reorderOffset(ofRow: 0, liftedFrom: 0, movedBy: 1), 0)
     }
+
+    // MARK: - The graph editor band (KEYFRAMES.md §11.3, stage D2)
+
+    /// **The seam D1 left, used for the first time.** A band opened on one layer grows that row and
+    /// nothing else, and `contentHeight` grows by exactly the same amount — which is the property
+    /// that keeps the SwiftUI host (`AnimationTimeline.contentHeight`) and the scroll content
+    /// (`TimelineTrackView.relayout`'s `totalHeight`) agreeing, since both read this one number.
+    func testOpeningTheBandGrowsOneRowAndTheContentByTheSameAmount() {
+        let rows = stackRows(4)
+        let closed = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight)
+        let open = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+                                          expansion: .init(layerIndex: 2, height: 96))
+
+        XCTAssertEqual(open.height(ofRow: 2), rowHeight + 96)
+        for position in [0, 1, 3] {
+            XCTAssertEqual(open.height(ofRow: position), rowHeight, "row \(position) must not move")
+            XCTAssertEqual(open.expansion(ofRow: position), 0)
+        }
+        XCTAssertEqual(open.expansion(ofRow: 2), 96)
+        XCTAssertEqual(open.contentHeight, closed.contentHeight + 96,
+                       "The host and the scroll content both read this; they must grow together")
+    }
+
+    /// **The two columns lay out from one derivation, so they cannot disagree about where a row
+    /// starts.** This is the failure the whole type exists to make impossible: a band the track has
+    /// and the name column does not shifts every track below it while the names stay, and a name
+    /// then labels the layer above the one it belongs to. Asserting it means asserting that a second
+    /// `make` call over the same inputs gives the same origins — which is what the two files do.
+    func testBothColumnsPutEveryRowInTheSamePlaceWithTheBandOpen() {
+        let rows = stackRows(5)
+        let expansion = TimelineRowLayout.Expansion(layerIndex: 1, height: 96)
+        let track = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight,
+                                           rowHeight: rowHeight, expansion: expansion)
+        let names = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight,
+                                           rowHeight: rowHeight, expansion: expansion)
+        for position in 0...5 {
+            XCTAssertEqual(track.y(ofRow: position), names.y(ofRow: position), "row \(position)")
+        }
+        // …and the rows past the band really did move, so the test above is not vacuous.
+        let closed = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight)
+        XCTAssertEqual(track.y(ofRow: 0), closed.y(ofRow: 0), "Rows above the band do not move")
+        XCTAssertEqual(track.y(ofRow: 2), closed.y(ofRow: 2) + 96, "Rows below it move by the band")
+    }
+
+    /// **The row view is sized to the block half, not the whole row.** `TimelineRowView` measures a
+    /// cel block's rect *and* the key-marker band's origin from its own `bounds.height`, so a row
+    /// view handed the expanded height would stretch every thumbnail down over the curves and slide
+    /// the key diamonds to the bottom of the band. The track asks for this instead.
+    func testTheBlockHalfOfAnExpandedRowIsStillAnOrdinaryRow() {
+        let layout = TimelineRowLayout.make(rows: stackRows(3), rulerHeight: rulerHeight,
+                                            rowHeight: rowHeight,
+                                            expansion: .init(layerIndex: 0, height: 96))
+        XCTAssertEqual(layout.blockHeight(ofRow: 0), rowHeight,
+                       "The blocks and their key markers are exactly where they were")
+        XCTAssertEqual(layout.blockHeight(ofRow: 1), rowHeight)
+        XCTAssertEqual(layout.y(ofRow: 0) + layout.blockHeight(ofRow: 0),
+                       layout.y(ofRow: 0) + rowHeight,
+                       "…so the band hangs directly under them")
+    }
+
+    /// A band asked for on a layer that is not a presented row — one inside a collapsed folder — is
+    /// ignored rather than expanding some other row or trapping. There is nothing to open it under.
+    func testABandOnALayerThatIsNotOnScreenExpandsNothing() {
+        let rows: [LayerStackRow] = [.folder(id: UUID(), depth: 0, kind: .group),
+                                     .layer(id: UUID(), index: 4, depth: 1)]
+        let layout = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+                                            expansion: .init(layerIndex: 9, height: 96))
+        XCTAssertNil(layout.expandedRow)
+        XCTAssertEqual(layout.contentHeight,
+                       TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight,
+                                              rowHeight: rowHeight).contentHeight)
+    }
+
+    /// The band is addressed by **layer index**, and `layerStackRows` interleaves folder rows — so
+    /// resolving it to a row position is a search rather than an equality, and getting that wrong
+    /// expands the folder header above the layer instead of the layer.
+    func testTheBandFindsItsRowPastAFolderHeader() {
+        let rows: [LayerStackRow] = [.folder(id: UUID(), depth: 0, kind: .group),
+                                     .layer(id: UUID(), index: 1, depth: 1),
+                                     .layer(id: UUID(), index: 0, depth: 0)]
+        let layout = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+                                            expansion: .init(layerIndex: 1, height: 96))
+        XCTAssertEqual(layout.expandedRow, 1, "The layer, not the folder header above it")
+        XCTAssertEqual(layout.height(ofRow: 0), rowHeight)
+        XCTAssertEqual(layout.height(ofRow: 1), rowHeight + 96)
+    }
+
+    /// A reorder drag past an expanded row has to walk its real pitch — the exact failure
+    /// `rowsCrossed` was written for, now with the input that actually produces it.
+    func testADragPastTheOpenBandCountsItsRealHeight() {
+        let layout = TimelineRowLayout.make(rows: stackRows(4), rulerHeight: rulerHeight,
+                                            rowHeight: rowHeight,
+                                            expansion: .init(layerIndex: 1, height: 96))
+        // Row 1 is 130 pt plus the 2 pt gap. Half way over it is 66; a 60 pt drag has not crossed it.
+        XCTAssertEqual(layout.rowsCrossed(from: 0, by: 60), 0)
+        XCTAssertEqual(layout.rowsCrossed(from: 0, by: 70), 1)
+        // …which a uniform 36 pt pitch would have called two rows, landing the layer in the wrong slot.
+        XCTAssertNotEqual(layout.rowsCrossed(from: 0, by: 70), 2)
+    }
 }
