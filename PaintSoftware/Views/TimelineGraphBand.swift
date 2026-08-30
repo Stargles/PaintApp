@@ -47,8 +47,8 @@ enum TimelineGraphBand {
     static let lineWidth: CGFloat = 1.8
 
     /// The dot on a key. Smaller than `CurveEditor`'s 9 pt `Circle`, because that one is a *handle*
-    /// sized for a finger and this stage draws no handles — D3 adds the hit target, and
-    /// `CurveEditor.hitRadius` (22 pt) is the constant it will want, not this one.
+    /// sized for a finger and this is a mark on a curve: what a finger has to reach is `hitRadius`,
+    /// which is 22 pt and independent of how big the dot is drawn.
     static let keyRadius: CGFloat = 2.5
 
     /// The hairline joining a key's dot to the line, where a step makes the two differ — see
@@ -88,6 +88,15 @@ enum TimelineGraphBand {
         /// `EffectParameter.uiRange`, verbatim, including its nil. `range(uiRange:keyValues:)` is
         /// what turns it into an axis.
         let uiRange: ClosedRange<Double>?
+        /// **`EffectParameter.modelDomain` — every value the model accepts, which is wider than
+        /// `uiRange` far more often than not.** D3's drag clamps to *this* and never to `uiRange`:
+        /// `Effect.swift` says in as many words to draw the axis over `uiRange` and allow a key
+        /// anywhere in here, and decision 3 above is the drawing half of the same sentence.
+        ///
+        /// In the `Channel` rather than looked up at drag time for `uiRange`'s reason one line up —
+        /// the clamp a gesture applies is then keyed by `TimelineLayoutKey` like everything else the
+        /// band decides, instead of being re-derived from `Effect.parameters` inside a recognizer.
+        let modelDomain: ClosedRange<Double>
         /// **The channel's position in `Effect.parameters`, which is where its colour comes from.**
         ///
         /// Not the position in the *drawn* list: that one shifts when a channel starts animating,
@@ -96,6 +105,13 @@ enum TimelineGraphBand {
         /// and it is distinct per channel by construction — every curve in one band comes from one
         /// layer, hence from one effect, hence from one table.
         let descriptorIndex: Int
+
+        /// The y axis this channel is drawn against — `range(uiRange:keyValues:)` applied to this
+        /// channel's own two inputs, named once so the drawing and the hit-testing cannot pick
+        /// different axes and disagree about where a key is.
+        var axis: ClosedRange<Double> {
+            TimelineGraphBand.range(uiRange: uiRange, keyValues: curve.keys.map(\.value))
+        }
     }
 
     /// **Everything one open band draws.** One value, so `TimelineLayoutKey` gains a single optional
@@ -157,6 +173,7 @@ enum TimelineGraphBand {
                            name: parameter.name,
                            curve: curve,
                            uiRange: parameter.uiRange,
+                           modelDomain: parameter.modelDomain,
                            descriptorIndex: index)
         }
     }
@@ -309,6 +326,235 @@ enum TimelineGraphBand {
         let maxX = min(full, min(rect.maxX, visibleX.upperBound) + 1)
         guard maxX > minX else { return nil }
         return Sampling(minX: minX, maxX: maxX, step: 1)
+    }
+
+    // MARK: - What a touch on the band means — stage D3, KEYFRAMES.md §11.4
+
+    /// **One key, addressed the way the document addresses it**: which channel, and which frame.
+    ///
+    /// Not an index into `channels` and not an index into `curve.keys`. Both of those move under an
+    /// edit — inserting a key renumbers every key above it, and a channel that stops satisfying
+    /// `isAnimated` leaves the drawn list entirely — so a selection held across a gesture has to be
+    /// stated in the model's own terms. `AnimationCurve` enforces one key per frame (decision 4), so
+    /// this pair is unique by construction.
+    struct KeyRef: Hashable {
+        let parameterID: String
+        let frame: Int
+    }
+
+    /// **How near a touch has to land to count as *on* a key, in points.** `CurveEditor.hitRadius`
+    /// verbatim, and for the reason its own comment gives: the dots are a few points across and a
+    /// fingertip is not. Re-declared rather than shared because that one is a `private let` on a
+    /// SwiftUI `View` in `Views/EffectSection.swift`, which is not compiled into
+    /// `PaintSoftwareUITests` — the constant is reachable from neither the type nor the test tier.
+    /// The number travels; the widget does not.
+    static let hitRadius: CGFloat = 22
+
+    /// **Below this much travel the gesture is a tap, not a drag.** `CurveEditor.tapSlop`, same
+    /// provenance and same job: without it a tap always resolves as a zero-length drag of whatever
+    /// it landed on, and tap-to-remove could never fire.
+    static let tapSlop: CGFloat = 5
+
+    /// **The value a band-local y means — the exact inverse of `y(ofValue:in:bandHeight:)`.**
+    ///
+    /// Unclamped, exactly as its inverse is: a y above the band's top is a value above the axis, and
+    /// that is a state the model allows (`Effect.swift`: draw over `uiRange`, allow a key anywhere in
+    /// `modelDomain`). The clamp that *does* apply is `modelDomain`'s, and it is applied where the
+    /// domain is known — see `move(_:in:translation:pixelsPerFrame:bandHeight:)`.
+    static func value(atY y: CGFloat, in range: ClosedRange<Double>, bandHeight: CGFloat) -> Double {
+        let usable = max(bandHeight - verticalInset * 2, 1)
+        let t = 1 - Double((y - verticalInset) / usable)
+        return range.lowerBound + t * (range.upperBound - range.lowerBound)
+    }
+
+    /// **Where a touch may grab a key from, vertically.**
+    ///
+    /// A key's *drawn* y is unclamped and the band cuts it (decision 3), so a key dragged above the
+    /// top of the range is off screen — and measuring the hit against that y would make it
+    /// permanently ungrabbable, an unreachable state D3's own gesture had created. Measuring against
+    /// the y clamped **into** the band instead makes such a key reachable from the rim of its own
+    /// column, which is the only place an artist could sensibly look for it. Inside the range this is
+    /// the identity, so it costs the ordinary case nothing.
+    static func reachableY(ofValue value: Double, in range: ClosedRange<Double>,
+                           bandHeight: CGFloat) -> CGFloat {
+        min(max(y(ofValue: value, in: range, bandHeight: bandHeight), 0), bandHeight)
+    }
+
+    /// **The key a touch grabs: the nearest one inside `hitRadius`, across every drawn channel.**
+    ///
+    /// The nearest match rather than the first — `CurveEditor.nearestHandle`'s rule, and it matters
+    /// more here than it does there, because two channels can key the same frame and their dots then
+    /// share an x. Nil when nothing is in reach, which is what makes tap-to-add reachable at all.
+    static func nearestKey(to point: CGPoint, channels: [Channel],
+                           pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> KeyRef? {
+        var best: (ref: KeyRef, distance: CGFloat)?
+        for channel in channels {
+            let axis = channel.axis
+            for key in channel.curve.keys {
+                let dx = x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame) - point.x
+                let dy = reachableY(ofValue: key.value, in: axis, bandHeight: bandHeight) - point.y
+                let distance = hypot(dx, dy)
+                guard distance <= hitRadius else { continue }
+                if best == nil || distance < best!.distance {
+                    best = (KeyRef(parameterID: channel.parameterID, frame: key.frame), distance)
+                }
+            }
+        }
+        return best?.ref
+    }
+
+    /// **Which curve a tap that missed every key belongs to.**
+    ///
+    /// `CurveEditor` has no equivalent because it draws exactly one curve, so "add a point here" needs
+    /// no subject. A band draws several, and the only non-arbitrary way to name one is the same
+    /// proximity rule the keys use: the nearest drawn line within `hitRadius` of the touch. A tap that
+    /// is near no line at all names no channel and adds nothing, which is the honest answer to a
+    /// touch that pointed at no curve.
+    ///
+    /// Measured against the **drawn** line, `evaluate` and all, rather than against the keys: that is
+    /// the shape the artist is aiming at, and at `step > 1` it is deliberately not where the dots are.
+    static func nearestChannel(to point: CGPoint, channels: [Channel],
+                               pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> String? {
+        let t = time(atX: point.x, pixelsPerFrame: pixelsPerFrame)
+        var best: (id: String, distance: CGFloat)?
+        for channel in channels {
+            let lineY = y(ofValue: channel.curve.evaluate(at: t), in: channel.axis, bandHeight: bandHeight)
+            let distance = abs(lineY - point.y)
+            guard distance <= hitRadius else { continue }
+            if best == nil || distance < best!.distance { best = (channel.parameterID, distance) }
+        }
+        return best?.id
+    }
+
+    /// **How many frames a horizontal travel of `translationX` is worth**, and the first caller of
+    /// `TimelineKeyMarkers.frame(atX:pixelsPerFrame:)`, whose doc has been waiting for one.
+    ///
+    /// **The floored inverse, not the continuous one.** `time(atX:)` answers 7.4 because sampling a
+    /// curve between two frames needs it; a key lands on an integer frame and nothing an artist can do
+    /// puts one between two, so this asks *which column* instead. Using the other one here would put
+    /// every drag half a frame out.
+    ///
+    /// Stated as a **delta** rather than as an absolute frame. It is exactly delta-invariant:
+    /// `frame(atX:)` floors and `centerX` offsets by half a column, so `frame(atX: centerX(f) + dx) - f`
+    /// is `floor(0.5 + dx / pixelsPerFrame)` for every integer `f`, so taking it at frame 0 is the
+    /// same answer as taking it at the key.
+    ///
+    /// **And it keeps the grab offset.** A finger may take a key from up to `hitRadius` away, so
+    /// resolving the destination from the touch's own x — `CurveEditor`'s spelling, on a 196 pt square
+    /// where 22 pt is a tenth of the range — would snap the key under the finger and, at the pinched-out
+    /// zoom of 10.5 pt per frame, teleport it two frames on touch-down.
+    static func frameDelta(translationX: CGFloat, pixelsPerFrame: CGFloat) -> Int {
+        TimelineKeyMarkers.frame(atX: TimelineKeyMarkers.centerX(frame: 0, pixelsPerFrame: pixelsPerFrame)
+                                    + translationX,
+                                 pixelsPerFrame: pixelsPerFrame)
+    }
+
+    /// Where one key ends up.
+    struct Move: Equatable {
+        let frame: Int
+        let value: Double
+    }
+
+    /// **Where a drag puts the key it is carrying.**
+    ///
+    /// **The collision rule: a key is stopped by its neighbour rather than allowed to consume it.**
+    /// `AnimationCurve.setKey` replaces on collision, so letting a key travel onto another's frame
+    /// would silently destroy that key — a destructive edit produced by a continuous gesture, where
+    /// "put it here" and "overshoot" are the same finger movement. `CurveEditor.moving(_:to:)` already
+    /// answers exactly this question exactly this way, one epsilon at a time, and states the reason:
+    /// `MonotoneCubic` drops a point whose x duplicates its neighbour's, so letting two coincide would
+    /// delete one silently. Clamping is also the only one of the two answers that is *visible* — the
+    /// dot stops under a finger that is still moving, which reads as a wall — and the only one that
+    /// needs no confirmation, no toast and no second undo entry.
+    ///
+    /// Frames are clamped at 0 as well as at the neighbour: §3.1 puts a layer channel in absolute
+    /// document frames, and the track begins at x 0.
+    ///
+    /// The value is clamped to **`modelDomain`** and never to `uiRange` — `Effect.swift` says to draw
+    /// the axis over one and allow a key anywhere in the other, and decision 3 above is the drawing
+    /// half of the same sentence. A key above the axis is a real state, and what the artist sees is
+    /// the band cutting it exactly as it cuts the line through it.
+    static func move(_ ref: KeyRef, in channels: [Channel], translation: CGSize,
+                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Move? {
+        guard let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
+              let key = channel.curve.key(atFrame: ref.frame)
+        else { return nil }
+        let others = channel.curve.keys.map(\.frame).filter { $0 != ref.frame }
+        let lowest = max(0, (others.last { $0 < ref.frame } ?? -1) + 1)
+        let highest = (others.first { $0 > ref.frame }).map { $0 - 1 }
+
+        let requested = ref.frame + frameDelta(translationX: translation.width,
+                                               pixelsPerFrame: pixelsPerFrame)
+        var frame = max(requested, lowest)
+        if let highest { frame = min(frame, highest) }
+
+        let axis = channel.axis
+        let startY = y(ofValue: key.value, in: axis, bandHeight: bandHeight)
+        let raw = value(atY: startY + translation.height, in: axis, bandHeight: bandHeight)
+        let domain = channel.modelDomain
+        return Move(frame: frame, value: min(max(raw, domain.lowerBound), domain.upperBound))
+    }
+
+    /// **What a tap on the band does.** `CurveEditor`'s two halves of one gesture, unchanged: on a key
+    /// it removes, on empty graph it adds — *"because a curve editor with separate add and remove
+    /// buttons makes the artist name a point before they can delete it."*
+    enum Tap: Equatable {
+        case remove(KeyRef)
+        /// A new key on `parameterID`, at the tapped frame and the tapped value.
+        case add(parameterID: String, frame: Int, value: Double)
+        /// The touch named no channel, or named one that already holds a key on that frame.
+        ///
+        /// Spelled `nothing` rather than `none` so it can never be read as `Optional.none` at a call
+        /// site that pattern-matches it.
+        case nothing
+    }
+
+    /// **A tap resolved.** The value is the tapped y rather than the curve's own value there, which is
+    /// `CurveEditor.adding`'s behaviour and makes the new dot land under the finger; a key placed on
+    /// the line instead would be a gesture with no visible effect.
+    ///
+    /// **An add onto a frame the channel already keys is refused**, which is `CurveEditor.adding`'s
+    /// own guard against creating a duplicate — and it is reachable here without a near miss, because
+    /// at `step > 1` the drawn line and the key's dot are deliberately apart (`stem(forKeyAt:in:)`),
+    /// so a tap can be on the line and 40 pt from the key that owns that frame. Without the refusal
+    /// `setKey` would replace it and the artist's value would be gone with no gesture that looked
+    /// destructive.
+    static func tap(at point: CGPoint, channels: [Channel],
+                    pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Tap {
+        if let hit = nearestKey(to: point, channels: channels,
+                                pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
+            return .remove(hit)
+        }
+        guard let id = nearestChannel(to: point, channels: channels,
+                                      pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight),
+              let channel = channels.first(where: { $0.parameterID == id })
+        else { return .nothing }
+        let frame = TimelineKeyMarkers.frame(atX: point.x, pixelsPerFrame: pixelsPerFrame)
+        guard frame >= 0, channel.curve.key(atFrame: frame) == nil else { return .nothing }
+        let raw = value(atY: point.y, in: channel.axis, bandHeight: bandHeight)
+        let domain = channel.modelDomain
+        return .add(parameterID: id, frame: frame,
+                    value: min(max(raw, domain.lowerBound), domain.upperBound))
+    }
+
+    /// **The curve one move produces, from the curve the drag started with.**
+    ///
+    /// Always applied to the drag's *starting* curve rather than to the document's current one: a live
+    /// drag rewrites the same key on every `.changed` tick, and composing this tick's delta onto last
+    /// tick's result would make the key accelerate away from the finger.
+    ///
+    /// - Returns: nil when the curve would come back unchanged, so a caller can tell a drag that
+    ///   moved something from one that resolved to where it started.
+    static func applying(_ move: Move, to ref: KeyRef, in channels: [Channel]) -> AnimationCurve? {
+        guard let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
+              var key = channel.curve.key(atFrame: ref.frame)
+        else { return nil }
+        var curve = channel.curve
+        curve.removeKey(atFrame: ref.frame)
+        key.frame = move.frame
+        key.value = move.value
+        curve.setKey(key)
+        return curve == channel.curve ? nil : curve
     }
 
     // MARK: - Telling the curves apart

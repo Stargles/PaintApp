@@ -1216,35 +1216,96 @@ because the drawn list reorders the moment a channel starts animating, which hap
 the artist is watching. Every channel of one band comes from one effect, hence one table, so the
 first eight are distinct by construction.
 
-### 11.4 Stage D3 — the gestures, most of which are already written
+### 11.4 Stage D3 — the gestures — **single-key editing done 2026-08-29**
 
-`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` is the exact inverse of `centerX(frame:)` and its own
-doc says **"Nothing calls this yet and that is deliberate"** — it was written for this, and D2 left it
-untouched.
+**What ships in this half: a key can be dragged on both axes, tapped away, and tapped into being.**
+The marquee is the second half and is not here yet.
 
-**There are now two inverses and they answer different questions.** D2 added
-`TimelineGraphBand.time(atX:pixelsPerFrame:)`, the **continuous** inverse of the same forward map,
-because sampling a curve between two frames needs 7.4 and not 7. `frame(atX:)` floors to a column and
-is the one D3's hit-testing wants. Using either for the other's job puts the answer half a frame out —
-which is exactly enough to pick up the wrong key at the default zoom and to draw a curve that misses
-its own dots.
+**`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` has its first caller and its doc's blocker is
+settled.** It is reached through `TimelineGraphBand.frameDelta(translationX:pixelsPerFrame:)`, which
+asks it *once at frame 0* rather than once per key, because the answer is exactly delta-invariant:
+`frame(atX:)` floors and `centerX` offsets by half a column, so `frame(atX: centerX(f) + dx) − f` is
+`floor(0.5 + dx / pixelsPerFrame)` for every integer `f`. That is what lets one number carry a whole
+group later, and it is why the drag keeps the **grab offset** rather than resolving from the touch's
+own x the way `CurveEditor` does: a finger may take a key from 22 pt away, which at the pinched-out
+10.5 pt per frame is two frames of teleport on touch-down.
 
-Reuse `CurveEditor`'s gesture grammar (`Views/EffectSection.swift:683` onward), which §3.2 already
-nominates: `DragGesture(minimumDistance: 0)`, `hitRadius` 22 pt, `tapSlop` 5 pt, drag moves,
-tap-on-empty adds. Reuse the **rules and constants, not the widget** — that one is SwiftUI and this is a
-`CGContext` in the coordinator. The hit arithmetic goes in a logic-testable enum beside
-`TimelineKeyMarkers`, for that file's own stated reason.
+D2's `time(atX:)` is untouched and remains the sampler's. Both inverses exist and neither has moved.
 
-**`AnimationCurve` needs no model work.** It already carries `setKey`, `removeKey`, bezier handles, five
-tangent modes, per-segment interpolation and the per-channel step, and its decision 1 — the output is
-never clamped — is what makes dragging a handle worth doing.
+**Where `require(toFail:)` went, and the arbitration in full.** In `layoutGraphBand`'s
+`graphBandView.superview == nil` block, which runs exactly once per coordinator — the band is
+*hidden* when the editor closes, never removed — beside the one `addTarget` for the same reason: a
+second one fires the handler twice per touch and opens two brackets for one drag. §11.3 was right
+that the existing two calls are inside `relayout()`; this is a third of the same shape.
+The recogniser is a `UILongPressGestureRecognizer` with `minimumPressDuration = 0`, which is
+`TimelineRulerView.panRecognizer`'s configuration exactly and this file's UIKit spelling of
+`DragGesture(minimumDistance: 0)`: it begins on touch-down, so a tap arrives as a began/ended pair
+with no travel, and it holds the touch for its whole life, which a `UIPanGestureRecognizer` would not
+do until ~10 pt — three times `tapSlop`. Everything else falls out of where the band sits: it is a
+**sibling** of the row pool, so a row's pan, tap and long press are on views the touch never reaches;
+the pinch is two-touch on `contentView` against this recogniser's one, the coexistence the ruler
+already relies on; and the playhead is already `isUserInteractionEnabled = false`, so a key under
+120 pt of blue is grabbable — that was checked rather than assumed.
 
-**Ask 6, the marquee.** The owner: *"the ability to use the select tool on it to select the keyframe
-nodes and move them."* Build it as the band's **own** drag-in-empty-space rather than as an observation
-of `currentTool`. A drag in empty space inside a graph editor has no competing meaning, so routing it
-through the canvas's `Tool` would couple two unrelated surfaces to buy a mode the artist would then have
-to switch into. **The cel half of that ask is future and already has its stub**: "Select Multiple" sits
-in the cel menu today, `.disabled(true)`, and a marquee over cels is what enables it.
+**The cost is that a finger on the band no longer scrolls the timeline.** Deliberate: the ruler and
+every cel row still scroll, so what is given up is a 96 pt strip, and the marquee is going to want
+the whole of the band's empty space anyway.
+
+**Three decisions the stage had to make, none of which the brief settled.**
+
+- **A key is stopped by its neighbour rather than consuming it.** `setKey` replaces on collision, so
+  travelling onto a neighbour's frame silently destroys it — a destructive edit made by a continuous
+  gesture, where "put it here" and "overshoot" are the same movement. `CurveEditor.moving(_:to:)`
+  already answers this exact question this exact way, an epsilon at a time, for the identical reason
+  (`MonotoneCubic` drops a duplicate x). Clamping is also the only one of the two answers that is
+  **visible**: the dot stops under a finger that is still going, which reads as a wall, and it needs
+  no confirmation and no second undo entry. The same clamp puts the floor at frame 0.
+- **A drag clamps to `modelDomain` and never to `uiRange`, and a key above the axis is drawn nowhere.**
+  `Effect.swift` says to draw the axis over one and allow a key anywhere in the other; decision 3 of
+  §11.3 is the drawing half of that sentence, so the band cuts an out-of-range key exactly as it cuts
+  the line through it, and the picture stays coherent — the curve leaves the top where the dot did.
+  Neither of the alternatives survives its own consequence: rescaling to admit it is decision 2 undone
+  once a frame, and a marker pinned at the rim is a *handle reporting a value no key holds*, which
+  §11.3 already refused for the step stem. What that leaves is a key that cannot be grabbed back, so
+  **hit-testing measures the key's y clamped into the band** — one line, `reachableY` — and an
+  out-of-range key is reachable from the rim of its own column. Inside the axis it is the identity.
+- **One drag is one press of Undo, and it is `beginStructureGesture` that makes it so.**
+  `setEffectParameterTrack` records one step *per call* and the drag calls it on every `.changed`
+  tick, so the bracket is the whole of the arithmetic: opened on the **first real movement** rather
+  than at touch-down (`CurveEditor`'s rule — a drag that never moved closes no bracket because it
+  never opened one), and closed with `commitStructureGesture` only if a write actually changed
+  something, because `recordStructureChange` records unconditionally and would otherwise leave a step
+  that undoes nothing. A cancelled drag restores the starting curve *before* dropping the bracket:
+  `cancelStructureGesture` throws the baseline away without recording, so "record nothing" and
+  "change nothing" have to be arranged separately. A tap needs no bracket, being one write.
+
+**§2.28's union follows for free, and that was verified rather than assumed** — end to end, by a real
+finger. `GraphEditorUITests.testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows` drags the key at
+frame 0 and asserts the marker band a row up goes from `0|6` to `(0)|N|6`: the diamond moved with the
+key, and the frame it left kept the artist's explicit mark and went **hollow**, which is exactly the
+two-kinds distinction §2.26 exists for. Nothing writes a mark; the accessor computes the union, which
+is the whole point of it.
+
+**What a `Channel` gained**, and it is the only widening of D2's key: `modelDomain`, so the clamp a
+gesture applies is keyed like everything else the band decides rather than re-derived from
+`Effect.parameters` inside a recogniser. All the hit arithmetic is on `TimelineGraphBand` itself,
+which is already in the test target — **no new file, and therefore no `project.pbxproj` entry and no
+object id to collide with anyone's.**
+
+**One thing found and left.** Tapping away a channel's second-to-last key makes the curve stop
+satisfying `isAnimated`, so the whole curve leaves the band mid-gesture. That is §11.5's predicate
+behaving correctly and one press of Undo brings it back, but an artist watching a curve vanish will
+not read it that way. It wants either a listed-but-flat state or a note in D4's channel list, and it
+is D4's to decide because that list is where a channel that is present-but-not-an-animation would have
+to show.
+
+**Ask 6's cel marquee stays future**, with its stub: "Select Multiple" sits in the cel menu today,
+`.disabled(true)`.
+
+**Not in this stage and deliberately: bezier tangent handles.** `AnimationCurve` already carries
+`inHandle`/`outHandle` and five tangent modes and decision 1 makes an unclamped overshoot real, so the
+model is ready; what is missing is the second hit target per key and the arbitration between grabbing
+a handle and grabbing the key it belongs to, which is a stage rather than an afternoon.
 
 ### 11.5 Stage D4 — the channel list is a filter, not a navigator — **done 2026-08-29**
 

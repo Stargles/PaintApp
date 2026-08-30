@@ -203,12 +203,16 @@ enum TimelineKeyMarkers {
 
     /// Which frame a point on the band belongs to — the exact inverse of `centerX`.
     ///
-    /// **Nothing calls this yet and that is deliberate.** Dragging a key along the timeline is the
-    /// graph editor's, and it is the next stage; what this stage owes it is a geometry that will not
-    /// have to be redone, so the mapping exists in both directions and is pinned as a round trip.
-    /// The gesture itself is not built — adding one inside the scroll content means
-    /// `scrollView.panGestureRecognizer.require(toFail:)`, which is a decision about arbitration
-    /// rather than about arithmetic.
+    /// **The graph editor's key drag is what calls it** (§11.4), through
+    /// `TimelineGraphBand.frameDelta(translationX:pixelsPerFrame:)`, which asks it once at frame 0
+    /// rather than once per key: this floors and `centerX` offsets by half a column, so
+    /// `frame(atX: centerX(f) + dx) - f` is `floor(0.5 + dx / pixelsPerFrame)` for every integer `f`
+    /// and the answer is a property of the *travel* alone.
+    ///
+    /// **Not `TimelineGraphBand.time(atX:)`, which is the continuous inverse of the same forward
+    /// map.** A key lands on a whole frame and a curve sample does not; using either for the other's
+    /// job puts the answer half a frame out, which is enough to pick up the wrong key at the default
+    /// zoom.
     static func frame(atX x: CGFloat, pixelsPerFrame: CGFloat) -> Int {
         guard pixelsPerFrame > 0 else { return 0 }
         return Int((x / pixelsPerFrame).rounded(.down))

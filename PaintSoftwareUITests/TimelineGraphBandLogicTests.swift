@@ -464,4 +464,378 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.releaseGraphBand()
         XCTAssertEqual(manager.graphBandExpansion?.layerIndex, gradeIndex)
     }
+
+    // MARK: - Stage D3: what a touch on the band means
+
+    /// The band's own height, so a test's y arithmetic is the band's rather than a literal.
+    private let band = TimelineGraphBand.height
+    private let base = TimelineKeyMarkers.basePixelsPerFrame
+
+    /// Where a channel's key is actually drawn, built from the two mappings under test so a change to
+    /// either shows up as a failure here rather than as a test that quietly stopped aiming at a key.
+    private func dot(_ channel: TimelineGraphBand.Channel, frame: Int,
+                     pixelsPerFrame: CGFloat? = nil) -> CGPoint {
+        let ppf = pixelsPerFrame ?? base
+        let value = channel.curve.key(atFrame: frame)!.value
+        return CGPoint(x: TimelineGraphBand.x(ofFrame: frame, pixelsPerFrame: ppf),
+                       y: TimelineGraphBand.y(ofValue: value, in: channel.axis, bandHeight: band))
+    }
+
+    /// A blur layer, because `blur.radius` is the parameter whose `modelDomain` (0…128) is genuinely
+    /// wider than its `uiRange` (0…64) — which is the case the clamping rule is *about*, and
+    /// brightness/contrast cannot exercise it, being unbounded in the model.
+    private let radiusID = "blur.radius"
+    private func blurredManager() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer(effect: .blur(Effect.Blur(radius: 8)))
+        manager.currentLayerIndex = gradeIndex
+        return manager
+    }
+
+    // MARK: Hit-testing
+
+    /// **The nearest key inside the radius, and nothing outside it** — `CurveEditor.nearestHandle`'s
+    /// rule, which matters more here because two channels can key the same frame and their dots then
+    /// share an x.
+    func testAGrabTakesTheNearestKeyInsideTheRadiusAndNothingOutsideIt() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (10, 2.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 2.0), (10, 0.0)]))
+        let drawn = channels(manager)
+        let brightness = drawn.first { $0.parameterID == brightnessID }!
+        let contrast = drawn.first { $0.parameterID == contrastID }!
+
+        // Frame 0: brightness is at the bottom of its axis and contrast at the top, on the same x.
+        let low = dot(brightness, frame: 0)
+        let high = dot(contrast, frame: 0)
+        XCTAssertGreaterThan(low.y, high.y, "PREMISE: the two channels' frame-0 dots are far apart")
+
+        XCTAssertEqual(TimelineGraphBand.nearestKey(to: low, channels: drawn,
+                                                    pixelsPerFrame: base, bandHeight: band),
+                       TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0))
+        XCTAssertEqual(TimelineGraphBand.nearestKey(to: high, channels: drawn,
+                                                    pixelsPerFrame: base, bandHeight: band),
+                       TimelineGraphBand.KeyRef(parameterID: contrastID, frame: 0),
+                       "The nearest match, not the first channel in the list")
+
+        // Just inside and just outside the radius, measured from the same dot along one axis.
+        let justInside = CGPoint(x: low.x + TimelineGraphBand.hitRadius - 1, y: low.y)
+        let justOutside = CGPoint(x: low.x + TimelineGraphBand.hitRadius + 1, y: low.y)
+        XCTAssertNotNil(TimelineGraphBand.nearestKey(to: justInside, channels: drawn,
+                                                     pixelsPerFrame: base, bandHeight: band))
+        XCTAssertNil(TimelineGraphBand.nearestKey(to: justOutside, channels: drawn,
+                                                  pixelsPerFrame: base, bandHeight: band),
+                     "Outside the radius is empty band, which is what the marquee needs")
+    }
+
+    /// **A key above the top of its axis is still grabbable, from the rim of its own column.**
+    ///
+    /// The band clips (decision 3) and `modelDomain` is wider than `uiRange`, so a drag can legally
+    /// put a key where nothing is drawn. Measuring the hit against the key's true y would make it
+    /// permanently unreachable — an unreachable state D3's own gesture had created.
+    func testAKeyOutsideTheAxisIsStillGrabbableFromTheRim() {
+        let manager = blurredManager()
+        // 100 is inside `blur.radius`'s modelDomain (0…128) and above its uiRange (0…64).
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: radiusID,
+                                        to: linear([(0, 100.0), (10, 8.0)]))
+        let drawn = channels(manager)
+        let channel = drawn.first { $0.parameterID == radiusID }!
+
+        let trueY = TimelineGraphBand.y(ofValue: 100, in: channel.axis, bandHeight: band)
+        XCTAssertLessThan(trueY, 0, "PREMISE: a radius of 100 is drawn above the band and cut away")
+
+        let rim = CGPoint(x: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: base), y: 0)
+        XCTAssertEqual(TimelineGraphBand.nearestKey(to: rim, channels: drawn,
+                                                    pixelsPerFrame: base, bandHeight: band),
+                       TimelineGraphBand.KeyRef(parameterID: radiusID, frame: 0),
+                       "…and it can be taken back from the edge of its own column")
+    }
+
+    // MARK: The two axes a drag resolves
+
+    /// `value(atY:)` and `y(ofValue:)` are inverses, including outside the axis — which is the half
+    /// that matters, since that is where a drag off the top of the band lands.
+    func testTheValueAxisRoundTripsBothInsideAndOutsideTheRange() {
+        let axis: ClosedRange<Double> = 0...64
+        for value in [0.0, 1.0, 32.0, 64.0, 100.0, -20.0] {
+            let y = TimelineGraphBand.y(ofValue: value, in: axis, bandHeight: band)
+            XCTAssertEqual(TimelineGraphBand.value(atY: y, in: axis, bandHeight: band), value,
+                           accuracy: 1e-9, "value \(value)")
+        }
+    }
+
+    /// **`tapSlop` is smaller than half a frame column at every zoom the pinch can reach**, so a
+    /// gesture the view calls a tap can never have carried a key onto another frame.
+    ///
+    /// Stated against `TimelineKeyMarkers.pixelsPerFrameRange` rather than against `10.5`, which is
+    /// that constant's own rule: comparing a number to a copy of itself is green forever, including
+    /// on the day somebody widens the pinch range.
+    func testATapCanNeverHaveMovedAKeyByAFrameAtAnyZoom() {
+        let floor = TimelineKeyMarkers.pixelsPerFrameRange.lowerBound
+        XCTAssertLessThan(TimelineGraphBand.tapSlop, floor / 2,
+                          "A tap's whole allowance has to be less than half a column at the widest zoom")
+        for ppf in [floor, TimelineKeyMarkers.basePixelsPerFrame,
+                    TimelineKeyMarkers.pixelsPerFrameRange.upperBound] {
+            XCTAssertEqual(TimelineGraphBand.frameDelta(translationX: TimelineGraphBand.tapSlop,
+                                                        pixelsPerFrame: ppf), 0, "\(ppf)")
+            XCTAssertEqual(TimelineGraphBand.frameDelta(translationX: -TimelineGraphBand.tapSlop,
+                                                        pixelsPerFrame: ppf), 0, "\(ppf)")
+        }
+    }
+
+    /// **The frame delta is the floored inverse and is independent of which key it is asked about** —
+    /// the property that lets one number move a whole marquee rigidly.
+    func testTheFrameDeltaIsTheSameWhicheverKeyItIsTakenFrom() {
+        for ppf in [TimelineKeyMarkers.pixelsPerFrameRange.lowerBound,
+                    TimelineKeyMarkers.basePixelsPerFrame,
+                    TimelineKeyMarkers.pixelsPerFrameRange.upperBound] {
+            for travel in [-3.0, -0.6, 0.0, 0.4, 0.5, 2.7] {
+                let dx = CGFloat(travel) * ppf
+                let delta = TimelineGraphBand.frameDelta(translationX: dx, pixelsPerFrame: ppf)
+                for frame in [0, 1, 7, 250] {
+                    XCTAssertEqual(
+                        TimelineKeyMarkers.frame(atX: TimelineGraphBand.x(ofFrame: frame,
+                                                                          pixelsPerFrame: ppf) + dx,
+                                                 pixelsPerFrame: ppf) - frame,
+                        delta,
+                        "ppf \(ppf), travel \(travel), frame \(frame)")
+                }
+            }
+        }
+    }
+
+    /// **A drag of the same *screen* distance means different frames at the two ends of the pinch
+    /// range, and the same value.** The x axis belongs to the timeline and the y axis does not.
+    func testADragResolvesFramesByZoomAndValuesIndependentlyOfIt() {
+        let manager = blurredManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: radiusID,
+                                        to: linear([(0, 8.0), (40, 32.0)]))
+        let drawn = channels(manager)
+        let ref = TimelineGraphBand.KeyRef(parameterID: radiusID, frame: 0)
+        // 60 pt right and a sixth of the band up.
+        let travel = CGSize(width: 60, height: -(band - TimelineGraphBand.verticalInset * 2) / 6)
+
+        let atDefault = TimelineGraphBand.move(ref, in: drawn, translation: travel,
+                                               pixelsPerFrame: base, bandHeight: band)
+        let pinchedOut = TimelineGraphBand.move(ref, in: drawn, translation: travel,
+                                                pixelsPerFrame: TimelineKeyMarkers.pixelsPerFrameRange.lowerBound,
+                                                bandHeight: band)
+        XCTAssertEqual(atDefault?.frame, 2, "60 pt is two frames at 30 pt each")
+        XCTAssertEqual(pinchedOut?.frame, 6, "…and six at 10.5, because the axis is the timeline's")
+        // A sixth of the usable band on a 0…64 axis is 64/6.
+        XCTAssertEqual(atDefault?.value ?? 0, 8 + 64.0 / 6, accuracy: 1e-9)
+        XCTAssertEqual(pinchedOut?.value ?? 0, atDefault?.value ?? -1, accuracy: 1e-9,
+                       "The value axis is the band's own and the pinch does not touch it")
+    }
+
+    /// **The clamp is `modelDomain`'s, and `uiRange` is not a wall.** `Effect.swift` says to draw the
+    /// axis over `uiRange` and allow a key anywhere in `modelDomain`; clamping to the axis instead
+    /// would make the model's own reachable values unreachable through the only UI that edits them.
+    func testADragOvershootsUIRangeAndStopsAtModelDomain() {
+        let manager = blurredManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: radiusID,
+                                        to: linear([(0, 32.0), (40, 8.0)]))
+        let drawn = channels(manager)
+        let channel = drawn.first { $0.parameterID == radiusID }!
+        XCTAssertEqual(channel.uiRange, 0...64)
+        XCTAssertEqual(channel.modelDomain, 0...Double(Effect.maxBlurTaps))
+        let ref = TimelineGraphBand.KeyRef(parameterID: radiusID, frame: 0)
+
+        // Half a band upward is half of `uiRange` — 32 units — which takes a key at 32 to 64, the
+        // top of the axis. A whole band takes it to 96, well outside it and well inside the domain.
+        let usable = band - TimelineGraphBand.verticalInset * 2
+        let up = TimelineGraphBand.move(ref, in: drawn,
+                                        translation: CGSize(width: 0, height: -usable),
+                                        pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(up?.value ?? 0, 96, accuracy: 1e-9,
+                       "A key above the axis is a real state — the band cuts it, it is not clamped")
+
+        // Far enough that even `modelDomain` runs out, in both directions.
+        let miles = TimelineGraphBand.move(ref, in: drawn,
+                                           translation: CGSize(width: 0, height: -usable * 10),
+                                           pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(miles?.value, Double(Effect.maxBlurTaps))
+        let down = TimelineGraphBand.move(ref, in: drawn,
+                                          translation: CGSize(width: 0, height: usable * 10),
+                                          pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(down?.value, 0, "…and a blur radius stops at zero, which is its identity")
+    }
+
+    // MARK: The collision rule
+
+    /// **A key is stopped by its neighbour rather than consuming it.** `AnimationCurve.setKey`
+    /// replaces on collision, so travelling onto a neighbour's frame would silently destroy it —
+    /// `CurveEditor.moving`'s epsilon guard, made of whole frames.
+    func testAKeyIsStoppedByItsNeighbourRatherThanConsumingIt() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (4, 2.0), (5, 1.0)]))
+        let drawn = channels(manager)
+        let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
+
+        // Ten frames right, with a neighbour at 4: the answer is 3, not 4 and not 10.
+        let far = TimelineGraphBand.move(ref, in: drawn,
+                                         translation: CGSize(width: base * 10, height: 0),
+                                         pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(far?.frame, 3, "It stops one short of its neighbour")
+
+        let curve = TimelineGraphBand.applying(far!, to: ref, in: drawn)
+        XCTAssertEqual(curve?.keys.map(\.frame), [3, 4, 5], "…and nothing was swallowed")
+
+        // And the floor: frames are absolute document frames, so 0 is the wall on the other side.
+        let backwards = TimelineGraphBand.move(.init(parameterID: brightnessID, frame: 4), in: drawn,
+                                               translation: CGSize(width: -base * 10, height: 0),
+                                               pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(backwards?.frame, 1, "Stopped by the key at 0, not by frame 0")
+    }
+
+    /// The other half of the same rule: **an add onto a frame the channel already keys is refused.**
+    /// Reachable without a near miss, because at `step > 1` the drawn line and the key's own dot are
+    /// deliberately apart, so a tap can be on the line and forty points from the key that owns it.
+    func testAnAddOntoAFrameTheChannelAlreadyKeysIsRefused() {
+        let manager = gradedManager()
+        var stepped = linear([(0, 0.0), (1, 2.0), (10, 1.0)])
+        stepped.step = 2
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID, to: stepped)
+        let drawn = channels(manager)
+        let channel = drawn.first { $0.parameterID == brightnessID }!
+
+        XCTAssertNotNil(TimelineGraphBand.stem(forKeyAt: 1, in: channel.curve),
+                        "PREMISE: on twos the key at frame 1 sits off the line it belongs to")
+        let onTheLine = CGPoint(
+            x: TimelineGraphBand.x(ofFrame: 1, pixelsPerFrame: base),
+            y: TimelineGraphBand.y(ofValue: channel.curve.evaluate(at: 1), in: channel.axis,
+                                   bandHeight: band))
+        XCTAssertNil(TimelineGraphBand.nearestKey(to: onTheLine, channels: drawn,
+                                                  pixelsPerFrame: base, bandHeight: band),
+                     "PREMISE: and far enough off it that the tap is not a grab")
+        XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: drawn,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .nothing,
+                       "Adding here would have replaced the key at frame 1 with no gesture that looked destructive")
+    }
+
+    // MARK: Tap to add, tap to remove
+
+    /// `CurveEditor`'s two halves of one gesture, and the part that has no equivalent there: with
+    /// several curves in one band, "add here" has to name one, and proximity is the only
+    /// non-arbitrary namer.
+    func testATapRemovesAKeyAddsToTheNearestCurveAndOtherwiseDoesNothing() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (10, 2.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 2.0), (10, 0.0)]))
+        let drawn = channels(manager)
+        let brightness = drawn.first { $0.parameterID == brightnessID }!
+
+        XCTAssertEqual(TimelineGraphBand.tap(at: dot(brightness, frame: 10), channels: drawn,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .remove(TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 10)))
+
+        // Frame 5, on brightness's own line: the two curves cross at the middle of the band, so aim
+        // a quarter of the way up, which is brightness's half and not contrast's.
+        let quarter = TimelineGraphBand.y(ofValue: 0.5, in: brightness.axis, bandHeight: band)
+        let onBrightness = CGPoint(x: TimelineGraphBand.x(ofFrame: 3, pixelsPerFrame: base), y: quarter)
+        XCTAssertEqual(TimelineGraphBand.tap(at: onBrightness, channels: drawn,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .add(parameterID: brightnessID, frame: 3, value: 0.5),
+                       "The tapped value, not the curve's own there — the dot lands under the finger")
+
+        // Between the two curves at frame 5 and further than `hitRadius` from either: empty band,
+        // which is what the marquee needs to exist.
+        let farAbove = CGPoint(x: TimelineGraphBand.x(ofFrame: 5, pixelsPerFrame: base),
+                               y: TimelineGraphBand.verticalInset)
+        XCTAssertEqual(TimelineGraphBand.tap(at: farAbove, channels: drawn,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .nothing)
+    }
+
+    // MARK: What an edit costs, and what follows it
+
+    /// **One drag is one press of Undo, however many ticks it spanned.**
+    ///
+    /// `setEffectParameterTrack` records one step *per call*, which is right for a discrete edit and
+    /// wrong for a gesture — `KeyframeControl.setEffectParameterKeys` states the same problem from the
+    /// other side. The bracket is the answer, and this pins the arithmetic the coordinator relies on:
+    /// a write on every `.changed` tick inside one `beginStructureGesture` / `commitStructureGesture`
+    /// pair costs the artist exactly one press, where without it a two-second drag costs dozens.
+    func testADragThatWritesOnEveryTickIsOneUndoStep() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (10, 2.0)]))
+        let before = manager.history.undoStack.count
+        let startChannels = channels(manager)
+        let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
+
+        manager.beginStructureGesture()
+        for tick in 1...3 {
+            let move = TimelineGraphBand.move(ref, in: startChannels,
+                                              translation: CGSize(width: base * CGFloat(tick), height: 4),
+                                              pixelsPerFrame: base, bandHeight: band)!
+            manager.setEffectParameterTrack(
+                layerIndex: gradeIndex, parameterID: brightnessID,
+                to: TimelineGraphBand.applying(move, to: ref, in: startChannels))
+        }
+        manager.commitStructureGesture(label: .effectKeyframes)
+
+        XCTAssertEqual(manager.history.undoStack.count - before, 1,
+                       "Three writes over three ticks, one undo step")
+        XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
+                       [3, 10], "PREMISE: the drag actually landed")
+        manager.undo()
+        XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
+                       [0, 10], "…and one press took all of it back")
+    }
+
+    /// A single tap is a single write and therefore a single step, with no bracket — the discrete
+    /// half of the same rule.
+    func testATapToRemoveIsOneUndoStepOnItsOwn() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (5, 1.0), (10, 2.0)]))
+        let before = manager.history.undoStack.count
+        var curve = channels(manager).first!.curve
+        curve.removeKey(atFrame: 5)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID, to: curve)
+
+        XCTAssertEqual(manager.history.undoStack.count - before, 1)
+        manager.undo()
+        XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
+                       [0, 5, 10])
+    }
+
+    /// **§2.28: moving a curve key moves the keyframe, because the union is computed and never
+    /// stored.** Both device reports of 2026-08-29 were a divergence between the marks and the keyed
+    /// frames; the fix was one accessor, and this is the guard that a graph-editor edit goes through
+    /// it rather than around it by writing a mark of its own.
+    ///
+    /// The frame vacated by the key keeps its diamond and becomes **bare**, which is the whole point
+    /// of the two kinds: the artist's explicit mark is still there and now carries nothing.
+    func testMovingAKeyMovesTheKeyframeUnionAndLeavesABareMarkBehind() {
+        let manager = gradedManager()
+        manager.addKeyframe(target(manager), atFrame: 0)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (10, 2.0)]))
+        XCTAssertEqual(manager.keyframes(of: target(manager)).frames, [0, 10])
+        XCTAssertEqual(manager.keyframes(of: target(manager)).keyed, [0, 10])
+
+        let drawn = channels(manager)
+        let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
+        let move = TimelineGraphBand.move(ref, in: drawn,
+                                          translation: CGSize(width: base * 4, height: 0),
+                                          pixelsPerFrame: base, bandHeight: band)!
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: TimelineGraphBand.applying(move, to: ref, in: drawn))
+
+        let after = manager.keyframes(of: target(manager))
+        XCTAssertEqual(after.frames, [0, 4, 10], "The union followed the key, with no mark written")
+        XCTAssertEqual(after.keyed, [4, 10])
+        XCTAssertEqual(TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(
+            markers: TimelineKeyMarkers.markers(frames: after.frames, keyed: after.keyed),
+            pixelsPerFrame: base)), "(0)|4|10",
+            "…and the frame it left keeps its explicit mark, now hollow")
+    }
 }

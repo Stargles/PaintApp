@@ -332,4 +332,192 @@ final class GraphEditorUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["Extend to End"].waitForExistence(timeout: 5),
                       "The arm is a cel identity, so the second tap still reaches the block's menu")
     }
+
+    // MARK: - Stage D3: the gestures
+
+    /// **The whole of stage D3 through a real finger, and the §2.28 union with it.**
+    ///
+    /// Everything the drag *decides* is `TimelineGraphBandLogicTests`, run headlessly against
+    /// `TimelineGraphBand` — the hit radius, the neighbour clamp, the two axes, the undo arithmetic.
+    /// What only this tier can see is that a touch on a `UIView` inside a horizontally scrolling
+    /// `UIScrollView` reaches the band at all: without
+    /// `scrollView.panGestureRecognizer.require(toFail:)` every drag here is eaten by the scroll view
+    /// and the band is a picture, which is exactly what D2 shipped.
+    ///
+    /// **And the assertion that a moved key moves its keyframe is the one this feature could get
+    /// wrong invisibly.** §2.28 makes a keyframe the *union* of the artist's explicit marks and every
+    /// frame a channel keys on, computed by one accessor and never stored twice — both of the owner's
+    /// device reports were a divergence between those two lists. So the marker band a row up must
+    /// follow a curve edit for free, and the frame the key left must keep its mark and go **hollow**:
+    /// the artist marked it, and it now carries nothing.
+    func testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6",
+                       "PREMISE: the band is drawing the curve the settings bar just authored")
+        let markers = app.otherElements["timeline.keyMarkers.1"]
+        XCTAssertEqual(markers.value as? String, "0|6",
+                       "PREMISE: two keyframes, both landed on a channel, neither bare")
+
+        // The key at frame 0 holds Brightness / Contrast's default of 1.0, which is the middle of its
+        // 0…2 `uiRange` — so its y is computable without knowing what the slider drag produced at the
+        // other key. Both mappings come from `TimelineGraphBand` rather than from literals.
+        let bandFrame = band.frame
+        let key = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
+            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: bandFrame.height)))
+        // Three frames right at the default zoom. Well short of the neighbour at 6, so the clamp is
+        // not what this test is measuring, and XCUITest's synthetic drags undershoot by a
+        // timing-dependent amount — hence the assertion below is a range.
+        key.press(forDuration: 0.2,
+                  thenDragTo: key.withOffset(CGVector(dx: TimelineKeyMarkers.basePixelsPerFrame * 3, dy: 0)),
+                  withVelocity: .slow, thenHoldForDuration: 0.3)
+
+        let moved = try XCTUnwrap(band.value as? String)
+        let landed = try XCTUnwrap(Int(moved.split(separator: ":")[1].split(separator: ",")[0]),
+                                   "Could not read the moved key's frame out of \(moved)")
+        XCTAssertTrue((1...5).contains(landed),
+                      "The key should have travelled toward frame 3 and stopped short of its neighbour: \(moved)")
+        XCTAssertEqual(moved, "brightnessContrast.brightness:\(landed),6",
+                       "…and the key at 6 did not move")
+        XCTAssertEqual(markers.value as? String, "(0)|\(landed)|6", """
+            The keyframe union did not follow the key. §2.28: a keyframe is the union of the marks \
+            and the keyed frames, computed by one accessor — so moving a key moves the diamond, and \
+            the frame it left keeps the artist's own mark, now hollow because nothing is saved on it.
+            """)
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        let back = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "brightnessContrast.brightness:0,6"),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed, """
+            One drag is one press of Undo. The drag writes the whole curve on every `.changed` tick, \
+            and `setEffectParameterTrack` records a step per call — the gesture bracket is what \
+            collapses them, and without it this needs one press per tick.
+            """)
+        XCTAssertEqual(markers.value as? String, "0|6", "…and the union came back with it")
+    }
+
+    /// **A tap on the band is the other half of the same gesture** — `CurveEditor`'s rule, which
+    /// §11.4 nominates: on a key it removes, on empty graph it adds. Both are one press of Undo,
+    /// being one write each.
+    func testATapAddsAKeyToTheCurveItLandsOnAndRemovesOneItLandsOn() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6")
+
+        // Frame 3 is the middle of the only segment, so the line there is halfway between the two
+        // keys' values whatever the tangents do with the ends — an aim well inside `hitRadius` of the
+        // curve and nowhere near either key's own column.
+        let bandFrame = band.frame
+        let onTheLine = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 3, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
+            dy: TimelineGraphBand.y(ofValue: (authored.start + authored.end) / 2, in: 0...2,
+                                    bandHeight: bandFrame.height)))
+        onTheLine.tap()
+
+        let added = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "brightnessContrast.brightness:0,3,6"),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [added], timeout: 5), .completed,
+                       "A tap near a curve adds a key to it, at the tapped frame — got \(band.value ?? "nil")")
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String, "0|3|6",
+                       "…and the new key is a keyframe, with no mark written for it")
+
+        onTheLine.tap()
+        let removed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "brightnessContrast.brightness:0,6"),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [removed], timeout: 5), .completed,
+                       "…and a second tap, now on the key it just made, takes it away again")
+    }
+
+    // MARK: - Fixture
+
+    /// The two values `authorAnAnimatedBrightnessCurve` left on the track.
+    private struct AuthoredCurve {
+        /// The grade's stored default, keyed onto the earlier mark by the seed arm.
+        let start: Double
+        /// What the slider drag left, keyed onto the later one.
+        let end: Double
+    }
+
+    /// **A layer with one genuinely animated effect channel, authored the only way the app can author
+    /// one: two keyframe marks and one slider drag.**
+    ///
+    /// This is the `.seedAndKey` arm of `KeyframeControl.write` — marks at both frames, the playhead
+    /// on the later one, and a channel with no curve yet — so one drag puts the *old* value on the
+    /// mark below and the new one under the finger, which is two keys of different values and
+    /// therefore an animation by `AnimationCurve.isAnimated`, the predicate the band's channel list
+    /// uses. There is no shorter route: the graph editor needs a curve to edit and cannot be the thing
+    /// that creates the first one.
+    ///
+    /// - Returns: the two values the two keys hold, read off the slider rather than assumed, so a
+    ///   test can compute where on the band each of them is drawn.
+    private func authorAnAnimatedBrightnessCurve(_ app: XCUIApplication,
+                                                 from: Int, to: Int) throws -> AuthoredCurve {
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        // The helper leaves the layer's options open inside the rail, and the rail covers the
+        // timeline — so the panel is toggled shut before any of the taps below.
+        app.buttons["toolbar.layersButton"].tap()
+
+        let block = app.otherElements["timeline.cel.1.0"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5), "The effect layer should have a track")
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
+        func mark(_ frame: Int) {
+            // A frame's column as a fraction of the block, which reaches past its right edge for a
+            // frame the block does not cover — the only handle a test has on an empty slot, and
+            // `testAnEmptySlotCanStillBeGivenAKeyframe`'s technique.
+            let slot = block.coordinate(withNormalizedOffset:
+                CGVector(dx: (Double(frame) + 0.5) / Double(cel.length), dy: 0.5))
+            let add = app.buttons["timeline.menu.Add Keyframe"]
+            // **One tap or two, decided by what happened rather than assumed.**
+            // `handleTapOnCel`/`handleTapOnGap` are a two-stage contract: a tap on a frame that is
+            // *not* already selected only selects it, and the menu comes up on the next one. So a
+            // frame the playhead is already sitting on — frame 0 on a fresh document — needs a
+            // single tap, and tapping twice there opens the menu and dismisses it again, which is
+            // indistinguishable from the menu never having opened.
+            slot.tap()
+            if !add.waitForExistence(timeout: 2) {
+                slot.tap()
+                XCTAssertTrue(add.waitForExistence(timeout: 5),
+                              "No Add Keyframe on frame \(frame)'s menu")
+            }
+            add.tap()
+        }
+        mark(from)
+        mark(to)
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String,
+                       "(\(from))|(\(to))",
+                       "PREMISE: two bare marks, which is what puts the next slider edit in seedAndKey")
+
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        app.buttons["layerOptions.effectSettings"].tap()
+        let slider = app.sliders["effectSettings.brightness"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        let before = try XCTUnwrap(Double(try XCTUnwrap(slider.value as? String)))
+        // Far from the middle, so the new value cannot land on the old one and leave a flat curve —
+        // which `AnimationCurve.isAnimated` would refuse to call an animation and the band would not
+        // draw at all.
+        slider.adjust(toNormalizedSliderPosition: 0.9)
+        let after = try XCTUnwrap(Double(try XCTUnwrap(slider.value as? String)))
+        XCTAssertNotEqual(after, before, accuracy: 0.05,
+                          "The slider did not move, so no key was written")
+
+        app.buttons["layerOptions.subMenuBack"].tap()
+        app.buttons["toolbar.layersButton"].tap()
+        return AuthoredCurve(start: before, end: after)
+    }
 }

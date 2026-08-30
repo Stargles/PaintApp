@@ -386,11 +386,15 @@ struct TimelineTrackView: UIViewRepresentable {
         /// from the touch's *x* alone, so a touch anywhere in the band would resolve to a cel body
         /// or a gap and drag a block the artist cannot see they are holding.
         ///
-        /// **It takes no touches at all** (`isUserInteractionEnabled = false`, `TimelineFolderRowView`'s
-        /// setting and for the same reason). D2 is draw-only; D3 adds a recognizer, and the moment it
-        /// does it must also call `scrollView.panGestureRecognizer.require(toFail:)` on it — §11.3's
-        /// third silent failure, and the reason the band is created here beside the row pool rather
-        /// than in `makeUIView`, where no such call is made for anything.
+        /// **The `require(toFail:)` lives in the one-time block below, and that is the site because it
+        /// is the one that runs exactly once.** Any drag inside the scroll content is eaten without it
+        /// — §11.3's third silent failure. The two existing calls are also inside `relayout()` rather
+        /// than in `makeUIView` (the ruler's behind its own `superview == nil` guard, a row's inside
+        /// the pool-growth loop), and this one is the same shape: the band is added to `contentView`
+        /// once per coordinator and is *hidden* rather than removed when the editor closes, so
+        /// `graphBandView.superview == nil` is true exactly once. The recognizer's target is added in
+        /// the same block for the same reason — a second `addTarget` would fire the handler twice per
+        /// touch and open two undo brackets for one drag.
         ///
         /// **Drawn from `TimelineLayoutKey`'s copy, never re-read off the model**, which is
         /// `trackMarkers`' rule one screen up: `relayout()` early-returns on an unchanged key, so a
@@ -406,11 +410,14 @@ struct TimelineTrackView: UIViewRepresentable {
                   layout.expansion(ofRow: position) > 0
             else {
                 graphBandView.isHidden = true
+                // A band that closes mid-drag cancels it rather than leaving a bracket open.
+                endGraphBandDrag(cancelled: true)
                 return
             }
             if graphBandView.superview == nil {
-                graphBandView.isUserInteractionEnabled = false
                 contentView.addSubview(graphBandView)
+                graphBandView.panRecognizer.addTarget(self, action: #selector(handleGraphBandTouch(_:)))
+                scrollView?.panGestureRecognizer.require(toFail: graphBandView.panRecognizer)
             }
             graphBandView.isHidden = false
             graphBandView.frame = CGRect(x: 0,
@@ -451,6 +458,164 @@ struct TimelineTrackView: UIViewRepresentable {
         private func updateGraphBandViewport() {
             guard !graphBandView.isHidden, graphBandView.superview != nil else { return }
             graphBandView.setVisibleX(visibleBandX)
+        }
+
+        // MARK: - The graph editor's gestures — KEYFRAMES.md §11.4, stage D3
+
+        /// One touch on the band, from touch-down to lift.
+        ///
+        /// **The channels are captured at `.began` and every tick resolves against *those*.** A live
+        /// drag rewrites the same key on every `.changed`, so composing this tick's translation onto
+        /// last tick's document would make the key accelerate away from the finger — the same reason
+        /// `BlockDrag` records where its block started rather than where it currently is.
+        private struct GraphBandDrag {
+            let layerIndex: Int
+            let start: CGPoint
+            let channels: [TimelineGraphBand.Channel]
+            let bandHeight: CGFloat
+            /// The key being carried, or nil when the touch began on nothing.
+            let carried: TimelineGraphBand.KeyRef?
+            /// Set once travel passes `tapSlop`. Until then the touch is still a candidate tap, and
+            /// **no undo bracket is open** — `CurveEditor`'s rule: a drag that never moved closes no
+            /// bracket, because it never opened one.
+            var didMove = false
+            /// Whether any write actually changed the document, so a drag that resolved to the frame
+            /// and value it started on cancels its bracket instead of recording an empty undo step.
+            var didWrite = false
+        }
+        private var graphBandDrag: GraphBandDrag?
+
+        /// **The whole of D3's gesture, in `CurveEditor`'s grammar** — KEYFRAMES.md §11.4, which
+        /// nominates that grammar and rules that what travels is the rules and the constants rather
+        /// than the widget.
+        ///
+        /// - The key to grab is chosen once, at touch-down, from `startLocation` — so a drag that
+        ///   passes near another key does not swap handles under the finger.
+        /// - Travel of `tapSlop` or less is a **tap**, and the question is asked of the *translation*
+        ///   rather than of a `didMove` flag: a touch that began on empty band and travelled an inch
+        ///   never grabbed anything, and treating that as a tap would drop a key wherever it stopped.
+        /// - The undo bracket opens on the first real movement, not on touch-down.
+        ///
+        /// **Arbitration, in full.** The scroll view's pan `require(toFail:)`s this recogniser (see
+        /// `layoutGraphBand`), so a touch that lands on the band belongs to the band; the band is a
+        /// sibling of the row pool and never a subview of a row, so a row's pan, tap and 0.5 s long
+        /// press — which pick their zone from x alone and would read the band as a cel body — are on
+        /// views this touch never reaches; the pinch is a two-touch recogniser on `contentView` and
+        /// this is `numberOfTouchesRequired = 1`, the same coexistence `TimelineRulerView` already
+        /// relies on; and the playhead, which lies *over* the band by §11.3's z-order ruling, is
+        /// `isUserInteractionEnabled = false`, so a key hidden under 120 pt of blue is still grabbable.
+        @objc func handleGraphBandTouch(_ gr: UILongPressGestureRecognizer) {
+            let point = gr.location(in: graphBandView)
+            switch gr.state {
+            case .began:
+                beginGraphBandTouch(at: point)
+            case .changed:
+                updateGraphBandTouch(at: point)
+            case .ended:
+                finishGraphBandTouch(at: point)
+            case .cancelled, .failed:
+                endGraphBandDrag(cancelled: true)
+            default:
+                break
+            }
+        }
+
+        private func beginGraphBandTouch(at point: CGPoint) {
+            guard let content = laidOutKey?.graphBand else { return }
+            let height = graphBandView.bounds.height
+            graphBandDrag = GraphBandDrag(
+                layerIndex: content.layerIndex, start: point, channels: content.channels,
+                bandHeight: height,
+                carried: TimelineGraphBand.nearestKey(to: point, channels: content.channels,
+                                                      pixelsPerFrame: pixelsPerFrame,
+                                                      bandHeight: height))
+        }
+
+        private func updateGraphBandTouch(at point: CGPoint) {
+            guard var drag = graphBandDrag else { return }
+            let translation = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
+            guard hypot(translation.width, translation.height) > TimelineGraphBand.tapSlop else { return }
+
+            if !drag.didMove {
+                drag.didMove = true
+                // One bracket for the whole drag, opened here rather than at touch-down: this is the
+                // moment the gesture stops being a candidate tap. `setEffectParameterTrack` records
+                // nothing while a gesture snapshot is open, so the write below — one per tick, for as
+                // long as the finger is down — collapses into the single step
+                // `commitStructureGesture` records.
+                if drag.carried != nil { canvasManager.beginStructureGesture() }
+                graphBandDrag = drag
+            }
+
+            guard let ref = drag.carried,
+                  let move = TimelineGraphBand.move(ref, in: drag.channels, translation: translation,
+                                                    pixelsPerFrame: pixelsPerFrame,
+                                                    bandHeight: drag.bandHeight),
+                  let curve = TimelineGraphBand.applying(move, to: ref, in: drag.channels)
+            else { return }
+            if canvasManager.setEffectParameterTrack(layerIndex: drag.layerIndex,
+                                                     parameterID: ref.parameterID, to: curve) {
+                graphBandDrag?.didWrite = true
+            }
+            relayout()
+        }
+
+        private func finishGraphBandTouch(at point: CGPoint) {
+            guard let drag = graphBandDrag else { return }
+            let translation = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
+            defer { endGraphBandDrag(cancelled: false) }
+
+            // Asked of the travel, not of `didMove` — `CurveEditor`'s own comment: a drag that started
+            // on empty band never grabbed a key, so `didMove` would be the wrong question and a long
+            // sweep would resolve as a tap and add a key wherever it stopped.
+            guard hypot(translation.width, translation.height) <= TimelineGraphBand.tapSlop else { return }
+
+            switch TimelineGraphBand.tap(at: point, channels: drag.channels,
+                                         pixelsPerFrame: pixelsPerFrame, bandHeight: drag.bandHeight) {
+            case .remove(let ref):
+                guard var curve = drag.channels.first(where: { $0.parameterID == ref.parameterID })?.curve
+                else { return }
+                curve.removeKey(atFrame: ref.frame)
+                // One `setEffectParameterTrack` call, one undo step — the discrete half of "one
+                // artist action is one press of Undo", with no bracket needed because there is one
+                // write.
+                canvasManager.setEffectParameterTrack(layerIndex: drag.layerIndex,
+                                                      parameterID: ref.parameterID, to: curve)
+                relayout()
+            case .add(let parameterID, let frame, let value):
+                guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
+                else { return }
+                curve.setKey(AnimationCurve.Key(frame: frame, value: value))
+                canvasManager.setEffectParameterTrack(layerIndex: drag.layerIndex,
+                                                      parameterID: parameterID, to: curve)
+                relayout()
+            case .nothing:
+                break
+            }
+        }
+
+        /// Clears the live drag, and closes whatever it opened.
+        ///
+        /// **A cancelled drag restores the curve it started from before dropping the bracket.**
+        /// `cancelStructureGesture` throws the baseline away without recording, so leaving the model
+        /// mid-drag would strand an edit the artist cannot undo — the one place where "record nothing"
+        /// and "change nothing" have to be arranged separately.
+        private func endGraphBandDrag(cancelled: Bool) {
+            guard let drag = graphBandDrag else { return }
+            graphBandDrag = nil
+            guard drag.didMove, let ref = drag.carried else { return }
+            if cancelled {
+                canvasManager.setEffectParameterTrack(
+                    layerIndex: drag.layerIndex, parameterID: ref.parameterID,
+                    to: drag.channels.first { $0.parameterID == ref.parameterID }?.curve)
+                canvasManager.cancelStructureGesture()
+            } else if drag.didWrite {
+                canvasManager.commitStructureGesture(label: .effectKeyframes)
+            } else {
+                // `recordStructureChange` records unconditionally, so a bracket that spanned no write
+                // would put an undo step on the stack that undoes nothing.
+                canvasManager.cancelStructureGesture()
+            }
         }
 
         /// The scrub fast path: everything a `currentFrame` change actually moves.
@@ -1096,8 +1261,19 @@ private final class TimelineKeyMarkerBand: UIView {
 /// file is not compiled into `PaintSoftwareUITests`, so anything decided here is decided where no
 /// fast-tier test can see it. What is left here is `UIBezierPath` and `UIColor`.
 ///
-/// **Draw-only.** No recognizer, no hit testing, no drag — D3 is the gestures, and
-/// `TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` is already written and waiting for it.
+/// **Editable since D3, and every decision about *what* a touch means is still `TimelineGraphBand`'s.**
+/// This class owns one `UILongPressGestureRecognizer` with `minimumPressDuration = 0` — which is
+/// `TimelineRulerView.panRecognizer`'s configuration exactly, and this file's UIKit spelling of
+/// `CurveEditor`'s `DragGesture(minimumDistance: 0)`: it begins on touch-down, so a *tap* arrives as
+/// a began/ended pair with no travel and tap-to-add can fire at all, and it keeps the touch for its
+/// whole life, which a `UIPanGestureRecognizer` would not do until ~10 pt of movement — three times
+/// `tapSlop`.
+///
+/// **The band claims its own drags, and gives up scrolling over itself to do it.** A recogniser that
+/// begins on touch-down is exactly what the enclosing scroll view's `require(toFail:)` defers to, so
+/// a finger on the band no longer scrolls the timeline; the ruler and every cel row still do (a row's
+/// pan declines everything but a resize handle), so what is lost is a 96 pt strip and not the
+/// gesture. §11.4's marquee is the drag that will claim the rest of that strip.
 ///
 /// **The playhead stays on top of it**, which is a decision rather than an oversight. It is a
 /// *column* the width of a frame, not a hairline, so at full zoom 120 pt of 35 % blue lies over the
@@ -1122,16 +1298,28 @@ private final class TimelineGraphBandView: UIView {
     /// without invalidating trades a slow band for a blank one, which is strictly worse.
     private var visibleX: ClosedRange<CGFloat> = 0...0
 
+    /// **The band's own touch, and the reason it is a long press with no minimum duration.** See the
+    /// class doc: it is `TimelineRulerView.panRecognizer`'s configuration, which is this file's UIKit
+    /// answer to `DragGesture(minimumDistance: 0)`. The coordinator adds itself as the target and
+    /// makes the scroll view's own pan `require(toFail:)` this — both exactly once, in
+    /// `layoutGraphBand`.
+    let panRecognizer: UILongPressGestureRecognizer = {
+        let gr = UILongPressGestureRecognizer()
+        gr.minimumPressDuration = 0
+        gr.numberOfTouchesRequired = 1
+        return gr
+    }()
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIColor(white: TimelineGraphBand.backgroundWhite,
                                   alpha: TimelineGraphBand.backgroundAlpha)
         isOpaque = false
         contentMode = .redraw
-        isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityTraits = .none
         accessibilityIdentifier = "timeline.graphBand"
+        addGestureRecognizer(panRecognizer)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
