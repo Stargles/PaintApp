@@ -115,34 +115,35 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// **§2.26's whole routing table, as a function of values.**
     ///
     /// Where an edit goes is decided entirely by where the playhead stands relative to the target's
-    /// keyframe marks, so the whole table is reachable from a headless test.
+    /// keyframes, so the whole table is reachable from a headless test.
     func testTheRoutingRuleHasFiveArms() {
-        func write(curve: Bool, marks: Int, onMark: Bool) -> KeyframeControl.Write {
+        func write(curve: Bool, keyframes: Int, onKeyframe: Bool) -> KeyframeControl.Write {
             KeyframeControl.write(isScalarAnimatable: true, channelHasCurve: curve,
-                                  markCount: marks, playheadIsOnMark: onMark)
+                                  keyframeCount: keyframes, playheadIsOnKeyframe: onKeyframe)
         }
 
-        XCTAssertEqual(write(curve: false, marks: 0, onMark: false), .storedValue,
-                       "Arm 5 — with no marks anywhere, a slider is a slider")
-        XCTAssertEqual(write(curve: true, marks: 0, onMark: false), .key,
-                       "Arm 2 — an animated channel keys wherever it is edited, marks or no marks")
-        XCTAssertEqual(write(curve: true, marks: 2, onMark: true), .key,
+        XCTAssertEqual(write(curve: false, keyframes: 0, onKeyframe: false), .storedValue,
+                       "Arm 5 — with no keyframes anywhere, a slider is a slider")
+        XCTAssertEqual(write(curve: true, keyframes: 0, onKeyframe: false), .key,
+                       "Arm 2 — an animated channel keys wherever it is edited, keyframes or none")
+        XCTAssertEqual(write(curve: true, keyframes: 2, onKeyframe: true), .key,
                        "…and arm 2 takes precedence over the seed arm, which is only for a channel with no curve")
-        XCTAssertEqual(write(curve: false, marks: 2, onMark: false), .storedValueHoldingBaseline,
-                       "Arm 4 — between marks, the previous value is held for the next keyframe to commit")
-        XCTAssertEqual(write(curve: false, marks: 2, onMark: true), .seedAndKey,
+        XCTAssertEqual(write(curve: false, keyframes: 2, onKeyframe: false), .storedValueHoldingBaseline,
+                       "Arm 4 — between keyframes, the previous value is held for the next one to commit")
+        XCTAssertEqual(write(curve: false, keyframes: 2, onKeyframe: true), .seedAndKey,
                        "Arm 3 — standing on B with A already placed, the old value goes to A in one move")
-        XCTAssertEqual(write(curve: false, marks: 1, onMark: true), .storedValueHoldingBaseline,
-                       "…but with only one mark there is no A to seed onto, so the value is held instead")
+        XCTAssertEqual(write(curve: false, keyframes: 1, onKeyframe: true), .storedValueHoldingBaseline,
+                       "…but with only one there is no A to seed onto, so the value is held instead")
     }
 
-    /// **Arm 3 needs a neighbour, and `markCount` is what tells it there is one.**
+    /// **Arm 3 needs a neighbour, and `keyframeCount` is what tells it there is one.**
     ///
-    /// This is the case that would be wrong under a bare `hasMarks`: the artist places their very first
-    /// keyframe and moves the slider while still standing on it. Seeding there produces a one-key curve
-    /// pinning the *new* value, and the owner's *"the previous value gets saved to A"* is lost with
-    /// nothing on screen to explain it. `playheadIsOnMark && markCount > 1` is the same statement as
-    /// "there is a mark other than this one", because the playhead's own mark is in the count.
+    /// This is the case that would be wrong under a bare `hasKeyframes`: the artist places their very
+    /// first keyframe and moves the slider while still standing on it. Seeding there produces a one-key
+    /// curve pinning the *new* value, and the owner's *"the previous value gets saved to A"* is lost
+    /// with nothing on screen to explain it. `playheadIsOnKeyframe && keyframeCount > 1` is the same
+    /// statement as "there is a keyframe other than this one", because the playhead's own is in the
+    /// count.
     func testStandingOnTheOnlyMarkHoldsRatherThanSeeds() {
         let manager = gradedManager()
         let target = layerTarget(manager)
@@ -156,16 +157,17 @@ final class KeyframeControlLogicTests: XCTestCase {
                        "The value at A is held, exactly as it would be from any other frame")
     }
 
-    /// **The one refusal that is not about marks at all.** A parameter a `Double` curve cannot drive is
-    /// `EffectParameter.isScalarAnimatable`'s nine — an `Int`, a `Bool`, a seed, an enum index, a
-    /// colour, a point list — and it writes a value from every position in the table.
+    /// **The one refusal that is not about keyframes at all.** A parameter a `Double` curve cannot
+    /// drive is `EffectParameter.isScalarAnimatable`'s nine — an `Int`, a `Bool`, a seed, an enum
+    /// index, a colour, a point list — and it writes a value from every position in the table.
     func testAParameterACurveCannotDriveAlwaysWritesAValue() {
         for curve in [false, true] {
-            for marks in [0, 1, 3] {
-                for onMark in [false, true] {
+            for keyframes in [0, 1, 3] {
+                for onKeyframe in [false, true] {
                     XCTAssertEqual(
                         KeyframeControl.write(isScalarAnimatable: false, channelHasCurve: curve,
-                                              markCount: marks, playheadIsOnMark: onMark),
+                                              keyframeCount: keyframes,
+                                              playheadIsOnKeyframe: onKeyframe),
                         .storedValue,
                         "A stepped or compound parameter is not a scalar channel, from any state")
                 }
@@ -188,7 +190,7 @@ final class KeyframeControlLogicTests: XCTestCase {
 
         // A is added at frame 0, and nothing is saved.
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 0))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0])
         XCTAssertTrue(tracks(manager, target).isEmpty, "\"keyframe A is added, nothing is saved\"")
 
         // The artist moves to frame 10 and adjusts a slider. The previous value is held.
@@ -202,7 +204,7 @@ final class KeyframeControlLogicTests: XCTestCase {
 
         // B is added at frame 10.
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9,
                        "\"that previous value gets saved to A\"")
@@ -327,9 +329,9 @@ final class KeyframeControlLogicTests: XCTestCase {
         let target = layerTarget(manager)
 
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 4))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [4])
-        XCTAssertTrue(manager.hasKeyframeMark(target, atFrame: 4))
-        XCTAssertFalse(manager.hasKeyframeMark(target, atFrame: 5))
+        XCTAssertEqual(manager.keyframeFrames(of: target), [4])
+        XCTAssertTrue(manager.hasKeyframe(target, atFrame: 4))
+        XCTAssertFalse(manager.hasKeyframe(target, atFrame: 5))
         XCTAssertTrue(tracks(manager, target).isEmpty)
         XCTAssertEqual(manager.listedAnimationChannelIDs(of: target), [],
                        "A mark is not an animation, so nothing appears in the list")
@@ -341,7 +343,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         let manager = gradedManager()
         let target = layerTarget(manager)
         for frame in [10, 2, 7, 2] { manager.addKeyframe(target, atFrame: frame) }
-        XCTAssertEqual(manager.keyframeMarks(of: target), [2, 7, 10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [2, 7, 10])
     }
 
     /// **A second press on a frame that already has a mark is not a no-op**, and refusing it would be
@@ -359,7 +361,7 @@ final class KeyframeControlLogicTests: XCTestCase {
 
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 10),
                       "The mark does not move and the write is still a change")
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10], "…and no duplicate mark appeared")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "…and no duplicate mark appeared")
         XCTAssertEqual(keyFrames(manager, target, contrastID), [0, 10])
         XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 0), 1, accuracy: 1e-9)
         XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 10), 6, accuracy: 1e-9)
@@ -405,14 +407,14 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(tracks(manager, target).count, 2)
 
         manager.undo()
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0], "The mark came back off")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0], "The mark came back off")
         XCTAssertTrue(tracks(manager, target).isEmpty, "Both channels went with it")
         XCTAssertEqual(baselines(manager, target).count, 2,
                        "…and the held values came back, or a redo would have nothing to commit")
         XCTAssertFalse(manager.canUndo, "…because there was only ever one step")
 
         manager.redo()
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(tracks(manager, target).count, 2)
         XCTAssertTrue(baselines(manager, target).isEmpty)
     }
@@ -439,7 +441,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         let plain = KeyframeTarget.layer(id: manager.layers[0].id)
         XCTAssertNil(manager.storedEffect(of: plain), "Fixture premise: nothing to key on it")
         XCTAssertTrue(manager.addKeyframe(plain, atFrame: 3))
-        XCTAssertEqual(manager.keyframeMarks(of: plain), [3])
+        XCTAssertEqual(manager.keyframeFrames(of: plain), [3])
     }
 
     /// **Only the immediate neighbours are seeded, and that is behaviourally identical to seeding every
@@ -462,24 +464,109 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(curve.evaluate(at: 5), 1, accuracy: 1e-9)
     }
 
-    /// A neighbouring mark that already carries a key is left alone: that key is a value the artist
+    /// A neighbouring keyframe that already carries a key is left alone: that key is a value the artist
     /// authored or a pose an earlier keyframe held, and a baseline must not move a point of the curve
-    /// nobody asked to move.
-    func testSeedingDoesNotOverwriteAKeyThatIsAlreadyOnANeighbouringMark() {
+    /// nobody asked to move. The seed reaches the other neighbour, which is empty, so the two arms of
+    /// the same write are asserted against each other.
+    ///
+    /// **The channel has to be curveless when the edit is made and keyed at the neighbour when the
+    /// baseline is committed**, or the two never meet: a channel with a curve routes to the auto-key
+    /// arm and never holds a baseline at all.
+    func testSeedingDoesNotOverwriteAKeyThatIsAlreadyOnANeighbouringKeyframe() {
         let manager = gradedManager()
         let target = layerTarget(manager)
         manager.addKeyframe(target, atFrame: 0)
         manager.addKeyframe(target, atFrame: 10)
+
+        XCTAssertEqual(moveSlider(manager, target, contrastID, to: 3, atFrame: 5),
+                       .storedValueHoldingBaseline, "Fixture premise: the value is held, not keyed")
+        // …and by the time it is committed, frame 0 carries a key the artist authored.
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
                                         to: linear([(0, 8.0)]))
-
-        moveSlider(manager, target, contrastID, to: 3, atFrame: 5)
-        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 3, atFrame: 5),
-                       .storedValueHoldingBaseline, "Fixture premise: brightness is held, contrast keys")
         manager.addKeyframe(target, atFrame: 5)
 
         XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 0), 8, accuracy: 1e-9,
                        "The authored key at 0 survived the neighbour seed")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 10), 1, accuracy: 1e-9,
+                       "…and the empty neighbour above took the held value")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 5), 3, accuracy: 1e-9)
+    }
+
+    // MARK: - A keyframe is a mark *or* a key, and the two reports that forced it
+
+    /// **Report 1 of 2026-08-29, from the owner's iPad**: *"if i have two keyframes and then put one
+    /// keyframe in between them and then select on the middle keyframe, there is no delete keyframe."*
+    ///
+    /// The middle diamond is drawn by a curve key with no mark beside it — which is what the auto-key
+    /// arm writes, and what §2.26 already says a curve carries. Asking only the stored marks made it a
+    /// keyframe the artist could see and could not take back.
+    func testAFrameOnlyACurveKeysOnIsStillAKeyframe() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 1)
+        moveSlider(manager, target, brightnessID, to: 2, atFrame: 3)
+        manager.addKeyframe(target, atFrame: 3)
+        // The middle keyframe: an edit on the now-animated channel keys at the playhead (arm 2) and
+        // writes no mark, which is the whole of how the artist places one.
+        XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 5, atFrame: 2), .key,
+                       "Fixture premise: the diamond at 2 comes from a curve key alone")
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [1, 3],
+                       "…and the stored marks never learned about it")
+
+        XCTAssertEqual(manager.keyframeFrames(of: target), [1, 2, 3])
+        XCTAssertTrue(manager.hasKeyframe(target, atFrame: 2),
+                      "A frame a channel keys on is a keyframe, so Remove Keyframe is offered on it")
+        XCTAssertTrue(manager.hasKeyframe(target, inFrames: 2 ..< 3))
+
+        XCTAssertTrue(manager.removeKeyframe(target, atFrame: 2), "…and taking it back works")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [1, 3])
+        XCTAssertEqual(keyFrames(manager, target, brightnessID), [1, 3])
+    }
+
+    /// **Report 2 of 2026-08-29, from the owner's iPad**: *"lets say i have an effect where there are
+    /// two sliders. I have 3 keyframes and only slider A is being controlled right now. Then I go to
+    /// keyframe 3 (the last one) and modify slider B. It starts from keyframe 1 to 3, skipping 2. It
+    /// should start at keyframe 2, ending at keyframe 3."*
+    ///
+    /// The same defect seen from the other side: the seed arm searched the stored marks for the nearest
+    /// keyframe below, so it stepped straight over the middle one the artist had placed with a slider.
+    func testSeedingLandsOnTheNearestKeyframeEvenWhenOnlyACurveKeysOnIt() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 1)
+        moveSlider(manager, target, brightnessID, to: 2, atFrame: 3)
+        manager.addKeyframe(target, atFrame: 3)
+        moveSlider(manager, target, brightnessID, to: 5, atFrame: 2)
+
+        // Standing on the last keyframe, the artist moves the other slider.
+        XCTAssertEqual(moveSlider(manager, target, contrastID, to: 7, atFrame: 3), .seedAndKey)
+
+        XCTAssertEqual(keyFrames(manager, target, contrastID), [2, 3],
+                       "\"It should start at keyframe 2, ending at keyframe 3\"")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 2), 1, accuracy: 1e-9,
+                       "The value it moved away from, on the keyframe it moved away from")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 3), 7, accuracy: 1e-9)
+    }
+
+    /// **A curve on a target with no grade in force is storage, not animation, so it is not a
+    /// keyframe.** `storedEffect(of:)`'s rule, which the timeline used to apply on its own line and
+    /// which now reaches the cel menu too: the canvas is not showing that value, so offering to remove
+    /// a keyframe for it would name a diamond that is not drawn. The *mark* is untouched — a mark is a
+    /// point in time, not a property of an effect.
+    func testACurveOnATargetWhoseGradeIsNotInForceIsNotAKeyframe() {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+        manager.addKeyframe(target, atFrame: 0)
+        manager.setEffectParameterKeys(target, frame: 6, values: [brightnessID: 2])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 6], "Fixture premise")
+
+        manager.layers[gradeIndex].kind = .raster
+
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0],
+                       "The track is still stored and grades nothing, so it marks no keyframe")
+        XCTAssertFalse(manager.hasKeyframe(target, atFrame: 6))
+        XCTAssertFalse(manager.keyframeState(of: target).tracks.isEmpty,
+                       "…and nothing was deleted behind the artist's back")
     }
 
     // MARK: - `removeKeyframe` and `clearKeyframes`
@@ -494,11 +581,11 @@ final class KeyframeControlLogicTests: XCTestCase {
         for frame in [0, 5, 10] { manager.addKeyframe(target, atFrame: frame) }
 
         XCTAssertTrue(manager.removeKeyframe(target, atFrame: 5))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
 
         manager.undo()
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 5, 10], "One step takes both back")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 5, 10], "One step takes both back")
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
     }
 
@@ -512,7 +599,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         for frame in [2, 4] { manager.addKeyframe(target, atFrame: frame) }
 
         XCTAssertTrue(manager.clearKeyframes(target, inFrames: 0 ..< 6))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [])
         XCTAssertTrue(tracks(manager, target).isEmpty, "Gone, not present-and-empty")
     }
 
@@ -529,11 +616,11 @@ final class KeyframeControlLogicTests: XCTestCase {
         manager.refreshUndoRedoState()
 
         XCTAssertTrue(manager.clearKeyframes(target, inFrames: 0 ..< 10))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [10], "10 is outside a half-open 0..<10")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [10], "10 is outside a half-open 0..<10")
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [10])
 
         manager.undo()
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 5, 10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 5, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 5, 10])
         XCTAssertFalse(manager.canUndo, "One step for the whole range")
 
@@ -557,12 +644,12 @@ final class KeyframeControlLogicTests: XCTestCase {
         let target = layerTarget(manager)
         manager.addKeyframe(target, atFrame: 12)
 
-        XCTAssertTrue(manager.hasKeyframeMark(target, inFrames: 10 ..< 20))
-        XCTAssertTrue(manager.hasKeyframeMark(target, inFrames: 12 ..< 13), "Its own frame")
-        XCTAssertFalse(manager.hasKeyframeMark(target, inFrames: 0 ..< 12),
+        XCTAssertTrue(manager.hasKeyframe(target, inFrames: 10 ..< 20))
+        XCTAssertTrue(manager.hasKeyframe(target, inFrames: 12 ..< 13), "Its own frame")
+        XCTAssertFalse(manager.hasKeyframe(target, inFrames: 0 ..< 12),
                        "Half-open: a block ending at 12 does not own the mark on 12")
-        XCTAssertFalse(manager.hasKeyframeMark(target, inFrames: 13 ..< 30))
-        XCTAssertFalse(manager.hasKeyframeMark(target, inFrames: 12 ..< 12), "An empty range holds nothing")
+        XCTAssertFalse(manager.hasKeyframe(target, inFrames: 13 ..< 30))
+        XCTAssertFalse(manager.hasKeyframe(target, inFrames: 12 ..< 12), "An empty range holds nothing")
     }
 
     /// The other half of the same menu item: the range it asks about is the tapped block's own span,
@@ -765,7 +852,7 @@ final class KeyframeControlLogicTests: XCTestCase {
 
         manager.setLayerEffect(layerIndex: gradeIndex, to: .bloom(Effect.Bloom()))
 
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0],
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0],
                        "The artist's keyframe is not the effect's to delete")
         XCTAssertTrue(baselines(manager, target).isEmpty,
                       "A bloom has no `brightnessContrast.brightness`, so the held value is storage nothing can reach")
@@ -791,7 +878,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(baselines(manager, target)[brightnessID] ?? .nan, 1, accuracy: 1e-9)
 
         XCTAssertTrue(manager.addKeyframe(target, atFrame: 10))
-        XCTAssertEqual(manager.keyframeMarks(of: target), [0, 10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
         XCTAssertEqual(keyFrames(manager, target, brightnessID), [0, 10])
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 0), 1, accuracy: 1e-9)
         XCTAssertEqual(keyValue(manager, target, brightnessID, atFrame: 10), 2, accuracy: 1e-9)
@@ -845,7 +932,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeTarget, .layer(id: manager.layers[0].id))
         XCTAssertEqual(manager.curvedEffectChannelIDs(of: manager.keyframeTarget!), [],
                        "The graded folder's channel is not counted against the layer the strip means")
-        XCTAssertEqual(manager.keyframeMarks(of: manager.keyframeTarget!), [],
+        XCTAssertEqual(manager.keyframeFrames(of: manager.keyframeTarget!), [],
                        "…nor is its mark")
     }
 }

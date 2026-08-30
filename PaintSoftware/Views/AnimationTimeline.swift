@@ -316,13 +316,13 @@ struct AnimationTimeline: View {
             menuButton("Add Keyframe", icon: "plus.diamond") {
                 canvasManager.addKeyframe(target, atFrame: frame)
             }
-            if canvasManager.hasKeyframeMark(target, atFrame: frame) {
+            if canvasManager.hasKeyframe(target, atFrame: frame) {
                 menuButton("Remove Keyframe", icon: "minus.diamond") {
                     canvasManager.removeKeyframe(target, atFrame: frame)
                 }
             }
             if let range = canvasManager.celFrameRange(layerIndex: layerIndex, celIndex: celIndex),
-               canvasManager.hasKeyframeMark(target, inFrames: range) {
+               canvasManager.hasKeyframe(target, inFrames: range) {
                 menuButton("Clear Keyframes", icon: "xmark.diamond") {
                     canvasManager.clearKeyframes(target, inFrames: range)
                 }

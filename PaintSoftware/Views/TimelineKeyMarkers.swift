@@ -104,40 +104,25 @@ enum TimelineKeyMarkers {
         let isBare: Bool
     }
 
-    /// **Every marker on one target's row: the union of the frames it carries a keyframe mark on and
-    /// the frames its curves key on**, deduped and ascending.
+    /// **One marker per keyframe, each carrying which of the two kinds it is.**
     ///
-    /// **Neither list contains the other, which is why this is a union rather than one of them.**
-    /// §2.26: a mark with no channel is legal and is the point, and a curve carries keys the artist
-    /// never marked — an auto-key, or a value seeded onto a neighbouring mark. Deriving one from the
-    /// other in either direction loses real frames.
+    /// **The frame set is the model's, not this file's** — `CanvasManager.keyframes(of:)`, which is
+    /// where a keyframe is defined as a frame the target marks explicitly *or* any of its channels
+    /// keys on. This once computed that union a second time, and a second implementation of an
+    /// invariant is a second thing to forget: the two reports of 2026-08-29 are what a divergence
+    /// between them looks like from the artist's chair, and they were both against the model's half.
     ///
-    /// **Deduping *is* collapse (1) above**, and it happens here rather than at the drawing so the
-    /// marker count is a property of the document rather than of the paint code.
+    /// **Deduping *is* collapse (1) above**, and it happens in that union rather than at the drawing
+    /// so the marker count is a property of the document rather than of the paint code.
     ///
-    /// **The sort is not cosmetic.** This feeds `TimelineLayoutKey`, which is an `Equatable`
-    /// memoization key, and `Dictionary.values` has no defined order — an unsorted result would make
-    /// the key unequal to itself at random and turn the layout gate off in a way that looks like a
-    /// performance regression with no cause.
-    ///
-    /// **No `isScalarAnimatable` filter, deliberately.** Both `setEffectParameterTrack` overloads and
-    /// `setEffectParameterKeys` refuse a non-scalar channel at the writer as well as at the resolver
-    /// (stage 2), so a track that stores and renders nothing cannot be created; filtering here would
-    /// buy nothing and would cost a call to `Effect.parameters`, which rebuilds up to thirty-three
-    /// closures and is read from a path that runs on every SwiftUI pass.
-    ///
-    /// - Parameter tracks: the curves whose keys count as landed. The caller decides whether this
-    ///   target's grade is in force at all — see `TimelineLayoutKey.make`, where a layer that is not
-    ///   in effect form passes none, while its marks still pass in full.
-    static func markers(marks: [Int], tracks: [String: AnimationCurve]) -> [Marker] {
-        guard !marks.isEmpty || !tracks.isEmpty else { return [] }
-        var keyed: Set<Int> = []
-        for curve in tracks.values {
-            for key in curve.keys { keyed.insert(key.frame) }
-        }
-        var frames = keyed
-        frames.formUnion(marks)
-        return frames.sorted().map { Marker(frame: $0, isBare: !keyed.contains($0)) }
+    /// - Parameters:
+    ///   - frames: ascending and unique. Unsorted input would merge the wrong things in `runs` and
+    ///     would make `TimelineLayoutKey` — an `Equatable` memoization gate — unequal to itself at
+    ///     random, which reads as a performance regression with no cause.
+    ///   - keyed: the frames some channel holds a key on. The rest are §2.26's bare marks, which are
+    ///     drawn hollow because otherwise *did my edit land on a channel?* has no answer on screen.
+    static func markers(frames: [Int], keyed: Set<Int>) -> [Marker] {
+        frames.map { Marker(frame: $0, isBare: !keyed.contains($0)) }
     }
 
     /// One drawn thing on the band: either a single key, or a run of keys too close together to draw
@@ -180,7 +165,7 @@ enum TimelineKeyMarkers {
     /// minimum zoom, because they do not collide. Only the parts of the track that are actually dense
     /// collapse, and the rest of the row is untouched.
     ///
-    /// - Parameter markers: ascending and unique — `markers(marks:tracks:)`' output. Unsorted input
+    /// - Parameter markers: ascending and unique — `markers(frames:keyed:)`' output. Unsorted input
     ///   would merge the wrong things silently, and the single production caller is that function.
     static func runs(markers: [Marker], pixelsPerFrame: CGFloat) -> [Run] {
         guard let first = markers.first else { return [] }

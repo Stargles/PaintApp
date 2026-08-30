@@ -96,19 +96,24 @@ struct TimelineLayoutKey: Equatable {
     /// Parallel to the `.layer` entries of `rows`, in their order.
     let tracks: [[CelKey]]
     /// The document frames each of those layers carries a keyframe on — ascending, unique, and **one
-    /// entry per frame however many channels key there** (`TimelineKeyMarkers.markers`).
+    /// entry per frame however many channels key there** (`CanvasManager.keyframes(of:)`).
     ///
     /// **A second array rather than a field on `CelKey`, because a keyframe is not on a cel.** §2.4
     /// puts effect keys on the *layer*, in absolute document frames, and §2.26's marks likewise, so
     /// they exist perfectly well at frames the layer has no cel at, and the marker band spans the
     /// whole track for that reason.
     ///
+    /// **Every input the union reads has to be reachable from this key, or the band renders once and
+    /// freezes** — `relayout()` early-returns on `built.key == laidOutKey`. It is: the union's own
+    /// output *is* this field, so a mark, a curve key or a grade going away all change it.
+    ///
     /// **Cheap enough to compare on every layout, which is the bar this key has to clear.** Building
-    /// it is two `isEmpty` checks per layer for the overwhelming majority of documents, which have
-    /// neither a mark nor a track; for one that does it is a walk of the curves' own key arrays and
-    /// nothing else — in particular it never touches `Effect.parameters`, which rebuilds up to
-    /// thirty-three closures per call. Comparing it is equality over a handful of `(Int, Bool)`
-    /// pairs, against a key that already carries every cel's id, start, length and thumbnail address.
+    /// it is an id lookup and two `isEmpty` checks per layer for the overwhelming majority of
+    /// documents, which have neither a mark nor a track; for one that does it is a walk of the curves'
+    /// own key arrays and nothing else — in particular it never touches `Effect.parameters`, which
+    /// rebuilds up to thirty-three closures per call. Comparing it is equality over a handful of
+    /// `(Int, Bool)` pairs, against a key that already carries every cel's id, start, length and
+    /// thumbnail address.
     let trackMarkers: [[TimelineKeyMarkers.Marker]]
     /// Parallel to the `.folder` entries of `rows`, in their order.
     let folders: [FolderKey]
@@ -162,21 +167,12 @@ extension TimelineLayoutKey {
                                   thumbnail: cel.thumbnail.map(ObjectIdentifier.init))
                 }
                 tracks.append(cels)
-                // **The grade gates the curves and does not gate the marks**, which is the one
-                // asymmetry on this line and it is deliberate.
-                //
-                // `layerEffect` rather than `effect`, matching `CanvasManager.storedEffect(of:)`: a
-                // layer that is not in effect form grades nothing, so tracks left on it by a kind
-                // change are storage rather than animation and must not draw markers for a value the
-                // canvas is not showing. A **mark** is not a value at all — §2.26 makes it a point in
-                // time the artist placed, `addKeyframe` takes one on a target with no grade
-                // whatsoever, and later stages key transforms onto the same marks. Gating marks on an
-                // effect would hide the entire first step of the workflow ("keyframe A is added,
-                // nothing is saved") on every ordinary drawing layer, which is where it is normally
-                // performed.
-                trackMarkers.append(TimelineKeyMarkers.markers(
-                    marks: layer.keyframeMarks,
-                    tracks: layer.layerEffect == nil ? [:] : layer.effectTracks))
+                // **What counts as a keyframe is the model's answer, asked here rather than rebuilt.**
+                // `CanvasManager.keyframes(of:)` unions the explicit marks with every frame a channel
+                // in force keys on, and carries the grade asymmetry that used to sit on this line.
+                let placed = canvasManager.keyframes(of: .layer(id: layer.id))
+                trackMarkers.append(TimelineKeyMarkers.markers(frames: placed.frames,
+                                                               keyed: placed.keyed))
             } else if let folderID = row.folderID {
                 let folder = canvasManager.folders.first { $0.id == folderID }
                 let childCels = canvasManager.descendantLayerIndices(ofFolder: folderID)
@@ -184,14 +180,14 @@ extension TimelineLayoutKey {
                 let span: ClosedRange<Int>? = childCels.isEmpty
                     ? nil
                     : (childCels.map(\.startFrame).min() ?? 0)...(childCels.map(\.endFrame).max() ?? 0)
+                // §2.21: a folder's grade animates exactly as a layer's, so it asks the same accessor.
+                let placed = canvasManager.keyframes(of: .folder(id: folderID))
                 folders.append(FolderKey(id: folderID,
                                          name: folder?.name ?? folderID.uuidString,
                                          isVisible: folder?.isVisible ?? true,
                                          span: span,
-                                         // The layer arm's asymmetry, for its reasons.
-                                         markers: TimelineKeyMarkers.markers(
-                                            marks: folder?.keyframeMarks ?? [],
-                                            tracks: folder?.effect == nil ? [:] : folder?.effectTracks ?? [:])))
+                                         markers: TimelineKeyMarkers.markers(frames: placed.frames,
+                                                                             keyed: placed.keyed)))
             }
         }
 

@@ -13,8 +13,9 @@ import UIKit
 /// The three questions the file is organised around:
 ///
 /// - **What is a marker?** One per (target, frame), however many channels key there — the channel
-///   collapse, which is unconditional — and it is the **union** of the target's keyframe marks and
-///   its curves' keys, because neither list contains the other.
+///   collapse, which is unconditional. The frame set is the **union** of the target's keyframe marks
+///   and its curves' keys, because neither list contains the other; that union is
+///   `CanvasManager.keyframes`, so these tests take it from there rather than from a second copy.
 /// - **Which kind is it?** Bare when the artist placed a keyframe there and nothing has been saved
 ///   onto it yet (§2.26), landed otherwise.
 /// - **What happens when markers touch?** The zoom collapse, which is the interesting one, and which
@@ -34,6 +35,22 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// The two ends of the pinch range, named so a test reads as the zoom the artist is at.
     private var floorZoom: CGFloat { TimelineKeyMarkers.pixelsPerFrameRange.lowerBound }
     private var defaultZoom: CGFloat { TimelineKeyMarkers.basePixelsPerFrame }
+
+    /// **The band's markers for one target's stored state.** The union is
+    /// `CanvasManager.keyframes(marks:tracks:)`' — the model owns what counts as a keyframe — and
+    /// `TimelineKeyMarkers.markers` only says which kind each one is drawn as. Pairing them here is
+    /// what `TimelineLayoutKey.make` does, so the assertions below are about the band the artist sees
+    /// rather than about either half alone.
+    private func markerRow(marks: [Int], tracks: [String: AnimationCurve]) -> [TimelineKeyMarkers.Marker] {
+        let placed = CanvasManager.keyframes(marks: marks, tracks: tracks)
+        return TimelineKeyMarkers.markers(frames: placed.frames, keyed: placed.keyed)
+    }
+
+    /// The same pair against a real document, through the accessor production reads.
+    private func markerRow(_ manager: CanvasManager, _ target: KeyframeTarget) -> [TimelineKeyMarkers.Marker] {
+        let placed = manager.keyframes(of: target)
+        return TimelineKeyMarkers.markers(frames: placed.frames, keyed: placed.keyed)
+    }
 
     private func curve(_ frames: [Int]) -> AnimationCurve {
         AnimationCurve(keys: frames.map { AnimationCurve.Key(frame: $0, value: Double($0),
@@ -73,7 +90,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// the artist needs to see *a key is here*, not a stack of overlapping dots — and it is decided
     /// here, at the frame set, so the count is a property of the document rather than of the drawing.
     func testEveryChannelKeyedOnOneFrameProducesOneMarker() {
-        let markers = TimelineKeyMarkers.markers(marks: [], tracks: [
+        let markers = markerRow(marks: [], tracks: [
             brightnessID: curve([4]),
             contrastID: curve([4])
         ])
@@ -81,7 +98,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     }
 
     func testChannelsKeyedOnDifferentFramesProduceOneMarkerEach() {
-        let markers = TimelineKeyMarkers.markers(marks: [], tracks: [
+        let markers = markerRow(marks: [], tracks: [
             brightnessID: curve([0, 8]),
             contrastID: curve([4, 8])
         ])
@@ -94,9 +111,9 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// would make the key unequal to itself at random, turning the layout gate off in a way that
     /// looks like a performance regression with no cause and no failing test.
     func testTheFrameListIsAscendingWhateverOrderTheChannelsAreIn() {
-        let a = TimelineKeyMarkers.markers(marks: [], tracks: [brightnessID: curve([9, 2]),
+        let a = markerRow(marks: [], tracks: [brightnessID: curve([9, 2]),
                                                                contrastID: curve([5])])
-        let b = TimelineKeyMarkers.markers(marks: [], tracks: [contrastID: curve([5]),
+        let b = markerRow(marks: [], tracks: [contrastID: curve([5]),
                                                                brightnessID: curve([2, 9])])
         XCTAssertEqual(a, landed([2, 5, 9]))
         XCTAssertEqual(a, b, "Two dictionaries with the same content must produce the same array")
@@ -105,13 +122,13 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// The marks arrive sorted from the model, but the union is a `Set` and only this sort decides
     /// what comes out — so an out-of-order input must not survive into the layout key.
     func testTheUnionIsAscendingWhateverOrderTheMarksArriveIn() {
-        XCTAssertEqual(TimelineKeyMarkers.markers(marks: [9, 2, 5], tracks: [:]).map(\.frame),
+        XCTAssertEqual(markerRow(marks: [9, 2, 5], tracks: [:]).map(\.frame),
                        [2, 5, 9])
     }
 
     func testATargetWithNothingOnItHasNoMarkers() {
-        XCTAssertEqual(TimelineKeyMarkers.markers(marks: [], tracks: [:]), [])
-        XCTAssertEqual(TimelineKeyMarkers.markers(marks: [], tracks: [brightnessID: AnimationCurve()]), [],
+        XCTAssertEqual(markerRow(marks: [], tracks: [:]), [])
+        XCTAssertEqual(markerRow(marks: [], tracks: [brightnessID: AnimationCurve()]), [],
                        "A channel whose curve is empty animates nothing and draws nothing")
     }
 
@@ -121,7 +138,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// draws nothing the artist places A blind and the feature cannot be used. It has to be a marker,
     /// and it has to be visibly a *different* marker from one that carries a key.
     func testAMarkWithNoKeyOnItIsABareMarker() {
-        XCTAssertEqual(TimelineKeyMarkers.markers(marks: [3], tracks: [:]),
+        XCTAssertEqual(markerRow(marks: [3], tracks: [:]),
                        [TimelineKeyMarkers.Marker(frame: 3, isBare: true)])
     }
 
@@ -129,13 +146,13 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// curve carries keys the artist never marked — an auto-key at the playhead, or a value seeded
     /// onto a neighbouring mark. So the union cannot be derived from the marks either.
     func testAKeyWithNoMarkOnItIsALandedMarker() {
-        XCTAssertEqual(TimelineKeyMarkers.markers(marks: [], tracks: [brightnessID: curve([7])]),
+        XCTAssertEqual(markerRow(marks: [], tracks: [brightnessID: curve([7])]),
                        landed([7]))
     }
 
     /// The mixed row: the artist's mark at 0 has taken a value, the one at 12 has not yet.
     func testAMarkThatHasTakenAKeyIsLandedAndOneThatHasNotIsBare() {
-        XCTAssertEqual(TimelineKeyMarkers.markers(marks: [0, 12], tracks: [brightnessID: curve([0])]),
+        XCTAssertEqual(markerRow(marks: [0, 12], tracks: [brightnessID: curve([0])]),
                        [TimelineKeyMarkers.Marker(frame: 0, isBare: false),
                         TimelineKeyMarkers.Marker(frame: 12, isBare: true)])
     }
@@ -297,7 +314,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     }
 
     func testTheAccessibilityValueParenthesisesABareMarker() {
-        let markers = TimelineKeyMarkers.markers(marks: [0, 12], tracks: [brightnessID: curve([0])])
+        let markers = markerRow(marks: [0, 12], tracks: [brightnessID: curve([0])])
         XCTAssertEqual(TimelineKeyMarkers.encode(
             TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: defaultZoom)), "0|(12)")
     }
@@ -315,8 +332,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
                                            values: [brightnessID: Double(frame), contrastID: 1])
         }
 
-        let markers = TimelineKeyMarkers.markers(marks: manager.layers[1].keyframeMarks,
-                                                 tracks: manager.layers[1].effectTracks)
+        let markers = markerRow(manager, target)
         XCTAssertEqual(markers, landed([3, 4, 20]),
                        "Two channels keyed on each of three frames — three markers, none of them bare")
         XCTAssertEqual(TimelineKeyMarkers.encode(
@@ -335,8 +351,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
         manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
         let target = KeyframeTarget.layer(id: manager.layers[1].id)
         func band() -> String {
-            let markers = TimelineKeyMarkers.markers(marks: manager.layers[1].keyframeMarks,
-                                                     tracks: manager.layers[1].effectTracks)
+            let markers = markerRow(manager, target)
             return TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(markers: markers,
                                                                      pixelsPerFrame: defaultZoom))
         }

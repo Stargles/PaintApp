@@ -30,19 +30,20 @@ enum KeyframeControl {
 
     /// **The routing rule, in one place — five arms, no mode.**
     ///
-    /// **The marks carry the state**: a keyframe is placed, edits are made, another keyframe is
+    /// **The keyframes carry the state**: a keyframe is placed, edits are made, another keyframe is
     /// placed, and the pair of them is the animation. So "what does this edit do" is answered by where
-    /// the playhead stands relative to `Layer.keyframeMarks` — document state the artist can see on the
-    /// timeline — rather than by a flag they have to remember they set.
+    /// the playhead stands relative to the target's keyframes — document state the artist can see on
+    /// the timeline — rather than by a flag they have to remember they set.
     ///
     /// 1. **Not scalar-animatable → `.storedValue`.** The stepped, array and colour parameters
     ///    (`EffectParameter.isScalarAnimatable` names why for each of the nine) are refused here as
     ///    well as at the resolver, so the app cannot reach a track that stores and renders nothing.
     /// 2. **The channel already has a curve → `.key`.** This is the auto-key arm and it takes
     ///    precedence over everything below it.
-    /// 3. **Marks exist and the playhead is on one, with another mark to seed onto → `.seedAndKey`.**
-    /// 4. **Marks exist and the playhead is not on one (or is on the only one) → hold the baseline.**
-    /// 5. **No marks at all → `.storedValue`.** On a document nobody has keyframed a slider is a
+    /// 3. **Keyframes exist and the playhead is on one, with another to seed onto → `.seedAndKey`.**
+    /// 4. **Keyframes exist and the playhead is not on one (or is on the only one) → hold the
+    ///    baseline.**
+    /// 5. **No keyframes at all → `.storedValue`.** On a document nobody has keyframed a slider is a
     ///    slider, and nothing about this feature is visible.
     ///
     /// **Arm 2 asks `channelHasCurve`, not the owner's stricter "two keyframes and the value differs".**
@@ -53,23 +54,28 @@ enum KeyframeControl {
     /// keying is not "edit the value", it is a **dead control**. Two predicates, two jobs; do not merge
     /// them.
     ///
-    /// **`markCount` rather than a bare `hasMarks`, and that is arm 3's whole correctness.** Seeding
-    /// needs a *neighbouring* mark to put the old value on, and when the playhead's mark is the only
-    /// one there is none — seeding would then produce a one-key curve pinning the new value, and the
-    /// artist's old value would be lost with nothing on screen to explain it. The owner's canonical
+    /// **`keyframeCount` rather than a bare `hasKeyframes`, and that is arm 3's whole correctness.**
+    /// Seeding needs a *neighbouring* keyframe to put the old value on, and when the playhead's is the
+    /// only one there is none — seeding would then produce a one-key curve pinning the new value, and
+    /// the artist's old value would be lost with nothing on screen to explain it. The owner's canonical
     /// story is exactly that case: *"keyframe A is added, nothing is saved. A slider is then adjusted.
-    /// The previous value is held. Then keyframe B is added"* — so with one mark the answer must be
-    /// arm 4, and the value reaches A when B lands. `playheadIsOnMark && markCount > 1` is the same
-    /// statement as "there is a mark other than this one", because the playhead's own mark is one of
+    /// The previous value is held. Then keyframe B is added"* — so with one keyframe the answer must be
+    /// arm 4, and the value reaches A when B lands. `playheadIsOnKeyframe && keyframeCount > 1` is the
+    /// same statement as "there is a keyframe other than this one", because the playhead's own is in
     /// the count.
+    ///
+    /// **Both counts are of `CanvasManager.keyframeFrames` — marks *and* keyed frames.** A frame a
+    /// channel keys on with no mark beside it is a keyframe the artist placed with a slider, and
+    /// counting only the stored marks is what made an edit at the last of three keyframes seed onto the
+    /// first.
     static func write(isScalarAnimatable: Bool,
                       channelHasCurve: Bool,
-                      markCount: Int,
-                      playheadIsOnMark: Bool) -> Write {
+                      keyframeCount: Int,
+                      playheadIsOnKeyframe: Bool) -> Write {
         guard isScalarAnimatable else { return .storedValue }
         if channelHasCurve { return .key }
-        guard markCount > 0 else { return .storedValue }
-        return (playheadIsOnMark && markCount > 1) ? .seedAndKey : .storedValueHoldingBaseline
+        guard keyframeCount > 0 else { return .storedValue }
+        return (playheadIsOnKeyframe && keyframeCount > 1) ? .seedAndKey : .storedValueHoldingBaseline
     }
 }
 
@@ -175,13 +181,68 @@ extension CanvasManager {
         }
     }
 
-    /// **The frames this target carries a keyframe on** — §2.26's bare marks, sorted.
-    func keyframeMarks(of target: KeyframeTarget) -> [Int] { keyframeState(of: target).marks }
+    /// **The frames a target carries a keyframe on, and which of them a channel actually keys.**
+    ///
+    /// `frames` is the whole answer and `keyed` is only how each one is *drawn* — hollow when nothing
+    /// has landed on it yet (§2.26's bare mark), filled otherwise. They are returned together because
+    /// the walk that finds one finds the other, and the timeline needs both on every layout pass.
+    struct Keyframes: Equatable {
+        /// Ascending and unique.
+        var frames: [Int] = []
+        /// The subset of `frames` some channel holds a key on. `frames` minus this is the bare ones.
+        var keyed: Set<Int> = []
+    }
+
+    /// **A keyframe is any frame the target marks explicitly *or* any of its channels holds a key on.**
+    ///
+    /// **This union is the invariant, and it is computed rather than stored.** Storing it — making
+    /// every key write append a mark as well — would put the same fact in two places and let them
+    /// drift apart the first time a writer forgot, which is exactly the defect the two reports of
+    /// 2026-08-29 were: a curve keyed at a frame with no mark beside it drew a diamond the artist could
+    /// see, could not delete, and which the seed arm's neighbour search stepped straight over. So
+    /// `KeyframeState.marks` keeps its narrow meaning — the frames the artist marked *explicitly*,
+    /// which is what makes "keyframe A is added, nothing is saved" storable at all — and stops being
+    /// the whole answer. Everything that asks *is there a keyframe here*, *how many are there* or
+    /// *which is nearest below* asks this.
+    ///
+    /// **A target with no grade contributes no curves, and that asymmetry is deliberate.**
+    /// `storedEffect(of:)`'s rule: a layer that is not in effect form grades nothing, so tracks left on
+    /// it by a kind change are storage rather than animation and must not draw a marker for a value the
+    /// canvas is not showing. A **mark** is not a value at all — `addKeyframe` takes one on a target
+    /// with no grade whatsoever, and later stages key transforms onto the same marks — so gating those
+    /// would hide the entire first step of the workflow on every ordinary drawing layer.
+    ///
+    /// **The `isEmpty` fast path is what makes this affordable from a SwiftUI body.** The overwhelming
+    /// majority of documents carry neither a mark nor a track, and for those this is two `isEmpty`
+    /// checks; for one that does it is a walk of the curves' own key arrays and never a call to
+    /// `Effect.parameters`, which rebuilds up to thirty-three closures.
+    func keyframes(of target: KeyframeTarget) -> Keyframes {
+        let state = keyframeState(of: target)
+        return Self.keyframes(marks: state.marks,
+                              tracks: storedEffect(of: target) == nil ? [:] : state.tracks)
+    }
+
+    /// The union as a function of values — the one implementation, so the writers below can take it
+    /// against a state they hold rather than re-reading the document mid-edit.
+    static func keyframes(marks: [Int], tracks: [String: AnimationCurve]) -> Keyframes {
+        guard !marks.isEmpty || !tracks.isEmpty else { return Keyframes() }
+        var keyed: Set<Int> = []
+        for curve in tracks.values {
+            for key in curve.keys { keyed.insert(key.frame) }
+        }
+        var frames = keyed
+        frames.formUnion(marks)
+        return Keyframes(frames: frames.sorted(), keyed: keyed)
+    }
+
+    /// **The frames this target carries a keyframe on**, ascending — `keyframes(of:).frames`, which is
+    /// what almost every caller wants.
+    func keyframeFrames(of target: KeyframeTarget) -> [Int] { keyframes(of: target).frames }
 
     /// Whether a keyframe already sits on `frame`. The predicate `KeyframeControl.write`'s third arm
     /// asks about, named so no caller writes `contains` by hand against an unsorted assumption.
-    func hasKeyframeMark(_ target: KeyframeTarget, atFrame frame: Int) -> Bool {
-        keyframeMarks(of: target).contains(frame)
+    func hasKeyframe(_ target: KeyframeTarget, atFrame frame: Int) -> Bool {
+        keyframeFrames(of: target).contains(frame)
     }
 
     /// Whether any keyframe sits inside a half-open frame range — `clearKeyframes(_:inFrames:)`'s
@@ -193,8 +254,8 @@ extension CanvasManager {
     /// keyframes in that cel" means the ones whose frame falls in the span that cel block covers —
     /// which is `celFrameRange(layerIndex:celIndex:)`, and is the caller's knowledge rather than
     /// this predicate's.
-    func hasKeyframeMark(_ target: KeyframeTarget, inFrames frames: Range<Int>) -> Bool {
-        keyframeMarks(of: target).contains { frames.contains($0) }
+    func hasKeyframe(_ target: KeyframeTarget, inFrames frames: Range<Int>) -> Bool {
+        keyframeFrames(of: target).contains { frames.contains($0) }
     }
 
     /// **The ids of this target's effect channels that carry a curve at all**, in the descriptor
@@ -252,12 +313,12 @@ extension CanvasManager {
     /// target, so a routing bug built there would be invisible to the fast tier.
     func keyframeWrite(_ target: KeyframeTarget, parameter: EffectParameter,
                        atFrame frame: Int) -> KeyframeControl.Write {
-        let state = keyframeState(of: target)
+        let placed = keyframes(of: target)
         return KeyframeControl.write(
             isScalarAnimatable: parameter.isScalarAnimatable,
-            channelHasCurve: state.tracks[parameter.id]?.isEmpty == false,
-            markCount: state.marks.count,
-            playheadIsOnMark: state.marks.contains(frame))
+            channelHasCurve: keyframeState(of: target).tracks[parameter.id]?.isEmpty == false,
+            keyframeCount: placed.frames.count,
+            playheadIsOnKeyframe: placed.frames.contains(frame))
     }
 
     /// **Writes the grade back onto whichever of the two homes `target` names.**
@@ -360,10 +421,10 @@ extension CanvasManager {
     /// what makes that gesture produce an animation without a third keyframe press.
     ///
     /// **Only the immediate neighbours are seeded, and that is behaviourally identical to seeding every
-    /// mark.** `AnimationCurve` extrapolates as a **constant hold** outside its first and last key
-    /// (documented decision 2 there), so a value placed on the nearest mark below already holds at every
-    /// mark below that, and likewise above. Fewer keys, same curve. Do not "fix" this to seed all — it
-    /// would put keys on frames the artist never touched and make every one of them a handle to drag.
+    /// keyframe.** `AnimationCurve` extrapolates as a **constant hold** outside its first and last key
+    /// (documented decision 2 there), so a value placed on the nearest keyframe below already holds at
+    /// every one below that, and likewise above. Fewer keys, same curve. Do not "fix" this to seed all —
+    /// it would put keys on frames the artist never touched and make every one a handle to drag.
     ///
     /// - Returns: whether the document changed.
     @discardableResult
@@ -375,7 +436,8 @@ extension CanvasManager {
 
         var state = keyframeState(of: target)
         let before = state
-        state.tracks[parameterID] = Self.seeded(state.tracks[parameterID], marks: state.marks,
+        let placed = Self.keyframes(marks: state.marks, tracks: state.tracks).frames
+        state.tracks[parameterID] = Self.seeded(state.tracks[parameterID], keyframes: placed,
                                                 frame: frame, oldValue: oldValue, newValue: newValue)
         // A channel that seeds is a channel that no longer needs its held value.
         state.baselines.removeValue(forKey: parameterID)
@@ -391,6 +453,12 @@ extension CanvasManager {
     ///
     /// 1. **The mark is recorded**, if it is not already there. A mark with no channel is legal and is
     ///    the point: *"keyframe A is added, nothing is saved."*
+    ///
+    ///    **The mark is taken even on a frame a channel already keys, where `keyframes(of:)` would
+    ///    already answer yes.** It is not the same fact twice: a key is a value some channel holds and
+    ///    a mark is the artist saying *this frame is a keyframe*, and the two come apart the moment
+    ///    that key is dragged or deleted — a keyframe the artist placed by hand must not go with it.
+    ///    The guard therefore stays what it always was, a dedupe of `marks` against itself.
     /// 2. **Every held baseline is committed and cleared.** The old value goes onto the nearest mark
     ///    below and the nearest mark above (whichever exist — see `seedAndKeyChannel` for why only the
     ///    immediate neighbours), and the channel's **current stored value** goes on `frame`. This is
@@ -423,6 +491,12 @@ extension CanvasManager {
             state.marks.append(frame)
             state.marks.sort()
         }
+        // **The neighbour search's view of the timeline, taken once.** Two things it must be: the
+        // *union*, so a keyframe the artist placed with a slider is a neighbour like any other; and a
+        // snapshot of `before.tracks` rather than of the tracks being written, because seeding one
+        // channel adds keys and would otherwise move the next channel's neighbour — an order
+        // dependence over a dictionary, which has none.
+        let placed = Self.keyframes(marks: state.marks, tracks: before.tracks).frames
 
         if let stored = storedEffect(of: target) {
             let resolved = resolvedEffect(of: target, atFrame: frame)
@@ -432,7 +506,7 @@ extension CanvasManager {
                     // resolve through — that is what made it a baseline rather than an auto-key.
                     guard let current = parameter.read(stored) else { continue }
                     state.tracks[parameter.id] = Self.seeded(state.tracks[parameter.id],
-                                                             marks: state.marks, frame: frame,
+                                                             keyframes: placed, frame: frame,
                                                              oldValue: baseline, newValue: current)
                 } else if before.tracks[parameter.id]?.isEmpty == false {
                     // 3. Hold the pose. Skipped for a channel that just seeded, whose key on `frame`
@@ -459,6 +533,9 @@ extension CanvasManager {
     /// the shape of a control that appears not to work. A channel left with no keys is removed rather
     /// than stored empty — `setEffectParameterTrack`'s rule, and the state that would otherwise show
     /// up in the channel list animating nothing.
+    ///
+    /// **Both halves is also what makes this work on a keyframe that has no mark at all** — one placed
+    /// by moving a slider, which `keyframes(of:)` counts and which the artist can therefore reach.
     ///
     /// - Returns: whether the document changed.
     @discardableResult
@@ -558,20 +635,25 @@ extension CanvasManager {
         }
     }
 
-    /// `existing` with `oldValue` keyed onto the marks either side of `frame` and `newValue` on
+    /// `existing` with `oldValue` keyed onto the keyframes either side of `frame` and `newValue` on
     /// `frame` itself.
+    ///
+    /// - Parameter keyframes: ascending — `CanvasManager.keyframes(marks:tracks:)`' frames, so a
+    ///   keyframe the artist placed with a slider counts as a neighbour exactly as a marked one does.
+    ///   Taken *once* by each caller before it starts writing, because seeding one channel adds keys
+    ///   and would otherwise move the next channel's neighbour.
     ///
     /// **A neighbour that already carries a key is left alone.** That key is a value the artist
     /// authored or a pose a previous keyframe held, and overwriting it with a baseline would move a
     /// point of the curve nobody asked to move. `frame`'s own key *is* replaced, because that is the
     /// edit being made.
-    private static func seeded(_ existing: AnimationCurve?, marks: [Int], frame: Int,
+    private static func seeded(_ existing: AnimationCurve?, keyframes: [Int], frame: Int,
                                oldValue: Double, newValue: Double) -> AnimationCurve {
         var curve = existing ?? AnimationCurve()
-        if let below = marks.last(where: { $0 < frame }), curve.key(atFrame: below) == nil {
+        if let below = keyframes.last(where: { $0 < frame }), curve.key(atFrame: below) == nil {
             curve.setKey(AnimationCurve.Key(frame: below, value: oldValue))
         }
-        if let above = marks.first(where: { $0 > frame }), curve.key(atFrame: above) == nil {
+        if let above = keyframes.first(where: { $0 > frame }), curve.key(atFrame: above) == nil {
             curve.setKey(AnimationCurve.Key(frame: above, value: oldValue))
         }
         curve.setKey(AnimationCurve.Key(frame: frame, value: newValue))

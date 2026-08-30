@@ -238,6 +238,39 @@ a later session reinstating it by rediscovering the argument that produced it.
       playhead on it, seeding would pin the new value in a one-key curve and lose the old one, so the
       answer there is to hold the baseline and let B commit it. That is the owner's canonical story and
       the reason the rule counts marks rather than asking whether any exist.
+28. **A keyframe is any frame the target marks explicitly *or* any of its channels holds a key on.**
+    2026-08-29, and it is not a preference — it is the invariant two bug reports off the owner's iPad
+    turned out to be the same defect of:
+
+    > "1. if i have two keyframes and then put one keyframe in between them and then select on the
+    > middle keyframe, there is no delete keyframe"
+
+    > "2. lets say i have an effect where there are two sliders. I have 3 keyframes and only slider A is
+    > being controlled right now. Then I go to keyframe 3 (the last one) and modify slider B. It starts
+    > from keyframe 1 to 3, skipping 2. It should start at keyframe 2, ending at keyframe 3"
+
+    The middle keyframe in both stories was placed by *moving a slider*, which §2.26 already says a
+    curve records and no mark does: the auto-key arm writes a key and nothing else. The timeline drew
+    the union of marks and curve keys and every model question asked the marks alone, so a frame could
+    be a keyframe on screen and not one to the code. Report 1 is `hasKeyframe` answering no and the cel
+    menu withholding Remove Keyframe; report 2 is the seed arm's *nearest keyframe below* stepping over
+    it to the one before. One divergence, two symptoms, and neither is reachable if the two lists are
+    never asked separately.
+
+    **The union is computed, never stored, and that is the load-bearing half.** Making every key write
+    append a mark as well would put the same fact in two places and let it drift again the first time a
+    writer forgot — which is the defect, not the fix. So `keyframeMarks` keeps its narrow meaning, the
+    frames the artist marked *explicitly*, which is what makes §2.27's "keyframe A is added, nothing is
+    saved" storable at all; it just stops being the whole answer. `CanvasManager.keyframes(of:)` is the
+    one accessor, and `TimelineKeyMarkers` no longer computes a union of its own — it is handed the
+    frames and told which carry a key, which is all it ever needed to draw bare against landed.
+
+    **Two consequences worth keeping.** A grade that is not in force contributes no curves — a track
+    left on a layer by a kind change is storage, so it draws no diamond and offers no Remove Keyframe,
+    while its marks stand, because a mark is a point in time rather than a property of an effect. And
+    `addKeyframe` still records the explicit mark on a frame a channel already keys: a key is a value
+    some channel holds and a mark is the artist saying *this frame is a keyframe*, and the two come
+    apart the moment that key is dragged or deleted in the graph editor.
 
 ---
 
