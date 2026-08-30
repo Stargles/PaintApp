@@ -939,10 +939,10 @@ cache entry per frame of a held cel).
 ## 11. The graph editor
 
 Asks 4, 5 and 6 of 2026-08-29, and §2.17 sharpened by the owner from *"a drawer that grows the timeline
-upward"* to *"it pops up above the layer that has it when on"*. **D1 is built; D2 onward is not.** Line
-numbers are as of `0513d06`, re-taken 2026-08-29 — every one §11.3 and §11.4 carried was stale, because
-`167e44a` is three commits back and 336 lines of the four timeline files have moved since. This document
-has been wrong about them twice now; re-take them again rather than trusting this sentence.
+upward"* to *"it pops up above the layer that has it when on"*. **D1 and D2 are built; D3 onward is
+not.** Line numbers are **gone from §11.2 and §11.3** rather than re-taken: every one they carried was
+stale twice, and D2 moved all four timeline files again. Name the symbol, not the line — the two
+sections below now do, and §11.4's remaining numbers should be re-taken rather than trusted.
 
 **Scope, ruled 2026-08-29: one band at a time, under the selected layer.** Offered per-layer toggles and
 an open-every-animated-layer mode, the owner took the selected layer. It is also the cheapest of the
@@ -993,41 +993,90 @@ independent of uniformity, unchanged to the byte.
 sufficient only because the heights are a pure function of `(rows, rowHeight)` and `rows` is already
 in the key. The first stage that derives a height from anything else — which is D2, since a band
 opens per layer — must put that input in the key or the row draws once at its old height and never
-moves again. §11.3's first bullet, reached from the geometry side.
+moves again. §11.3's first bullet, reached from the geometry side. **D2 confirmed it: the field it
+added carries the row's height as well as the curves, and each half fails on its own.**
 
-### 11.3 Stage D2 — the band, and three ways it renders once and never again
+**The seam took an `Expansion`, and one thing it also had to grow was a way to say *not* the whole
+row.** `make(rows:rulerHeight:rowHeight:expansion:)` resolves a layer index to a row position and
+gives that row the extra height, so `height(ofRow:)`, `dropBand`, `rowsCrossed` and `contentHeight`
+are all right about a tall row without being touched. What D1 could not have predicted is
+`blockHeight(ofRow:)`, the complement: `TimelineRowView` measures **both** a cel block's rect and the
+key-marker band's origin from its own `bounds.height`, so a row view handed the expanded height
+stretches every thumbnail down over the curves *and* slides the diamonds to the bottom of the band.
+The track therefore sizes the row view to the block half and hangs the graph band beside it as a
+sibling — which also keeps the row's pan/tap/long-press, which pick their zone from x alone, away
+from a band they would read as a cel body.
 
-**D2 also repurposes the button, because otherwise nothing can open the band.** §2.22's keyframe button
-(`AnimationTimeline.swift:507`, symbol `diamond`, id `timeline.keyframeButton`) still adds a keyframe at
-the playhead — the owner noted on 2026-08-29 that it is "still here, eventually to get replaced by the
-graph editor icon", which is ask 3's own tail. It becomes the graph-editor toggle: the icon and the
-accessibility identifier change, and the tap opens the band on the selected layer instead of writing a
-mark. **No function is lost** — Add Keyframe moved to the cel menu in `4057e9d` and is the workflow ask 3
-described. The **channel list is not part of this stage**; ask 3 wants the button to raise the list as
-well, and that is D4 hanging a control inside the band rather than a second thing on the button.
+### 11.3 Stage D2 — the band, and three ways it renders once and never again — **done 2026-08-29**
 
-- **`TimelineLayoutKey` gates everything.** `relayout()` early-returns on `built.key == laidOutKey`
-  (`TimelineTrackView.swift:225`). Curve data outside the key renders once and then freezes — §4.5's
-  invisible failure from a third door. `currentFrame` is deliberately absent from the key and takes a
-  `movePlayhead`-style fast path instead; curves should go **in** the key, because unlike the playhead
-  they change shape rather than position.
-- **The playhead is a column, not a hairline** — width `pixelsPerFrame` (`:360`), so 10.5 to 120 pt of
-  35 % blue, `bringSubviewToFront` on every `movePlayhead` (`:363`). A curve drawn under it is tinted, and
-  at maximum zoom that column is 120 pt of the band.
+**D2 also repurposed the button, because otherwise nothing could open the band.** §2.22's keyframe
+button is now `graphEditorButton` — `chart.xyaxis.line`, id `timeline.graphEditorButton` — and the tap
+toggles the band on the selected layer instead of writing a mark. **No function was lost**: Add /
+Remove / Clear Keyframes are in the cel menu, which is the workflow ask 3 described. It is **tinted
+blue when open**, like `interpolateButton`, because the band lives inside the scroll content and can
+therefore be open and scrolled out of sight; unconditionally white left the artist no way to tell a
+closed editor from one below the fold. The **channel list is not part of this stage**; ask 3 wants the
+button to raise the list as well, and that is D4 hanging a control inside the band rather than a
+second thing on the button, which would give one control two jobs and make one of them win the second
+tap.
+
+- **`TimelineLayoutKey` gates everything, and the field it needed is bigger than "the curves".**
+  `relayout()` early-returns on `built.key == laidOutKey`, so `graphBand` carries the whole band as
+  one optional `TimelineGraphBand.Content` — the expanded layer index, the height it asked for, and
+  every channel with its curve and its `uiRange`. Two failures, not one: without the height the row
+  draws at 34 pt forever, and without the curves the line freezes at its first shape. **The
+  distinction the mutation test made concrete is that a curve's shape moves nothing else on the
+  track.** A key's value, a bezier handle, a tangent mode, a segment's interpolation and the
+  channel's `step` all change the drawn line and change **no frame** — so `trackMarkers`, which is
+  positions only, is unchanged and the gate stays shut. Only a key's *frame* moves both.
+  `AnimationCurve` is `Equatable`, so this is an ordinary field rather than a hash: nothing has to
+  describe what the hash covers or keep it in step, and the cost argument survives because the band
+  is nil while it is closed and holds one layer's channels while it is open. The view reads what it
+  draws **out of** the key, `trackMarkers`' rule.
+- **The playhead is a column, not a hairline** — width `pixelsPerFrame`, so 10.5 to 120 pt of 35 %
+  blue, `bringSubviewToFront` on every `movePlayhead`. **Left in front, having looked at it**: a
+  saturated 1.8 pt curve reads through the wash perfectly well, and the one thing an artist wants
+  from a graph editor beside the shape is where the playhead crosses it — fronting the band would cut
+  that column into two halves with a gap where the curves are, which is worse than a tint.
 - **Any drag inside the scroll content is eaten** without
-  `scrollView.panGestureRecognizer.require(toFail:)`. **This document said that call is made at view
-  creation and it is not** — both sites are inside `relayout()`, the ruler's at `:246` behind an
-  `if rulerView.superview == nil` guard (`:238`) and a row's at `:268` inside the
-  `while rowViews.count < layerEntries.count` pool-growth loop (`:264`). Each still fires once per view,
-  so the net effect is the one described; but a band added to that pool must sit **inside the same loop**
-  or it is created without arbitration and its drags go to the scroll view. Only the pinch recogniser is
-  attached in `makeUIView` (`:72-73`).
+  `scrollView.panGestureRecognizer.require(toFail:)`; both sites are inside `relayout()`, not
+  `makeUIView`. D2 adds no recogniser and sets `isUserInteractionEnabled = false` on the band, so the
+  arbitration question is D3's whole and undisturbed. **The band is a sibling of the row pool rather
+  than a member of it**, so the "add it inside the same loop" advice above does not apply as written:
+  what applies is that D3's recogniser must make that call wherever the band is created.
+
+**What it cost, and the two predictions that were wrong.** The band is `Views/TimelineGraphBand.swift`
+(every number: the value-to-y map, the range fallback, the sampling stride, the palette, the
+accessibility encoding) plus a `UIView` in `TimelineTrackView.swift` that owns only `UIBezierPath` and
+`UIColor` — the split `TimelineKeyMarkers` argues for, and the reason 18 of the 29 new tests are in
+the fast tier. **The marker band did not follow the row down**, because sizing the row view to
+`blockHeight` removes the hazard rather than fixing it. **And the name column's trap is real but is
+not assertable from XCUITest**: a SwiftUI `Text` with an accessibility identifier, inside a row that
+also carries `.contentShape` and a gesture, reports the **cell's** frame rather than the glyph's — so
+"the name stayed at the top of the tall row" was checked by eye and the test pins the row cells'
+tops and heights instead, which is the failure that actually loses the artist their place. The fix
+is two frames: the name is centred in `blockHeight` and that block is pinned `.top` in the full
+height, which is a no-op for every row with no band.
+
+**Colour comes from `Effect.parameters` order, not from the drawn list.** Eight hand-picked hues,
+indexed by the channel's descriptor position — hand-picked because a generated palette cannot be told
+that ~211° is the playhead and ~48° is an interpolation reference (§2.8), and descriptor-indexed
+because the drawn list reorders the moment a channel starts animating, which happens mid-drag while
+the artist is watching. Every channel of one band comes from one effect, hence one table, so the
+first eight are distinct by construction.
 
 ### 11.4 Stage D3 — the gestures, most of which are already written
 
-`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` (`TimelineKeyMarkers.swift:212`) is the exact inverse of
-`centerX(frame:)` and its own doc says **"Nothing calls this yet and that is deliberate"** — it was
-written for this.
+`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` is the exact inverse of `centerX(frame:)` and its own
+doc says **"Nothing calls this yet and that is deliberate"** — it was written for this, and D2 left it
+untouched.
+
+**There are now two inverses and they answer different questions.** D2 added
+`TimelineGraphBand.time(atX:pixelsPerFrame:)`, the **continuous** inverse of the same forward map,
+because sampling a curve between two frames needs 7.4 and not 7. `frame(atX:)` floors to a column and
+is the one D3's hit-testing wants. Using either for the other's job puts the answer half a frame out —
+which is exactly enough to pick up the wrong key at the default zoom and to draw a curve that misses
+its own dots.
 
 Reuse `CurveEditor`'s gesture grammar (`Views/EffectSection.swift:683` onward), which §3.2 already
 nominates: `DragGesture(minimumDistance: 0)`, `hitRadius` 22 pt, `tapSlop` 5 pt, drag moves,
@@ -1081,7 +1130,9 @@ with the editor closed, and persisting it would put a field in the manifest that
   dragging it. Take `uiRange`, fall back to the key extent only for a parameter whose `uiRange` is nil,
   and **clip to the band** — `AnimationCurve`'s decision 1 is that the output is never clamped, so a
   bezier overshoot genuinely leaves the range and the band must cut it rather than rescale for it.
-- **The band's height, and whether it is draggable.** Start fixed.
+- ~~**The band's height, and whether it is draggable.**~~ **Fixed at 96 pt, D2, not draggable.** There
+  is no stored size and nothing to persist; it is `TimelineGraphBand.height`, asked for by
+  `CanvasManager.graphBandExpansion` and carried in the layout key so the row it expands can move.
 - ~~**A collapsed folder hides its children's key markers.**~~ **Ruled 2026-08-29: it shows nothing, which
   is today's behaviour, so there is no work.** Offered merged per-frame diamonds from the hidden children
   and a single "there is animation in here" indicator, the owner kept the blank row. Recorded as ruled

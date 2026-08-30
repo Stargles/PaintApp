@@ -56,11 +56,14 @@ final class GraphEditorUITests: PaintUITestCase {
     /// one UIKit, and a band only one of them knows about shifts every track down while the names
     /// stay put — so a name labels the layer above the one it belongs to.
     ///
-    /// **It also pins the trap that comes with routing the band through the row's height**: the name
-    /// cell grows too, and a name left centred in the taller cell floats down beside the middle of
-    /// the curves instead of labelling the cel blocks it is the name of. Both halves are one
-    /// measurement — a name and its track still sharing a horizontal band of screen — taken on the
-    /// expanded row and on the row below it.
+    /// **Measured on the row *cells*, which is what XCUITest can actually see.** A SwiftUI `Text`
+    /// carrying an accessibility identifier inside a row that also carries `.contentShape` and a
+    /// gesture reports the **cell's** frame, not the glyph's — which is why the assertions below are
+    /// about tops and heights rather than about centres. So the name being pinned to the *top* of an
+    /// expanded cell rather than floating down beside the middle of the curves is **not assertable
+    /// from this tier at all**, and was checked by eye instead; what is assertable, and is the
+    /// failure that actually loses the artist their place, is that the two columns agree about where
+    /// each row starts and which one grew.
     func testOpeningTheBandKeepsEveryNameLinedUpWithItsTrack() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -77,21 +80,31 @@ final class GraphEditorUITests: PaintUITestCase {
             XCTAssertTrue(element.waitForExistence(timeout: 5))
         }
 
-        func agree(_ name: XCUIElement, _ track: XCUIElement) -> Bool {
-            abs(name.frame.midY - track.frame.midY) < 12
+        /// The two columns are 2 pt out of register by inheritance — the name column's ruler spacer
+        /// plus one `VStack` step is `rulerHeight + 6` where the track's row 0 is `rulerHeight + 4`,
+        /// and the cel block is inset 2 pt inside its row, which happens to cancel it. 6 pt of
+        /// tolerance covers both without admitting a row's worth of drift.
+        func startsTogether(_ name: XCUIElement, _ track: XCUIElement, _ what: String) {
+            XCTAssertEqual(name.frame.minY, track.frame.minY, accuracy: 6,
+                           "\(what): name at \(name.frame.minY), track at \(track.frame.minY)")
         }
-        XCTAssertTrue(agree(openName, openTrack), "Fixture: the two columns start in register")
-        XCTAssertTrue(agree(lowerName, lowerTrack))
-        let before = lowerTrack.frame.midY
+        startsTogether(openName, openTrack, "Fixture: the two columns start in register")
+        startsTogether(lowerName, lowerTrack, "Fixture: and so does the row below")
+        XCTAssertEqual(openName.frame.height, lowerName.frame.height, accuracy: 1,
+                       "Fixture: every row is the same height until the band opens")
+        let before = lowerTrack.frame.minY
 
         app.buttons["timeline.graphEditorButton"].tap()
         XCTAssertTrue(app.otherElements["timeline.graphBand"].waitForExistence(timeout: 5))
 
-        XCTAssertGreaterThan(lowerTrack.frame.midY, before + 40,
-                             "The band opened on the top layer, so the row under it moved down")
-        XCTAssertTrue(agree(lowerName, lowerTrack),
-                      "…and its name moved with it — both columns lay out from one TimelineRowLayout")
-        XCTAssertTrue(agree(openName, openTrack),
-                      "The expanded row's name stays on its blocks rather than sliding down the band")
+        XCTAssertEqual(openName.frame.height - lowerName.frame.height, TimelineGraphBand.height,
+                       accuracy: 1,
+                       "The name column took the band's height, on the row the band opened under")
+        XCTAssertEqual(lowerTrack.frame.minY - before, TimelineGraphBand.height, accuracy: 2,
+                       "…and the track pushed the row below down by exactly the same amount")
+        startsTogether(openName, openTrack,
+                       "The expanded row's blocks stay at the top of it, under its name")
+        startsTogether(lowerName, lowerTrack,
+                       "…and the row below is still in register — one TimelineRowLayout, two columns")
     }
 }
