@@ -1424,6 +1424,37 @@ before, where one test was a seventh of its class. If a fourth gesture test is e
 fixture is what to attack; it now lives as a `fileprivate` extension on `PaintUITestCase`, both halves
 of the split needing it.
 
+**And the band now sits above the playhead, which reverses §11.3's fourth decision** (the paragraph
+beginning "The playhead is a column, not a hairline" — it is stale from here on, and so is the class
+doc it seeded on `TimelineGraphBandView`, which has been rewritten in place). D2 made that call
+*having looked at it* and recorded that "a saturated 1.8 pt curve reads through the wash perfectly
+well". That was **true of the hue it was looked at and not of the palette**: screenshotted with green
+(145°) and orange (28°) crossing the column together, the green survives and the orange is a grey
+stub. Red (8°) and violet (262°) are the next two the same compositing reaches — the second by
+landing on the playhead's own colour rather than on grey — and which channel gets which hue depends
+only on its position in `Effect.parameters`.
+
+**The objection to fronting the band assumed a panel, and the band is not one.** Its background is
+white at `backgroundAlpha` **0.06**, so putting it above the playhead does not cut the column in two:
+the column reads through 96 pt of 6 % white unchanged, and what rises clear of the wash is the 1.8 pt
+strokes and the key dots — a few percent of the band's area. The alternative that was going to be
+needed otherwise, redrawing the curves above the playhead inside its own x range, buys exactly the
+same picture for the price of a second view kept in register with this one; and repainting the palette
+to survive 35 % blue would constrain all eight hues for one overlap. One `bringSubviewToFront` in
+`movePlayhead`, beside the playhead's own so the two orderings stay in one place.
+
+**Verified by looking, which is the only way this could have been verified.** Two screenshots of the
+same fixture — a grade with brightness (descriptor index 0, green) and contrast (index 1, orange) both
+animated, the playhead scrubbed onto frame 4 in the middle of both curves — taken on the same device
+before and after the change. Before: the orange curve is **a grey stub** for the width of the column
+and orange either side, while the green curve is untouched, exactly as reported. After: both curves
+hold their colour across the column, and the column is continuous from the ruler through the band to
+the row below. Only those two hues were rendered, and that is enough, because the fix removes the
+composite rather than tuning it: nothing is drawn over a curve any more, so the remaining six hues
+cannot be affected differently. The harness that took the pair was a throwaway and is not in the tree
+— XCUITest can see neither a `CGContext` nor a colour, so there is nothing here for either tier to
+assert and this is a decision made by eye, as D2's was.
+
 **Ask 6's *cel* marquee stays future**, with its stub: "Select Multiple" sits in the cel menu today,
 `.disabled(true)`. What this stage built is the keyframe half of that ask, and the shape it settles —
 a drag in empty space rubber-bands, a grab on a member carries the set — is the one a cel marquee

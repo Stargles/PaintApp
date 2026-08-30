@@ -15,7 +15,7 @@ import XCTest
 /// taken it from ~40 s to a MEASURED 271 s over ten tests and made it the suite's second-longest.
 /// The seam is what a test is *about*: here, that the band opens, closes, follows the selected layer
 /// and stays in register with the pinned name column; there, what a finger does to a curve once it
-/// is drawn. Balanced on seconds and not on tests — 7 tests / 139 s here against 3 / 132 s there.
+/// is drawn. Balanced on seconds and not on tests — 7 tests / 133 s here against 3 / 136 s there.
 ///
 /// **What is left for this tier and what is not.** Everything the band *draws* — the axis, the
 /// clipping, the colours, the sampling density — is `TimelineGraphBandLogicTests`, run headlessly
@@ -351,7 +351,7 @@ final class GraphEditorUITests: PaintUITestCase {
 /// distribute onto two clones and the floor falls back under `PerfBaselineTests`.
 ///
 /// **The seam is the band's existence against the band's gestures**, and the balance is on measured
-/// seconds rather than on test count: three tests here against seven there, 132 s against 139 s.
+/// seconds rather than on test count: three tests here against seven there, 136 s against 133 s.
 /// That asymmetry is the point — the three gesture tests each spend ~45 s, and nearly all of it is
 /// `authorAnAnimatedBrightnessCurve` rather than the gesture, because the graph editor edits curves
 /// and cannot be the thing that makes the first one. A split on test count would have put 3 s of
@@ -481,6 +481,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String, "0|3|6",
                        "…and the union came back with it")
     }
+
 
     /// **Ask 6, through a finger: a rubber band in empty space picks keys up, and grabbing any member
     /// of that set then moves the whole of it.**

@@ -757,6 +757,27 @@ struct TimelineTrackView: UIViewRepresentable {
                 height: totalHeight - 8
             )
             contentView.bringSubviewToFront(playheadView)
+            // **And the graph band goes above the playhead, which reverses §11.3's z-order ruling
+            // without giving up what that ruling was protecting.** D2 put the playhead in front
+            // having looked at it, and recorded that a saturated 1.8 pt curve reads through 35 %
+            // `systemBlue` perfectly well. **Screenshotted on 2026-08-30 with green (145°) and
+            // orange (28°) drawn side by side under the column: the green survives and the orange is
+            // a grey stub.** The judgement was made on one hue and generalised, and the two hues the
+            // same compositing arithmetic puts next in line are red (8°) and violet (262°), the
+            // second of which lands on the playhead's own colour rather than on grey.
+            //
+            // The objection to fronting the band was that it would cut the playhead column in two
+            // with a gap where the curves are. That is not what happens, because the band is not a
+            // panel: its background is white at `backgroundAlpha` **0.06**, so the column reads
+            // through it essentially unchanged and only the 1.8 pt strokes and the key dots — a few
+            // percent of the band's area — sit above the wash. That was screenshotted too: the
+            // column runs unbroken from the ruler through the band to the row below. No hue can be
+            // lost now because nothing is composited over a curve at all, which is what option 2
+            // (redrawing the curves above the playhead inside its x range) would have bought for the
+            // price of a second view kept in register with this one.
+            if !graphBandView.isHidden, graphBandView.superview != nil {
+                contentView.bringSubviewToFront(graphBandView)
+            }
             // A block in hand stays on top of everything, including the playhead — a re-layout in
             // the middle of a drag (any `@Published` change triggers one) would otherwise bury it.
             if blockDrag != nil {
@@ -1392,13 +1413,20 @@ private final class TimelineKeyMarkerBand: UIView {
 /// enclosing scroll view to pan from; the ruler and every cel row still scroll (a row's pan declines
 /// everything but a resize handle), so what is lost is a 96 pt strip and not the gesture.
 ///
-/// **The playhead stays on top of it**, which is a decision rather than an oversight. It is a
-/// *column* the width of a frame, not a hairline, so at full zoom 120 pt of 35 % blue lies over the
-/// band — but it is the same column that lies over every cel block on every row, and the one thing
-/// an artist reads a graph editor for beside the shape is *where the playhead crosses it*. Fronting
-/// the band would cut that column into two halves with a gap where the curves are, which is worse
-/// than a tint. `movePlayhead` re-fronts the playhead on every layout, so this needs no z-order code
-/// of its own.
+/// **This view goes above the playhead, and the sentence here used to say the opposite.** D2 ruled
+/// the playhead in front — it is a *column* the width of a frame, not a hairline, so at full zoom
+/// 120 pt of 35 % blue lies over the band, and where the playhead crosses a curve is one of the two
+/// things an artist reads a graph editor for. The objection to fronting the band was that it would
+/// cut that column in two with a gap where the curves are.
+///
+/// That objection assumed a panel. This view is not one: its background is white at
+/// `backgroundAlpha` 0.06, so fronting it leaves the column whole — 6 % lighter across 96 pt, which
+/// is not a gap — and lifts only the 1.8 pt strokes and the key dots clear of the wash. The ruling
+/// it reverses was made by looking at one hue and generalising: screenshotted with green (145°) and
+/// orange (28°) crossing the column together, the green reads and the orange is a grey stub. Red (8°)
+/// and violet (262°) are the next two the same arithmetic reaches, violet by vanishing into the
+/// playhead's own colour rather than into grey. `movePlayhead` does the fronting, right after the
+/// playhead's own, so the two orderings live in one place.
 private final class TimelineGraphBandView: UIView {
     private var content: TimelineGraphBand.Content?
     private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
