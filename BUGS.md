@@ -3,6 +3,37 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A popover whose host view disappears re-presents itself when the host comes back (2026-08-29)
+
+`CanvasPresentationModifier.close()` (`Views/CanvasPresentationModifier.swift:95-98`) removes the
+presentation from the registry and fires the site's `onDismiss` — and **does not write the site's own
+`isPresented`**. Reached from `.onChange(of: isPresented)` (`:68`) that is correct, because there the
+binding is already false and is what triggered the call. Reached from **`.onDisappear` (`:89`) it is
+not**: the host view is being destroyed with the popover still up, `isPresented` is left `true`, and
+the next time that host is rendered `.popover(isPresented:)` (`:67`) opens it again with no one having
+asked.
+
+The comment at `:84-88` shows the case was thought about from the registry's side — *"without this
+line the registry keeps a presentation that is gone and every `onDismiss` bracket in the app leaks"* —
+and closed that half. The binding is the half left open.
+
+**It reaches every conditionally-rendered host, not one feature.** The doc names `activePanel = .none`
+removing the layer rail as "the everyday way" a host is deleted, so any presentation hanging off a
+control that is not always on screen inherits it. Found on 2026-08-29 by the graph editor's channel
+list, whose button is rendered only while the band is open: closing the band with the list up, then
+reopening the band, brought the list back by itself. That stage shipped a local `onChange` workaround
+on its own always-present sibling button rather than change a modifier every presentation in the app
+routes through.
+
+**One thing to establish before fixing it, because it decides whether the bug is conditional.**
+`.onChange(of: canvasManager.openPresentations.contains(presentation))` at `:81` already writes
+`isPresented = false` whenever the registry drops the presentation, which is exactly what `close()`
+does one line earlier — so on paper that observer should catch the `onDisappear` path too. It does not
+in practice, and the likely reason is that a view being removed from the hierarchy does not get to run
+an `onChange` for a mutation made during its own `onDisappear`. **That is inferred from the observed
+behaviour, not verified against SwiftUI**, and it is the first thing to check: if the ordering is the
+cause, the fix is one line in `close()` and not a rework of the two observers.
+
 ## Fill and Clear on a selection rewrite a derived in-between's `VectorCanvas` (2026-08-28)
 
 Every other vector edit that writes a cel's display list refuses on an interpolated cel, because an
@@ -34,6 +65,33 @@ sentence in the Select panel rather than a button that goes quietly grey — sin
 Not a duplicate of "Canvas Padding while a vector Move is held writes pre-resize geometry onto the
 resized cel" below: that one writes correct geometry to the wrong *pose*, this one writes to the wrong
 *cel*.
+
+## Every `draw(_:)` view on the timeline track is as wide as the whole document (2026-08-29)
+
+`contentView`, `TimelineRulerView`, every `TimelineRowView`, every `TimelineKeyMarkerBand` and the
+graph editor's band are all sized to `totalWidth` — `displayedFrameCount * pixelsPerFrame`
+(`Views/TimelineTrackView.swift`, `relayout`). Three of those are `draw(_:)`-backed, so UIKit
+allocates a bitmap of that width times the view's height times 4 bytes times the screen scale.
+
+MEASURED as arithmetic, not on device: the 96 pt graph band is **13.8 MB** at 300 frames and the
+default 30 pt/frame, **55 MB** at the 120 pt/frame zoom ceiling, and **184 MB** at 1,000 frames by 120.
+The 18 pt ruler and the 12 pt marker bands are the same width and cost proportionally less only
+because they are shorter.
+
+**INFERRED, and it is the part worth checking before anything is built**: above roughly 8,192 pt of
+view width — 16,384 px at scale 2, the Metal texture limit `CALayer` backing stores are subject to —
+nothing on the track can be backed at all, the ruler included. A **273-frame document reaches that at
+the default zoom**, and PERFORMANCE.md's own note that a real scene is 300 to 1,000 drawn cels puts
+the owner's ordinary work past it. Nobody has observed this on the device; it may be that `CALayer`
+tiles transparently and there is no cliff, which is exactly why it should be measured before it is
+designed around.
+
+**Found by the graph editor's D2 and deliberately not fixed there.** Sizing that one view to the
+viewport would have bought a correct band under a ruler that had already failed — the width is a
+property of the *track*, it predates the band, and the fix belongs to whatever makes the track's
+drawing viewport-relative as a whole. D2 did clip its *sampling* to the visible window, so the band's
+per-redraw CPU cost is now O(viewport) regardless of document length; this entry is about the
+allocation, which that change does not touch.
 
 ## Picking a colour or starting a masked stroke can pay a full CPU composite mid-gesture (2026-08-28)
 
