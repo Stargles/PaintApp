@@ -3,6 +3,40 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Three things looking at the graph editor found that 2,224 passing tests did not (2026-08-30)
+
+All three came from screenshots of the merged band on a simulator
+(`docs/graph-editor/`), taken because the owner had read the feature and never seen it.
+None is caught by any test, and the first two are not *catchable* by the tiers this repo has —
+XCUITest can see neither a colour nor a `CGContext`.
+
+**1. The channel-list popover renders in system appearance, on an app that is otherwise black.**
+`TimelineGraphChannelList`'s popup is a light-grey card with dark text floating over the black
+timeline chrome — see `docs/graph-editor/3b-channel-list-full.png`. On a dark-mode iPad it matches;
+on a light-mode one it does not. Every other timeline surface paints its own colours. The fix is a
+`.preferredColorScheme` or an explicit background, and the open question is whether the app should
+declare a scheme globally rather than per surface — which is why this is filed rather than patched.
+
+**2. The band draws every curve flat across the frames past the end of the document.**
+The band view is `totalWidth` wide — `displayedFrameCount * pixelsPerFrame`, which
+`displayedFrameCount(for:)` inflates past `sceneFrameCount` to cover the scroll's look-ahead — and a
+curve is sampled across all of it, so it extends as a flat line into track that holds no frames. At
+25 frames it is a tail; on a 12-frame document more than half the band was flat line in dead space.
+`AnimationCurve`'s constant-hold extrapolation makes the value correct, so this is about where
+drawing should *stop*, not about what it evaluates to. The scene's own frame count is the bound, and
+`TimelineRulerClip.frames(in:pixelsPerFrame:frameCount:)` already takes one.
+
+**3. A 250 pt timeline cannot hold four layers plus an open band.** The bottom row falls off the
+panel and the artist must drag it taller. The content scrolls, so nothing is broken and nothing is
+lost — recorded because it is the first thing an artist meets on a modest stack, and because the
+band's height (96 pt, fixed, KEYFRAMES §11.6 "start fixed") is the number to revisit if it grates.
+
+**And one that is not a bug in the app but will cost a test session.** The effects menu only exposes
+items as far as Gaussian Blur to XCUITest — Bloom, Sharpen, Sobel, Outline, Chromatic Aberration and
+Noise never match, on any query. Almost certainly a scrollable-menu accessibility limit rather than an
+app defect, but a test reaching for one of those six will fail to find an element that a human can see,
+which reads as a broken app. HSV Shift and Gaussian Blur are the reachable multi-slider fixtures.
+
 ## A popover whose host view disappears re-presents itself when the host comes back (2026-08-29)
 
 `CanvasPresentationModifier.close()` (`Views/CanvasPresentationModifier.swift:95-98`) removes the
