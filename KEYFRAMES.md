@@ -1246,7 +1246,7 @@ through the canvas's `Tool` would couple two unrelated surfaces to buy a mode th
 to switch into. **The cel half of that ask is future and already has its stub**: "Select Multiple" sits
 in the cel menu today, `.disabled(true)`, and a marquee over cels is what enables it.
 
-### 11.5 Stage D4 — the channel list is a filter, not a navigator
+### 11.5 Stage D4 — the channel list is a filter, not a navigator — **done 2026-08-29**
 
 The owner: *"just a button option in the graph editor which brings up a scrollable popup menu, which is
 basically an include or exclude checkmark box for each animation. Animations may have multiple values
@@ -1254,13 +1254,67 @@ being modified at once (like transform x and y), so those should have a drop dow
 invisible like a whole. This is basically like the hide/show layers and layer groups."*
 
 So it is visibility, not selection: the editor shows every animated channel and the list turns them off.
-**Grouping falls out of the id format for free** — parameter ids are `"<case>.<field>"`, so the text
-before the dot *is* the group and no second table is needed; display names come from the descriptor
-table, which already carries them. Membership of the list is `channelIsAnimated` — the strict predicate,
-≥2 keys whose values are not all equal — never the loose one auto-key uses.
+Membership of the list is `channelIsAnimated` — the strict predicate, ≥2 keys whose values are not all
+equal — never the loose one auto-key uses. Visibility is **transient view state, not document state**: it
+filters what is drawn, it has no meaning with the editor closed, and persisting it would put a field in
+the manifest that changes no pixel. `TimelineGraphChannelList` holds the grouping, the toggle arithmetic
+and the filter's scope, beside `TimelineGraphBand` and for that file's reason — `AnimationTimeline.swift`
+is not compiled into the test target, so a rule written there is pinned by nothing.
 
-Visibility is **transient view state, not document state**: it filters what is drawn, it has no meaning
-with the editor closed, and persisting it would put a field in the manifest that changes no pixel.
+**Grouping falls out of the id format, and what falls out is one group.** Parameter ids are
+`"<case>.<field>"` so `groupID(ofParameterID:)` is the text before the first dot and no second table is
+needed — but a band is one layer, a layer is one grade, and a grade is one prefix, so **every band today
+has exactly one group**. That is not a reason to drop it: the group row is the only control that switches
+a whole effect off in one tap, which is the owner's *"visible or invisible like a whole"*, and the shape
+is what a second channel source (a transform, a folder's grade) will need. It is the reason the groups
+come up **expanded** — a list whose single group was folded shut would show the artist nothing — and it
+is pinned by `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade`, which is the assertion that
+changes the day the premise does.
+
+**The group's *name* is the one thing the id format cannot supply**, and "display names come from the
+descriptor table" was true only of the channels. `EffectParameter.name` is a field label ("Radius"); a
+group has no descriptor row, so `TimelineGraphBand.Channel` gained `groupName` — the effect's own
+`displayName`, which is the word the artist picked the grade by. Splitting camel case out of the prefix
+instead would have worked for twelve of the thirteen and spelled `hsvShift` "Hsv Shift".
+
+**The filter is applied inside `graphBandContent`, before the key is built, and that placement is the
+whole feature.** `relayout()` early-returns on `built.key == laidOutKey`; a filter applied later — read
+off the manager inside `TimelineGraphBandView.draw` — would change what the band should show without
+moving the key, and unchecking a box would move nothing on screen until an unrelated edit happened to
+reopen the gate, with nothing thrown and nothing logged. Filtering into `Content.channels` makes the key
+move for free and leaves every line of the drawing code untouched: what is drawn *is* what is keyed on,
+`trackMarkers`' rule. Mutation-tested both ways — with the filter lifted out of `graphBandContent`, six
+tests fail including both key ones. **Colour survives it**: a channel keeps its `descriptorIndex`
+through the filter, which is what D2's colour rule was for, and re-deriving it from the drawn position
+(the obvious spelling, since the list is now short) fails `testHidingAChannelRepaintsNothing`.
+
+**Where it hangs, and which of the three presentation shapes it is.** A second button,
+`timeline.graphChannelsButton`, rendered from both timeline bars **only while the band is open** — ask 3
+wants the graph-editor button to raise the list too, and a control that both toggles and raises a menu
+has no answer for its second tap. It is a real `.popover` and therefore a **`CanvasPresentation` case**
+(`graphChannelList`, `overlapsLiveCanvas` true), which is `onionSkinOptions` and `interpolateOptions`
+line for line: a list of controls presented from timeline chrome over a mounted, touchable `CanvasView`,
+with its openness in a `Binding`. §8 stage 3b's other two were read and rejected — an inline docked panel
+is not a presentation and a case for one would be wrong, and `ActivePanel` is the canvas's settings rail
+that `CanvasTouchOwner` reads to decide who owns a touch, which this list is no part of. One consequence
+of the conditional button: `CanvasPresentationModifier.onDisappear` deliberately does not clear the
+site's own flag, so a popover open through a host deletion returns when the host does — the always-present
+graph-editor button carries the `onChange` that closes it.
+
+**An all-hidden band is not an empty one and does not say so.** D2 made an empty band report `"empty"`
+because an artist looking for a curve that was never there is the failure; here the curves are there and
+the artist put them away, so the band reports `"hidden"` — which is why `Content` carries `hiddenCount`
+rather than only a shorter `channels`. The artist's version of that distinction is not an accessibility
+value: the channel-list button is **tinted blue while anything is switched off**, `graphEditorButton`'s
+reason, and in the all-hidden state it is the only signal there is.
+
+**The filter lives exactly as long as the band it was made on**, which is what makes a stale id
+impossible rather than merely harmless. It carries the `KeyframeTarget` it was authored against and
+answers `[]` for any other band, `isGraphEditorOpen`'s `didSet` drops it on close, and `setting` prunes
+to the ids the band is currently listing so a grade swap cannot leave `"blur.radius"` waiting for a Blur
+to come back. The invariant underneath all three is that the filter can only ever **subtract**: the drawn
+channels are a subsequence of the strict predicate's answer whatever the set holds, so a hidden id that
+names nothing hides nothing and no id can resurrect a channel `isAnimated` refused.
 
 ### 11.6 Open
 
