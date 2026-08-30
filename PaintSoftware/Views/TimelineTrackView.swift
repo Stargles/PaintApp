@@ -487,6 +487,15 @@ struct TimelineTrackView: UIViewRepresentable {
             let bandHeight: CGFloat
             /// The keys being carried. Empty means the touch began on nothing, which is a marquee.
             let carried: Set<TimelineGraphBand.KeyRef>
+            /// The standing selection as it stood once touch-down had resolved — equal to `carried`
+            /// when a key was grabbed, and the pre-marquee set when one was not.
+            ///
+            /// **A cancelled drag restores this alongside the curves.** Both are live state the drag
+            /// rewrites every tick, and putting one back without the other leaves the rings naming
+            /// frames the restored curves no longer key: nothing draws them, grabbing a member no
+            /// longer carries the group, and nothing repairs it — `layoutGraphBand` clears the
+            /// selection when the band changes layer but never recomputes it.
+            let startSelection: Set<TimelineGraphBand.KeyRef>
             /// Set once travel passes `tapSlop`. Until then the touch is still a candidate tap, and
             /// **no undo bracket is open** — `CurveEditor`'s rule: a drag that never moved closes no
             /// bracket, because it never opened one.
@@ -507,9 +516,15 @@ struct TimelineTrackView: UIViewRepresentable {
         ///
         /// - The key to grab is chosen once, at touch-down, from `startLocation` — so a drag that
         ///   passes near another key does not swap handles under the finger.
-        /// - Travel of `tapSlop` or less is a **tap**, and the question is asked of the *translation*
-        ///   rather than of a `didMove` flag: a touch that began on empty band and travelled an inch
-        ///   never grabbed anything, and treating that as a tap would drop a key wherever it stopped.
+        /// - A **tap** is `!didMove && travel <= tapSlop` — *both*, and neither alone. `didMove` alone
+        ///   is what `CurveEditor` warns against and is wrong for the same reason there and here: a
+        ///   touch that began on empty band and travelled an inch never grabbed anything, so `didMove`
+        ///   stays false there and treating that as a tap drops a key wherever the finger stopped.
+        ///   The *translation* alone is wrong here and is not wrong in `CurveEditor`, because there
+        ///   `didMove` is set only after a handle was grabbed while here it is set for the marquee
+        ///   too: a drag that changes its mind and brings the finger back inside `tapSlop` resolves as
+        ///   a tap **on the key it started from**, which removes it — a destructive edit made by a
+        ///   gesture that was cancelled, and (the bracket being open by then) with no undo step.
         /// - The undo bracket opens on the first real movement, not on touch-down.
         ///
         /// **Arbitration, in full.** The scroll view's pan `require(toFail:)`s this recogniser (see
@@ -531,6 +546,11 @@ struct TimelineTrackView: UIViewRepresentable {
                 finishGraphBandTouch(at: point)
             case .cancelled, .failed:
                 endGraphBandDrag(cancelled: true)
+                // The restore inside is a document write like every other one in this file, so it
+                // needs the same redraw. It is here rather than inside `endGraphBandDrag` because
+                // `layoutGraphBand` — which `relayout()` calls — is itself one of that function's
+                // callers, and a `relayout()` in there would re-enter the layout it is running under.
+                relayout()
             default:
                 break
             }
@@ -550,13 +570,17 @@ struct TimelineTrackView: UIViewRepresentable {
             } else {
                 carried = []
             }
-            graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
-                                          channels: content.channels, bandHeight: height,
-                                          carried: carried)
             if let hit, carried == [hit] {
                 graphBandSelection = [hit]
                 graphBandView.setSelection(graphBandSelection)
             }
+            // Captured *after* that replacement, so a cancel restores what the artist saw once the
+            // finger was down rather than undoing the touch-down itself: taking a key that was not in
+            // the selection is an immediate, visible edit to the selection, and it is not part of the
+            // drag that may be cancelled.
+            graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
+                                          channels: content.channels, bandHeight: height,
+                                          carried: carried, startSelection: graphBandSelection)
         }
 
         private func updateGraphBandTouch(at point: CGPoint) {
@@ -605,12 +629,21 @@ struct TimelineTrackView: UIViewRepresentable {
         private func finishGraphBandTouch(at point: CGPoint) {
             guard let drag = graphBandDrag else { return }
             let translation = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
-            defer { endGraphBandDrag(cancelled: false) }
+            // **Closed here rather than in a `defer`, and that ordering is load-bearing.** A tap
+            // writes through `setEffectParameterTrack`, which records **nothing** while a gesture
+            // snapshot is open (`CanvasManager.setEffectParameterTrack`) — so a write that happened
+            // before the bracket was dropped would land in the document with no undo step at all.
+            // The predicate below now makes that state unreachable, since a tap implies no bracket
+            // was ever opened; this makes it unreachable *twice*, which is what it is worth for an
+            // edit whose failure mode is a silently unrecoverable deletion.
+            endGraphBandDrag(cancelled: false)
 
-            // Asked of the travel, not of `didMove` — `CurveEditor`'s own comment: a drag that started
-            // on empty band never grabbed a key, so `didMove` would be the wrong question and a long
-            // sweep would resolve as a tap and add a key wherever it stopped.
-            guard hypot(translation.width, translation.height) <= TimelineGraphBand.tapSlop else { return }
+            // Both halves, and neither alone — `TimelineGraphBand.isTap` carries the argument, and
+            // is there rather than here so the fast tier can read it: this file is not compiled into
+            // `PaintSoftwareUITests`, and the rule it used to spell inline was wrong for a year of
+            // reading because it had been copied from a file where the flag means something else.
+            guard TimelineGraphBand.isTap(didMove: drag.didMove, translation: translation)
+            else { return }
 
             switch TimelineGraphBand.tap(at: point, channels: drag.channels,
                                          pixelsPerFrame: pixelsPerFrame, bandHeight: drag.bandHeight) {
@@ -645,11 +678,25 @@ struct TimelineTrackView: UIViewRepresentable {
         /// `cancelStructureGesture` throws the baseline away without recording, so leaving the model
         /// mid-drag would strand an edit the artist cannot undo — the one place where "record nothing"
         /// and "change nothing" have to be arranged separately.
+        ///
+        /// **And it restores the selection, which is the same restore and not a second one.** A drag
+        /// rewrites the rings on every tick as well as the curves — deliberately, so a set dragged
+        /// four frames right is still drawn around itself — so putting the curves back while leaving
+        /// the rings on the moved frames leaves refs naming keys that no longer exist. The rings then
+        /// draw nowhere, grabbing a member stops carrying the group, and nothing after this repairs
+        /// it: `layoutGraphBand` clears the selection when the band changes layer, and never
+        /// recomputes it. This is reachable with two fingers — a second touch cancels the recogniser
+        /// mid-drag — so it is a state an artist can reach without meaning to.
         private func endGraphBandDrag(cancelled: Bool) {
             graphBandView.setMarquee(nil)
             guard let drag = graphBandDrag else { return }
             graphBandDrag = nil
-            guard drag.didMove, !drag.carried.isEmpty else { return }
+            guard drag.didMove else { return }
+            if cancelled {
+                graphBandSelection = drag.startSelection
+                graphBandView.setSelection(graphBandSelection)
+            }
+            guard !drag.carried.isEmpty else { return }
             if cancelled {
                 var restored: [String: AnimationCurve] = [:]
                 for channel in drag.channels where drag.carried.contains(where: {

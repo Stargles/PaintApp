@@ -1,14 +1,21 @@
 import XCTest
 
-/// **The graph editor band, from a real tap** — KEYFRAMES.md §11.3, stage D2.
+/// **The graph editor band exists, and is laid out where it says it is** — KEYFRAMES.md §11.3,
+/// stage D2. D3's gestures are `GraphEditorGestureUITests`, further down this same file.
 ///
-/// Deliberately one small class of its own rather than a few methods added to `TimelineAndUndoUITests`
-/// or `LayerPanelUITests`. `xcodebuild` distributes parallel work per test **class**, so a class is
+/// Deliberately its own class rather than a few methods added to `TimelineAndUndoUITests` or
+/// `LayerPanelUITests`. `xcodebuild` distributes parallel work per test **class**, so a class is
 /// indivisible and the longest one sets the whole suite's critical path (CLAUDE.md's cost model).
 /// Tests hung off one of the heavy classes cost the suite their whole runtime; the same tests in a
 /// class of their own cost it nothing, because a spare clone runs them beside the long one. The class
 /// this sentence used to name as the 515 s floor, `LayerPanelUITests`, was split into three on
 /// 2026-08-29 for exactly that reason — so re-take the table rather than quoting a number from here.
+///
+/// **The same argument then applied to this class and it was split in two on 2026-08-30**, D3 having
+/// taken it from ~40 s to a MEASURED 271 s over ten tests and made it the suite's second-longest.
+/// The seam is what a test is *about*: here, that the band opens, closes, follows the selected layer
+/// and stays in register with the pinned name column; there, what a finger does to a curve once it
+/// is drawn. Balanced on seconds and not on tests — 7 tests / 139 s here against 3 / 132 s there.
 ///
 /// **What is left for this tier and what is not.** Everything the band *draws* — the axis, the
 /// clipping, the colours, the sampling density — is `TimelineGraphBandLogicTests`, run headlessly
@@ -332,19 +339,35 @@ final class GraphEditorUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["Extend to End"].waitForExistence(timeout: 5),
                       "The arm is a cel identity, so the second tap still reaches the block's menu")
     }
+}
 
-    // MARK: - Stage D3: the gestures
+/// **Stage D3's gestures through a real finger** — KEYFRAMES.md §11.4.
+///
+/// **Split out of `GraphEditorUITests` on 2026-08-30, and the reason is the whole of CLAUDE.md's
+/// cost model rather than tidiness.** `xcodebuild` distributes parallel work per test *class*, so a
+/// class is indivisible and the longest one sets the suite's critical path. D3 took that class from
+/// ~40 s to a MEASURED **271 s over ten tests**, which made it the suite's second-longest — behind
+/// `SelectionAndMoveUITests` at 327 s and ahead of everything else. Two classes of ~135 s each
+/// distribute onto two clones and the floor falls back under `PerfBaselineTests`.
+///
+/// **The seam is the band's existence against the band's gestures**, and the balance is on measured
+/// seconds rather than on test count: three tests here against seven there, 132 s against 139 s.
+/// That asymmetry is the point — the three gesture tests each spend ~45 s, and nearly all of it is
+/// `authorAnAnimatedBrightnessCurve` rather than the gesture, because the graph editor edits curves
+/// and cannot be the thing that makes the first one. A split on test count would have put 3 s of
+/// work in one class and 268 in the other. It is `LayerPanelUITests`' lesson, where one test was a
+/// seventh of the class.
+///
+/// Everything these gestures *decide* is `TimelineGraphBandLogicTests`, headless and free: the hit
+/// radius, the neighbour clamp, the two axes, the tap predicate and the undo arithmetic. What only
+/// this tier can see is that a touch on a `UIView` inside a horizontally scrolling `UIScrollView`
+/// reaches the band at all — without `scrollView.panGestureRecognizer.require(toFail:)` every drag
+/// here is eaten by the scroll view and the band is a picture, which is exactly what D2 shipped.
+final class GraphEditorGestureUITests: PaintUITestCase {
 
-    /// **The whole of stage D3 through a real finger, and the §2.28 union with it.**
+    /// **A key travels under a finger, and the §2.28 union travels with it.**
     ///
-    /// Everything the drag *decides* is `TimelineGraphBandLogicTests`, run headlessly against
-    /// `TimelineGraphBand` — the hit radius, the neighbour clamp, the two axes, the undo arithmetic.
-    /// What only this tier can see is that a touch on a `UIView` inside a horizontally scrolling
-    /// `UIScrollView` reaches the band at all: without
-    /// `scrollView.panGestureRecognizer.require(toFail:)` every drag here is eaten by the scroll view
-    /// and the band is a picture, which is exactly what D2 shipped.
-    ///
-    /// **And the assertion that a moved key moves its keyframe is the one this feature could get
+    /// **The assertion that a moved key moves its keyframe is the one this feature could get
     /// wrong invisibly.** §2.28 makes a keyframe the *union* of the artist's explicit marks and every
     /// frame a channel keys on, computed by one accessor and never stored twice — both of the owner's
     /// device reports were a divergence between those two lists. So the marker band a row up must
@@ -440,6 +463,23 @@ final class GraphEditorUITests: PaintUITestCase {
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [removed], timeout: 5), .completed,
                        "…and a second tap, now on the key it just made, takes it away again")
+
+        // **And that removal is recoverable, which is not a free consequence of removing it.** A
+        // tap's write is a bare `setEffectParameterTrack`, and that records a step only while no
+        // gesture bracket is open — so the coordinator has to close the touch's drag *before* the
+        // write rather than after it in a `defer`. Get that ordering wrong and the key is deleted
+        // from the document with nothing on the undo stack; the app looks correct and one press of
+        // Undo takes back the wrong edit, or none.
+        app.buttons["sideToolbar.undoButton"].tap()
+        let back = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "brightnessContrast.brightness:0,3,6"),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed, """
+            One press of Undo brings a tapped-away key back. If this fails having removed the key, \
+            the removal was written inside an open gesture bracket and recorded nothing.
+            """)
+        XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String, "0|3|6",
+                       "…and the union came back with it")
     }
 
     /// **Ask 6, through a finger: a rubber band in empty space picks keys up, and grabbing any member
@@ -495,11 +535,16 @@ final class GraphEditorUITests: PaintUITestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed,
                        "A marquee move of two keys is still one press of Undo")
     }
+}
 
-    // MARK: - Fixture
+/// **The fixture both graph-editor classes share**, on `PaintUITestCase` rather than on either of
+/// them because the split of 2026-08-30 left it needed on both sides — a layout test authors a curve
+/// for the band to draw and a gesture test authors one to edit. `fileprivate`, so it stays this
+/// file's business and does not become a third thing to keep in step.
+private extension PaintUITestCase {
 
     /// The two values `authorAnAnimatedBrightnessCurve` left on the track.
-    private struct AuthoredCurve {
+    struct AuthoredCurve {
         /// The grade's stored default, keyed onto the earlier mark by the seed arm.
         let start: Double
         /// What the slider drag left, keyed onto the later one.
@@ -518,8 +563,8 @@ final class GraphEditorUITests: PaintUITestCase {
     ///
     /// - Returns: the two values the two keys hold, read off the slider rather than assumed, so a
     ///   test can compute where on the band each of them is drawn.
-    private func authorAnAnimatedBrightnessCurve(_ app: XCUIApplication,
-                                                 from: Int, to: Int) throws -> AuthoredCurve {
+    func authorAnAnimatedBrightnessCurve(_ app: XCUIApplication,
+                                         from: Int, to: Int) throws -> AuthoredCurve {
         openLayerPanel(app)
         addEffectLayerFromAddMenu(app)
         // The helper leaves the layer's options open inside the rail, and the rail covers the

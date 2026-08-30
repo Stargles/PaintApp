@@ -714,6 +714,37 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(backwards.values.first?.frame, 1, "Stopped by the key at 0, not by frame 0")
     }
 
+    /// **And frame 0 itself is a wall, for a key that has no neighbour below it at all.**
+    ///
+    /// The backwards case above is *not* this one and cannot stand in for it: its curve has a key
+    /// sitting on frame 0, so `below` is non-nil and the neighbour arm answers. The floor reaches a
+    /// first key through `below`'s `-1` sentinel instead, and nothing exercised that — a curve whose
+    /// earliest key is at frame 2, dragged ten frames left, is the only shape that does.
+    ///
+    /// §3.1 puts a layer channel in absolute document frames and the track begins at x 0, so a
+    /// negative frame is a key drawn off the left end of the band where no gesture can reach it back.
+    func testTheFirstKeyOfACurveIsStoppedByFrameZero() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(2, 0.0), (8, 2.0)]))
+        let drawn = channels(manager)
+        let first = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 2)
+
+        let moves = TimelineGraphBand.moves(of: [first], in: drawn,
+                                            translation: CGSize(width: -base * 10, height: 0),
+                                            pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(moves[first]?.frame, 0, "Ten frames left of frame 2 is frame 0, not frame -8")
+        XCTAssertEqual(TimelineGraphBand.applying(moves, to: drawn)[brightnessID]?.keys.map(\.frame),
+                       [0, 8])
+
+        // Two frames left is inside the allowance and lands exactly on the floor, so the clamp is
+        // pinned at the boundary as well as past it.
+        let exact = TimelineGraphBand.moves(of: [first], in: drawn,
+                                            translation: CGSize(width: -base * 2, height: 0),
+                                            pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(exact[first]?.frame, 0)
+    }
+
     /// The other half of the same rule: **an add onto a frame the channel already keys is refused.**
     /// Reachable without a near miss, because at `step > 1` the drawn line and the key's own dot are
     /// deliberately apart, so a tap can be on the line and forty points from the key that owns it.
@@ -741,6 +772,52 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     }
 
     // MARK: Tap to add, tap to remove
+
+    /// **A finished touch is a tap only if it never became a drag *and* it went nowhere.**
+    ///
+    /// The two halves are one conjunction and neither is redundant, which is what a truth table is
+    /// for. It shipped as the travel alone, with a comment borrowed from `CurveEditor` explaining
+    /// why `didMove` "would be the wrong question" — true there, where the flag is set only after a
+    /// handle has been grabbed, and false here, where `updateGraphBandTouch` sets it for the marquee
+    /// too before the gesture has decided which kind it is.
+    ///
+    /// What the missing half cost: press a key, nudge it past `tapSlop`, change your mind, bring the
+    /// finger back to where it started and lift. The travel is nothing, so the touch resolved as a
+    /// tap — on the key it was carrying, which is a **remove**. The key that was being dragged is
+    /// deleted, and (the drag's undo bracket being open, and `setEffectParameterTrack` recording
+    /// nothing while one is) with no undo step to bring it back.
+    func testATouchIsATapOnlyIfItNeitherMovedNorTravelled() {
+        let still = CGSize.zero
+        let inside = CGSize(width: TimelineGraphBand.tapSlop - 1, height: 0)
+        let sweep = CGSize(width: 200, height: 30)
+
+        XCTAssertTrue(TimelineGraphBand.isTap(didMove: false, translation: still))
+        XCTAssertTrue(TimelineGraphBand.isTap(didMove: false, translation: inside),
+                      "A fingertip is not a point, which is what `tapSlop` is for")
+
+        XCTAssertFalse(TimelineGraphBand.isTap(didMove: false, translation: sweep), """
+            A sweep that began on empty band grabbed nothing, so `didMove` is false — asking only \
+            that would call this a tap and drop a key wherever the finger stopped. `CurveEditor`'s \
+            own warning, and it still holds here.
+            """)
+        XCTAssertFalse(TimelineGraphBand.isTap(didMove: true, translation: still), """
+            A drag that changed its mind: out past the slop, then back to where it started. Asking \
+            only the travel calls this a tap, and a tap on the key it is carrying REMOVES that key — \
+            with the drag's bracket open, so `setEffectParameterTrack` records nothing and the \
+            deletion cannot be undone. This is the assertion the shipped predicate failed.
+            """)
+        XCTAssertFalse(TimelineGraphBand.isTap(didMove: true, translation: sweep),
+                       "An ordinary drag, which is neither half's disputed case")
+
+        // The boundary is inclusive, matching the `.changed` guard that sets `didMove` on strictly
+        // more than `tapSlop` — so no travel is both too far to be a tap and too near to be a drag.
+        XCTAssertTrue(TimelineGraphBand.isTap(didMove: false,
+                                              translation: CGSize(width: TimelineGraphBand.tapSlop,
+                                                                  height: 0)))
+        XCTAssertFalse(TimelineGraphBand.isTap(didMove: false,
+                                               translation: CGSize(width: TimelineGraphBand.tapSlop + 0.5,
+                                                                   height: 0)))
+    }
 
     /// `CurveEditor`'s two halves of one gesture, and the part that has no equivalent there: with
     /// several curves in one band, "add here" has to name one, and proximity is the only
@@ -774,6 +851,65 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(TimelineGraphBand.tap(at: farAbove, channels: drawn,
                                              pixelsPerFrame: base, bandHeight: band),
                        .nothing)
+    }
+
+    /// **The nearest *curve*, not the first one in reach** — and it is `nearestKey`'s weakness one
+    /// level down, in the same costume §11.4 already found it in twice.
+    ///
+    /// The test above is the only coverage `nearestChannel` had, and it cannot fail against a
+    /// first-match implementation: its two lines are 4 pt and 36 pt from the tap against a
+    /// `hitRadius` of 22, so exactly one of them is ever a candidate and "nearest" and "first" are
+    /// the same answer. Mutating the `distance < best!.distance` comparison to `best == nil` leaves
+    /// the whole suite green. This is the fixture where the two answers differ.
+    ///
+    /// What it guards is not hypothetical: a grade's two curves cross in the middle of the band —
+    /// that same fixture's do — and a tap between them there would add a key to whichever channel
+    /// `Effect.parameters` happens to list first rather than to the one under the finger.
+    func testATapNamesTheNearestOfTwoCurvesInReachAndNotTheFirst() {
+        let manager = gradedManager()
+        // Two lines eight points apart at frame 3, with the *far* one first in the walk: `channels`
+        // follows `Effect.parameters`, where brightness is index 0 and contrast index 1.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (10, 2.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 0.8), (10, 1.8)]))
+        let drawn = channels(manager)
+        XCTAssertEqual(drawn.map(\.parameterID), [brightnessID, contrastID], "PREMISE: this order")
+        let brightness = drawn.first { $0.parameterID == brightnessID }!
+        let contrast = drawn.first { $0.parameterID == contrastID }!
+
+        let column = TimelineGraphBand.x(ofFrame: 3, pixelsPerFrame: base)
+        let brightnessY = TimelineGraphBand.y(ofValue: brightness.curve.evaluate(at: 3),
+                                              in: brightness.axis, bandHeight: band)
+        let contrastY = TimelineGraphBand.y(ofValue: contrast.curve.evaluate(at: 3),
+                                            in: contrast.axis, bandHeight: band)
+        // Between the two lines and a quarter of the way off the nearer one.
+        let between = CGPoint(x: column, y: contrastY - (contrastY - brightnessY) / 4)
+        XCTAssertLessThan(abs(contrastY - between.y), abs(brightnessY - between.y),
+                          "PREMISE: contrast is the nearer of the two")
+        XCTAssertLessThan(abs(brightnessY - between.y), TimelineGraphBand.hitRadius,
+                          "PREMISE: and the wrong one is a candidate too, which is the whole test")
+        XCTAssertNil(TimelineGraphBand.nearestKey(to: between, channels: drawn,
+                                                  pixelsPerFrame: base, bandHeight: band),
+                     "PREMISE: no key is in reach, so a tap here is an add and not a remove")
+
+        XCTAssertEqual(TimelineGraphBand.nearestChannel(to: between, channels: drawn,
+                                                        pixelsPerFrame: base, bandHeight: band),
+                       contrastID,
+                       "The nearest line, not the first one the walk finds inside the radius")
+        XCTAssertEqual(TimelineGraphBand.tap(at: between, channels: drawn,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .add(parameterID: contrastID, frame: 3,
+                            value: TimelineGraphBand.value(atY: between.y, in: contrast.axis,
+                                                           bandHeight: band)),
+                       "…and the tap that rides on it names the same channel")
+
+        // Neither line in reach names nothing, which is what leaves the band's empty space free for
+        // the marquee to start in.
+        XCTAssertNil(TimelineGraphBand.nearestChannel(to: CGPoint(x: column,
+                                                                  y: TimelineGraphBand.verticalInset),
+                                                      channels: drawn, pixelsPerFrame: base,
+                                                      bandHeight: band))
     }
 
     // MARK: The marquee
@@ -835,6 +971,15 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// **A selection sliding into the frames its own leading edge just vacated loses no member.**
     /// `setKey` replaces on collision and the clamp never fires inside a rigid group, so the removals
     /// have to all happen before any insertion — which is the one thing `applying` arranges.
+    ///
+    /// **This test's kill power depends on `applying` walking its keys in a defined order, and for
+    /// most of a day it did not have one.** The walk was a `Dictionary`'s, whose order Swift seeds
+    /// per process, and the mutation this test names — insert each key as it is removed — is
+    /// harmless when that order comes out descending: each key vacates its frame before the one
+    /// behind it arrives. Three keys have six orders and one of them is that one, so the test caught
+    /// the defect about five runs in six and was green on the sixth, which is the worst of both
+    /// answers. `applying` now sorts ascending, and the slide below is **rightward** deliberately:
+    /// that is the pairing in which an interleaved walk destroys two of the three keys every time.
     func testAGroupSlidingOverItsOwnFramesLosesNothing() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
@@ -898,6 +1043,15 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
     /// A single tap is a single write and therefore a single step, with no bracket — the discrete
     /// half of the same rule.
+    ///
+    /// **And the second half of this test is why `finishGraphBandTouch` closes the drag *before* it
+    /// does the tap's write rather than in a `defer` after it.** The bracket that makes a drag one
+    /// step is the same mechanism that makes a bare write record *nothing*, so a tap whose write
+    /// happened while one was still open would be a deletion committed to the document with no way
+    /// back — and the drag then drops that bracket with `cancelStructureGesture`, because a clamped
+    /// drag may legitimately have written nothing of its own. The predicate above closes the door
+    /// that reaches this state; the ordering closes it a second time, which is what an
+    /// unrecoverable deletion is worth.
     func testATapToRemoveIsOneUndoStepOnItsOwn() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
@@ -911,6 +1065,22 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.undo()
         XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
                        [0, 5, 10])
+
+        // The same write with a gesture bracket open: it lands, it reports that it changed
+        // something, and it records nothing at all.
+        let openBracket = manager.history.undoStack.count
+        manager.beginStructureGesture()
+        XCTAssertTrue(manager.setEffectParameterTrack(layerIndex: gradeIndex,
+                                                      parameterID: brightnessID, to: curve),
+                      "PREMISE: the write itself succeeds either way")
+        XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
+                       [0, 10], "PREMISE: and the key really is gone from the document")
+        XCTAssertEqual(manager.history.undoStack.count - openBracket, 0, """
+            A write inside a gesture bracket records no step of its own — which is exactly what makes \
+            a drag one press of Undo, and exactly what would make a tap's removal unrecoverable if \
+            the two were ever allowed to overlap.
+            """)
+        manager.cancelStructureGesture()
     }
 
     /// **§2.28: moving a curve key moves the keyframe, because the union is computed and never

@@ -355,6 +355,32 @@ enum TimelineGraphBand {
     /// it landed on, and tap-to-remove could never fire.
     static let tapSlop: CGFloat = 5
 
+    /// **Whether a finished touch was a tap: it never became a drag, *and* it went nowhere.**
+    ///
+    /// Both, and neither alone — which is the one place D3 could not inherit `CurveEditor`'s answer
+    /// even though it inherited the grammar, and it is here rather than in the recogniser so that
+    /// the rule is a value the fast tier can read like every other rule the band decides.
+    ///
+    /// - `didMove` alone is what `CurveEditor`'s own comment warns against, and it is wrong in both
+    ///   files for the same reason: a touch that began on empty graph grabbed nothing, so the flag
+    ///   stays false while the finger travels an inch, and calling that a tap drops a key wherever
+    ///   it stopped.
+    /// - The **translation** alone is wrong here and is *not* wrong in `CurveEditor`, and this is the
+    ///   asymmetry that made the borrowed comment stop being true when it was carried over. There the
+    ///   flag is set only after a handle was grabbed; here it is set for the marquee too, before the
+    ///   gesture has decided which kind it is. So a drag that changes its mind — out past `tapSlop`,
+    ///   then back to where it started — arrives with a translation of nothing, and the translation
+    ///   alone reads it as a tap **on the key it was carrying**, and removes it.
+    ///
+    /// That deletion is worse than a mistaken edit. A tap's write is a bare
+    /// `setEffectParameterTrack`, and the reversed drag has an undo bracket open by then;
+    /// `setEffectParameterTrack` records **nothing** while a gesture snapshot is open, and the
+    /// bracket is then dropped by `cancelStructureGesture` because a clamped drag can easily have
+    /// written nothing of its own. The key is gone from the document with no undo step at all.
+    static func isTap(didMove: Bool, translation: CGSize) -> Bool {
+        !didMove && hypot(translation.width, translation.height) <= tapSlop
+    }
+
     /// The ring drawn around a key the marquee has picked up. Larger than `keyRadius`, so a
     /// selection is legible without the dot itself changing size and appearing to move.
     static let selectedKeyRadius: CGFloat = 5
@@ -605,11 +631,24 @@ enum TimelineGraphBand {
     /// collision — the interior of a rigid selection is exactly the case where the neighbour clamp is
     /// silent because it never fires.
     ///
+    /// **The walk is sorted, and that buys a test rather than a behaviour.** Removals-before-
+    /// insertions makes the result independent of the order the carried keys are visited in, so
+    /// sorting changes no answer this function gives. What it changes is what a *broken* version
+    /// gives: interleave the two halves and a rightward slide survives untouched whenever the walk
+    /// happens to run downwards, which for a `Dictionary` is a per-process coin flip — Swift seeds
+    /// its hashing per launch, so `testAGroupSlidingOverItsOwnFramesLosesNothing` killed that
+    /// mutation about five runs in six and was green on the sixth. A test that catches a defect
+    /// sometimes is worse here than one that never does: CLAUDE.md's triage section exists because a
+    /// one-off XCUITest red is usually environmental, and a genuinely intermittent test spends that
+    /// judgement for everyone. Ascending is the direction that makes an interleaved walk fatal to
+    /// the rightward slide the test drags.
+    ///
     /// - Returns: only the channels whose curve actually changed, keyed by parameter id.
     static func applying(_ moves: [KeyRef: Move], to channels: [Channel]) -> [String: AnimationCurve] {
         var result: [String: AnimationCurve] = [:]
         for channel in channels {
             let mine = moves.filter { $0.key.parameterID == channel.parameterID }
+                .sorted { $0.key.frame < $1.key.frame }
             guard !mine.isEmpty else { continue }
             var curve = channel.curve
             var moved: [AnimationCurve.Key] = []

@@ -1304,7 +1304,7 @@ case where the neighbour clamp is silent — the interior of a rigid group never
 `setKey`'s replace-on-collision would eat a member with nothing to see.
 
 **§2.28's union follows for free, and that was verified rather than assumed** — end to end, by a real
-finger. `GraphEditorUITests.testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows` drags the key at
+finger. `GraphEditorGestureUITests.testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows` drags the key at
 frame 0 and asserts the marker band a row up goes from `0|6` to `(0)|N|6`: the diamond moved with the
 key, and the frame it left kept the artist's explicit mark and went **hollow**, which is exactly the
 two-kinds distinction §2.26 exists for. Nothing writes a mark; the accessor computes the union, which
@@ -1332,13 +1332,97 @@ answers could not differ and the assertion was true of any implementation that r
 range*. §11.3's own finding, one stage later and in a subtler costume — the test named the right rule
 and could not see it. It now puts two dots 20 pt apart with the wrong one first.
 
-**What it cost the suite, since class granularity is the whole cost model.** `GraphEditorUITests`
-goes from three tests to six and from ~40 to **~183 class-seconds** — three of the new tests each
-spend ~45 s, and nearly all of it is the fixture rather than the gesture: there is no shorter way to
-author an animated channel than two keyframe marks and a slider drag, because the graph editor edits
-curves and cannot be the thing that makes the first one. That puts the class beside `PerfBaselineTests`
-(173 s) and nowhere near `LayerPanelUITests` (515 s), so it does not become the floor. If a fourth
-gesture test is ever wanted, the fixture is what to attack.
+## Reviewed 2026-08-30 — one real defect, and a comment that outlived its reasoning
+
+**`finishGraphBandTouch` decided tap-versus-drag from the translation alone**, under a comment copied
+from `CurveEditor` saying `didMove` "would be the wrong question". That sentence is true where it was
+written: `CurveEditor` sets the flag only after `guard let index = dragIndex`, so there it means *a
+handle was grabbed and then moved*. It is false here, because `updateGraphBandTouch` sets it for the
+marquee too, before the gesture has decided which kind it is. **The predicate is the conjunction,
+`!didMove && travel <= tapSlop`, and neither half is redundant** — the flag alone drops a key wherever
+an empty-band sweep stops, which is what the borrowed comment was really about; the travel alone calls
+a reversed drag a tap.
+
+What the missing half cost: press a key, nudge it past `tapSlop`, change your mind, bring the finger
+back and lift. The travel is nothing, so the touch resolved as a tap **on the key it was carrying** —
+which is a *remove*. And the deletion was **unrecoverable**: the tap's `setEffectParameterTrack` ran
+while the drag's bracket was still open, that call records nothing while a gesture snapshot is open,
+and the bracket was then dropped by `cancelStructureGesture` — the arm a drag takes when it wrote
+nothing of its own, which any key pinned at its `modelDomain` edge does (a `blur.radius` key at 0
+dragged downward clamps to 0, frame delta 0, `applying` returns `[:]`).
+
+**Both doors are shut, deliberately twice over.** The predicate is now
+`TimelineGraphBand.isTap(didMove:translation:)`, moved onto the band so the *fast tier* can read it —
+`TimelineTrackView.swift` is not compiled into `PaintSoftwareUITests`, which is exactly why a rule
+this load-bearing went a whole stage with no test that named it. And `endGraphBandDrag` is now called
+**before** the tap's write rather than in a `defer` after it, so no bracket can span a discrete write
+whatever the predicate is later changed to. The truth table is
+`testATouchIsATapOnlyIfItNeitherMovedNorTravelled`; that a tapped-away key comes back on one press of
+Undo is `testATapAddsAKeyToTheCurveItLandsOnAndRemovesOneItLandsOn`, end to end through a finger.
+
+**A cancelled drag now restores the selection as well as the curves, and it is one restore rather than
+two.** The drag rewrites the rings every tick alongside the keys — deliberately, so a set dragged four
+frames right is still drawn around itself — so putting only the curves back left refs naming frames
+that no longer key: no ring drew, grabbing a member stopped carrying the group, and nothing repaired
+it, `layoutGraphBand` clearing the selection when the band changes layer but never recomputing one.
+Two fingers reach it, the second touch cancelling the recogniser mid-drag. It is the only one of the
+four findings with no test: the selection is coordinator state and the band's accessibility value
+carries content only, so neither tier can see it without new machinery for a cosmetic bug.
+
+**And `applying` walks its keys sorted, which buys a test rather than a behaviour.** Removals-before-
+insertions is what makes the answer independent of the walk order, so sorting changes nothing this
+function returns. It changes what the *poisoned* version returns: interleave the two halves and a
+rightward slide is untouched whenever the walk runs downwards, which for a `Dictionary` is a coin flip
+on Swift's per-process hash seed — three keys, six orders, one of them safe, so
+`testAGroupSlidingOverItsOwnFramesLosesNothing` killed that mutation about five runs in six. **A test
+that catches a defect sometimes is worse than one that never does**, because this repo triages a
+one-off red as environmental until an isolated re-run says otherwise (CLAUDE.md), and an intermittent
+test spends that judgement for everyone.
+
+**"The nearest, not the first" has now been the same miss three times, at three levels.** §11.3 found
+it; the five-mutation pass above found it again for `nearestKey` and fixed *that* fixture — and left
+`nearestChannel` one level down with no test that could fail. Its only coverage was through `tap()`,
+on a fixture whose two lines sit 4 pt and 36 pt from the touch against a `hitRadius` of 22: one
+candidate, so "nearest" and "first" are the same answer and `if best == nil { best = ... }` is green
+across the whole suite. It now has a fixture of its own — both lines in reach, 8 pt apart, the wrong
+one first — and the case is real rather than contrived, because a grade's two curves cross mid-band
+and a first-match rule adds a key there to whichever channel `Effect.parameters` lists first rather
+than to the one under the finger. **The rule worth carrying out of the third occurrence: a proximity
+test proves nothing until its fixture holds two candidates.** With one, the assertion reads correctly
+and is true of any implementation that returns *something* in range.
+
+**A smaller one, and the brief that named it was half wrong.** The frame-0 floor in `moves` was
+untested, and is now covered by a curve whose earliest key is at frame 2 dragged ten frames left —
+`testAKeyIsStoppedByItsNeighbourRatherThanConsumingIt`'s backwards case has a blocker sitting *on*
+frame 0, so it exercises the neighbour arm and never this one. But the `max(0, …)` in that expression
+is not what makes the floor: `below` is never negative and the `?? -1` sentinel already yields 0, so
+the `max` is provably a no-op and no test could have distinguished it. The floor is the sentinel. The
+code is left as it stands, being correct; the note is here so the next reader does not go looking for
+the coverage gap that would justify it.
+
+**What it cost the suite, and the split that paid it back.** `GraphEditorUITests` went from three
+tests to ten and from ~40 s to a MEASURED **271 s** — taken serially on a dedicated device on
+2026-08-30, which made it the suite's **second-longest class**, behind `SelectionAndMoveUITests`
+(327 s) and ahead of `PerfBaselineTests`. Class granularity is the whole cost model: a class is
+indivisible and the longest one sets the critical path, so it was split in two along the seam between
+the band's *existence* and D3's *gestures*, both classes in the same file.
+
+| class | tests | MEASURED s |
+|---|---|---|
+| `GraphEditorUITests` — open/close, register with the pinned name column, drop targets, the two-stage tap, the channel-list button | 7 | **133** |
+| `GraphEditorGestureUITests` — drag a key, tap to add and remove, the marquee | 3 | **136** |
+
+Same run, same device, serial: 2237 tests, 0 failed, 3 skipped, and the graph tests still ten. The
+split cost the suite nothing — 269 s of work against 271 before it — and it can now occupy two clones.
+
+**Balanced on seconds and not on tests, which is why 7 against 3 is the right cut.** Each gesture test
+spends ~45 s and nearly all of it is `authorAnAnimatedBrightnessCurve` — two keyframe marks and a
+slider drag, there being no shorter way to author an animated channel, since the graph editor edits
+curves and cannot be the thing that makes the first one. A split on test count would have left 3 s on
+one side and 268 on the other and bought nothing. That is `LayerPanelUITests`' lesson of the day
+before, where one test was a seventh of its class. If a fourth gesture test is ever wanted, the
+fixture is what to attack; it now lives as a `fileprivate` extension on `PaintUITestCase`, both halves
+of the split needing it.
 
 **Ask 6's *cel* marquee stays future**, with its stub: "Select Multiple" sits in the cel menu today,
 `.disabled(true)`. What this stage built is the keyframe half of that ask, and the shape it settles —
