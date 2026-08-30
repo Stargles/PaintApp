@@ -1150,7 +1150,7 @@ private final class TimelineGraphBandView: UIView {
         self.pixelsPerFrame = pixelsPerFrame
         self.frameCount = frameCount
         self.visibleX = visibleX
-        accessibilityValue = TimelineGraphBand.encode(content.channels)
+        accessibilityValue = TimelineGraphBand.encode(content)
         if changed { setNeedsDisplay() }
     }
 

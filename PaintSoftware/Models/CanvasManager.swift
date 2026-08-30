@@ -122,7 +122,24 @@ final class CanvasManager: ObservableObject {
     /// has no meaning with the timeline closed, so putting it in the manifest would be a field that
     /// only ever says which panel was up last — §11.5 makes the same call about the channel list's
     /// visibility for the same reason. `interpolationThicknessFade` is the nearest precedent.
-    @Published var isGraphEditorOpen: Bool = false
+    ///
+    /// **Closing the band drops the channel filter with it**, which is D4's scoping rule stated in
+    /// the one place that cannot be bypassed: §11.5 makes the filter transient *because* it has no
+    /// meaning with the editor closed, so a filter that outlived the band would be exactly the state
+    /// the ruling refuses. The other half of the same rule is `Filter.hidden(on:)`, which answers `[]`
+    /// for any band but the one it was authored on.
+    @Published var isGraphEditorOpen: Bool = false {
+        didSet { if !isGraphEditorOpen { graphChannelFilter = .none } }
+    }
+
+    /// **Which of the open band's channels the artist has switched off** — KEYFRAMES.md §11.5,
+    /// set from `timeline.graphChannelsButton`'s popup.
+    ///
+    /// Transient view state for `isGraphEditorOpen`'s reason and one of its own: it can only ever
+    /// *subtract* from what the band would draw, so it changes no pixel of the document and there is
+    /// nothing in it a reopened project would be worse for having forgotten. Deliberately absent from
+    /// `LayerManifest`, `FolderManifest` and every codec.
+    @Published var graphChannelFilter: TimelineGraphChannelList.Filter = .none
 
     /// **The layer the band is held under while a timeline gesture owns the track**, or nil when it
     /// is free to follow the selection — KEYFRAMES.md §11.3. Written only through

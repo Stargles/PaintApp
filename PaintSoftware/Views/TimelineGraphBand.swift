@@ -75,6 +75,15 @@ enum TimelineGraphBand {
         /// channel list is what displays it, and it is carried here so that stage needs no second
         /// walk of `Effect.parameters`.
         let name: String
+        /// **The label for the group this channel belongs to** — `Effect.displayName`, the words the
+        /// artist picked the grade by, drawn by D4's channel list on the group's row.
+        ///
+        /// The group's *id* is the text before the dot in `parameterID` and needs no table
+        /// (§11.5); its **name** does, because a group has no descriptor and `EffectParameter.name`
+        /// is a field label rather than an effect's. Carried per channel rather than looked up,
+        /// which is `name`'s reason exactly: the channel list must not walk `Effect.parameters` a
+        /// second time to draw a header.
+        let groupName: String
         let curve: AnimationCurve
         /// `EffectParameter.uiRange`, verbatim, including its nil. `range(uiRange:keyValues:)` is
         /// what turns it into an axis.
@@ -100,8 +109,19 @@ enum TimelineGraphBand {
         /// the first stage to derive a row height from something other than `(rows, rowHeight)`, and
         /// a height outside the key draws once and never moves again.
         let height: CGFloat
-        /// In `Effect.parameters` order, which is `listedAnimationChannelIDs`' order.
+        /// In `Effect.parameters` order, which is `listedAnimationChannelIDs`' order — **and with
+        /// D4's channel list already applied**, which is why the filter needs no separate key field:
+        /// switching a channel off shortens this array and the gate opens on the same comparison it
+        /// always did.
         let channels: [Channel]
+        /// How many of the band's channels the channel list is holding back — D4 (§11.5).
+        ///
+        /// **Not redundant with a shorter `channels`, and that is the whole reason it is here.** A
+        /// band with nothing on it and a band with everything switched off draw the same picture and
+        /// are different states: the first is a layer that animates nothing, the second is a filter
+        /// the artist can undo. `encode(_ content:)` is what tells them apart, and this is the field
+        /// it reads.
+        let hiddenCount: Int
     }
 
     /// **The channels a band draws: the target's *animations*, by the strict predicate.**
@@ -135,6 +155,7 @@ enum TimelineGraphBand {
             else { return nil }
             return Channel(parameterID: parameter.id,
                            name: parameter.name,
+                           groupName: effect.displayName,
                            curve: curve,
                            uiRange: parameter.uiRange,
                            descriptorIndex: index)
@@ -352,6 +373,23 @@ enum TimelineGraphBand {
             channel.parameterID + ":" + channel.curve.keys.map { "\($0.frame)" }.joined(separator: ",")
         }.joined(separator: "|")
     }
+
+    /// **The band's value with D4's filter accounted for, which is one more state than the curves
+    /// alone can express.**
+    ///
+    /// A band the artist has emptied by unchecking every box draws the same nothing as a band on a
+    /// layer that animates nothing, and `"empty"` is the wrong word for it: `"empty"` exists because
+    /// an artist looking for a curve that was never there is the failure, and here the curves *are*
+    /// there. `"hidden"` says the band is blank on purpose and the way back is the list. It is what
+    /// the view publishes, and it is why `Content` carries `hiddenCount` rather than only a shorter
+    /// `channels`.
+    ///
+    /// The artist's own version of this distinction is not the accessibility value — it is
+    /// `CanvasManager.graphBandHasHiddenChannels`, which tints the button the filter was set from.
+    static func encode(_ content: Content) -> String {
+        if content.channels.isEmpty && content.hiddenCount > 0 { return "hidden" }
+        return encode(content.channels)
+    }
 }
 
 extension CanvasManager {
@@ -415,14 +453,25 @@ extension CanvasManager {
     ///
     /// Costs nothing while the band is closed, which is every document that has not opened it: one
     /// `Bool` and a return.
+    ///
+    /// **D4's channel filter is applied *here*, before the key is built, and that placement is the
+    /// whole of §11.5's silent failure.** `relayout()` early-returns on `built.key == laidOutKey`, so
+    /// a filter applied any later — in `TimelineGraphBandView.draw`, say, reading the manager — would
+    /// change what the band should draw without changing the key, and unchecking a box would move
+    /// nothing on screen until some unrelated edit happened to reopen the gate. Filtering into
+    /// `channels` makes the key move for free and leaves the drawing code untouched, which is the
+    /// same bargain `trackMarkers` takes: what is drawn *is* what is keyed on.
     var graphBandContent: TimelineGraphBand.Content? {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return nil }
-        return TimelineGraphBand.Content(
-            layerIndex: expansion.layerIndex,
-            height: expansion.height,
-            channels: TimelineGraphBand.channels(effect: storedEffect(of: target),
-                                                 tracks: keyframeState(of: target).tracks))
+        let all = TimelineGraphBand.channels(effect: storedEffect(of: target),
+                                             tracks: keyframeState(of: target).tracks)
+        let shown = TimelineGraphChannelList.visible(all,
+                                                     hidden: graphChannelFilter.hidden(on: target))
+        return TimelineGraphBand.Content(layerIndex: expansion.layerIndex,
+                                         height: expansion.height,
+                                         channels: shown,
+                                         hiddenCount: all.count - shown.count)
     }
 }

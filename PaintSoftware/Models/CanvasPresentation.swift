@@ -55,6 +55,17 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// lines below it, and it was broken in exactly the same way.
     case interpolateOptions
 
+    /// The graph editor's channel list, hung off the button that appears beside the graph editor
+    /// toggle while the band is open — KEYFRAMES.md §11.5.
+    ///
+    /// **A `.popover` and therefore a case here, rather than an inline panel or an `ActivePanel`.**
+    /// It is `onionSkinOptions` and `interpolateOptions` line for line: a list of controls presented
+    /// from the timeline's own toolbar over a mounted, touchable `CanvasView`, with its openness held
+    /// in a `Binding`. An inline docked panel would not be a presentation at all and a case for one
+    /// would be wrong; `ActivePanel` is the canvas's settings rail and answers a different question
+    /// (`CanvasTouchOwner` reads it to decide who owns a touch), which this list has no part in.
+    case graphChannelList
+
     // MARK: - The layer rail and its options panels
 
     /// `ViewSelectorMenu`, off the layer panel's "Views" button.
@@ -115,10 +126,10 @@ enum CanvasPresentation: String, CaseIterable, Hashable, Identifiable {
     /// side.
     var overlapsLiveCanvas: Bool {
         switch self {
-        case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions,
+        case .timelineSlotMenu, .onionSkinOptions, .interpolateOptions, .graphChannelList,
              .layerViewSelector, .canvasBackgroundColour, .valueLayerColour,
              .effectOutlineColour, .effectGradientStopColour:
-            // All eight are `.popover`s presented from chrome that sits over a mounted, touchable
+            // All nine are `.popover`s presented from chrome that sits over a mounted, touchable
             // `CanvasView`. A `.popover` left to its own dismissal is dismissed *by* the touch that
             // lands outside it, and this repo has observed twice that the touch is not swallowed:
             // the stroke begins, and the presentation's teardown lands in the middle of the touch

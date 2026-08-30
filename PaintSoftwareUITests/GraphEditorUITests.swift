@@ -109,6 +109,54 @@ final class GraphEditorUITests: PaintUITestCase {
                        "…and the row below is still in register — one TimelineRowLayout, two columns")
     }
 
+    /// **The channel list is a control of the editor, so it comes and goes with it** —
+    /// KEYFRAMES.md §11.5, stage D4.
+    ///
+    /// The one thing about D4 no logic test can see, and the reason it is here rather than only in
+    /// `TimelineGraphChannelListLogicTests`: the list hangs off a **second** button rather than off
+    /// the graph editor's own, because a control that both toggles and raises a menu has no good
+    /// gesture for its second tap. That is a fact about two SwiftUI views in a file this target does
+    /// not compile, so what is assertable is exactly this — the second button does not exist until
+    /// the band does, and it goes away with it.
+    ///
+    /// **Asserted on a fresh document, which animates nothing**, so the popup comes up saying so.
+    /// That is the state being pinned rather than a shortcoming of the fixture: authoring a curve
+    /// through the settings bar costs minutes of gestures, and everything the boxes *do* once there
+    /// is one is pinned headlessly against `CanvasManager` in the fast tier.
+    func testTheChannelListButtonExistsOnlyWhileTheBandIsOpen() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let editor = app.buttons["timeline.graphEditorButton"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        let channels = app.buttons["timeline.graphChannelsButton"]
+        XCTAssertFalse(channels.exists,
+                       "There is no graph editor yet, so there is no option in one")
+
+        editor.tap()
+        XCTAssertTrue(channels.waitForExistence(timeout: 5),
+                      "Opening the band puts its channel list button beside the toggle")
+
+        channels.tap()
+        let empty = app.staticTexts["timeline.graphChannels.empty"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 5),
+                      "A popup that came up holding nothing says so rather than being blank")
+
+        // The popover has to come down before the toggle can be tapped again: a tap outside a
+        // `.popover` is spent dismissing it and does not reach what it landed on, which is the whole
+        // reason `CanvasPresentation` exists.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        let popupGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+                                                  object: empty)
+        XCTAssertEqual(XCTWaiter().wait(for: [popupGone], timeout: 5), .completed)
+
+        editor.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+                                             object: channels)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed,
+                       "Closing the band takes the option with it — it is not a timeline control")
+    }
+
     /// **What D2's repurposed button had to leave behind, and did not.**
     ///
     /// §2.22's keyframe button became the graph editor toggle on the reasoning that Add / Remove /

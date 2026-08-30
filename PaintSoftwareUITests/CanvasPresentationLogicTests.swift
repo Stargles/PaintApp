@@ -36,13 +36,14 @@ final class CanvasPresentationLogicTests: XCTestCase {
     /// Adding a case to `CanvasPresentation` without adding it below fails the count assertion, and
     /// the message is addressed to whoever is reading it in that moment.
     private let expectedOverlapsLiveCanvas: [String: Bool] = [
-        // The eight `.popover`s presented from chrome that sits over a mounted, touchable
+        // The nine `.popover`s presented from chrome that sits over a mounted, touchable
         // `CanvasView`. A `.popover` left to its own dismissal is dismissed *by* the touch that lands
         // outside it, and this repo has twice observed that the touch is not swallowed: the stroke
         // begins and the teardown lands mid-sequence.
         "timelineSlotMenu": true,          // the original reported freeze
         "onionSkinOptions": true,          // symptom 2 of the 2026-08-18 report
         "interpolateOptions": true,        // never reported, identical line for line
+        "graphChannelList": true,          // §11.5, and the same shape as the two above it
         "layerViewSelector": true,
         "canvasBackgroundColour": true,
         "valueLayerColour": true,          // also closes an undo bracket on the way out

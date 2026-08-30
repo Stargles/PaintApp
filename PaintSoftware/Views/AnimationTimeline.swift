@@ -64,6 +64,16 @@ struct AnimationTimeline: View {
     // opened on the first tap would put a mode change behind an extra step.
     @State private var showOnionSkinOptions = false
 
+    // The graph editor's channel list (§11.5), opened from a button that only exists while the band
+    // is open. Cleared by `graphEditorButton`'s `onChange` when the band closes — see the note there.
+    @State private var showGraphChannels = false
+
+    /// Which channel groups the artist has folded shut in that list. **Collapsed rather than
+    /// expanded**, so the default — nothing in the set — is every group open, which is the only
+    /// useful first state for a list that today has exactly one group. Pure presentation: it names no
+    /// channel and filters nothing, so unlike the visibility filter it does not belong on the model.
+    @State private var collapsedGraphChannelGroups: Set<String> = []
+
     /// A vector block dropped on a raster layer, waiting on the artist's answer. Non-nil raises the
     /// rasterize alert; the drop is only applied if they say yes. Held by identity (see
     /// `CanvasManager.CelDropRequest`) because the indices it came from can be renumbered while the
@@ -548,15 +558,157 @@ struct AnimationTimeline: View {
     /// where an artist who dragged the timeline down will look for it. It is also where the tint earns
     /// the most: collapsed, the band is not on screen at all.
     ///
-    /// The channel list ask 3 also wants is **not** on this button — §11.5 makes it a control inside
-    /// the band, because hanging a second popover here would give one control two jobs and one of
-    /// them would have to win the second tap.
+    /// The channel list ask 3 also wants is **not** on this button — §11.5 makes it a control of the
+    /// graph editor's own (`graphChannelsButton`, which appears beside this one while the band is
+    /// open), because hanging a second popover here would give one control two jobs and one of them
+    /// would have to win the second tap.
     private var graphEditorButton: some View {
         Button(action: { canvasManager.isGraphEditorOpen.toggle() }) {
             Image(systemName: "chart.xyaxis.line")
         }
         .foregroundColor(canvasManager.isGraphEditorOpen ? .blue : .white)
         .accessibilityIdentifier("timeline.graphEditorButton")
+        // The channel list is a control *of* the editor, so it cannot outlive it. Closing the band
+        // deletes the button its popover hangs off, and `CanvasPresentationModifier`'s `onDisappear`
+        // deliberately does not write the site's own flag — so a popover left open through a host
+        // deletion comes straight back up when the host returns. This button is rendered
+        // unconditionally, so it is the reliable place to watch from.
+        .onChange(of: canvasManager.isGraphEditorOpen) { _, isOpen in
+            if !isOpen { showGraphChannels = false }
+        }
+    }
+
+    /// **The graph editor's channel list** — KEYFRAMES.md §11.5, stage D4. The owner: *"just a button
+    /// option in the graph editor which brings up a scrollable popup menu, which is basically an
+    /// include or exclude checkmark box for each animation."*
+    ///
+    /// **Beside the graph editor button rather than on it, and rendered only while the band is
+    /// open.** A toggle that also raises a menu has no good gesture — the second tap has to mean one
+    /// of the two — so ask 3's "the button brings up the list as well" is answered by a second
+    /// button that exists exactly when there is an editor for it to be an option of.
+    ///
+    /// **Tinted blue while anything is switched off**, `graphEditorButton`'s reason: a filter with no
+    /// visible sign of itself is a band that looks broken. It matters most in the state that has no
+    /// other signal — every channel hidden, so the band is correctly blank and only this says why.
+    private var graphChannelsButton: some View {
+        Button(action: { showGraphChannels.toggle() }) {
+            Image(systemName: "line.3.horizontal.decrease")
+        }
+        .foregroundColor(canvasManager.graphBandHasHiddenChannels ? .blue : .white)
+        .accessibilityIdentifier("timeline.graphChannelsButton")
+        .canvasPresentation(.graphChannelList, isPresented: $showGraphChannels,
+                            canvasManager: canvasManager) {
+            graphChannelList
+                .frame(width: 250)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    /// The popup itself: one section per group, each a whole-group box over its channels' boxes.
+    ///
+    /// **Scrollable, because the owner asked for it and because thirteen effects' worth of channels
+    /// will not fit** — and capped in height so a short list is a short popover rather than a tall
+    /// one with air in it.
+    ///
+    /// **Groups start expanded and the chevron collapses them.** The owner's *"drop down"* is about
+    /// switching a group's channels as a whole, which is the box; a list whose one group came up
+    /// collapsed would show the artist nothing, and today every band has exactly one group —
+    /// one layer is one grade is one id prefix.
+    private var graphChannelList: some View {
+        let groups = canvasManager.graphChannelGroups ?? []
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if groups.isEmpty {
+                    // The same answer the band gives, in words: a surface that came up holding
+                    // nothing says so rather than being blank (LASSO_MOVE §5.24, read across).
+                    Text("This layer animates nothing")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .accessibilityIdentifier("timeline.graphChannels.empty")
+                }
+                ForEach(groups) { group in
+                    graphChannelGroupRow(group)
+                    if !collapsedGraphChannelGroups.contains(group.id) {
+                        ForEach(group.rows, id: \.parameterID) { row in
+                            graphChannelRow(row)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .frame(maxHeight: 300)
+    }
+
+    private func graphChannelGroupRow(_ group: TimelineGraphChannelList.Group) -> some View {
+        HStack(spacing: 8) {
+            Button(action: {
+                if collapsedGraphChannelGroups.contains(group.id) {
+                    collapsedGraphChannelGroups.remove(group.id)
+                } else {
+                    collapsedGraphChannelGroups.insert(group.id)
+                }
+            }) {
+                Image(systemName: collapsedGraphChannelGroups.contains(group.id)
+                      ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10))
+                    .frame(width: 14)
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+            .accessibilityIdentifier("timeline.graphChannels.disclosure.\(group.id)")
+
+            Button(action: {
+                canvasManager.setGraphChannels(group.rows.map(\.parameterID),
+                                               visible: group.visibilityAfterToggle)
+            }) {
+                HStack(spacing: 8) {
+                    // Three states, because a group can be half off: checked, dashed, empty. The
+                    // dash is what stops "some are hidden" reading as "none are".
+                    Image(systemName: group.isMixed ? "minus.square"
+                          : (group.isFullyVisible ? "checkmark.square.fill" : "square"))
+                    Text(group.name).font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(group.isFullyVisible || group.isMixed ? .primary : .secondary)
+            .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
+            .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
+
+    private func graphChannelRow(_ row: TimelineGraphChannelList.Row) -> some View {
+        // The swatch is the band's colour for this curve, taken from the **descriptor** index the
+        // row carries — the same input the band draws with, so hiding a channel repaints nothing.
+        let colour = TimelineGraphBand.colour(forDescriptorIndex: row.descriptorIndex)
+        return Button(action: {
+            canvasManager.setGraphChannels([row.parameterID], visible: !row.isVisible)
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: row.isVisible ? "checkmark.square.fill" : "square")
+                Circle()
+                    .fill(Color(hue: colour.hue, saturation: colour.saturation,
+                                brightness: colour.brightness))
+                    .frame(width: 8, height: 8)
+                    .opacity(row.isVisible ? 1 : 0.3)
+                Text(row.name).font(.caption)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(row.isVisible ? .primary : .secondary)
+        .padding(.leading, 34)
+        .padding(.trailing, 12)
+        .padding(.vertical, 6)
+        .accessibilityIdentifier("timeline.graphChannels.\(row.parameterID)")
+        .accessibilityValue(row.isVisible ? "on" : "off")
     }
 
     /// Interpolate mode's entry point, next to onion skin and loop rather than in the canvas's top
@@ -614,6 +766,7 @@ struct AnimationTimeline: View {
                 loopButton
                 interpolateButton
                 graphEditorButton
+                if canvasManager.isGraphEditorOpen { graphChannelsButton }
                 Spacer()
                 frameLabel
             }
@@ -634,6 +787,9 @@ struct AnimationTimeline: View {
                 loopButton
                 interpolateButton
                 graphEditorButton
+                // Rendered from both bars, like every other button in this group: a control added to
+                // only one is invisible in the other state.
+                if canvasManager.isGraphEditorOpen { graphChannelsButton }
 
                 Spacer()
 
