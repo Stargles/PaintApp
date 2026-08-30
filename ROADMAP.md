@@ -55,8 +55,9 @@ is narrower than it looks, and the code adds three dependencies the owner did no
   three.
 - **Unnamed: (4) needs a real playback clock, and there is none.** Playback is a
   `Timer.scheduledTimer(withTimeInterval: 1.0/fps)` whose callback re-dispatches onto the main queue
-  and increments an `Int` (`PaintSoftware/Views/AnimationTimeline.swift:729-734`); the state lives on
-  the *view* (`:13-14`), not the model. That drifts, and today nothing notices because the only
+  and calls `advancePlayback()` (`PaintSoftware/Views/AnimationTimeline.swift:976-989` — **re-checked
+  2026-08-30; this file said `:729-734`, which is now the frame label**); `isPlaying` and
+  `playbackTimer` live on the *view* (`:13-14`), not the model. That drifts, and today nothing notices because the only
   consumer is the playhead. Audio is a hardware clock, so drift becomes what the artist hears, and
   lipsync is where they see it. **INFERRED**: the first work in item (4) is moving playback onto the
   model behind a monotonic time base — a timeline change, not an audio feature.
