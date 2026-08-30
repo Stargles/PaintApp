@@ -58,10 +58,17 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
     // MARK: - Which channels the band draws
 
-    /// **The band's channel list and `listedAnimationChannelIDs` are the same list, and they have to
-    /// stay so.** Two implementations of one invariant is the defect §2.28 was written about — the
+    /// **`channels(effect:tracks:)` and `listedAnimationChannelIDs` are the same list, and they have
+    /// to stay so.** Two implementations of one invariant is the defect §2.28 was written about — the
     /// two device reports of 2026-08-29 were a keyframe union computed twice and diverging — so this
     /// pins the ids against the model's own accessor rather than against a literal.
+    ///
+    /// **The second half of the fixture is not decoration, and it was missing until 2026-08-30.** With
+    /// both channels animated, a `channels` that did not filter *at all* returns the same array as one
+    /// that does, so every assertion here was true of an implementation with the predicate deleted —
+    /// mutating `.filter(\.isAnimated)` away left this green and was caught only by a neighbour. It is
+    /// the fixture-with-one-candidate defect this repo has now found four times, in its fourth
+    /// costume: **a filter is unpinned until its fixture holds something the filter must reject.**
     func testTheBandDrawsExactlyTheChannelsTheModelCallsAnimations() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
@@ -74,6 +81,16 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        "The band asks the same question the channel list does, in the same order")
         XCTAssertEqual(channels(manager).map(\.parameterID), [brightnessID, contrastID],
                        "…which is `Effect.parameters` order, not dictionary order")
+
+        // Now make contrast a curve in force rather than an animation, so the two answers differ.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 1.0), (6, 1.0)]))
+        XCTAssertEqual(channels(manager).map(\.parameterID),
+                       manager.listedAnimationChannelIDs(of: target(manager)),
+                       "Still the model's own answer with something for the predicate to refuse")
+        XCTAssertEqual(channels(manager).map(\.parameterID), [brightnessID])
+        XCTAssertEqual(allChannels(manager).map(\.parameterID), [brightnessID, contrastID],
+                       "…while the band lists both and draws the refused one dashed")
     }
 
     /// **A flat curve is in force, is not an animation, and is drawn — dashed.**
