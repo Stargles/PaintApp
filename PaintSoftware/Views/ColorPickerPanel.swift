@@ -63,8 +63,23 @@ struct ColorPickerPanel: View {
     private enum Tab: Hashable { case color, palettes }
     @State private var tab: Tab = .color
 
-    private static let hueSpectrum: [Color] = stride(from: 0.0, through: 1.0, by: 1.0 / 6).map {
-        Color(hue: $0, saturation: 1, brightness: 1)
+    /// The hue bar's stops.
+    ///
+    /// **Seventy-three samples of the hue function rather than seven**, and both halves of that are
+    /// argued in `ColorMath.hueRailStopCount` / `ColorMath.hueRail` rather than here, because the
+    /// choice is testable and this file is not in the test target. The short version: the seven this
+    /// replaced sat exactly on the six corners of the hue function, so the bar was correct *provided*
+    /// `LinearGradient` interpolates in the same sRGB component space `Color(hue:saturation:
+    /// brightness:)` is defined in. Nobody documents that it does, and if it interpolates in linear
+    /// light instead the middle of each sixth is 74/255 wrong — the colour under the drag thumb
+    /// beside the colour the thumb paints. At 73 the bar is within 2/255 of the hue function either
+    /// way, so it no longer depends on the answer.
+    ///
+    /// **Sampled, not mixed in Oklab.** The bar has to show the colour this panel will produce at
+    /// that x, which is the hue function and nothing smoother; `ColorMath.hueRail` measures what
+    /// mixing the corners in Oklab would cost (14.3 degrees of hue).
+    private static let hueSpectrum: [Color] = ColorMath.hueRail().map {
+        Color(red: $0.r, green: $0.g, blue: $0.b)
     }
 
     private var currentColor: Color {

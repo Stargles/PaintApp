@@ -1,0 +1,26 @@
+orange to blue  middle brightness: before 0.52, after 0.61 (the ends average 0.61) — the ramp moves up to 60 of 255
+green to magenta  middle brightness: before 0.52, after 0.68 (the ends average 0.68) — the ramp moves up to 70 of 255
+red to cyan  middle brightness: before 0.53, after 0.67 (the ends average 0.67) — the ramp moves up to 79 of 255
+pure red to pure blue  middle brightness: before 0.42, after 0.54 (the ends average 0.54) — the ramp moves up to 83 of 255
+black to white: the greyscale ramp is up to 31 of 255 darker, worst at input 69
+black to white: input 113 was 113, is now 83
+hue bar — 7 colours, filled in one way: up to 1 of 255 from the picker's own colour
+hue bar — 7 colours, filled in the other: up to 74 of 255 from the picker's own colour
+hue bar — 73 colours (what ships now): up to 2 of 255 from the picker's own colour
+hue bar — 7 colours, smoothly blended: up to 61 of 255 from the picker's own colour
+hue bar — blending the corners is up to 14.3 degrees of hue from the picker's own colour
+hue bar — 7 stops: 1 of 255 filled in one way, 74 the other
+hue bar — 33 stops: 11 of 255 filled in one way, 15 the other   <- does not divide into sixths, so a straight piece crosses a corner
+hue bar — 49 stops: 1 of 255 filled in one way, 5 the other
+hue bar — 61 stops: 0 of 255 filled in one way, 3 the other
+hue bar — 73 stops: 1 of 255 filled in one way, 2 the other
+hue bar — 97 stops: 1 of 255 filled in one way, 2 the other
+
+gradient preview — 2 stops: up to 85 of 255 from the real ramp filled in one way, 104 the other   <- the two raw stops, which is what the preview used to be
+gradient preview — 17 stops: up to 19 of 255 from the real ramp filled in one way, 3 the other
+gradient preview — 33 stops: up to 12 of 255 from the real ramp filled in one way, 1 the other
+gradient preview — 65 stops: up to 7 of 255 from the real ramp filled in one way, 1 the other
+gradient preview — 129 stops: up to 3 of 255 from the real ramp filled in one way, 1 the other
+
+EXHAUSTIVE: rgb -> Oklab -> rgb over all 16,777,216 8-bit triples
+  triples that do not come back to the same byte: 0, worst by 0

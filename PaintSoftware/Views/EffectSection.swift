@@ -951,19 +951,20 @@ struct GradientStopsEditor: View {
             .accessibilityValue(stops.map { String(format: "%.2f", $0.position) }.joined(separator: ";"))
     }
 
-    /// SwiftUI refuses to build a gradient from an empty stop list and draws nothing useful from one
-    /// entry, so both degenerate cases become the flat colour `Effect.gradientTable` also resolves
-    /// them to — the preview agrees with the render even where the render is a single colour.
+    /// **Resampled rather than handed over, because the ramp is no longer a straight line.**
+    /// `Effect.gradientTable` mixes between two stops through Oklab (TODO item (10a)), and a
+    /// `LinearGradient` given the two raw stops would draw the straight RGB line instead — a preview
+    /// showing a muddy middle the canvas does not have, MEASURED at up to 85/255 apart.
+    /// `Effect.gradientRampStops` samples the ramp the render actually uses, so the two agree by
+    /// construction rather than by two loops staying in step; its own note carries the residual.
+    ///
+    /// It also owns the two degenerate cases this property used to state — SwiftUI refuses to build a
+    /// gradient from an empty stop list and draws nothing useful from one entry, so both become the
+    /// flat colour `Effect.gradientTable` also resolves them to.
     private var previewStops: [Gradient.Stop] {
-        let sorted = stops.sorted { $0.position < $1.position }
-        guard let first = sorted.first else {
-            return [Gradient.Stop(color: .black, location: 0), Gradient.Stop(color: .black, location: 1)]
+        Effect.gradientRampStops(stops).map {
+            Gradient.Stop(color: $0.color.color, location: CGFloat($0.position))
         }
-        guard sorted.count > 1 else {
-            return [Gradient.Stop(color: first.color.color, location: 0),
-                    Gradient.Stop(color: first.color.color, location: 1)]
-        }
-        return sorted.map { Gradient.Stop(color: $0.color.color, location: CGFloat($0.position)) }
     }
 
     private func stopRow(_ index: Int) -> some View {

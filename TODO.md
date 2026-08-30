@@ -191,11 +191,23 @@ LAYER_TRANSFORM.md.
 
       **So (10) is now two items with different priorities.**
 
-      - **(10a) The ramps — build this, it is what the owner asked for.** Oklab mixing for `Effect`'s
-        gradient table and for the colour picker's rails. Per *colour*, not per pixel per frame; outside
-        the compositor parity gate entirely; nothing on disk changes. This is the owner's original
-        *"RGB goes muddy through the middle between two saturated hues"* rendered as the one place the
-        code literally does that.
+      - **(10a) The ramps — BUILT 2026-08-30, and the owner has one thing left to rule.** `ColorMath`
+        gained sRGB↔linear, Oklab both ways and `mixOklab`; `Effect`'s gradient ramp mixes through it;
+        the picker's hue bar went from 7 samples to 73 and the settings panel's gradient preview is
+        resampled so it cannot show a ramp the canvas does not render. Per *colour*, not per pixel per
+        frame; nothing reaches the compositor and nothing on disk changed.
+        **The pictures are `docs/oklab-ramps/`, generator `tools/oklab_ramp_ab.swift`** — which compiles
+        the shipped `ColorMath.swift` in rather than porting it, so the bars are drawn by the app's own
+        function. `01-the-ramps.png` is the owner's sentence rendered; the ramp moves up to 79/255.
+        **`02-the-cost.png` is the ruling that is still open**: the default Gradient Map is black to
+        white, and a black-to-white gradient map used to be an exact greyscale conversion (entry 113 was
+        113). It now darkens the midtones by up to 31/255, because the rule is applied to achromatic
+        stops like any others. Leaving greys alone would be a special case; the owner may want it.
+        **Two premises in the brief for this were wrong and are worth carrying:** the hue bar's seven
+        stops were already *exact* under one plausible gradient interpolation (and 74/255 wrong under the
+        other, which is why they were densified) — and Oklab-*mixing* those seven, which is what "fix the
+        rail" naturally suggests, lands 14.3° of hue from the colour the picker paints. It is the wrong
+        bar, measured.
       - **(10b) The pipeline switch — deprioritised, and RE-SCOPED by the ruling above.** Linear light for
         blend modes becomes **an option on the blend mode**, not a consequence of a document-wide flag; the
         document-wide flag covers only the dab/stroke-over-stroke site. That is a better shape than the one

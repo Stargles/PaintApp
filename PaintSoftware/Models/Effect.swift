@@ -811,38 +811,110 @@ extension Effect {
         return bytes
     }
 
-    /// The gradient sampled at 256 evenly spaced positions, linear between stops.
+    /// The gradient's colour at position `t`, on an already-sorted, non-empty stop list.
+    ///
+    /// **The one definition of what a stop list means.** `gradientTable` samples this at 256 evenly
+    /// spaced positions to build the bytes both backends read, and `gradientRampStops` samples it
+    /// wherever the settings-panel preview needs a stop, so the picture in the panel and the pixels
+    /// on the canvas cannot drift apart the way they would if each had its own loop.
+    ///
+    /// **Between two stops the mix goes through Oklab, not through the RGB channels** — TODO item
+    /// (10a), and the owner's complaint stated as code: *"RGB goes muddy through the middle between
+    /// two saturated hues."* Lerping the three channels puts the middle of the ramp well below the
+    /// lightness either end suggests, because the channel values are gamma-encoded. MEASURED on the
+    /// 256 entries: orange-to-blue moves up to 60/255, green-to-magenta 70/255, red-to-cyan 79/255,
+    /// and in every case the move is the middle of the ramp getting *lighter* — see
+    /// `docs/oklab-ramps/`.
+    ///
+    /// **What it costs, stated because it is not free.** The default stop list is black to white, and
+    /// a black-to-white gradient map used to be exactly "the pixel's own `Lum`, restated as a
+    /// colour": entry 113 was (113, 113, 113). Through Oklab it is (83, 83, 83), because the entry
+    /// whose *perceptual lightness* is 0.443 is darker than the byte 113. So a gradient map used to
+    /// convert to greyscale now darkens the midtones by up to 31/255. That is the same rule applied
+    /// consistently rather than a special case for greys, and `docs/oklab-ramps/02-the-cost.png` is
+    /// the picture of it.
+    private static func gradientColour(_ sorted: [GradientStop], at t: Double) -> CodableColor {
+        guard let first = sorted.first else { return CodableColor(red: 0, green: 0, blue: 0, alpha: 1) }
+        guard let upper = sorted.firstIndex(where: { $0.position >= t }) else {
+            return sorted[sorted.count - 1].color
+        }
+        guard upper > 0 else { return first.color }
+
+        let low = sorted[upper - 1].color, high = sorted[upper].color
+        let span = sorted[upper].position - sorted[upper - 1].position
+        let f = span > 0 ? (t - sorted[upper - 1].position) / span : 0
+        let mixed = ColorMath.mixOklab((r: low.red, g: low.green, b: low.blue),
+                                       (r: high.red, g: high.green, b: high.blue), f)
+        return CodableColor(red: mixed.r, green: mixed.g, blue: mixed.b, alpha: 1)
+    }
+
+    /// The gradient sampled at 256 evenly spaced positions.
     ///
     /// An empty or single-stop gradient is a flat colour rather than an error, and an unsorted stop
     /// list is sorted here — both because a manifest is not a place to require an invariant that the
     /// UI could break and the document then fail to open (§6.6's "show the artwork" direction).
+    ///
+    /// **What the Oklab mix costs here, MEASURED** (`swiftc -O` on the host Mac, 20,000 builds):
+    /// **34 µs** to build the whole table against 0.3 µs for the channel lerp it replaced. This runs
+    /// once per effect encode, not per pixel, so at 24 fps with a gradient map on screen it is 0.8 ms
+    /// of every second — no memo, and the reason (10a) is outside the performance conversation that
+    /// (10b) is inside.
     private static func gradientTable(_ stops: [GradientStop]) -> [UInt8] {
         let sorted = stops.sorted { $0.position < $1.position }
-        guard let first = sorted.first else { return identityTable }
+        guard !sorted.isEmpty else { return identityTable }
         var bytes = [UInt8](repeating: 255, count: 1024)
         for i in 0..<256 {
-            let t = Double(i) / 255
-            var colour = first.color
-            if let upper = sorted.firstIndex(where: { $0.position >= t }) {
-                if upper == 0 {
-                    colour = sorted[0].color
-                } else {
-                    let low = sorted[upper - 1], high = sorted[upper]
-                    let span = high.position - low.position
-                    let f = span > 0 ? (t - low.position) / span : 0
-                    colour = CodableColor(red: low.color.red + (high.color.red - low.color.red) * f,
-                                          green: low.color.green + (high.color.green - low.color.green) * f,
-                                          blue: low.color.blue + (high.color.blue - low.color.blue) * f,
-                                          alpha: 1)
-                }
-            } else {
-                colour = sorted[sorted.count - 1].color
-            }
+            let colour = gradientColour(sorted, at: Double(i) / 255)
             bytes[i * 4] = UInt8((min(max(colour.red, 0), 1) * 255).rounded())
             bytes[i * 4 + 1] = UInt8((min(max(colour.green, 0), 1) * 255).rounded())
             bytes[i * 4 + 2] = UInt8((min(max(colour.blue, 0), 1) * 255).rounded())
         }
         return bytes
+    }
+
+    /// How many evenly spaced samples `gradientRampStops` lays down across the whole ramp.
+    ///
+    /// MEASURED over seven stop pairs, worst case, against the ramp `gradientColour` actually
+    /// computes: 65 samples leave a UI gradient **7/255** away from the truth if it interpolates in
+    /// sRGB components and 1/255 if it interpolates in linear light. Handing the two raw stops
+    /// straight to `LinearGradient`, which is what the preview did before the ramp curved, is
+    /// **85/255** away — a preview showing a muddy middle the canvas no longer has.
+    static let gradientPreviewSampleCount = 65
+
+    /// The stop list a straight-line UI gradient needs in order to draw the ramp these stops
+    /// actually resolve to.
+    ///
+    /// A `LinearGradient` interpolates in a straight line between whatever stops it is given, so once
+    /// the ramp between two stops stopped being a straight line the preview had to stop being two
+    /// stops. This resamples: every position the artist placed a stop at (so the corners stay sharp
+    /// exactly where the ramp bends) plus `sampleCount` evenly spaced positions across 0...1 (so each
+    /// curved span is broken into pieces short enough for the straight lines to hide inside).
+    ///
+    /// Returns a single flat pair for the two degenerate lists, matching what `gradientTable`
+    /// resolves them to — see `GradientStopsEditor.previewStops`, which used to own that rule.
+    static func gradientRampStops(_ stops: [GradientStop],
+                                  sampleCount: Int = gradientPreviewSampleCount) -> [GradientStop] {
+        let sorted = stops.sorted { $0.position < $1.position }
+        guard let first = sorted.first else {
+            let black = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
+            return [GradientStop(position: 0, color: black), GradientStop(position: 1, color: black)]
+        }
+        guard sorted.count > 1 else {
+            return [GradientStop(position: 0, color: first.color),
+                    GradientStop(position: 1, color: first.color)]
+        }
+
+        let n = max(sampleCount, 2)
+        let grid = (0..<n).map { Double($0) / Double(n - 1) }
+        let corners = sorted.map(\.position).filter { $0 > 0 && $0 < 1 }
+
+        // The corners can land on the grid, and a duplicated location is a zero-width segment
+        // SwiftUI has no use for.
+        var positions: [Double] = []
+        for p in (grid + corners).sorted() where positions.last.map({ p - $0 > 1e-9 }) ?? true {
+            positions.append(p)
+        }
+        return positions.map { GradientStop(position: $0, color: gradientColour(sorted, at: $0)) }
     }
 
     /// `lut[i] == i` on every channel, so an effect that does not use the table cannot be changed by

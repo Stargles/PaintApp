@@ -273,14 +273,25 @@ final class EffectParityLogicTests: XCTestCase {
 
     /// The gradient map's index is **W3C Compositing Level 1's `Lum`** (0.3, 0.59, 0.11), the same
     /// weighting `Compositor.swift`'s `lum` uses for Hue/Saturation/Color/Luminosity — so a black-to-
-    /// white gradient turns the pixel into flat grey at exactly its own `Lum`, which is a value the
-    /// weights alone predict.
+    /// white gradient turns the pixel into a flat grey the weights alone predict *the index* of.
+    ///
+    /// **This test used to assert (113, 113, 113) and it was renamed rather than deleted, because the
+    /// property it named is still true and only the second half moved.** TODO item (10a) made the ramp
+    /// between two stops an Oklab mix, so the table entry at index 113 is the grey whose *perceptual
+    /// lightness* is 113/255 rather than the grey whose byte is 113 — (83, 83, 83). The index is
+    /// untouched, which is what this case is actually about; `ColorMathOklabLogicTests` owns what the
+    /// table now holds, and states there what it costs (a black-to-white gradient map used to be an
+    /// exact greyscale conversion and now darkens the midtones by up to 31/255).
     func testGradientMapIndexesByTheSameLuminanceTheBlendModesUse() {
         let effect = Effect.gradientMap(Effect.GradientMap())
         let out = cpu(effect, flatBytes(Self.probe.0, Self.probe.1, Self.probe.2))
-        // 0.3(0.2) + 0.59(0.50196) + 0.11(0.8) = 0.444157 → table index 113 → 113/255.
-        XCTAssertEqual(pixel(out, 8, 8), [113, 113, 113, 255],
-                       "A black-to-white gradient map is Lum, restated as a colour. Got \(pixel(out, 8, 8))")
+        // 0.3(0.2) + 0.59(0.50196) + 0.11(0.8) = 0.444157 → table index 113. The entry there is the
+        // Oklab mix of black and white at 113/255, which is 83.
+        XCTAssertEqual(pixel(out, 8, 8), [83, 83, 83, 255],
+                       "A black-to-white gradient map is Lum, restated as the grey of that lightness. Got \(pixel(out, 8, 8))")
+        // The index really is Lum and not something adjacent: entry 113 is the one that was picked.
+        XCTAssertEqual(Int(effect.lookupTable[113 * 4]), 83,
+                       "the table entry the index selected")
     }
 
     /// `floor(c * (n - 1) + d) / (n - 1)` at `d = 0.5`, which is plain rounding to four steps: the
