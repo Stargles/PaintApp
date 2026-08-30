@@ -271,7 +271,57 @@ LAYER_TRANSFORM.md.
       standing expendable-documents permission at the top of this file means today is the cheapest this
       change will ever be.
 
-### Playback at 24 fps, with in-betweens — the owner's goal, ranked and not started
+### (25) Stream the document off disk, and size memory to the device — the owner's architecture, 2026-08-30
+
+- [ ] **Given unprompted, and it is a design rather than a complaint. Quoted in full because the shape
+      is the ask:**
+
+      > "the ipad does not have much memory, so I want the paint program to not use much by storing as
+      > many things it can to disk. Probably the current active cel is the only thing required to be in
+      > memory. The paint program automatically pulls unbaked frames from disk (layers, compositing,
+      > etc), bakes the compositing and stores it back straight to disk, so that when the play is
+      > pressed it can be played at 24fps. This way, the program doesn't run out of memory even with a
+      > hundred layers and a thousand cels. The memory is dynamically allocated: lets say we have layers
+      > 1 through 10 and the program has only enough memory for 3: the three bottom layers are pulled,
+      > composited and stored, then the next are pulled etc."
+
+      And, in the same message, **the two things that keep this from being over-specified**:
+
+      > "(NOTE: This is my thinking on how it may work, it may not be the most optimal. The session is
+      > gonna have to make a judgement on how exactly to do this. I eventually want to make it android
+      > and windows compatible so dynamic allocation of some sort may be nice.)"
+
+      **So the mechanism is delegated and the goal is not.** The goal: a hundred layers and a thousand
+      cels without running out of memory, and 24 fps on press-play. **The portability line is new and it
+      is a constraint on the design, not a wish** — a scheme that hard-codes an iPad's budget, or that
+      leans on an iOS-only API for its eviction signal, fails a requirement the owner has now stated.
+
+      **This subsumes and outranks the playback item below**, which was scoped to making playback fast;
+      this is scoped to making the whole document not fit in memory in the first place.
+
+      **What already exists, so the design starts from the tree rather than from scratch** — none of
+      this is verified against the current tip and all of it needs re-reading before it is trusted:
+      `CompositorBudget` already refuses work that will not fit and is the seam a dynamic budget would
+      grow from; KEYFRAMES §4.6 already specifies a **span-scoped, eager, disk-backed** playback cache
+      and §9 question 4 leaves *where the disk tier lives* unruled (it recommends `Library/Caches` over
+      `ProjectBackupManager`'s `Documents/` precedent, knowingly); PERFORMANCE item 14 is the ranked
+      entry for this; and the standing memory note **"stream cels, don't hoard them"** records that the
+      owner had already ruled against holding the whole animation resident and named the YouTube-buffer
+      shape themselves.
+
+      **One part of the owner's sketch is worth confirming early because everything rests on it**: their
+      layer-chunked accumulation — pull three, composite, store, pull the next three — is valid for
+      source-over and for every backdrop-reading blend mode, because each layer blends against the
+      accumulation *below* it, which is exactly what a bottom-up chunk holds. **INFERRED, and it should
+      be proven against `blendOver` and the six non-separable modes before it is built on.** What it
+      does *not* obviously survive is anything that reads content from *above*, and the `above` half of
+      the sandwich is where to look.
+
+      **Ask the owner before building**, per ROADMAP's standing rule, at least: whether a bake is
+      allowed to be stale on screen while it catches up (a YouTube buffer shows you where it has got
+      to), and what should happen when the disk is full rather than when memory is.
+
+### Playback at 24 fps, with in-betweens — now a consequence of (25), not a separate programme
 
 - [ ] The owner, 2026-08-29: *"Basically I want the app to be able to play in realtime even with in
       betweens... if a smarter faster way is possible which doesnt require a lot of code, then sure."*

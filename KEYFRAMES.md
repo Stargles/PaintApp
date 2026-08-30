@@ -815,6 +815,22 @@ Each stage is mergeable and leaves the app working.
 | **8** | **The transformation layer** | §4.4. Late because §4.6's cache is its real cost, and because it is the only stage that needs one. |
 | **10** | **The timing recorder** | §7. Small, sits on 7. |
 
+**Stage 5 comes before stage 4, ruled by the owner 2026-08-30.** Asked whether the effort should go to
+stage 4 or to stage 5 — given that §4.2 says in its own words that the rest-space dab bake is *"not
+rescuing a visible defect and must not be scheduled as though it were"* — the owner answered *"keyframe
+stage 5 comes first."* Stage 5 is the transform channel, which is where the feature becomes something an
+artist can see: keyframed movement.
+
+**What makes that schedulable rather than merely preferred is the owner's own earlier ruling.** §4.2's
+construction exists to remove the per-frame shimmer of re-walking the dab lattice under a non-uniform
+map — and the owner checked that shimmer on the device against a build of `main` and said *"the
+interpolation shimmer seems fine for now, I can't notice it… disregard for now."* So stage 5 may pose ink
+through the path that ships today and accept an artifact the owner has already accepted, rather than
+blocking on stage 4 to avoid it. **INFERRED and load-bearing, so establish it before building**: what
+stage 5 owes without stage 4 is the *width* rule — LASSO_MOVE §5.17's `sqrt(|det|)`, which §4.2 says the
+rest-space bake dissolves "completely" — and whether the shipped mapped-stroke path can express it. If it
+cannot, stage 4 is a real prerequisite after all and the owner should be told the order has to change.
+
 **Why Distort moved, ruled 2026-08-29.** It sat last, which read as a dependency and was not one: Distort
 needs the **transform channel and nothing else** — not bake, not the playback cache, not the
 transformation layer — because §2.13's whole content is that a pose is a quad, which stage 5 stores from
