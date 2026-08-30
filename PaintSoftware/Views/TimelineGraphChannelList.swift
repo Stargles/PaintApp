@@ -26,15 +26,30 @@ import Foundation
 /// **one band is one layer, one layer is one grade, and one grade is one prefix, so every band today
 /// has exactly one group.** That is not a reason to drop the grouping — the group row is what
 /// carries the owner's *"visible or invisible like a whole"*, and it is the only control that can
-/// switch a whole effect off in one tap — but it is why the groups start **expanded**: a list whose
-/// single group is collapsed shows the artist nothing at all.
+/// switch a whole effect off in one tap — but it **is** the reason there is no fold. A chevron over
+/// one group folds the only thing in the list, so its only reachable effect today is the empty list
+/// §11.5 says the expanded default exists to prevent; and collapse state, being keyed by effect case
+/// and scoped to no band, would follow the artist to a layer they never folded it on. The control
+/// arrives with the second channel source, when it has something to fold and a reason to be scoped.
+/// **`testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade` is that premise**, so the day it
+/// fails is the day to reconsider — which is what putting the decision on this side of the target
+/// boundary buys, since `Views/AnimationTimeline.swift` can pin nothing.
 ///
 /// **The group's *name* is the one thing the id format cannot supply**, and §11.5's "display names
 /// come from the descriptor table" is only true of the channels. `EffectParameter.name` is a field
-/// label ("Radius"); a group has no descriptor and so no name of its own, which is why
-/// `TimelineGraphBand.Channel` carries `groupName` — the effect's own `displayName`, the words the
-/// artist picked the grade by. Deriving "Chromatic Aberration" from `chromaticAberration` by
-/// splitting camel case would work for twelve of the thirteen and spell `hsvShift` "Hsv Shift".
+/// label ("Radius"); a group has no descriptor and so no name of its own, so `groupNames(of:)` reads
+/// the effect's own `displayName` — the words the artist picked the grade by. Deriving "Chromatic
+/// Aberration" from `chromaticAberration` by splitting camel case would work for twelve of the
+/// thirteen and spell `hsvShift` "Hsv Shift".
+///
+/// **It is read here and not carried on the channel**, which is the one thing about this file that
+/// looks like a detour and is not. A `TimelineGraphBand.Channel` is inside the layout key, and
+/// `Effect.displayName` is not constant per case — `.blur` answers "Directional Blur" or "Gaussian
+/// Blur" off a toggle no curve draws — so a name on the channel makes an effect-settings tap relayout
+/// the whole timeline for a band that did not change. This list is SwiftUI, is built only while the
+/// popup is up, and already has the effect in hand: `graphChannelGroups` calls `storedEffect(of:)` to
+/// get the channels at all, so reading the name costs one walk of at most thirteen descriptors on a
+/// surface that is not on screen the rest of the time.
 enum TimelineGraphChannelList {
 
     // MARK: - What the artist has switched off
@@ -144,6 +159,25 @@ enum TimelineGraphChannelList {
         return String(id[id.startIndex..<dot])
     }
 
+    /// **The label for every group one effect can contribute**, by group id.
+    ///
+    /// A dictionary rather than one string because that is the shape the second channel source needs:
+    /// the day a band lists a transform beside a grade, its names are two of these merged, and
+    /// nothing above here changes. Today it has exactly one entry for the same reason the list has
+    /// exactly one group.
+    ///
+    /// A group with no entry falls back to its id in `groups(of:hidden:names:)`, so a channel whose
+    /// prefix the effect does not address is labelled `"blur"` rather than blank — legible, and
+    /// obviously a bug, which is the right pair for a case that should not arise.
+    static func groupNames(of effect: Effect?) -> [String: String] {
+        guard let effect else { return [:] }
+        var names: [String: String] = [:]
+        for parameter in effect.parameters {
+            names[groupID(ofParameterID: parameter.id)] = effect.displayName
+        }
+        return names
+    }
+
     /// **The list the popup shows: every channel the band could draw, grouped, with its box's state.**
     ///
     /// Built from the band's *unfiltered* channels, so the rows are exactly the band's membership —
@@ -154,16 +188,13 @@ enum TimelineGraphChannelList {
     /// Groups and rows both keep `Effect.parameters` order: a group is ordered by where its first
     /// channel appears, so the list cannot reshuffle itself when a channel starts animating.
     static func groups(of channels: [TimelineGraphBand.Channel],
-                       hidden: Set<String>) -> [Group] {
+                       hidden: Set<String>,
+                       names: [String: String]) -> [Group] {
         var order: [String] = []
         var rows: [String: [Row]] = [:]
-        var names: [String: String] = [:]
         for channel in channels {
             let group = groupID(ofParameterID: channel.parameterID)
-            if rows[group] == nil {
-                order.append(group)
-                names[group] = channel.groupName
-            }
+            if rows[group] == nil { order.append(group) }
             rows[group, default: []].append(
                 Row(parameterID: channel.parameterID,
                     name: channel.name,
@@ -197,10 +228,12 @@ extension CanvasManager {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return nil }
-        let channels = TimelineGraphBand.channels(effect: storedEffect(of: target),
+        let effect = storedEffect(of: target)
+        let channels = TimelineGraphBand.channels(effect: effect,
                                                   tracks: keyframeState(of: target).tracks)
         return TimelineGraphChannelList.groups(of: channels,
-                                               hidden: graphChannelFilter.hidden(on: target))
+                                               hidden: graphChannelFilter.hidden(on: target),
+                                               names: TimelineGraphChannelList.groupNames(of: effect))
     }
 
     /// Whether anything is switched off on the band that is open.

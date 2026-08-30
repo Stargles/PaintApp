@@ -123,14 +123,42 @@ final class CanvasManager: ObservableObject {
     /// only ever says which panel was up last — §11.5 makes the same call about the channel list's
     /// visibility for the same reason. `interpolationThicknessFade` is the nearest precedent.
     ///
-    /// **Closing the band drops the channel filter with it**, which is D4's scoping rule stated in
-    /// the one place that cannot be bypassed: §11.5 makes the filter transient *because* it has no
-    /// meaning with the editor closed, so a filter that outlived the band would be exactly the state
-    /// the ruling refuses. The other half of the same rule is `Filter.hidden(on:)`, which answers `[]`
-    /// for any band but the one it was authored on.
+    /// **Closing the band drops the channel filter with it, and takes the channel list down**, which
+    /// is D4's scoping rule stated in the one place that cannot be bypassed: §11.5 makes the filter
+    /// transient *because* it has no meaning with the editor closed, so a filter that outlived the
+    /// band would be exactly the state the ruling refuses. The other half of the same rule is
+    /// `Filter.hidden(on:)`, which answers `[]` for any band but the one it was authored on.
     @Published var isGraphEditorOpen: Bool = false {
-        didSet { if !isGraphEditorOpen { graphChannelFilter = .none } }
+        didSet {
+            if !isGraphEditorOpen {
+                graphChannelFilter = .none
+                isGraphChannelListOpen = false
+            }
+        }
     }
+
+    /// **Whether the graph editor's channel list is up** — the `.popover`'s `isPresented`, held here
+    /// rather than as `@State` in `AnimationTimeline` for one reason: it has a *rule*, and the rule
+    /// has to be pinnable.
+    ///
+    /// The rule is the line above. The list is a control **of** the editor, so it cannot outlive it,
+    /// and closing the band deletes the very button the popover hangs off —
+    /// `CanvasPresentationModifier` clears the registry from `.onDisappear` but deliberately never
+    /// the site's own flag, so a popover whose host is destroyed while it is up comes back by itself
+    /// when the host returns (BUGS.md, "A popover whose host view disappears re-presents itself when
+    /// the host comes back"). D4 is the first control in the app rendered conditionally with a
+    /// presentation on it, so D4 is where that became reachable.
+    ///
+    /// **Written as a `didSet` on the model and not as an `onChange` on a view**, because
+    /// `Views/AnimationTimeline.swift` is not compiled into `PaintSoftwareUITests` — a guard written
+    /// there is pinned by nothing, and this one cannot be pinned from the UI tier either: a tap that
+    /// lands on the graph editor's toggle while the popover is up is spent dismissing the popover and
+    /// never reaches the button (measured 2026-08-29 on the simulator, which is why
+    /// `testTheChannelListButtonExistsOnlyWhileTheBandIsOpen` taps the canvas first). Here it is one
+    /// line and `testClosingTheEditorTakesTheChannelListDownWithIt`.
+    ///
+    /// Transient, like everything else on this surface: nothing here reaches a manifest.
+    @Published var isGraphChannelListOpen: Bool = false
 
     /// **Which of the open band's channels the artist has switched off** — KEYFRAMES.md §11.5,
     /// set from `timeline.graphChannelsButton`'s popup.

@@ -1266,16 +1266,39 @@ is not compiled into the test target, so a rule written there is pinned by nothi
 needed — but a band is one layer, a layer is one grade, and a grade is one prefix, so **every band today
 has exactly one group**. That is not a reason to drop it: the group row is the only control that switches
 a whole effect off in one tap, which is the owner's *"visible or invisible like a whole"*, and the shape
-is what a second channel source (a transform, a folder's grade) will need. It is the reason the groups
-come up **expanded** — a list whose single group was folded shut would show the artist nothing — and it
-is pinned by `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade`, which is the assertion that
-changes the day the premise does.
+is what a second channel source (a transform, a folder's grade) will need. It is pinned by
+`testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade`, which is the assertion that changes the
+day the premise does.
+
+**And it is why there is no fold.** The groups are not merely expanded by default, they cannot be
+collapsed at all: a chevron over one group folds the only thing in the list, so its only reachable state
+today is the empty list the expanded default exists to prevent. Collapse state is also the one piece of
+this feature that has no natural scope — keyed by effect case it is *"brightnessContrast"*, which follows
+the artist to the next layer carrying a Brightness/Contrast grade and greets them with a header and no
+channels, where the visibility filter carries its `KeyframeTarget` and dies with the band. The control
+comes back with the second channel source, when it has something to fold and a reason to be scoped, and
+the premise test above is what says when. **The decision lives in `TimelineGraphChannelList`, not in the
+view** — `AnimationTimeline.swift` is not compiled into the test target, so a rule written there is
+pinned by nothing, which is the same reason the grouping and the toggle arithmetic are in that file.
 
 **The group's *name* is the one thing the id format cannot supply**, and "display names come from the
 descriptor table" was true only of the channels. `EffectParameter.name` is a field label ("Radius"); a
-group has no descriptor row, so `TimelineGraphBand.Channel` gained `groupName` — the effect's own
+group has no descriptor row, so `TimelineGraphChannelList.groupNames(of:)` reads the effect's own
 `displayName`, which is the word the artist picked the grade by. Splitting camel case out of the prefix
 instead would have worked for twelve of the thirteen and spelled `hsvShift` "Hsv Shift".
+
+**It is read at the popup and *not* carried on `TimelineGraphBand.Channel`, which is the cheap spelling
+and a layout-key defect.** A `Channel` is inside `Content` and `Content` is inside `TimelineLayoutKey`,
+so a field the band never draws still gates `relayout()` — and `Effect.displayName` is constant per case
+for twelve of the thirteen effects but not for `.blur`, which answers "Directional Blur" or "Gaussian
+Blur" off a toggle. One tap on Directional therefore relaid out every row frame, every cel accessibility
+identifier and the ruler's per-frame CoreText loop, for a band whose curves had not moved. The rule the
+fix states is the general one: **a `Channel` carries only what the band draws with.** The list is SwiftUI,
+is built only while the popup is up, and `graphChannelGroups` already holds the effect, so reading the
+name there costs one walk of at most thirteen descriptors on a surface that is off screen the rest of the
+time. `testFlippingTheDirectionalToggleDoesNotReflowTheTimeline` pins it, on a *named* layer: an unnamed
+value layer is renamed to its grade's `displayName` by `setLayerEffect`, so the name column moves the key
+too and hides what is being measured.
 
 **The filter is applied inside `graphBandContent`, before the key is built, and that placement is the
 whole feature.** `relayout()` early-returns on `built.key == laidOutKey`; a filter applied later — read
@@ -1298,8 +1321,20 @@ with its openness in a `Binding`. §8 stage 3b's other two were read and rejecte
 is not a presentation and a case for one would be wrong, and `ActivePanel` is the canvas's settings rail
 that `CanvasTouchOwner` reads to decide who owns a touch, which this list is no part of. One consequence
 of the conditional button: `CanvasPresentationModifier.onDisappear` deliberately does not clear the
-site's own flag, so a popover open through a host deletion returns when the host does — the always-present
-graph-editor button carries the `onChange` that closes it.
+site's own flag, so a popover open through a host deletion returns when the host does. That is a
+pre-existing bug in a modifier every presentation in the app routes through (BUGS.md, "A popover whose
+host view disappears re-presents itself when the host comes back") and D4 is only where it became
+reachable, being the first control rendered conditionally with a presentation hanging off it — so this
+stage carries a local guard rather than changing a modifier the whole app routes through.
+
+**The guard is `isGraphEditorOpen`'s `didSet`, beside the filter it is the twin of**, and the list's
+`isPresented` is `CanvasManager.isGraphChannelListOpen` rather than `@State` in `AnimationTimeline` for
+that reason alone: the other popovers in that file are `@State` because none of them has a rule, and this
+one does. Written in the view it would be pinned by nothing — and **it cannot be pinned from the UI tier
+either**, measured 2026-08-29: with the popover up, a tap on the graph editor's toggle is spent
+dismissing the popover and never reaches the button, so an XCUITest closes the list first every time and
+never reaches the state. On the model it is one line and
+`testClosingTheEditorTakesTheChannelListDownWithIt`.
 
 **An all-hidden band is not an empty one and does not say so.** D2 made an empty band report `"empty"`
 because an artist looking for a curve that was never there is the failure; here the curves are there and

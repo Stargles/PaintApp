@@ -64,16 +64,6 @@ struct AnimationTimeline: View {
     // opened on the first tap would put a mode change behind an extra step.
     @State private var showOnionSkinOptions = false
 
-    // The graph editor's channel list (§11.5), opened from a button that only exists while the band
-    // is open. Cleared by `graphEditorButton`'s `onChange` when the band closes — see the note there.
-    @State private var showGraphChannels = false
-
-    /// Which channel groups the artist has folded shut in that list. **Collapsed rather than
-    /// expanded**, so the default — nothing in the set — is every group open, which is the only
-    /// useful first state for a list that today has exactly one group. Pure presentation: it names no
-    /// channel and filters nothing, so unlike the visibility filter it does not belong on the model.
-    @State private var collapsedGraphChannelGroups: Set<String> = []
-
     /// A vector block dropped on a raster layer, waiting on the artist's answer. Non-nil raises the
     /// rasterize alert; the drop is only applied if they say yes. Held by identity (see
     /// `CanvasManager.CelDropRequest`) because the indices it came from can be renumbered while the
@@ -568,14 +558,6 @@ struct AnimationTimeline: View {
         }
         .foregroundColor(canvasManager.isGraphEditorOpen ? .blue : .white)
         .accessibilityIdentifier("timeline.graphEditorButton")
-        // The channel list is a control *of* the editor, so it cannot outlive it. Closing the band
-        // deletes the button its popover hangs off, and `CanvasPresentationModifier`'s `onDisappear`
-        // deliberately does not write the site's own flag — so a popover left open through a host
-        // deletion comes straight back up when the host returns. This button is rendered
-        // unconditionally, so it is the reliable place to watch from.
-        .onChange(of: canvasManager.isGraphEditorOpen) { _, isOpen in
-            if !isOpen { showGraphChannels = false }
-        }
     }
 
     /// **The graph editor's channel list** — KEYFRAMES.md §11.5, stage D4. The owner: *"just a button
@@ -591,12 +573,18 @@ struct AnimationTimeline: View {
     /// visible sign of itself is a band that looks broken. It matters most in the state that has no
     /// other signal — every channel hidden, so the band is correctly blank and only this says why.
     private var graphChannelsButton: some View {
-        Button(action: { showGraphChannels.toggle() }) {
+        Button(action: { canvasManager.isGraphChannelListOpen.toggle() }) {
             Image(systemName: "line.3.horizontal.decrease")
         }
         .foregroundColor(canvasManager.graphBandHasHiddenChannels ? .blue : .white)
         .accessibilityIdentifier("timeline.graphChannelsButton")
-        .canvasPresentation(.graphChannelList, isPresented: $showGraphChannels,
+        // **`isPresented` is on the model, unlike every other popover in this file.** The list is a
+        // control *of* the editor and may not outlive it — closing the band deletes this very button,
+        // and a popover whose host is destroyed while it is up re-presents itself when the host
+        // returns. That rule belongs where it can be pinned: `CanvasManager.isGraphChannelListOpen`,
+        // cleared by `isGraphEditorOpen`'s `didSet` beside the filter it is the twin of. The other
+        // popovers here are `@State` because they have no such rule.
+        .canvasPresentation(.graphChannelList, isPresented: $canvasManager.isGraphChannelListOpen,
                             canvasManager: canvasManager) {
             graphChannelList
                 .frame(width: 250)
@@ -610,10 +598,14 @@ struct AnimationTimeline: View {
     /// will not fit** — and capped in height so a short list is a short popover rather than a tall
     /// one with air in it.
     ///
-    /// **Groups start expanded and the chevron collapses them.** The owner's *"drop down"* is about
-    /// switching a group's channels as a whole, which is the box; a list whose one group came up
-    /// collapsed would show the artist nothing, and today every band has exactly one group —
-    /// one layer is one grade is one id prefix.
+    /// **Every group's rows are always shown; there is no fold.** The owner's *"drop down"* is about
+    /// switching a group's channels as a whole, which is the box — and a fold has nothing to earn
+    /// here yet, because a band is one layer, a layer is one grade and a grade is one id prefix, so
+    /// **every band today has exactly one group** (`TimelineGraphChannelList`'s doc, pinned by
+    /// `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade`). A chevron over one group
+    /// folds the only thing in the list, and the state it reaches is the empty list §11.5 says the
+    /// expanded default exists to prevent. It comes back with the second channel source, and by then
+    /// it has something to fold.
     private var graphChannelList: some View {
         let groups = canvasManager.graphChannelGroups ?? []
         return ScrollView {
@@ -630,10 +622,8 @@ struct AnimationTimeline: View {
                 }
                 ForEach(groups) { group in
                     graphChannelGroupRow(group)
-                    if !collapsedGraphChannelGroups.contains(group.id) {
-                        ForEach(group.rows, id: \.parameterID) { row in
-                            graphChannelRow(row)
-                        }
+                    ForEach(group.rows, id: \.parameterID) { row in
+                        graphChannelRow(row)
                     }
                 }
             }
@@ -642,43 +632,27 @@ struct AnimationTimeline: View {
         .frame(maxHeight: 300)
     }
 
+    /// The group's header: one box that takes every channel under it, and nothing else. See
+    /// `graphChannelList` for why there is no chevron beside it.
     private func graphChannelGroupRow(_ group: TimelineGraphChannelList.Group) -> some View {
-        HStack(spacing: 8) {
-            Button(action: {
-                if collapsedGraphChannelGroups.contains(group.id) {
-                    collapsedGraphChannelGroups.remove(group.id)
-                } else {
-                    collapsedGraphChannelGroups.insert(group.id)
-                }
-            }) {
-                Image(systemName: collapsedGraphChannelGroups.contains(group.id)
-                      ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 10))
-                    .frame(width: 14)
+        Button(action: {
+            canvasManager.setGraphChannels(group.rows.map(\.parameterID),
+                                           visible: group.visibilityAfterToggle)
+        }) {
+            HStack(spacing: 8) {
+                // Three states, because a group can be half off: checked, dashed, empty. The
+                // dash is what stops "some are hidden" reading as "none are".
+                Image(systemName: group.isMixed ? "minus.square"
+                      : (group.isFullyVisible ? "checkmark.square.fill" : "square"))
+                Text(group.name).font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .foregroundColor(.secondary)
-            .accessibilityIdentifier("timeline.graphChannels.disclosure.\(group.id)")
-
-            Button(action: {
-                canvasManager.setGraphChannels(group.rows.map(\.parameterID),
-                                               visible: group.visibilityAfterToggle)
-            }) {
-                HStack(spacing: 8) {
-                    // Three states, because a group can be half off: checked, dashed, empty. The
-                    // dash is what stops "some are hidden" reading as "none are".
-                    Image(systemName: group.isMixed ? "minus.square"
-                          : (group.isFullyVisible ? "checkmark.square.fill" : "square"))
-                    Text(group.name).font(.caption.weight(.semibold))
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(group.isFullyVisible || group.isMixed ? .primary : .secondary)
-            .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
-            .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .foregroundColor(group.isFullyVisible || group.isMixed ? .primary : .secondary)
+        .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
+        .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
     }
@@ -704,7 +678,7 @@ struct AnimationTimeline: View {
         }
         .buttonStyle(.plain)
         .foregroundColor(row.isVisible ? .primary : .secondary)
-        .padding(.leading, 34)
+        .padding(.leading, 28)
         .padding(.trailing, 12)
         .padding(.vertical, 6)
         .accessibilityIdentifier("timeline.graphChannels.\(row.parameterID)")

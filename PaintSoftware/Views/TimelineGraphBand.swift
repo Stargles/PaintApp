@@ -75,15 +75,15 @@ enum TimelineGraphBand {
         /// channel list is what displays it, and it is carried here so that stage needs no second
         /// walk of `Effect.parameters`.
         let name: String
-        /// **The label for the group this channel belongs to** — `Effect.displayName`, the words the
-        /// artist picked the grade by, drawn by D4's channel list on the group's row.
-        ///
-        /// The group's *id* is the text before the dot in `parameterID` and needs no table
-        /// (§11.5); its **name** does, because a group has no descriptor and `EffectParameter.name`
-        /// is a field label rather than an effect's. Carried per channel rather than looked up,
-        /// which is `name`'s reason exactly: the channel list must not walk `Effect.parameters` a
-        /// second time to draw a header.
-        let groupName: String
+        // **A `Channel` carries only what the band draws with, and that rule is load-bearing here
+        // rather than tidy.** A `Channel` sits inside `Content`, `Content` sits inside
+        // `TimelineLayoutKey`, and the key is what `relayout()` gates on — so a field the band never
+        // reads still costs a full relayout (every row frame, every cel identifier, the ruler's
+        // per-frame CoreText loop) every time something else moves it. D4's channel list needs the
+        // *effect's* display name for its group header, which is not a channel's property and is not
+        // even constant per case — `.blur` answers "Directional Blur" or "Gaussian Blur" off a
+        // toggle. `TimelineGraphChannelList.groupNames(of:)` reads it at the popup, the one surface
+        // that shows the word. Pinned by `testFlippingTheDirectionalToggleDoesNotReflowTheTimeline`.
         let curve: AnimationCurve
         /// `EffectParameter.uiRange`, verbatim, including its nil. `range(uiRange:keyValues:)` is
         /// what turns it into an axis.
@@ -155,7 +155,6 @@ enum TimelineGraphBand {
             else { return nil }
             return Channel(parameterID: parameter.id,
                            name: parameter.name,
-                           groupName: effect.displayName,
                            curve: curve,
                            uiRange: parameter.uiRange,
                            descriptorIndex: index)
