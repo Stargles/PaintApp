@@ -126,6 +126,29 @@ LAYER_TRANSFORM.md.
       graph editor, whose design is KEYFRAMES §11 and which is four stages — variable row height first
       and behaviour-neutral, because `AnimationTimeline`'s reorder drag counts rows by dividing by a
       fixed pitch and one tall row breaks it silently.
+### (23) Selection membership modes belong to Select, not to Move — so Recolour can use them
+
+- [ ] The owner, 2026-08-29: *"Right now the enclosed/cut/touching option for the select move is in
+      move, but i feel like it would be better in select menu because i want it to affect recolour. For
+      enclosed on recolour, it would have to split the strokes and other objects around the lasso border
+      and then recolour the ones inside. Luckly, the splitting already exists in enclosed move, so you
+      can reuse that. This task is not necessarily priority but put it in TODO.md."*
+
+      **Not priority — the owner said so.** Recorded here rather than researched, per the standing rule.
+
+      Two things the ask already settles, and they are the reason it is cheap. The **modes exist** —
+      LASSO_MOVE §5.23-24 rules how Touching and Enclosed treat text and placed images, and §5.25 rules
+      that Clear cuts at the loop rather than deleting every element it touches, which is the same
+      split-at-the-border behaviour this asks Recolour to grow. And the **splitting exists**: Enclosed
+      move already cuts strokes and fills at the lasso boundary, so Recolour-with-Enclosed is a new
+      caller of a built operation rather than new geometry.
+
+      What it is really asking is that membership stop being a property of *the Move tool* and become a
+      property of *the selection*, which is the more honest home for it — every tool that consumes a
+      lasso then inherits it for free instead of each one growing its own copy. Whether that is a move of
+      the control or a duplicate of it is the one design question, and §5.25's precedent argues for a
+      move.
+
 ### (10) Oklab colour storage and processing, from the Actions menu
 
 - [ ] The owner: *"I also want the option in actions to switch the color storage and processing to oklab
