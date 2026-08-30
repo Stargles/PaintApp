@@ -1,4 +1,4 @@
-# Handoff — 2026-08-30 (session 78)
+# Handoff — 2026-08-30 (session 79)
 
 <!-- This file is BOTH the state of the repo and the prompt that starts the next session. It was once
 two files and they drifted apart inside a day, because the same state had to be written twice. Keep it
@@ -7,203 +7,128 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 ## Start here — paste this to begin the next session
 
 ```
-Read HANDOFF.md, then CLAUDE.md, KEYFRAMES.md and TODO.md.
+Read HANDOFF.md, then CLAUDE.md, KEYFRAMES.md and TODO.md. ROADMAP.md no longer exists — its six
+features are TODO items (21) and (26)-(30) under "Later".
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `ff2d732` — `7c38ba2` is the last commit that touches code, everything above it is
-this close-out. **Fast tier 2227 / 2224 / 0 / 3.** **No full suite was run this pass**,
-and two heavy classes were split during it, so **CLAUDE.md's 22.3 min is stale in the *optimistic*
-direction** — the ~15-16 min the arithmetic predicts is labelled INFERRED there and nobody has watched
-a run since. **Take a real full run early**, on a freshly erased simulator, under `tools/simlock.sh`:
-it is the only way to learn what the two splits bought, and every later measurement is read against it.
-No branches, one worktree, clean tree.
+inline. `main` is clean, one worktree, no branches. **Full suite 2373 passed / 0 failed / 6 skipped.
+Fast tier 2248 / 0 failed / 3 skipped.**
 
-**1. The graph editor is built — D1 through D4 — and nothing about it is left that the owner asked
-   for.** KEYFRAMES §11 is the record: D1 row geometry, D2 the band, D3 the gestures (drag a key on
-   both axes, tap to add and remove, a marquee that picks up a set which then travels as one body),
-   D4 the channel list as a *filter*. All six of the owner's asks from §2.26's message are merged, so
-   TODO (22) is down to one line.
-   **The scope ruling is theirs and is not in question**: *"graphs are layer based, so tapping on
-   another layer should just open the other layer's graph."* One band at a time, under the selected
-   layer — which is also the cheapest thing to key, an `Int?` rather than a set.
-   **What is genuinely left, and none of it is an owner ask**: bezier tangent handles (the model
-   already carries `inHandle`/`outHandle` and five tangent modes — what is missing is a second hit
-   target per key and the arbitration against grabbing the key itself, so it is a stage, not an
-   afternoon); ask 6's *cel* marquee, which the owner themselves put in the future and whose stub is
-   "Select Multiple", `.disabled(true)`; and one loose end D3 handed to D4 after D4 had already
-   merged — tapping away a channel's second-to-last key makes it stop satisfying `isAnimated`, so the
-   whole curve leaves the band mid-gesture. It wants a listed-but-flat state or a note in the channel
-   list (KEYFRAMES §11.4, "One thing found and left").
+**Two standing instructions from the owner about how you work. Both were given this pass and both
+were given because they were violated.**
 
-**2. TODO (10) is the next buildable thing and its route is already decided — do not re-derive it.**
-   The owner ruled, having been shown the A/B: *"toggle option between OKlab and normal… You decide
-   the best route for the oklab."* The route is in TODO (10) and the evidence is
-   [LINEAR_LIGHT_AB.md](LINEAR_LIGHT_AB.md) with five rendered PNGs under `docs/linear-light-ab/`.
-   **The switch's two positions are sRGB and *linear light*, not Oklab**, stored as an extensible enum
-   so Oklab can be a third; the muddy middle is a gamma artefact, worst case MEASURED 73/255. Oklab
-   still gets built, for *interpolation*, where it is per-colour and outside the parity gate.
-   **The scope is three coverage sites and the compositor is the one the artist does not paint on** —
-   every dab is a `CGGradient` into an 8-bit DeviceRGB bitmap — so a compositor-only version leaves
-   the dark ring in place whenever both hues are on one layer, and is not worth shipping.
-   **Two things are unruled on purpose and one of them needs the owner**: how the result comes back
-   *out* of linear (a `pow` on both backends, or an 8-bit-linear quantization that bands the shadows),
-   and what linearizing does to the meaning of Hue/Saturation/Color/Luminosity, whose luminance
-   coefficients are specified on non-linear values.
+1. **Conserve tokens, and state the size of a multi-agent run BEFORE you launch it.** An eleven-agent
+   workflow was killed mid-flight at 95% weekly usage; the question it existed to answer took three
+   greps. Default to answering directly. Delegate building and test runs, not thinking you can do.
+2. **Documents say what is true. `git log` says how it got that way.** No dates on decisions, no "at
+   the owner's instruction", no "this used to be", no narrating which premise an investigation
+   overturned. Keep the ask in the owner's words, the decision, non-obvious reasoning, trap warnings
+   and file:line evidence. Cut the rest.
 
-**3. Also open, unchanged: TODO (23)** — the owner's explicitly-not-priority ask that selection
-   membership move from Move to Select so Recolour can use it — and **KEYFRAMES §8 stage 4** onward,
-   the rest-space dab bake. **Distort is stage 5b now**, not last: it needs the transform channel and
-   nothing else, the schedule was delegated and that is the call. Stage numbers 6-10 were left alone,
-   so there is deliberately no stage 9.
+**1. Build KEYFRAMES §8 stage 5 — the transform channel. The owner ruled it comes before stage 4.**
+   Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation, Uniform +
+   Freeform. **The gate that could have reversed that order is already answered**:
+   `drawn(_:through:widthScale:)` (`Engine/VectorLayer.swift:2262`) takes a `CGAffineTransform` and
+   **one scalar** width — and an affine has a constant Jacobian, so `sqrt(|det|)` (LASSO_MOVE §5.17)
+   is the same everywhere in the stroke and one number is exactly right for Uniform and Freeform.
+   Per-dab width is a **projective** problem, so it belongs to stage 5b (Distort), not here. Stage 4
+   is not a prerequisite. The owner has also already ruled the interpolation shimmer imperceptible on
+   the device, so posing ink through the shipped path is licensed.
+   **§4.5 is where this fails silently if it fails.** `PixelOps.rasterize`'s memo has no pose field
+   while `SandwichKey` compares the whole node tree — a posed frame composites happily from a stale
+   un-posed image: green tests, wrong pixels, no key that looks wrong. Enumerate every cache key
+   before writing code, not after. A plan reviewed this pass missed five of them.
+   Stage 5 also owes a derivation **identity** that includes the frame, where interpolation's
+   deliberately does not (KEYFRAMES §8, `CelContentProvider`).
 
-**4. The traps this pass paid for, all five of them about *evidence* rather than about code.**
-   - **A comment can be true where it was written and false where it was pasted.** D3's tap-vs-drag
-     predicate came from `CurveEditor` with a comment explaining why `didMove` "would be the wrong
-     question" — true there, where the flag is set only after a handle is grabbed; false here, where
-     the marquee sets it too. A drag that changed its mind **deleted the key it was carrying, with no
-     undo step at all**. Read a borrowed comment against the code you pasted it into.
-   - **A judgement made by looking at one example generalises silently.** D2 put the playhead in front
-     of the band "having looked at it" and recorded that a saturated curve reads through the wash.
-     True of the hue it was looked at; three of the palette's eight are washed to grey, and only a
-     screenshot found it.
-   - **Looking at the feature found three things 2,224 passing tests structurally cannot** — a colour,
-     a `CGContext` and a layout that runs off the panel. They are in BUGS.md. **This suite has no tier
-     that can see a rendered pixel**, so when a feature is visual, budget a look at it.
-   - **A worker's completion notification is the only signal its tree is finished.** A worktree was
-     branched this pass from a commit whose agent had not reported, and was re-based off the last
-     reported-complete commit instead.
-   - **Mutation-test your own tests, and a proximity test proves nothing until its fixture holds two
-     candidates.** D3 found one of its own tests could not fail: the fixture put two dots 80 pt apart,
-     so "nearest" and "first" were the same answer. Two independent reviews then found the same class
-     of defect again, one level down.
+**2. What else is open.** (22) the cel marquee — the owner put it in the future themselves. (23)
+   selection membership moves to Select — they said not priority. (10) linear light **as an option on
+   the blend mode**, deprioritised, with five things any implementation must handle already listed in
+   the item. (24) is answered "do not" and can be closed on read. (26)-(30) are the long-term
+   features and **each needs a design conversation with the owner before it starts** — an item built
+   from its TODO entry alone was built wrong.
+   **(28)'s first move is not an audio feature**: the playback clock is a `Timer` whose state lives
+   on the view (`Views/AnimationTimeline.swift:13-14`, timer at `:976-989`), so it drifts. Hoisting it
+   onto the model is a timeline change that (28), KEYFRAMES §5 and (29) all need.
 
-**5. One process note about talking to the owner.** Asked where the graph editor should open, they
-   answered the question and then said *"I'm missing context. What is a graph band?"* — **"band" was
-   our invented word and the question was unanswerable until it was defined with a picture.** Define
-   invented vocabulary, or better, render it; they judge behaviour, not internals.
+**3. The cost model changed and CLAUDE.md now says so.** MEASURED on an idle machine: **2358 tests in
+   24.4 min**, 3,893 class-seconds over 102 classes — 16.2 min of ideal work on four clones, longest
+   class 5.7 min. **For the first time the gap is not an indivisible class**: ~7 min, 45% over ideal,
+   is scheduling. Splitting further cannot recover it and past some point makes it worse. Do not
+   reach for a class split as the lever without re-taking the table.
+   `SandwichCompositingUITests` (344 s) is the longest class and produced an environmental red in
+   each of two runs.
+
+**4. The traps this pass paid for.**
+   - **A shipped spec's "what is already true" section describes the world before its own build order
+     ran.** EFFECT_BACKDROP §0 says the paper is not in the composite; it has been since §6 shipped.
+     Quoting it as current produced a wrong scope argument to the owner. §0 now carries a banner.
+     Check any §0 against the build order below it.
+   - **A filter is unpinned until its fixture holds something the filter must reject.** The §2.28 pin
+     animated both fixture channels, so deleting the filter returned an identical array — green under
+     an implementation with no filter at all. Fourth occurrence of this shape.
+   - **A red suite under load is evidence about the machine.** Measuring the full run while a
+     workflow compiled on the same cores cost four minutes of wall clock while leaving per-class
+     seconds within noise — so the table looked right and the headline was wrong.
+   - **This suite has no tier that can see a rendered pixel.** Budget a look at any visual feature.
+     Two of the three graph-editor defects fixed this pass were found only by screenshot.
 
 **Do not re-litigate**: KEYFRAMES §2's twenty-eight rulings and §11.6's three; LASSO_MOVE §5's
-twenty-five; CANVAS_RESIZE §5 and §6; EFFECT_BACKDROP §5 and §2.1; (10)'s sRGB/linear-light route.
+twenty-five; CANVAS_RESIZE §5 and §6; EFFECT_BACKDROP §5 and §2.1; (10)'s per-blend-mode scope; the
+greys ruling in `Effect.gradientColour`; stage 5 before stage 4.
 ```
 
 ---
 
 ## State
 
-`main` = `ff2d732`, 22 commits above `0513d06`; `7c38ba2` is the last one that touches code. **Fast tier 2227 total / 2224 passed / 0 failed / 3
-skipped**, up from 2153 at the start of the pass.
+`main` is clean, one worktree, no branches. **Full suite 2373 passed / 0 failed / 6 skipped.** Fast
+tier **2248 / 0 / 3**.
 
-**NO FULL SUITE WAS RUN.** CLAUDE.md's 22.3 min figure predates both of this pass's class splits and is
-therefore stale in the direction that flatters us. The arithmetic there — ~3,542 class-seconds over four
-clones against a new 327 s floor, landing nearer 15-16 min — is labelled INFERRED, and it should stay
-INFERRED until somebody watches a run.
-
-**Two heavy classes were split, both on measured seconds rather than on test count.**
-`LayerPanelUITests`, 515 s across 19 tests and the whole suite's floor, became
-`LayerFolderAndMaskMenuUITests` (190 s / 7), `LayerPanelControlsUITests` (174 / 7) and
-`LayerStackUITests` (159 / 5) — same file, every test body byte-identical, 523 s against 534 s for the
-same nineteen immediately before the cut. `SelectionAndMoveUITests` at 327 s is the new floor. And `GraphEditorUITests`, which this pass grew
-from ~40 s to a MEASURED 271 s and the suite's second-longest class, split into `GraphEditorUITests`
-(7 / 133) and `GraphEditorGestureUITests` (3 / 136).
-
-**A Release build of `7c38ba2` is installed on the iPad** — built and installed 2026-08-30 01:34, first
-attempt, tunnel re-established with `devicectl device info details` first because the device read
-`available (paired)`. The owner is holding the whole graph editor including D3's gestures. The last build
-*confirmed* on the device is `a85a316`. Ask the owner rather than assuming.
+**A Release build of `7c38ba2` is on the iPad**, installed 2026-08-30 01:34. Everything merged since —
+the Oklab ramps, the dark colour scheme, all three graph-editor fixes — **is not on the device**. The
+last build *confirmed* on it is `a85a316`. Ask the owner rather than assuming.
 
 ## What landed
 
-**The graph editor, stages D2 through D4, each adversarially reviewed and each review real.**
+**(10a) Oklab ramps.** `ColorMath` gained sRGB↔linear and Oklab both ways; `Effect`'s gradient ramp
+mixes through it; the picker's hue bar went 7 samples → 73; the settings-panel gradient preview is
+resampled from the same evaluator, which fixed an unreported bug — it was a plain gradient over the
+raw stops and could disagree with the render by **85/255**. Pictures in `docs/oklab-ramps/`, generator
+`tools/oklab_ramp_ab.swift`. The owner ruled its one cost intended: a black-to-white Gradient Map
+darkens midtones by up to 31/255, recorded in `Effect.gradientColour` so it is not "fixed" later.
 
-- **`5297c35`** — the owner's three rulings and one delegation, plus the y-axis question answered from
-  a note already in the tree (`Effect.swift`: draw over `uiRange`, key anywhere in `modelDomain`).
-- **`931b859`** — D2, the band. `Views/TimelineGraphBand.swift` holds every number; `TimelineLayoutKey`
-  gains the whole band as one field, because a curve's *shape* moves nothing else on the track.
-- **`b3ec305`** — D2's review: five findings, five real. The band sampled the whole track (a dirty rect
-  is not a clip), a keyframe could not be placed at a frame with no cel, the drop strip and the drag
-  ghost disagreed by 96 pt, a key's dot is off the line above step 1 and is meant to be, and **one test
-  that could not fail** and asserted only that `make` is deterministic.
-- **`327374b` / `b204dd6`** — the reflow the band causes, which is the scope ruling's own cost. A block
-  drag was resolving the drop against moved rows, so **a re-time silently became a cross-layer move**;
-  the band is pinned to its row for the length of that one gesture. The two-stage tap is **not** fixable
-  and that is the answer: one wasted tap per layer switch, paid once. Scroll compensation was what the
-  owner was told the fix would be, and it does not work — the reflow is not a uniform translation.
-- **`bf423f0` / `f543a71` / `1ce12f8`** — D4, the channel list. It is a **filter**, applied inside
-  `graphBandContent` *before* the layout key is built, because applied later it would change what the
-  band should draw without moving the key. The review deleted a chevron whose collapse state was keyed
-  by effect case and scoped to no band, took `Channel.groupName` out of the layout key (`.blur` answers
-  two display names off a toggle, so one tap on Directional relaid out the whole timeline), and killed
-  three more assertions that could not fail.
-- **`56b0479` / `bccbfc2`** — D3, both halves. A key is **stopped** by its neighbour rather than
-  consuming it; a drag clamps to `modelDomain` and never to `uiRange`, with hit-testing on a clamped y
-  so an out-of-range key stays grabbable; one drag is one press of Undo. The marquee's group takes one
-  frame delta clamped by its tightest member, shares a vertical travel in **points** because each
-  channel normalises its own axis, and removes every carried key before inserting any.
-- **`4ea6722` / `dbbe775`** — D3's review. The tap-vs-drag predicate, the unrecoverable delete it
-  allowed, and the fixture that could not tell "nearest" from "first".
-- **`7c38ba2`** — the band moves above the playhead, reversing §11.3's fourth decision. Verified by two
-  screenshots of one fixture, which is the only way it could have been verified.
-- **`e1c002f` / `8507bdc`** — six screenshots under `docs/graph-editor/`, and the three defects looking
-  at them found.
+**The graph editor's three visible defects.** Curves stop at the document end rather than running two
+screenfuls into dead track; the app declares `.preferredColorScheme(.dark)` globally — chosen over a
+per-surface fix because ~20 editor surfaces inherit system appearance and `Menu`/`alert`/`contextMenu`/
+`ColorPicker` have no background to set at all; and a channel that stops being an animation goes
+dashed and dimmed instead of vanishing under the finger. Before/after screenshots in
+`docs/graph-editor/`. The 250 pt timeline height was deliberately left alone, with the reasoning
+recorded so it is not re-derived.
 
-**The colour switch.** `1fd6e23` renders the A/B — five labelled PNGs, a generator, no simulator — and
-`f396aaa` records the owner's ruling and the route it delegated. Worst 8-bit channel difference **73/255**,
-exhaustive over every (backdrop, source, coverage) triple for Normal.
+**The cost model, re-measured and re-explained.** See the paste block.
 
-**The cost model.** `7c806b5` split `LayerPanelUITests` after measuring per-test seconds first;
-`4408fd3` fixed a doc comment that named that class as the suite's floor and went stale the same day.
-
-**BUGS.md** gained the popover that re-presents itself when its host returns, the arithmetic on
-`draw(_:)` views as wide as the whole document, and the three the screenshots found.
-
-## What this pass learned that outlives it
-
-- **A borrowed comment carries its premise, and the premise does not travel.** `CurveEditor`'s `didMove`
-  sentence was true in `CurveEditor` and false one file over, and the difference was a single extra
-  assignment in the pasting site. The predicate is now `TimelineGraphBand.isTap`, where the fast tier
-  can read it — `TimelineTrackView.swift` is not compiled into the test target, which is exactly why a
-  rule this load-bearing went a whole stage with nothing naming it.
-- **"Having looked at it" is a sample size of one.** Both this pass's visual decisions were made that
-  way; one of them was wrong for three hues in eight, and which channel gets which hue is only its
-  position in `Effect.parameters`.
-- **A test that catches a defect *sometimes* is worse than one that never does.** `applying` walks its
-  keys sorted now — which changes no answer it gives — because the unsorted version killed its mutation
-  five runs in six, off Swift's per-process `Dictionary` hash seed. This repo triages a one-off red as
-  environmental until an isolated re-run says otherwise, so an intermittent test spends that judgement
-  for everyone.
-- **A proximity test proves nothing until its fixture holds two candidates.** Three occurrences, three
-  levels: §11.3 found it, D3's five-mutation pass found it again for `nearestKey`, and the review found
-  it a third time one level down in `nearestChannel`.
-- **Split on seconds, never on tests.** `GraphEditorUITests` is 7/3 and not 5/5 because each gesture
-  test spends ~45 s and nearly all of it is authoring an animated curve — the graph editor edits curves
-  and cannot be the thing that makes the first one. A count-balanced split would have left 3 s on one
-  side and 268 on the other.
-- **A class grows past the floor while nobody is looking.** `GraphEditorUITests` went ~40 s → 271 s
-  across three stages, none of which was a suspicious commit, and became the suite's second-longest
-  class without anyone deciding to make it so.
+**Documentation.** ROADMAP.md deleted, 644 lines folded into TODO as (26)-(30). EFFECT_BACKDROP §0
+banner. The eyedropper doc now carries the margin ruling it had been hiding since 2026-08-27.
 
 ## Still open
 
-TODO (10) — the colour switch, route decided and unbuilt, with two questions unruled inside it. TODO
-(23) — selection membership moves from Move to Select, the owner's not-priority ask. TODO (22) is now
-one line: ask 6's *cel* marquee, which the owner put in the future themselves.
+KEYFRAMES §8 stage 5 onward; §9's four open questions. TODO (22), (23), (10), (26)-(30).
+`ARCHITECTURE_REVIEW.md` findings 2-4.
 
-KEYFRAMES §8 stage 4 onward. §9's four open questions. §11 has no ruled-open items left — §11.6's three
-are all answered — but three things sit outside it: bezier tangent handles, the cel marquee, and the
-channel that vanishes when its second-to-last key is tapped away.
+BUGS.md carries the popover that re-presents itself, the track's `draw(_:)` view widths, the
+interactive-gesture CPU composites, Fill/Clear on a derived in-between, the raster-storage bound, the
+unclamped zoom, `TextFrame.homography` decoding with no validity check, PERFORMANCE item 14, the
+narrowed mask-cache structural gap, and the folder-row accessibility gap.
 
-`ARCHITECTURE_REVIEW.md` findings 2-4. BUGS.md carries the three the screenshots found, the popover
-that re-presents itself, the track's `draw(_:)` view widths, the interactive-gesture CPU composites,
-Fill/Clear on a derived in-between, the raster-storage bound, the unclamped zoom,
-`TextFrame.homography` decoding with no validity check, PERFORMANCE item 14, the narrowed mask-cache
-structural gap, and the folder-row accessibility gap.
+Two behaviour questions are still owed: save semantics when a project loaded with something
+unreadable, and which faces belong in the font picker's favourites strip.
 
-Two behaviour questions are still owed: save semantics when a project loaded with something unreadable,
-and which faces belong in the font picker's favourites strip.
-
-**Found and deliberately not fixed this pass**: the band's backing store is `totalWidth × 96` and the
-largest single store on the track, left because *every* view on the track is `totalWidth` wide and the
-fix belongs to the track; colour, toggle and picker rows still write a whole resolved `Effect`; stepped
-and compound parameters still cannot be keyed; and six of the thirteen effects never match an XCUITest
-query, which is almost certainly a scrollable-menu accessibility limit and will read as a broken app to
+**Found and deliberately not fixed**: `TimelineGraphBand.channels(effect:tracks:)` has no caller in
+the app any more — documented in its own doc rather than deleted minutes after the run that verified
+it, and a later pass should remove it. The band's backing store is `totalWidth × 96` and the largest
+single store on the track, left because *every* view on the track is `totalWidth` wide and the fix
+belongs to the track. Colour, toggle and picker rows still write a whole resolved `Effect`. Stepped
+and compound parameters still cannot be keyed. Six of the thirteen effects never match an XCUITest
+query, almost certainly a scrollable-menu accessibility limit, and will read as a broken app to
 whoever reaches for one next.
