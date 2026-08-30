@@ -10,7 +10,8 @@ one file. Rewrite the paste block when you close a pass; do not append to it. --
 Read HANDOFF.md, then CLAUDE.md, KEYFRAMES.md and TODO.md.
 
 You are the orchestrator: delegate the building and the test runs, do the merging and the reading
-inline. `main` is `7c38ba2`. **Fast tier 2227 / 2224 / 0 / 3.** **No full suite was run this pass**,
+inline. `main` is `ff2d732` — `7c38ba2` is the last commit that touches code, everything above it is
+this close-out. **Fast tier 2227 / 2224 / 0 / 3.** **No full suite was run this pass**,
 and two heavy classes were split during it, so **CLAUDE.md's 22.3 min is stale in the *optimistic*
 direction** — the ~15-16 min the arithmetic predicts is labelled INFERRED there and nobody has watched
 a run since. **Take a real full run early**, on a freshly erased simulator, under `tools/simlock.sh`:
@@ -89,7 +90,7 @@ twenty-five; CANVAS_RESIZE §5 and §6; EFFECT_BACKDROP §5 and §2.1; (10)'s sR
 
 ## State
 
-`main` = `7c38ba2`, 21 commits above `0513d06`. **Fast tier 2227 total / 2224 passed / 0 failed / 3
+`main` = `ff2d732`, 22 commits above `0513d06`; `7c38ba2` is the last one that touches code. **Fast tier 2227 total / 2224 passed / 0 failed / 3
 skipped**, up from 2153 at the start of the pass.
 
 **NO FULL SUITE WAS RUN.** CLAUDE.md's 22.3 min figure predates both of this pass's class splits and is
@@ -105,7 +106,9 @@ same nineteen immediately before the cut. `SelectionAndMoveUITests` at 327 s is 
 from ~40 s to a MEASURED 271 s and the suite's second-longest class, split into `GraphEditorUITests`
 (7 / 133) and `GraphEditorGestureUITests` (3 / 136).
 
-A Release build of `7c38ba2` was being installed on the iPad as this was written; the last build
+**A Release build of `7c38ba2` is installed on the iPad** — built and installed 2026-08-30 01:34, first
+attempt, tunnel re-established with `devicectl device info details` first because the device read
+`available (paired)`. The owner is holding the whole graph editor including D3's gestures. The last build
 *confirmed* on the device is `a85a316`. Ask the owner rather than assuming.
 
 ## What landed
