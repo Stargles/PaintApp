@@ -3,6 +3,15 @@
 The owner's asks. [BUGS.md](BUGS.md) is for what we find. **An item leaves when merged, not when a
 branch exists.** Three in flight at once unless the extras need no simulator — see `tools/simlock.sh`.
 
+**An ask that restates a ROADMAP feature belongs in ROADMAP, under the item it extends.** Added
+2026-08-30, at the owner's instruction, after their memory-and-baking architecture was filed here as a new
+item (25) when [ROADMAP.md](ROADMAP.md) §5b had been its home since 2026-08-29 and already held an earlier
+statement of the same thing. The test is not "is this new words?" but "is there already an item this is a
+more detailed version of?" — and the cost of getting it wrong is what the owner saw: one feature specified
+in six documents at three scopes, which is how it acquired two eviction policies and two disk tiers before
+a line of it was written. **This file is asks being built or next. ROADMAP is the long-term features, none
+designed, each needing its own conversation first.**
+
 **Record an ask in the owner's own words, and fold a ruling into the item it rules on.** A quote is
 cheaper to keep than a decision is to rebuild — the perspective-text requirement was nearly re-derived
 because it lived in one document. But an item should read as *one current description*, not as the
@@ -271,71 +280,22 @@ LAYER_TRANSFORM.md.
       standing expendable-documents permission at the top of this file means today is the cheapest this
       change will ever be.
 
-### (25) Stream the document off disk, and size memory to the device — the owner's architecture, 2026-08-30
+### Playback, baking and memory — these live in ROADMAP §5b, not here
 
-- [ ] **Given unprompted, and it is a design rather than a complaint. Quoted in full because the shape
-      is the ask:**
+- **Moved 2026-08-30 at the owner's instruction**: *"the feature that I just told you about the memory
+  allocation render baking belongs in ROADMAP.md 5. Rendering and export... it may be a good idea to clean
+  up and organize the ideas properly instead of it being everywhere (todo and roadmap)."*
 
-      > "the ipad does not have much memory, so I want the paint program to not use much by storing as
-      > many things it can to disk. Probably the current active cel is the only thing required to be in
-      > memory. The paint program automatically pulls unbaked frames from disk (layers, compositing,
-      > etc), bakes the compositing and stores it back straight to disk, so that when the play is
-      > pressed it can be played at 24fps. This way, the program doesn't run out of memory even with a
-      > hundred layers and a thousand cels. The memory is dynamically allocated: lets say we have layers
-      > 1 through 10 and the program has only enough memory for 3: the three bottom layers are pulled,
-      > composited and stored, then the next are pulled etc."
+  Two items left this file for [ROADMAP.md](ROADMAP.md) §5b — the disk-streaming memory architecture, and
+  "playback at 24 fps with in-betweens", which was always the same feature seen from the performance end.
+  **§5b is now the single home**, and it names the four other documents that specify parts of it so they
+  can be read as subordinate rather than parallel.
 
-      And, in the same message, **the two things that keep this from being over-specified**:
-
-      > "(NOTE: This is my thinking on how it may work, it may not be the most optimal. The session is
-      > gonna have to make a judgement on how exactly to do this. I eventually want to make it android
-      > and windows compatible so dynamic allocation of some sort may be nice.)"
-
-      **So the mechanism is delegated and the goal is not.** The goal: a hundred layers and a thousand
-      cels without running out of memory, and 24 fps on press-play. **The portability line is new and it
-      is a constraint on the design, not a wish** — a scheme that hard-codes an iPad's budget, or that
-      leans on an iOS-only API for its eviction signal, fails a requirement the owner has now stated.
-
-      **This subsumes and outranks the playback item below**, which was scoped to making playback fast;
-      this is scoped to making the whole document not fit in memory in the first place.
-
-      **What already exists, so the design starts from the tree rather than from scratch** — none of
-      this is verified against the current tip and all of it needs re-reading before it is trusted:
-      `CompositorBudget` already refuses work that will not fit and is the seam a dynamic budget would
-      grow from; KEYFRAMES §4.6 already specifies a **span-scoped, eager, disk-backed** playback cache
-      and §9 question 4 leaves *where the disk tier lives* unruled (it recommends `Library/Caches` over
-      `ProjectBackupManager`'s `Documents/` precedent, knowingly); PERFORMANCE item 14 is the ranked
-      entry for this; and the standing memory note **"stream cels, don't hoard them"** records that the
-      owner had already ruled against holding the whole animation resident and named the YouTube-buffer
-      shape themselves.
-
-      **One part of the owner's sketch is worth confirming early because everything rests on it**: their
-      layer-chunked accumulation — pull three, composite, store, pull the next three — is valid for
-      source-over and for every backdrop-reading blend mode, because each layer blends against the
-      accumulation *below* it, which is exactly what a bottom-up chunk holds. **INFERRED, and it should
-      be proven against `blendOver` and the six non-separable modes before it is built on.** What it
-      does *not* obviously survive is anything that reads content from *above*, and the `above` half of
-      the sandwich is where to look.
-
-      **Ask the owner before building**, per ROADMAP's standing rule, at least: whether a bake is
-      allowed to be stale on screen while it catches up (a YouTube buffer shows you where it has got
-      to), and what should happen when the disk is full rather than when memory is.
-
-### Playback at 24 fps, with in-betweens — now a consequence of (25), not a separate programme
-
-- [ ] The owner, 2026-08-29: *"Basically I want the app to be able to play in realtime even with in
-      betweens... if a smarter faster way is possible which doesnt require a lot of code, then sure."*
-
-      **[PERFORMANCE.md](PERFORMANCE.md) §8 is the ranked list** — five entries, each naming what is
-      already measured and what would have to be established. Nothing is started. Two facts decide how it
-      reads: **composited playback already misses 24 fps on the device in Release before interpolation is
-      involved** (§2 item 5), so this is not one delta away; and **KEYFRAMES §4.6's span cache does not
-      cover it**, because §4.6 scopes itself to the transformation layer and export, so shipping stage 6b
-      as specified changes nothing here.
-
-      The two cheapest wins **share one prerequisite** — hoisting the playback clock onto the model, which
-      ROADMAP §4 (audio) and KEYFRAMES §5 (recording) already require for their own reasons. That makes
-      the clock the highest-leverage thing on this list and the natural first move.
+  **The boundary this restores, because it is what let the idea scatter:** TODO.md is asks that are being
+  built or are next; ROADMAP.md is the long-term features, none of which is designed and each of which
+  needs its own conversation with the owner first. An ask that is a *roadmap feature stated in new words*
+  belongs in ROADMAP under the item it extends — not as a new TODO entry, which is the mistake made
+  earlier today when this arrived as item (25).
 
 ## Carried — deliberate, and not an ask
 

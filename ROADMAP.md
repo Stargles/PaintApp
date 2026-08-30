@@ -413,7 +413,37 @@ the export — [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md)'s whole subject is that 
 behind the composite rather than part of it. At what resolution: the canvas, or a chosen one? And is a
 slow, correct export acceptable, given the arithmetic above?
 
-### 5b. Background baking for playback — asked 2026-08-29, and the answer is that it is specified twice
+### 5b. Bake, stream and size to the device — **the single home for this feature**
+
+**Consolidated here on 2026-08-30 at the owner's instruction**, after they observed it had been recorded
+in two files at once and asked for it to stop being everywhere:
+
+> "the feature that I just told you about the memory allocation render baking belongs in ROADMAP.md 5.
+> Rendering and export. It's going to have to be implemented sometime as well as all the other stuff on
+> roadmap, so it may be a good idea to clean up and organize the ideas properly instead of it being
+> everywhere (todo and roadmap)."
+
+**Six documents specify part of this. This section is the one that governs; the others are subordinate
+and should be read as detail, not as competing designs.** They were written at different scopes on
+different days, which is exactly how one feature acquired two eviction policies and two disk tiers:
+
+| where | what it holds | status |
+|---|---|---|
+| **ROADMAP §5b — here** | the whole feature, the owner's three statements of it, and the couplings | **governs** |
+| ROADMAP §5 (above) | export, which shares this feature's encoder and its native-resolution problem | sibling; build together |
+| LAYER_COMPOSITING §9.2 | the same machine at *sequencer* scope — priority queue, disk LRU, evict on edit | detail |
+| KEYFRAMES §4.6 | the same machine at *one keyframe span* — eager, complete, ruled 2026-08-28 (§2.19-20) | detail, and **ruled** |
+| PERFORMANCE §8 | the ranked list of what would actually buy frames, each entry naming what is measured | evidence |
+| TODO.md | **nothing, as of 2026-08-30.** Two items moved out of it into this section | — |
+
+**The boundary that stops it scattering again**: TODO.md is asks being built or next; ROADMAP is
+long-term features, none designed, each needing its own conversation first. **An ask that restates a
+roadmap feature in new words belongs under that roadmap item** — not as a new TODO entry, which is the
+mistake made on 2026-08-30 when the owner's memory architecture arrived and was filed as TODO (25).
+
+---
+
+**Originally: asked 2026-08-29, and the answer was that it is specified twice**
 
 The owner, unprompted, on being told an in-between frame composites live:
 
@@ -489,6 +519,49 @@ that a future ask be written down rather than researched now:
 cel is **6.558 MiB resident (MEASURED**, PERFORMANCE.md), and the owner's real scenes are 300-1000 cels,
 so a fully-resident document is **2-6.5 GB (INFERRED**, arithmetic only). §9.2 point 5 reached the same
 place from the other end.
+
+**The owner's third statement, 2026-08-30, and it is the first one that specifies a *mechanism*.** Asked
+to choose what to build next, they explained the feature again unprompted and in more detail:
+
+> "the ipad does not have much memory, so I want the paint program to not use much by storing as many
+> things it can to disk. Probably the current active cel is the only thing required to be in memory. The
+> paint program automatically pulls unbaked frames from disk (layers, compositing, etc), bakes the
+> compositing and stores it back straight to disk, so that when the play is pressed it can be played at
+> 24fps. This way, the program doesn't run out of memory even with a hundred layers and a thousand cels.
+> The memory is dynamically allocated: lets say we have layers 1 through 10 and the program has only
+> enough memory for 3: the three bottom layers are pulled, composited and stored, then the next are
+> pulled etc."
+
+> "(NOTE: This is my thinking on how it may work, it may not be the most optimal. The session is gonna
+> have to make a judgement on how exactly to do this. I eventually want to make it android and windows
+> compatible so dynamic allocation of some sort may be nice.)"
+
+**Three things this adds that the two earlier statements did not.**
+
+1. **Layer-chunked accumulation is a new mechanism and it looks sound.** Pull as many layers as fit,
+   composite, store, pull the next — valid for source-over and for every backdrop-reading blend mode,
+   because each layer blends against the accumulation *below* it, which is exactly what a bottom-up
+   chunk holds. **INFERRED; prove it against `blendOver` and the six non-separable modes before building
+   on it.** Where it may not hold is anything reading content from *above* — the `above` half of the
+   sandwich is where to look, and `RenderBackground`'s ink-exclusion walk is a second place.
+2. **Portability is now a stated requirement, not a wish** — *"android and windows compatible"*. A budget
+   hard-coded to an iPad, or an eviction signal that only iOS emits, fails it. This is a constraint on
+   the design and it arrived before the design, which is the cheapest moment it could have.
+3. **The mechanism is explicitly delegated and the goal is not.** The goal: a hundred layers and a
+   thousand cels without running out of memory, and 24 fps on press-play. Anything meeting that is
+   allowed to disagree with the sketch above, and the owner has said so in writing.
+
+**What the performance end of the same feature already establishes**, moved here from TODO.md on
+2026-08-30 so the two halves stop being read separately. The owner, 2026-08-29: *"Basically I want the
+app to be able to play in realtime even with in betweens... if a smarter faster way is possible which
+doesnt require a lot of code, then sure."* [PERFORMANCE.md](PERFORMANCE.md) §8 ranks the five candidates.
+Two facts decide how that list reads: **composited playback already misses 24 fps on the device in
+Release before interpolation is involved** (PERFORMANCE §2 item 5), so this is not one delta away; and
+**KEYFRAMES §4.6's span cache does not cover it**, because §4.6 scopes itself to the transformation layer
+and export. One prerequisite is shared by more of this repo than anything else on the list: **the
+playback clock is a `Timer` whose state lives on the view** (`Views/AnimationTimeline.swift:13-14`, the
+timer at `:976-989`), so it drifts; ROADMAP §4 (audio) and KEYFRAMES §5 (recording) each need it hoisted
+onto the model for their own reasons.
 
 **Three couplings that are cheap to note now and expensive to discover late. Nothing here was researched;
 it is what the tree already says.**
