@@ -830,9 +830,15 @@ extension Effect {
     /// a black-to-white gradient map used to be exactly "the pixel's own `Lum`, restated as a
     /// colour": entry 113 was (113, 113, 113). Through Oklab it is (83, 83, 83), because the entry
     /// whose *perceptual lightness* is 0.443 is darker than the byte 113. So a gradient map used to
-    /// convert to greyscale now darkens the midtones by up to 31/255. That is the same rule applied
-    /// consistently rather than a special case for greys, and `docs/oklab-ramps/02-the-cost.png` is
-    /// the picture of it.
+    /// convert to greyscale now darkens the midtones by up to 31/255.
+    ///
+    /// **RULED BY THE OWNER 2026-08-30, shown `docs/oklab-ramps/02-the-cost.png`: apply it everywhere,
+    /// greys included.** Offered the alternative — mix achromatic stop pairs the old way so a
+    /// black-to-white gradient map stays an exact brightness conversion, one extra branch here — they
+    /// took the uniform rule. **So the darkening is intended, not an oversight**; do not "fix" it, and
+    /// do not add the special case back without asking. `EffectParityLogicTests`'
+    /// `testGradientMapIndexesByTheSameLuminanceTheBlendModesUse` pins entry 113 at 83 and records the
+    /// old value in its doc.
     private static func gradientColour(_ sorted: [GradientStop], at t: Double) -> CodableColor {
         guard let first = sorted.first else { return CodableColor(red: 0, green: 0, blue: 0, alpha: 1) }
         guard let upper = sorted.firstIndex(where: { $0.position >= t }) else {

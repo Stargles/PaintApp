@@ -7,6 +7,18 @@ settled — §5's four questions were answered the same day and two of them over
 
 ## §0 — What is already true, verified rather than assumed
 
+> **STALE BY CONSTRUCTION — READ THIS FIRST.** This section describes the tree **before this document's
+> own build order (§6) ran**, and §6 has since shipped (`2a0379d`, `d90b329`, `5c00201`). Its first
+> bullet in particular — *"The paper is not in the composite"* — **is no longer true**:
+> `makeSandwichRequests` now builds `full` and `below` with `background: paper`
+> (`RenderRequest.swift:722-724`), both backends fill it, and `EffectLayerLogicTests:1491` is
+> `testEveryBlendModeBlendsAgainstThePaper`. Only the disengaged Core Animation path still has the
+> paper as a plain view. **A shipped spec's what-is-already-true section is the most
+> confidently-worded stale text in the repo** — it carries the commits it was verified at, so it reads
+> like a fresh statement of current behaviour and is a statement of the past. On 2026-08-30 it was
+> quoted as current to the owner and produced a wrong scope argument for TODO (10). Kept rather than
+> rewritten, because the *before* picture is what makes §2's reasoning legible.
+
 Every line here was opened by two agents independently, at commit `500a53e`/`f5126d8`.
 
 - **The paper is not in the composite.** It is a `UIView` painted behind the layer host

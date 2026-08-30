@@ -32,12 +32,24 @@ extension CanvasManager {
     /// Step 1, on the main actor: the composite the artist is looking at, captured as a value.
     ///
     /// **`includeBackground: true` is the whole "what does the artist see" decision in one argument.**
-    /// The canvas paints its paper as a real `UIView` behind the layer stack (`CanvasView`'s
-    /// `paperView`), so the paper is part of the picture but not part of any layer. Sampling without
-    /// it would make a tap on an unpainted patch of a white canvas return "nothing here" — the artist
-    /// can plainly see white, and the tool would be telling them there is no colour there. Gated on
-    /// `isCanvasBackgroundVisible` inside `makeRenderRequest`, so hiding the paper does make those
-    /// pixels genuinely empty, which is correct: that is what the artist sees then too.
+    /// Sampling without the paper would make a tap on an unpainted patch of a white canvas return
+    /// "nothing here" — the artist can plainly see white, and the tool would be telling them there is
+    /// no colour there. Gated on `isCanvasBackgroundVisible` inside `makeRenderRequest`, so hiding the
+    /// paper does make those pixels genuinely empty, which is correct: that is what the artist sees
+    /// then too.
+    ///
+    /// **That argument is scoped to the artwork rect, and outside it the opposite is ruled.** This
+    /// comment used to open by saying the paper is a real `UIView` behind the layer stack and so "part
+    /// of the picture but not part of any layer". That stopped being true when EFFECT_BACKDROP §6
+    /// shipped (`2a0379d`): the paper is a `RenderBackground` filled into the composite by both
+    /// backends, and it is only the *disengaged* live-canvas path that still paints `paperView`.
+    /// The consequence for this function is that **a tap in the padding margin now returns nothing**,
+    /// because `RenderBackground.rect` insets to the artwork rect and `Eyedropper.color` guards
+    /// `a > 0`. **RULED 2026-08-27 (EFFECT_BACKDROP §8 item 8): nothing to pick is correct.** The
+    /// margin does not export, does not thumbnail and is not part of the picture — it is an on-screen
+    /// affordance — so there is genuinely nothing there to sample and saying so is honest. It reads
+    /// like a regression and is not, which is why it is written here rather than left to be
+    /// rediscovered. **Nothing tests this in either direction.**
     ///
     /// `quality: .full`, and `makeRenderRequest` is also the request builder that does *not* apply
     /// `renderResolution` (that is `makeSandwichRequests`, by design — see `RenderRequest.swift`). So
