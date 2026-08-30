@@ -124,11 +124,34 @@ struct TimelineRowLayout {
         return y
     }
 
-    /// The strip a drop counts as landing on: the row plus half the gap either side, so two adjacent
-    /// rows' strips meet and there is no dead band between them where a drag resolves to nothing.
+    /// The strip a cel drop counts as landing on: the row's **block half** plus half the gap either
+    /// side, so two adjacent rows' strips meet and there is no dead band between them where a drag
+    /// resolves to nothing.
+    ///
+    /// **A graph editor band is split down the middle between the layer it hangs under and the one
+    /// below, and that is a decision.** This used to be `height(ofRow:)`, the whole expanded row —
+    /// so the expanded layer's strip was 130 pt while `TimelineTrackView.layoutDragChrome` places
+    /// the ghost and the drop indicator with `blockHeight`, and a finger over the curves resolved to
+    /// that layer and painted the block it was carrying up to 96 pt above itself.
+    ///
+    /// **A cel cannot live on a value axis**, so the band is not a cel target of its own; but the
+    /// alternative to giving it away is not "nothing", because every y between two rows has to
+    /// resolve to one of them. Handing the whole band to the layer it belongs to costs the detached
+    /// ghost *and* makes an expanded layer a sticky drop target its neighbour is 96 pt further away
+    /// than it looks. Handing it away entirely would leave the one interval on the track that no
+    /// strip covers, and the answer for it would be whatever `layerIndex(atY:)`'s nearest-row
+    /// fallback happened to give — which is nearest row **top**, so it would split the band 30 pt
+    /// down rather than at its middle, emergently and untestably. Splitting it deliberately is
+    /// therefore both the smallest maximum distance between the finger and the ghost (66 pt rather
+    /// than 130) and the only one of the three that is *stated*.
+    ///
+    /// So a row takes half of its own band below its blocks, and half of the band belonging to the
+    /// row above comes back up to meet it. With no expansion anywhere both terms are zero and this
+    /// is exactly the arithmetic it always was.
     func dropBand(ofRow position: Int) -> (minY: CGFloat, maxY: CGFloat) {
         let top = y(ofRow: position)
-        return (top - Self.gap / 2, top + height(ofRow: position) + Self.gap / 2)
+        return (top - Self.gap / 2 - expansion(ofRow: position - 1) / 2,
+                top + blockHeight(ofRow: position) + expansion(ofRow: position) / 2 + Self.gap / 2)
     }
 
     /// The full height of the scrollable content — the ruler, every row and its gap, and the inset

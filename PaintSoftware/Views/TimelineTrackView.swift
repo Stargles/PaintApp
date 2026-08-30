@@ -126,7 +126,13 @@ struct TimelineTrackView: UIViewRepresentable {
         /// turn a finger's y into a target layer and hang its ghost at that row's size. Folder rows
         /// are absent by construction: a folder is a summary of its children and has no track of its
         /// own to drop a block onto.
-        private var layerRowGeometry: [(layerIndex: Int, minY: CGFloat, maxY: CGFloat, height: CGFloat)] = []
+        /// Per layer row: the strip a drop on it resolves from (`minY`/`maxY`, `dropBand`), and where
+        /// the block it would land on actually is (`blockTop`/`height`). **Two things, since D2** —
+        /// they were one while every row was its blocks and nothing else, and the graph editor band
+        /// is the first row content that no cel can be dropped onto. Deriving the second from the
+        /// first is what put the drag ghost up to 96 pt away from the finger holding it.
+        private var layerRowGeometry: [(layerIndex: Int, minY: CGFloat, maxY: CGFloat,
+                                        blockTop: CGFloat, height: CGFloat)] = []
 
         /// The block currently picked up, if any. See `BlockDrag`.
         private var blockDrag: BlockDrag?
@@ -232,6 +238,11 @@ struct TimelineTrackView: UIViewRepresentable {
             // every accessibility identifier and the ruler's CoreText exactly as they are.
             if built.key == laidOutKey {
                 movePlayhead(totalHeight: totalHeight)
+                // The band's window is not in the key (see `updateGraphBandViewport`), so it is
+                // refreshed on this path as well as from `scrollViewDidScroll`. Both are needed and
+                // neither subsumes the other: a plain scroll raises no SwiftUI pass, and the first
+                // pass after the scroll view has a width raises no scroll event.
+                updateGraphBandViewport()
                 return
             }
             laidOutKey = built.key
@@ -316,10 +327,19 @@ struct TimelineTrackView: UIViewRepresentable {
                            sceneFrameCount: sceneFrameCount,
                            markers: built.key.trackMarkers.indices.contains(slot)
                                ? built.key.trackMarkers[slot] : [])
-                let band = layout.dropBand(ofRow: entry.position)
+                // **Where a drop resolves and where its ghost is drawn are recorded separately, and
+                // that is the fix rather than an accident of naming.** `layoutDragChrome` used to
+                // place the ghost at `minY + gap/2`, i.e. derived from the strip — true only while a
+                // row was its blocks and nothing else. `dropBand` now stops with the blocks and
+                // splits a graph editor band with the row below (see its doc), so the strip's top is
+                // no longer the block's top and reading one off the other puts the ghost half a band
+                // out. `blockTop` is the row view's own frame origin, which is where a dropped cel
+                // will actually appear.
+                let strip = layout.dropBand(ofRow: entry.position)
                 layerRowGeometry.append((layerIndex: entry.layerIndex,
-                                         minY: band.minY,
-                                         maxY: band.maxY,
+                                         minY: strip.minY,
+                                         maxY: strip.maxY,
+                                         blockTop: layout.y(ofRow: entry.position),
                                          height: height))
             }
 
@@ -398,7 +418,39 @@ struct TimelineTrackView: UIViewRepresentable {
                                          width: totalWidth,
                                          height: layout.expansion(ofRow: position))
             graphBandView.update(content: content, pixelsPerFrame: pixelsPerFrame,
-                                 frameCount: frameCount)
+                                 frameCount: frameCount, visibleX: visibleBandX)
+        }
+
+        /// **The band's x window, in the track's own coordinates.**
+        ///
+        /// The band's frame starts at x 0 of `contentView`, and `contentView` sits at the origin of
+        /// the scroll view's content, so a content x and a band x are the same number and the window
+        /// is `contentOffset.x` plus a screenful. Only x: the band is 96 pt tall and its cost is
+        /// entirely horizontal, so clipping it vertically would buy nothing and could only go wrong.
+        ///
+        /// Nil-safe by way of a zero-width range rather than an optional, because "no scroll view"
+        /// is a state this view cannot draw in anyway — it is a subview of the scroll view's content.
+        private var visibleBandX: ClosedRange<CGFloat> {
+            guard let scrollView, scrollView.bounds.width > 0 else { return 0...0 }
+            let minX = scrollView.contentOffset.x
+            return minX ... (minX + scrollView.bounds.width)
+        }
+
+        /// **The band's scroll fast path**, and the second half of the clip that
+        /// `TimelineGraphBand.sampling` is the first half of.
+        ///
+        /// Clipping the band to the viewport without redrawing it when the viewport moves would
+        /// trade a slow band for a **blank** one, which is strictly worse. It is a redraw and
+        /// nothing else — deliberately not a `relayout()`, and the viewport is deliberately not a
+        /// field of `TimelineLayoutKey`: `scrollViewDidScroll` fires on every frame of a scroll and
+        /// of a pinch's `contentOffset` correction, so keying on it would put a full re-layout of
+        /// every row, every accessibility identifier and the ruler's scene-length CoreText loop on
+        /// each of those ticks. That is `currentFrame`'s argument for `movePlayhead`, reached from
+        /// the other axis, and the key's own doc states the rule it follows: nothing that moves
+        /// faster than the layout goes in it.
+        private func updateGraphBandViewport() {
+            guard !graphBandView.isHidden, graphBandView.superview != nil else { return }
+            graphBandView.setVisibleX(visibleBandX)
         }
 
         /// The scrub fast path: everything a `currentFrame` change actually moves.
@@ -615,8 +667,10 @@ struct TimelineTrackView: UIViewRepresentable {
             guard let contentView else { return }
             guard let row = layerRowGeometry.first(where: { $0.layerIndex == drag.targetLayerIndex }) else { return }
 
+            // `blockTop`, not `minY + gap/2`: the drop strip and the blocks stopped being the same
+            // rectangle when the graph editor band arrived — see `layerRowGeometry`.
             let rect = CGRect(x: CGFloat(drag.targetStartFrame) * pixelsPerFrame,
-                              y: row.minY + TimelineRowLayout.gap / 2,
+                              y: row.blockTop,
                               width: CGFloat(drag.frameCount) * pixelsPerFrame,
                               height: row.height).insetBy(dx: 2, dy: 2)
             dragGhostView.setUntransformedFrame(rect)
@@ -680,8 +734,16 @@ struct TimelineTrackView: UIViewRepresentable {
 
 extension TimelineTrackView.Coordinator: UIScrollViewDelegate {
     /// Grows the laid-out track as the user scrolls toward its right edge, which is what makes the
-    /// timeline read as endless rather than stopping at the last drawing.
+    /// timeline read as endless rather than stopping at the last drawing — and redraws the graph
+    /// editor band, which samples only what is on screen and would otherwise be left blank past the
+    /// window it was last drawn for.
+    ///
+    /// The band's half is **before** the growth gate and outside it: the gate is "the track has to
+    /// get longer", which is false on the overwhelming majority of scroll ticks and has nothing to
+    /// do with what the band has to redraw. Ordering them the other way would leave the band showing
+    /// the curves of wherever the artist last stopped.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updateGraphBandViewport()
         guard displayedFrameCount(for: scrollView) > laidOutFrameCount else { return }
         relayout()
     }
@@ -1038,6 +1100,17 @@ private final class TimelineGraphBandView: UIView {
     private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
     private var frameCount: Int = 0
 
+    /// **What part of the band is actually on screen**, in the band's own x — which is the track's,
+    /// since the band's frame starts at x 0 of `contentView`. Set by the coordinator, never derived
+    /// here: `pixelsPerFrame` is `private(set)` on it and `contentOffset` is published nowhere, so
+    /// §11.1's coordinate-ownership rule applies to this the way it applies to everything else the
+    /// band draws.
+    ///
+    /// It exists because the dirty rect is **not** a clip on this view (see
+    /// `TimelineGraphBand.sampling`), and it comes with an obligation: a redraw on scroll. Clipping
+    /// without invalidating trades a slow band for a blank one, which is strictly worse.
+    private var visibleX: ClosedRange<CGFloat> = 0...0
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIColor(white: TimelineGraphBand.backgroundWhite,
@@ -1054,17 +1127,30 @@ private final class TimelineGraphBandView: UIView {
 
     /// - Parameter content: taken out of `TimelineLayoutKey`, never re-read off the model — see
     ///   `Coordinator.layoutGraphBand`.
-    func update(content: TimelineGraphBand.Content, pixelsPerFrame: CGFloat, frameCount: Int) {
+    func update(content: TimelineGraphBand.Content, pixelsPerFrame: CGFloat, frameCount: Int,
+                visibleX: ClosedRange<CGFloat>) {
         // A pinch changes `pixelsPerFrame` without changing a curve, and it changes every x on the
         // band — so both halves gate the redraw, exactly as `TimelineKeyMarkerBand.update` does.
         let changed = content != self.content
             || pixelsPerFrame != self.pixelsPerFrame
             || frameCount != self.frameCount
+            || visibleX != self.visibleX
         self.content = content
         self.pixelsPerFrame = pixelsPerFrame
         self.frameCount = frameCount
+        self.visibleX = visibleX
         accessibilityValue = TimelineGraphBand.encode(content.channels)
         if changed { setNeedsDisplay() }
+    }
+
+    /// **The scroll fast path.** A horizontal scroll changes nothing the layout key carries and
+    /// everything this view draws, so it arrives here rather than through `relayout()` — the shape
+    /// `movePlayhead` has for `currentFrame`, and for the same reason: the alternative is a full
+    /// re-layout on every delegate callback of the gesture that fires most often.
+    func setVisibleX(_ range: ClosedRange<CGFloat>) {
+        guard range != visibleX else { return }
+        visibleX = range
+        setNeedsDisplay()
     }
 
     override func layoutSubviews() {
@@ -1078,6 +1164,7 @@ private final class TimelineGraphBandView: UIView {
     override func draw(_ rect: CGRect) {
         guard let content,
               let sampling = TimelineGraphBand.sampling(in: rect,
+                                                        visibleX: visibleX,
                                                         pixelsPerFrame: pixelsPerFrame,
                                                         frameCount: frameCount)
         else { return }
@@ -1114,16 +1201,41 @@ private final class TimelineGraphBandView: UIView {
             // evaluator filled in. Filled in the curve's own colour with a dark rim, which is the
             // key-marker band's answer to the same problem one row up: a single colour disappears
             // against half the backgrounds it can land on.
-            stroke.setFill()
-            UIColor.black.withAlphaComponent(0.6).setStroke()
+            //
+            // **The dot is the key's own value, and it is deliberately not always on the line.**
+            // `AnimationCurve.step` quantises time *down* onto a multiple of the step, anchored at
+            // frame 0 of the curve's time base — so at `step > 1` a key on an off-parity frame holds
+            // a value the animation never outputs: the polyline at that x is the value the curve had
+            // at the step boundary below it. Two truths, and both are wanted. The line is what the
+            // animation **does**, which is the whole reason to read a graph editor; the dot is where
+            // the key **is**, which is what D3 will hand the artist to drag — moving the dot onto
+            // the line would make that handle report a value no key holds. What the two must not do
+            // is look like a mistake, so where they differ the divergence is drawn: a hairline stem
+            // from the key down to the line it belongs to.
+            let slack = TimelineGraphBand.keyRadius
+            let keyWindow = (sampling.minX - slack)...(sampling.maxX + slack)
             for key in channel.curve.keys {
                 let x = TimelineGraphBand.x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame)
+                guard keyWindow.contains(x) else { continue }
                 let y = TimelineGraphBand.y(ofValue: key.value, in: range, bandHeight: bounds.height)
+
+                if let onCurve = TimelineGraphBand.stem(forKeyAt: key.frame, in: channel.curve) {
+                    let stem = UIBezierPath()
+                    stem.move(to: CGPoint(x: x, y: y))
+                    stem.addLine(to: CGPoint(x: x,
+                                             y: TimelineGraphBand.y(ofValue: onCurve, in: range,
+                                                                    bandHeight: bounds.height)))
+                    stem.lineWidth = TimelineGraphBand.stemWidth
+                    stroke.withAlphaComponent(TimelineGraphBand.stemAlpha).setStroke()
+                    stem.stroke()
+                }
+
+                stroke.setFill()
+                UIColor.black.withAlphaComponent(0.6).setStroke()
                 let dot = UIBezierPath(ovalIn: CGRect(x: x - TimelineGraphBand.keyRadius,
                                                       y: y - TimelineGraphBand.keyRadius,
                                                       width: TimelineGraphBand.keyRadius * 2,
                                                       height: TimelineGraphBand.keyRadius * 2))
-                guard dot.bounds.intersects(rect) else { continue }
                 dot.fill()
                 dot.lineWidth = 1
                 dot.stroke()

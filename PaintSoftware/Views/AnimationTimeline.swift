@@ -232,8 +232,10 @@ struct AnimationTimeline: View {
     /// the old `blockMenu` had: a block can be deleted (by undo, by another gesture) while its menu
     /// is up, and the popover must not survive that — showing stale actions for a cel that no longer
     /// exists, or worse, crashing on the array access those actions perform. `.gap` and `.loop` carry
-    /// no such stale reference (a frame number and a layer index used only to set `currentLayerIndex`
-    /// are never subscripted), so they need no equivalent guard — same as before the merge.
+    /// no such stale reference — a frame number, and a layer index nothing here subscripts: the two
+    /// accessors the gap arm's keyframe section asks, `keyframeTarget(layerIndex:)` and
+    /// `gapFrameRange(layerIndex:containing:)`, each bounds-check and answer nil, which is what lets
+    /// that arm keep going without a guard of its own.
     @ViewBuilder
     private var timelineMenuContent: some View {
         switch timelineMenu?.menu {
@@ -254,7 +256,9 @@ struct AnimationTimeline: View {
                     menuButton("Clear", icon: "eraser") {
                         canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
                     }
-                    keyframeItems(layerIndex: layerIndex, celIndex: celIndex, frame: frame)
+                    keyframeItems(layerIndex: layerIndex, frame: frame,
+                                  clearing: canvasManager.celFrameRange(layerIndex: layerIndex,
+                                                                        celIndex: celIndex))
                     if canvasManager.layers[layerIndex].cels.count > 1 {
                         menuButton("Delete", icon: "trash", role: .destructive) {
                             canvasManager.deleteCel(layerIndex: layerIndex, celIndex: celIndex)
@@ -277,6 +281,17 @@ struct AnimationTimeline: View {
                         canvasManager.goToFrame(frame)
                     }
                 }
+                // **A gap gets the keyframe section too, and leaving it out lost a region of the
+                // model outright.** D2 repurposed §2.22's keyframe button into the graph editor
+                // toggle on the reasoning that Add / Remove / Clear had moved to the cel menu — true,
+                // and incomplete: §2.4 and §2.26 put marks on the *layer* in absolute document
+                // frames, and `TimelineKeyMarkers` says in as many words that they "exist perfectly
+                // well at frames the layer has no cel at". With the items only on the `.block` arm,
+                // a layer whose one cel covers frames 0–9 could not be given a bare mark at frame 20
+                // by any gesture in the app.
+                keyframeItems(layerIndex: layerIndex, frame: frame,
+                              clearing: canvasManager.gapFrameRange(layerIndex: layerIndex,
+                                                                    containing: frame))
             }
 
         case .loop(let frame):
@@ -295,28 +310,38 @@ struct AnimationTimeline: View {
         }
     }
 
-    /// **The cel menu's keyframe section** — §2.26, where a keyframe is placed and taken back.
+    /// **The timeline menu's keyframe section** — §2.26, where a keyframe is placed and taken back.
+    /// **On both arms**: a block and an empty slot, because §2.28's union covers the whole track and
+    /// not only the part of it with drawings on.
     ///
-    /// **Which target.** The layer the tapped block belongs to, by id, through the one conversion
-    /// `KeyframeTarget` exposes. §2.4 puts keys and marks on the layer rather than on the cel, so
-    /// there is nothing about the block itself in the address; the block only says *which layer* and
-    /// *which frame*.
+    /// **Which target.** The layer the tapped block or slot belongs to, by id, through the one
+    /// conversion `KeyframeTarget` exposes. §2.4 puts keys and marks on the layer rather than on the
+    /// cel, so there is nothing about the block itself in the address; the tap only says *which
+    /// layer* and *which frame*.
     ///
-    /// **Which frame.** The one carried in the request, which `handleTapOnCel` set to the playhead at
-    /// the instant the menu opened — the owner's ruling that the two are the same thing here, held by
-    /// the two-stage tap. Reading `currentFrame` now instead would key wherever a running playback
-    /// timer had since carried it.
+    /// **Which frame.** The one carried in the request, which `handleTapOnCel` / `handleTapOnGap` set
+    /// to the playhead at the instant the menu opened — the owner's ruling that the two are the same
+    /// thing here, held by the two-stage tap. Reading `currentFrame` now instead would key wherever a
+    /// running playback timer had since carried it.
     ///
-    /// **What "in that cel" means.** The frames the block covers, `celFrameRange`. A range query, not
-    /// a container lookup: an effect key lives on the layer in absolute document frames, so a cel has
-    /// no list of keyframes to empty and this is the only sense in which it has any.
+    /// **What Clear is scoped to, which is the caller's knowledge and not this function's.** For a
+    /// block it is the frames that block covers (`celFrameRange`); for an empty slot it is the run of
+    /// empty frames the artist tapped (`gapFrameRange`). A range query either way, not a container
+    /// lookup: an effect key lives on the layer in absolute document frames, so neither a cel nor a
+    /// gap has a list of keyframes to empty and this is the only sense in which either has any. The
+    /// owner's *"clear all keyframes in that cel"* generalises to *the stretch of track you tapped*,
+    /// and it has to generalise to something, because a mark can be placed anywhere on the track and
+    /// a Clear that only existed over cels would leave a gap full of marks removable one at a time.
+    ///
+    /// **`nil` is a legal answer and means no Clear item** — a block that has been undone out from
+    /// under its own menu, or a frame that turned out to be inside a cel after all.
     ///
     /// Both conditional items follow the Delete item's precedent a few lines up — offered only when
     /// they would do something, rather than shown greyed. Neither is `.destructive`: red is this
     /// menu's mark for losing a whole drawing, and Clear, which empties the cel's ink, is not red
     /// either.
     @ViewBuilder
-    private func keyframeItems(layerIndex: Int, celIndex: Int, frame: Int) -> some View {
+    private func keyframeItems(layerIndex: Int, frame: Int, clearing scope: Range<Int>?) -> some View {
         if let target = canvasManager.keyframeTarget(layerIndex: layerIndex) {
             menuButton("Add Keyframe", icon: "plus.diamond") {
                 canvasManager.addKeyframe(target, atFrame: frame)
@@ -326,10 +351,9 @@ struct AnimationTimeline: View {
                     canvasManager.removeKeyframe(target, atFrame: frame)
                 }
             }
-            if let range = canvasManager.celFrameRange(layerIndex: layerIndex, celIndex: celIndex),
-               canvasManager.hasKeyframe(target, inFrames: range) {
+            if let scope, canvasManager.hasKeyframe(target, inFrames: scope) {
                 menuButton("Clear Keyframes", icon: "xmark.diamond") {
-                    canvasManager.clearKeyframes(target, inFrames: range)
+                    canvasManager.clearKeyframes(target, inFrames: scope)
                 }
             }
         }

@@ -666,6 +666,40 @@ final class KeyframeControlLogicTests: XCTestCase {
         XCTAssertNil(manager.celFrameRange(layerIndex: manager.layers.count, celIndex: 0))
     }
 
+    /// **The same menu item raised over an empty slot, which is a place a keyframe can be.** §2.4
+    /// and §2.26 put keys and marks on the layer in absolute document frames, so they exist at
+    /// frames the layer has no cel at; the gap menu therefore needs a Clear scope of its own, and
+    /// the only unit visible there is the run of empty frames the artist tapped.
+    func testAGapsFrameRangeRunsBetweenItsNeighbours() {
+        let manager = gradedManager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 4, length: 4), (start: 12, length: 2)])
+
+        XCTAssertEqual(manager.gapFrameRange(layerIndex: 0, containing: 1), 0 ..< 4,
+                       "The gap before the first block starts at the head of the track")
+        XCTAssertEqual(manager.gapFrameRange(layerIndex: 0, containing: 9), 8 ..< 12,
+                       "…and one between two blocks is bounded by both")
+        XCTAssertEqual(manager.gapFrameRange(layerIndex: 0, containing: 8), 8 ..< 12,
+                       "Half-open at the block's end: the frame it stops on is the gap's first")
+        XCTAssertNil(manager.gapFrameRange(layerIndex: 0, containing: 5), "Frame 5 is inside a block")
+        XCTAssertNil(manager.gapFrameRange(layerIndex: 0, containing: 12), "…and so is a block's first frame")
+        XCTAssertNil(manager.gapFrameRange(layerIndex: manager.layers.count, containing: 0))
+    }
+
+    /// The trailing gap has no block to stop at, so it runs to the scene — and past it if that is
+    /// where the tap was. `handleTapOnGap` sends the playhead to the tapped frame before the menu can
+    /// open, and `goToFrame` raises `sceneFrameCount` to admit it; the floor is what makes the range
+    /// contain its own frame whatever order those happen in.
+    func testTheLastGapAlwaysContainsTheFrameItWasAskedAbout() {
+        let manager = gradedManager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 4)])
+
+        let range = manager.gapFrameRange(layerIndex: 0, containing: 40)
+        XCTAssertNotNil(range, "Frame 40 is past every block, so it is in the trailing gap")
+        XCTAssertEqual(range?.lowerBound, 4, "It starts where the last block stopped")
+        XCTAssertTrue(range?.contains(40) ?? false,
+                      "A tap out past the scene's end still names a range with that frame in it")
+    }
+
     // MARK: - Which channels are counted
 
     /// Empty until something is keyed, and then the descriptor table's order — not the dictionary's,

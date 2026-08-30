@@ -51,6 +51,12 @@ enum TimelineGraphBand {
     /// `CurveEditor.hitRadius` (22 pt) is the constant it will want, not this one.
     static let keyRadius: CGFloat = 2.5
 
+    /// The hairline joining a key's dot to the line, where a step makes the two differ — see
+    /// `stem(forKeyAt:in:)`. Thinner and fainter than the curve, because it is an annotation on the
+    /// curve rather than a second one.
+    static let stemWidth: CGFloat = 0.75
+    static let stemAlpha: CGFloat = 0.55
+
     /// The band's own background, over the timeline's black, so the strip reads as a panel rather
     /// than as curves floating between two rows.
     static let backgroundWhite: CGFloat = 1
@@ -176,6 +182,29 @@ enum TimelineGraphBand {
         y >= 0 && y <= bandHeight
     }
 
+    /// **Where the drawn line is at a key's own frame, when that is not the key's own value** — and
+    /// nil when the two agree, which is every key of every curve at `step == 1`.
+    ///
+    /// The band draws two things about a key and they are two different truths. The polyline is
+    /// `AnimationCurve.evaluate`, which applies `stepped(_:)` and quantises time **down** onto a
+    /// multiple of the curve's `step`, anchored at frame 0 of its own time base (`AnimationCurve.step`
+    /// says so, and the anchor is why this cannot be reasoned about from the first key). So on twos,
+    /// a key at an odd frame holds a value the animation never outputs: at that frame the curve
+    /// reports what it held at the even frame below. The dot is the key's stored value, because that
+    /// is what the artist authored and what D3 hands them to drag; the line is what the animation
+    /// does, because that is what a graph editor is read for.
+    ///
+    /// Neither may move onto the other — a dot placed on the line would be a drag handle for a value
+    /// no key holds, and a line drawn through the dots would be a picture of an animation that does
+    /// not play. What they may not do is look like a mistake, so the view joins them with a hairline
+    /// wherever this is non-nil. Returning the *value* rather than a `Bool` keeps the arithmetic here
+    /// and leaves the view with the two `y(ofValue:)` calls and a `UIBezierPath`.
+    static func stem(forKeyAt frame: Int, in curve: AnimationCurve) -> Double? {
+        guard let key = curve.key(atFrame: frame) else { return nil }
+        let onCurve = curve.evaluate(at: Double(frame))
+        return onCurve == key.value ? nil : onCurve
+    }
+
     // MARK: - The x axis, which belongs to the timeline
 
     /// **The curve time a band x maps to — the continuous inverse of
@@ -198,9 +227,9 @@ enum TimelineGraphBand {
         TimelineKeyMarkers.centerX(frame: frame, pixelsPerFrame: pixelsPerFrame)
     }
 
-    /// The x positions a curve is evaluated at across a dirty rect: one per point of width, which is
-    /// `CurveEditor.curvePath`'s density, clipped to the rect and to the frames the track actually
-    /// lays out.
+    /// The x positions a curve is evaluated at: one per point of width, which is
+    /// `CurveEditor.curvePath`'s density, clipped to the dirty rect, to **what is on screen**, and
+    /// to the frames the track actually lays out.
     ///
     /// **A stride rather than an array**, because the whole point of clipping is not to allocate one
     /// sample per point of a track that can be nine thousand points wide.
@@ -220,11 +249,44 @@ enum TimelineGraphBand {
         func x(at index: Int) -> CGFloat { min(minX + CGFloat(index) * step, maxX) }
     }
 
-    static func sampling(in rect: CGRect, pixelsPerFrame: CGFloat, frameCount: Int) -> Sampling? {
-        guard pixelsPerFrame > 0, frameCount > 0, rect.width > 0 else { return nil }
+    /// **The dirty rect is not a clip, and that is the whole reason `visibleX` exists.**
+    ///
+    /// `TimelineRulerView.draw`'s doc already states the premise: UIKit hands a **full-bounds**
+    /// `rect` whenever a view is invalidated by the no-argument `setNeedsDisplay()`, which is what
+    /// both `update` and `layoutSubviews` call — so on the band, whose own width *is* the whole
+    /// laid-out track, clipping to `rect` clipped to nothing at all. The difference from the ruler
+    /// is what a clipped-away unit costs: the ruler pays one CoreText layout per **frame** (one per
+    /// 30 pt at the default zoom), the band pays a Bézier root-solve per **point**. Measured as
+    /// counts rather than as time, because the constant is small and the count is the term that
+    /// moved: a 300-frame document at the default zoom is 9,000 pt of track, so two animated
+    /// channels cost ~18,000 `evaluate` calls — each a binary search plus, on a bezier segment, a
+    /// Newton solve of 2–3 `cubic()` evaluations — on **every** redraw, and 216,000 `cubic()` calls
+    /// at the 120 pt/frame zoom ceiling. That redraw fires on every `.changed` tick of a slider drag
+    /// that is auto-keying with the band open, and on every `.changed` sample of a pinch.
+    ///
+    /// `visibleX` is the scroll view's window in the band's own x, so the count becomes a function
+    /// of the *viewport* — ~1,366 pt on this iPad in landscape, whatever the document's length or
+    /// the zoom. It is deliberately **not** an optional with a "no clip" default: a caller that
+    /// forgot it would silently buy the whole track back, which is the failure this parameter is
+    /// here to remove.
+    ///
+    /// **The viewport is not in `TimelineLayoutKey` and must not be.** A scroll changes what the
+    /// band draws and moves nothing else on the track, so it takes the `movePlayhead` fast path —
+    /// `Coordinator.updateGraphBandViewport`. Keying on it would make the key move on every tick of
+    /// a gesture the gate exists to make cheap, which is `currentFrame`'s argument exactly.
+    static func sampling(in rect: CGRect,
+                         visibleX: ClosedRange<CGFloat>,
+                         pixelsPerFrame: CGFloat,
+                         frameCount: Int) -> Sampling? {
+        guard pixelsPerFrame > 0, frameCount > 0, rect.width > 0,
+              visibleX.upperBound > visibleX.lowerBound
+        else { return nil }
         let full = CGFloat(frameCount) * pixelsPerFrame
-        let minX = max(0, rect.minX - 1)
-        let maxX = min(full, rect.maxX + 1)
+        // The slack is applied *after* both clips, so the polyline still leaves the visible window
+        // by a point at each end and the curve reaches the screen edge rather than stopping a pixel
+        // short of it — the seam argument above, with the screen edge as the seam.
+        let minX = max(0, max(rect.minX, visibleX.lowerBound) - 1)
+        let maxX = min(full, min(rect.maxX, visibleX.upperBound) + 1)
         guard maxX > minX else { return nil }
         return Sampling(minX: minX, maxX: maxX, step: 1)
     }

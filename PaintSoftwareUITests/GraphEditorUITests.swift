@@ -107,4 +107,43 @@ final class GraphEditorUITests: PaintUITestCase {
         startsTogether(lowerName, lowerTrack,
                        "…and the row below is still in register — one TimelineRowLayout, two columns")
     }
+
+    /// **What D2's repurposed button had to leave behind, and did not.**
+    ///
+    /// §2.22's keyframe button became the graph editor toggle on the reasoning that Add / Remove /
+    /// Clear Keyframes had moved to the cel menu. True, and incomplete: they had moved to the
+    /// `.block` arm of `timelineMenuContent` only, and §2.4 and §2.26 put marks on the *layer* in
+    /// absolute document frames — `TimelineKeyMarkers` says they "exist perfectly well at frames the
+    /// layer has no cel at", which is why the marker band spans the whole track. So a layer whose one
+    /// block covers frames 0–9 had no gesture anywhere in the app that could give it a bare mark at
+    /// frame 20. This is the test that a slot with no drawing on it is still a place a keyframe can
+    /// go, and it lives here rather than with the other keyframe UI tests because it is D2's debt.
+    func testAnEmptySlotCanStillBeGivenAKeyframe() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let block = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5))
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0),
+                                "Could not read the starting block")
+        let markers = app.otherElements["timeline.keyMarkers.0"]
+        XCTAssertFalse(markers.exists, "PREMISE: an untouched document has no marks and hides the band")
+
+        // Two frames past the block's own right edge — an offset outside the element's bounds is the
+        // only handle a test has on an empty slot. Two taps for the reason a block's menu needs two:
+        // the first selects the frame, the second raises the menu on the frame already selected.
+        let slot = block.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(cel.length) + 2.0) / Double(cel.length), dy: 0.5))
+        slot.tap()
+        slot.tap()
+
+        XCTAssertTrue(app.buttons["Add Drawing"].waitForExistence(timeout: 5),
+                      "PREMISE: this is the empty slot's menu, not a block's")
+        let add = app.buttons["timeline.menu.Add Keyframe"]
+        XCTAssertTrue(add.exists, "A frame with no drawing on it is still a frame a mark can sit at")
+        add.tap()
+
+        XCTAssertTrue(markers.waitForExistence(timeout: 5),
+                      "…and the mark landed: the marker band spans the track, cels or no cels")
+    }
 }

@@ -64,6 +64,8 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         XCTAssertEqual(layout.contentHeight, rulerHeight + (rowHeight + 2) + 8)
     }
 
+    /// True with the graph editor open as well as closed — the band moves where two strips meet, not
+    /// whether they do. See `testTheOpenBandIsHalvedBetweenTheTwoLayersItLiesBetween`.
     func testDropBandsMeetSoNoDragFallsBetweenTwoRows() {
         for heights in [[rowHeight, rowHeight, rowHeight], [34, 100, 34, 60]] {
             let layout = self.layout(heights)
@@ -76,6 +78,16 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
             // track view used to spell out at each end.
             XCTAssertEqual(layout.dropBand(ofRow: 0).minY, layout.y(ofRow: 0) - 1)
             XCTAssertEqual(layout.dropBand(ofRow: 0).maxY, layout.y(ofRow: 0) + heights[0] + 1)
+        }
+        // …and with the graph editor open under the middle row, where the strips meet inside the
+        // band rather than at the row boundary.
+        let expanded = TimelineRowLayout.make(rows: stackRows(4), rulerHeight: rulerHeight,
+                                              rowHeight: rowHeight,
+                                              expansion: .init(layerIndex: 1, height: 96))
+        for position in 0..<3 {
+            XCTAssertEqual(expanded.dropBand(ofRow: position).maxY,
+                           expanded.dropBand(ofRow: position + 1).minY,
+                           "a dead strip opened below row \(position) with the band open")
         }
     }
 
@@ -237,25 +249,33 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
                        "The host and the scroll content both read this; they must grow together")
     }
 
-    /// **The two columns lay out from one derivation, so they cannot disagree about where a row
-    /// starts.** This is the failure the whole type exists to make impossible: a band the track has
-    /// and the name column does not shifts every track below it while the names stay, and a name
-    /// then labels the layer above the one it belongs to. Asserting it means asserting that a second
-    /// `make` call over the same inputs gives the same origins — which is what the two files do.
-    func testBothColumnsPutEveryRowInTheSamePlaceWithTheBandOpen() {
+    /// **Only the rows past the band move, and they move by exactly the band.**
+    ///
+    /// This replaces a test that named the two-column invariant — a band the track has and the name
+    /// column does not shifts every track below it while the names stay, so a name labels the layer
+    /// above the one it belongs to — and then **could not fail**: it built two layouts from two
+    /// `make` calls with byte-identical arguments and asserted their origins agreed, which asserts
+    /// that `make` is deterministic and nothing else. Neither call site was in it, and neither can
+    /// be: `AnimationTimeline.swift` and `TimelineTrackView.swift` are not compiled into this target,
+    /// which is the reason this type exists at all. **The real guard is
+    /// `GraphEditorUITests.testOpeningTheBandKeepsEveryNameLinedUpWithItsTrack`**, which measures the
+    /// two columns' actual on-screen frames and is the only tier that can see them.
+    ///
+    /// What is left here is the half that was doing work: which rows move, and by how much.
+    func testOnlyTheRowsBelowTheBandMoveAndTheyMoveByTheBand() {
         let rows = stackRows(5)
-        let expansion = TimelineRowLayout.Expansion(layerIndex: 1, height: 96)
-        let track = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight,
-                                           rowHeight: rowHeight, expansion: expansion)
-        let names = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight,
-                                           rowHeight: rowHeight, expansion: expansion)
-        for position in 0...5 {
-            XCTAssertEqual(track.y(ofRow: position), names.y(ofRow: position), "row \(position)")
-        }
-        // …and the rows past the band really did move, so the test above is not vacuous.
+        let open = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight,
+                                          expansion: .init(layerIndex: 1, height: 96))
         let closed = TimelineRowLayout.make(rows: rows, rulerHeight: rulerHeight, rowHeight: rowHeight)
-        XCTAssertEqual(track.y(ofRow: 0), closed.y(ofRow: 0), "Rows above the band do not move")
-        XCTAssertEqual(track.y(ofRow: 2), closed.y(ofRow: 2) + 96, "Rows below it move by the band")
+        XCTAssertEqual(open.expandedRow, 1, "Fixture: layer 1 is row 1 in a stack with no folders")
+        for position in 0...1 {
+            XCTAssertEqual(open.y(ofRow: position), closed.y(ofRow: position),
+                           "Row \(position) is at or above the band and must not move")
+        }
+        for position in 2...5 {
+            XCTAssertEqual(open.y(ofRow: position), closed.y(ofRow: position) + 96,
+                           "Row \(position) is past the band and moves by exactly it")
+        }
     }
 
     /// **The row view is sized to the block half, not the whole row.** `TimelineRowView` measures a
@@ -299,6 +319,29 @@ final class TimelineRowLayoutLogicTests: XCTestCase {
         XCTAssertEqual(layout.expandedRow, 1, "The layer, not the folder header above it")
         XCTAssertEqual(layout.height(ofRow: 0), rowHeight)
         XCTAssertEqual(layout.height(ofRow: 1), rowHeight + 96)
+    }
+
+    /// **The open band is split down the middle between the layer it hangs under and the one below.**
+    ///
+    /// `TimelineTrackView.layoutDragChrome` draws the ghost and the drop indicator on the row's
+    /// *blocks*. While `dropBand` was built from `height(ofRow:)` the expanded layer's strip ran 96 pt
+    /// past those blocks, so a finger over the curves resolved to that layer and painted the block it
+    /// was carrying up to a band above itself. A cel cannot live on a value axis — but every y
+    /// between two rows still has to resolve to one of them, so the band is halved rather than given
+    /// to either whole. That is the smallest maximum distance between the finger and its ghost, and
+    /// unlike leaving the band uncovered it is a decision this file can see.
+    func testTheOpenBandIsHalvedBetweenTheTwoLayersItLiesBetween() {
+        let layout = TimelineRowLayout.make(rows: stackRows(3), rulerHeight: rulerHeight,
+                                            rowHeight: rowHeight,
+                                            expansion: .init(layerIndex: 1, height: 96))
+        let strip = layout.dropBand(ofRow: 1)
+        XCTAssertEqual(strip.maxY, layout.y(ofRow: 1) + rowHeight + 48 + 1,
+                       "Its blocks, then half its band")
+        XCTAssertEqual(layout.dropBand(ofRow: 2).minY, strip.maxY,
+                       "…and the row below reaches up for the other half, so the strips still meet")
+        XCTAssertEqual(layout.dropBand(ofRow: 0).maxY, layout.dropBand(ofRow: 1).minY,
+                       "The row above is untouched: nothing of its own hangs under it")
+        XCTAssertEqual(strip.minY, layout.y(ofRow: 1) - 1)
     }
 
     /// A reorder drag past an expanded row has to walk its real pitch — the exact failure

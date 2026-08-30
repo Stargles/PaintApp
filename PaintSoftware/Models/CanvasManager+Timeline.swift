@@ -181,6 +181,33 @@ extension CanvasManager {
         return cel.startFrame ..< cel.endFrame
     }
 
+    /// **The run of empty frames a gap on a layer's track covers, half-open**, or nil when `frame`
+    /// is inside a cel after all — `celFrameRange`'s complement, and it exists for the same caller.
+    ///
+    /// **Why a gap needs a frame range at all.** §2.4 and §2.26 put keys and marks on the *layer*, in
+    /// absolute document frames, so they exist perfectly well at frames the layer has no cel at —
+    /// `TimelineLayoutKey.trackMarkers` says so and the marker band spans the whole track because of
+    /// it. The cel menu's "Clear Keyframes" is scoped to the block that raised it; the gap menu's has
+    /// to be scoped to something, and the only unit the artist can see there is the gap itself. So
+    /// the two menus scope to the same thing said twice: *the stretch of track you tapped*.
+    ///
+    /// **The bounds are the neighbouring cels, and the last gap ends at the scene.** That matches
+    /// what `TimelineRowView` draws — its trailing gap runs to the displayed frame count — closely
+    /// enough for the artist to recognise, and `handleTapOnGap` has already sent the playhead to the
+    /// tapped frame by the time this is asked, which raises `sceneFrameCount` to admit it
+    /// (`goToFrame`). The `frame + 1` floor is what makes that true rather than assumed.
+    ///
+    /// Order-independent by construction: `cels` is not guaranteed sorted, so this is a min and a max
+    /// over the neighbours rather than an index walk.
+    func gapFrameRange(layerIndex: Int, containing frame: Int) -> Range<Int>? {
+        guard layers.indices.contains(layerIndex) else { return nil }
+        let cels = layers[layerIndex].cels
+        guard !cels.contains(where: { $0.startFrame <= frame && frame < $0.endFrame }) else { return nil }
+        let lower = cels.filter { $0.endFrame <= frame }.map(\.endFrame).max() ?? 0
+        let upper = cels.filter { $0.startFrame > frame }.map(\.startFrame).min() ?? sceneFrameCount
+        return lower ..< max(upper, frame + 1)
+    }
+
     func extendCelToEnd(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]

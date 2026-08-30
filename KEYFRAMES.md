@@ -1011,8 +1011,18 @@ from a band they would read as a cel body.
 
 **D2 also repurposed the button, because otherwise nothing could open the band.** §2.22's keyframe
 button is now `graphEditorButton` — `chart.xyaxis.line`, id `timeline.graphEditorButton` — and the tap
-toggles the band on the selected layer instead of writing a mark. **No function was lost**: Add /
-Remove / Clear Keyframes are in the cel menu, which is the workflow ask 3 described. It is **tinted
+toggles the band on the selected layer instead of writing a mark. This section claimed **"no function
+was lost"** on the strength of Add / Remove / Clear Keyframes being in the cel menu, which is the
+workflow ask 3 described — and that was **half true and shipped as if it were whole**. The items were
+on the `.block` arm of `timelineMenuContent` only. §2.4 and §2.26 put marks on the *layer*, in
+absolute document frames, and `TimelineLayoutKey.trackMarkers` says in as many words that they "exist
+perfectly well at frames the layer has no cel at" — which is why the marker band spans the whole
+track. So a layer whose one block covered frames 0–9 could not be given a bare mark at frame 20 by
+any gesture in the app: a region of the model's own address space had lost its only UI, and the
+sentence asserting otherwise is what stopped anyone looking. **The `.gap` arm now carries the same
+section**, and Clear is scoped there to `gapFrameRange(layerIndex:containing:)`, the run of empty
+frames the artist tapped — because the owner's *"clear all keyframes in that cel"* has to generalise
+to *the stretch of track you tapped* or a gap full of marks comes back one at a time. It is **tinted
 blue when open**, like `interpolateButton`, because the band lives inside the scroll content and can
 therefore be open and scrolled out of sight; unconditionally white left the artist no way to tell a
 closed editor from one below the fold. The **channel list is not part of this stage**; ask 3 wants the
@@ -1057,6 +1067,81 @@ also carries `.contentShape` and a gesture, reports the **cell's** frame rather 
 tops and heights instead, which is the failure that actually loses the artist their place. The fix
 is two frames: the name is centred in `blockHeight` and that block is pinned `.top` in the full
 height, which is a no-op for every row with no band.
+
+**What an adversarial review of D2 found, and what each finding cost.** Five findings, all five real
+and all five fixed; the one question inside them that is answered *"leave it"* is the band's backing
+store, and it is answered with arithmetic below rather than with a shrug. They are recorded here
+rather than folded into the bullets above because each is a place where a sentence in this section
+was true of the code and wrong about the behaviour — which is the pattern worth recognising more than
+any one of them.
+
+- **The band sampled the whole track, not the screen.** `sampling(in:)` clipped to the dirty rect,
+  and the dirty rect **is not a clip on this view**: the band's own width is the whole laid-out track
+  and UIKit hands a full-bounds rect for the no-argument `setNeedsDisplay()` that both `update` and
+  `layoutSubviews` call. `TimelineRulerView.draw` already states that premise; what nobody carried
+  across is that the ruler pays one CoreText layout per **frame** and the band pays a Bézier
+  root-solve per **point**. A 300-frame document at the default zoom is 9,000 pt, so two animated
+  channels were ~18,000 `evaluate` calls — each a binary search and, on a bezier segment, a Newton
+  solve of 2–3 `cubic()` — per redraw, and 216,000 `cubic()` calls at the 120 pt/frame ceiling; on
+  every `.changed` tick of an auto-keying slider drag and every `.changed` sample of a pinch.
+  `sampling` now takes `visibleX`, and the cost is the viewport — ~1,366 pt on this iPad — whatever
+  the document's length and zoom are. **The clip brought an obligation with it**: clipping without
+  invalidating on scroll trades a slow band for a blank one, so `scrollViewDidScroll` redraws the
+  band *before* its own growth gate, and `relayout`'s early-return path refreshes the window too
+  (a scroll raises no SwiftUI pass; the first pass after the scroll view has a width raises no scroll
+  event, and neither call subsumes the other). The viewport is deliberately **not** in
+  `TimelineLayoutKey`: it moves faster than the layout, which is `currentFrame`'s argument for
+  `movePlayhead` reached from the other axis.
+- **The backing store is a second question and it is answered "not the band's", with numbers.** The
+  band view is `totalWidth` × 96 pt and `draw(_:)`-backed, so UIKit allocates `totalWidth × 96 × 4 ×
+  scale²` regardless of what is sampled into it — at scale 2, `totalWidth × 1536` bytes: **13.8 MB**
+  for 300 frames at the default 30 pt/frame, **55 MB** for the same document at the 120 pt ceiling,
+  **184 MB** at 1,000 frames × 120. Real numbers, and the band is the largest single store on the
+  track — but `contentView`, `rulerView`, every `TimelineRowView` and every `TimelineKeyMarkerBand`
+  are all `totalWidth` wide too, and the last two are `draw(_:)`-backed as well. So the *width* is a
+  property of the track rather than of the band, and above ~8,192 pt of view width (16,384 px, the
+  Metal 2D texture limit — **INFERRED**, not observed on device) nothing on the track can be backed
+  at all, the 18 pt ruler included, which a 273-frame document reaches at the default zoom. Sizing
+  the band's drawing view to the viewport would therefore buy a correct band under a ruler that had
+  already failed, which is worse than the status quo and not a D2-shaped fix. **Left as it is,
+  deliberately**; the owner of the fix is the track — a cap on `totalWidth`, or viewport-sized
+  drawing views for all of it — and it predates D2 by every one of those views.
+- **The drop strip and the drag ghost disagreed by the whole band.** `relayout` recorded
+  `dropBand(ofRow:)`, built from `height(ofRow:)`, which now *includes* the expansion — so the
+  expanded layer's drop strip was 130 pt, while `layoutDragChrome` draws the ghost and the drop
+  indicator at `blockHeight`. A finger over the curves resolved to that layer and painted the block
+  it was carrying up to 96 pt above itself. **A cel cannot live on a value axis**, so the band is not
+  a drop target of its own — but "not a target" is not an available answer, because every y between
+  two rows has to resolve to one of them. Three readings, and the arithmetic picks between them:
+  giving the band to its own layer costs the 130 pt detachment *and* makes an expanded layer a sticky
+  target its neighbour is 96 pt further away than it looks; leaving it covered by no strip hands it
+  to `layerIndex(atY:)`'s nearest-row fallback, which compares distances to row **tops** and so
+  would split it 30 pt down rather than in the middle — emergent and untestable; **halving it
+  deliberately** gives the smallest worst-case gap between the finger and its ghost (66 pt rather
+  than 130) and is the only one of the three a logic test can see. So `dropBand` takes the row's
+  blocks plus half of its own band, and reaches up for half of the band belonging to the row above;
+  with nothing expanded both terms are zero and the arithmetic is what it always was, so the strips
+  still meet everywhere. The ghost is drawn from a **separately recorded** `blockTop` rather than
+  derived from the strip, which is the half of this that would otherwise silently come back.
+- **A key's dot does not sit on the drawn line when a curve's `step` is above 1, and it is meant not
+  to.** `evaluate` applies `stepped(_:)`, which quantises time **down** onto a multiple of the step,
+  anchored at frame 0 of the curve's own time base — so on twos a key at an odd frame holds a value
+  the animation never outputs. Both are truths worth drawing: the line is what the animation *does*,
+  which is what a graph editor is read for, and the dot is where the key *is*, which is what D3 hands
+  the artist to drag — a dot moved onto the line would be a handle reporting a value no key holds.
+  They are kept apart and **joined by a hairline stem** wherever `TimelineGraphBand.stem(forKeyAt:in:)`
+  is non-nil, so the gap reads as a fact about the step rather than as a rendering bug. Latent today:
+  nothing in the app writes a step above 1 yet (§2.10), and `step` decodes from a document.
+- **And one test that could not fail**, which is the finding worth carrying forward.
+  `testBothColumnsPutEveryRowInTheSamePlaceWithTheBandOpen` named the exact failure `TimelineRowLayout`
+  exists to prevent and then built its two layouts from two `make` calls with byte-identical
+  arguments, so it asserted that `make` is deterministic and nothing else. It could not have asserted
+  more: neither call site is compiled into the test target, which is the reason the type exists. It is
+  gone, its non-vacuous half kept under a name that says what it checks, and the real guard is named
+  in its place — `GraphEditorUITests.testOpeningTheBandKeepsEveryNameLinedUpWithItsTrack`, which
+  measures the two columns' on-screen frames. **A test that cannot fail is worse than no test**,
+  because it reads as coverage; the tell here was that the failure it named was a disagreement between
+  two *files* and every symbol in its body came from one.
 
 **Colour comes from `Effect.parameters` order, not from the drawn list.** Eight hand-picked hues,
 indexed by the channel's descriptor position — hand-picked because a generated palette cannot be told
