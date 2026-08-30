@@ -1745,6 +1745,14 @@ extension EffectParameter {
     ///   before: green everywhere, wrong on screen, and nothing in the model to point at. It wants
     ///   four curves and a decision about which colour space they interpolate in, neither of which
     ///   falls out for free.
+    ///
+    ///   **The colour-space half now has an answer to reuse rather than to re-derive.** TODO (10a)
+    ///   put `ColorMath.mixOklab` in the tree and `gradientColour` above already tweens two colours
+    ///   through it, for the reason recorded there. Note what that does to the *other* half: a colour
+    ///   tween through Oklab is **not** four independent channel curves, because mixing the channels
+    ///   separately is exactly the muddy middle (10a) removed. It is one curve driving a position
+    ///   between two colours, plus alpha — which is a smaller change than "four curves", and a
+    ///   different one.
     var isScalarAnimatable: Bool { animation == .continuous && value == .double }
 }
 
