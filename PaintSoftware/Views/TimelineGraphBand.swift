@@ -138,6 +138,41 @@ enum TimelineGraphBand {
         /// the artist can undo. `encode(_ content:)` is what tells them apart, and this is the field
         /// it reads.
         let hiddenCount: Int
+        /// **How far along the track the curves are drawn** — `drawnFrameCount(sceneFrameCount:channels:)`,
+        /// and *not* the track's own laid-out length.
+        ///
+        /// In `Content`, and therefore in `TimelineLayoutKey`, for `height`'s reason exactly: it is an
+        /// input the band draws with that is not otherwise in the key, and one that is not would draw
+        /// once and freeze. Half of it is already in the key (the channels' own keys) and half is not
+        /// (the scene's length), which is precisely the shape that makes such a field silently stale.
+        let frameCount: Int
+    }
+
+    /// **How many frames the band draws its curves over.** The scene's own length, widened to hold any
+    /// key that sits past the end of it.
+    ///
+    /// **The band view is as wide as the *track*, and the track is not the document.**
+    /// `TimelineTrackView.Coordinator.displayedFrameCount(for:)` inflates the laid-out frame count past
+    /// `CanvasManager.sceneFrameCount` by two screenfuls of look-ahead, so that the artist can scroll
+    /// right and drop a cel past the end. Sampling a curve across all of that draws a flat line into
+    /// track that holds no frames: on a 12-frame document at the default zoom more than half the band
+    /// was tail. `AnimationCurve`'s constant-hold extrapolation makes the *value* out there correct,
+    /// which is why this is a question about where drawing stops rather than about what it evaluates to.
+    ///
+    /// **Expressed as a frame count and handed to `sampling(in:visibleX:pixelsPerFrame:frameCount:)`,
+    /// which already clips to one** — `TimelineRulerClip.frames(in:pixelsPerFrame:frameCount:)`'s shape,
+    /// and the reason there is no second spelling of this bound anywhere.
+    ///
+    /// **The widening is not tidiness.** Nothing clamps a key to the scene's length: `moves` stops a key
+    /// at its neighbour and at frame 0 and at no upper bound, `tap` adds one wherever the touch lands,
+    /// and `sceneFrameCount` grows only from *cel* edits (`CanvasManager+Timeline`), never from a
+    /// keyframe write. So a key genuinely can sit past the end of the scene, and bounding the drawing at
+    /// `sceneFrameCount` alone would make it invisible while leaving it grabbable — a key the artist can
+    /// delete by accident and cannot see. `+ 1` because a frame count is exclusive: the last key's own
+    /// column has to be inside the bound, not on its edge.
+    static func drawnFrameCount(sceneFrameCount: Int, channels: [Channel]) -> Int {
+        let lastKey = channels.flatMap { $0.curve.keys.map(\.frame) }.max()
+        return max(max(sceneFrameCount, 0), lastKey.map { $0 + 1 } ?? 0)
     }
 
     /// **The channels a band draws: the target's *animations*, by the strict predicate.**
@@ -266,7 +301,8 @@ enum TimelineGraphBand {
 
     /// The x positions a curve is evaluated at: one per point of width, which is
     /// `CurveEditor.curvePath`'s density, clipped to the dirty rect, to **what is on screen**, and
-    /// to the frames the track actually lays out.
+    /// to the frames the band draws over — `drawnFrameCount(sceneFrameCount:channels:)`, which is the
+    /// document's own length rather than the track's.
     ///
     /// **A stride rather than an array**, because the whole point of clipping is not to allocate one
     /// sample per point of a track that can be nine thousand points wide.
@@ -575,7 +611,15 @@ enum TimelineGraphBand {
     /// so a tap can be on the line and 40 pt from the key that owns that frame. Without the refusal
     /// `setKey` would replace it and the artist's value would be gone with no gesture that looked
     /// destructive.
-    static func tap(at point: CGPoint, channels: [Channel],
+    ///
+    /// **And an add past `frameCount` is refused, which is the gesture half of where drawing stops.**
+    /// `nearestChannel`'s rule is proximity to the **drawn** line — that is the sentence its own doc
+    /// makes the choice on — so once the curves stop at the document's own length
+    /// (`drawnFrameCount(sceneFrameCount:channels:)`) a tap out in the look-ahead would be aiming at a
+    /// line nobody can see, and would land a key by luck. A **remove** is deliberately not bounded the
+    /// same way: the bound already widens to hold any key past the end, so every key the band draws is
+    /// inside it and a key that is drawn must stay removable.
+    static func tap(at point: CGPoint, channels: [Channel], frameCount: Int,
                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Tap {
         if let hit = nearestKey(to: point, channels: channels,
                                 pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
@@ -586,7 +630,8 @@ enum TimelineGraphBand {
               let channel = channels.first(where: { $0.parameterID == id })
         else { return .nothing }
         let frame = TimelineKeyMarkers.frame(atX: point.x, pixelsPerFrame: pixelsPerFrame)
-        guard frame >= 0, channel.curve.key(atFrame: frame) == nil else { return .nothing }
+        guard frame >= 0, frame < frameCount, channel.curve.key(atFrame: frame) == nil
+        else { return .nothing }
         let raw = value(atY: point.y, in: channel.axis, bandHeight: bandHeight)
         let domain = channel.modelDomain
         return .add(parameterID: id, frame: frame,
@@ -825,6 +870,12 @@ extension CanvasManager {
         return TimelineGraphBand.Content(layerIndex: expansion.layerIndex,
                                          height: expansion.height,
                                          channels: shown,
-                                         hiddenCount: all.count - shown.count)
+                                         hiddenCount: all.count - shown.count,
+                                         // The scene's length, not the track's — see
+                                         // `drawnFrameCount`. Read here rather than in the view
+                                         // because it is an input to the drawing and therefore has
+                                         // to be inside the layout key.
+                                         frameCount: TimelineGraphBand.drawnFrameCount(
+                                             sceneFrameCount: sceneFrameCount, channels: shown))
     }
 }

@@ -199,7 +199,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sampling.count, 2, "A line, not a point")
     }
 
-    func testSamplingStopsAtTheEndOfTheLaidOutTrack() {
+    func testSamplingStopsAtTheFrameCountItIsGiven() {
         let sampling = TimelineGraphBand.sampling(in: CGRect(x: 0, y: 0, width: 10_000, height: 96),
                                                   visibleX: 0...10_000,
                                                   pixelsPerFrame: 30, frameCount: 12)
@@ -208,7 +208,65 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertNil(TimelineGraphBand.sampling(in: CGRect(x: 500, y: 0, width: 40, height: 96),
                                                 visibleX: 0...10_000,
                                                 pixelsPerFrame: 30, frameCount: 12),
-                     "A dirty rect entirely past the track samples nothing at all")
+                     "A dirty rect entirely past that bound samples nothing at all")
+    }
+
+    // MARK: - Where the curves stop, which is not where the track ends
+
+    /// **The bound is the document, not the laid-out track.**
+    ///
+    /// `displayedFrameCount(for:)` inflates the track past `sceneFrameCount` by two screenfuls, so
+    /// that the artist can scroll right and drop a cel past the end; the band view is that wide. Until
+    /// 2026-08-30 the curves were sampled across all of it and `AnimationCurve`'s constant-hold
+    /// extrapolation drew a *correct* flat line into track holding no frames — on a 12-frame document
+    /// more than half the band. The value out there was never the question; where drawing stops was.
+    func testTheCurvesStopAtTheEndOfTheDocumentAndNotAtTheEndOfTheTrack() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (6, 2.0)]))
+        XCTAssertEqual(manager.sceneFrameCount, 12, "PREMISE: a fresh document is twelve frames")
+
+        // The band is closed on a fresh document, so ask the arithmetic directly as well as through
+        // the accessor once it is open.
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 12,
+                                                         channels: channels(manager)), 12,
+                       "Every key is inside the scene, so the scene is the bound")
+        XCTAssertNil(manager.graphBandContent, "PREMISE: nothing is drawn until the editor is opened")
+
+        manager.isGraphEditorOpen = true
+        XCTAssertEqual(manager.graphBandContent?.frameCount, 12,
+                       "…and the content the view draws from carries that bound rather than the track's")
+    }
+
+    /// **A key past the end of the scene widens the bound, and that is not tidiness.**
+    ///
+    /// Nothing clamps a key to `sceneFrameCount`: `moves` stops at a neighbour and at frame 0 and at
+    /// no upper bound, and the scene's length grows only from *cel* edits, never from a keyframe
+    /// write. Bounding at the scene alone would leave such a key drawn nowhere while `nearestKey`
+    /// still found it — a key an artist can delete by accident and cannot see.
+    func testAKeyPastTheEndOfTheSceneIsStillDrawn() throws {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (20, 2.0)]))
+        XCTAssertEqual(manager.sceneFrameCount, 12, "PREMISE: the scene did not grow to meet the key")
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 12,
+                                                         channels: channels(manager)), 21,
+                       "Exclusive, so the key's own column at frame 20 is inside the bound")
+
+        let sampling = TimelineGraphBand.sampling(in: CGRect(x: 0, y: 0, width: 10_000, height: 96),
+                                                  visibleX: 0...10_000, pixelsPerFrame: 30,
+                                                  frameCount: 21)
+        let keyX = TimelineGraphBand.x(ofFrame: 20, pixelsPerFrame: 30)
+        XCTAssertGreaterThan(try XCTUnwrap(sampling?.maxX), keyX,
+                             "…and the polyline reaches past the dot rather than stopping short of it")
+    }
+
+    /// The degenerate ends, so neither is a crash and neither is a whole track.
+    func testTheDrawnBoundOfAnEmptyBand() {
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 12, channels: []), 12,
+                       "No channel means the scene, which is what an open-but-empty band draws over")
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 0, channels: []), 0,
+                       "…and no scene means nothing, which `sampling` refuses outright")
     }
 
     /// **The cost is the viewport, not the document.**
@@ -470,6 +528,10 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// The band's own height, so a test's y arithmetic is the band's rather than a literal.
     private let band = TimelineGraphBand.height
     private let base = TimelineKeyMarkers.basePixelsPerFrame
+    /// `CanvasManager.sceneFrameCount`'s default, which every fixture below keys inside — so the
+    /// bound `tap` applies is never the thing these tests are measuring. The bound has a fixture of
+    /// its own, `testATapPastTheEndOfTheDocumentAddsNothing`.
+    private let frames = 12
 
     /// Where a channel's key is actually drawn, built from the two mappings under test so a change to
     /// either shows up as a failure here rather than as a test that quietly stopped aiming at a key.
@@ -765,7 +827,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertNil(TimelineGraphBand.nearestKey(to: onTheLine, channels: drawn,
                                                   pixelsPerFrame: base, bandHeight: band),
                      "PREMISE: and far enough off it that the tap is not a grab")
-        XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: drawn,
+        XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: drawn, frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .nothing,
                        "Adding here would have replaced the key at frame 1 with no gesture that looked destructive")
@@ -832,6 +894,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let brightness = drawn.first { $0.parameterID == brightnessID }!
 
         XCTAssertEqual(TimelineGraphBand.tap(at: dot(brightness, frame: 10), channels: drawn,
+                                             frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .remove(TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 10)))
 
@@ -839,7 +902,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         // a quarter of the way up, which is brightness's half and not contrast's.
         let quarter = TimelineGraphBand.y(ofValue: 0.5, in: brightness.axis, bandHeight: band)
         let onBrightness = CGPoint(x: TimelineGraphBand.x(ofFrame: 3, pixelsPerFrame: base), y: quarter)
-        XCTAssertEqual(TimelineGraphBand.tap(at: onBrightness, channels: drawn,
+        XCTAssertEqual(TimelineGraphBand.tap(at: onBrightness, channels: drawn, frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .add(parameterID: brightnessID, frame: 3, value: 0.5),
                        "The tapped value, not the curve's own there — the dot lands under the finger")
@@ -848,9 +911,57 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         // which is what the marquee needs to exist.
         let farAbove = CGPoint(x: TimelineGraphBand.x(ofFrame: 5, pixelsPerFrame: base),
                                y: TimelineGraphBand.verticalInset)
-        XCTAssertEqual(TimelineGraphBand.tap(at: farAbove, channels: drawn,
+        XCTAssertEqual(TimelineGraphBand.tap(at: farAbove, channels: drawn, frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .nothing)
+    }
+
+    /// **A tap out past the end of the document adds nothing, which is the gesture half of where
+    /// drawing stops.**
+    ///
+    /// `nearestChannel` names a curve by proximity to the **drawn** line — its own doc makes the
+    /// choice on that word — so once the curves stop at the document's own length, an add out in the
+    /// look-ahead would be a key placed by aiming at a line nobody can see. The same tap one frame
+    /// inside the bound is the control: the refusal has to be the bound and not the fixture.
+    func testATapPastTheEndOfTheDocumentAddsNothing() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (6, 2.0)]))
+        let drawn = channels(manager)
+        let brightness = drawn.first { $0.parameterID == brightnessID }!
+        // Constant-hold past the last key, so the line's y is the same at both frames and only the
+        // bound can tell the two taps apart.
+        func onTheHeldLine(_ frame: Int) -> CGPoint {
+            CGPoint(x: TimelineGraphBand.x(ofFrame: frame, pixelsPerFrame: base),
+                    y: TimelineGraphBand.y(ofValue: brightness.curve.evaluate(at: Double(frame)),
+                                           in: brightness.axis, bandHeight: band))
+        }
+        XCTAssertEqual(onTheHeldLine(11).y, onTheHeldLine(14).y,
+                       "PREMISE: the extrapolated value is the same at both, so y cannot be the difference")
+
+        XCTAssertEqual(TimelineGraphBand.tap(at: onTheHeldLine(11), channels: drawn,
+                                             frameCount: frames,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .add(parameterID: brightnessID, frame: 11,
+                            value: TimelineGraphBand.value(atY: onTheHeldLine(11).y,
+                                                           in: brightness.axis, bandHeight: band)),
+                       "The last frame the document has is still a frame, and the line is drawn there")
+        XCTAssertEqual(TimelineGraphBand.tap(at: onTheHeldLine(14), channels: drawn,
+                                             frameCount: frames,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .nothing,
+                       "Three frames past the end of a twelve-frame document is dead track")
+
+        // …and a *remove* is deliberately not bounded, because the bound widens to hold any key past
+        // the end: a key that is drawn out there must stay removable.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (20, 2.0)]))
+        let wide = channels(manager)
+        XCTAssertEqual(TimelineGraphBand.tap(at: dot(wide.first { $0.parameterID == brightnessID }!,
+                                                     frame: 20),
+                                             channels: wide, frameCount: frames,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .remove(TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 20)))
     }
 
     /// **The nearest *curve*, not the first one in reach** — and it is `nearestKey`'s weakness one
@@ -897,7 +1008,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                                                         pixelsPerFrame: base, bandHeight: band),
                        contrastID,
                        "The nearest line, not the first one the walk finds inside the radius")
-        XCTAssertEqual(TimelineGraphBand.tap(at: between, channels: drawn,
+        XCTAssertEqual(TimelineGraphBand.tap(at: between, channels: drawn, frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .add(parameterID: contrastID, frame: 3,
                             value: TimelineGraphBand.value(atY: between.y, in: contrast.axis,

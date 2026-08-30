@@ -372,7 +372,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
 
             layoutGraphBand(content: built.key.graphBand, layout: layout, stackRows: stackRows,
-                            totalWidth: totalWidth, frameCount: sceneFrameCount)
+                            totalWidth: totalWidth)
 
             movePlayhead(totalHeight: totalHeight)
         }
@@ -402,8 +402,7 @@ struct TimelineTrackView: UIViewRepresentable {
         private func layoutGraphBand(content: TimelineGraphBand.Content?,
                                      layout: TimelineRowLayout,
                                      stackRows: [LayerStackRow],
-                                     totalWidth: CGFloat,
-                                     frameCount: Int) {
+                                     totalWidth: CGFloat) {
             guard let contentView else { return }
             guard let content,
                   let position = stackRows.firstIndex(where: { $0.layerIndex == content.layerIndex }),
@@ -437,7 +436,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
             graphBandView.setSelection(graphBandSelection)
             graphBandView.update(content: content, pixelsPerFrame: pixelsPerFrame,
-                                 frameCount: frameCount, visibleX: visibleBandX)
+                                 visibleX: visibleBandX)
         }
 
         /// **The band's x window, in the track's own coordinates.**
@@ -484,6 +483,9 @@ struct TimelineTrackView: UIViewRepresentable {
             let layerIndex: Int
             let start: CGPoint
             let channels: [TimelineGraphBand.Channel]
+            /// Where the curves stop, captured with them — `Content.frameCount`. A tap past it adds
+            /// nothing, because out there there is no drawn line to have aimed at.
+            let frameCount: Int
             let bandHeight: CGFloat
             /// The keys being carried. Empty means the touch began on nothing, which is a marquee.
             let carried: Set<TimelineGraphBand.KeyRef>
@@ -579,7 +581,8 @@ struct TimelineTrackView: UIViewRepresentable {
             // the selection is an immediate, visible edit to the selection, and it is not part of the
             // drag that may be cancelled.
             graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
-                                          channels: content.channels, bandHeight: height,
+                                          channels: content.channels,
+                                          frameCount: content.frameCount, bandHeight: height,
                                           carried: carried, startSelection: graphBandSelection)
         }
 
@@ -646,6 +649,7 @@ struct TimelineTrackView: UIViewRepresentable {
             else { return }
 
             switch TimelineGraphBand.tap(at: point, channels: drag.channels,
+                                         frameCount: drag.frameCount,
                                          pixelsPerFrame: pixelsPerFrame, bandHeight: drag.bandHeight) {
             case .remove(let ref):
                 guard var curve = drag.channels.first(where: { $0.parameterID == ref.parameterID })?.curve
@@ -1430,7 +1434,6 @@ private final class TimelineKeyMarkerBand: UIView {
 private final class TimelineGraphBandView: UIView {
     private var content: TimelineGraphBand.Content?
     private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
-    private var frameCount: Int = 0
 
     /// **What part of the band is actually on screen**, in the band's own x — which is the track's,
     /// since the band's frame starts at x 0 of `contentView`. Set by the coordinator, never derived
@@ -1488,18 +1491,19 @@ private final class TimelineGraphBandView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// - Parameter content: taken out of `TimelineLayoutKey`, never re-read off the model — see
-    ///   `Coordinator.layoutGraphBand`.
-    func update(content: TimelineGraphBand.Content, pixelsPerFrame: CGFloat, frameCount: Int,
+    ///   `Coordinator.layoutGraphBand`. It carries `frameCount`, the bound the curves stop at, which
+    ///   is deliberately not a parameter of its own: the number is an input to the drawing and so has
+    ///   to be inside the key, and a second copy travelling beside it is a second thing to keep in
+    ///   step.
+    func update(content: TimelineGraphBand.Content, pixelsPerFrame: CGFloat,
                 visibleX: ClosedRange<CGFloat>) {
         // A pinch changes `pixelsPerFrame` without changing a curve, and it changes every x on the
         // band — so both halves gate the redraw, exactly as `TimelineKeyMarkerBand.update` does.
         let changed = content != self.content
             || pixelsPerFrame != self.pixelsPerFrame
-            || frameCount != self.frameCount
             || visibleX != self.visibleX
         self.content = content
         self.pixelsPerFrame = pixelsPerFrame
-        self.frameCount = frameCount
         self.visibleX = visibleX
         accessibilityValue = TimelineGraphBand.encode(content)
         if changed { setNeedsDisplay() }
@@ -1533,9 +1537,11 @@ private final class TimelineGraphBandView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // The band's height is fixed but its *width* follows the track, which grows as the artist
-        // scrolls right (`displayedFrameCount`). A resize with no key change would otherwise leave
-        // the curves drawn at the old width and blank past it.
+        // The band's height is fixed but its *view* is as wide as the track, which grows as the
+        // artist scrolls right (`displayedFrameCount`). The curves stop at the document's own length
+        // (`Content.frameCount`) and so do not follow that growth, but the backing store does: a
+        // resize discards it, and a resize with no key change would otherwise leave the band blank
+        // until something else happened to invalidate it.
         setNeedsDisplay()
     }
 
@@ -1544,7 +1550,7 @@ private final class TimelineGraphBandView: UIView {
               let sampling = TimelineGraphBand.sampling(in: rect,
                                                         visibleX: visibleX,
                                                         pixelsPerFrame: pixelsPerFrame,
-                                                        frameCount: frameCount)
+                                                        frameCount: content.frameCount)
         else { return }
 
         for channel in content.channels {
