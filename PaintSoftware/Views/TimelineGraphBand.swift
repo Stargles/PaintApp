@@ -255,6 +255,16 @@ enum TimelineGraphBand {
     /// objection that used to be recorded here. What this still answers is the model's own question,
     /// *is this channel an animation*, which is what the pin above is about and what the channel
     /// list's rows are labelled by.
+    ///
+    /// **And that change left it with no caller in the app**, which is worth writing down rather than
+    /// acting on at the end of a pass. `graphBandContent`, `graphChannelGroups` and `setGraphChannels`
+    /// all take `allChannels` now, so the only callers are the two logic tests that pin this against
+    /// `listedAnimationChannelIDs(of:)`. The invariant does not need it — `allChannels` carries both
+    /// answers and both are pinned, membership against `curvedEffectChannelIDs` and the flag against
+    /// `listedAnimationChannelIDs` — so a future session may delete this and let the tests spell the
+    /// filter. It is kept for now because the alternative is deleting production code on a worker's
+    /// own judgement immediately after the run that verified it, and because the name is the clearest
+    /// statement in the tree of what the model means by "an animation".
     static func channels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
         allChannels(effect: effect, tracks: tracks).filter(\.isAnimated)
     }
