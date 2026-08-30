@@ -520,6 +520,27 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        TimelineGraphBand.KeyRef(parameterID: contrastID, frame: 0),
                        "The nearest match, not the first channel in the list")
 
+        // **Two keys both inside the radius, with the wrong one first.** Without this the test cannot
+        // tell "the nearest match" from "the first channel with anything in range" — the two answers
+        // only differ when both are candidates, and every other pair on this fixture is 80 pt apart.
+        // `channels` walks `Effect.parameters`, so brightness is index 0 and comes first.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 1.5), (10, 0.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 1.0), (10, 2.0)]))
+        let crowded = channels(manager)
+        XCTAssertEqual(crowded.map(\.parameterID), [brightnessID, contrastID], "PREMISE: this order")
+        let near = dot(crowded.first { $0.parameterID == contrastID }!, frame: 0)
+        let far = dot(crowded.first { $0.parameterID == brightnessID }!, frame: 0)
+        let between = CGPoint(x: near.x, y: near.y + 2)
+        XCTAssertLessThan(hypot(near.x - between.x, near.y - between.y), TimelineGraphBand.hitRadius)
+        XCTAssertLessThan(hypot(far.x - between.x, far.y - between.y), TimelineGraphBand.hitRadius,
+                          "PREMISE: the wrong one is a candidate too, which is the whole test")
+        XCTAssertEqual(TimelineGraphBand.nearestKey(to: between, channels: crowded,
+                                                    pixelsPerFrame: base, bandHeight: band),
+                       TimelineGraphBand.KeyRef(parameterID: contrastID, frame: 0),
+                       "The nearest of two candidates, not the first one the walk reaches")
+
         // Just inside and just outside the radius, measured from the same dot along one axis.
         let justInside = CGPoint(x: low.x + TimelineGraphBand.hitRadius - 1, y: low.y)
         let justOutside = CGPoint(x: low.x + TimelineGraphBand.hitRadius + 1, y: low.y)

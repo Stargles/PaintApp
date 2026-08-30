@@ -1323,6 +1323,23 @@ not read it that way. It wants either a listed-but-flat state or a note in D4's 
 is D4's to decide because that list is where a channel that is present-but-not-an-animation would have
 to show.
 
+**Five mutations, and the fifth is why this note exists.** Each of D3's load-bearing rules was
+poisoned in turn against the fast tier — remove the neighbour clamp, clamp to `uiRange` instead of
+`modelDomain`, hit-test the true y instead of `reachableY`, insert a group's keys as they are removed
+rather than after — and four were caught. **"The nearest key, not the first" was not**, because the
+fixture never put two keys in reach at once: the two channels' dots were 80 pt apart, so the two
+answers could not differ and the assertion was true of any implementation that returned *something in
+range*. §11.3's own finding, one stage later and in a subtler costume — the test named the right rule
+and could not see it. It now puts two dots 20 pt apart with the wrong one first.
+
+**What it cost the suite, since class granularity is the whole cost model.** `GraphEditorUITests`
+goes from three tests to six and from ~40 to **~183 class-seconds** — three of the new tests each
+spend ~45 s, and nearly all of it is the fixture rather than the gesture: there is no shorter way to
+author an animated channel than two keyframe marks and a slider drag, because the graph editor edits
+curves and cannot be the thing that makes the first one. That puts the class beside `PerfBaselineTests`
+(173 s) and nowhere near `LayerPanelUITests` (515 s), so it does not become the floor. If a fourth
+gesture test is ever wanted, the fixture is what to attack.
+
 **Ask 6's *cel* marquee stays future**, with its stub: "Select Multiple" sits in the cel menu today,
 `.disabled(true)`. What this stage built is the keyframe half of that ask, and the shape it settles —
 a drag in empty space rubber-bands, a grab on a member carries the set — is the one a cel marquee
