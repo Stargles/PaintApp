@@ -157,16 +157,16 @@ enum TimelineGraphBand {
         /// the first stage to derive a row height from something other than `(rows, rowHeight)`, and
         /// a height outside the key draws once and never moves again.
         let height: CGFloat
-        /// In `Effect.parameters` order, which is `listedAnimationChannelIDs`' order — **and with
-        /// D4's channel list already applied**, which is why the filter needs no separate key field:
-        /// switching a channel off shortens this array and the gate opens on the same comparison it
-        /// always did.
+        /// In `Effect.parameters` order, which is `curvedEffectChannelIDs`' order — animations and
+        /// curves-in-force alike, each flagged (`Channel.isAnimated`), **and with D4's channel list
+        /// already applied**, which is why the filter needs no separate key field: switching a channel
+        /// off shortens this array and the gate opens on the same comparison it always did.
         let channels: [Channel]
         /// How many of the band's channels the channel list is holding back — D4 (§11.5).
         ///
         /// **Not redundant with a shorter `channels`, and that is the whole reason it is here.** A
         /// band with nothing on it and a band with everything switched off draw the same picture and
-        /// are different states: the first is a layer that animates nothing, the second is a filter
+        /// are different states: the first is a layer that carries no curve, the second is a filter
         /// the artist can undo. `encode(_ content:)` is what tells them apart, and this is the field
         /// it reads.
         let hiddenCount: Int

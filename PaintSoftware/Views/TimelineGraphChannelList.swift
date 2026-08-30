@@ -220,10 +220,11 @@ enum TimelineGraphChannelList {
     /// **The channels the band actually draws.**
     ///
     /// A `filter`, which is the whole of §11.5's ruling expressed as code: the answer is a subsequence
-    /// of the strict predicate's, so a hidden id that names nothing hides nothing, and no id in this
-    /// set can put a channel *back* that `isAnimated` refused. Order is preserved, which keeps the
-    /// band drawing in `Effect.parameters` order — and every channel keeps its own
-    /// `descriptorIndex`, so its colour does not move when the channel above it is switched off.
+    /// of `allChannels`, so a hidden id that names nothing hides nothing and no id in this set can put
+    /// a channel *back* that the band was not going to draw. Order is preserved, which keeps the band
+    /// drawing in `Effect.parameters` order — and every channel keeps its own `descriptorIndex`, so
+    /// its colour does not move when the channel above it is switched off, and its `isAnimated`, so
+    /// hiding a neighbour cannot turn a dashed line solid.
     static func visible(_ channels: [TimelineGraphBand.Channel],
                         hidden: Set<String>) -> [TimelineGraphBand.Channel] {
         hidden.isEmpty ? channels : channels.filter { !hidden.contains($0.parameterID) }
