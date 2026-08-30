@@ -157,58 +157,67 @@ LAYER_TRANSFORM.md.
       the control or a duplicate of it is the one design question, and §5.25's precedent argues for a
       move.
 
-### (10) Oklab colour storage and processing, from the Actions menu
+### (10) A colour-pipeline switch per document — linear light now, Oklab where it earns its keep
 
-- [ ] The owner: *"I also want the option in actions to switch the color storage and processing to oklab
-      or other future models. Oklab may give better compositing."* They then asked for a recommendation on
-      whether to **store** Oklab or convert at use, guessing that storing it avoids a transform and is
-      therefore faster, and asked for the call to be made for them.
+- [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and
+      processing to oklab or other future models. Oklab may give better compositing."* The complaint behind
+      it: *"RGB goes muddy through the middle between two saturated hues."*
 
-      **RECOMMENDATION, 2026-08-27: do not store Oklab, and do not put it in the compositor. Three
-      stages, and the first one is not Oklab at all.**
+      **Ruled 2026-08-29, having been shown the A/B**: *"toggle option between OKlab and normal (i believe
+      its srgb). You decide the best route for the oklab, as i dont fully understand what this is asking me.
+      The stored flag per document is minimal memory, and do try to keep performance and good architecture
+      in mind with OKlab."* A per-document stored switch, and the technical route delegated.
 
-      **Storing Oklab moves a conversion rather than removing one, and moves it somewhere worse.** Colour
-      is per *stroke* — 32 bytes x 190 strokes = 6 KB on the owner's own cel — while compositing is per
-      *pixel*, every frame. Storing Oklab saves converting 190 colours once and does nothing for the
-      composite; meanwhile every swatch, every export and every PNG needs sRGB, so the conversion is paid
-      per *display* instead. The owner's performance intuition is the one part of their guess that
-      inverts.
+      **The route, on that delegation: the switch's two positions are sRGB (today, the default) and
+      *linear light* — not Oklab.** [LINEAR_LIGHT_AB.md](LINEAR_LIGHT_AB.md) is the rendered evidence and
+      the owner has seen it. The muddy middle is a gamma artefact, worst case MEASURED at **73/255**, and
+      linear light removes it. Oklab does not remove it any better and costs a cube root per pixel per
+      frame, 16-bit textures — doubling every canvas-sized buffer, the resource `CompositorBudget` and the
+      iPad 9 crash test exist to manage — and the parity gate, because a cube root sits *after* a matrix
+      mix of the three channels and cannot be tabled. sRGB-to-linear is *per-channel*, so it is a
+      256-entry LUT and identical on both backends by construction. **Store the setting as an extensible
+      enum, never a `Bool`**, so Oklab becomes a third position with no format change — which is what the
+      owner's *"or other future models"* asked for.
 
-      **Three blockers, all specific to this tree.** Every texture is `rgba8Unorm`
-      (`MetalCompositor.swift:173`), and Oklab's a/b are small signed values that band at 8 bits on
-      exactly the saturated colours this is for — 16-bit float doubles every canvas-sized buffer, which
-      is the resource `CompositorBudget`, `peakCompositeTextures` and the iPad 9 crash test all exist to
-      manage. `CompositorParityLogicTests` gates the two backends **byte for byte**, with eleven blend
-      modes additionally gated against `CGBlendMode`, and Oklab needs a **cube root** whose Metal and
-      Foundation implementations are not guaranteed bit-identical — `Composite.metal`'s header says the
-      byte-identical comparison is the whole reason the textures are unmanaged. And coverage compositing
-      is averaging light, so a perceptual space is the wrong home for it regardless; Oklab's real win is
-      **interpolating between two colours**, which is what the owner's "better gradients" and "better
-      keyframe interpolation" instincts are actually about.
+      **Oklab still gets built, for interpolation**: gradient map, keyframe colour tweens, the picker's
+      gradients. Per-colour rather than per-pixel-per-frame, so the cost is nil and none of it is inside
+      the parity gate. That is where the owner's "better gradients" instinct is right.
 
-      **The finding that is probably bigger than the ask.** The compositor blends in **sRGB,
-      unlinearized**, deliberately (`Composite.metal:8-12`). That is the classic gamma problem: a
-      half-covered edge between two saturated hues lands at the sRGB midpoint rather than the light
-      midpoint and reads muddy — which is nearly word for word the symptom this item already described as
-      *"RGB goes muddy through the middle between two saturated hues"*. It is a **linear-light** problem,
-      not an Oklab one.
+      **Storage does not change.** Colour is per *stroke* — 32 bytes x 190 strokes = 6 KB on the owner's
+      own cel — while compositing is per *pixel*, every frame. Storing Oklab saves converting 190 colours
+      once, does nothing for the composite, and makes every swatch, export and PNG pay a conversion per
+      *display* instead.
 
-      **And the distinction that decides the whole item: sRGB-to-linear is a *per-channel* function, so on
-      8-bit input it is a 256-entry lookup table and therefore bit-identical on both backends by
-      construction. Oklab's cube root sits *after* a matrix mix of the three channels and cannot be tabled
-      that way.** One is compatible with the parity gate; the other is not.
+      **What reading the shipped code changed about the plan, and it is the expensive part.**
 
-      - **Stage A — composite in linear light through a 256-entry LUT.** Same class of win, cheaper,
-        probably the thing the owner is seeing, and provably keeps parity. Verify the muddy-edge symptom
-        first with a rendered A/B rather than assuming it.
-      - **Stage B — Oklab for *interpolation only***: gradient map, keyframe colour tweens, the picker's
-        gradients. Per-colour rather than per-pixel-per-frame, so the cost is nil, and all of it sits
-        outside the parity gate.
-      - **Stage C — Oklab blend modes**, only if A and B leave the owner still wanting them, and knowing
-        it breaks the `CGBlendMode` gate for eleven modes.
+      - **The compositor is one of three coverage sites, and not the one the artist paints on.** Every
+        brush dab is a `CGGradient` in `PixelOps.deviceRGBColorSpace` drawn into a persistent 8-bit
+        DeviceRGB bitmap (`RasterLayerTexture.swift:66-102`), and a cel's four tiers stack through
+        `UIImage.draw(in:)` (`PixelOps.rasterizeUncached:296-332`). Only cross-*layer* work reaches
+        `blendOver`. **A switch that linearizes only the compositor leaves the soft-dab ring in place
+        whenever both hues are on one layer**, which is the ordinary way a painter works. The dab path is
+        in scope; a compositor-only version is not worth shipping.
+      - **Ten modes on the CPU backend are computed by CoreGraphics itself** (`Compositor.swift:429-455`,
+        called at `:1078`), Normal among them, and `image.draw(in:blendMode:alpha:)` has no hook for a
+        transfer function. Linearizing forces all ten onto `drawHandRolled`, documented at `:1092` as
+        *"slow on purpose… three canvas-sized allocations for one draw"*. This is a shader edit **plus**
+        the deletion of the reference backend's fast path.
+      - **"Byte-for-byte parity gate" is half true.** Delta 0 holds for source-over and masks
+        (`CompositorParityLogicTests.swift:906-942`); blend modes hold at `blendTolerance = 1` (`:968`),
+        with eight already sitting at 1 in the measured table at `:991`. The LUT argument survives on the
+        way **in** for every formula in the tree, the six non-separable modes included, since they mix
+        already-transformed channels. It does **not** cover the way out: `blendOver`'s result is a
+        continuous float, so linear→sRGB is either a `pow` on both backends (a last-ulp risk the delta-0
+        Normal gate would catch) or an 8-bit-linear quantization that bands the shadows. **Unruled.**
+      - **One design question the switch creates rather than inherits**: `lum`'s 0.3/0.59/0.11
+        (`Composite.metal:145`) are specified on *non-linear* values, so linearizing changes what Hue,
+        Saturation, Color and Luminosity **mean**. **Unruled.**
 
-      The *"document-level switch with room for future models"* the owner asked for should therefore be a
-      property of **interpolation**, not of storage. Storage does not change.
+      **The cost side is currently free and will not stay free.** Every antialiased grey edge gets lighter
+      by up to 73/255 — coverage 0.5 goes 128 → 188 — so hairlines, antialiased text and soft shading in
+      existing artwork read thinner and paler. Defaulting the switch to sRGB makes that opt-in, and the
+      standing expendable-documents permission at the top of this file means today is the cheapest this
+      change will ever be.
 
 ### Playback at 24 fps, with in-betweens — the owner's goal, ranked and not started
 
