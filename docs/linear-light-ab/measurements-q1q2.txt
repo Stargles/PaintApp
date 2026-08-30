@@ -1,0 +1,75 @@
+=== linear_light_q1q2 — SIMULATED, not a screenshot. Port of Composite.metal:145-186,
+=== :236-249 and :417 into double precision. No Metal, no simulator, no xcodebuild.
+
+--- Q1 · the 8-bit LINEAR intermediate, on its own terms (MEASURED, exhaustive over 256 codes) ---
+Q1.1 8-bit LINEAR store reaches 183 of the 256 sRGB output codes.
+Q1.1 largest hole between two reachable codes: 13 codes, starting at sRGB 0.
+Q1.1 the first six linear codes display as sRGB [0, 13, 22, 28, 34, 38].
+Q1.2 the 8-bit LINEAR step is WIDER than one sRGB code for everything below sRGB 135
+Q1.2   (linear code 62). Above that it is finer than 8-bit sRGB and costs nothing.
+Q1.2 REFUTES the brief's framing 'bands the shadows': the step SHRINKS as the value rises, so
+Q1.2   the coarse region is everything from black up to sRGB 135 — over half the tonal range,
+Q1.2   not a dark corner. Step at sRGB 0->1: 12.71 codes; at sRGB 128: 1.07 codes.
+
+--- Q1 · exhaustive over all 256x256x256 (backdrop, source, coverage) Normal triples, one channel ---
+Q1.3 worst |b 8-bit-linear  -  c float+pow| = 7/255  at backdrop 0, source 7, coverage 0.925
+Q1.3 worst |d 12-bit table  -  c float+pow| = 1/255
+Q1.3 worst |a TODAY         -  c float+pow| = 73/255  at backdrop 0, source 252, coverage 0.227
+Q1.3   (the last line is LINEAR_LIGHT_AB.md §3's 73/255 re-derived independently — a check on this port.)
+
+--- Q1 · the last-ulp parity risk of route (c). INFERRED-BUT-BOUNDED. ---
+Q1.4 triples whose byte a 1-ulp `pow` disagreement would flip:  546 of 16777216  = 3.254e-05
+Q1.4 triples whose byte a 16-ulp disagreement would flip:      9474 of 16777216  = 5.647e-04
+Q1.4   (16 ulps is the Metal Shading Language spec's stated bound for `pow`.)
+Q1.4 16686588 of 16777216 triples take the pow branch at all; the rest are the linear segment (l <= 0.0031308).
+Q1.4 on the owner's 2048x1024 canvas that is 68 pixels at 1 ulp and 1184 at 16 ulps, PER FRAME.
+Q1.4 at-risk population for routes (a), (b) and (d): 0, by construction — none of them calls `pow`
+Q1.4   at run time. (a) has no transfer at all; (b) and (d) index integer tables built once on the CPU.
+
+--- Q1 · scene A, the near-black ramp (sRGB 0 -> 32 over 1130 px), MEASURED ---
+Q1.5 a TODAY: 33 distinct output levels
+Q1.5 b LINEAR, 8-bit store: 5 distinct output levels
+Q1.5 c LINEAR, float + pow: 33 distinct output levels
+Q1.5 d LINEAR, 12-bit table: 33 distinct output levels
+--- Q1 · scene B, the dark soft dab (sRGB 48 on black), MEASURED ---
+Q1.6 a TODAY: 49 distinct levels, worst 10/255 vs route (c)
+Q1.6 b LINEAR, 8-bit store: 8 distinct levels, worst 7/255 vs route (c)
+Q1.6 c LINEAR, float + pow: 49 distinct levels, worst 0/255 vs route (c)
+Q1.6 d LINEAR, 12-bit table: 49 distinct levels, worst 1/255 vs route (c)
+Q1.6 NOTE the shape of this: (b)'s worst ERROR is only 7/255, which sounds tolerable, and its
+Q1.6   worst error is SMALLER than (a)'s 10/255. The damage is not magnitude, it is the collapse
+Q1.6   from 49 levels to 8. A number cannot show that and the picture can.
+
+Q1.7 parity-risk map (620x620, backdrop black): 14 at-risk at 1 ulp, 143 at 16 ulps.
+
+--- Q2 · worst 8-bit channel difference between routes, per mode. MEASURED. ---
+Q2.0 swept over every pair from a 12-level-per-channel grid (1728 colours each side = 2,985,984
+Q2.0   pairs), at full opacity. Deterministic, nothing sampled. These are maxima over a FINITE
+Q2.0   grid, so every number below is a LOWER bound on the true worst case.
+Q2.1 pairs swept: 2985984
+Q2.1 mode            i vs ii     i vs iii    i vs iv     ii vs iii   ii vs iv    iii vs iv   
+Q2.1 Hue             153/255     196/255     1/255       159/255     153/255     196/255     
+Q2.1 Saturation      154/255     155/255     1/255       126/255     154/255     155/255     
+Q2.1 Color           154/255     193/255     1/255       173/255     154/255     193/255     
+Q2.1 Luminosity      154/255     193/255     1/255       173/255     154/255     193/255     
+Q2.1 Lighter Color   255/255     255/255     0/255       255/255     255/255     255/255     
+Q2.1 Darker Color    255/255     255/255     0/255       255/255     255/255     255/255     
+Q2.2 i vs iv tops out at 1/255, and it is 0 on 99.9458% of the 17915904 (pair, mode)
+Q2.2   combinations swept — 9711 differ, every one of them by exactly 1. That 1 is NOT a behaviour
+Q2.2   difference: the exemption is an sRGB -> linear -> sRGB round trip, and a value that lands on a
+Q2.2   rounding boundary rounds the other way. It is Q1's last-ulp question wearing Q2's hat, which means
+Q2.2   the exemption cannot hold a delta-0 gate either unless its round trip is an integer table.
+Q2.3 flip pair found by SEARCH (largest separation among pairs where Lighter Color changes its answer):
+Q2.3   backdrop 0,139,255  top layer 255,0,0
+Q2.3 Lighter Color: the mode picks the OTHER layer on 7.81% of pairs under (ii) and 7.58% under (iii).
+Q2.3 Darker Color: the mode picks the OTHER layer on 7.81% of pairs under (ii) and 7.58% under (iii).
+
+--- Q2 · partial alpha, where route (iv) stops matching route (i). MEASURED. ---
+Q2.4 swept over 117649 pairs from a 7-level grid, at four source alphas.
+Q2.4 source alpha 0.25: worst |i - iv| Hue=73  Saturation=64  Color=73  Luminosity=73  Lighter Color=73  Darker Color=73
+Q2.4 source alpha 0.50: worst |i - iv| Hue=61  Saturation=54  Color=60  Luminosity=61  Lighter Color=60  Darker Color=60
+Q2.4 source alpha 0.75: worst |i - iv| Hue=73  Saturation=54  Color=73  Luminosity=73  Lighter Color=73  Darker Color=73
+Q2.4 source alpha 1.00: worst |i - iv| Hue=1  Saturation=1  Color=1  Luminosity=1  Lighter Color=1  Darker Color=1
+Q2.4 The exemption reproduces today only where the source is OPAQUE. Below that the `mix(cs, B, da)`
+Q2.4   and the source-over around it (Composite.metal:248-249) still run in linear light, so an exempt
+Q2.4   mode is not 'today's behaviour' — it is 'today's blend inside a linear composite'.

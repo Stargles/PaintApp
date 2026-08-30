@@ -121,11 +121,73 @@ LAYER_TRANSFORM.md.
       the control or a duplicate of it is the one design question, and §5.25's precedent argues for a
       move.
 
-### (10) A colour-pipeline switch per document — linear light now, Oklab where it earns its keep
+### (24) The canvas paper is its own code path — should it just be a value layer?
+
+- [ ] The owner, 2026-08-30, on being told that ink-on-paper is blended somewhere the colour work cannot
+      reach: *"I find it weird that the canvas itself is a separate piece of code. Value layers already
+      exist and work, so I wonder why you can't just reuse the same code to make the canvas behave like a
+      value layer colour only. That would remove alot of redundant code and tidy up architecture, unless
+      there is a reason not to do that."*
+
+      **Recorded as an ask, not researched — and the owner's instinct has a real defect behind it.** The
+      paper is a `UIView` painted *behind* the layer host (`CanvasView.swift:39-43`, `updatePaper()` at
+      `:540-552`), added before the two image views that carry the composite, and every live-canvas
+      request is built with `background: nil` (`RenderRequest.swift:547`). So the paper is not in the
+      composite, which is why **no effect, no blend mode and no colour-pipeline change can reach
+      ink-over-paper** — the finding that reshaped (10) on the same day.
+
+      **There is a reason it is that way and it is written down**, so this is a question to answer rather
+      than a change to make: [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) §0 verified the arrangement at two
+      commits, and §2 rules that an *adjustment layer* grading the paper is what makes the composite
+      opaque, which is why the Behind onion skin has to move above it in z-order. A value layer in
+      flat-colour mode is already a full-canvas sheet, so the shapes genuinely match; what has to be
+      established is what a bottom-most value layer does to the onion skin ordering §2 settled, to
+      `RenderBackground` (`RenderRequest.swift:249-259`, designed for exactly this disagreement), to the
+      layer panel's idea of a deletable layer, and to every document that has no such layer stored.
+
+      **The prize if it works is larger than tidiness**: it is what would put ink-over-paper inside the
+      composite, which is the case (10) cannot currently improve.
+
+### (10) Colour mixing — (10a) Oklab ramps, build now; (10b) linear light per blend mode, deprioritised
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and
       processing to oklab or other future models. Oklab may give better compositing."* The complaint behind
       it: *"RGB goes muddy through the middle between two saturated hues."*
+
+      **Ruled 2026-08-30, and it splits this item in two.** Shown in plain terms where the app actually
+      mixes two colours — stroke over stroke, layer over layer, colour ramps, and *not* ink on blank paper
+      — the owner ruled: *"just do the ramps first for now. I do want linear light to be able to be used
+      for compositing blend modes. Maybe instead of a global switch for that, it should be an option in the
+      blend modes, with the global switch just being for the other stuff, like one brush stroke over
+      another."* And on where it sits: *"Task 10) isnt exactly a major priority for me, the other stuff on
+      the roadmap may be more valuable."*
+
+      **So (10) is now two items with different priorities.**
+
+      - **(10a) The ramps — build this, it is what the owner asked for.** Oklab mixing for `Effect`'s
+        gradient table and for the colour picker's rails. Per *colour*, not per pixel per frame; outside
+        the compositor parity gate entirely; nothing on disk changes. This is the owner's original
+        *"RGB goes muddy through the middle between two saturated hues"* rendered as the one place the
+        code literally does that.
+      - **(10b) The pipeline switch — deprioritised, and RE-SCOPED by the ruling above.** Linear light for
+        blend modes becomes **an option on the blend mode**, not a consequence of a document-wide flag; the
+        document-wide flag covers only the dab/stroke-over-stroke site. That is a better shape than the one
+        this item was written around and it changes the design: per-mode opt-in means existing artwork does
+        not move unless the artist asks it to, which removes the whole "reopening a finished drawing changes
+        it" cost that LINEAR_LIGHT_AB.md §4 spends its longest section on. **Do not build (10b) from the
+        nine-stage plan drafted on 2026-08-30** — three adversarial reviews found it unbuildable as written
+        (five cache keys serving stale pixels, a document that forgets the setting on reopen, a memoized
+        accumulator format with no invalidation, and a real PNG migration the plan claimed did not exist),
+        *and* the per-mode ruling above invalidates its central architecture anyway.
+
+      **The evidence that settled the two questions this item left unruled**, both rendered rather than
+      argued, in `docs/linear-light-ab/` with `tools/linear_light_q1q2.swift` as the generator:
+      `Q1-shadow-banding.png` kills the 8-bit-linear intermediate on sight — 5 output levels where there
+      were 33 on a near-black ramp — so the way *out* of linear is a 12-bit integer-indexed table.
+      `Q2-nonseparable-modes.png` settles the six colour-judging blend modes: **exempt them**, keeping
+      today's answer exactly, because linearizing their inputs and leaving `Composite.metal:145` alone
+      shifts them by up to 78/255 and makes Lighter/Darker Color return *the other layer* on 7.81% of
+      colour pairs — MEASURED by search over all 2,985,984 pairs, not by example.
 
       **Ruled 2026-08-29, having been shown the A/B**: *"toggle option between OKlab and normal (i believe
       its srgb). You decide the best route for the oklab, as i dont fully understand what this is asking me.
