@@ -230,7 +230,7 @@ final class CelContentProviderLogicTests: XCTestCase {
     }
 
     /// The composite — the path an export walks. `makeRenderRequest` is already frame-parametric, so
-    /// this is the whole of what ROADMAP §0 called the model-side gap blocking item (5).
+    /// this is the whole of what was the model-side gap blocking TODO (29).
     @MainActor
     func testTheCompositeSourcesIncludeADerivedInBetween() throws {
         let (manager, _, _) = try interpolated()

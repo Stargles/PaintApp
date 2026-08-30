@@ -3,14 +3,16 @@
 The owner's asks. [BUGS.md](BUGS.md) is for what we find. **An item leaves when merged, not when a
 branch exists.** Three in flight at once unless the extras need no simulator — see `tools/simlock.sh`.
 
-**An ask that restates a ROADMAP feature belongs in ROADMAP, under the item it extends.** Added
-2026-08-30, at the owner's instruction, after their memory-and-baking architecture was filed here as a new
-item (25) when [ROADMAP.md](ROADMAP.md) §5b had been its home since 2026-08-29 and already held an earlier
-statement of the same thing. The test is not "is this new words?" but "is there already an item this is a
-more detailed version of?" — and the cost of getting it wrong is what the owner saw: one feature specified
-in six documents at three scopes, which is how it acquired two eviction policies and two disk tiers before
-a line of it was written. **This file is asks being built or next. ROADMAP is the long-term features, none
-designed, each needing its own conversation first.**
+**Before adding an item, check whether one already exists that this is a more detailed version of.** The
+test is not "are these new words?" — it is "is this a restatement?" The owner's memory-and-baking
+architecture arrived on 2026-08-30 in new words and was filed as a new item when an existing one had held
+it since 2026-08-29. The cost of getting it wrong is what they then saw: **one feature specified in six
+documents at three scopes**, which is how it acquired two eviction policies and two disk tiers before a
+line of it was written.
+
+**This file is everything.** ROADMAP.md was deleted the same day, at the owner's instruction, because a
+second file meant its features were never built. Items above "Later" are being built or are next; items
+under it are the long-term features, none designed, each needing its own conversation first.
 
 **Record an ask in the owner's own words, and fold a ruling into the item it rules on.** A quote is
 cheaper to keep than a decision is to rebuild — the perspective-text requirement was nearly re-derived
@@ -75,7 +77,7 @@ LAYER_TRANSFORM.md.
       (frames), and also set frame rate. Transformation layers adds transformation animation to whatever
       is under it."*
 
-      **[KEYFRAMES.md](KEYFRAMES.md) is the specification.** ROADMAP item (1), designed 2026-08-28 in the
+      **[KEYFRAMES.md](KEYFRAMES.md) is the specification.** Designed 2026-08-28 in the
       conversation that file names as each item's entry condition. **§2 carries twenty-five rulings — read
       it rather than re-deriving them**, and §8 is the build order. The three that shape everything else:
       a transform key stores a **quad** from day one, so Distort lands later with no migration; posed ink
@@ -86,7 +88,7 @@ LAYER_TRANSFORM.md.
       Stage 0 is `renderTree(atFrame:)` and is behaviour-neutral. §8 also names one prerequisite that is
       not part of this feature and is worth doing first anyway: VECTOR_INTERPOLATION item 18's
       `ContentProvider` seam, which is what makes any derived content visible to thumbnails, onion skin
-      and export — and which ROADMAP §0 already flags as blocking item (5).
+      and export — and which (29) is blocked on.
 
 ### (22) Select multiple cels at once — the half of ask 6 the owner put in the future
 
@@ -280,22 +282,183 @@ LAYER_TRANSFORM.md.
       standing expendable-documents permission at the top of this file means today is the cheapest this
       change will ever be.
 
-### Playback, baking and memory — these live in ROADMAP §5b, not here
+## Later — the six long-term features, folded in from ROADMAP.md on 2026-08-30
 
-- **Moved 2026-08-30 at the owner's instruction**: *"the feature that I just told you about the memory
-  allocation render baking belongs in ROADMAP.md 5. Rendering and export... it may be a good idea to clean
-  up and organize the ideas properly instead of it being everywhere (todo and roadmap)."*
+**ROADMAP.md is deleted.** The owner: *"I also have a feeling that the stuff in ROADMAP wont really ever
+be done because stuff in TODO keeps on increasing. It may be worth stuffing all the stuff into TODO...
+Remove ROADMAP and push all its stuff into TODO. Don't make it messy or overly longer than it absolutely
+has to be."* So these compete for position with everything above rather than sitting in a file nobody
+opens. The analysis that was in ROADMAP is **compressed, not copied** — what survives is the owner's own
+words, the dependencies, and the findings that would cost a session to rediscover.
 
-  Two items left this file for [ROADMAP.md](ROADMAP.md) §5b — the disk-streaming memory architecture, and
-  "playback at 24 fps with in-betweens", which was always the same feature seen from the performance end.
-  **§5b is now the single home**, and it names the four other documents that specify parts of it so they
-  can be read as subordinate rather than parallel.
+**Every one of these carries the same entry condition**, given by the owner with the original list:
+*"When you get to these, prompt me to explain to you in more detail how they work."* **An item built from
+its entry here alone was built wrong.** Its specification is its own document once that conversation has
+happened, the way KEYFRAMES.md exists for (21).
 
-  **The boundary this restores, because it is what let the idea scatter:** TODO.md is asks that are being
-  built or are next; ROADMAP.md is the long-term features, none of which is designed and each of which
-  needs its own conversation with the owner first. An ask that is a *roadmap feature stated in new words*
-  belongs in ROADMAP under the item it extends — not as a new TODO entry, which is the mistake made
-  earlier today when this arrived as item (25).
+**Dependencies the owner named**: (26)→(21), (27)→(26), (30)→(29). **Three the code adds**: (28) needs a
+real playback clock; (21)'s bake-to-cels and (29)'s exporter are **the same frame walk**, so build it
+once; and (29) was blocked on derived content being invisible to the render walk, which the
+`ContentProvider` seam has since fixed.
+
+### (26) Import videos — requires (21)
+
+- [ ] > "Import videos: (requires #1) like import images, but exist as videos. Since videos have a
+      > specified length, a vector layer containing a video can only have one video and must be a specific
+      > length (but add that length able to be cropped). Should have the same option to bake to multiple
+      > cels containing images instead of the video."
+
+      **Why it truly requires (21)**: `InterpolationRecipe.t` is a parameter of the *cel*, not the frame,
+      and a cel spans a range — so **nothing in the document varies across the frames one cel spans**. A
+      video is exactly content that must. (21) introduces that; this is its first consumer.
+      **A tripwire**: `"video"` is currently the **sentinel** for "a layer kind nothing implements" in the
+      forward-compatibility tests. Implementing it takes that sentinel away and those tests need a new one.
+      **The one live coupling**: a video element inherits whatever Move stage 3c decides about
+      `VectorImageElement.transform`.
+      **Ask first**: what "a specific length" means when the cel's `frameCount` and the video's duration
+      disagree — resize, retime, or refuse; whether cropping trims or retimes; one video per *layer* or per
+      *cel*; and at what rate a 30 fps source plays in a 24 fps document.
+
+### (27) Screen recording the computer as a layer — requires (26)
+
+- [ ] > "screen recording computer as layer: (requires #2) This is the big feature. It should connect live
+      > with the computer and display the screen live as a video or image like object in a vector layer.
+      > Performance will be big here, so some kind of optimization where you can freeze it will be good,
+      > along with it not updating when nothing is changing on screen. The objective is to be able to have
+      > blender on my computer, use my mouse to pick an angle, then rotoscope it on the drawing app, move to
+      > another perspective, and so on. This means another program for the windows computers side. I also
+      > would like a feature where the computer can drop in an image or video file somewhere and it will
+      > appear on the app, so I can directly pull out renders from blender and mash it with my animations."
+
+      **Both of the owner's performance instincts are already how the render path works** — freeze, and
+      don't update when nothing changed — because content versions gate recomposites. What is missing is
+      **any dirty-rect or partial-upload path**: when a version *does* move, the whole layer re-uploads.
+      **A correction worth keeping**: the existing "Windows" scripts in `deploy/` are unrelated to this —
+      they are a build/deploy path, not a device link.
+      **The drop-a-file half starts from nothing**: the app has zero drag-and-drop, `Transferable`,
+      `NSItemProvider`, `fileImporter` or `UTType` code. **INFERRED: that half looks separable and much
+      smaller, and could ship long before the live stream — worth asking.**
+      **Ask first**, more than anywhere else, because this is a second program: is the Mac in the loop or
+      does the iPad talk to the Windows box directly; is the goal a live *stream* or a still per camera
+      move (the Blender workflow described sounds like the latter, and a still is enormously cheaper); what
+      the layer shows when nothing is connected; and whether the last frame saves into the document.
+
+### (28) Audio — needs a real playback clock first
+
+- [ ] > "audio: implement the ability to add sounds to the animations, potentially including features like
+      > lipsync. Also ability to drop in audio files from computer."
+
+      **Nothing exists** — no audio framework is linked anywhere in the app.
+      **The dependency the owner did not name, and it is the whole first move**: there is no clock to sync
+      to. Playback is a `Timer` whose callback re-dispatches onto the main queue, with `isPlaying` and the
+      timer living on the *view* (`Views/AnimationTimeline.swift:13-14`, timer at `:976-989`). It drifts,
+      and nothing notices today because the only consumer is the playhead. Audio is a hardware clock, so
+      drift becomes what the artist *hears*, and lipsync is where they *see* it. **Hoisting playback onto
+      the model behind a monotonic time base is a timeline change, not an audio feature** — and (21)'s
+      recording stage and (29)'s playback goal each need it too, which makes it the highest-leverage
+      single change on this list.
+      **Ask first**: is audio a property of the document or of a scene in (30); does a sound attach to a
+      frame, a cel, or a free position on a time ruler that does not exist yet; and is lipsync automatic
+      (analyse the audio, pick a mouth shape) or a manual chart — those are completely different features.
+
+### (29) Rendering, export, and the bake-stream-and-size architecture
+
+- [ ] > "rendering: add the ability to export animations as video or a frame as image"
+
+      **There is no export feature at all, of any kind** — searched exhaustively for every share, file-export
+      and photo-library API: zero hits in app code and tests. The one `ShareLink` shares a debug telemetry
+      file. The word "Export" reaches the artist only as reassurance copy on the Render Resolution knob — a
+      promise with no code behind it. Several documents name export as a consumer of some render path; read
+      all of them as describing a **hypothetical** consumer.
+      **The good news is bigger than expected**: `Compositor.composite(_:) -> CGImage?` is already pure,
+      already headless, already runs in the test tier with no view, and `makeRenderRequest` is already
+      frame-parametric. **What is missing is a driver loop, an encoder and a destination — not a renderer.**
+      **What it collides with**: an export composites at *native* resolution, the one case
+      `CompositorBudget.affordableSize` does not bound — passing no `fittingWithin` skips the cap by
+      construction, the GPU admission gate then returns `.unavailable`, and the CPU path answers at a
+      MEASURED **203.3 ms** per grading composite (iPad 9, Release, warm, 2048²). **INFERRED, arithmetic
+      only**: a 240-frame export is ~49 s of CPU compositing, and real documents are 300-1000 cels.
+      `CanvasManager+Document`'s reassurance that saving is bounded to 320x320 **stops being true the day
+      export ships**.
+
+      **The memory architecture is the other half of this item, and the owner has stated it three times.**
+      2026-08-29, on being told an in-between composites live:
+
+      > "does the compositor automatically bake in the background so that when playing every frame doesnt
+      > need to be composited live as it runs? ... the goal is to allow 24fps playback while conserving
+      > memory. Basically the animation bakes in the background, and the data of each frame other than the
+      > current frame gradually gets replaced with that baked 'video', so when the play button is run, every
+      > single frame does not need to be composited live. When something is modified, only the modified
+      > frames are rebaked."
+
+      Then, the same day: *"the ipad gen 9 has enough capability to just store that bake on disk, then play
+      it from disk in real time without having to fill the entire animation to memory... it does not matter
+      how large your animation is or how many layers or complex your compositor is, it always will play it
+      24fps while using minimal memory."* And on 2026-08-30, the first statement to specify a **mechanism**:
+
+      > "the ipad does not have much memory, so I want the paint program to not use much by storing as many
+      > things it can to disk. Probably the current active cel is the only thing required to be in memory.
+      > The paint program automatically pulls unbaked frames from disk (layers, compositing, etc), bakes the
+      > compositing and stores it back straight to disk, so that when the play is pressed it can be played
+      > at 24fps. This way, the program doesn't run out of memory even with a hundred layers and a thousand
+      > cels. The memory is dynamically allocated: lets say we have layers 1 through 10 and the program has
+      > only enough memory for 3: the three bottom layers are pulled, composited and stored, then the next
+      > are pulled etc."
+
+      > "(NOTE: This is my thinking on how it may work, it may not be the most optimal. The session is gonna
+      > have to make a judgement on how exactly to do this. I eventually want to make it android and windows
+      > compatible so dynamic allocation of some sort may be nice.)"
+
+      **So the goal is fixed and the mechanism is delegated in writing.** The goal: a hundred layers and a
+      thousand cels without running out, and 24 fps on press-play. **Portability is a stated requirement**
+      — a budget hard-coded to an iPad, or an eviction signal only iOS emits, fails it.
+      **Layer-chunked accumulation looks sound**: each layer blends against the accumulation *below* it,
+      which is exactly what a bottom-up chunk holds. **INFERRED — prove it against `blendOver` and the six
+      non-separable modes**, and check the `above` half of the sandwich and `RenderBackground`'s
+      ink-exclusion walk, which are where it may not hold.
+      **Three things are already built and must not be rebuilt**: propagating content versions, so a leaf
+      edit bumps only its ancestors; **frame-scoped invalidation**, which is the owner's "only the modified
+      frames are rebaked" and cost nothing; and a pure snapshot-driven composite that was built that way so
+      adding a thread later is not a rewrite.
+      **The memory arithmetic that decides the design**: one frame is 16.8 MB at 2048², so ten seconds at
+      24 fps is **4 GB**, and 15 GB at 4000². *"Any design that holds baked frames as raw textures dies on
+      the first real sequence."* So "gradually replaced with that baked video" is not a nicety, it is the
+      only shape that works.
+      **Two specs describe parts of this machine and must be unified before either is built**, or the app
+      gets two frame caches and two eviction policies: LAYER_COMPOSITING §9.2 (sequencer scope — priority
+      queue, disk LRU, evict on edit) and KEYFRAMES §4.6 (one keyframe span — eager and complete, and
+      **ruled** by the owner 2026-08-28 in §2.19-20). They differ in one interesting way worth keeping: the
+      *policy* is scoped, the *store* is not. PERFORMANCE §8 is the ranked evidence.
+      **This item is already load-bearing even unbuilt**: KEYFRAMES §2.25 lets a derived frame cost more
+      than 1/24 s *because* of this prebake — *"if it prebakes and can play at 24fps after, then the
+      original ask is covered."* Anything that quietly drops this item takes that permission with it.
+      **Ask first**: which container and codec, and does it need alpha (few codecs carry it, and the
+      composite is not necessarily opaque); at what resolution; whether a slow correct export is acceptable
+      given the arithmetic; whether a bake may be visibly stale while it catches up, the way a video buffer
+      is; and what happens when the *disk* is full rather than memory.
+      **Unruled**: whether a baked span survives a relaunch, and what sweeps it if the OS purges its cache.
+      **Scrubbing backwards is the hard direction and it is the one an animator uses** — a long-GOP stream
+      decodes forward from a keyframe, which probably forces an all-intra codec, larger on disk. A knowing
+      trade, not a detail.
+
+### (30) Video editor — requires (29)
+
+- [ ] > "video editor: (requires #5) right now each animation is viewed in the gallery. This would be the
+      > idea of being able to have them organized into scenes, episodes, etc, so an entire movie can be made
+      > and exported."
+
+      **It is really two features and only one needs (29)**: organising documents into scenes needs no
+      renderer at all; *exporting the movie* does.
+      **"Scene" in this codebase is a false friend** — `sceneFrameCount` is the laid-out length of the
+      timeline, nothing to do with a scene in the film sense. Do not reuse the word in code.
+      **The blueprint exists one level down**: the layer tree is already a complete, tested, persisted
+      ordered hierarchy with folders. A gallery of scenes is that same shape at the document level.
+      **What has to change beyond the tree**: a `.paintproj` is a package *directory*, and the gallery has
+      no folders — so this is a new containment level, not a rename.
+      **Ask first**: is a scene a *folder of documents* or a new document kind that references them; can a
+      shot appear in two scenes; is the cut list part of a package or a separate file; what happens when two
+      documents disagree on frame rate or canvas size; and — the question that decides the data model — is
+      an exported movie re-rendered from the sources, or assembled from per-scene exports?
 
 ## Carried — deliberate, and not an ask
 

@@ -805,7 +805,7 @@ extension CanvasManager {
     ///
     /// **This is a responsiveness argument and deliberately not a frame-rate one**, which matters
     /// because the frame-rate argument is no longer available: the owner ruled on 2026-08-29
-    /// (KEYFRAMES §2.25, ROADMAP §5b) that **the live per-frame cost of a derived frame is not held to
+    /// (KEYFRAMES §2.25, TODO (29)) that **the live per-frame cost of a derived frame is not held to
     /// the 24 fps budget** — the background prebake is what must play at 24 fps. That ruling is what
     /// lets this function engage on in-betweens at all, and a reader who takes it to mean "latency on
     /// this path never matters" would delete this clause. It is about a *gesture tracking a finger*,

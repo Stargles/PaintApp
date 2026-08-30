@@ -76,7 +76,7 @@ struct DerivedCelContent {
 ///
 /// Today's only derivation is an interpolation recipe, whose `t` lives on the *cel* and does not
 /// vary across the frames that cel spans — so nothing in this version reads the frame. It is a
-/// parameter anyway, for the reason ROADMAP §0 gives about a video layer and KEYFRAMES stage 5 gives
+/// parameter anyway, for the reason TODO (26) gives about a video layer and KEYFRAMES stage 5 gives
 /// about a transform key: **a cel occupies a range of frames, and the next derivation source poses
 /// it differently on each of them.** Adding the frame later would mean revisiting every call site a
 /// second time, and every call site already has one — `makeRenderRequest` is frame-parametric, the

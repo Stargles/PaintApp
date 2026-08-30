@@ -1,6 +1,6 @@
 # Keyframes
 
-**Animating properties across the frames one cel spans.** ROADMAP.md item (1), specified 2026-08-28
+**Animating properties across the frames one cel spans.** TODO.md item (21), specified 2026-08-28
 after the conversation that file names as each item's entry condition. This is the design; nothing is
 built yet.
 
@@ -45,7 +45,7 @@ And, expanding it:
 > has no space) in which something akin to a laser pointer is displayed. Like a brush stroke, but the
 > tail tapers and ends from the point at where it was on the previous frame."
 
-Videos as vector-layer objects are **ROADMAP item (2)**, not this document. They inherit this feature's
+Videos as vector-layer objects are **TODO item (26)**, not this document. They inherit this feature's
 pose channel and its bake, which is why item (2) is stated to require item (1).
 
 ---
@@ -72,7 +72,7 @@ a later session reinstating it by rediscovering the argument that produced it.
    (`TransformMode.distort.isImplemented == false`, `Models/SelectionModels.swift:54`).
 3. **A transformation layer re-poses the vector objects below it**, rather than resampling the
    composited pixels below it. The owner wants crisp lines, not a bitmap magnify. This answers the
-   question ROADMAP.md:173-174 raised and called *"different features wearing the same name"*.
+   question TODO (21) raises and calls *"different features wearing the same name"*.
 4. **Effect-parameter keys live on the layer, in absolute document frames** — not on the cel. The owner:
    *"for effects it really does not have to be anchored to one singular cel, in fact that would likely
    be better."*
@@ -177,7 +177,7 @@ a later session reinstating it by rediscovering the argument that produced it.
     interpolation in-between costs +75.7 ms/frame, the owner: *"if we are planning for this feature, then
     it is okay for things to take more than 1/24th of a second, including in-betweens... if it prebakes
     and can play at 24fps after, then the original ask is covered."* The "feature" is background baking —
-    ROADMAP §5b, asked for the same day, unscheduled, and **already specified twice** (§4.6 here and
+    TODO (29), asked for the same day, unscheduled, and **already specified twice** (§4.6 here and
     LAYER_COMPOSITING §9.2). So a derived frame is allowed to be expensive to *compute*; what must be
     cheap is *replaying* it. One door stayed open — *"if a smarter faster way is possible which doesnt
     require a lot of code, then sure"* — which is a standing preference for cheap wins, not a reopening.
@@ -728,7 +728,7 @@ real time.
 **Two prerequisites.** Playback's `isPlaying` / `playbackTimer` live as `@State` on the timeline **view**
 (`Views/AnimationTimeline.swift:13-14`) and the timer just adds 1 per fire with no wall-clock
 comparison, so it drifts. The recorder needs a model-level clock — which is the same prerequisite
-ROADMAP item (4) names for audio, so it is worth doing once and properly. And an fps stepper that only
+TODO (28) names for audio, so it is worth doing once and properly. And an fps stepper that only
 writes `canvasManager.fps` will **silently play at the old rate** until playback is stopped and
 restarted, because `togglePlayback()` captures `1.0 / fps` once (`AnimationTimeline.swift:729`).
 
@@ -767,7 +767,7 @@ For a bake it is wrong: 48 cels whose elements share ids will alias anything key
   parallelised across cores. Baking one cel into 48 raises the cost of every future save **for the life
   of the document**. Say so at the bake, with the number.
 
-**A range bake is also (5)'s exporter.** ROADMAP §0 notes both are "evaluate the document at frame N,
+**A range bake is also (29)'s exporter.** TODO's "Later" section notes both are "evaluate the document at frame N,
 N+1, … and emit one picture per frame", and that `makeRenderRequest` is already frame-parametric. Build
 the frame-walker once.
 
@@ -809,7 +809,7 @@ Each stage is mergeable and leaves the app working.
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
 | **5b** | **Real Distort** | §2.13. **Moved here from the end of this table on 2026-08-29.** Raster tier first (the gesture is `TextFrameDrag.distortedFrame` and the bake is `ImageWarp`), then ink through §4.2's point map, then placed images behind Move stage 3c. |
-| **6** | **Bake to cels** | §6. Shares its frame-walker with ROADMAP (5). |
+| **6** | **Bake to cels** | §6. Shares its frame-walker with TODO (29). |
 | **6b** | **The playback cache** | §4.6. Only stage 8 actually needs it — per-object animation fits the budget without it — so it lands beside the transformation layer, not before it. |
 | **7** | **Live recording + editable fps** | §5. Needs the playback clock hoisted onto the model first. |
 | **8** | **The transformation layer** | §4.4. Late because §4.6's cache is its real cost, and because it is the only stage that needs one. |
