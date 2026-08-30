@@ -617,11 +617,11 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         // 60 pt right and a sixth of the band up.
         let travel = CGSize(width: 60, height: -(band - TimelineGraphBand.verticalInset * 2) / 6)
 
-        let atDefault = TimelineGraphBand.move(ref, in: drawn, translation: travel,
-                                               pixelsPerFrame: base, bandHeight: band)
-        let pinchedOut = TimelineGraphBand.move(ref, in: drawn, translation: travel,
-                                                pixelsPerFrame: TimelineKeyMarkers.pixelsPerFrameRange.lowerBound,
-                                                bandHeight: band)
+        let atDefault = TimelineGraphBand.moves(of: [ref], in: drawn, translation: travel,
+                                                pixelsPerFrame: base, bandHeight: band)[ref]
+        let pinchedOut = TimelineGraphBand.moves(of: [ref], in: drawn, translation: travel,
+                                                 pixelsPerFrame: TimelineKeyMarkers.pixelsPerFrameRange.lowerBound,
+                                                 bandHeight: band)[ref]
         XCTAssertEqual(atDefault?.frame, 2, "60 pt is two frames at 30 pt each")
         XCTAssertEqual(pinchedOut?.frame, 6, "…and six at 10.5, because the axis is the timeline's")
         // A sixth of the usable band on a 0…64 axis is 64/6.
@@ -646,20 +646,20 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         // Half a band upward is half of `uiRange` — 32 units — which takes a key at 32 to 64, the
         // top of the axis. A whole band takes it to 96, well outside it and well inside the domain.
         let usable = band - TimelineGraphBand.verticalInset * 2
-        let up = TimelineGraphBand.move(ref, in: drawn,
-                                        translation: CGSize(width: 0, height: -usable),
-                                        pixelsPerFrame: base, bandHeight: band)
+        let up = TimelineGraphBand.moves(of: [ref], in: drawn,
+                                         translation: CGSize(width: 0, height: -usable),
+                                         pixelsPerFrame: base, bandHeight: band)[ref]
         XCTAssertEqual(up?.value ?? 0, 96, accuracy: 1e-9,
                        "A key above the axis is a real state — the band cuts it, it is not clamped")
 
         // Far enough that even `modelDomain` runs out, in both directions.
-        let miles = TimelineGraphBand.move(ref, in: drawn,
-                                           translation: CGSize(width: 0, height: -usable * 10),
-                                           pixelsPerFrame: base, bandHeight: band)
+        let miles = TimelineGraphBand.moves(of: [ref], in: drawn,
+                                            translation: CGSize(width: 0, height: -usable * 10),
+                                            pixelsPerFrame: base, bandHeight: band)[ref]
         XCTAssertEqual(miles?.value, Double(Effect.maxBlurTaps))
-        let down = TimelineGraphBand.move(ref, in: drawn,
-                                          translation: CGSize(width: 0, height: usable * 10),
-                                          pixelsPerFrame: base, bandHeight: band)
+        let down = TimelineGraphBand.moves(of: [ref], in: drawn,
+                                           translation: CGSize(width: 0, height: usable * 10),
+                                           pixelsPerFrame: base, bandHeight: band)[ref]
         XCTAssertEqual(down?.value, 0, "…and a blur radius stops at zero, which is its identity")
     }
 
@@ -676,19 +676,21 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
 
         // Ten frames right, with a neighbour at 4: the answer is 3, not 4 and not 10.
-        let far = TimelineGraphBand.move(ref, in: drawn,
-                                         translation: CGSize(width: base * 10, height: 0),
-                                         pixelsPerFrame: base, bandHeight: band)
+        let far = TimelineGraphBand.moves(of: [ref], in: drawn,
+                                          translation: CGSize(width: base * 10, height: 0),
+                                          pixelsPerFrame: base, bandHeight: band)[ref]
         XCTAssertEqual(far?.frame, 3, "It stops one short of its neighbour")
 
-        let curve = TimelineGraphBand.applying(far!, to: ref, in: drawn)
+        let curve = TimelineGraphBand.applying([ref: far!], to: drawn)[brightnessID]
         XCTAssertEqual(curve?.keys.map(\.frame), [3, 4, 5], "…and nothing was swallowed")
 
         // And the floor: frames are absolute document frames, so 0 is the wall on the other side.
-        let backwards = TimelineGraphBand.move(.init(parameterID: brightnessID, frame: 4), in: drawn,
-                                               translation: CGSize(width: -base * 10, height: 0),
-                                               pixelsPerFrame: base, bandHeight: band)
-        XCTAssertEqual(backwards?.frame, 1, "Stopped by the key at 0, not by frame 0")
+        let backwards = TimelineGraphBand.moves(of: [TimelineGraphBand.KeyRef(parameterID: brightnessID,
+                                                                              frame: 4)],
+                                                in: drawn,
+                                                translation: CGSize(width: -base * 10, height: 0),
+                                                pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(backwards.values.first?.frame, 1, "Stopped by the key at 0, not by frame 0")
     }
 
     /// The other half of the same rule: **an add onto a frame the channel already keys is refused.**
@@ -753,41 +755,124 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        .nothing)
     }
 
+    // MARK: The marquee
+
+    /// **A rubber band takes what is inside it, whichever way it was drawn**, and the group then
+    /// moves as a rigid body: one frame delta for all of them, and a shared travel in *points*
+    /// mapped through each channel's own axis.
+    func testTheMarqueeTakesTheKeysInsideItAndMovesThemAsOneBody() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (2, 1.0), (20, 2.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(1, 0.0), (20, 2.0)]))
+        let drawn = channels(manager)
+
+        // The first three columns, full height — and drawn bottom-right to top-left, so the
+        // standardisation is under test too.
+        let box = CGRect(x: base * 3, y: band, width: -base * 3, height: -band)
+        let picked = TimelineGraphBand.keys(in: box, channels: drawn,
+                                            pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(picked, [TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0),
+                                TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 2),
+                                TimelineGraphBand.KeyRef(parameterID: contrastID, frame: 1)],
+                       "Three keys across two channels, and the ones at frame 20 left behind")
+
+        let moves = TimelineGraphBand.moves(of: picked, in: drawn,
+                                            translation: CGSize(width: base * 5, height: 0),
+                                            pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(moves.count, 3)
+        XCTAssertEqual(Set(moves.map { $0.value.frame - $0.key.frame }), [5],
+                       "One delta for all of them — the selection's shape survives the move")
+
+        let after = TimelineGraphBand.applying(moves, to: drawn)
+        XCTAssertEqual(after[brightnessID]?.keys.map(\.frame), [5, 7, 20])
+        XCTAssertEqual(after[contrastID]?.keys.map(\.frame), [6, 20])
+    }
+
+    /// **The group is clamped by its tightest member, not per key** — the alternative collapses the
+    /// selection onto whichever key hit a wall, and dragging back does not restore its shape.
+    func testTheGroupIsClampedByItsTightestMember() {
+        let manager = gradedManager()
+        // The two carried keys are at 0 and 2; the blocker at 6 is not selected, so the leading key
+        // may reach 5 and the whole group may travel three frames — not five.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (2, 1.0), (6, 2.0)]))
+        let drawn = channels(manager)
+        let picked: Set<TimelineGraphBand.KeyRef> = [
+            .init(parameterID: brightnessID, frame: 0), .init(parameterID: brightnessID, frame: 2)
+        ]
+        let moves = TimelineGraphBand.moves(of: picked, in: drawn,
+                                            translation: CGSize(width: base * 20, height: 0),
+                                            pixelsPerFrame: base, bandHeight: band)
+        XCTAssertEqual(Set(moves.map { $0.value.frame }), [3, 5],
+                       "Both moved by three, keeping their two-frame gap")
+        XCTAssertEqual(TimelineGraphBand.applying(moves, to: drawn)[brightnessID]?.keys.map(\.frame),
+                       [3, 5, 6], "…and the blocker survived")
+    }
+
+    /// **A selection sliding into the frames its own leading edge just vacated loses no member.**
+    /// `setKey` replaces on collision and the clamp never fires inside a rigid group, so the removals
+    /// have to all happen before any insertion — which is the one thing `applying` arranges.
+    func testAGroupSlidingOverItsOwnFramesLosesNothing() {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0.0), (1, 1.0), (2, 2.0)]))
+        let drawn = channels(manager)
+        let picked: Set<TimelineGraphBand.KeyRef> = [
+            .init(parameterID: brightnessID, frame: 0),
+            .init(parameterID: brightnessID, frame: 1),
+            .init(parameterID: brightnessID, frame: 2)
+        ]
+        let moves = TimelineGraphBand.moves(of: picked, in: drawn,
+                                            translation: CGSize(width: base, height: 0),
+                                            pixelsPerFrame: base, bandHeight: band)
+        let after = TimelineGraphBand.applying(moves, to: drawn)[brightnessID]
+        XCTAssertEqual(after?.keys.map(\.frame), [1, 2, 3])
+        XCTAssertEqual(after?.keys.map(\.value), [0.0, 1.0, 2.0], "…and each kept its own value")
+    }
+
     // MARK: What an edit costs, and what follows it
 
-    /// **One drag is one press of Undo, however many ticks it spanned.**
+    /// **One drag is one press of Undo, however many channels and ticks it spanned.**
     ///
     /// `setEffectParameterTrack` records one step *per call*, which is right for a discrete edit and
     /// wrong for a gesture — `KeyframeControl.setEffectParameterKeys` states the same problem from the
     /// other side. The bracket is the answer, and this pins the arithmetic the coordinator relies on:
-    /// a write on every `.changed` tick inside one `beginStructureGesture` / `commitStructureGesture`
-    /// pair costs the artist exactly one press, where without it a two-second drag costs dozens.
-    func testADragThatWritesOnEveryTickIsOneUndoStep() {
+    /// nine writes across three ticks and two channels inside one `beginStructureGesture` /
+    /// `commitStructureGesture` pair cost the artist exactly one press.
+    func testADragOfManyKeysAcrossManyChannelsIsOneUndoStep() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 0.0), (10, 2.0)]))
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: contrastID,
+                                        to: linear([(0, 2.0), (10, 0.0)]))
         let before = manager.history.undoStack.count
         let startChannels = channels(manager)
-        let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
+        let picked: Set<TimelineGraphBand.KeyRef> = [
+            .init(parameterID: brightnessID, frame: 0), .init(parameterID: contrastID, frame: 0)
+        ]
 
         manager.beginStructureGesture()
         for tick in 1...3 {
-            let move = TimelineGraphBand.move(ref, in: startChannels,
-                                              translation: CGSize(width: base * CGFloat(tick), height: 4),
-                                              pixelsPerFrame: base, bandHeight: band)!
-            manager.setEffectParameterTrack(
-                layerIndex: gradeIndex, parameterID: brightnessID,
-                to: TimelineGraphBand.applying(move, to: ref, in: startChannels))
+            let moves = TimelineGraphBand.moves(of: picked, in: startChannels,
+                                                translation: CGSize(width: base * CGFloat(tick), height: 4),
+                                                pixelsPerFrame: base, bandHeight: band)
+            for (id, curve) in TimelineGraphBand.applying(moves, to: startChannels) {
+                manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: id, to: curve)
+            }
         }
         manager.commitStructureGesture(label: .effectKeyframes)
 
         XCTAssertEqual(manager.history.undoStack.count - before, 1,
-                       "Three writes over three ticks, one undo step")
+                       "Six writes over three ticks, one undo step")
         XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
                        [3, 10], "PREMISE: the drag actually landed")
         manager.undo()
         XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[brightnessID]?.keys.map(\.frame),
                        [0, 10], "…and one press took all of it back")
+        XCTAssertEqual(manager.keyframeState(of: target(manager)).tracks[contrastID]?.keys.map(\.frame),
+                       [0, 10])
     }
 
     /// A single tap is a single write and therefore a single step, with no bracket — the discrete
@@ -824,11 +909,12 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
         let drawn = channels(manager)
         let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
-        let move = TimelineGraphBand.move(ref, in: drawn,
-                                          translation: CGSize(width: base * 4, height: 0),
-                                          pixelsPerFrame: base, bandHeight: band)!
-        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
-                                        to: TimelineGraphBand.applying(move, to: ref, in: drawn))
+        let moves = TimelineGraphBand.moves(of: [ref], in: drawn,
+                                            translation: CGSize(width: base * 4, height: 0),
+                                            pixelsPerFrame: base, bandHeight: band)
+        for (id, curve) in TimelineGraphBand.applying(moves, to: drawn) {
+            manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: id, to: curve)
+        }
 
         let after = manager.keyframes(of: target(manager))
         XCTAssertEqual(after.frames, [0, 4, 10], "The union followed the key, with no mark written")

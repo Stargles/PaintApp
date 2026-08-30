@@ -442,6 +442,60 @@ final class GraphEditorUITests: PaintUITestCase {
                        "…and a second tap, now on the key it just made, takes it away again")
     }
 
+    /// **Ask 6, through a finger: a rubber band in empty space picks keys up, and grabbing any member
+    /// of that set then moves the whole of it.**
+    ///
+    /// Two gestures, and the second is the one no logic test can see — the standing selection has to
+    /// survive the first drag ending, the layout passes in between, and the second drag's touch-down
+    /// resolving to a key that is already in it. What the fast tier covers is which keys a rect
+    /// encloses and where the group lands; what this covers is that the band's own drag-in-empty-space
+    /// exists at all, which it does not without `require(toFail:)` — the enclosing scroll view eats it.
+    func testAMarqueeSelectsKeysAndDraggingOneOfThemMovesThemTogether() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6")
+
+        let height = band.frame.height
+        let origin = band.coordinate(withNormalizedOffset: .zero)
+        let ppf = TimelineKeyMarkers.basePixelsPerFrame
+        func point(_ dx: CGFloat, _ dy: CGFloat) -> XCUICoordinate {
+            origin.withOffset(CGVector(dx: dx, dy: dy))
+        }
+        // A box round both keys' columns, begun in a corner further than `hitRadius` from either dot
+        // — otherwise the touch is a grab and there is no marquee to test.
+        let corner = point(2, height - 4)
+        corner.press(forDuration: 0.2,
+                     thenDragTo: point(TimelineGraphBand.x(ofFrame: 6, pixelsPerFrame: ppf) + 14, 4),
+                     withVelocity: .slow, thenHoldForDuration: 0.3)
+
+        // Now take the pair by the key at frame 0 and carry both two frames right.
+        let key = point(TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: ppf),
+                        TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: height))
+        key.press(forDuration: 0.2, thenDragTo: key.withOffset(CGVector(dx: ppf * 2, dy: 0)),
+                  withVelocity: .slow, thenHoldForDuration: 0.3)
+
+        let moved = try XCTUnwrap(band.value as? String)
+        let frames = moved.split(separator: ":")[1].split(separator: ",").compactMap { Int($0) }
+        XCTAssertEqual(frames.count, 2, "Both keys should still be there: \(moved)")
+        XCTAssertTrue((1...3).contains(frames[0]),
+                      "The pair should have travelled toward frame 2: \(moved)")
+        XCTAssertEqual(frames[1] - frames[0], 6, """
+            The selection moved as a rigid body, so its two keys keep the six frames between them —             got \(moved). A per-key clamp, or a marquee that only picked up the key under the             finger, is what this looks like when it is wrong.
+            """)
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        let back = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "brightnessContrast.brightness:0,6"),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed,
+                       "A marquee move of two keys is still one press of Undo")
+    }
+
     // MARK: - Fixture
 
     /// The two values `authorAnAnimatedBrightnessCurve` left on the track.

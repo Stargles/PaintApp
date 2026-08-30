@@ -1216,17 +1216,18 @@ because the drawn list reorders the moment a channel starts animating, which hap
 the artist is watching. Every channel of one band comes from one effect, hence one table, so the
 first eight are distinct by construction.
 
-### 11.4 Stage D3 — the gestures — **single-key editing done 2026-08-29**
+### 11.4 Stage D3 — the gestures — **done 2026-08-29, both halves**
 
-**What ships in this half: a key can be dragged on both axes, tapped away, and tapped into being.**
-The marquee is the second half and is not here yet.
+**A key drags on both axes, a tap on one removes it, a tap on a curve adds one, and a rubber band in
+empty space picks up a set that then travels as one body.** Two commits in that order, because the
+first has to stand on its own.
 
 **`TimelineKeyMarkers.frame(atX:pixelsPerFrame:)` has its first caller and its doc's blocker is
 settled.** It is reached through `TimelineGraphBand.frameDelta(translationX:pixelsPerFrame:)`, which
 asks it *once at frame 0* rather than once per key, because the answer is exactly delta-invariant:
 `frame(atX:)` floors and `centerX` offsets by half a column, so `frame(atX: centerX(f) + dx) − f` is
 `floor(0.5 + dx / pixelsPerFrame)` for every integer `f`. That is what lets one number carry a whole
-group later, and it is why the drag keeps the **grab offset** rather than resolving from the touch's
+group rigidly, and it is why the drag keeps the **grab offset** rather than resolving from the touch's
 own x the way `CurveEditor` does: a finger may take a key from 22 pt away, which at the pinched-out
 10.5 pt per frame is two frames of teleport on touch-down.
 
@@ -1247,9 +1248,10 @@ the pinch is two-touch on `contentView` against this recogniser's one, the coexi
 already relies on; and the playhead is already `isUserInteractionEnabled = false`, so a key under
 120 pt of blue is grabbable — that was checked rather than assumed.
 
-**The cost is that a finger on the band no longer scrolls the timeline.** Deliberate: the ruler and
-every cel row still scroll, so what is given up is a 96 pt strip, and the marquee is going to want
-the whole of the band's empty space anyway.
+**The cost is that a finger on the band no longer scrolls the timeline.** Deliberate, and the marquee
+is what spends it: §11.4's ruling makes the rubber band *the* meaning of a drag in the band's empty
+space, so there is nothing left for the scroll view to pan from. The ruler and every cel row still
+scroll, so what is given up is a 96 pt strip and not the gesture.
 
 **Three decisions the stage had to make, none of which the brief settled.**
 
@@ -1279,6 +1281,28 @@ the whole of the band's empty space anyway.
   `cancelStructureGesture` throws the baseline away without recording, so "record nothing" and
   "change nothing" have to be arranged separately. A tap needs no bracket, being one write.
 
+**The marquee, and the two things it forced on the arithmetic that a single key never would have.**
+A drag that begins on no key is a rubber band; the keys inside it become a standing selection that
+survives the gesture, and grabbing *any member* of it then carries the whole set — which is why it is
+two gestures rather than one compound one, and why the selection is view state that dies with the band
+(§11.5's rule for channel visibility, reached from the other side). It uses `reachableY` for
+membership, the same y the single grab does, so "what this gesture can reach" is one rule rather than
+two: a key above the axis is reachable by both or by neither. The two consequences:
+
+- **The group is clamped by its tightest member, not per key.** One `frameDelta` for all of them,
+  intersected with each carried key's own allowance against the keys that are *not* selected — a
+  per-key clamp collapses the selection onto whichever member hit a wall, and dragging back does not
+  restore its shape.
+- **Vertically the group shares a travel in *points*, not in value**, mapped through each channel's own
+  axis. Per-channel normalisation (§11.6) makes a point of band a different number of units in every
+  curve, so a shared value delta would carry a 0…1 opacity off the top while a 0…500 blur radius
+  visibly did not move.
+
+And one that is invisible until it bites: `applying` removes **every** carried key before inserting
+any of them, because a selection sliding into the frames its own leading edge just vacated is the one
+case where the neighbour clamp is silent — the interior of a rigid group never blocks itself, so
+`setKey`'s replace-on-collision would eat a member with nothing to see.
+
 **§2.28's union follows for free, and that was verified rather than assumed** — end to end, by a real
 finger. `GraphEditorUITests.testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows` drags the key at
 frame 0 and asserts the marker band a row up goes from `0|6` to `(0)|N|6`: the diamond moved with the
@@ -1299,8 +1323,10 @@ not read it that way. It wants either a listed-but-flat state or a note in D4's 
 is D4's to decide because that list is where a channel that is present-but-not-an-animation would have
 to show.
 
-**Ask 6's cel marquee stays future**, with its stub: "Select Multiple" sits in the cel menu today,
-`.disabled(true)`.
+**Ask 6's *cel* marquee stays future**, with its stub: "Select Multiple" sits in the cel menu today,
+`.disabled(true)`. What this stage built is the keyframe half of that ask, and the shape it settles —
+a drag in empty space rubber-bands, a grab on a member carries the set — is the one a cel marquee
+would copy.
 
 **Not in this stage and deliberately: bezier tangent handles.** `AnimationCurve` already carries
 `inHandle`/`outHandle` and five tangent modes and decision 1 makes an unclamped overshoot real, so the

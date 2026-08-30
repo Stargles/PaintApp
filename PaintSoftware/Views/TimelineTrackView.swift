@@ -410,8 +410,12 @@ struct TimelineTrackView: UIViewRepresentable {
                   layout.expansion(ofRow: position) > 0
             else {
                 graphBandView.isHidden = true
-                // A band that closes mid-drag cancels it rather than leaving a bracket open.
+                // A closed band holds no selection: it is view state that means nothing without the
+                // surface it is drawn on, and a stale ref would come back naming a frame the artist
+                // has since moved a key off.
                 endGraphBandDrag(cancelled: true)
+                graphBandSelection = []
+                graphBandView.setSelection([])
                 return
             }
             if graphBandView.superview == nil {
@@ -424,6 +428,14 @@ struct TimelineTrackView: UIViewRepresentable {
                                          y: layout.y(ofRow: position) + layout.blockHeight(ofRow: position),
                                          width: totalWidth,
                                          height: layout.expansion(ofRow: position))
+            // The selection belongs to one layer's channels, so it does not survive the band moving
+            // to another — the ids would collide (two Blur layers both key `blur.radius`) and the
+            // rings would land on a curve the artist never picked.
+            if graphBandSelectionLayerIndex != content.layerIndex {
+                graphBandSelectionLayerIndex = content.layerIndex
+                graphBandSelection = []
+            }
+            graphBandView.setSelection(graphBandSelection)
             graphBandView.update(content: content, pixelsPerFrame: pixelsPerFrame,
                                  frameCount: frameCount, visibleX: visibleBandX)
         }
@@ -465,7 +477,7 @@ struct TimelineTrackView: UIViewRepresentable {
         /// One touch on the band, from touch-down to lift.
         ///
         /// **The channels are captured at `.began` and every tick resolves against *those*.** A live
-        /// drag rewrites the same key on every `.changed`, so composing this tick's translation onto
+        /// drag rewrites the same keys on every `.changed`, so composing this tick's translation onto
         /// last tick's document would make the key accelerate away from the finger — the same reason
         /// `BlockDrag` records where its block started rather than where it currently is.
         private struct GraphBandDrag {
@@ -473,8 +485,8 @@ struct TimelineTrackView: UIViewRepresentable {
             let start: CGPoint
             let channels: [TimelineGraphBand.Channel]
             let bandHeight: CGFloat
-            /// The key being carried, or nil when the touch began on nothing.
-            let carried: TimelineGraphBand.KeyRef?
+            /// The keys being carried. Empty means the touch began on nothing, which is a marquee.
+            let carried: Set<TimelineGraphBand.KeyRef>
             /// Set once travel passes `tapSlop`. Until then the touch is still a candidate tap, and
             /// **no undo bracket is open** — `CurveEditor`'s rule: a drag that never moved closes no
             /// bracket, because it never opened one.
@@ -484,6 +496,10 @@ struct TimelineTrackView: UIViewRepresentable {
             var didWrite = false
         }
         private var graphBandDrag: GraphBandDrag?
+        /// The marquee's standing selection, surviving between gestures so a set picked up by one
+        /// drag can be moved by the next.
+        private var graphBandSelection: Set<TimelineGraphBand.KeyRef> = []
+        private var graphBandSelectionLayerIndex: Int?
 
         /// **The whole of D3's gesture, in `CurveEditor`'s grammar** — KEYFRAMES.md §11.4, which
         /// nominates that grammar and rules that what travels is the rules and the constants rather
@@ -523,12 +539,24 @@ struct TimelineTrackView: UIViewRepresentable {
         private func beginGraphBandTouch(at point: CGPoint) {
             guard let content = laidOutKey?.graphBand else { return }
             let height = graphBandView.bounds.height
-            graphBandDrag = GraphBandDrag(
-                layerIndex: content.layerIndex, start: point, channels: content.channels,
-                bandHeight: height,
-                carried: TimelineGraphBand.nearestKey(to: point, channels: content.channels,
-                                                      pixelsPerFrame: pixelsPerFrame,
-                                                      bandHeight: height))
+            let hit = TimelineGraphBand.nearestKey(to: point, channels: content.channels,
+                                                   pixelsPerFrame: pixelsPerFrame, bandHeight: height)
+            // Grabbing a member of the standing selection carries the whole of it, which is what makes
+            // ask 6's *"select the keyframe nodes and move them"* two gestures rather than one
+            // compound one. Grabbing anything else replaces the selection with just that key.
+            let carried: Set<TimelineGraphBand.KeyRef>
+            if let hit {
+                carried = graphBandSelection.contains(hit) ? graphBandSelection : [hit]
+            } else {
+                carried = []
+            }
+            graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
+                                          channels: content.channels, bandHeight: height,
+                                          carried: carried)
+            if let hit, carried == [hit] {
+                graphBandSelection = [hit]
+                graphBandView.setSelection(graphBandSelection)
+            }
         }
 
         private func updateGraphBandTouch(at point: CGPoint) {
@@ -540,23 +568,37 @@ struct TimelineTrackView: UIViewRepresentable {
                 drag.didMove = true
                 // One bracket for the whole drag, opened here rather than at touch-down: this is the
                 // moment the gesture stops being a candidate tap. `setEffectParameterTrack` records
-                // nothing while a gesture snapshot is open, so the write below — one per tick, for as
-                // long as the finger is down — collapses into the single step
-                // `commitStructureGesture` records.
-                if drag.carried != nil { canvasManager.beginStructureGesture() }
-                graphBandDrag = drag
+                // nothing while a gesture snapshot is open, so the N writes below — one per channel
+                // per tick — collapse into the single step `commitStructureGesture` records.
+                if !drag.carried.isEmpty { canvasManager.beginStructureGesture() }
+            }
+            graphBandDrag = drag
+
+            guard !drag.carried.isEmpty else {
+                let rect = CGRect(x: drag.start.x, y: drag.start.y,
+                                  width: translation.width, height: translation.height)
+                graphBandView.setMarquee(rect)
+                graphBandSelection = TimelineGraphBand.keys(in: rect, channels: drag.channels,
+                                                            pixelsPerFrame: pixelsPerFrame,
+                                                            bandHeight: drag.bandHeight)
+                graphBandView.setSelection(graphBandSelection)
+                return
             }
 
-            guard let ref = drag.carried,
-                  let move = TimelineGraphBand.move(ref, in: drag.channels, translation: translation,
-                                                    pixelsPerFrame: pixelsPerFrame,
-                                                    bandHeight: drag.bandHeight),
-                  let curve = TimelineGraphBand.applying(move, to: ref, in: drag.channels)
-            else { return }
-            if canvasManager.setEffectParameterTrack(layerIndex: drag.layerIndex,
-                                                     parameterID: ref.parameterID, to: curve) {
+            let moves = TimelineGraphBand.moves(of: drag.carried, in: drag.channels,
+                                                translation: translation,
+                                                pixelsPerFrame: pixelsPerFrame,
+                                                bandHeight: drag.bandHeight)
+            if writeGraphBandCurves(TimelineGraphBand.applying(moves, to: drag.channels),
+                                    layerIndex: drag.layerIndex) {
                 graphBandDrag?.didWrite = true
             }
+            // The rings follow the keys rather than staying on the frames they were picked up from,
+            // so a selection dragged four frames right is still drawn around itself.
+            graphBandSelection = Set(moves.map {
+                TimelineGraphBand.KeyRef(parameterID: $0.key.parameterID, frame: $0.value.frame)
+            })
+            graphBandView.setSelection(graphBandSelection)
             relayout()
         }
 
@@ -579,35 +621,43 @@ struct TimelineTrackView: UIViewRepresentable {
                 // One `setEffectParameterTrack` call, one undo step — the discrete half of "one
                 // artist action is one press of Undo", with no bracket needed because there is one
                 // write.
-                canvasManager.setEffectParameterTrack(layerIndex: drag.layerIndex,
-                                                      parameterID: ref.parameterID, to: curve)
+                _ = writeGraphBandCurves([ref.parameterID: curve], layerIndex: drag.layerIndex)
+                graphBandSelection.remove(ref)
+                graphBandView.setSelection(graphBandSelection)
                 relayout()
             case .add(let parameterID, let frame, let value):
                 guard var curve = drag.channels.first(where: { $0.parameterID == parameterID })?.curve
                 else { return }
                 curve.setKey(AnimationCurve.Key(frame: frame, value: value))
-                canvasManager.setEffectParameterTrack(layerIndex: drag.layerIndex,
-                                                      parameterID: parameterID, to: curve)
+                _ = writeGraphBandCurves([parameterID: curve], layerIndex: drag.layerIndex)
                 relayout()
             case .nothing:
-                break
+                // A tap on genuinely empty band drops the selection, which is the only gesture that
+                // can: a marquee that catches nothing does the same thing by the same route.
+                graphBandSelection = []
+                graphBandView.setSelection([])
             }
         }
 
         /// Clears the live drag, and closes whatever it opened.
         ///
-        /// **A cancelled drag restores the curve it started from before dropping the bracket.**
+        /// **A cancelled drag restores the curves it started from before dropping the bracket.**
         /// `cancelStructureGesture` throws the baseline away without recording, so leaving the model
         /// mid-drag would strand an edit the artist cannot undo — the one place where "record nothing"
         /// and "change nothing" have to be arranged separately.
         private func endGraphBandDrag(cancelled: Bool) {
+            graphBandView.setMarquee(nil)
             guard let drag = graphBandDrag else { return }
             graphBandDrag = nil
-            guard drag.didMove, let ref = drag.carried else { return }
+            guard drag.didMove, !drag.carried.isEmpty else { return }
             if cancelled {
-                canvasManager.setEffectParameterTrack(
-                    layerIndex: drag.layerIndex, parameterID: ref.parameterID,
-                    to: drag.channels.first { $0.parameterID == ref.parameterID }?.curve)
+                var restored: [String: AnimationCurve] = [:]
+                for channel in drag.channels where drag.carried.contains(where: {
+                    $0.parameterID == channel.parameterID
+                }) {
+                    restored[channel.parameterID] = channel.curve
+                }
+                _ = writeGraphBandCurves(restored, layerIndex: drag.layerIndex)
                 canvasManager.cancelStructureGesture()
             } else if drag.didWrite {
                 canvasManager.commitStructureGesture(label: .effectKeyframes)
@@ -616,6 +666,27 @@ struct TimelineTrackView: UIViewRepresentable {
                 // would put an undo step on the stack that undoes nothing.
                 canvasManager.cancelStructureGesture()
             }
+        }
+
+        /// Writes a set of whole-curve replacements onto the band's layer.
+        ///
+        /// **`setEffectParameterTrack`, deliberately, and it is what makes the undo arithmetic work.**
+        /// It refuses a parameter that is not `isScalarAnimatable` and removes the track outright for
+        /// an empty curve, so a channel whose last key was tapped away leaves no husk behind; and it
+        /// records **nothing** while a gesture snapshot is open, which is what turns N channels × M
+        /// ticks of a marquee move into the one step `commitStructureGesture` writes.
+        ///
+        /// - Returns: whether anything changed, which is the input to that commit-or-cancel decision.
+        @discardableResult
+        private func writeGraphBandCurves(_ curves: [String: AnimationCurve], layerIndex: Int) -> Bool {
+            var changed = false
+            for (parameterID, curve) in curves {
+                if canvasManager.setEffectParameterTrack(layerIndex: layerIndex,
+                                                         parameterID: parameterID, to: curve) {
+                    changed = true
+                }
+            }
+            return changed
         }
 
         /// The scrub fast path: everything a `currentFrame` change actually moves.
@@ -1269,11 +1340,10 @@ private final class TimelineKeyMarkerBand: UIView {
 /// whole life, which a `UIPanGestureRecognizer` would not do until ~10 pt of movement — three times
 /// `tapSlop`.
 ///
-/// **The band claims its own drags, and gives up scrolling over itself to do it.** A recogniser that
-/// begins on touch-down is exactly what the enclosing scroll view's `require(toFail:)` defers to, so
-/// a finger on the band no longer scrolls the timeline; the ruler and every cel row still do (a row's
-/// pan declines everything but a resize handle), so what is lost is a 96 pt strip and not the
-/// gesture. §11.4's marquee is the drag that will claim the rest of that strip.
+/// **The band claims its own drags, and gives up scrolling over itself to do it.** §11.4 rules the
+/// marquee to be the band's own drag-in-empty-space, so there is no empty space left for the
+/// enclosing scroll view to pan from; the ruler and every cel row still scroll (a row's pan declines
+/// everything but a resize handle), so what is lost is a 96 pt strip and not the gesture.
 ///
 /// **The playhead stays on top of it**, which is a decision rather than an oversight. It is a
 /// *column* the width of a frame, not a hairline, so at full zoom 120 pt of 35 % blue lies over the
@@ -1298,6 +1368,16 @@ private final class TimelineGraphBandView: UIView {
     /// without invalidating trades a slow band for a blank one, which is strictly worse.
     private var visibleX: ClosedRange<CGFloat> = 0...0
 
+    /// The keys the marquee is holding, drawn as a ring. View state, not document state — it means
+    /// nothing with the band closed, exactly as §11.5 says of channel visibility.
+    private var selection: Set<TimelineGraphBand.KeyRef> = []
+
+    /// The rubber band itself. A sibling `UIView` rather than a shape inside `draw(_:)`, because this
+    /// view is `draw(_:)`-backed over the whole track's width and re-rasterising all of it on every
+    /// `.changed` tick of a marquee is precisely the cost `TimelineGraphBand.sampling`'s clip exists
+    /// to remove.
+    private let marqueeView = UIView()
+
     /// **The band's own touch, and the reason it is a long press with no minimum duration.** See the
     /// class doc: it is `TimelineRulerView.panRecognizer`'s configuration, which is this file's UIKit
     /// answer to `DragGesture(minimumDistance: 0)`. The coordinator adds itself as the target and
@@ -1319,6 +1399,14 @@ private final class TimelineGraphBandView: UIView {
         isAccessibilityElement = true
         accessibilityTraits = .none
         accessibilityIdentifier = "timeline.graphBand"
+
+        marqueeView.isUserInteractionEnabled = false
+        marqueeView.isHidden = true
+        marqueeView.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
+        marqueeView.layer.borderColor = UIColor.systemBlue.cgColor
+        marqueeView.layer.borderWidth = 1
+        addSubview(marqueeView)
+
         addGestureRecognizer(panRecognizer)
     }
 
@@ -1350,6 +1438,22 @@ private final class TimelineGraphBandView: UIView {
         guard range != visibleX else { return }
         visibleX = range
         setNeedsDisplay()
+    }
+
+    /// The keys drawn with a ring. Gated on inequality for `update`'s reason — a marquee's `.changed`
+    /// fires many times a second and most ticks select nothing new.
+    func setSelection(_ keys: Set<TimelineGraphBand.KeyRef>) {
+        guard keys != selection else { return }
+        selection = keys
+        setNeedsDisplay()
+    }
+
+    /// The rubber band, in this view's own coordinates. Nil hides it.
+    func setMarquee(_ rect: CGRect?) {
+        guard let rect else { marqueeView.isHidden = true; return }
+        marqueeView.isHidden = false
+        marqueeView.frame = rect.standardized
+        bringSubviewToFront(marqueeView)
     }
 
     override func layoutSubviews() {
@@ -1438,6 +1542,19 @@ private final class TimelineGraphBandView: UIView {
                 dot.fill()
                 dot.lineWidth = 1
                 dot.stroke()
+
+                // A ring rather than a bigger or differently coloured dot: the dot's own size says
+                // "a key is here" and its colour says which channel, and a selection that changed
+                // either would look like the key had moved or changed channel.
+                guard selection.contains(TimelineGraphBand.KeyRef(parameterID: channel.parameterID,
+                                                                  frame: key.frame)) else { continue }
+                let ring = UIBezierPath(ovalIn: CGRect(x: x - TimelineGraphBand.selectedKeyRadius,
+                                                       y: y - TimelineGraphBand.selectedKeyRadius,
+                                                       width: TimelineGraphBand.selectedKeyRadius * 2,
+                                                       height: TimelineGraphBand.selectedKeyRadius * 2))
+                UIColor.white.setStroke()
+                ring.lineWidth = 1.5
+                ring.stroke()
             }
         }
     }

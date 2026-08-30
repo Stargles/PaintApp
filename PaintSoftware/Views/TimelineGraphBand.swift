@@ -355,12 +355,16 @@ enum TimelineGraphBand {
     /// it landed on, and tap-to-remove could never fire.
     static let tapSlop: CGFloat = 5
 
+    /// The ring drawn around a key the marquee has picked up. Larger than `keyRadius`, so a
+    /// selection is legible without the dot itself changing size and appearing to move.
+    static let selectedKeyRadius: CGFloat = 5
+
     /// **The value a band-local y means — the exact inverse of `y(ofValue:in:bandHeight:)`.**
     ///
     /// Unclamped, exactly as its inverse is: a y above the band's top is a value above the axis, and
     /// that is a state the model allows (`Effect.swift`: draw over `uiRange`, allow a key anywhere in
     /// `modelDomain`). The clamp that *does* apply is `modelDomain`'s, and it is applied where the
-    /// domain is known — see `move(_:in:translation:pixelsPerFrame:bandHeight:)`.
+    /// domain is known — see `moves(of:in:translation:pixelsPerFrame:bandHeight:)`.
     static func value(atY y: CGFloat, in range: ClosedRange<Double>, bandHeight: CGFloat) -> Double {
         let usable = max(bandHeight - verticalInset * 2, 1)
         let t = 1 - Double((y - verticalInset) / usable)
@@ -384,7 +388,8 @@ enum TimelineGraphBand {
     ///
     /// The nearest match rather than the first — `CurveEditor.nearestHandle`'s rule, and it matters
     /// more here than it does there, because two channels can key the same frame and their dots then
-    /// share an x. Nil when nothing is in reach, which is what makes tap-to-add reachable at all.
+    /// share an x. Nil when nothing is in reach, which is what makes tap-to-add and the marquee
+    /// reachable at all.
     static func nearestKey(to point: CGPoint, channels: [Channel],
                            pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> KeyRef? {
         var best: (ref: KeyRef, distance: CGFloat)?
@@ -408,8 +413,8 @@ enum TimelineGraphBand {
     /// `CurveEditor` has no equivalent because it draws exactly one curve, so "add a point here" needs
     /// no subject. A band draws several, and the only non-arbitrary way to name one is the same
     /// proximity rule the keys use: the nearest drawn line within `hitRadius` of the touch. A tap that
-    /// is near no line at all names no channel and adds nothing, which is the honest answer to a
-    /// touch that pointed at no curve.
+    /// is near no line at all names no channel and adds nothing — which is what leaves the empty parts
+    /// of the band free for the marquee.
     ///
     /// Measured against the **drawn** line, `evaluate` and all, rather than against the keys: that is
     /// the shape the artist is aiming at, and at `step > 1` it is deliberately not where the dots are.
@@ -434,10 +439,12 @@ enum TimelineGraphBand {
     /// puts one between two, so this asks *which column* instead. Using the other one here would put
     /// every drag half a frame out.
     ///
-    /// Stated as a **delta** rather than as an absolute frame. It is exactly delta-invariant:
-    /// `frame(atX:)` floors and `centerX` offsets by half a column, so `frame(atX: centerX(f) + dx) - f`
-    /// is `floor(0.5 + dx / pixelsPerFrame)` for every integer `f`, so taking it at frame 0 is the
-    /// same answer as taking it at the key.
+    /// Stated as a **delta** rather than as an absolute frame, which is what lets one expression serve
+    /// a single key and a marquee of nine. It is exactly delta-invariant: `frame(atX:)` floors and
+    /// `centerX` offsets by half a column, so `frame(atX: centerX(f) + dx) - f` is
+    /// `floor(0.5 + dx / pixelsPerFrame)` for every integer `f`. Taking it at frame 0 is therefore the
+    /// same answer as taking it at the key, and every key of a group gets the *same* answer — which is
+    /// the property a group move needs and a per-key round trip would not guarantee.
     ///
     /// **And it keeps the grab offset.** A finger may take a key from up to `hitRadius` away, so
     /// resolving the destination from the touch's own x — `CurveEditor`'s spelling, on a 196 pt square
@@ -455,7 +462,7 @@ enum TimelineGraphBand {
         let value: Double
     }
 
-    /// **Where a drag puts the key it is carrying.**
+    /// **Where a drag puts every key it is carrying** — one key or a marquee's worth, one function.
     ///
     /// **The collision rule: a key is stopped by its neighbour rather than allowed to consume it.**
     /// `AnimationCurve.setKey` replaces on collision, so letting a key travel onto another's frame
@@ -467,32 +474,55 @@ enum TimelineGraphBand {
     /// dot stops under a finger that is still moving, which reads as a wall — and the only one that
     /// needs no confirmation, no toast and no second undo entry.
     ///
+    /// **The group moves as a rigid body.** One `frameDelta` for every key, clamped to the tightest
+    /// allowance any of them has, so a marquee's shape survives the move; the alternative — clamping
+    /// each key independently — collapses a selection onto its blocked members and cannot be undone by
+    /// dragging back. Keys *inside* the selection never block each other, since they travel together.
+    ///
+    /// **Vertically the group shares a travel in points, not in value**, and each channel maps that
+    /// through its own axis. Per-channel normalisation (§11.6) means a point of band is a different
+    /// number of units in every curve; a shared *value* delta would move a 0…1 opacity off the top of
+    /// the band while a 0…500 blur radius did not visibly move at all.
+    ///
     /// Frames are clamped at 0 as well as at the neighbour: §3.1 puts a layer channel in absolute
     /// document frames, and the track begins at x 0.
-    ///
-    /// The value is clamped to **`modelDomain`** and never to `uiRange` — `Effect.swift` says to draw
-    /// the axis over one and allow a key anywhere in the other, and decision 3 above is the drawing
-    /// half of the same sentence. A key above the axis is a real state, and what the artist sees is
-    /// the band cutting it exactly as it cuts the line through it.
-    static func move(_ ref: KeyRef, in channels: [Channel], translation: CGSize,
-                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Move? {
-        guard let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
-              let key = channel.curve.key(atFrame: ref.frame)
-        else { return nil }
-        let others = channel.curve.keys.map(\.frame).filter { $0 != ref.frame }
-        let lowest = max(0, (others.last { $0 < ref.frame } ?? -1) + 1)
-        let highest = (others.first { $0 > ref.frame }).map { $0 - 1 }
+    static func moves(of selection: Set<KeyRef>, in channels: [Channel], translation: CGSize,
+                      pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> [KeyRef: Move] {
+        guard !selection.isEmpty else { return [:] }
+        var minDelta = Int.min
+        var maxDelta = Int.max
+        var carried: [(ref: KeyRef, channel: Channel, value: Double)] = []
 
-        let requested = ref.frame + frameDelta(translationX: translation.width,
-                                               pixelsPerFrame: pixelsPerFrame)
-        var frame = max(requested, lowest)
-        if let highest { frame = min(frame, highest) }
+        for channel in channels {
+            let taken = channel.curve.keys.filter { selection.contains(KeyRef(parameterID: channel.parameterID,
+                                                                             frame: $0.frame)) }
+            guard !taken.isEmpty else { continue }
+            let blockers = channel.curve.keys.map(\.frame)
+                .filter { frame in !selection.contains(KeyRef(parameterID: channel.parameterID, frame: frame)) }
+            for key in taken {
+                let below = blockers.last { $0 < key.frame }
+                let above = blockers.first { $0 > key.frame }
+                minDelta = max(minDelta, max(0, (below ?? -1) + 1) - key.frame)
+                if let above { maxDelta = min(maxDelta, above - 1 - key.frame) }
+                carried.append((KeyRef(parameterID: channel.parameterID, frame: key.frame), channel, key.value))
+            }
+        }
+        guard !carried.isEmpty else { return [:] }
+        // Zero is always inside the allowance — a key never blocks itself — so the two bounds can
+        // never cross, whatever the requested delta is.
+        let delta = min(max(frameDelta(translationX: translation.width, pixelsPerFrame: pixelsPerFrame),
+                            minDelta), maxDelta)
 
-        let axis = channel.axis
-        let startY = y(ofValue: key.value, in: axis, bandHeight: bandHeight)
-        let raw = value(atY: startY + translation.height, in: axis, bandHeight: bandHeight)
-        let domain = channel.modelDomain
-        return Move(frame: frame, value: min(max(raw, domain.lowerBound), domain.upperBound))
+        var result: [KeyRef: Move] = [:]
+        for item in carried {
+            let axis = item.channel.axis
+            let startY = y(ofValue: item.value, in: axis, bandHeight: bandHeight)
+            let raw = value(atY: startY + translation.height, in: axis, bandHeight: bandHeight)
+            let domain = item.channel.modelDomain
+            result[item.ref] = Move(frame: item.ref.frame + delta,
+                                    value: min(max(raw, domain.lowerBound), domain.upperBound))
+        }
+        return result
     }
 
     /// **What a tap on the band does.** `CurveEditor`'s two halves of one gesture, unchanged: on a key
@@ -537,24 +567,63 @@ enum TimelineGraphBand {
                     value: min(max(raw, domain.lowerBound), domain.upperBound))
     }
 
-    /// **The curve one move produces, from the curve the drag started with.**
+    /// **Every key a rubber band encloses** — ask 6's *"select the keyframe nodes and move them"*.
     ///
-    /// Always applied to the drag's *starting* curve rather than to the document's current one: a live
-    /// drag rewrites the same key on every `.changed` tick, and composing this tick's delta onto last
-    /// tick's result would make the key accelerate away from the finger.
+    /// The rect is standardised, so a marquee drawn in any of the four directions selects the same
+    /// keys; a drag that travels less than `tapSlop` is a tap and never reaches here.
     ///
-    /// - Returns: nil when the curve would come back unchanged, so a caller can tell a drag that
-    ///   moved something from one that resolved to where it started.
-    static func applying(_ move: Move, to ref: KeyRef, in channels: [Channel]) -> AnimationCurve? {
-        guard let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
-              var key = channel.curve.key(atFrame: ref.frame)
-        else { return nil }
-        var curve = channel.curve
-        curve.removeKey(atFrame: ref.frame)
-        key.frame = move.frame
-        key.value = move.value
-        curve.setKey(key)
-        return curve == channel.curve ? nil : curve
+    /// **Membership uses `reachableY`, the same y the single-key grab does.** One rule for "which keys
+    /// can this gesture reach" rather than two: a key above the top of the axis is drawn nowhere, and
+    /// if a marquee measured it at its true y it would be selectable by a rect the artist cannot draw,
+    /// while the single-tap grab could still reach it from the rim. Reachable by both or by neither.
+    static func keys(in rect: CGRect, channels: [Channel],
+                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Set<KeyRef> {
+        let box = rect.standardized
+        guard box.width > 0 || box.height > 0 else { return [] }
+        var result: Set<KeyRef> = []
+        for channel in channels {
+            let axis = channel.axis
+            for key in channel.curve.keys {
+                let point = CGPoint(x: x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame),
+                                    y: reachableY(ofValue: key.value, in: axis, bandHeight: bandHeight))
+                if box.contains(point) {
+                    result.insert(KeyRef(parameterID: channel.parameterID, frame: key.frame))
+                }
+            }
+        }
+        return result
+    }
+
+    /// **The curves a set of moves produces, from the curves the drag started with.**
+    ///
+    /// Always applied to the drag's *starting* curves rather than to the document's current ones: a
+    /// live drag rewrites the same keys on every `.changed` tick, and composing this tick's delta onto
+    /// last tick's result would make the key accelerate away from the finger.
+    ///
+    /// Each carried key is removed before any is re-inserted, so a group sliding **into** the frames
+    /// its own leading edge just vacated cannot have a member deleted by `setKey`'s replace-on-
+    /// collision — the interior of a rigid selection is exactly the case where the neighbour clamp is
+    /// silent because it never fires.
+    ///
+    /// - Returns: only the channels whose curve actually changed, keyed by parameter id.
+    static func applying(_ moves: [KeyRef: Move], to channels: [Channel]) -> [String: AnimationCurve] {
+        var result: [String: AnimationCurve] = [:]
+        for channel in channels {
+            let mine = moves.filter { $0.key.parameterID == channel.parameterID }
+            guard !mine.isEmpty else { continue }
+            var curve = channel.curve
+            var moved: [AnimationCurve.Key] = []
+            for (ref, move) in mine {
+                guard var key = curve.key(atFrame: ref.frame) else { continue }
+                curve.removeKey(atFrame: ref.frame)
+                key.frame = move.frame
+                key.value = move.value
+                moved.append(key)
+            }
+            for key in moved { curve.setKey(key) }
+            if curve != channel.curve { result[channel.parameterID] = curve }
+        }
+        return result
     }
 
     // MARK: - Telling the curves apart
