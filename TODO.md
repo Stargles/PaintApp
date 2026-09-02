@@ -30,7 +30,7 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-**Nothing.** No branches, no worktrees, clean tree.
+- **(29) Rendering** — design stage, spec at [RENDER.md](RENDER.md). Its §2 is fourteen owner rulings.
 
 - **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
   half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
@@ -64,6 +64,18 @@ lands in the next save, off a path the artist is told is loading. See PERFORMANC
 LAYER_TRANSFORM.md.
 
 ## Open
+
+### (29) Rendering — the background baker and export
+
+- [ ] > "rendering: add the ability to export animations as video or a frame as image"
+
+      Spec at [RENDER.md](RENDER.md): §1 the ask in full, **§2 fourteen owner rulings**, §3 the design.
+      The load-bearing ones: the baker **replaces** live main-thread compositing rather than sitting beside
+      it; export **reads the bake** and re-renders nothing; the Render Resolution knob is the truth for
+      both the canvas and the export, so `CompositorBudget.affordableSize`'s silent shrink is a defect, not
+      a trade; playback may be visibly stale while the bake catches up, with the artist's current frame
+      baked first; and the bake is dumped between launches unless the artist keeps it in the project folder.
+      Item (31)'s three symptoms are this item's acceptance tests on a real device.
 
 ### (21) Keyframes — animating properties across the frames one cel spans
 
@@ -113,7 +125,8 @@ LAYER_TRANSFORM.md.
       and then recolour the ones inside. Luckly, the splitting already exists in enclosed move, so you
       can reuse that. This task is not necessarily priority but put it in TODO.md."*
 
-      **Not priority — the owner said so.** Recorded here rather than researched, per the standing rule.
+      Asked again: *"right now the enclosed / cut / touching option for move is in the move menu. It is more
+      appropriate for the select menu."*
 
       Two things the ask already settles, and they are the reason it is cheap. The **modes exist** —
       LASSO_MOVE §5.23-24 rules how Touching and Enclosed treat text and placed images, and §5.25 rules
@@ -172,6 +185,47 @@ LAYER_TRANSFORM.md.
       bottom value layer would have two spellings of its own. If the redundancy is the thing worth
       removing, the target is the dual live-canvas path — a much larger question, and one to put to the
       owner on its own rather than smuggle in under this item.
+
+### (31) Large canvases: three symptoms of the compositor's sizing and threading
+
+- [ ] > "There is a resolution bug where the canvas renders at non full resolution even if the slider is set
+      > to full. Happens on big canvases. If you want to check, on the iPad there is a canvas called UI Test."
+
+      RENDER §2.12 rules the knob is the truth. The known mechanism is `CompositorBudget.affordableSize`
+      (`Engine/Compositor.swift`), which scales a composite down so its textures fit `physicalMemory / 16`
+      regardless of the knob — 192 MiB on a 3 GB iPad, against 64 MiB per texture at 4096². Treat that as
+      the hypothesis until the on-device canvas confirms it.
+
+- [ ] > "A 16k by 16k canvas crashes the iPad app when you draw something. This is really odd, it should not
+      > happen. I wonder if it could hint at a deeper issue where larger canvases take more memory per
+      > brushstroke. Because it is vector, this should not happen. I wonder if it may be the compositor."
+
+      One canvas-sized RGBA buffer at 16384² is 1 GiB; the device has 3 GB. Whatever allocates canvas-area
+      memory on a stroke is the suspect, and whether any of it is per-stroke rather than per-frame is the
+      question the owner is really asking.
+
+- [ ] > "Larger canvases seem to freeze the program momentarily after each brushstroke is lifted. I suspect
+      > it is compositing, which is pretty bad. I want you to weigh moving the majority of the program to
+      > another thread, so that the UX is responsive and doesnt lagspike when the user does opperations."
+
+      RENDER §2.2 and §2.13 rule this: compositing leaves the main thread, and a split-second stale canvas
+      is acceptable as long as the canvas can be moved and the next stroke laid during it.
+
+### (32) Merging a blend layer down does not bake its blend into the layer below
+
+- [ ] > "I tried having 2 layers: a vector layer and a value layer above it set to HSV. Then I merged those two
+      > layers. The expected outcome is that the HSV gets baked into the vector layer (colors get
+      > transformed). Right now it does nothing. This may be an issue other blend modes. Lower priority."
+
+### (33) Select and duplicate produces a raster layer from a vector selection
+
+- [ ] > "When I select and duplicate, it does not support vector (the duplicated selection is a raster layer
+      > not a vector)."
+
+### (34) Imported images should arrive in a move box
+
+- [ ] > "Right now when you import images they appear in the center of the canvas with no move box. Make them
+      > have the move box. You likely can reuse the move code, this should be a simple fix."
 
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
@@ -343,75 +397,6 @@ once; and (29) was blocked on derived content being invisible to the render walk
       **Ask first**: is audio a property of the document or of a scene in (30); does a sound attach to a
       frame, a cel, or a free position on a time ruler that does not exist yet; and is lipsync automatic
       (analyse the audio, pick a mouth shape) or a manual chart — those are completely different features.
-
-### (29) Rendering, export, and the bake-stream-and-size architecture
-
-- [ ] > "rendering: add the ability to export animations as video or a frame as image"
-
-      **There is no export feature at all, of any kind** — searched exhaustively for every share, file-export
-      and photo-library API: zero hits in app code and tests. The one `ShareLink` shares a debug telemetry
-      file. The word "Export" reaches the artist only as reassurance copy on the Render Resolution knob — a
-      promise with no code behind it. Several documents name export as a consumer of some render path; read
-      all of them as describing a **hypothetical** consumer.
-      **The good news is bigger than expected**: `Compositor.composite(_:) -> CGImage?` is already pure,
-      already headless, already runs in the test tier with no view, and `makeRenderRequest` is already
-      frame-parametric. **What is missing is a driver loop, an encoder and a destination — not a renderer.**
-      **What it collides with**: an export composites at *native* resolution, the one case
-      `CompositorBudget.affordableSize` does not bound — passing no `fittingWithin` skips the cap by
-      construction, the GPU admission gate then returns `.unavailable`, and the CPU path answers at a
-      MEASURED **203.3 ms** per grading composite (iPad 9, Release, warm, 2048²). **INFERRED, arithmetic
-      only**: a 240-frame export is ~49 s of CPU compositing, and real documents are 300-1000 cels.
-      `CanvasManager+Document`'s reassurance that saving is bounded to 320x320 **stops being true the day
-      export ships**.
-
-      **The memory architecture is the other half of this item.** The owner:
-
-      > "the ipad does not have much memory, so I want the paint program to not use much by storing as many
-      > things it can to disk. Probably the current active cel is the only thing required to be in memory.
-      > The paint program automatically pulls unbaked frames from disk (layers, compositing, etc), bakes the
-      > compositing and stores it back straight to disk, so that when the play is pressed it can be played
-      > at 24fps. This way, the program doesn't run out of memory even with a hundred layers and a thousand
-      > cels. The memory is dynamically allocated: lets say we have layers 1 through 10 and the program has
-      > only enough memory for 3: the three bottom layers are pulled, composited and stored, then the next
-      > are pulled etc."
-
-      > "(NOTE: This is my thinking on how it may work, it may not be the most optimal. The session is gonna
-      > have to make a judgement on how exactly to do this. I eventually want to make it android and windows
-      > compatible so dynamic allocation of some sort may be nice.)"
-
-      And on what triggers a rebake: *"When something is modified, only the modified frames are rebaked."*
-
-      **So the goal is fixed and the mechanism is delegated in writing.** The goal: a hundred layers and a
-      thousand cels without running out, and 24 fps on press-play. **Portability is a stated requirement**
-      — a budget hard-coded to an iPad, or an eviction signal only iOS emits, fails it.
-      **Layer-chunked accumulation looks sound**: each layer blends against the accumulation *below* it,
-      which is exactly what a bottom-up chunk holds. **INFERRED — prove it against `blendOver` and the six
-      non-separable modes**, and check the `above` half of the sandwich and `RenderBackground`'s
-      ink-exclusion walk, which are where it may not hold.
-      **Three things are already built and must not be rebuilt**: propagating content versions, so a leaf
-      edit bumps only its ancestors; **frame-scoped invalidation**, which is the owner's "only the modified
-      frames are rebaked" and cost nothing; and a pure snapshot-driven composite that was built that way so
-      adding a thread later is not a rewrite.
-      **The memory arithmetic that decides the design**: one frame is 16.8 MB at 2048², so ten seconds at
-      24 fps is **4 GB**, and 15 GB at 4000². *"Any design that holds baked frames as raw textures dies on
-      the first real sequence."* So "gradually replaced with that baked video" is not a nicety, it is the
-      only shape that works.
-      **Two specs describe parts of this machine and must be unified before either is built**, or the app
-      gets two frame caches and two eviction policies: LAYER_COMPOSITING §9.2 (sequencer scope — priority
-      queue, disk LRU, evict on edit) and KEYFRAMES §4.6 (one keyframe span — eager and complete, and
-      **ruled** by the owner 2026-08-28 in §2.19-20). They differ in one interesting way worth keeping: the
-      *policy* is scoped, the *store* is not. PERFORMANCE §8 is the ranked evidence.
-      **This item is already load-bearing even unbuilt**: KEYFRAMES §2.25 lets a derived frame cost more
-      than 1/24 s *because* of this prebake — *"if it prebakes and can play at 24fps after, then the
-      original ask is covered."* Anything that quietly drops this item takes that permission with it.
-      **Ask first**: which container and codec, and does it need alpha (few codecs carry it, and the
-      composite is not necessarily opaque); at what resolution; whether a slow correct export is acceptable
-      given the arithmetic; whether a bake may be visibly stale while it catches up, the way a video buffer
-      is; and what happens when the *disk* is full rather than memory.
-      **Unruled**: whether a baked span survives a relaunch, and what sweeps it if the OS purges its cache.
-      **Scrubbing backwards is the hard direction and it is the one an animator uses** — a long-GOP stream
-      decodes forward from a keyframe, which probably forces an all-intra codec, larger on disk. A knowing
-      trade, not a detail.
 
 ### (30) Video editor — requires (29)
 
