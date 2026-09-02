@@ -45,16 +45,12 @@ suspect first, both new:
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**Two branches were in flight when this pass ran out of budget.** Each was told to commit before it
+**One branch was in flight when this pass ran out of budget.** Each was told to commit before it
 died, which this repo does because a background agent does not survive a limit and its committed work
 does. **None has been reviewed or merged. Harvest their commits; do not trust their working trees** — a
 worker's tree legitimately holds deliberate poison from mutation testing, and this repo shipped that to
 `main` once.
 
-- **`tmp/render-export`** — RENDER stage 6, export. Two commits. **The design question the stage turns
-  on is answered**: *an export is a scrub*, so the playhead-ordered scheduler needed one field and no
-  second queue — an export walking 1..N is the same shape as an artist dragging the playhead, which the
-  queue already serves. Build on that rather than re-deriving it. Read its commits before its tree.
 - **`tmp/dab-bake`** — KEYFRAMES stage 4, the rest-space dab bake. One checkpoint, *"engine and render
   seam, does not build yet"*. Its acceptance signal already exists: stage 5 left
   `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` **written to go red when this lands**.
@@ -95,7 +91,21 @@ The app now runs on the bake. `Engine/FrameBakeKey.swift`, `FrameBakeStore.swift
 canvas at rest and playback are served from LZ4 files on disk, and the timeline shows which frames are
 not yet ready to play.
 
-**Stage 6 is export (§3.9) and it is next.** Video is `AVAssetWriter` over the store in frame order,
+**Stage 6, export, is MERGED.** The app exports an animation as H.264 `.mp4` and a frame as PNG, and
+neither re-renders anything. The design that made it small: **an export is a scrub** — `BakeQueue.next`
+was already a pure function of the playhead handed to it, so the export needed one field, a virtual
+playhead (`FrameBaker.exportFocus`), and no second queue. Store eviction and ring warming follow from
+the same local.
+
+**What export still owes**, and it is the honest gap: `FrameExportSession` and the sheet have **no
+tests** — the frame walk, the focus hand-back and the progress phases are uncovered, there is no
+XCUITest for "row exists / progress visible / share sheet appears", and nothing has run on the device.
+**The keep-the-bake option (§2.11) is deferred, not built**, with the stamp decided — the encoded-tier
+hash, because a manifest stamp bumped from edit sites inherits every hole the sweep exists to cover, and
+in a *persistent* content-addressed store a missed site is a wrong picture with no error. §3.9a carries
+the reasoning and the two things beyond the stamp that a kept store needs.
+
+Superseded — this said stage 6 was next: Video is `AVAssetWriter` over the store in frame order,
 H.264 in `.mp4` at the document's fps and the knob's resolution; a frame is the baked frame as PNG.
 **Both re-render nothing** — that is §2.1 and it is the whole reason the store exists. Delivery is the
 system share sheet. §3.9 says nothing so far forces a second renderer; if something does, say so and
