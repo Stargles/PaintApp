@@ -6,7 +6,10 @@ import UIKit
 /// `SelectionOverlayView`, so its coordinate space matches canvas points exactly (same placement and
 /// handle-drag technique as the object-layer work's `ObjectTransformOverlayView`).
 final class FloatingPieceOverlayView: TransformOverlayView {
-    var onTransformChange: ((FloatingTransform) -> Void)?
+    /// **One callback carrying both halves of the pose**, not two — see
+    /// `CanvasManager.updateFloatingPose(transform:distortQuad:)`. The quad is nil from every arm
+    /// that does not distort, which is how "this gesture left the corners alone" is said.
+    var onPoseChange: ((FloatingTransform, Quad?) -> Void)?
     var onRequestCommit: (() -> Void)?
 
     private var piece: FloatingPiece?
@@ -24,6 +27,11 @@ final class FloatingPieceOverlayView: TransformOverlayView {
     /// The opposite corner/edge (in canvas space), captured at the start of a resize drag and held
     /// fixed for its duration so the resize anchors there instead of at the piece's center.
     private var dragAnchor: CGPoint = .zero
+    /// The Distort corner drag in flight, latched at touch-down. Nil for every other gesture, and
+    /// nil for a corner drag in Uniform or Freeform — the mode is read once, at `.began`, so
+    /// switching the picker under a finger already down cannot change what that finger means
+    /// (`ObjectTransformDrag.isFreeform`'s own rule).
+    private var distortDrag: FloatingDistortDrag?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -112,34 +120,70 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         guard let piece else { return }
         pieceImageView.image = piece.pieceImage
         let t = piece.transform
-        let affine = CGAffineTransform.identity
-            .rotated(by: t.rotation)
-            .scaledBy(x: t.scaleX * (t.flipH ? -1 : 1), y: t.scaleY * (t.flipV ? -1 : 1))
+        let quad = piece.canvasQuad
 
-        pieceImageView.bounds = CGRect(origin: .zero, size: piece.baseSize)
-        pieceImageView.transform = affine
-        pieceImageView.center = t.position
+        // **The whole of the live Distort preview, and it rasterizes nothing** — LASSO_MOVE.md §4
+        // rule 2, which a re-warp per touch-move would break outright. A 2D homography *is* what a
+        // `CATransform3D`'s `m14`/`m24` express, so the same matrix the bake warps through carries the
+        // drag on the GPU for free; `Homography.catransform3D` owns the row-vector transposition that
+        // makes it come out as foreshortening rather than as a shear.
+        //
+        // **Anchor point and position are zero and the bounds origin is zero**, which is what makes
+        // the layer's whole layer-to-superlayer map that one matrix — the contract
+        // `Homography.catransform3D`'s doc states. Both are put back on the affine arm below, so a
+        // piece that stops being distorted (Reset) goes straight back to the `center`-based layout.
+        if piece.distortQuad != nil, let homography = piece.homography {
+            let box = CGRect(origin: .zero, size: piece.baseSize)
+            for view in [pieceImageView, outlineView] {
+                view.transform = .identity
+                view.bounds = box
+                view.layer.anchorPoint = .zero
+                view.layer.position = .zero
+                view.layer.transform = homography.catransform3D
+            }
+            outlineDashLayer.frame = box
+            outlineDashLayer.path = CGPath(rect: box, transform: nil)
+        } else {
+            let affine = CGAffineTransform.identity
+                .rotated(by: t.rotation)
+                .scaledBy(x: t.scaleX * (t.flipH ? -1 : 1), y: t.scaleY * (t.flipV ? -1 : 1))
 
-        outlineView.bounds = pieceImageView.bounds
-        outlineView.transform = affine
-        outlineView.center = t.position
-        outlineDashLayer.frame = outlineView.bounds
-        outlineDashLayer.path = CGPath(rect: outlineView.bounds, transform: nil)
+            for view in [pieceImageView, outlineView] {
+                view.layer.transform = CATransform3DIdentity
+                view.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            }
+            pieceImageView.bounds = CGRect(origin: .zero, size: piece.baseSize)
+            pieceImageView.transform = affine
+            pieceImageView.center = t.position
+
+            outlineView.bounds = pieceImageView.bounds
+            outlineView.transform = affine
+            outlineView.center = t.position
+            outlineDashLayer.frame = outlineView.bounds
+            outlineDashLayer.path = CGPath(rect: outlineView.bounds, transform: nil)
+        }
 
         let hw = piece.baseSize.width / 2, hh = piece.baseSize.height / 2
-        let cornerLocal = [CGPoint(x: -hw, y: -hh), CGPoint(x: hw, y: -hh), CGPoint(x: hw, y: hh), CGPoint(x: -hw, y: hh)]
         let edgeLocal = [CGPoint(x: 0, y: -hh), CGPoint(x: hw, y: 0), CGPoint(x: 0, y: hh), CGPoint(x: -hw, y: 0)]
 
-        for (i, local) in cornerLocal.enumerated() { corners[i].center = t.projected(local) }
-        // Edge (single-axis) handles only make sense in Freeform — Uniform/Distort/Warp keep the
-        // aspect ratio locked, so only corner handles are shown for those.
-        let showEdgeHandles = piece.mode == .freeform
+        // **The grips read `FloatingPiece.canvasQuad`, the same value the outline, the tap-away
+        // bounds and the bake's warp read**, so a handle cannot sit anywhere but on the corner it
+        // drags. For an undistorted piece this is the same four points `t.projected` gave, through
+        // the same `affineTransform` `transformedBounds` has always used.
+        for i in 0..<4 { corners[i].center = quad[i] }
+        // Edge (single-axis) handles only make sense in Freeform — Uniform and Distort have no
+        // single-axis gesture, the first because it scales both axes together and the second because
+        // a corner already moves freely.
+        let showEdgeHandles = piece.mode == .freeform && piece.distortQuad == nil
         for (i, local) in edgeLocal.enumerated() {
             edges[i].center = t.projected(local)
             edges[i].isHidden = !showEdgeHandles
         }
 
-        let topCenter = t.projected(CGPoint(x: 0, y: -hh))
+        // Midway along the quad's own top edge, so the knob stays over the edge it belongs to under
+        // a foreshortening as well as under a rotation. `(p0 + p1) / 2` is `t.projected(0, -hh)`
+        // exactly whenever the quad is the plain box, since an affine carries midpoints to midpoints.
+        let topCenter = CGPoint(x: (quad.p0.x + quad.p1.x) / 2, y: (quad.p0.y + quad.p1.y) / 2)
         placeRotateHandle(rotateHandle, line: rotateLine, topCenter: topCenter, rotation: t.rotation)
     }
 
@@ -189,16 +233,32 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         switch recognizer.state {
         case .began:
             dragStartTransform = piece.transform
-            dragAnchor = dragStartTransform.projected(oppositeCornerLocal(index, size: piece.baseSize))
+            // Latched at touch-down with everything else on this gesture, so flipping the Move bar's
+            // picker mid-drag cannot change what the finger already down means.
+            distortDrag = piece.mode == .distort ? FloatingDistortDrag(piece: piece, corner: index) : nil
+            // The anchor is the *quad's* opposite corner rather than the box's, so a scale made after
+            // a distort holds the corner the artist can see. Identical to the box's for an
+            // undistorted piece, which is every piece the affine arm could previously meet.
+            dragAnchor = piece.canvasQuad[(index + 2) % 4]
         case .changed:
+            if let distortDrag {
+                // A delta that would make an undrawable quad is refused rather than clamped, so the
+                // handle sticks and the piece stays exactly where the last valid one put it.
+                guard let quad = distortDrag.quad(draggedTo: recognizer.location(in: self)) else { return }
+                apply(dragStartTransform, distortQuad: quad)
+                return
+            }
             resizeFromAnchor(current: recognizer.location(in: self), uniform: piece.mode != .freeform, axisIsHorizontal: nil)
         default:
-            break
+            distortDrag = nil
         }
     }
 
     @objc private func handleEdgePan(_ recognizer: UIPanGestureRecognizer) {
-        guard let piece, piece.mode == .freeform, let handle = recognizer.view else { return }
+        // The same condition `layoutFromPiece`'s `showEdgeHandles` uses, so a hidden grip cannot be
+        // dragged: a distorted box's edges have no single axis for this arm to move along.
+        guard let piece, piece.mode == .freeform, piece.distortQuad == nil,
+              let handle = recognizer.view else { return }
         let index = handle.tag // 0=top, 1=right, 2=bottom, 3=left
         switch recognizer.state {
         case .began:
@@ -208,16 +268,6 @@ final class FloatingPieceOverlayView: TransformOverlayView {
             resizeFromAnchor(current: recognizer.location(in: self), uniform: false, axisIsHorizontal: (index == 1 || index == 3))
         default:
             break
-        }
-    }
-
-    private func oppositeCornerLocal(_ index: Int, size: CGSize) -> CGPoint {
-        let hw = size.width / 2, hh = size.height / 2
-        switch index {
-        case 0: return CGPoint(x: hw, y: hh)   // dragging TL -> anchor BR
-        case 1: return CGPoint(x: -hw, y: hh)  // dragging TR -> anchor BL
-        case 2: return CGPoint(x: -hw, y: -hh) // dragging BR -> anchor TL
-        default: return CGPoint(x: hw, y: -hh) // dragging BL -> anchor TR
         }
     }
 
@@ -283,9 +333,19 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         }
     }
 
-    private func apply(_ updated: FloatingTransform) {
+    /// **The one funnel every arm writes through**, so no gesture can update the model and the layout
+    /// out of step. The affine arms — move, rotate, corner scale, edge scale — never name
+    /// `distortQuad`, and carry whatever the piece already had; only the Distort corner passes one.
+    ///
+    /// No arm *clears* it, which is why the parameter is a plain `Quad?` rather than a
+    /// distinguish-nil-from-absent double optional: Reset is the only thing that takes a distort
+    /// back, and it does so on the model (`CanvasManager.resetFloating`) where it belongs beside the
+    /// transform it is putting back at the same time.
+    private func apply(_ updated: FloatingTransform, distortQuad: Quad? = nil) {
+        let quad = distortQuad ?? piece?.distortQuad
         piece?.transform = updated
+        piece?.distortQuad = quad
         layoutFromPiece()
-        onTransformChange?(updated)
+        onPoseChange?(updated, quad)
     }
 }

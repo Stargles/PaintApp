@@ -1659,10 +1659,13 @@ final class LassoMoveLogicTests: XCTestCase {
     /// will not be a feature (like liquify)."* A hidden case stays in `allCases`, keeps answering
     /// `switch`es and keeps its string wherever the next thing to persist a mode would put it; this is
     /// the assertion that a later tidy-up cannot quietly reinstate it.
+    ///
+    /// **The second half of this test used to read `isImplemented`, and stage 5 deleted the
+    /// property.** Distort is built, so the "not implemented" set is empty by construction and the
+    /// honest replacement is that every case is a mode the bar can act on. What a *piece* can be
+    /// refused for is `CanvasManager.distortUnavailableReason`, and `DistortLogicTests` pins it.
     func testTheTransformModesAreFreeformUniformAndDistortWithNoWarp() {
         XCTAssertEqual(TransformMode.allCases.map(\.rawValue), ["freeform", "uniform", "distort"])
-        XCTAssertEqual(TransformMode.allCases.filter { !$0.isImplemented }, [.distort],
-                       "and Distort is the only one the bar still has to caption")
     }
 
     // MARK: - Freeform (stage 3a)

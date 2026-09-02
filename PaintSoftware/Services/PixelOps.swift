@@ -521,11 +521,51 @@ enum PixelOps {
         return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
     }
 
+    /// The most destination texels a distorted piece's warp may write, per axis.
+    ///
+    /// `TextLayout.maximumWarpDestinationTexels`' number and its argument, restated for the second
+    /// consumer rather than reached across a `View`-adjacent file: `ImageWarp.warpedImage` holds three
+    /// `w × h × 4` buffers of the destination at once, so 4096 is 3 × 64 MiB on top of the
+    /// canvas-sized flatten and composite the bake already pays. It is not a refusal — past the cap
+    /// the warp is rasterised smaller and drawn up into the full rectangle — and the clip to the
+    /// canvas below comes first, so on a canvas of 4096² or less it never binds at all.
+    static let maximumFloatingWarpTexels: CGFloat = 4096
+
     /// Renders a floating piece (with its live transform applied) into a canvas-sized image, ready
     /// to be composited over a target cel's baked image at commit time.
+    ///
+    /// **Two arms, and the affine one is untouched.** A piece nobody has distorted takes the
+    /// `concatenate`-and-draw it always took, bit for bit — which matters more than it looks, because
+    /// the projective solver *would* have answered for it: an undistorted quad comes back with
+    /// `g == h == 0` and lands its corners on the affine's own answer at exactly zero error (MEASURED,
+    /// `swiftc -O`, 2026-09-02). Routing it through the warp anyway would trade CoreGraphics'
+    /// resampler for `ImageWarp`'s bilinear one on every existing Move, which is a change to shipped
+    /// output for no gain.
     static func render(floatingPiece piece: FloatingPiece, into canvasSize: CGSize) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
+        // **The distort arm, and it is the same matrix the live preview was shown under** — see
+        // `FloatingPiece.homography`, which both read. `destination` is clipped to the canvas first,
+        // because pixels outside it are the ones the composite is about to throw away and allocating
+        // them was never anything but cost (`TextLayout.warpedGlyphs`' own rule).
+        if piece.distortQuad != nil, let source = piece.pieceImage.cgImage,
+           piece.baseSize.width > 0, source.width > 0, let homography = piece.homography {
+            // Source **texels per box point**, taken from the bitmap rather than from
+            // `pieceImage.scale` — `crop` rounds its pixel rectangle to `.integral`, so the two differ
+            // by up to a texel on a piece whose bounds are not whole pixels. `TextLayout.warpedGlyphs`
+            // measures it the same way and for the same reason.
+            let sourceScale = CGFloat(source.width) / piece.baseSize.width
+            let destination = piece.canvasQuad.boundingBox.integral.intersection(bounds.integral)
+            if destination.width >= 1, destination.height >= 1,
+               let warped = ImageWarp.warpedImage(
+                source: source, sourceScale: sourceScale, boxSize: piece.baseSize,
+                homography: homography, destination: destination,
+                maximumDestinationTexels: maximumFloatingWarpTexels) {
+                return renderer.image { _ in
+                    UIImage(cgImage: warped, scale: 1, orientation: .up).draw(in: destination)
+                }
+            }
+        }
         return renderer.image { ctx in
             ctx.cgContext.saveGState()
             ctx.cgContext.concatenate(piece.transform.affineTransform)

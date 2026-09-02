@@ -34,8 +34,16 @@ enum SelectionMode: String, CaseIterable, Identifiable {
 /// next reader has no way to tell "not yet" from "never". Nothing decoded it — `TransformMode` is
 /// live UI state and appears nowhere in `ProjectStore` — so removing it needed no migration.
 ///
-/// `.distort` is the opposite kind of absence: it is coming (per-corner geometry, shared with
-/// perspective text), and until it lands it gestures like `.uniform` and the bar says so.
+/// `.distort` was the opposite kind of absence — *"coming"* rather than ruled out — and it arrived on
+/// 2026-09-02 (LASSO_MOVE.md §3 stage 5). It moves each corner of the box on its own, which is a
+/// **homography** and not any affine: `FloatingPiece.distortQuad` stores the four corners and
+/// `Homography`/`ImageWarp` carry them, the same solver the perspective text box has used since
+/// ADD_TEXT.md stage 5. `isImplemented` and the bar's *"Coming soon — acts like Uniform for now"*
+/// caption went with it — there is no half-live case here any more.
+///
+/// **It reaches the raster floating piece and not a lassoed *vector* float**, and that boundary is a
+/// measurement rather than an omission — see `CanvasManager.distortUnavailableReason`, which is where
+/// the bar says so and where what would unblock it is written down.
 enum TransformMode: String, CaseIterable, Identifiable {
     case freeform
     case uniform
@@ -47,14 +55,6 @@ enum TransformMode: String, CaseIterable, Identifiable {
         case .freeform: return "Freeform"
         case .uniform: return "Uniform"
         case .distort: return "Distort"
-        }
-    }
-    /// Distort isn't implemented with real per-corner geometry yet — it renders and gestures
-    /// identically to Uniform until that follow-up work lands.
-    var isImplemented: Bool {
-        switch self {
-        case .freeform, .uniform: return true
-        case .distort: return false
         }
     }
 }
@@ -188,17 +188,131 @@ struct FloatingPiece {
     var liftTransform: FloatingTransform
     var mode: TransformMode
 
+    /// **Distort's four corners, in the piece's own local (centred, untransformed) space** — nil for
+    /// a piece nobody has distorted, which is `Quad.rect(localBox)` exactly. LASSO_MOVE.md §3 stage 5.
+    ///
+    /// **It holds the projective residue and nothing else, which is why every other control is
+    /// untouched by it.** `transform` stays the whole of the affine pose — Move, the corner scale,
+    /// the rotate knob, Rotate 45°/90° and both Mirrors all write it and none of them knows this
+    /// field exists — and the full local-to-canvas map is this quad carried through
+    /// `transform.affineTransform`. That is the same split stage 3d struck for text (§5.18: the
+    /// uniform part scales the layout, "the residual stays in `corners`"), and the same one stage 3c
+    /// struck for a placed image, which stores its shape *beside* its `LayerTransform` rather than
+    /// inside it.
+    ///
+    /// **Nil is not merely a default, it is a measured identity.** A quad that is still the plain
+    /// rectangle solves through `Homography(rect:to:)` to `g == h == 0` and lands its corners on the
+    /// affine's own answer at **exactly** zero error (MEASURED standalone with `swiftc -O`,
+    /// 2026-09-02), so a piece that is never distorted takes the affine path it always took and the
+    /// two paths agree at the seam rather than merely near it.
+    ///
+    /// Transient like everything else on this type — a floating piece is never persisted (see the
+    /// type's own doc comment), so Distort owes no file-format change at all.
+    var distortQuad: Quad?
+
+    /// The rectangle the piece's bitmap occupies in its own local space: `baseSize`, centred on the
+    /// origin. `pieceImage`'s texel (0,0) is its `minX`/`minY` corner — which is the correspondence
+    /// `PixelOps.render(floatingPiece:into:)` draws by and `homography` solves against.
+    var localBox: CGRect {
+        CGRect(x: -baseSize.width / 2, y: -baseSize.height / 2,
+               width: baseSize.width, height: baseSize.height)
+    }
+
+    /// The four corners the piece actually has in its own local space — the stored quad, or the box.
+    var localQuad: Quad { distortQuad ?? Quad.rect(localBox) }
+
+    /// **Where the piece's four corners are in canvas space, and the single source of truth for it.**
+    /// The outline, the corner handles, the tap-away bounds, the live `CATransform3D` and the bake's
+    /// warp all read this one value, so none of them can come to disagree about where the piece is.
+    var canvasQuad: Quad { localQuad.mapped(by: transform.affineTransform) }
+
+    /// **The whole local-to-canvas map, from the bitmap's own texel box onto `canvasQuad`** — the
+    /// matrix the live preview shows the piece under (`Homography.catransform3D`) and the matrix the
+    /// bake warps it through (`ImageWarp.warpedImage`).
+    ///
+    /// **One accessor rather than two, because "the preview and the bake agree" is otherwise a
+    /// promise instead of a fact.** LASSO_MOVE.md §5.17 records the price of the other arrangement
+    /// one stage back: a Freeform stretch's latched bitmap is a *bounded* approximation of its bake,
+    /// and the latch has to be dropped at every gesture end to stop the error accumulating. Distort
+    /// on a raster piece has no such gap — a `CATransform3D`'s `m14`/`m24` express exactly the same
+    /// projective divide `Homography.map` performs, and the two were MEASURED agreeing to **0.0** over
+    /// the box's interior (`swiftc -O`, 2026-09-02). What differs between preview and bake is the
+    /// resampling filter, which is what already differs for a plain scale.
+    ///
+    /// Nil for a quad no homography can be drawn through — a collapsed or self-crossed box. The drag
+    /// cannot produce one (`FloatingDistortDrag` refuses the delta), so this is the guard rather than
+    /// a case anything reaches.
+    var homography: Homography? {
+        Homography(rect: CGRect(origin: .zero, size: baseSize), to: canvasQuad)
+    }
+
     /// Bounding box of the transformed piece in canvas space — used to hit-test "tap outside to
-    /// commit" and to lay out handles.
-    var transformedBounds: CGRect {
-        let half = CGSize(width: baseSize.width / 2, height: baseSize.height / 2)
-        let localCorners = [
-            CGPoint(x: -half.width, y: -half.height), CGPoint(x: half.width, y: -half.height),
-            CGPoint(x: -half.width, y: half.height), CGPoint(x: half.width, y: half.height)
-        ]
-        let corners = localCorners.map { $0.applying(transform.affineTransform) }
-        let xs = corners.map(\.x), ys = corners.map(\.y)
-        return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+    /// commit" and to lay out handles. Bit-identical to what it was before Distort for an
+    /// undistorted piece: the same four local corners through the same `affineTransform`, min and max
+    /// being blind to the order they arrive in.
+    var transformedBounds: CGRect { canvasQuad.boundingBox }
+}
+
+// MARK: - One corner of a distorted box, dragged
+
+/// A Distort corner drag in flight — **`TextFrameDrag`'s distort arm, for the raster floating
+/// piece**, and deliberately the same three rules: the corner goes where the finger is, the other
+/// three stay exactly where they were, and a delta that would make an undrawable quad is refused
+/// rather than clamped.
+///
+/// **Latched at touch-down**, for `ObjectTransformDrag`'s reason rather than for tidiness: the
+/// artist can pinch-zoom mid-drag, and a reference frame recomputed per delta would let the second
+/// finger move the thing the first is measured against. Pure — driving one delta or sixty gives the
+/// same answer for the same final point.
+///
+/// **It works in the piece's *local* space and the validity test is taken there**, which is what
+/// makes a distort independent of the pose it was made in: `Homography.isValidQuad`'s terms are
+/// convexity, simplicity, an area floor and positive box-corner weights, and an invertible affine
+/// preserves all four (weights identically — an affine's third matrix row is `[0 0 1]`, so composing
+/// one leaves the projective row untouched). MEASURED across 6,396 pose/quad pairs spanning ±3 rad,
+/// both mirrors and scales from 0.05 to 8: **zero disagreements** between asking the local quad and
+/// asking the canvas one (`swiftc -O`, 2026-09-02).
+struct FloatingDistortDrag: Equatable {
+
+    /// The quad when the finger went down, in the piece's local space.
+    let startQuad: Quad
+    /// `baseSize` — the source box the homography is solved against, and the units the area floor is
+    /// measured in.
+    let boxSize: CGSize
+    /// Which corner is moving, in `Quad`'s own order: 0 top-left, 1 top-right, 2 bottom-right,
+    /// 3 bottom-left. The other three are not written at all.
+    let corner: Int
+    /// Canvas space back into the piece's local space, latched. The pose is the drag's reference
+    /// frame, so it is taken once.
+    let canvasToLocal: CGAffineTransform
+
+    /// Nil for a corner index outside 0...3, a degenerate box, or a pose with no inverse — none of
+    /// which the overlay can hand it, so the failure is the type refusing to exist rather than a
+    /// drag that produces nonsense.
+    init?(piece: FloatingPiece, corner: Int) {
+        guard (0...3).contains(corner),
+              piece.baseSize.width > Quad.epsilon, piece.baseSize.height > Quad.epsilon else { return nil }
+        let affine = piece.transform.affineTransform
+        guard abs(affine.a * affine.d - affine.b * affine.c) > .ulpOfOne else { return nil }
+        self.startQuad = piece.localQuad
+        self.boxSize = piece.baseSize
+        self.corner = corner
+        self.canvasToLocal = affine.inverted()
+    }
+
+    /// The quad this drag produces with the finger at `canvasPoint`, **or nil when that quad is not
+    /// one a homography can be drawn through**.
+    ///
+    /// Nil rather than a clamp to the last valid quad, which is `TextFrameDrag.distortedFrame`'s
+    /// answer and the one that keeps this function pure: "the last valid quad" depends on the path
+    /// the finger took, so two drags ending on the same point would produce two different boxes.
+    /// ADD_TEXT.md §1 is explicit about how the refusal reads — the handle "will feel like it
+    /// sticks", and rendering garbage or flipping the box through the horizon are both worse.
+    func quad(draggedTo canvasPoint: CGPoint) -> Quad? {
+        var moved = startQuad
+        moved[corner] = canvasPoint.applying(canvasToLocal)
+        guard Homography.isValidQuad(moved, boxSize: boxSize) else { return nil }
+        return moved
     }
 }
 
@@ -439,6 +553,46 @@ extension CanvasManager {
         floatingPiece?.transform = transform
     }
 
+    /// The pose a live drag produces: the affine, and Distort's four corners beside it.
+    ///
+    /// **One call rather than two**, for the reason `ObjectTransformDrag.Pose` gives: a path that
+    /// could write one without the other is a path that can silently drop a field, and every arm of
+    /// the overlay's drag produces both — `nil` from the arms that do not distort, which is the whole
+    /// of what "this gesture left the corners alone" means.
+    func updateFloatingPose(transform: FloatingTransform, distortQuad: Quad?) {
+        floatingPiece?.transform = transform
+        floatingPiece?.distortQuad = distortQuad
+    }
+
+    /// Why **Distort** cannot act on what is floating, or nil when it can. One line under the Move
+    /// bar's mode picker, in the artist's terms — the shape `selectionMembershipUnavailableReason`
+    /// and `recolorUnavailableReason` already use, and for their reason: a control that does nothing
+    /// says why.
+    ///
+    /// **It replaces `TransformMode.isImplemented` and the blanket *"Coming soon — acts like Uniform
+    /// for now"* caption, both deleted with stage 5.** That caption was true of every float; this one
+    /// is true of exactly the case that is still refused, and it names what would unblock it — which
+    /// is §5.14's own distinction between "not yet" and "never", applied to a sentence instead of to
+    /// an enum case.
+    ///
+    /// **Why a lassoed vector piece is the case, and it is a measurement rather than a policy.** A
+    /// homography's local scale spans 1.3× to 8.5× across one quad, so there is no single number for
+    /// `VectorStroke.size` to follow: the best available scalar is wrong by 15%–315%, which ships as
+    /// a visible width error on every line in the selection. The cure is KEYFRAMES.md stage 4's
+    /// rest-space dab bake — draw the dab walk once in the stroke's own space and map dab *centres*
+    /// through the map — which is not built. Until it is, Distort declines a vector float rather than
+    /// silently thickening the artist's ink, and the box goes on behaving as Uniform, which is what
+    /// `vectorFloatIsFreeform` already says.
+    ///
+    /// Text and a placed image are the two kinds a vector float could carry that *would* survive a
+    /// homography — a `TextFrame` is already four free corners, and stage 3c gave an image a stored
+    /// shape — but a float carrying one almost always carries ink beside it, and a per-kind refusal
+    /// is exactly what stage 3c deleted. So the refusal is per *float*, once, with one sentence.
+    var distortUnavailableReason: String? {
+        guard transformMode == .distort, vectorFloat != nil else { return nil }
+        return "Distort needs pixels. A lassoed drawing moves, scales and mirrors instead."
+    }
+
     func setTransformMode(_ mode: TransformMode) {
         transformMode = mode
         floatingPiece?.mode = mode
@@ -585,7 +739,14 @@ extension CanvasManager {
     /// the drawing is. The artist straightens the box the same way they turned it — by the knob,
     /// freely, the way a zoom is un-zoomed. It goes when the float goes, at commit or at cancel.
     var canResetFloating: Bool {
-        if let piece = floatingPiece { return piece.transform != piece.liftTransform }
+        // **`distortQuad` is the raster arm's second term, and it is the aspect's argument one tier
+        // over**: a piece dragged back to the position, scale and rotation it lifted at but left with
+        // a pulled corner is not sitting where it was picked up, and Reset is the only way back to a
+        // square box. It is a *stored shape*, exactly like `frame.aspect` below, so it belongs on the
+        // same side of this question.
+        if let piece = floatingPiece {
+            return piece.transform != piece.liftTransform || piece.distortQuad != nil
+        }
         guard let float = vectorFloat else { return false }
         // The aspect is the third term for the same reason it is the third argument to
         // `applyToVectorFloat`: a piece stretched back to its original *area* and rotation is still
@@ -620,6 +781,12 @@ extension CanvasManager {
         guard canResetFloating else { return }
         if let piece = floatingPiece {
             floatingPiece!.transform = piece.liftTransform
+            // "Snap it back to where I picked it up" includes the shape it was picked up in, and a
+            // lift is always undistorted — `beginMove` and `beginDuplicate` build the piece from a
+            // rectangle. Written as nil rather than as `Quad.rect(localBox)` so the reset piece is
+            // the *same value* an unlifted one is, and every `distortQuad != nil` question above
+            // answers the way it did before the drag.
+            floatingPiece!.distortQuad = nil
             return
         }
         guard let float = vectorFloat else { return }

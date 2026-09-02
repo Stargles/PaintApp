@@ -188,6 +188,8 @@
 		F0CFFEDF4ADD703689965802 /* PaintSoftware/Engine/Deform/Homography.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0CFFEDF4ADD703689965801 /* PaintSoftware/Engine/Deform/Homography.swift */; };
 		16A68D1EFD90D0606ED44802 /* PaintSoftware/Engine/ImageWarp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A68D1EFD90D0606ED44801 /* PaintSoftware/Engine/ImageWarp.swift */; };
 		060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */; };
+		1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ACD68660078E6C48908F501 /* DistortUITests.swift */; };
+		688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */; };
 		26A9C3CB17EDDB6D1B679902 /* WarpAgreementCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */; };
 		55AD836D577F389E88B68F02 /* PaintSoftware/Engine/TextLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55AD836D577F389E88B68F01 /* PaintSoftware/Engine/TextLayout.swift */; };
 		9503DF989F335799429B8002 /* PaintSoftware/Engine/FontLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9503DF989F335799429B8001 /* PaintSoftware/Engine/FontLibrary.swift */; };
@@ -423,6 +425,8 @@
 		F0CFFEDF4ADD703689965801 /* PaintSoftware/Engine/Deform/Homography.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/Homography.swift; sourceTree = "<group>"; };
 		16A68D1EFD90D0606ED44801 /* PaintSoftware/Engine/ImageWarp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ImageWarp.swift; sourceTree = "<group>"; };
 		060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomographyLogicTests.swift; sourceTree = "<group>"; };
+		1ACD68660078E6C48908F501 /* DistortUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortUITests.swift; sourceTree = "<group>"; };
+		688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DistortLogicTests.swift; sourceTree = "<group>"; };
 		26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WarpAgreementCharacterizationTests.swift; sourceTree = "<group>"; };
 		55AD836D577F389E88B68F01 /* PaintSoftware/Engine/TextLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/TextLayout.swift; sourceTree = "<group>"; };
 		9503DF989F335799429B8001 /* PaintSoftware/Engine/FontLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FontLibrary.swift; sourceTree = "<group>"; };
@@ -539,6 +543,8 @@
 				23646AF05A85FB19D06D7B01 /* TextHitTestLogicTests.swift */,
 				0935736759FEE47DC1C2146C /* TextTransformLogicTests.swift */,
 				060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */,
+				1ACD68660078E6C48908F501 /* DistortUITests.swift */,
+				688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */,
 				26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */,
 				75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
@@ -875,6 +881,8 @@
 				F0CFFEDF4ADD703689965802 /* PaintSoftware/Engine/Deform/Homography.swift in Sources */,
 				16A68D1EFD90D0606ED44802 /* PaintSoftware/Engine/ImageWarp.swift in Sources */,
 				060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */,
+				1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */,
+				688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */,
 				26A9C3CB17EDDB6D1B679902 /* WarpAgreementCharacterizationTests.swift in Sources */,
 				55AD836D577F389E88B68F02 /* PaintSoftware/Engine/TextLayout.swift in Sources */,
 				9503DF989F335799429B8002 /* PaintSoftware/Engine/FontLibrary.swift in Sources */,

@@ -303,8 +303,8 @@ struct CanvasView: UIViewRepresentable {
         selectionOverlay.onAutomaticTap = { [weak coordinator = context.coordinator] point in
             coordinator?.canvasManager.finishAutomaticSelection(at: point)
         }
-        floatingOverlay.onTransformChange = { [weak coordinator = context.coordinator] transform in
-            coordinator?.canvasManager.updateFloatingTransform(transform)
+        floatingOverlay.onPoseChange = { [weak coordinator = context.coordinator] transform, distortQuad in
+            coordinator?.canvasManager.updateFloatingPose(transform: transform, distortQuad: distortQuad)
         }
         floatingOverlay.onRequestCommit = { [weak coordinator = context.coordinator] in
             coordinator?.canvasManager.commitFloatingPieceIfNeeded()

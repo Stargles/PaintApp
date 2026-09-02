@@ -32,14 +32,23 @@ import SwiftUI
 /// **Text stopped being refused on 2026-08-27** (owner: *"I rule text should be able to be
 /// transformed"*) and the placed image, the last kind either refusal named, on stage 3c. The picker
 /// is live for every float there is.
+///
+/// **Distort shipped 2026-09-02 (stage 5) and it reaches the raster piece only**, so the caption slot
+/// has a second tenant rather than an empty one: `CanvasManager.distortUnavailableReason` refuses
+/// Distort on a lassoed *vector* float and says what would unblock it. That is a refusal about one
+/// piece, where the caption it replaced — `TransformMode.isImplemented`'s *"Coming soon"* — was a
+/// statement about the whole mode.
 struct MoveTransformBottomBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
-    /// One line under the buttons, or none. The only thing left for it to say is that a mode is not
-    /// built yet — `.distort`, which is stage 5.
-    private var caption: String? {
-        canvasManager.transformMode.isImplemented ? nil : "Coming soon — acts like Uniform for now"
-    }
+    /// One line under the picker, or none.
+    ///
+    /// **Stage 5 shipped Distort and this caption changed subject rather than going away.** It used
+    /// to read *"Coming soon — acts like Uniform for now"* off `TransformMode.isImplemented`, which
+    /// was true of every float; both are deleted. What is left is a refusal about one *piece* —
+    /// Distort on a lassoed vector selection — and `CanvasManager.distortUnavailableReason` is where
+    /// the sentence and the measurement behind it live.
+    private var caption: String? { canvasManager.distortUnavailableReason }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -106,6 +115,7 @@ struct MoveTransformBottomBar: View {
                 Text(caption)
                     .font(.caption2)
                     .foregroundColor(.gray)
+                    .accessibilityIdentifier("moveBar.modeCaption")
             }
         }
         .padding(.horizontal, 16)
@@ -123,9 +133,9 @@ struct MoveTransformBottomBar: View {
     /// neither is a thing anybody drawing has an opinion about. What they *do* have an opinion about
     /// is shrinking a drawing, saving, coming back and finding it grew back rough.
     ///
-    /// **Its help line says what it costs**, in the voice this file already uses for "Coming soon —
-    /// acts like Uniform for now": there is a price, it is paid in file size, and there is a way to
-    /// stop paying it. A toggle whose cost is invisible is one an artist leaves on for a year.
+    /// **Its help line says what it costs**, in the voice `caption` above uses for a control that
+    /// cannot act: there is a price, it is paid in file size, and there is a way to stop paying it.
+    /// A toggle whose cost is invisible is one an artist leaves on for a year.
     ///
     /// Never disabled. There is no piece it cannot apply to — a fill, a text box and a placed image
     /// simply have no samples to keep, and the strokes beside them in the same lasso still do.
