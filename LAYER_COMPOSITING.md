@@ -441,6 +441,8 @@ Memory is the constraint, not ALU.
 
 **What a sandwich rebuild costs, measured in phase 5b.** 2048², six layers, CoreGraphics, warmed,
 median of nine: the `@MainActor` snapshot half is **0.1 ms** and the three composites are **~55 ms**.
+A rebuild is **two** composites since RENDER §3.6 — the rest picture is read from the on-disk bake —
+so the figure is the cost of the path phase 5b measured, and an upper bound on the one that runs.
 The snapshot is no longer the expensive half — memoizing `PixelOps.rasterize` (`1e4d7d1`) retired the
 276 ms that earlier drafts of this document quoted, because a layer switch, blend change or stroke
 lift touches no cel content and so hits the memo on every leaf.

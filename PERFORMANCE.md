@@ -69,7 +69,7 @@ benchmark — which is why none has ever been under the microscope.
 | Save re-encodes every PNG in the document | O(cel count) × per-PNG size — measured, and no longer serial (item 15) | `ProjectStore.writePackage` |
 | Load decodes and rasterizes every cel | O(cel count) — no longer serial, and no longer on main for the gallery's open (item 9) | `ProjectStore.load` / `loadInBackground` |
 | `UndoHistory.maxCost` | Was a hardcoded literal; device-derived as of item 13, still canvas-independent | `UndoHistory.swift` |
-| Compositor fixed per-call overhead | A fixed term, paid three times per sandwich rebuild | `RenderTree.swift:429-431`, paid at `CanvasView.swift:1236-1238` |
+| Compositor fixed per-call overhead | A fixed term, paid twice per sandwich rebuild — the two mid-stroke halves; the rest picture is read from the bake | `RenderTree.swift:429-431`, paid in `CanvasView.startSandwichRebuild` |
 | Mode 3 eraser re-stamps the whole vector layer per cut | O(total dabs in the layer) | `VectorLayer.swift:615-634`, `:1160-1214` |
 
 Two independent device tables record that per-composite intercept and they do not quite agree:
@@ -185,19 +185,23 @@ for why a millisecond was not taken and what the counts say instead.
 The cost that replaced them as the tick's main-actor headline was the sandwich **snapshot**: 78.2 ms
 for six layers at 2048×1024 when the playhead moves to a new frame (MEASURED, simulator/CoreGraphics
 — see item 4b). **Item 9(b) took that to ~22 ms on 2026-08-20** by spreading the per-cel flatten over
-cores, so it is no longer the tick's headline; the three composites, at 22.4 ms and off the main
-thread, are now the same size as it. Nothing on this tick is unmeasured any more, and none of it is
-the timeline's.
+cores, so it is no longer the tick's headline; the composites, MEASURED at 22.4 ms for the three a
+rebuild then ran and off the main thread, are the same size as it. A rebuild is **two** composites now
+— the rest picture is read from the bake (RENDER §3.6) — so 22.4 ms is the ceiling rather than the
+figure. Nothing on this tick is unmeasured any more, and none of it is the timeline's.
 
 **5. Playback stuttering on documents with a mask, blend mode, or grade.** `startSandwichRebuild`
 still computes `below` and `above` unconditionally even though they are shown only while `midStroke`
-is true — item 4b explains why that was measured and left alone, and item 4a removed the third
-composite on a layer switch. Every playback tick, scrub tick and undo still computes two composites
-nobody sees. It runs off-main on `sandwichQueue`,
-so it burns cores rather than freezing the UI — but `isSandwichRebuilding` serialises, so a rebuild
-slower than the frame interval drops frames. A six-layer sandwich rebuild at 2048² costs **54.8 ms
-warm on Metal, 64.7 ms on CoreGraphics** (MEASURED, iPad 9, Release, `Compositor.swift:36`) against a
-41.6 ms budget at 24 fps: it already misses. Only fires where `needsCompositorOnCanvas` is true; a
+is true — item 4b explains why that was measured and left alone. The third composite is gone outright:
+the rest picture is read from the bake (RENDER §3.6), which is also what playback now plays. Every
+playback tick, scrub tick and undo still computes the two halves nobody sees. It runs off-main on
+`sandwichQueue`, so it burns cores rather than freezing the UI — but `isSandwichRebuilding` serialises,
+so a rebuild slower than the frame interval drops frames. A six-layer sandwich rebuild at 2048² costs
+**54.8 ms warm on Metal, 64.7 ms on CoreGraphics** (MEASURED, iPad 9, Release, `Compositor.swift:36`)
+against a 41.6 ms budget at 24 fps. **That figure is a rebuild of three composites and a rebuild is
+two now, so it is an upper bound rather than the number** — and nobody has re-measured it. Do not
+divide it by anything: `below` and `above` together do roughly the work `full` did on its own, so what
+came off is not a third of the total. Only fires where `needsCompositorOnCanvas` is true; a
 flat stack stays on Core Animation and pays none of it.
 
 **6. Drawing on a vector layer feeling heavier than raster. — FIXED 2026-08-20 (item 11), and the
@@ -1604,7 +1608,7 @@ spread across the three was under 4% on every figure.
 | per frame of the scrub | ms | what it is |
 |---|---|---|
 | in-between frame, **before** | **24.5** | one ARAP evaluation for the layer host. The compositor was refused, so this was all of it |
-| ordinary frame of the same document | 53.8 | the sandwich as it already runs today — snapshot plus three composites, no derivation |
+| ordinary frame of the same document | 53.8 | the sandwich as it ran when this was taken — snapshot plus three composites, no derivation. A rebuild is two composites now (RENDER §3.6), so this row is an upper bound |
 | in-between frame, sandwich only | 74.2 | …plus the composite's own evaluation of the in-between (+20.4) |
 | in-between frame, **after** | **100.2** | …plus the layer host's evaluation of the *same* in-between, a second time (+26.0) |
 
@@ -1658,9 +1662,9 @@ record removing — or conclude the app is broken. It is neither. The ruling is:
 **The 24 fps budget belongs to the prebake, not to the live path.** "The feature" the owner names is
 **background baking for playback** ([TODO.md](TODO.md) item (29), asked and recorded the same day):
 the animation bakes in the background, non-current frames are gradually replaced by that baked
-"video", and playback plays frames rather than compositing them. It does not exist today —
-`sandwichCacheKey` holds exactly one composite and playback composites every frame live. Once it
-does, what has to hit 41 ms is the **playback of a baked frame**, and the live composite of the frame
+"video", and playback plays frames rather than compositing them. **It exists** — RENDER.md §3.5-3.7,
+stages 4 and 5 merged: the canvas at rest and playback are served from LZ4 frames on disk through a
+decoded ring, and only the two mid-stroke halves are still composited live. So what has to hit 41 ms is the **playback of a baked frame**, and the live composite of the frame
 the artist is *looking at while drawing* is a different budget with a different consumer: one person,
 one frame, at the pace of an edit. [KEYFRAMES.md](KEYFRAMES.md) §2.25 states this as a ruling in its
 own right — *the live per-frame cost of a derived frame is not held to the 24 fps budget; the prebake
@@ -1668,8 +1672,10 @@ is what must play at 24 fps* — and that is the sentence to read before optimis
 path.
 
 So this section is **not** an open performance problem awaiting a fix. It is a recorded, accepted,
-reasoned cost. The thing that would make it a problem again is the prebake landing and *still* not
-playing at 24 fps, which is a measurement about §5b and not about this number.
+reasoned cost. The thing that would make it a problem again is the prebake *still* not playing at
+24 fps — a measurement about §5b and not about this number, and **one nobody has taken on the device
+now that the prebake is merged.** §10's decode figures say a frame reaches the screen in 1.5 ms at the
+owner's canvas and 24.6 ms at 4096²; what is unmeasured is whether the baker keeps up with a scrub.
 
 **One door is explicitly open** — *"if a smarter faster way is possible which doesnt require a lot of
 code, then sure"* — and the next subsection is exactly that door. It is a cheap win, not an

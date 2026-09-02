@@ -122,7 +122,7 @@ Found while designing RENDER.md; the compositor's budget is sound and almost not
    (`Models/CanvasManager+Fill.swift:842-852`) adds a transient canvas-sized image and byte array.
 4. **Blanked layer hosts keep every byte.** `Views/Canvas/LayerHostView.swift:97-103` `setBlanked` only installs a
    zero-alpha mask; `reconcileLayers` (`CanvasView.swift:892`) still re-renders blanked hosts every pass. The sandwich's
-   three composites are paid on top of N × 3 host images, not instead of them.
+   two composites and the decoded baked frame are paid on top of N × 3 host images, not instead of them.
 5. **Two caches are bounded by entry count, which is not a bound.** `MaskResolver.cache` is 8 entries
    (`MaskResolver.swift:336`; 128 MiB at 4096², 2 GiB at 16383²), and `vectorRenderCacheLimit = 12`
    (`Models/CanvasManager+Interpolation.swift:489-511`) holds up to two canvas images each, is evicted only from the Move
@@ -1136,7 +1136,9 @@ layer is worth grepping for `render()` before the next owner report arrives.
 `CompositorMetalEngine.readBack` builds its `CGImage` as `premultipliedLast` RGBA in device RGB;
 Core Animation's native layout on iOS is BGRA premultiplied-*first*. So assigning one to
 `UIImageView.image` costs a full-canvas convert-and-copy inside the CA commit, on the main thread —
-three of them per sandwich rebuild, 64 MiB each at 4096². The CoreGraphics backend never paid it: a
+two of them per sandwich rebuild, 64 MiB each at 4096². **The rest picture does not pay it**: it comes
+off the bake, and `DecodedFrame.makeImage()` hands CA `premultipliedFirst` little-endian bytes, which
+is CA's own layout — so what is left is the two mid-stroke halves. The CoreGraphics backend never paid it: a
 `UIGraphicsImageRenderer` image is already in CA's format, so this arrived with the backend flip and
 is invisible to every headless benchmark, which stops at the `CGImage`.
 
