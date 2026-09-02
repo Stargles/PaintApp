@@ -197,15 +197,18 @@ final class BakeWiringLogicTests: XCTestCase {
     func testLiftIsWhatStartsTheBakeTheStrokeAskedFor() {
         let manager = perFrameDocument(frames: 4)
         let baker = manager.frameBaker
-        // **The suspended passes go inside the probe window.** They used to sit outside it and the
-        // control was `composites { }` over an *empty block*, whose zero is a fact about the empty
-        // closure rather than about suspension — true under any implementation whatever, including
-        // one that composites while the artist's hand is down.
-        let whileSuspended = composites {
-            manager.syncFrameBake(suspended: true)
-            manager.syncFrameBake(suspended: true)
-        }
-        XCTAssertEqual(whileSuspended, 0, "Control: nothing composites while the hand is down")
+        manager.syncFrameBake(suspended: true)
+        // **`CompositeProbe` cannot be the control here, and this line used to pretend it was.** It
+        // was `composites { }` over an *empty block*, whose zero is a fact about the empty closure
+        // and not about suspension. Moving the suspended pass inside the window does not fix it
+        // either, and that is the part worth writing down: `kick` dispatches to `workQueue`, so a
+        // *synchronous* probe window sees nothing whether a job was dispatched or not — MEASURED
+        // 2026-09-02 by forcing `isSuspended = false` in `syncFrameBake`, which left such a window
+        // at zero and the test green.
+        //
+        // `isBaking` is the witness, exactly as this file's §2 header says: `kick` sets it on the
+        // line before the dispatch, so it answers with no waiting and no flake.
+        XCTAssertFalse(baker.isBaking, "Control: the hand is down, so no job may be in flight")
 
         manager.syncFrameBake(suspended: false)
         XCTAssertTrue(baker.isBaking, "Lift releases the loop on the very pass that reports it")
