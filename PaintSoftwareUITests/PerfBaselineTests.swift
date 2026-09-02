@@ -5211,7 +5211,7 @@ final class PerfBaselineTests: XCTestCase {
                 bytes[i + 3] = 255                                          // A, last under 32-little
             }
         }
-        return FrameBakeStore.image(fromBGRA: bytes, width: w, height: h, bytesPerRow: w * 4)!
+        return DecodedFrame(width: w, height: h, pixels: Data(bytes)).makeImage()!
     }
 
     /// Incompressible, seeded so the ratio is reproducible. Opaque alpha, because a premultiplied
@@ -5227,7 +5227,7 @@ final class PerfBaselineTests: XCTestCase {
         for i in stride(from: 0, to: bytes.count, by: 4) {
             bytes[i] = next(); bytes[i + 1] = next(); bytes[i + 2] = next(); bytes[i + 3] = 255
         }
-        return FrameBakeStore.image(fromBGRA: bytes, width: w, height: h, bytesPerRow: w * 4)!
+        return DecodedFrame(width: w, height: h, pixels: Data(bytes)).makeImage()!
     }
 
     private static func bakeFixture(_ kind: BakeFixture, size: CGSize) -> CGImage {
@@ -5284,9 +5284,10 @@ final class PerfBaselineTests: XCTestCase {
     }
 
     /// The header `FrameBakeStore` writes, read back by hand. Parsing it here rather than reaching
-    /// into the store is what lets the decode be *split* — the store's `load` does the read, the
-    /// decompress and the `CGImage` build in one call, and which of the three dominates is the
-    /// finding.
+    /// into the store is what lets the decode be *split* — `loadDecoded` does the read and the
+    /// decompress in one call, `makeImage()` finishes the job, and which of the three dominates is the
+    /// finding. It was the finding: the `CGImage` build was the largest of them until RENDER stage 4c
+    /// deleted the two copies inside it, and a total would have hidden that in both directions.
     private static func bakeHeader(_ file: Data) -> (flags: UInt16, width: Int, height: Int,
                                                      bytesPerRow: Int, rawBytes: Int, payloadBytes: Int)? {
         guard file.count >= FrameBakeStore.headerBytes else { return nil }
@@ -5362,13 +5363,16 @@ final class PerfBaselineTests: XCTestCase {
                         ? repeatedTiming(reps) { _ = FrameBakeStore.decompress(payload, to: header.rawBytes) }
                         : (best: 0.0, median: 0.0)
                     let decodedBytes = compressed
-                        ? (FrameBakeStore.decompress(payload, to: header.rawBytes) ?? [])
-                        : [UInt8](payload)
-                    let buildImage = repeatedTiming(reps) {
-                        _ = FrameBakeStore.image(fromBGRA: decodedBytes, width: header.width,
-                                                 height: header.height, bytesPerRow: header.bytesPerRow)
-                    }
-                    let wholeLoad = repeatedTiming(reps) { _ = store.load(key) }
+                        ? (FrameBakeStore.decompress(payload, to: header.rawBytes) ?? Data())
+                        : payload
+                    let frame = DecodedFrame(width: header.width, height: header.height,
+                                             bytesPerRow: header.bytesPerRow, pixels: decodedBytes)
+                    let buildImage = repeatedTiming(reps) { _ = frame.makeImage() }
+                    let wholeLoad = repeatedTiming(reps) { _ = store.loadDecoded(key) }
+                    // What the display path actually costs: the frame off disk **and** the image
+                    // handed to the layer. Stage 4c split those two so the ring can hold the first
+                    // without paying the second, which is why they are timed apart as well as together.
+                    let wholeToImage = repeatedTiming(reps) { _ = store.loadDecoded(key)?.makeImage() }
 
                     let ratio = Double(rawBytes) / Double(fileBytes)
                     report("bake store — \(label)", [
@@ -5385,30 +5389,32 @@ final class PerfBaselineTests: XCTestCase {
                         ("decodeColdFileRead", milliseconds(coldRead.median)),
                         ("decodeLZ4", milliseconds(decompress.median)),
                         ("decodeBuildCGImage", milliseconds(buildImage.median)),
+                        ("decodeToDisplayableImage", milliseconds(wholeToImage.median)),
                         ("budget24fps", milliseconds(Self.playbackFrameBudget)),
-                        ("fitsIn24fps", wholeLoad.median < Self.playbackFrameBudget ? "yes" : "NO"),
+                        ("fitsIn24fps", wholeToImage.median < Self.playbackFrameBudget ? "yes" : "NO"),
                     ])
 
                     if fixture == .celArt { celArtRatios[row.name] = ratio }
                     if fixture == .noise { noiseTookRawBranch = !compressed }
-                    if wholeLoad.median > worstMedianDecode {
-                        worstMedianDecode = wholeLoad.median
+                    if wholeToImage.median > worstMedianDecode {
+                        worstMedianDecode = wholeToImage.median
                         worstDecodeLabel = label
                     }
 
                     // The round trip, at every size — a ratio measured off a file nobody could read
                     // back would be a measurement of nothing.
-                    guard let restored = store.load(key) else {
+                    guard let restored = store.loadDecoded(key), let image = restored.makeImage() else {
                         return XCTFail("\(label): the store must read back what it wrote")
                     }
                     XCTAssertEqual(restored.width, Int(row.size.width))
                     XCTAssertEqual(restored.height, Int(row.size.height))
+                    XCTAssertEqual(image.width, Int(row.size.width))
                     try? FileManager.default.removeItem(at: url)
                 }
             }
         }
 
-        report("bake store — worst decode against the play budget", [
+        report("bake store — worst decode-to-displayable-image against the play budget", [
             ("worstFixture", worstDecodeLabel),
             ("worstMedianDecode", milliseconds(worstMedianDecode)),
             ("budget24fps", milliseconds(Self.playbackFrameBudget)),

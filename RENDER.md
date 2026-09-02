@@ -305,14 +305,14 @@ Three things in the two sections above came out differently.
   testable.
 
 **Measured again 2026-09-02 (stage 4e), on artwork rather than on a rect — it confirms one sentence of
-this section, refutes another outright, and supplies a third the section never wrote.** The full tables
-are PERFORMANCE §10; what belongs here is what they change. The
+this section, refutes another outright, supplies a third the section never wrote, and puts a number on
+what stage 4c bought.** The full tables are PERFORMANCE §10; what belongs here is what they change. The
 fixtures are the document §2.8 names: flat cel art (six colours in large hard-edged polygons with real
 vector ink stamped over them), a hold (three strokes on transparency), a painted gradient as the honest
-pessimistic bound, and seeded noise as the theatrical one. **Byte counts are exact and build-independent —
-the simulator and the device agreed to the byte. The milliseconds are the owner's iPad 9 in Release**, and
-the Debug simulator run that preceded them got the *split* backwards, which PERFORMANCE §10.2 keeps as a
-warning rather than as data.
+pessimistic bound, and seeded noise as the theatrical one. **Byte counts are exact and
+build-independent — the simulator and both device runs agreed to the byte. The milliseconds are the
+owner's iPad 9 in Release**, taken on both sides of 4c's deletion, and the Debug simulator run that
+preceded them got the *split* backwards, which PERFORMANCE §10.2 keeps as a warning rather than as data.
 
 - **The ratio is high and *rises* with canvas size.** Cel art is **54.4x at 2048x1024, 66.9x at 2048²,
   73.2x at 4096²**; a hold is **135-155x**. A bigger canvas draws the same picture with more flat pixels
@@ -320,27 +320,31 @@ warning rather than as data.
   cel art at the owner's canvas is **37 MB**, so the store's 512 MiB ceiling holds about an hour of it
   before §3.3's content addressing is even counted. **The bound that matters is not the noise row, it is
   the painted one at 1.49x**: a smooth gradient has no exact byte repeat and barely compresses at all.
-- **"Single-digit milliseconds on the device" is confirmed: an 8 MiB frame is 4.0-5.0 ms.** The cold
+- **"Single-digit milliseconds on the device" is confirmed with room to spare: an 8 MiB frame is
+  1.5-3.1 ms** on the store as it stands after stage 4c (it was 4.0-5.0 before it — see below). The cold
   `F_NOCACHE` storage read inside that is **0.1 ms**, because a 154 kB file is off the NAND before it
-  has started — which is what the compression buys, over and above the disk it saves.
-- **Decode is proportional to the frame's *pixels*, not to its file, and that is the load-bearing one.**
-  A hold is a *quarter* of cel art's file and decodes **slower** at every size: 5.0 vs 4.0 ms at
-  2048x1024, **39.8 vs 27.4** at 4096². LZ4 rebuilds the same buffer either way and a nearly-empty frame
-  is long small-offset matches, every LZ4 decoder's slowest path. **So the ring's "byte budget rather
-  than a count" below has to mean *decoded* bytes** — and the frames content addressing makes cheapest
-  on disk are the dearest to play, which is the opposite of the intuition this section was written with.
-- **At 4096² a frame fits a play interval and only just: 39.8 ms against 41.6, 96% of the budget.** At
-  the owner's 2048x1024 it is 4.0 ms with a factor of ten in hand. So above about 2048² the ring is not
-  an optimisation, it is the mechanism — play must read a frame the scheduler decoded an interval or
-  more ago, because a decode on the tick eats the tick. §2.12 forbids baking smaller instead.
-- **The largest single term in a decode is not the codec, it is the `CGImage` build** — in both device
-  runs, **1.6-2.6 ms against the LZ4's 1.3-1.4** at 2048x1024 and **17.6-21.5 against 12.9-13.2** at
-  4096². `image(fromBGRA:)` makes **two full-frame copies where one would do**: `var copy = bytes` so
-  the `CGContext` can own its buffer, then `makeImage()`. Decompressing into the buffer the context will
-  own, or a `CGDataProvider` over the decoded bytes, takes a term of the codec's own size out of the path
-  with the 41.6 ms budget. **It was invisible in Debug**, where that column read as 8% of the decode.
-- **The encode, which this section never mentions, is 7-11 ms a frame at 2048x1024 and ~25-30 ms at
-  4096².** The BGRA convert inside it is 1.8-2.4 ms at the owner's canvas and 12.7-13.8 at 4096² — so the
+  has started; only the incompressible fixtures, whose files *are* the frame, pay a measurable read.
+- **Decode is proportional to the frame's *pixels*, not to its file, and it is the finding here that no
+  change has touched.** A hold is a *quarter* of cel art's file and decodes **slower** at every size, in
+  every run: 3.1 vs 1.5 ms at 2048x1024, **24.6 vs 9.9** at 4096². LZ4 rebuilds the same buffer either
+  way and a nearly-empty frame is long small-offset matches, every LZ4 decoder's slowest path. **So the
+  ring's "byte budget rather than a count" below has to mean *decoded* bytes** — and the frames content
+  addressing makes cheapest on disk are the dearest to play, which is the opposite of the intuition this
+  section was written with.
+- **Every size now fits a play interval and the worst case has real headroom: 24.6 ms against 41.6,
+  1.70x**; at the owner's 2048x1024 it is 1.5-3.1 ms. **Before stage 4c the same worst case was 39.3-39.8
+  ms — 1.05x**, i.e. 96% of the interval to get one frame on screen. Play still must not decode on the
+  tick, which is what the ring below is for; what is new is that a one-frame lead is now enough.
+- **Stage 4c's copy elimination is measured on both sides of it, and it is worth 1.6-2.8x on the whole
+  decode.** The old `load(_:) -> CGImage?` decompressed into a `[UInt8]`, copied it again so a
+  `CGContext` could own the buffer, then `makeImage()`d a third: **1.6-2.6 ms of `CGImage` build against
+  the LZ4's 1.3-1.4** at 2048x1024, and 15.3-21.5 against 12.9-13.2 at 4096² — larger, at every size,
+  than the codec it sat behind. `DecodedFrame.makeImage()` measures **0.0 ms at every size**. Two
+  cautions for whoever finds the next one of these: it was invisible in Debug, where that column read as
+  8% of the decode against the codec's 91%; and it only ever showed up because the decode was measured
+  *split* rather than as a total.
+- **The encode, which this section never mentions, is 5-13 ms a frame at 2048x1024 and 25-31 ms at
+  4096².** The BGRA convert inside it is 1.2-2.4 ms at the owner's canvas and 12.7-13.8 at 4096² — so the
   `readBack`-into-`bgra8Unorm` change named in the paragraph above is worth a fraction of the bake where
   the owner draws and about half at the knob's maximum, not the 2x a Debug run implied. Still worth
   having; it also deletes the per-stroke-lift hitch BUGS.md attributes to the same convert.
@@ -350,9 +354,9 @@ warning rather than as data.
   matches exact byte sequences instead: a flat region is already one long match, so differencing it to
   zeros codes to the same size, while every hard edge becomes a band of residuals that differ row by row
   where the source rows were byte-identical. The loss is largest exactly where this document has the most
-  edges. And the cost is not a rounding error either: the filter is **4.6-7.1 ms** on the way in and
-  **8.4-8.9 ms** on the way out at 2048x1024, so adopting it would have more than tripled a 4.0 ms decode in
-  order to make the file 39% bigger. If the ratio ever does disappoint, reach for a coder that models
+  edges. And the cost is not a rounding error — it is the whole decode over again: the filter is
+  **4.3-7.1 ms** on the way in and **4.4-8.9 ms** on the way out at 2048x1024, against a 1.5 ms decode.
+  Adopting it would have multiplied the decode by four to make the file 39% bigger. If the ratio ever does disappoint, reach for a coder that models
   prediction error at all — not a filter in front of a match-only one.
 
 **The key is `SandwichFullKey` minus `frame`, built from a `FrameRecipe` by a hand-written canonical byte
@@ -586,12 +590,12 @@ it is the dependency order.
 
    **4e is done, 2026-09-02, on the owner's iPad in Release** — the ratio, the decode and the encode
    measured on artwork at 2048x1024, 2048² and 4096², in `PerfBaselineTests`; §3.5 above carries what it
-   changed and PERFORMANCE §10 the tables. The headline: **54-73x on cel art; decode 4.0 ms at the owner's
-   canvas and 39.3-39.8 ms at 4096² against a 41.6 ms budget; the `CGImage` build, not the codec, is the biggest
-   term in a decode; and §3.5's per-row-filter fallback refuted rather than deferred.**
-   **Still owed: the wiring** — the queue driving the store, the live canvas and play reading frames out of
-   it, and the timeline's baked-frame indication. The ratio on the owner's own "UI Test" document is owed
-   too; these fixtures are synthetic, deliberately shaped like §2.8's document but not drawn by them.
+   changed and PERFORMANCE §10 the tables. The headline: **54-73x on cel art; a frame on screen in 1.5 ms
+   at the owner's canvas and 24.6 ms at 4096² against a 41.6 ms budget; 4c's copy elimination measured on
+   both sides of it at 1.6-2.8x; and §3.5's per-row-filter fallback refuted rather than deferred.**
+   **Still owed: the ratio on the owner's own "UI Test" document** — these fixtures are synthetic,
+   deliberately shaped like §2.8's document but not drawn by them — and a decode measured against a frame
+   the *compositor* produced at the owner's canvas rather than one drawn for the purpose.
 5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.
 6. **Export** (§3.9).
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
