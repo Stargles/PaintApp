@@ -232,6 +232,41 @@ before something was deleted will silently resurrect it, and the count is the on
   the test names against the value it reports — that is thirty seconds and it settles which of the
   two you are looking at. Use plain `test` (which builds) unless you have a reason not to.
 
+### A green assertion is only as good as its two operands
+
+Three failures of this shape landed in one day, and none of them looks wrong while you read it.
+
+**A table that builds a fresh fixture per row is comparing allocation addresses.** `LayerContentVersion`
+names a cel's tiers by `ObjectIdentifier`, so two `CanvasManager`s differ in every leaf *before* anything
+is mutated. A per-field table built that way — one manager per row, digests compared across them —
+**passed with the field under test deleted from the encoder it was written to pin.** Mutate one fixture
+cumulatively, so a row's difference is attributable to the row.
+
+**`Layer.layerEffect` is `kind == .value ? effect : nil`, and the render path reads the accessor, not the
+field.** So `layers[0].effect = …` on a raster layer reaches neither the tree nor the content version:
+forty rows of an effect table were setting nothing. `Layer.valueFill` is `kind == .value && effect == nil
+? fill : nil` and is inert the same way for a layer already in effect mode. Setting a field the shipped
+code does not read is the commonest way a fixture measures nothing.
+
+**A fixture can be eaten by the optimisation it is testing.** The obvious ten-frame document for
+RENDER §2.16 — one cel spanning frames 2–6, edit it, count re-renders — measures nothing, because that
+cel *is* a hold, so those five frames are one bake key and one composite. Every frame needs its own
+picture before "five frames re-rendered" is expressible at all.
+
+And `CompositeProbe` counts calls to `Compositor.composite`, which since chunking means **chunks, not
+frames**. Pin "one small frame is one composite" as its own test rather than assuming it inside five
+others.
+
+### A static that writes through to `UserDefaults` outlives the test that set it
+
+`CanvasManager.renderResolution` persists on every set, so it is process-wide **and survives into the
+next run in the simulator container**. A suite that left it on `.half` produced **15 reds in a later fast
+tier**, across `EffectLayerLogicTests` and `PerfBaselineTests`, every one a half-resolution artifact of a
+*previous* run — reported, reasonably, as failures of the code under test. Pin it in `setUp` and restore
+what was there in `tearDown`, exactly as suites already do for `Compositor.backend`. It is that same
+restore rule reached through a door nobody had checked, and the persistence is what makes it worse: the
+damage shows up in a *different* suite, on a *later* run, with nothing pointing back.
+
 ### Triaging a failed XCUITest — do this before suspecting your change
 
 A one-off XCUITest failure here is environmental far more often than it is real, and re-running the
