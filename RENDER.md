@@ -282,6 +282,48 @@ time — which also means `CompositorMetalEngine.readBack` should render into `b
 that as a one-capability-check change). If the ratio on real documents disappoints, the next step is a per-row Up
 filter before LZ4, not a video codec.
 
+**Built 2026-09-02 (stage 4a): `Engine/FrameBakeKey.swift` and `Engine/FrameBakeStore.swift`, headless.**
+Three things in the two sections above came out differently.
+
+- **The header is 64 bytes, not 32.** A SHA-256 digest alone fills 32, so the original number left no room
+  for the width, height, stride, the two sizes and the flags the same sentence asked for. Little-endian:
+  magic `PBK1` (0), format version (4), flags (6, bit 0 = LZ4 payload), width (8), height (12),
+  bytes-per-row (16), uncompressed bytes (20), compressed bytes (24), reserved zero (28), digest (32..64).
+  Rows are **tightly packed** — `bytesPerRow == width * 4` whatever CoreGraphics chose — so the ratio does
+  not depend on a platform's own alignment (§2.6).
+- **`COMPRESSION_LZ4_RAW`, not `COMPRESSION_LZ4`**, and §3.5's own reasoning is what says so. Apple's
+  `COMPRESSION_LZ4` wraps the stream in `bv41` block framing that no other LZ4 decoder reads, which
+  contradicts "portable to any platform with an LZ4 decoder". `_RAW` is the standard raw block; its one
+  extra requirement is knowing the uncompressed size before decoding, and the header already carries it.
+  If the encoder does not shrink a frame the payload is stored raw with the flag clear, so a file is never
+  larger than its pixels plus one header.
+- **MEASURED ratios, headless on the iOS 26.5 simulator** — the number §3.5 asked to be measured rather
+  than expected, though the owner's own "UI Test" document on the device is still owed. A 512² synthetic
+  flat-colour frame (three filled rects on a flat ground) is **1,048,576 B → 9,658 B, 108.6x**. The same
+  size in seeded noise is **1,048,576 B → 1,048,576 B, 1.00x**, i.e. it takes the raw branch. So the anime
+  expectation holds at the extreme and the fallback is reachable, which is what makes both branches
+  testable.
+
+**The key is `SandwichFullKey` minus `frame`, built from a `FrameRecipe` by a hand-written canonical byte
+encoder rather than from any `Hashable`, and that is not fastidiousness.**
+`LayerContentVersion.hash(into:)` deliberately omits `effect` — correctly, since every in-memory cache in
+this app compares `==` after the bucket lookup, so a collision costs one compare. A content-addressed
+store has no second chance: the filename *is* the digest, so a missing field is the wrong picture served
+with no error. `InterpolatedCelIdentity.hash(into:)` omits four more fields for the same reason, and it
+reaches the key through `LayerContentVersion.derived`. The encoder therefore emits a discriminator byte
+per enum case and a length prefix per collection, writes floats by `bitPattern`, and carries **no
+`default:` clause anywhere** — so a fourteenth `Effect` case or a twenty-seventh `BlendMode` is a compile
+error in `FrameBakeKey.swift` rather than a silent collision on disk. That is the durable half of the
+guarantee; `FrameBakeKeyLogicTests` is the other half, one row per field.
+
+**Two things `FrameRecipe` already folds in, and one it does not.** `canvasSize` is a `RenderSizing`
+already applied and rounded, so it is the real buffer; and **canvas padding needs no field of its own**,
+because `CanvasManager.canvasSize` includes the margin and the margin's only route into a composited pixel
+is `RenderBackground.rect`, which `canvasBackground(renderedInto:)` insets by it — with the paper hidden
+the padding reaches nothing at all. **`RenderResolution` is *not* implied by `canvasSize`** and is a
+separate field: `RenderSizing.native` ignores the knob outright, so all three positions mint one buffer,
+and even under `.liveComposite` two positions can land on one size once `affordableSize` clamps them.
+
 **A kept bake needs a stable stamp.** The process-lifetime key uses object identity and in-memory version counters
 (`RasterLayerTexture.version`, `VectorCanvas.version`), which restart at every open. A bake the artist keeps beside
 the project must key on something the document persists — a per-cel content stamp saved in the manifest and bumped
@@ -415,6 +457,10 @@ it is the dependency order.
    legitimately want one request over every leaf, and stage 4 is what moves the live canvas.
 4. **Store and scheduler** (§3.5, §3.6): the key, the LZ4 files, the ring, the queue, the live canvas and play served
    from it, the timeline's baked-frame indication. MEASURE the compression ratio and the decode time on the device.
+   **4a is done, 2026-09-02** — `FrameBakeKey` and `FrameBakeStore`, both pure and headless; §3.5 above carries the
+   three places its own text was wrong and the two ratios. Still owed by this stage: the ring, the queue, the live
+   canvas and play reading from the store, the timeline indication, and the device measurement of both the ratio and
+   the decode time.
 5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.
 6. **Export** (§3.9).
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
