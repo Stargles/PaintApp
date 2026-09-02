@@ -1757,7 +1757,8 @@ final class CanvasManager: ObservableObject {
     /// Play, from `playbackEntryFrame()`.
     func play() {
         guard !isPlaying else { return }
-        currentFrame = playbackEntryFrame()
+        // Through `goToFrame`, which is the one place the playhead's bounds are decided.
+        goToFrame(playbackEntryFrame())
         playbackClock = PlaybackClock(startedAt: playbackNow())
         isPlaying = true
         schedulePlaybackTimer()
