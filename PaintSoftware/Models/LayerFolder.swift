@@ -242,7 +242,7 @@ extension LayerFolder {
     /// **Presence is untouched, which is the same guarantee the layer half makes and rests on the same
     /// line of code.** `Effect.resolved(atFrame:through:)` takes an `Effect` and returns an `Effect`
     /// with no arm that returns nil, so the chain below is nil at every frame or non-nil at every
-    /// frame. `CanvasManager.compositorSizeGate` and the panel-versus-rendering division below both
+    /// frame. `RenderTree.peakCompositeTextures` and the panel-versus-rendering division below both
     /// depend on that, and stage 2b did not spend either.
     ///
     /// **Named `resolvedEffect` rather than `effect(atFrame:)`, on purpose.** Swift will happily take
@@ -256,7 +256,7 @@ extension LayerFolder {
     /// The raw `effect` field stays what everything *structural* reads — `maxInputCount` above,
     /// `setNodeEffect`, the panel's rows — because presence is a property of the folder and not of the
     /// playhead. That division holds only for as long as a track cannot turn a grade on or off at a
-    /// frame; `CanvasManager.compositorSizeGate` is the other place that assumption is load-bearing.
+    /// frame; `RenderTree.peakCompositeTextures` is the other place that assumption is load-bearing.
     func resolvedEffect(atFrame frame: Int) -> Effect? {
         effect?.resolved(atFrame: frame, through: effectTracks)
     }

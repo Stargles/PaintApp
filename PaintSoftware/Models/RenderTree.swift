@@ -504,19 +504,21 @@ extension Array where Element == RenderNode {
     // MARK: - What one composite of this tree costs in memory
 
     /// **The most canvas-sized textures one `Compositor.composite` of this tree holds at once** —
-    /// the number `CompositorBudget` sizes a composite against, and the reason a 4096² canvas with a
-    /// bloom on it crashed a 3 GB iPad while every simulator measurement said the branch was fine.
+    /// the number `CompositorBudget` is divided by to decide how a frame is cut up, and the reason a
+    /// 4096² canvas with a bloom on it crashed a 3 GB iPad while every simulator measurement said the
+    /// branch was fine.
     ///
     /// **Derived here rather than in `MetalCompositor` because it is a property of the tree**, the
-    /// same argument `needsOwnBuffer` makes: the main thread has to know what a composite will cost
-    /// *before* it asks for one (`makeSandwichRecipe` sizes the request by it), and the engine has
-    /// to know the same number when it decides whether to accept that request. Two spellings of it
+    /// same argument `needsOwnBuffer` makes: the planners have to know what a composite will cost
+    /// *before* it runs — `StripedCompositor.plan` cuts the frame into strips by this number and
+    /// `ChunkedCompositor.chunkSources` cuts each strip by node with the same arithmetic — and the
+    /// engine has to know it again when it decides whether to accept a request. Two spellings of it
     /// would be two things to keep in step with `CompositorMetalEngine.encode`, which is the walk
     /// this counts.
     ///
     /// **An upper bound, and deliberately so.** Where the walk's exact peak is hard to state — a
     /// `.mix` slot pair overlapping a node's own grade scratch, say — this counts both. Over-counting
-    /// composites a slightly smaller picture; under-counting is the crash. The flat stacks that
+    /// cuts the frame more finely than it needs; under-counting is the crash. The flat stacks that
     /// matter in practice are counted exactly.
     ///
     /// **Under-counting is the crash *literally*, and the softer story once told about it is false.**
@@ -525,17 +527,29 @@ extension Array where Element == RenderNode {
     /// `MetalCompositor.attempt`'s own admission comment records that `makeTexture` does not politely
     /// return nil under this pressure — jetsam takes the process first. The `guard wanted <= budget`
     /// that reads this number is the only gate there is. Over-counting is not free either: at 4096²
-    /// against a 3 GB device, each texture this claims and does not need costs the live composite
-    /// several hundred pixels a side and lowers the size at which the eyedropper's own composite —
-    /// `RenderSizing.native`, and the only live consumer that takes it — is refused the GPU
-    /// altogether.
+    /// against a 3 GB device, each texture this claims and does not need shortens every strip and
+    /// narrows every chunk — more passes over the same picture — and lowers the size at which a
+    /// composite that is *not* stripped is refused the GPU altogether. The two mid-stroke sandwich
+    /// halves are the ones that reach that gate whole; the bake, the thumbnail and the eyedropper all
+    /// go through `StripedCompositor` and are cut to fit instead.
     ///
     /// **Visibility is not consulted, here or in `uploadableLeafCount`, for the reason
     /// `needsCompositorOnCanvas` gives for the same choice.** A hidden layer costs the walk nothing,
-    /// so honouring the flag would be more accurate — and would make toggling an eye change the
-    /// sharpness of the whole canvas, because the size this feeds is `makeSandwichRecipe`'s. A
+    /// so honouring the flag would be more accurate — and would make toggling an eye re-cut the whole
+    /// frame, because what this feeds is the strip and chunk plan. A
     /// number that only moves when the document's *structure* does is worth more than a number that
     /// is exactly right, and the inaccuracy is in the safe direction.
+    ///
+    /// **This is frame-invariant only for as long as a keyframe track cannot turn a grade on or off,
+    /// and that assumption is load-bearing here rather than merely convenient.** The count branches on
+    /// `node.effect != nil`, and `Effect.resolved(atFrame:through:)` takes an `Effect` and returns an
+    /// `Effect` with no arm that returns nil — so a grade is present at every frame of a cel or at
+    /// none, and one count describes the whole span. The day a track can *add* a grade, how a frame is
+    /// cut into strips and chunks becomes a function of the playhead: a document measured at one frame
+    /// is sized for another, and the failure is a jetsam rather than a wrong picture.
+    /// `Layer.layerEffect(atFrame:)`, `LayerFolder.resolvedEffect(atFrame:)` and
+    /// `Effect.resolved(atFrame:through:)` each name this as the other place their own
+    /// panel-versus-rendering division rests; KEYFRAMES.md §4.1 is where it would be spent.
     ///
     /// Excludes the upload cache, which is bounded separately: uploads are a pure memoization that
     /// degrades to today's uncached behaviour when it has no room, where the textures below are what

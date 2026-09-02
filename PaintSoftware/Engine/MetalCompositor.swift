@@ -615,10 +615,14 @@ final class CompositorMetalEngine {
             lastAdmission = .overBudget(wantedBytes: wanted, budgetBytes: budget)
             // `.unavailable`, not `.underPressure`: this is a *static* verdict about the device and
             // the canvas size, and the CPU reference is the only thing that can render this frame at
-            // all. On the live canvas it should never fire, because `makeSandwichRecipe` has
-            // already sized the request against the same budget — it is a request built at
-            // `RenderSizing.native` (the eyedropper, `CanvasManager+Eyedropper.swift`, composites at
-            // native size on purpose so a colour pick never blends in a downscale) that reaches it.
+            // all. **What reaches it is a composite nothing cut up first.** Everything that goes
+            // through `StripedCompositor` — the bake, the project thumbnail, and the eyedropper's
+            // native-size pick (`CanvasManager+Eyedropper.swift`, which composites at native size on
+            // purpose so a colour pick never blends in a downscale) — arrives as a band that already
+            // fits, by construction: the strip height is this budget divided by this texture count.
+            // The two mid-stroke sandwich halves are composited whole
+            // (`CanvasView.startSandwichRebuild`), so on a document over this line they are what falls
+            // to CoreGraphics, for the duration of the stroke.
             return .unavailable
         }
         // Cold means the pool has to be built from nothing, so the whole working set is a new

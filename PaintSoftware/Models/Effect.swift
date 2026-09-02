@@ -1873,7 +1873,7 @@ extension Effect {
     /// **Presence is never touched, and that is load-bearing rather than incidental.** This takes an
     /// `Effect` and returns an `Effect`; there is no arm that returns nil. So a track can change what
     /// a grade *does* at a frame and can never change whether there *is* one — which is precisely
-    /// what `CanvasManager.compositorSizeGate` and the panel-versus-rendering division in
+    /// what `RenderTree.peakCompositeTextures` and the panel-versus-rendering division in
     /// `Layer.layerEffect(atFrame:)` each rest on, at length, and each say expires the day a track can
     /// turn an effect on or off. Stage 2 did not spend either.
     ///

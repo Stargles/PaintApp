@@ -723,8 +723,9 @@ extension CanvasManager {
     /// One builder for every caller, which is the point: `makeRenderRequest` and
     /// `makeSandwichRecipe` both need it, and the padding arithmetic is exactly the kind of thing
     /// that is written twice and then drifts. `renderedInto` is the request's own buffer size, which
-    /// may be smaller than the canvas (`RenderResolution`, `CompositorBudget`, the thumbnail's
-    /// bounding box), so the inset is scaled with it rather than applied in canvas pixels.
+    /// may be smaller than the canvas (`RenderResolution`, the thumbnail's bounding box), so the
+    /// inset is scaled with it rather than applied in canvas pixels. A strip's own window is applied
+    /// after this, by `FrameRecipe.windowed(to:)`, which translates the rect it returns.
     ///
     /// **The whole rect is whole pixels, not merely the inset**, so the two backends receive integers
     /// rather than an arithmetic problem. `CompositorParityLogicTests` is this subsystem's gate and a

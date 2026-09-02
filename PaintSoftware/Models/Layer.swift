@@ -220,7 +220,7 @@ extension Layer {
     /// host-interaction gate — because "is this layer in effect mode" is a question about the layer
     /// and there is no playhead in the answer. That division holds only for as long as a track cannot
     /// turn a grade *on or off* at a frame, at which point the panel questions become genuinely
-    /// ambiguous rather than merely frame-free; `CanvasManager.compositorSizeGate` is the other place
+    /// ambiguous rather than merely frame-free; `RenderTree.peakCompositeTextures` is the other place
     /// the same assumption is load-bearing, and it says so at length.
     ///
     /// **Stage 2 did not spend that assumption, and could not have.** `effectTracks` drives parameter

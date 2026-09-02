@@ -1293,13 +1293,13 @@ struct CanvasView: UIViewRepresentable {
             // a hard 2x2 block. That reads as a broken renderer rather than as a soft preview, which
             // is the difference between an artist using this setting and reporting it as a bug.
             //
-            // **Asked of the image rather than of the setting, which is a correction.** The artist's
-            // `renderResolution` is no longer the only thing that decides the composite's size —
-            // `CompositorBudget` caps it to what the device can hold, so a canvas can be composited
-            // reduced while the picker still reads "Full". Reading the picker would then choose
-            // nearest for an image that genuinely needs interpolating, and the blocky result would
-            // look like the bug the comment above exists to prevent, on the device least able to
-            // afford being reported as broken.
+            // **Asked of the image rather than of the setting, which is a correction.** The picker is
+            // what the *next* composite will be sized by; this filter has to describe the image that
+            // is on screen *now*, and those disagree for as long as a rebuild takes. Moving the knob
+            // to Full leaves the previous position's halves displayed until the new pair lands, so
+            // reading the picker would choose nearest for an image that genuinely needs
+            // interpolating, and the blocky result would look like the bug the comment above exists
+            // to prevent.
             // Either product answers: the bake and the halves are minted at one size, which is
             // `FrameBaker.recipe`'s whole argument for `.liveComposite`.
             let composited = sandwichFull?.size ?? sandwichHalves?.below.size ?? .zero
@@ -3646,8 +3646,8 @@ struct CanvasView: UIViewRepresentable {
             // serialise "the composite half of every rebuild off the main thread" — a pick is one
             // more of those. On a global queue a pick landing just after an edit would composite the
             // whole stack *concurrently* with the sandwich rebuild doing the same, holding two
-            // canvas-sized results at once on a canvas where `CompositorBudget` already has to shrink
-            // one composite to fit. The cost of sharing it is that a pick can wait a rebuild out,
+            // canvas-sized results at once on a canvas where `CompositorBudget` is already cutting
+            // one composite into strips to fit. The cost of sharing it is that a pick can wait a rebuild out,
             // which is tens of milliseconds on a deliberate tap.
             Self.sandwichQueue.async { [weak self] in
                 let picked = CanvasManager.sampledColor(from: recipe, atCanvasPoint: canvasPoint)

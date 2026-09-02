@@ -496,13 +496,14 @@ final class EffectParameterTrackLogicTests: XCTestCase {
 
     // MARK: - Presence, which a parameter track must never touch
 
-    /// **`CanvasManager.compositorSizeGate`'s expiry note has not been spent, and this is the pin.**
+    /// **`RenderTree.peakCompositeTextures`'s expiry note has not been spent, and this is the pin.**
     ///
-    /// That gate counts `node.effect != nil` over a tree derived at `currentFrame`, and it is safe
-    /// only for as long as no track can turn an effect on or off at a frame. A *parameter* track
+    /// That count branches on `node.effect != nil` over a tree derived at a frame, and it is safe
+    /// only for as long as no track can turn an effect on or off at one. A *parameter* track
     /// changes values; presence is decided by `Layer.layerEffect`, which reads `kind` and `effect` and
     /// knows nothing about a track, and `Effect.resolved(atFrame:through:)` has no arm that can return
-    /// nil. Both halves are asserted: the gate's own two numbers, and the accessor underneath it.
+    /// nil. Both halves are asserted: the compositor's own two numbers, and the accessor underneath
+    /// them.
     func testNoParameterTrackCanMakeAGradeAppearOrDisappearAtAFrame() {
         let manager = gradedManager()
         // A curve that passes through the identity and through zero, which is as close as a parameter
@@ -773,8 +774,9 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     }
 
     /// **A folder parameter track cannot turn a grade on or off either**, which is the second half of
-    /// the promise `CanvasManager.compositorSizeGate` rests on — that gate counts `node.effect != nil`
-    /// over a tree derived at `currentFrame`, and a *folder* node is exactly what it counts.
+    /// the promise `RenderTree.peakCompositeTextures` rests on — that count branches on
+    /// `node.effect != nil` over a tree derived at a frame, and a *folder* node is exactly what it
+    /// counts.
     ///
     /// Presence on a folder is `effect != nil` outright, decided one line above the resolver, and
     /// `Effect.resolved(atFrame:through:)` has no arm that returns nil. So the guarantee is the same
