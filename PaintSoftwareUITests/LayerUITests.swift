@@ -1079,21 +1079,6 @@ final class SandwichCompositingUITests: PaintUITestCase {
         return canvas
     }
 
-    /// Sets the active layer's blend mode through the options panel, leaving the panel closed.
-    private func setBlendMode(_ app: XCUIApplication, layerIndex: Int, to mode: String) {
-        openLayerPanel(app)
-        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        row.tap() // select
-        row.tap() // open options
-        app.buttons["layerOptions.blendModeButton"].tap()
-        let item = app.buttons["layerOptions.blendMode.\(mode)"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5))
-        item.tap()
-        app.buttons["layerOptions.close"].tap()
-        app.buttons["toolbar.layersButton"].tap()
-    }
-
     /// Polls a canvas pixel until `matches` holds. The sandwich composites off the main thread (see
     /// `CanvasView.Coordinator.startSandwichRebuild`), so every assertion about what the canvas shows
     /// after a model change is a wait, exactly as `waitUntilFilled` is for the fill.
@@ -1108,19 +1093,6 @@ final class SandwichCompositingUITests: PaintUITestCase {
             Thread.sleep(forTimeInterval: 0.2)
         }
         return last
-    }
-
-    /// "off" / "rest" / "stroke" — which rendering path the live canvas is on, published on
-    /// `canvas.host`'s label by `CanvasView.Coordinator.SandwichPresentation`.
-    ///
-    /// The label carries a second, space-separated field (`entries:`) that `midStrokeEntries` reads;
-    /// only the first token is the state.
-    private func sandwichState(_ app: XCUIApplication) -> String {
-        let label = app.otherElements["canvas.host"].label
-        guard let first = label.split(separator: " ").first, first.hasPrefix("sandwich:") else {
-            return "?(\(label))"
-        }
-        return String(first.dropFirst("sandwich:".count))
     }
 
     /// How many times the canvas has entered §5.2's mid-stroke presentation — the latch

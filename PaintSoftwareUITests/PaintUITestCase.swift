@@ -12,6 +12,40 @@ class PaintUITestCase: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// "off" / "rest" / "stroke" — which rendering path the live canvas is on, published on
+    /// `canvas.host`'s label by `CanvasView.Coordinator.SandwichPresentation`.
+    ///
+    /// The label carries a second, space-separated field (`entries:`) that `midStrokeEntries` reads;
+    /// only the first token is the state.
+    ///
+    /// **Here rather than in one suite** since RENDER.md stage 4d: "rest" now means *the bake for
+    /// this frame has landed*, so it is the answer two suites ask for rather than one.
+    func sandwichState(_ app: XCUIApplication) -> String {
+        let label = app.otherElements["canvas.host"].label
+        guard let first = label.split(separator: " ").first, first.hasPrefix("sandwich:") else {
+            return "?(\(label))"
+        }
+        return String(first.dropFirst("sandwich:".count))
+    }
+
+    /// Sets the active layer's blend mode through the options panel, leaving the panel closed.
+    ///
+    /// Shared for `sandwichState`'s reason: a blending leaf is the cheapest document Core Animation
+    /// cannot draw, so it is how any suite gets the compositor — and now the bake — onto the canvas.
+    func setBlendMode(_ app: XCUIApplication, layerIndex: Int, to mode: String) {
+        openLayerPanel(app)
+        let row = app.staticTexts["layerPanel.row.\(layerIndex)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap() // select
+        row.tap() // open options
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let item = app.buttons["layerOptions.blendMode.\(mode)"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        app.buttons["layerOptions.close"].tap()
+        app.buttons["toolbar.layersButton"].tap()
+    }
+
     /// Gallery -> New Canvas -> Create Canvas (default 2048x2048), landing in the editor.
     /// Also serves as the regression test for the launch-time freeze: if that bug ever
     /// comes back, `waitForExistence` below times out and the test fails.

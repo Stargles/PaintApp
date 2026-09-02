@@ -218,6 +218,7 @@
 		04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */; };
 		DEDD07AB03769DB26412A980 /* FrameBakeStoreLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */; };
 		3D49C50C541F55012CB1F244 /* FrameBakerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBA3CAB30EC28C0993A2DB14 /* FrameBakerLogicTests.swift */; };
+		A29DF3EC3DE1FA83FE150175 /* BakeWiringUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90302E0E787F2180502FE06 /* BakeWiringUITests.swift */; };
 		B71F3CE6117398D88191036A /* BakeWiringLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B74659D143FC7C1FFDFE07D /* BakeWiringLogicTests.swift */; };
 		4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */; };
 		885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */; };
@@ -452,6 +453,7 @@
 		1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeKeyLogicTests.swift; sourceTree = "<group>"; };
 		D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeStoreLogicTests.swift; sourceTree = "<group>"; };
 		FBA3CAB30EC28C0993A2DB14 /* FrameBakerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakerLogicTests.swift; sourceTree = "<group>"; };
+		B90302E0E787F2180502FE06 /* BakeWiringUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeWiringUITests.swift; sourceTree = "<group>"; };
 		5B74659D143FC7C1FFDFE07D /* BakeWiringLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeWiringLogicTests.swift; sourceTree = "<group>"; };
 		5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameRecipeLogicTests.swift; sourceTree = "<group>"; };
 		62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeferredVectorRenderLogicTests.swift; sourceTree = "<group>"; };
@@ -572,6 +574,7 @@
 				1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */,
 				D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */,
 				FBA3CAB30EC28C0993A2DB14 /* FrameBakerLogicTests.swift */,
+				B90302E0E787F2180502FE06 /* BakeWiringUITests.swift */,
 				5B74659D143FC7C1FFDFE07D /* BakeWiringLogicTests.swift */,
 				62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
@@ -958,6 +961,7 @@
 				04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */,
 				DEDD07AB03769DB26412A980 /* FrameBakeStoreLogicTests.swift in Sources */,
 				3D49C50C541F55012CB1F244 /* FrameBakerLogicTests.swift in Sources */,
+				A29DF3EC3DE1FA83FE150175 /* BakeWiringUITests.swift in Sources */,
 				B71F3CE6117398D88191036A /* BakeWiringLogicTests.swift in Sources */,
 				4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */,
 				885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */,

@@ -7,9 +7,10 @@ import SwiftUI
 // (`FrameBakeKey`), a store that holds them (`FrameBakeStore`), a queue that says which frame is
 // next (`BakeQueue`), a ring that holds the decoded frames just ahead of the playhead
 // (`DecodedFrameRing`), and a recipe that turns the model into a composite off the main actor
-// (`FrameRecipe`). **This file is the loop that joins them, and nothing else.** It does not wire the
-// live canvas and it does not wire playback — that is stage 4d — but it owns the read path both of
-// those will use, because the ring and the digest→frames map have nowhere else to live.
+// (`FrameRecipe`). **This file is the loop that joins them, plus the read path off it.** Stage 4d
+// wired that read path to the live canvas and to playback, both through `CanvasManager.syncFrameBake`
+// and `CanvasView.Coordinator.refreshBakedFull`; the ring and the digest→frames map live here because
+// nothing else sees both a file name and a frame number.
 //
 // ## The idiom is `CanvasView.startSandwichRebuild`'s, deliberately
 //
@@ -18,13 +19,17 @@ import SwiftUI
 // second path beside an existing one, and this *is* the existing one: mint on main in O(layers) with
 // no pixel work, do every pixel on the queue, assign on the way back.
 //
-// **One thing is deliberately not inherited: the single-slot drop.** `isSandwichRebuilding` discards
-// a rebuild request that arrives while one is in flight, and the discarded request is simply lost —
-// which is correct there, because the far end re-derives the key from the model and so picks up
-// whatever has happened since. It is wrong here: §3.6 says *"the queue reorders, it never
-// discards"*, and `BakeQueue` is structurally incapable of losing a frame. `isBaking` below is a
-// mutual-exclusion flag, not a slot: every path back through `finish` clears it and kicks again, so
-// a request that arrives mid-bake waits one iteration rather than evaporating.
+// **`isBaking` is mutual exclusion, not a slot**, and §3.6's *"the queue reorders, it never
+// discards"* is what it is written for: every path back through `finish` clears it and kicks again,
+// so a request that arrives mid-bake waits one iteration rather than evaporating, and `BakeQueue` is
+// structurally incapable of losing a frame in the meantime.
+//
+// This paragraph used to say that behaviour was *not inherited* from `isSandwichRebuilding`, on the
+// grounds that the sandwich's flag loses a declined request outright. **It does not**, and stage 4d
+// checked: `finishSandwichRebuild` ends in `reconcileLayers()`, which re-derives the key from the
+// model and starts the rebuild the guard declined. The two flags are one contract in two places, and
+// the sandwich's is still load-bearing — the halves run on a *serial* queue, so deleting its guard
+// would queue one rebuild per SwiftUI pass and hand a scrub a backlog of pictures nobody will see.
 
 /// The background frame baker: one serial worker that keeps the store in step with the document.
 ///
@@ -36,7 +41,7 @@ final class FrameBaker {
 
     // MARK: - Wiring
 
-    /// **Weak, because stage 4d hangs this off `CanvasManager`.** The baker reads the model on the
+    /// **Weak, because `CanvasManager` owns this.** The baker reads the model on the
     /// main actor and nowhere else; every value it hands the worker queue was frozen at mint time
     /// (`FrameRecipe`, RENDER §3.2), so the queue holds no reference to anything the artist can edit.
     private weak var manager: CanvasManager?
@@ -94,8 +99,9 @@ final class FrameBaker {
     /// serial baker" means and what keeps the peak memory to one frame's chunk width.
     private(set) var isBaking = false
 
-    /// Called on the main actor the moment `BakeQueue.next` answers nil — the loop having drained
-    /// and stopped rather than spun. Tests wait on it; stage 4d has no use for it.
+    /// Called on the main actor the moment the loop has nothing left — no dirty frame, and no cold
+    /// frame inside the ring's lookahead — having drained and stopped rather than spun. Tests wait on
+    /// it; the app does not, and a walk that failed to terminate is a hung expectation there.
     var onIdle: (() -> Void)?
 
     /// Called on the main actor after each frame the loop visits, whatever the outcome.
