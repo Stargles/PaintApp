@@ -1921,3 +1921,156 @@ identification of which call in the minify path kills the process at 16383², si
 established that one of two `CGContext.draw` calls did; and a confirmation, which is only a formality given
 the empty diff above, that stage 2's `render(quality:ifStillAtVersion:)` produces the same pixels off the
 render queue. None of them changes a conclusion here; all three would sharpen one.
+
+---
+
+## 10. What a baked frame costs on disk and on the clock (2026-09-02)
+
+RENDER §5 stage 4e: *"MEASURE the compression ratio and the decode time on the device rather than
+trusting §3.5's expectation of them."* Stage 4a measured a 512² synthetic rect on the simulator, which is
+the extreme case at a toy size on the wrong hardware. This is the same store — `Engine/FrameBakeStore.swift`,
+LZ4_RAW over tightly-packed BGRA premultiplied-first rows behind a 64-byte header — measured on frames
+shaped like the document RENDER §2.8 names, at canvas sizes the owner actually uses.
+
+The harness is `PerfBaselineTests.testWhatOneBakedFrameCostsToCompressStoreAndDecode` and
+`…testWhetherAPerRowFilterBeforeLZ4WouldBuyAnything`. Four fixtures: **cel art** (six flat colours in
+large hard-edged polygons with real vector ink stamped over them, so the antialiased dab edges LZ4 cannot
+match are present), a **hold** (three ink strokes on transparency), a **painted** background (a two-axis
+gradient with ±3 of grain) as the honest pessimistic bound, and seeded **noise** as the theatrical one.
+
+**Two kinds of number live below and they do not have the same standing.** The byte counts are exact and
+build-independent — the same fixtures produce the same file on any machine, so the ratio table is settled
+wherever it was taken. The milliseconds are not: they are **simulator, Debug** until a device run replaces
+them, and §1's "the device is ~1.3× the simulator" is a compositing figure that has no business being
+applied to a `libcompression` call. **The timings are labelled and they are owed a device re-take.**
+
+### 10.1 Compression ratio — MEASURED, exact, build-independent
+
+Taken on the iOS 26.5 simulator, 2026-09-02, at `3f6b360`; the figures are file sizes, so nothing about
+the host is in them.
+
+| canvas | fixture | raw bytes | file bytes | ratio | branch |
+|---|---|---|---|---|---|
+| 2048×1024 | cel art | 8,388,608 | 154,199 | **54.4×** | LZ4 |
+| 2048×1024 | hold | 8,388,608 | 61,955 | **135.4×** | LZ4 |
+| 2048×1024 | painted | 8,388,608 | 5,639,767 | 1.49× | LZ4 |
+| 2048×1024 | noise | 8,388,608 | 8,388,672 | 1.00× | raw |
+| 2048×2048 | cel art | 16,777,216 | 250,947 | **66.9×** | LZ4 |
+| 2048×2048 | hold | 16,777,216 | 108,529 | **154.6×** | LZ4 |
+| 2048×2048 | painted | 16,777,216 | 11,287,430 | 1.49× | LZ4 |
+| 2048×2048 | noise | 16,777,216 | 16,777,280 | 1.00× | raw |
+| 4096×4096 | cel art | 67,108,864 | 917,046 | **73.2×** | LZ4 |
+| 4096×4096 | hold | 67,108,864 | 443,573 | **151.3×** | LZ4 |
+
+**§2.8's premise holds, and the ratio improves with canvas size rather than decaying.** 54.4× at the
+owner's canvas, 73.2× at 4096²: a bigger canvas draws the same picture with more flat pixels in it, so the
+incompressible part — the ink's antialiased edges — is a shrinking share. Stage 4a's 108.6× on a 512²
+rect was optimistic about *this* document by about 2× and pessimistic about the *trend*.
+
+**The consequence for the store's ceiling, INFERRED from the table.** Ten seconds of 24 fps cel art at
+2048×1024 is 240 frames; at 154 kB a frame that is **37 MB**, against 2.0 GB raw. `FrameBakeStore`'s
+512 MiB default ceiling therefore holds roughly **an hour** of that material rather than the eleven seconds
+the raw arithmetic in RENDER §0 implies — and holds sizeably more than that in practice, because §3.3's
+content addressing keeps one file per *hold* rather than per frame, and the hold is the cheapest row in the
+table as well as the commonest.
+
+**And the pessimistic bound is not the noise row, it is the painted one: 1.49×.** A painted background —
+any smooth gradient — has no exact byte repeat for LZ4 to match and compresses barely at all. A document
+whose frames are mostly painted backdrop rather than flat cel would blow the ceiling ~36× faster than the
+table's headline suggests. Nothing needs doing about that today; it is written down so that a future
+"the bake is filling the disk" report is diagnosed by looking at the artwork first.
+
+### 10.2 Encode and decode — MEASURED on the **simulator in Debug**, and owed a device re-take
+
+Same run. Medians of five repetitions (three at 4096²), machine 90–96% idle before and after — checked
+with `top -l 2 -n 0 -s 2` per CLAUDE.md, because a timing taken on a busy machine is not a measurement.
+Every column is milliseconds. The `·` rows are the split of the whole above them.
+
+| canvas | fixture | encode whole | · BGRA convert | · LZ4 | decode whole | · warm read | · cold read (`F_NOCACHE`) | · LZ4 | · CGImage |
+|---|---|---|---|---|---|---|---|---|---|
+| 2048×1024 | cel art | 19.0 | 8.8 | 9.7 | **9.8** | 0.0 | 0.2 | 8.9 | 0.8 |
+| 2048×1024 | hold | 18.8 | 9.0 | 9.1 | **11.5** | 0.0 | 0.1 | 10.6 | 0.8 |
+| 2048×1024 | painted | 41.1 | 8.8 | 28.2 | 15.7 | 0.7 | 6.6 | 13.3 | 0.9 |
+| 2048×1024 | noise | 27.2 | 8.9 | 14.3 | 3.8 | 1.1 | 10.0 | — | 0.9 |
+| 2048×2048 | cel art | 37.2 | 17.8 | 18.6 | **20.0** | 0.0 | 0.3 | 17.9 | 1.6 |
+| 2048×2048 | hold | 37.1 | 18.1 | 17.8 | 23.4 | 0.0 | 0.1 | 21.7 | 1.6 |
+| 2048×2048 | painted | 166.9 | 17.9 | 57.3 | 34.8 | 2.0 | 19.9 | 46.7 | 5.5 |
+| 2048×2048 | noise | 54.7 | 18.0 | 29.0 | 7.5 | 2.3 | 20.1 | — | 1.5 |
+| 4096×4096 | cel art | 145.6 | 70.9 | 72.9 | **78.7** | 0.1 | 1.0 | 72.1 | 6.9 |
+| 4096×4096 | hold | 145.7 | 72.2 | 71.2 | **90.5** | 0.1 | 0.5 | 84.2 | 6.7 |
+
+**The two painted/noise rows at 2048² disagree with themselves and should be read as bounds, not as
+figures** — a 46.7 ms `· LZ4` under a 34.8 ms `decode whole` is arithmetically impossible, and it happens
+because those two rows churn an 11–16 MB incompressible buffer per repetition and the allocator, not the
+codec, sets the median. Every cel-art and hold row is internally consistent.
+
+**Four things the table says, in order of how much they matter.**
+
+**1. Decode is proportional to the frame's *pixels*, not to its file.** The hold is a quarter of the cel
+art's file and decodes **slower** (11.5 vs 9.8 ms at 2048×1024, 90.5 vs 78.7 at 4096²), because LZ4
+reconstructs the same 8 or 64 MiB either way and a nearly-empty frame is coded as long small-offset
+matches, which is every LZ4 decoder's slowest path. So the design cannot assume that the frames the store
+mostly holds — holds, the cheapest on disk — are also the cheapest to play. **Sizing the decoded ring by
+compressed bytes would size it by the wrong number**; §3.5's "a byte budget rather than a count" must mean
+*decoded* bytes, which it does, and this is the measurement that says why that wording matters.
+
+**2. At the owner's canvas a frame comes off disk in ~10 ms against a 41.6 ms budget — and at 4096² it
+does not.** 78.7–90.5 ms is **2.2× over budget**, so at the knob's full resolution one decode thread
+cannot feed 24 fps even with the file already in the page cache. §3.5's decoded ring is therefore not an
+optimisation at that size, it is the mechanism, and it needs enough lead — or enough threads — to cover a
+frame that costs two frame intervals to produce. **This is the first measured number that says how much
+lead.** (RENDER §2.12 forbids silently rendering below the knob, so "just bake smaller" is not available.)
+
+**3. The cold read is nearly free for the artwork and only appears at all for the incompressible bound.**
+`F_NOCACHE` at 2048×1024 costs 0.2 ms for cel art and 10.0 ms for noise: the storage read scales with the
+*file*, which is exactly what compression buys — a 154 kB frame is off the disk before it has started.
+The read is not the problem at any size. **The decompress is 90% of the decode**, at every size and every
+fixture that takes the LZ4 branch.
+
+**4. The encode is half format-conversion, and that half is already scheduled for deletion.** `bgraBytes`
+— `CGContext.draw` of the composite into a premultiplied-first BGRA context — is **8.8 of 19.0 ms** at
+2048×1024 and **70.9 of 145.6** at 4096². RENDER §3.5 already names the change that removes it
+(`CompositorMetalEngine.readBack` rendering into `bgra8Unorm`, scoped in BUGS.md as a one-capability-check
+change), so the baker could hand the store bytes it already has in the right layout. **That is a ~2×
+saving on the whole per-frame bake cost, measured rather than argued**, and it is the single cheapest
+thing on this page. §3.5 mentions the encode nowhere; it is not free and this is what it costs.
+
+### 10.3 §3.5's contingency, evaluated before anyone builds it: a per-row filter **loses**
+
+RENDER §3.5 ends with *"If the ratio on real documents disappoints, the next step is a per-row Up filter
+before LZ4, not a video codec."* The ratio does not disappoint — and had it, **the named next step would
+have made it worse**. Byte counts, exact, build-independent, from the same run:
+
+| canvas | fixture | LZ4 alone | Up + LZ4 | Sub + LZ4 |
+|---|---|---|---|---|
+| 2048×1024 | cel art | 154,135 | 214,358 (**+39%**) | 167,028 (+8%) |
+| 2048×1024 | hold | 61,891 | 79,287 (**+28%**) | 63,759 (+3%) |
+| 2048×1024 | painted | 5,639,703 | 5,781,663 (+2.5%) | 5,705,178 (+1.2%) |
+| 2048×2048 | cel art | 250,883 | 312,069 (**+24%**) | 281,893 (+12%) |
+| 2048×2048 | hold | 108,465 | 128,597 (**+19%**) | 111,859 (+3%) |
+| 2048×2048 | painted | 11,287,366 | 11,539,451 (+2.2%) | 11,404,944 (+1.0%) |
+
+**Every fixture, both filters, bigger.** The mechanism, INFERRED from the shape of the losses: a filter
+helps a coder that models *smooth variation*, and LZ4 does not — it matches exact byte sequences. A flat
+region is already one long match, so differencing it to a run of zeros codes to the same size and buys
+nothing; but every hard edge, and every antialiased dab boundary, becomes a band of residuals that differ
+row by row where the source rows were byte-identical repeats of each other. The loss is therefore largest
+exactly where this document has the most edges (cel art, +39%) and smallest where it has the fewest
+(painted, +2.5%) — which is the opposite of the ranking the contingency assumed.
+
+**So §3.5's fallback is refuted, not deferred, and the paragraph in RENDER.md has been corrected to say
+so.** If the ratio ever does disappoint on a real document, the thing to reach for is a coder that models
+prediction error at all (PNG's Paeth *with* DEFLATE, or a real intra codec), not a filter in front of a
+match-only coder. The cost side never got to matter, but for the record the filter is a full extra pass
+over the frame on the way in and another on the way out, and the second one lands on the decode path that
+§10.2 shows is already the tight one.
+
+### 10.4 What is still owed
+
+**The device.** Everything in §10.2 is simulator and Debug. The device run was built, signed and queued
+against the owner's iPad 9 on 2026-09-02 and never started: `xcodebuild` sat on *"Unlock Kevin's iPad to
+Continue"*, which is the same wall §9 hit, and nothing on this Mac fixes it. The command is
+`-configuration Release -destination platform=iOS,id=E3B83820-…` with the two test selectors above; the
+build is cached, so a retry reaches the tests in under a minute once the iPad is unlocked. **§10.1 and
+§10.3 do not need it** — those are byte counts. §10.2 does, and the A13's LZ4 throughput against an
+M-series simulator is exactly the kind of gap §1's ~1.3× rule is not entitled to guess at.
