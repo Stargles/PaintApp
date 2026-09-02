@@ -108,7 +108,17 @@ extension CanvasManager {
         let newStart = source.endFrame
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: newStart, maxLength: source.frameCount) else { return }
         withStructureUndo(label: .duplicateFrame) {
-            let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy())
+            // **The pose channels come with the drawing** — KEYFRAMES.md §3.1's *"it rides the cel
+            // through move, split, duplicate and paste for free"*, which was a claim in
+            // `Cel.transformTracks`' own doc comment and not true of this line until 2026-09-02: the
+            // memberwise `Cel(...)` below defaults both fields to `[:]`, so duplicating an animated cel
+            // produced a copy of the drawing with the animation silently deleted.
+            //
+            // **Verbatim, including keys past `length`.** The copy can be shorter than its source when
+            // a neighbour is in the way, and §3.1's resize rule is the one to follow — *"a key pushed
+            // outside the new span is held, not deleted"* — so re-growing the copy gives the animation
+            // back rather than finding it trimmed.
+            let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy(), transformTracks: source.transformTracks, pendingPoseBaselines: source.pendingPoseBaselines)
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, newStart + length)
@@ -131,6 +141,8 @@ extension CanvasManager {
         let source = layers[layerIndex].cels[celIndex]
         copiedCel = CopiedCel(raster: source.raster.makeCopy(), fillImage: source.fillImage,
                               bakedImage: source.bakedImage, vector: source.vector?.makeCopy(),
+                              transformTracks: source.transformTracks,
+                              pendingPoseBaselines: source.pendingPoseBaselines,
                               frameCount: source.frameCount)
     }
 
@@ -144,7 +156,11 @@ extension CanvasManager {
         withStructureUndo(label: .pasteFrame) {
             let newCel = Cel(id: UUID(), startFrame: startFrame, frameCount: length,
                              raster: copiedCel.raster.makeCopy(), fillImage: copiedCel.fillImage,
-                             bakedImage: copiedCel.bakedImage, vector: copiedCel.vector?.makeCopy())
+                             bakedImage: copiedCel.bakedImage, vector: copiedCel.vector?.makeCopy(),
+                             // Paste is the fourth verb in §3.1's *"move, split, duplicate and
+                             // paste"*, and it dropped the channel by the same door duplicate did.
+                             transformTracks: copiedCel.transformTracks,
+                             pendingPoseBaselines: copiedCel.pendingPoseBaselines)
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, startFrame + length)
@@ -425,13 +441,36 @@ extension CanvasManager {
     }
 
     /// Splits a cel into two at `atFrame` (strictly inside the cel); both halves keep the original drawing.
+    ///
+    /// **And both halves keep the pose animation** — KEYFRAMES.md §3.1, which gives `splitCel` a rule
+    /// of its own rather than letting it fall out of cel-local time: *"keys before the cut go left,
+    /// keys after go right, and a key is inserted at the cut in both so the value is continuous across
+    /// it."* `TransformTrack.split(atCelLocalFrame:)` is that rule and carries the argument for the
+    /// inserted key; the only thing this function owns is the conversion of the *absolute* cut frame
+    /// into the cel-local one the track is numbered in, which is the same conversion
+    /// `poseKeyframeFrames(inLayer:)` makes in the other direction.
+    ///
+    /// **The held baselines go to both halves rather than to one.** A baseline is §2.27's *"the
+    /// previous value is held"* — a pose waiting for the next keyframe press to commit it — and it is
+    /// not attached to a frame at all, so there is no cut to place it on either side of. Copying it
+    /// costs one dictionary entry and loses nothing; sending it to one half would decide, silently and
+    /// wrongly half the time, which half the artist is about to press the keyframe button on.
     func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return }
+        let cut = atFrame - cel.startFrame
+        var leftTracks: [String: TransformTrack] = [:]
+        var rightTracks: [String: TransformTrack] = [:]
+        for (id, track) in cel.transformTracks {
+            let halves = track.split(atCelLocalFrame: cut)
+            leftTracks[id] = halves.left
+            rightTracks[id] = halves.right
+        }
         withStructureUndo(label: .splitFrame) {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-            let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy())
+            layers[layerIndex].cels[celIndex].transformTracks = leftTracks
+            let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             layers[layerIndex].cels.append(secondHalf)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {

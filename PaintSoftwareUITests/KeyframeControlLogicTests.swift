@@ -245,6 +245,53 @@ final class KeyframeControlLogicTests: XCTestCase {
                        "\"without having to store every single number on the layer, only the things which change\"")
     }
 
+    /// **The seed arm's neighbour search sees pose keys too** — §2.28's union has exactly one
+    /// spelling, and until 2026-09-02 it had two.
+    ///
+    /// `keyframes(of:)` folded in `poseKeyframeFrames(inLayer:)`; `seedAndKeyChannel` and
+    /// `addKeyframe` took the **static two-argument** overload, whose `poseFrames` defaulted to empty.
+    /// So the routing rule could see a pose key, count it, and hand the edit to the seed arm — which
+    /// then could not find the neighbour the count promised. `seedAndKeyChannel`'s own doc names the
+    /// consequence: *"seeding would then produce a one-key curve pinning the new value, and the
+    /// artist's old value would be lost with nothing on screen to explain it."* That is device report
+    /// 2 of §2.28 exactly, and it is what this measures.
+    ///
+    /// **The pose track is planted rather than authored, and that is deliberate.** A pose channel
+    /// today is written by a vector Move, and a *graded* layer is by construction a value layer
+    /// (`Layer.layerEffect` is `kind == .value ? effect : nil`), so no gesture reaches both on one
+    /// target. What is under test is not the gesture, it is the accessor: `poseKeyframeFrames` reads
+    /// `Cel.transformTracks` for any `.layer` target whatever its kind, ungated by the grade, and
+    /// `keyframes(of:)` already counts it — which is what makes the route `.seedAndKey` here in the
+    /// first place.
+    ///
+    /// Watched failing with `seedAndKeyChannel`'s `placed` back on the static two-argument form:
+    /// `keyFrames` is `[10]` instead of `[4, 10]` and the pre-edit contrast of 1 is gone.
+    func testSeedingPutsTheOldValueOnAKeyframeThatIsOnlyAPoseKey() throws {
+        let manager = gradedManager()
+        let target = layerTarget(manager)
+
+        // Frame 4 is a keyframe by pose key alone — no mark, which is what §2.26 says a channel
+        // records and a mark does not.
+        manager.layers[gradeIndex].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                TransformTrack.Key(frame: 4,
+                                   pose: PoseQuad(box: CGRect(x: 0, y: 0, width: 10, height: 10),
+                                                  mappedBy: CGAffineTransform(translationX: 3, y: 0)))])
+        ]
+        manager.addKeyframe(target, atFrame: 10)
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [10])
+        XCTAssertEqual(manager.keyframeFrames(of: target), [4, 10],
+                       "Setup: two keyframes, one of which no mark records")
+
+        // Standing on 10 with 4 to seed onto: arm 3.
+        XCTAssertEqual(moveSlider(manager, target, contrastID, to: 3, atFrame: 10), .seedAndKey)
+
+        XCTAssertEqual(keyFrames(manager, target, contrastID), [4, 10],
+                       "the old value goes onto the pose keyframe, which is the nearest one below")
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 4), 1, accuracy: 1e-9)
+        XCTAssertEqual(keyValue(manager, target, contrastID, atFrame: 10), 3, accuracy: 1e-9)
+    }
+
     /// **A slider edit on a channel that is already animated keys at that frame**, wherever the
     /// playhead is — the owner: *"if the current frame is a keyframe, then the value gets updated on
     /// that keyframe. If it isnt a current keyframe the drag creates a keyframe at that frame."*

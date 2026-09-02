@@ -45,6 +45,57 @@ final class PoseInterpolationLogicTests: XCTestCase {
         sqrt(abs(t.a * t.d - t.b * t.c))
     }
 
+    // MARK: - Overshoot
+
+    /// **`blend` extrapolates outside `0...1`; it does not clamp to the keys.** KEYFRAMES.md §3.2
+    /// decision 1 and this file's own header both say so, `TransformTrack`'s header says *"a move can
+    /// overshoot its mark and settle back"*, and `TransformTrack.pose(atCelLocalTime:)` says the
+    /// fraction is *"deliberately left unclamped"* because this function *"extrapolates correctly for
+    /// it"*.
+    ///
+    /// **It did not, from stage 5 until 2026-09-02**, because the two endpoint shortcuts were spelled
+    /// `t <= 0` and `t >= 1` rather than `t == 0` and `t == 1` — so every overshoot an authored handle
+    /// produced was flattened onto the key it was meant to sail past, with four prose statements of
+    /// the opposite standing over it and nothing red.
+    ///
+    /// A translation is the operand, because it extrapolates without limit in both directions and so
+    /// nothing here can be satisfied by the §9.1 validity clamp instead.
+    func testABlendPastEitherKeyExtrapolatesRatherThanClampingToIt() throws {
+        let a = PoseQuad(restingIn: box)
+        let b = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 100, y: 0))
+
+        let over = try XCTUnwrap(PoseInterpolation.blend(a, b, t: 1.25))
+        XCTAssertEqual(over.corners.p0.x - box.minX, 125, accuracy: 1e-6,
+                       "t = 1.25 is a quarter past the second key, not the second key")
+        let under = try XCTUnwrap(PoseInterpolation.blend(a, b, t: -0.25))
+        XCTAssertEqual(under.corners.p0.x - box.minX, -25, accuracy: 1e-6,
+                       "and the same in the other direction, which a `0...1` range clamp would hide")
+
+        // The whole width of the box travels, so this is the map extrapolating rather than one corner
+        // drifting — a clamp on one axis would leave the other corners on the key.
+        XCTAssertEqual(over.corners.p2.x - box.maxX, 125, accuracy: 1e-6)
+        XCTAssertEqual(over.box, a.box, "and the rest box is unchanged by a pure translation")
+    }
+
+    /// **Where the extrapolation stops, and it is §9.1 rather than a limit of the arithmetic.**
+    /// `interpolatedFromIdentity` blends the symmetric part linearly, so extrapolating a `k`× scale
+    /// passes through a singular map at `t = k / (k - 1)` — `t = 2` for the 2× shrink below. The
+    /// `isValid` guard catches that and returns the nearer key, which is §9.1's *"clamp to the last
+    /// valid pose"* doing its job. Pinned so a later reader does not mistake it for the clamp this
+    /// file has just removed.
+    func testAScaleExtrapolatesUntilItGoesSingularAndThenTakesTheNearerKey() throws {
+        let big = PoseQuad(box: box, mappedBy: scale(x: 2, y: 2))
+        let rest = PoseQuad(restingIn: box)
+
+        let mild = try XCTUnwrap(PoseInterpolation.blend(big, rest, t: 1.5))
+        let width = mild.corners.p1.x - mild.corners.p0.x
+        XCTAssertLessThan(width, box.width, "past the rest pose the shrink keeps shrinking")
+        XCTAssertGreaterThan(width, 0)
+
+        XCTAssertEqual(try XCTUnwrap(PoseInterpolation.blend(big, rest, t: 2)), rest,
+                       "at the singular point the nearer key stands in")
+    }
+
     // MARK: - The pose itself
 
     /// §2.14: a pose is a box and four corners, and a drawing nobody has moved is the box's own
@@ -94,13 +145,24 @@ final class PoseInterpolationLogicTests: XCTestCase {
     /// reproduces its matrix only to floating point, so a pose read back at `t == 1` would otherwise
     /// differ from the one the artist authored in the last few bits — and the same is true of the
     /// whole chain at `t == 0`. Both are short-circuited, and this is what says so.
+    ///
+    /// **It used to assert two more lines than that, and they were wrong** — `blend(a, b, t: -0.4) ==
+    /// a` and `blend(a, b, t: 3) == b`, captioned *"before the first key is a hold"* and *"after the
+    /// last key is a hold"*. The **hold is real and lives one level up**: `AnimationCurve`'s decision
+    /// 2 holds the *timing* curve flat outside its first and last key and
+    /// `TransformTrack.pose(atCelLocalTime:)` clamps the segment index, so a frame off either end of a
+    /// channel never reaches this function with a `t` outside `0...1` at all
+    /// (`TransformTrackLogicTests.testOutsideTheKeysThePoseIsHeldRatherThanExtrapolated` is where that
+    /// belongs). What *does* arrive here outside `0...1` is an overshooting handle **inside** a
+    /// segment, which §3.2 decision 1 exists to allow — so those two lines pinned a hold the caller
+    /// already guarantees and, with it, the `t <= 0` / `t >= 1` clamp that flattened every overshoot.
+    /// A green test held the defect in place for the length of stage 5.
     func testTheEndpointsAreTheAuthoredPosesRatherThanTheBlendOfThem() {
         let a = PoseQuad(restingIn: box)
         let b = PoseQuad(box: box, mappedBy: rotation(90).concatenating(scale(x: 2, y: 0.5)))
         XCTAssertEqual(PoseInterpolation.blend(a, b, t: 0), a)
         XCTAssertEqual(PoseInterpolation.blend(a, b, t: 1), b)
-        XCTAssertEqual(PoseInterpolation.blend(a, b, t: -0.4), a, "Before the first key is a hold")
-        XCTAssertEqual(PoseInterpolation.blend(a, b, t: 3), b, "After the last key is a hold")
+        XCTAssertNil(PoseInterpolation.blend(a, b, t: .nan), "and a non-finite t is refused outright")
     }
 
     /// **§4.3's negative claim, measured.** A quarter turn between two keys: the factored blend keeps

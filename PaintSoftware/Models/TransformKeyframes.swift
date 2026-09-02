@@ -111,16 +111,41 @@ extension CanvasManager {
     /// baked, so overwriting would replace the true baseline with a position the artist never sat on.
     /// An existing entry is kept and the call is free — `holdBaseline`'s rule, restated for a pose.
     ///
-    /// **Records no undo step of its own**, for that function's reason verbatim: it changes no
-    /// rendered pixel, it never travels alone, and the bake it rides beside is already a step that
-    /// snapshots the cel.
+    /// **Records no undo step *of its own*, and instead folds itself into the one the Move already
+    /// made.** One Move is one press of Undo (LASSO_MOVE.md §5.5), and this write arrives after that
+    /// press has been recorded, so `UndoHistory.extendLast` is what puts the two on one entry.
+    ///
+    /// **The half of `holdBaseline`'s argument that is false here is what makes that necessary.** That
+    /// function may record nothing because *"the bake it rides beside is already a step that snapshots
+    /// the cel"* — true for a value channel, whose call sites sit inside a bracket that has already
+    /// snapshotted `layers` and `folders` wholesale. A pose baseline's neighbour is
+    /// `registerVectorFloatNudgeUndo`, which restores `vector.elements`, `float.frame.*` and
+    /// `selection` **and nothing on the `Cel`** — so this field was outside every closure that could
+    /// have given it back. The symptom was exact and silent: Move between two marks, press Undo, watch
+    /// the drawing return, and a later keyframe press then seeds an animation out of a baseline
+    /// describing a move that no longer exists.
+    ///
+    /// **Nothing is folded when a bracket is already open** (`structureUndoDepth`, `gestureSnapshot`),
+    /// which is `commitCelPoseState`'s guard and for its reason: the enclosing step restores the cel
+    /// wholesale, and extending an entry that is not this gesture's would attach the baseline to a
+    /// stranger.
     @discardableResult
     func holdPoseBaseline(layerID: UUID, celID: UUID, channel: TransformChannelID,
                           pose: PoseQuad) -> Bool {
-        var state = celPoseState(layerID: layerID, celID: celID)
-        guard state.baselines[channel.id] == nil else { return false }
+        let before = celPoseState(layerID: layerID, celID: celID)
+        guard before.baselines[channel.id] == nil else { return false }
+        var state = before
         state.baselines[channel.id] = pose
         applyCelPoseState(state, layerID: layerID, celID: celID)
+
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
+        history.extendLast(cost: 160,
+                           undo: { [weak self] in
+                               self?.applyCelPoseState(before, layerID: layerID, celID: celID)
+                           }, redo: { [weak self] in
+                               self?.applyCelPoseState(state, layerID: layerID, celID: celID)
+                           })
+        refreshUndoRedoState()
         return true
     }
 

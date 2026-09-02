@@ -158,6 +158,36 @@ final class UndoHistory {
         trim()
     }
 
+    /// **Folds another pair of closures into the step already on top of the stack**, so a change made
+    /// *after* that step was recorded but belonging to the same artist action is taken back by the
+    /// same single press.
+    ///
+    /// **Why this exists rather than a second `record`.** Some writers only learn what they owe after
+    /// the step that carries it has been recorded: a vector Move records one step per nudge, and the
+    /// pose baseline §2.27 holds is written at the *commit*, after the last nudge's step is already
+    /// here. Recording it separately would cost the artist two presses to undo one Move, which
+    /// LASSO_MOVE.md §5.5 rules out; leaving it unrecorded is worse, because the geometry then comes
+    /// back and a phantom baseline stays behind to seed an animation the artist undid.
+    ///
+    /// **Order is LIFO on the way back and chronological on the way forward**: the extension happened
+    /// after the step, so undo runs the extension first and redo runs it last. Both directions
+    /// therefore see the document in the state the original closures were written against.
+    ///
+    /// The redo stack is deliberately left alone — `record` has just cleared it, and an extension is
+    /// not a new action.
+    ///
+    /// - Returns: false when there is no step to extend, which is the caller's signal that it must
+    ///   record one of its own or do nothing.
+    @discardableResult
+    func extendLast(cost: Int = 0, undo: @escaping () -> Void, redo: @escaping () -> Void) -> Bool {
+        guard let last = undoStack.popLast() else { return false }
+        undoStack.append(.init(label: last.label, cost: last.cost + cost,
+                               undo: { undo(); last.undo() },
+                               redo: { last.redo(); redo() }))
+        trim()
+        return true
+    }
+
     /// Reverts the most recent action and returns its label, or nil (and does nothing) if the
     /// stack is empty — the caller's signal for whether to raise an "Undid …" notice at all.
     @discardableResult

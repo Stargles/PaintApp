@@ -231,21 +231,42 @@ extension CanvasManager {
     /// transform keys.
     func keyframes(of target: KeyframeTarget) -> Keyframes {
         let state = keyframeState(of: target)
+        return keyframes(of: target, marks: state.marks, tracks: state.tracks)
+    }
+
+    /// **The same union, taken against marks and curves a writer is holding mid-edit** — which is the
+    /// only other shape anything is allowed to ask this in.
+    ///
+    /// `addKeyframe` needs the union over its *new* marks and its *old* curves, and `seedAndKeyChannel`
+    /// needs it before it writes; neither can go through `keyframes(of:)`, which re-reads the document.
+    /// **Both of them used to call the static form below and get the two-argument overload**, whose
+    /// `poseFrames` defaulted to empty — so §2.28's union had two spellings in one file, one of which
+    /// could not see a pose key. That is precisely the divergence the ruling exists to forbid, and its
+    /// two symptoms are the ones the owner reported: the neighbour search steps over a keyframe the
+    /// artist can see, and the seed arm writes onto the wrong one. The default is gone from the static
+    /// form and this is what stands in its place, so the pose frames cannot be forgotten by omission.
+    func keyframes(of target: KeyframeTarget,
+                   marks: [Int], tracks: [String: AnimationCurve]) -> Keyframes {
         let poses: [Int]
         switch target {
         case .layer(let id): poses = poseKeyframeFrames(inLayer: id)
         // A folder holds no cels, so it holds no object channels — §2.4's target has no cel to ride.
         case .folder: poses = []
         }
-        return Self.keyframes(marks: state.marks,
-                              tracks: storedEffect(of: target) == nil ? [:] : state.tracks,
+        return Self.keyframes(marks: marks,
+                              tracks: storedEffect(of: target) == nil ? [:] : tracks,
                               poseFrames: poses)
     }
 
-    /// The union as a function of values — the one implementation, so the writers below can take it
+    /// The union as a function of values — the one implementation, so the writers above can take it
     /// against a state they hold rather than re-reading the document mid-edit.
+    ///
+    /// **`poseFrames` has no default and must not be given one.** It had one until 2026-09-02 and two
+    /// callers took it, which is how §2.28's *"computed by one accessor and never stored twice"* came
+    /// to have two answers. Nothing outside this file should reach past `keyframes(of:)` or its
+    /// marks-and-tracks twin above.
     static func keyframes(marks: [Int], tracks: [String: AnimationCurve],
-                          poseFrames: [Int] = []) -> Keyframes {
+                          poseFrames: [Int]) -> Keyframes {
         guard !marks.isEmpty || !tracks.isEmpty || !poseFrames.isEmpty else { return Keyframes() }
         var keyed: Set<Int> = []
         for curve in tracks.values {
@@ -460,7 +481,7 @@ extension CanvasManager {
 
         var state = keyframeState(of: target)
         let before = state
-        let placed = Self.keyframes(marks: state.marks, tracks: state.tracks).frames
+        let placed = keyframes(of: target, marks: state.marks, tracks: state.tracks).frames
         state.tracks[parameterID] = Self.seeded(state.tracks[parameterID], keyframes: placed,
                                                 frame: frame, oldValue: oldValue, newValue: newValue)
         // A channel that seeds is a channel that no longer needs its held value.
@@ -515,12 +536,17 @@ extension CanvasManager {
             state.marks.append(frame)
             state.marks.sort()
         }
-        // **The neighbour search's view of the timeline, taken once.** Two things it must be: the
-        // *union*, so a keyframe the artist placed with a slider is a neighbour like any other; and a
+        // **The neighbour search's view of the timeline, taken once.** Three things it must be: the
+        // *union*, so a keyframe the artist placed with a slider is a neighbour like any other; a
         // snapshot of `before.tracks` rather than of the tracks being written, because seeding one
         // channel adds keys and would otherwise move the next channel's neighbour — an order
-        // dependence over a dictionary, which has none.
-        let placed = Self.keyframes(marks: state.marks, tracks: before.tracks).frames
+        // dependence over a dictionary, which has none; and **§2.28's union including the pose
+        // channels**, which is what `keyframes(of:marks:tracks:)` supplies and what the static
+        // two-argument form silently did not. It feeds `poseDeltaForKeyframe` below as well as the
+        // effect loop, so a pose key missing from it seeds a pose baseline onto the wrong frame — or,
+        // when it is the only other keyframe there is, onto no frame at all, discarding the baseline
+        // and the animation with it.
+        let placed = keyframes(of: target, marks: state.marks, tracks: before.tracks).frames
 
         if let stored = storedEffect(of: target) {
             let resolved = resolvedEffect(of: target, atFrame: frame)

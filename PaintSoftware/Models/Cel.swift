@@ -27,9 +27,19 @@ struct Cel: Identifiable {
     /// `TransformChannelID.id` (`"cel"`, or `"group.<uuid>"`).
     ///
     /// **On the cel and in cel-local frames**, which is §3.1's first row: the channel rides the cel
-    /// through move, split, duplicate and paste for free, exactly as `interpolation` above does and
-    /// for the same reason. Effect-parameter channels are the other row — they live on the *layer* in
-    /// absolute document frames (§2.4), because their target has no cel to ride.
+    /// through move, split, duplicate and paste. Effect-parameter channels are the other row — they
+    /// live on the *layer* in absolute document frames (§2.4), because their target has no cel to
+    /// ride.
+    ///
+    /// **"Rides for free" is what this comment said until 2026-09-02 and it was false of three of
+    /// those four verbs.** `moveCel` genuinely is free — it writes `startFrame` and the keys are
+    /// numbered from it — but `duplicateCel`, `splitCel` and `pasteCel` each *build a new `Cel`*, and
+    /// a memberwise initialiser defaults an unmentioned field to `[:]`. So an animated cel duplicated,
+    /// split or pasted came back as the drawing with its animation deleted, and nothing said so. The
+    /// three call sites now carry these two fields explicitly, and `splitCel` carries §3.1's cut rule
+    /// through `TransformTrack.split(atCelLocalFrame:)`. **Add a field here and you owe those three
+    /// sites a line each**; cel-local numbering is what makes the line a copy rather than a
+    /// conversion, which is the part that really is free.
     ///
     /// Empty is the overwhelmingly common case and every reader tests it first: a document that has
     /// never been keyframed must cost one `isEmpty` on the paths that ask, which is every rasterize of

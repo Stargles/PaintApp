@@ -42,7 +42,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// what `TimelineLayoutKey.make` does, so the assertions below are about the band the artist sees
     /// rather than about either half alone.
     private func markerRow(marks: [Int], tracks: [String: AnimationCurve]) -> [TimelineKeyMarkers.Marker] {
-        let placed = CanvasManager.keyframes(marks: marks, tracks: tracks)
+        let placed = CanvasManager.keyframes(marks: marks, tracks: tracks, poseFrames: [])
         return TimelineKeyMarkers.markers(frames: placed.frames, keyed: placed.keyed)
     }
 

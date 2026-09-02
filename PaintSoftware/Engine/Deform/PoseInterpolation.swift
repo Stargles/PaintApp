@@ -157,15 +157,32 @@ extension PoseQuad: Codable {
 ///
 /// ## Two properties worth stating, because a test would otherwise have to guess at them
 ///
-/// **The endpoints are the keys, bit for bit.** `t <= 0` and `t >= 1` return the stored pose without
+/// **The endpoints are the keys, bit for bit.** `t == 0` and `t == 1` return the stored pose without
 /// going through any of the above — `interpolatedFromIdentity(t: 1)` reproduces its matrix only to
 /// floating-point, and a key the artist authored must be the pose the artist sees. Same argument
 /// `DeformFactorization.solve` makes for solving in the anchor frame.
 ///
-/// **`t` is not clamped in between.** An overshooting timing curve (§3.2 decision 1) hands this a `t`
-/// outside `0...1` on purpose, and the factored form extrapolates it correctly: the rotation keeps
-/// turning and the scale keeps going. That is the anticipation and settle a graph editor exists to
-/// give, and clamping here would remove it from the transform channel alone.
+/// **`t` is not clamped anywhere, and the shortcut above is an exact-equality shortcut rather than a
+/// clamp.** An overshooting timing curve (§3.2 decision 1) hands this a `t` outside `0...1` on
+/// purpose, and the factored form extrapolates it correctly: the rotation keeps turning and the scale
+/// keeps going. That is the anticipation and settle a graph editor exists to give, and clamping here
+/// would remove it from the transform channel alone.
+///
+/// **It was written `t <= 0` / `t >= 1` until 2026-09-02 and that flattened every overshoot**, while
+/// this comment, `TransformTrack`'s header (*"a move can overshoot its mark and settle back"*) and
+/// `TransformTrack.pose(atCelLocalTime:)` (*"the fraction is deliberately left unclamped … `blend`
+/// extrapolates correctly for it"*) all three said it did not. Three prose statements of the
+/// behaviour and two comparison operators against them, with nothing red — which is why the
+/// extrapolation is now pinned by `PoseInterpolationLogicTests` in both directions rather than only
+/// described here.
+///
+/// **How far it extrapolates before §9.1 takes over, measured 2026-09-02.** A translation and a
+/// rotation extrapolate cleanly to `t = 3` and beyond. A *scale* does not, and the arithmetic says
+/// where it stops: `interpolatedFromIdentity` blends the symmetric part linearly, so extrapolating a
+/// `k`× scale passes through a singular map at `t = k / (k - 1)` — `t = 2` for a 2× shrink — and the
+/// `isValid` guard below returns the nearer key from there on. That is §9.1's clamp doing exactly its
+/// job, not a limit of the extrapolation, and it is far outside any overshoot an authored handle
+/// produces.
 enum PoseInterpolation {
 
     /// `a` at `t = 0`, `b` at `t = 1`, and the factored blend in between.
@@ -179,8 +196,12 @@ enum PoseInterpolation {
     /// to a mirror image); the projective cases stage 5b adds reach it more easily.
     static func blend(_ a: PoseQuad, _ b: PoseQuad, t: CGFloat) -> PoseQuad? {
         guard t.isFinite else { return nil }
-        if t <= 0 { return a }
-        if t >= 1 { return b }
+        // **Exact equality, not `<=` / `>=`.** These two lines exist so a key the artist authored is
+        // returned bit for bit rather than round-tripped through the factorisation; they are not a
+        // range clamp, and writing them as one is what silently flattened every overshoot the timing
+        // curve is built to produce. Anything outside `0...1` falls through and extrapolates.
+        if t == 0 { return a }
+        if t == 1 { return b }
         guard let ha = a.homography, let hb = b.homography,
               let fa = factored(ha), let fb = factored(hb),
               let inverseA = inverted(fa.linear)

@@ -470,6 +470,230 @@ final class TransformChannelLogicTests: XCTestCase {
                        "The bake is taken back: the cel stores one drawing, in its rest position")
     }
 
+    // MARK: - Cel operations
+
+    /// The pose whichever cel covers `frame` shows there, through the shipped accessors — so a test
+    /// can ask "what does the document show at frame *n*" across an operation that replaces the cel
+    /// the frame belonged to.
+    private func shownDX(_ manager: CanvasManager, atFrame frame: Int) -> CGFloat? {
+        guard let index = manager.activeCelIndex(inLayer: 1, atFrame: frame) else { return nil }
+        let cel = manager.layers[1].cels[index]
+        guard let pose = manager.resolvedPose(layerID: manager.layers[1].id, celID: cel.id,
+                                              channel: .cel, atFrame: frame) else { return nil }
+        return pose.corners.p0.x - pose.box.minX
+    }
+
+    /// A `.linear` whole-cel channel over the fixture's twelve frames, written onto the cel's own
+    /// storage — the field `posedCelContent` and `splitCel` both read. Linear so that "every frame
+    /// shows what it showed" is exact rather than approximate across a cut.
+    private func animateLinearly(_ manager: CanvasManager, dx travel: CGFloat = 120) {
+        manager.layers[1].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                TransformTrack.Key(frame: 0, pose: PoseQuad(restingIn: box), interpolation: .linear),
+                TransformTrack.Key(frame: 12, pose: slide(travel), interpolation: .linear)])
+        ]
+    }
+
+    /// **`splitCel` carries the animation across the cut** — KEYFRAMES.md §3.1's rule, from the
+    /// document side.
+    ///
+    /// **The assertion is what the artist sees at every frame, not the key lists.** §3.1 asks for the
+    /// value to be *continuous across the cut*, so the operand is the pose each frame resolves to
+    /// before and after — read through `activeCelIndex` and `resolvedPose`, because the second half is
+    /// a cel with an id that did not exist a moment ago.
+    ///
+    /// Watched failing with `splitCel`'s two `transformTracks:` lines removed: **twelve** of these
+    /// twelve frames come back nil, because the memberwise `Cel(...)` defaults the field to `[:]` and
+    /// the surviving half is assigned `[:]` as well.
+    func testSplittingAnAnimatedCelKeepsEveryFrameShowingWhatItShowed() {
+        let (manager, _, _) = fixture()
+        animateLinearly(manager)
+        let before = (0..<12).map { shownDX(manager, atFrame: $0) }
+        XCTAssertEqual(before.compactMap { $0 }.count, 12, "Setup: every frame is posed to begin with")
+
+        manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
+        XCTAssertEqual(manager.layers[1].cels.count, 2)
+        XCTAssertFalse(manager.layers[1].cels[0].transformTracks.isEmpty, "the left half keeps its channel")
+        XCTAssertFalse(manager.layers[1].cels[1].transformTracks.isEmpty, "and so does the right")
+
+        for frame in 0..<12 {
+            let now = shownDX(manager, atFrame: frame)
+            XCTAssertNotNil(now, "frame \(frame) still has a pose")
+            XCTAssertEqual(now!, before[frame]!, accuracy: 1e-9,
+                           "frame \(frame) shows the pose it showed before the cut")
+        }
+    }
+
+    /// Undoing the split gives the animation back as one channel on one cel, since the split is one
+    /// structural step and the tracks ride inside it.
+    func testUndoingASplitRestoresTheOneChannel() {
+        let (manager, _, _) = fixture()
+        animateLinearly(manager)
+        manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
+        manager.undo()
+        XCTAssertEqual(manager.layers[1].cels.count, 1)
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.map(\.frame), [0, 12])
+    }
+
+    /// **`duplicateCel` copies the animation with the drawing.** `Cel.transformTracks`' own doc
+    /// comment claimed the channel *"rides the cel through move, split, duplicate and paste for
+    /// free"*; three of those four verbs build a fresh `Cel`, and a memberwise initialiser defaults an
+    /// unmentioned field to `[:]`, so the claim was false and the animation was silently deleted.
+    ///
+    /// The held baseline travels too — §2.27's state *between* keyframe A and keyframe B, which a copy
+    /// made in that gap must not drop any more than a save may.
+    ///
+    /// Watched failing with `duplicateCel`'s two arguments removed: `transformTracks` on the copy is
+    /// empty and this reads `nil` against `[0, 12]`.
+    func testDuplicatingAnAnimatedCelCopiesItsChannelAndItsHeldBaseline() throws {
+        let (manager, layerID, celID) = fixture()
+        animateLinearly(manager)
+        manager.layers[1].cels[0].frameCount = 6
+        manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .cel, pose: slide(-7))
+
+        manager.duplicateCel(layerIndex: 1, celIndex: 0)
+        XCTAssertEqual(manager.layers[1].cels.count, 2)
+        let copy = manager.layers[1].cels[1]
+        XCTAssertEqual(copy.startFrame, 6)
+        XCTAssertEqual(copy.transformTracks["cel"]?.keys.map(\.frame), [0, 12],
+                       "keys are cel-local, so they need no rebasing and none is done")
+        XCTAssertEqual(copy.pendingPoseBaselines["cel"], slide(-7))
+        XCTAssertNotEqual(copy.id, celID, "and it really is a different cel")
+    }
+
+    /// The fourth verb. `CopiedCel` had nowhere to put a pose channel, so copy-and-paste lost it by
+    /// the same door duplicate did.
+    func testCopyingAndPastingACelCarriesItsChannel() throws {
+        let (manager, layerID, celID) = fixture()
+        animateLinearly(manager)
+        manager.layers[1].cels[0].frameCount = 6
+        manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .cel, pose: slide(-3))
+
+        manager.copyCel(layerIndex: 1, celIndex: 0)
+        XCTAssertTrue(manager.pasteCel(layerIndex: 1, startFrame: 20))
+        let pasted = try XCTUnwrap(manager.layers[1].cels.first { $0.startFrame == 20 })
+        XCTAssertEqual(pasted.transformTracks["cel"]?.keys.map(\.frame), [0, 12])
+        XCTAssertEqual(pasted.pendingPoseBaselines["cel"], slide(-3))
+    }
+
+    // MARK: - The held baseline and undo
+
+    /// **One Move is one press of Undo, and the held pose goes back with the geometry.**
+    ///
+    /// `holdPoseBaseline` writes a **persisted** field (§3.5) and used to record nothing, on the
+    /// argument that *"the bake it rides beside is already a step that snapshots the cel"*. The bake
+    /// beside it is `registerVectorFloatNudgeUndo`, which restores `vector.elements`,
+    /// `float.frame.*` and `selection` — and nothing on the `Cel`. So the artist could Move between
+    /// two marks, press Undo, watch the drawing come back, and keep a baseline describing a move that
+    /// no longer existed; the next keyframe press then seeded an animation out of it.
+    ///
+    /// Driven through the real gesture — lift, nudge, commit — because the defect is precisely that
+    /// the baseline is written *after* the nudge's own step is on the stack, and a test that called
+    /// `holdPoseBaseline` with an empty history could not see it.
+    ///
+    /// Watched failing with `holdPoseBaseline`'s `history.extendLast` block removed: the geometry
+    /// returns and `pendingPoseBaselines` still holds one entry.
+    func testUndoingAMoveTakesTheHeldPoseBackWithTheGeometry() throws {
+        let (manager, layerID, celID) = fixture()
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        manager.currentLayerIndex = 1
+        // A mark at frame 0 and the playhead at 8: one keyframe, not standing on it, which is the
+        // `.storedValueHoldingBaseline` arm.
+        manager.currentFrame = 0
+        manager.addKeyframe(target, atFrame: 0)
+        manager.currentFrame = 8
+
+        let restX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
+            .samples.first?.point.x)
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        var pose = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        pose.position.x += 15
+        manager.nudgeVectorFloat(to: pose)
+        manager.commitVectorFloatIfNeeded()
+
+        XCTAssertEqual(manager.layers[1].cels[0].pendingPoseBaselines.count, 1,
+                       "Setup: the Move held a baseline, or there is nothing here to take back")
+        XCTAssertTrue(manager.layers[1].cels[0].transformTracks.isEmpty, "and keyed nothing yet")
+
+        manager.undo()
+        let afterX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
+            .samples.first?.point.x)
+        XCTAssertEqual(afterX, restX, accuracy: 1e-9, "one press gives the geometry back")
+        XCTAssertTrue(manager.layers[1].cels[0].pendingPoseBaselines.isEmpty,
+                      "and the same press gives the held pose back — a phantom baseline here seeds an "
+                      + "animation out of a move the artist undid")
+
+        manager.redo()
+        XCTAssertEqual(manager.layers[1].cels[0].pendingPoseBaselines.count, 1,
+                       "and redo puts both halves back, or the fold is one-directional")
+    }
+
+    /// The other half of "one press": the fold must not cost a *second* one. A Move that holds a
+    /// baseline is still one nudge and therefore one step on the stack.
+    func testHoldingAPoseBaselineCostsNoUndoStepOfItsOwn() throws {
+        let (manager, _, _) = fixture()
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        manager.currentLayerIndex = 1
+        manager.currentFrame = 0
+        manager.addKeyframe(target, atFrame: 0)
+        manager.currentFrame = 8
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        var pose = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        pose.position.x += 15
+        manager.nudgeVectorFloat(to: pose)
+        manager.commitVectorFloatIfNeeded()
+        XCTAssertEqual(manager.history.undoStack.count, 1,
+                       "one nudge, one step — LASSO_MOVE.md §5.5")
+    }
+
+    // MARK: - §2.28's union, from the writers' side
+
+    /// **A pose key is a neighbour for the seed arm**, which is device report 2 of §2.28 in pose
+    /// currency: *"I have 3 keyframes and only slider A is being controlled. I go to keyframe 3 and
+    /// modify slider B. It starts from keyframe 1 to 3, skipping 2."*
+    ///
+    /// `addKeyframe` took its neighbour list from the **two-argument** `keyframes(marks:tracks:)`,
+    /// whose `poseFrames` defaulted to empty, while `keyframes(of:)` passed them — two spellings of
+    /// the list §2.28 rules must have exactly one. Here the pose key at frame 4 is the *only* other
+    /// keyframe, so the blind list finds no neighbour at all and the baseline is discarded with the
+    /// animation it was holding.
+    ///
+    /// Watched failing with `addKeyframe`'s `placed` back on the static two-argument form: the group
+    /// channel comes out with one key at frame 8, `isAnimated` false, and the drawing's old position
+    /// nowhere in the document.
+    func testAddingAKeyframeSeedsAHeldPoseOntoANeighbourThatIsOnlyAPoseKey() throws {
+        let (manager, layerID, celID) = fixture()
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 1))
+        let group = UUID()
+
+        // The whole-cel channel is animated across frames 0 and 4 — keys placed by moving, which
+        // §2.26 records as a curve and no mark, so `keyframeMarks` is empty.
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 4, pose: slide(30))
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [],
+                       "Setup: frames 0 and 4 are keyframes by key, not by mark")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 4])
+
+        // A second channel holds a pose: the artist moved a group at frame 8 and has not pressed the
+        // keyframe button yet.
+        manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .group(group),
+                                 pose: slide(-18))
+
+        manager.addKeyframe(target, atFrame: 8)
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["group.\(group.uuidString)"])
+        XCTAssertEqual(track.keys.map(\.frame), [4, 8],
+                       "The held pose lands on frame 4 — the nearest keyframe below, which is a pose key")
+        XCTAssertTrue(track.isAnimated)
+        XCTAssertEqual(track.keys[0].pose, slide(-18), "keyframe A holds where the drawing was")
+        XCTAssertTrue(track.keys[1].pose.isIdentity, "and B holds where it is now")
+        XCTAssertTrue(manager.layers[1].cels[0].pendingPoseBaselines.isEmpty)
+    }
+
     // MARK: - Persistence
 
     /// §3.5's track sidecar, end to end. A pose channel and a held baseline both have to survive a

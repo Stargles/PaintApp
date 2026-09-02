@@ -152,6 +152,57 @@ struct TransformTrack: Equatable {
     /// cel's `startFrame`.
     var keyedFrames: [Int] { keys.map(\.frame) }
 
+    /// **This channel cut in two at a cel-local frame** — KEYFRAMES.md §3.1's rule for `splitCel`,
+    /// verbatim: *"keys before the cut go left, keys after go right, and a key is inserted at the cut
+    /// in both so the value is continuous across it."*
+    ///
+    /// `cut` is the first cel-local frame of the **right** half, so the left half spans `0..<cut` and
+    /// a key of the right half at original frame `f` lands at `f - cut`.
+    ///
+    /// **The inserted key is the pose this track already shows at `cut`**, which is what makes the
+    /// rule's *"so the value is continuous"* true rather than approximate. It is also why the left
+    /// half keeps a key one frame past its own last frame: without it, the left half's frames from its
+    /// last real key onward would hold that key's pose flat (`AnimationCurve`'s decision 2 reaching
+    /// here through `timing`) instead of continuing to travel, and the artist would watch a moving
+    /// drawing stop dead at the cut. §3.1's own resize rule — *"a key pushed outside the new span is
+    /// held, not deleted, so shrinking and re-growing a cel is lossless"* — is the precedent for
+    /// storing it there.
+    ///
+    /// **What is lost is stated rather than hidden.** A segment that spans the cut is re-parameterised
+    /// on both sides: `[k₀, cut]` and `[cut, k₁]` each become a segment of their own, so the easing
+    /// *within* that one span is not the easing it had. Every other frame's pose is unchanged, which is
+    /// the strongest statement §3.1's rule admits — a single bezier cannot be two beziers.
+    ///
+    /// **A key that already sits exactly on the cut is carried across whole, not re-synthesised.** Its
+    /// pose is what `pose(atCelLocalFrame: cut)` would answer anyway, but its handles and tangent mode
+    /// are not recoverable from a pose, and a split is not an occasion to flatten an authored ease.
+    ///
+    /// Empty halves are never returned: an empty track cannot exist in `Cel.transformTracks`
+    /// (`clearPoseKeys` removes a channel left with no keys), and a track with keys yields a key at the
+    /// cut on both sides whatever the keys are. `step` rides unchanged onto both, which does re-phase
+    /// the right half — its frame 0 is the original `cut` and §2.10 anchors a step at frame 0 of the
+    /// track's own base. Rescaling it instead would retime the animation, which is the thing §3.1
+    /// refuses for the resize handles and refuses here for the same reason.
+    func split(atCelLocalFrame cut: Int) -> (left: TransformTrack, right: TransformTrack) {
+        guard let atCut = pose(atCelLocalFrame: cut) else { return (self, self) }
+        let onCut = key(atFrame: cut)
+        // **The inserted key inherits the interpolation of the segment it lands in**, which matters on
+        // the right half and only there: a key's `interpolation` describes the segment it *begins*, so
+        // the right half's first segment would otherwise be `.bezier` — `Key`'s default — whatever the
+        // artist authored. A `.constant` hold cut in two would start easing, and a `.linear` span
+        // would gain a curve at the join.
+        let segment = keys.last { $0.frame <= cut }?.interpolation ?? .bezier
+        var left = TransformTrack(keys: keys.filter { $0.frame <= cut }, step: step)
+        if onCut == nil { left.setKey(Key(frame: cut, pose: atCut, interpolation: segment)) }
+        var right = TransformTrack(keys: keys.filter { $0.frame >= cut }.map {
+            var moved = $0
+            moved.frame -= cut
+            return moved
+        }, step: step)
+        if onCut == nil { right.setKey(Key(frame: 0, pose: atCut, interpolation: segment)) }
+        return (left, right)
+    }
+
     private static func normalised(_ input: [Key]) -> [Key] {
         guard input.count > 1 else { return input }
         let sorted = input.enumerated()

@@ -120,6 +120,94 @@ final class TransformTrackLogicTests: XCTestCase {
                        "Half way back down the second segment, not half way along the first")
     }
 
+    /// **An overshooting timing curve carries the pose past its key**, which is the whole reason
+    /// `pose(atCelLocalTime:)` clamps the *segment* and leaves the *fraction* alone — and it only
+    /// works if `PoseInterpolation.blend` extrapolates, which until 2026-09-02 it did not.
+    ///
+    /// The handles are `AnimationCurveLogicTests.testAFreeHandleOvershootIsNotClampedAway`'s, so the
+    /// spine is known to ride above 3 somewhere in the segment. **A translation is the operand**
+    /// because it extrapolates without limit, so a green here cannot be the §9.1 validity clamp
+    /// standing in for the arithmetic.
+    ///
+    /// Watched failing with the `t == 0` / `t == 1` shortcuts written back as `t <= 0` / `t >= 1`:
+    /// every frame of the segment then reads exactly 80, the second key's own pose.
+    func testAFreeHandleCarriesThePosePastTheKeyItIsHeadingFor() {
+        let overshooting = TransformTrack(keys: [
+            TransformTrack.Key(frame: 0, pose: moved(0),
+                               outHandle: AnimationCurve.Handle(deltaFrames: 5, deltaValue: 4),
+                               tangentMode: .free),
+            TransformTrack.Key(frame: 10, pose: moved(80),
+                               inHandle: AnimationCurve.Handle(deltaFrames: -5, deltaValue: 4),
+                               tangentMode: .free)
+        ])
+        let travelled = (0...10).compactMap { dx(overshooting.pose(atCelLocalFrame: $0)) }
+        XCTAssertEqual(travelled.count, 11)
+        XCTAssertGreaterThan(travelled.max() ?? 0, 160,
+                             "the spine rides past index 2, so the drawing sails past its mark")
+        XCTAssertEqual(travelled.first, 0, "and still lands on both authored keys")
+        XCTAssertEqual(travelled.last, 80)
+    }
+
+    // MARK: - Splitting
+
+    /// **§3.1's rule for `splitCel`, in the currency it is written in**: *"keys before the cut go
+    /// left, keys after go right, and a key is inserted at the cut in both so the value is continuous
+    /// across it."*
+    ///
+    /// The assertion is the *rendering* rather than the key list, because "continuous across the cut"
+    /// is a statement about what the artist sees: every frame of the original span must show the pose
+    /// it showed before, read out of whichever half now covers it. `.linear` keys, so the claim is
+    /// exact for every frame and not only for the keyed ones — a bezier segment cut in two is
+    /// re-parameterised on both sides, which `split` states and which no arithmetic can avoid.
+    func testSplittingATrackLeavesEveryFrameShowingThePoseItShowed() {
+        let whole = track([(0, 0), (12, 120)])
+        let (left, right) = whole.split(atCelLocalFrame: 5)
+
+        for frame in 0..<5 {
+            XCTAssertEqual(dx(left.pose(atCelLocalFrame: frame))!,
+                           dx(whole.pose(atCelLocalFrame: frame))!, accuracy: 1e-9,
+                           "left half, frame \(frame)")
+        }
+        for frame in 5..<13 {
+            XCTAssertEqual(dx(right.pose(atCelLocalFrame: frame - 5))!,
+                           dx(whole.pose(atCelLocalFrame: frame))!, accuracy: 1e-9,
+                           "right half, frame \(frame)")
+        }
+        XCTAssertEqual(left.keys.map(\.frame), [0, 5], "the inserted key is one past the left span")
+        XCTAssertEqual(right.keys.map(\.frame), [0, 7])
+        XCTAssertEqual(dx(right.keys[0].pose)!, 50, accuracy: 1e-9, "and it holds the pose at the cut")
+    }
+
+    /// The inserted key inherits the interpolation of the segment it lands in. A `.constant` hold cut
+    /// in two must stay a hold on both sides — `Key`'s default is `.bezier`, so an inserted key that
+    /// took it would start easing where the artist asked for a step.
+    func testSplittingAHoldLeavesAHoldOnBothSides() {
+        let held = track([(0, 0), (12, 120)], interpolation: .constant)
+        let (left, right) = held.split(atCelLocalFrame: 5)
+        XCTAssertEqual(dx(left.pose(atCelLocalFrame: 4)), 0)
+        XCTAssertEqual(dx(right.pose(atCelLocalFrame: 0)), 0)
+        XCTAssertEqual(dx(right.pose(atCelLocalFrame: 6)), 0, "still holding one frame before the step")
+        XCTAssertEqual(dx(right.pose(atCelLocalFrame: 7)), 120, "and stepping on the key, as before")
+    }
+
+    /// A key sitting exactly on the cut is carried across **whole** rather than re-synthesised from
+    /// its own pose: the pose would match either way, but the handles and the tangent mode would not,
+    /// and a split is not an occasion to flatten an authored ease.
+    func testAKeyOnTheCutKeepsItsHandlesOnBothSides() {
+        let authored = TransformTrack.Key(frame: 6, pose: moved(60),
+                                          inHandle: AnimationCurve.Handle(deltaFrames: -3, deltaValue: 0.4),
+                                          outHandle: AnimationCurve.Handle(deltaFrames: 3, deltaValue: -0.4),
+                                          tangentMode: .free, interpolation: .constant)
+        var whole = track([(0, 0), (12, 120)])
+        whole.setKey(authored)
+
+        let (left, right) = whole.split(atCelLocalFrame: 6)
+        XCTAssertEqual(left.key(atFrame: 6), authored)
+        var rebased = authored
+        rebased.frame = 0
+        XCTAssertEqual(right.key(atFrame: 0), rebased)
+    }
+
     /// **The predicate the whole derivation hangs off.** A track whose keys all hold the rest pose —
     /// which is what §2.27's seeding writes before anything has been moved — must cost the document
     /// nothing at all, because a non-nil answer here is a canvas-sized render and two extra cache
