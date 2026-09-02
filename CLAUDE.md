@@ -285,6 +285,16 @@ fixes the bug. It could not have gone red. The right operands were one level dow
 are: the dab **alphas** two poses of one stroke actually stamp. When an assertion would hold for any
 correct program *and* any incorrect one, it is measuring a definition, not a behaviour.
 
+**And an assertion can be true at the wrong *level*, which is the one that does real damage.** The four
+above measure nothing, so they merely fail to help. This one helps in the wrong direction: a **passing**
+test asserted `PoseInterpolation.blend(a, b, t: -0.4) == a`, captioned *"before the first key is a
+hold"*. The hold is real — but it lives one level up, in `AnimationCurve` and `TransformTrack`'s segment
+clamp, so a channel never hands `blend` an out-of-range `t` off either end. The test pinned a guarantee
+its own caller already makes, and in doing so **froze a defect underneath it for the length of a stage**:
+`blend` clamped where its doc says twice that it extrapolates, and an overshooting handle *inside* a
+segment was silently flattened. It could go red; it was simply about the wrong function. So the question
+to ask of an assertion is not only "can this go red" but **"if this went red, would the code be wrong?"**
+
 **A fixture can be eaten by the optimisation it is testing.** The obvious ten-frame document for
 RENDER §2.16 — one cel spanning frames 2–6, edit it, count re-renders — measures nothing, because that
 cel *is* a hold, so those five frames are one bake key and one composite. Every frame needs its own

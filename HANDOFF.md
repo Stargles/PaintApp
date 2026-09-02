@@ -10,16 +10,14 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first
 
-**Nothing is owed before you start.** The full suite was run at `04099a9` on an idle machine —
-**2759 tests, 2752 passed, 1 failed, 6 skipped** — and the single failure,
-`BlendModesAndCompositorUITests`' `testHidingFolderHidesContentsOnCanvasAndReshowingRestoresThem`,
-**passed clean in isolation**. Environmental, not a finding. The per-class table is re-taken in
-CLAUDE.md, and it records a change of shape: the top three classes are now within 25 seconds of each
-other at ~330 s, so the "split the one long class" lever that section tracked since August no longer
-exists.
+**Nothing is owed before you start.** The fast tier is **2657 / 2654 passed / 0 failed / 3 skipped**,
+up from 2622 at the start of this pass. The last full run was at `04099a9` — 2759 tests, one
+environmental failure that passed clean in isolation — and it predates this pass, so **a full run is the
+first thing worth spending twenty-two minutes on** if you are about to close a phase. It is not owed
+before ordinary work.
 
-**Pick up from "Everything else open" at the bottom, or from the review candidates in BUGS.md.** The
-two worth checking first are named there.
+**Pick up from "Everything else open" at the bottom, or from BUGS.md's first entry**, which is the
+largest open thing in the repo right now and is about the tests rather than the code.
 
 ## State
 
@@ -28,7 +26,7 @@ two worth checking first are named there.
 
 **Nothing is in flight. No worktrees, no `tmp/*` branches, nothing uncommitted.**
 
-**Fast tier: 2622 total / 2619 passed / 0 failed / 3 skipped.** It was 2351 at the start of the pass.
+**Fast tier: 2657 total / 2654 passed / 0 failed / 3 skipped.** It was 2622 at the start of this pass.
 
 ## RENDER (29) is delivered through stage 6; stage 7 is what is left
 
@@ -92,23 +90,45 @@ the main actor.
   closed part of audit item 1; the other eleven were not re-audited. The sentence names a commit so it is
   not false as written, but it is no longer a census.
 
-## A review found thirteen candidate defects and reached less than half the code
+## The review is closed: twelve defects fixed, one refuted, and the tests are the problem now
 
-BUGS.md carries them with line numbers. **One is confirmed** — the bake's dirty sweep does not see a
-pose edit, because `Cel.transformTracks` arrived with the keyframe channel and `CelStamp` was written
-for the sweep in a different branch, and nobody walked the seam. The general point outlives the fix:
-**the sweep is the one place in this design where "what reaches a pixel" and "what the differ compares"
-are two hand-maintained lists, and nothing holds them together.**
+Every one of the thirteen candidates has been settled against the code. **Twelve were real and all
+twelve are fixed**; the thirteenth — a Distort bake said to round a non-square crop into a stretch, and
+the only one that would have reached a *saved* document — was a misreading. BUGS.md keeps the
+refutation and the two places a fix differed from its sketch.
 
-Twelve more are unverified claims, each checkable in minutes. The two worth checking first are a Distort
-bake that may round a non-square crop into a stretch (wrong pixels in a *saved* document, not just on
-screen) and a posed derivation that may never reach the Core-Animation path (the feature not working on
-one of its two paths — the same shape RENDER stage 3 shipped and had to close later).
+What they had in common is worth more than the list. The bake's dirty sweep is the one place in this
+design where *"what reaches a pixel"* and *"what the differ compares"* are two hand-maintained lists,
+and **four of the twelve were holes in it**: a pose edit, a folder's animated grade, an in-between's own
+recipe, and an edit landing while a bake was in flight. The sweep now stamps the pose channel and the
+recipe's content fingerprint on the cel, folders' tracks and the document's guides on the structure, and
+`finish` re-mints before it clears a dirty bit. **The general problem is not fixed** — nothing holds
+those two lists together, and the next field added to a `Cel` will be invisible to the sweep in exactly
+the same way.
 
-**Four subsystems were never reviewed at all**: the bake key and store, striped compositing, the
-live-canvas wiring, and the ~230 tests this pass added. That last one is the one to run first, read only
-to ask of each test *what would have to break for this to go red* — four fixtures that measured nothing
-were found by hand in this pass, and nobody has looked systematically.
+**The tests this pass added have now been read, and that is where the open work is.** BUGS.md's first
+entry has it in full; the two that matter:
+
+- **The bake key's completeness table covered three of its nine fields and is now closed.** Seven
+  encoder lines were deletable with the whole suite green — including `rasterVersion` and
+  `vectorVersion`, the two an ordinary brush stroke moves, and the only two. Each has a row that moves
+  it *and nothing else*, so a deleted line collapses exactly the row naming it; the same pass covered
+  every `StructuralStamp` field and the `maskStacks` sort. **The reviewer's claim that no fixture in the
+  suite ever stamped a dab was too strong** — several do — but none of it reached the *key*, which was
+  the load-bearing half.
+- **The rest-space dab bake has no test that can go red.** All five pin
+  `BrushStamper.DabPose.applied(to:)`, which copies `alpha` and scales `radius`, so every assertion is an
+  algebraic consequence of that one function and true under any implementation — including one that
+  walks in posed space and reintroduces the grain boil the stage exists to remove. The only test that
+  reaches the shipped dispatch compares `opaqueContentBounds` at accuracy 2, and `VectorCanvas.posing`
+  has already posed the samples and scaled `size` before `stamp` picks an arm, so reverting all three
+  arms leaves it green.
+
+**And a new way for a fixture to be wrong turned up, which is the one to carry forward.** The four found
+before this pass all measured *nothing*. This one measured the *wrong level*: a passing test asserted
+`blend(a, b, t: -0.4) == a`, which is true of the channel but not of `blend`, and it held a real defect
+in place for the length of stage 5. The question that catches it is not "can this go red" — it could —
+but **"if this went red, would the code be wrong?"**
 
 ## What this pass established, and would otherwise be re-derived
 

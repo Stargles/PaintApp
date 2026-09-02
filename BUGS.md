@@ -17,6 +17,15 @@ itself instead of skipping, which is worth one measured number: with Generate st
 a recipe, the old spelling reported **13 skips and a green banner** and the new one reports 13
 failures.
 
+**One thing the closing measured, and it is worth more than the fix it belongs to.** The obvious repair
+for `BakeWiringLogicTests`' `composites { }` over an empty block — move the suspended calls *inside* the
+probe window, so the zero is about suspension rather than about an empty closure — **is still vacuous,
+and that was measured rather than reasoned**: `kick` dispatches to `workQueue`, so a synchronous probe
+window reads zero whether a job was dispatched or not, and forcing `isSuspended = false` left the
+windowed version green. The witness has to be synchronous by construction, and there is one — `kick`
+sets `isBaking` on the line before the dispatch. **A fix sketch for a fixture that measures nothing can
+itself measure nothing**, and only running it the wrong way round says so.
+
 **The second family is the expensive one, because it is the stage's own feature rather than its
 bookkeeping — and none of it is fixed.** The same reading of striped compositing and the dab bake
 found the pass's headline feature untested. `RestSpaceDabBakeLogicTests` is five tests over `BrushStamper.DabPose.applied(to:)`, which
@@ -55,43 +64,60 @@ fixtures do not assert their plan actually cut into more than one strip; all sev
 not vacuous — but the premise their siblings state explicitly is missing, and a fixture edit could make
 them one-strip silently.
 
-## Eight of the review's nine candidates are real, and the one that looked worst is not
+## `duplicateCel`, `splitCel` and `pasteCel` drop a cel's interpolation recipe, and it needs a ruling
 
-All nine have been checked against the code. **Eight confirmed, one refuted — and the refuted one is
-the one this entry used to flag as "worth checking first", because it was the only one that would have
-put wrong pixels in a saved document.**
+The same defect that lost a cel's **pose** channel at those three verbs loses its `interpolation` at all
+three as well, and the doc comment that wrongly claimed the pose rides along claimed the recipe does
+too. The pose half is fixed; this half is deliberately not, because **it is not obvious that carrying
+the recipe is right.** A recipe names *references* — other cels, by id — and half of a split span is not
+self-evidently a coherent in-between of the same pair; a duplicate that copies the references produces a
+second cel deriving from the same two keyframes, which may be exactly what the artist wants or may be
+nonsense. `poseDeltaForKeyframe` skips interpolated cels regardless, so nothing downstream is broken
+today by the recipe being dropped.
+
+Decide what each verb should do before changing any of them.
+
+## A green test can pin the bug it was written near, and one did for the length of a stage
+
+`PoseInterpolation.blend` clamped where `TransformTrack`'s doc says twice that it extrapolates, and the
+reason nobody caught it is that a **passing** test asserted the clamp was correct:
+`testTheEndpointsAreTheAuthoredPosesRatherThanTheBlendOfThem` checked `blend(a, b, t: -0.4) == a` and
+captioned it *"before the first key is a hold"*. The hold is real and the caption is true — but it lives
+one level up, in `AnimationCurve`'s decision 2 and `TransformTrack`'s segment clamp, so a channel never
+hands `blend` an out-of-range `t` off either end. Only an overshooting handle *inside* a segment does,
+and that is the case the assertion forbade.
+
+**The test pinned a guarantee its caller already makes, and in doing so froze the defect underneath it.**
+That is a new member of the family CLAUDE.md's "green assertion" section describes and worth naming
+separately: the other four measured *nothing*, and this one measured the *wrong level*. The question that
+catches it is not "can this go red" — it could — but "if this went red, would the code be wrong?"
+
+## Eight of the review's nine candidates were real, and the one that looked worst was not
+
+All twelve confirmed defects from this review are fixed. What is worth keeping is the refutation and the
+two ways the fixes differed from the sketches.
 
 **REFUTED: `Services/PixelOps.swift:584`.** The claim was that the Distort bake scales the source
-isotropically from the width, so a non-square crop rounds into a stretch. `sourceScale` is not an aspect
-ratio, it is texels per point, and that density is the same on both axes **by construction**:
-`piece.pieceImage` comes from `PixelOps.crop`, which sizes `pixelRect` with one scalar `UIImage.scale`
-for both dimensions, and `UIImage` has no independent per-axis scale. A 200×100 crop at scale 2 is a
-400×200 bitmap and `400/200` is also `200/100`. The reviewer read a ratio of unlike quantities as a
+isotropically from the width, so a non-square crop rounds into a stretch — the only one of the nine that
+would have put wrong pixels in a *saved* document, and the one this entry named as worth checking first.
+`sourceScale` is not an aspect ratio, it is texels per point, and that density is equal on both axes **by
+construction**: `piece.pieceImage` comes from `PixelOps.crop`, which sizes `pixelRect` with one scalar
+`UIImage.scale` for both dimensions, and `UIImage` has no independent per-axis scale. A 200×100 crop at
+scale 2 is a 400×200 bitmap, and `400/200` is also `200/100`. A ratio of unlike quantities was read as a
 ratio of like ones.
 
-**Distort's three and the pose channel's live-canvas one are fixed.** What that left behind is worth
-keeping: the Distort corner-drag fix was **not** the one the review sketched. Latching the drag anchor
-from `localQuad` still jumped, because `resizeFromAnchor` measured the *span* from `baseSize` as well;
-both had to become `movingLocal - anchorLocal`, which reduces to `±baseSize` for an undistorted piece.
-And `distortQuad` is deliberately **not** cleared when the mode picker leaves Distort — the mixed state
-is supported by design, and clearing it would delete the artist's distort with no undo step.
+**The Distort corner-drag fix was not the one the review sketched.** Latching the drag anchor from
+`localQuad` still jumped, because `resizeFromAnchor` measured the *span* from `baseSize` as well; both
+had to become `movingLocal - anchorLocal`, which reduces to `±baseSize` for an undistorted piece. And
+`distortQuad` is deliberately **not** cleared when the mode picker leaves Distort — the mixed state is
+supported by design, and clearing it would delete the artist's distort with no undo step.
 
-**Still open, all in the pose channel:**
+**Splitting an animated cel needed two rules §3.1 does not state.** A key inserted at the cut inherits
+the interpolation of the segment it lands in, or a `.constant` hold cut in two starts easing, since
+`TransformTrack.Key` defaults to `.bezier`; and a key sitting exactly on the cut is carried across whole
+so its handles survive. Held baselines are not frame-indexed, so both halves get them.
 
-- `Models/CanvasManager+Timeline.swift` — `splitCel` and `duplicateCel` drop `transformTracks` and
-  `pendingPoseBaselines`. The field's own doc claims it rides through both "for free" and it does not,
-  so both destroy saved animation.
-- `Models/TransformKeyframes.swift:118` — `holdPoseBaseline` writes a persisted field with no undo
-  cover, and the nudge undo it rides beside restores geometry only. Move, then Undo, leaves a phantom
-  baseline that a later keyframe press turns into an animation the artist undid.
-- `Models/KeyframeControl.swift` — `addKeyframe` and `seedAndKeyChannel` call the
-  `keyframes(marks:tracks:)` overload that defaults `poseFrames` to `[]`, which is §2.28's
-  one-accessor rule broken by having two spellings of the list.
-- `Engine/Deform/PoseInterpolation.swift:182` — `blend` clamps with `<=`/`>=` where `TransformTrack`'s
-  own doc says twice that it extrapolates, so an overshoot handle is silently flattened.
-
-**Two subsystems are still unreviewed**: the bake key and store, and the live-canvas wiring. (The tests
-were the third and are the entry above; striped compositing was the fourth and is read.)
+**Two subsystems are still unreviewed**: the bake key and store, and the live-canvas wiring.
 
 ## A 16383² canvas draws nothing the artist can see, and the allocation is not why (2026-09-02)
 
