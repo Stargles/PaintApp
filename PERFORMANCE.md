@@ -1817,10 +1817,11 @@ measured on the device. Pin:
 default 5-point brush width, minified to fit zoom by point sampling, leaves **zero** ink at 4096², 8192²
 and 12288², and 800 pixels at 2048²; box-filtered it survives at every size. Every view that showed
 artwork set `magnificationFilter` and none set `minificationFilter`, so they all ran CA's default
-`.linear` with no mipmap chain. **Nine layers now ask for `.trilinear`** — the layer host's baked and fill
-tiers, the stroke canvas's picture, live scratch and float, the two sandwich views, the onion-skin ghost
-and the shape preview, plus the lifted raster piece — and `magnificationFilter` is untouched everywhere,
-so zoomed-in pixels stay crisp. `SelectionOverlayView`'s collar keeps `.nearest` at both ends because it
+`.linear` with no mipmap chain. **Nine sites now ask for `.trilinear`** — the layer host's baked and fill
+tiers (2), the stroke canvas's picture, live scratch and float (3), the sandwich and onion-skin factories
+(2, a pair of views each), the shape preview and the lifted raster piece (2). Sites rather than views
+because the first five are per *layer*, which is what makes the mipmaps' cost scale with the stack.
+`magnificationFilter` is untouched everywhere, so zoomed-in pixels stay crisp. `SelectionOverlayView`'s collar keeps `.nearest` at both ends because it
 is chrome, and that decision is now pinned rather than commented.
 
 **The cost is unmeasured and it is the honest gap here.** A mipmap chain is about a third more texture per

@@ -22,10 +22,13 @@ import CoreGraphics
 /// copying over a stroke is O(final area) rather than O(area × reallocations). An axis the stroke
 /// has **not** left is not outset at all — it needs no headroom, and the guarantee above is already
 /// paid by the axis that moved. That is what keeps a straight line's window a band as wide as the
-/// line rather than a square as big as its length: a horizontal inch of pen travel at 16383² is a
-/// window of about 4300×133 rather than 8617×8611, 2 MB rather than 283 MB. A stroke that really
-/// does cross the whole canvas ends up with a canvas-sized window, which is correct rather than a
-/// failure: that stroke's dirty rect *is* the canvas.
+/// line rather than a square as big as its length. The gesture that made the case is one screen inch
+/// of pen travel at 16383², MEASURED on the owner's iPad 9 at **8617×8611 — 283.1 MB** round a stroke
+/// whose own box is 54 KB; simulating both rules over that gesture gives **8639×134, 4.42 MB**
+/// (PERFORMANCE §9 item 1, which also records that the width still overshoots the ink about
+/// threefold because an outset grows both sides of the axis). A stroke that really does cross the
+/// whole canvas ends up with a canvas-sized window, which is correct rather than a failure: that
+/// stroke's dirty rect *is* the canvas.
 ///
 /// **The two roles are the same distinction `VectorScratchRole` draws, and they decide how the
 /// window reaches the screen as well as how it commits.** `.additive` holds only this stroke's own
