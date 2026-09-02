@@ -546,26 +546,35 @@ final class PerfBaselineTests: XCTestCase {
                        "Undo of a stroke crossing the canvas edge must still restore exactly — a patch written at the unclamped origin would land offset")
     }
 
-    /// `handleBegin`'s snapshot, mirrored for `recordCroppedStrokeUndo`'s reason: **nil for a tier
-    /// with no bitmap**, which is every cel's first stroke. The image is the state undo returns to,
-    /// and "nothing was there" is the nil rather than a canvas of transparent pixels.
+    /// The pre-stroke state this fixture rewinds to: **nil for a tier with no bitmap**, which is
+    /// every cel's first stroke. The image is what undo returns to, and "nothing was there" is the
+    /// nil rather than a canvas of transparent pixels — which is also why it cannot be
+    /// `renderToUIImage()`, that being the shared 1×1.
+    ///
+    /// The view does not take a snapshot at all any more: a raster stroke stamps into a
+    /// `StrokeScratch` and the cel is untouched until lift, so it crops its before-patch straight
+    /// off the cel (`RasterLayerTexture.copiedPatch`). This fixture stamps into the texture
+    /// directly, so it needs the snapshot to have a "before" to crop.
     private func strokeSnapshot(_ raster: RasterLayerTexture) -> (image: UIImage?, count: Int) {
         (raster.hasContent ? raster.renderToUIImage() : nil, raster.strokeCount)
     }
 
-    /// Mirrors `StrokeCanvasView.registerRasterUndo`'s cropped representation. `StrokeCanvasView` is a
-    /// `UIView` driven by real touches, so it can't be exercised headlessly; this reproduces the same
-    /// three steps (crop to the dirty rect, clamp the origin, restore with `.copy`) against the same
-    /// engine API, so the engine support and the byte accounting are what's under test.
+    /// The cropped undo representation the view records, against the same engine API.
+    /// `StrokeCanvasView` is a `UIView` driven by real touches, so it can't be exercised headlessly;
+    /// this reproduces the three steps that matter — crop to the dirty rect, clamp the origin,
+    /// restore with `.copy` — so the engine support and the byte accounting are what's under test.
+    /// Where the two differ is only where the "before" pixels come from: the view crops them off the
+    /// cel just before committing the stroke's scratch, because nothing has written to the cel yet.
     private func recordCroppedStrokeUndo(manager: CanvasManager, raster: RasterLayerTexture,
                                          from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
         guard let dirty = raster.strokeDirtyRect else {
             return XCTFail("A stroke that stamped dabs must report a dirty rect")
         }
         // Clamped against the texture and not against the before-image, and a nil before-image
-        // yielding transparency of the patch's own shape — both mirroring `registerRasterUndo`, where
-        // both exist because a tier with no bitmap renders to a shared 1×1 rather than to a
-        // canvas-sized sheet of transparency (`RasterLayerTexture.renderToUIImage()`).
+        // yielding transparency of the patch's own shape — a tier with no bitmap renders to a shared
+        // 1×1 rather than to a canvas-sized sheet of transparency
+        // (`RasterLayerTexture.renderToUIImage()`), so neither the rect nor the pixels can come from
+        // the image.
         let rect = dirty.insetBy(dx: -1, dy: -1).integral
             .intersection(CGRect(origin: .zero, size: raster.size))
         guard rect.width >= 1, rect.height >= 1 else {
