@@ -24,7 +24,13 @@ Found while designing RENDER.md; the compositor's budget is sound and almost not
    (`MaskResolver.swift:336`; 128 MiB at 4096², 2 GiB at 16383²), and `vectorRenderCacheLimit = 12`
    (`Models/CanvasManager+Interpolation.swift:489-511`) holds up to two canvas images each, is evicted only from the Move
    tool's `handleActiveContextChanged` (`SelectionModels.swift:249`), and has no pressure hook at all — 768 MiB to 1.5 GiB
-   at 4096².
+   at 4096². **And that one call site runs on every playback tick**: `currentFrame.didSet`
+   (`Models/CanvasManager.swift:736-743`) calls `handleActiveContextChanged`, whose evictor counts every vector cel in the
+   document, finds any real document past 12, then walks every cel again taking each canvas's lock through `hasCachedImage`
+   (a lock a background `render()` can hold for tens of milliseconds), builds an array and sorts it — O(cels) plus a sort, on
+   the main thread, 24 times a second for the whole of playback. The fix is a byte budget on `PixelOps.rasterizeCache`'s
+   rule, eviction over a registry of canvases that actually hold a render rather than a document scan, run when a render is
+   cached rather than when the frame changes, and the call at `SelectionModels.swift:249` deleted.
 6. **Every eviction signal is a `UIApplication` notification and the only valve is `os_proc_available_memory`**
    (`PixelOps.swift:237,247`; `MetalCompositor.swift:401,413`; `MaskResolver.swift:363`; `OnionSkinSource.swift:948`;
    `CanvasManager.swift:1098`; `Engine/Compositor.swift:217`). RENDER §2.6 rules portability; a `MemoryPressure` seam
