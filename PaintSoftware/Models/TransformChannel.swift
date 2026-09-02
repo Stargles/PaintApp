@@ -122,7 +122,7 @@ extension CanvasManager {
                 carried = true
             }
             guard carried, !composed.isIdentity else { return element }
-            return VectorCanvas.mapping(element, throughStretch: composed)
+            return VectorCanvas.posing(element, through: composed)
         }
     }
 

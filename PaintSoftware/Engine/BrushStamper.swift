@@ -294,6 +294,152 @@ enum BrushStamper {
     }
 }
 
+// MARK: - KEYFRAMES.md §4.2 — the rest-space dab bake
+
+extension BrushStamper {
+
+    /// **One dab, in the space its stroke was drawn in.** KEYFRAMES.md §4.2's *"dab record"*, and
+    /// §2.16's *"each dab's grain value is baked… so the texture is part of the mark"* — the
+    /// multiplier is already folded into `alpha`, because `stampDab` multiplies it in before the dab
+    /// ever reaches a `DabTarget`. **That is the whole of the grain fix**: nothing here samples a
+    /// noise field, so nothing downstream can re-sample it at a posed position.
+    ///
+    /// It carries the dab's **radius**, not its diameter, and its **centre**, not its position along
+    /// the path — those are the only two things a pose has to touch.
+    struct BakedDab: Equatable {
+        var center: CGPoint
+        var radius: CGFloat
+        var color: UIColor
+        var alpha: CGFloat
+        var hardness: CGFloat
+        var blendMode: CGBlendMode
+    }
+
+    /// **The pose a baked dab is replayed through — a point map, not a `CGAffineTransform`.**
+    /// KEYFRAMES.md §4.2: *"One evaluator over `Homography.map` + `localScale(at:)` serves Uniform,
+    /// Freeform and Distort. Three separate arms do not."*
+    ///
+    /// **`constantScale` is not an optimisation, it is the affine case being a different fact.** An
+    /// affine's Jacobian determinant does not vary with position, so `sqrt(|det|)` *is* the local
+    /// area root at every dab — LASSO_MOVE.md §5.17's rule, and the number
+    /// `VectorCanvas.mapping(_:throughStretch:)` already writes into `VectorStroke.size`. Computing
+    /// it once means a Uniform or Freeform pose lands the identical width the shipped path lands,
+    /// bit for bit, rather than merely to within a `linearised` round trip. It is a homography whose
+    /// `|det J|` varies across the stroke that has no scalar answer, and that is the only case that
+    /// pays per dab.
+    struct DabPose: Equatable {
+        let map: Homography
+        /// Nil exactly when the map is projective and the scale has to be asked per dab.
+        let constantScale: CGFloat?
+
+        init(_ map: Homography) {
+            self.map = map
+            // `affine(tolerance: 0)` is a decision, not a threshold — see its own doc comment. A
+            // homography built from a `CGAffineTransform` has `g == h == 0` exactly.
+            constantScale = map.affine().map { sqrt(abs($0.a * $0.d - $0.b * $0.c)) }
+        }
+
+        init(_ transform: CGAffineTransform) { self.init(Homography(transform)) }
+
+        static let identity = DabPose(Homography.identity)
+
+        var isIdentity: Bool { map == .identity }
+
+        /// How much this pose magnifies area at `point`, as a linear scale. Nil on the vanishing
+        /// line, where the dab has no image at all.
+        func scale(at point: CGPoint) -> CGFloat? { constantScale ?? map.localScale(at: point) }
+
+        /// One rest-space dab where this pose puts it. Nil where the pose has no image for it.
+        func applied(to dab: BakedDab) -> BakedDab? {
+            guard let center = map.map(dab.center), let k = scale(at: dab.center) else { return nil }
+            var moved = dab
+            moved.center = center
+            moved.radius = dab.radius * k
+            return moved
+        }
+    }
+
+    /// **A `DabTarget` that collects instead of drawing** — KEYFRAMES.md §4.2 names it as
+    /// *"structurally identical to the existing `DiscardedDabTarget`"*, and it is: the dab is
+    /// computed by exactly the arithmetic that would have drawn it, and then kept instead of
+    /// rasterized. Running `stampStroke` into one *is* the bake.
+    ///
+    /// Not shared and not thread-safe, unlike `DiscardedDabTarget` — it has state, so each bake owns
+    /// one.
+    final class CollectingDabTarget: DabTarget {
+        private(set) var dabs: [BakedDab] = []
+        init() {}
+        func beginStroke() {}
+        func endStroke() {}
+        func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                         alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+            dabs.append(BakedDab(center: point, radius: radius, color: color,
+                                 alpha: alpha, hardness: hardness, blendMode: blendMode))
+        }
+    }
+
+    /// **A `DabTarget` that maps every dab through a pose on the way out** — the streaming form of
+    /// bake-then-replay, and what the render path uses.
+    ///
+    /// Wrapping the sink rather than the walk is the whole trick, and it is what makes this stage
+    /// small: `stampStroke`, `stampDab`, `applyScatter`, `grainAlphaMultiplier` and
+    /// `stampApproximateSquare` all run **unchanged, in rest space**, so the dab count, the dab
+    /// phase, the seeded `DabRNG` draws, the grain multiplier and the square brush's sub-lattice are
+    /// invariant across every frame of an animation *by construction* rather than by arithmetic that
+    /// happens to agree. Only the two numbers a pose can legitimately change — where the dab is and
+    /// how big it is — are touched, and they are touched last.
+    ///
+    /// `beginStroke`/`endStroke` forward, because the wrapped target may be a `RasterLayerTexture`
+    /// keeping a stroke count.
+    final class PosedDabTarget: DabTarget {
+        private let inner: DabTarget
+        private let pose: DabPose
+
+        init(_ inner: DabTarget, pose: DabPose) {
+            self.inner = inner
+            self.pose = pose
+        }
+
+        func beginStroke() { inner.beginStroke() }
+        func endStroke() { inner.endStroke() }
+
+        func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
+                         alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+            guard let center = pose.map.map(point), let k = pose.scale(at: point) else { return }
+            inner.stampCircle(at: center, radius: radius * k, color: color,
+                              alpha: alpha, hardness: hardness, blendMode: blendMode)
+        }
+    }
+
+    /// Walks a stroke in **rest space** and keeps its dabs instead of drawing them. Same arguments as
+    /// `stampStroke`, because it is `stampStroke` — into a collector.
+    static func bake(samples: [Sample], brush: Brush, color: UIColor, brushSize: CGFloat,
+                     brushOpacity: Double, isEraser: Bool = false,
+                     seed: UInt64? = nil, visibleRange: ClosedRange<CGFloat>? = nil) -> [BakedDab] {
+        let collector = CollectingDabTarget()
+        stampStroke(into: collector, samples: samples, brush: brush, color: color,
+                    brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
+                    seed: seed, visibleRange: visibleRange)
+        return collector.dabs
+    }
+
+    /// Draws a baked walk through a pose. The replay entry point §4.2 asks for, and the same
+    /// arithmetic `PosedDabTarget` applies — shared through `DabPose.applied(to:)` so a stored bake
+    /// and a streamed one cannot drift.
+    ///
+    /// A dab the pose has no image for is dropped rather than clamped: it is behind the vanishing
+    /// line, where there is no answer to draw.
+    static func replay(_ dabs: [BakedDab], into target: DabTarget, through pose: DabPose) {
+        target.beginStroke()
+        for dab in dabs {
+            guard let moved = pose.applied(to: dab) else { continue }
+            target.stampCircle(at: moved.center, radius: moved.radius, color: moved.color,
+                               alpha: moved.alpha, hardness: moved.hardness, blendMode: moved.blendMode)
+        }
+        target.endStroke()
+    }
+}
+
 /// Where `stampStroke` sends the dabs outside a `visibleRange`.
 ///
 /// The dab is still *computed* — same size, same alpha, same RNG draws — and then dropped, which is

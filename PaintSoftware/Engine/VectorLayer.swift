@@ -79,6 +79,17 @@ struct VectorStroke: Identifiable, Codable {
     /// stroke needs to vanish progressively along its length instead of all at once.
     var sampleVisibilityThresholds: [Int: CGFloat]? = nil
 
+    /// **Set only on the throwaway copy a pose makes** — KEYFRAMES.md §4.2's rest-space dab bake.
+    /// Nil on every stroke the artist owns, every stroke on disk and every stroke a Move commits.
+    ///
+    /// **Not persisted, and that costs no migration.** `init(from:)`/`encode(to:)` below name every
+    /// key by hand, so a field absent from `CodingKeys` is absent from the wire by construction
+    /// rather than by a decision anyone has to remember. That is the right answer here and not merely
+    /// the cheap one: a pose is re-resolved from `Cel.transformTracks` on every render, so a stored
+    /// walk could only ever be a second copy of something the tracks already say — `precise`'s
+    /// argument about derivable data, one level up.
+    var restWalk: StrokeRestWalk? = nil
+
     var uiColor: UIColor { color.uiColor }
 
     /// Saturating a coordinate at the storage boundary is ink the artist drew and will not get back,
@@ -136,6 +147,36 @@ struct DabLattice: Codable, Equatable {
         let f = clamped - CGFloat(i)
         return parameters[i] + (parameters[i + 1] - parameters[i]) * f
     }
+}
+
+/// **The walk a posed stroke's dabs are actually laid on** — KEYFRAMES.md §4.2, and the reason a
+/// posed frame's ink no longer boils.
+///
+/// A posed stroke is a throwaway copy whose `samples`, `lattice` and `size` have all been mapped
+/// into destination space, and until this existed that copy was what `BrushStamper` walked: the dab
+/// spacing, the grain field and the square brush's sub-lattice were all re-derived per frame at the
+/// posed geometry. This carries the **pre-image** of that copy — the artist's own numbers — so the
+/// walk happens once, where the stroke was drawn, and the pose touches nothing but each finished
+/// dab's centre and radius.
+///
+/// **Why the posed copy keeps its posed geometry anyway, rather than staying at rest and carrying
+/// only the map.** `samples` is what `strokePolyline` draws at `.preview` quality and what every
+/// bounds and index reader believes; a stroke whose stored points disagree with where its ink lands
+/// is a trap for every later reader, and §4.2 itself says `resolveSources` *"hands the posed display
+/// list"* on. So the display list is posed and the rest walk rides beside it. The duplication is a
+/// retain, not a copy — `[VectorSample]` is copy-on-write and these are the same arrays the
+/// unposed element already holds.
+struct StrokeRestWalk {
+    /// The stroke's own samples, unposed.
+    var samples: [VectorSample]
+    /// The stroke's own lattice, unposed — a cut piece still replays its parent's whole walk, and
+    /// that walk is in rest space too.
+    var lattice: DabLattice?
+    /// `VectorStroke.size` before the pose's area root was multiplied into it.
+    var size: CGFloat
+    /// Rest → posed. Carries a `Homography` rather than a `CGAffineTransform` precisely so stage 5b
+    /// changes the pose that is built here and not one line of what consumes it.
+    var pose: BrushStamper.DabPose
 }
 
 extension DabLattice {
@@ -2352,6 +2393,34 @@ final class VectorCanvas {
         }
     }
 
+    /// **`mapping(_:throughStretch:)` for a *keyed* pose** — KEYFRAMES.md §4.2, and the one seam
+    /// stage 4 adds to the model layer.
+    ///
+    /// Geometrically it *is* `mapping(_:throughStretch:)` and delegates to it, so a posed cel's
+    /// display list is exactly the list stage 5 shipped: same samples, same `sqrt(|det|)` width,
+    /// same text and image arms, same reduction to the similarity case. What it adds is one field on
+    /// the stroke arm — the walk the dabs are laid on, in rest space — which `stamp` reads and
+    /// nothing else does.
+    ///
+    /// **Why this is a second function rather than a flag on the first.** `mapping(_:throughStretch:)`
+    /// serves the lasso float's *commit* as well, where the map is baked into the artist's own
+    /// geometry and is over: attaching a rest walk there would leave a permanent stroke claiming it
+    /// is a posed copy of somewhere else, and its next render would draw its dabs back at the
+    /// pre-move position. A pose is a view of a stroke; a commit is a new stroke. Two call sites,
+    /// two functions.
+    ///
+    /// **Only strokes carry a walk, because only strokes have one.** A fill is a `CGPath` and a
+    /// placed image is a rectangle of pixels — both are drawn through the map directly with no dab
+    /// lattice to re-phase and no grain field to re-sample. Text is already four corners.
+    static func posing(_ element: VectorElement, through t: CGAffineTransform) -> VectorElement {
+        guard !t.isIdentity else { return element }
+        let moved = mapping(element, throughStretch: t)
+        guard case .stroke(let rest) = element, case .stroke(var posed) = moved else { return moved }
+        posed.restWalk = StrokeRestWalk(samples: rest.samples, lattice: rest.lattice,
+                                        size: rest.size, pose: BrushStamper.DabPose(t))
+        return .stroke(posed)
+    }
+
     /// **A placed image moved by any invertible affine** — the arm both public mappings hand their
     /// hard cases to, and the whole of LASSO_MOVE.md §3 stage 3c.
     ///
@@ -3432,14 +3501,30 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
+    /// **Two walks, and which one runs is the whole of KEYFRAMES.md §4.2.**
+    ///
+    /// Without a `restWalk` this is the shipped path unchanged, to the byte: an unposed stroke pays
+    /// nothing for this stage, which is every stroke in every document that has never been keyframed.
+    ///
+    /// With one, the *same* call is made against the stroke's own unposed samples, size and lattice,
+    /// into a `PosedDabTarget` that maps each finished dab. Everything that made a posed frame boil
+    /// lives inside that call and is now invariant across frames by construction: `stampSpacing` is
+    /// computed from the rest size, so its 1 pt floor cannot re-phase the walk under an animated
+    /// scale (§8 measures that floor re-phasing a *Uniform* shrink on 19 of 24 frames);
+    /// `grainAlphaMultiplier` is read at the rest stamp point, so §2.16's grain travels with the ink;
+    /// `stampApproximateSquare` builds its sub-lattice from the rest diameter against its own 1 pt
+    /// floors; and the seeded `DabRNG` sees an identical dab count and so draws an identical
+    /// sequence.
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
+        let rest = stroke.restWalk
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
         // than either option — so an unreadable one falls back to the stroke's own geometry.
-        let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
-        let source = lattice?.samples ?? stroke.samples
+        let lattice = (rest?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
+        let source = lattice?.samples ?? rest?.samples ?? stroke.samples
         let samples = source.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
-        BrushStamper.stampStroke(into: target, samples: samples, brush: stroke.brush,
-                                 color: stroke.uiColor, brushSize: stroke.size,
+        let sink: DabTarget = rest.map { BrushStamper.PosedDabTarget(target, pose: $0.pose) } ?? target
+        BrushStamper.stampStroke(into: sink, samples: samples, brush: stroke.brush,
+                                 color: stroke.uiColor, brushSize: rest?.size ?? stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
                                  seed: BrushStamper.seed(for: lattice?.seedID ?? stroke.id),
                                  visibleRange: lattice?.range)
