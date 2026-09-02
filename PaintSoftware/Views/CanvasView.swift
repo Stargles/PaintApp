@@ -1217,7 +1217,7 @@ struct CanvasView: UIViewRepresentable {
             let baker = canvasManager.frameBaker
             guard observedFrameBaker !== baker else { return }
             observedFrameBaker = baker
-            baker.onFrameFinished = { [weak self] frame in
+            baker.observeFrameFinished(self) { [weak self] frame in
                 self?.bakerDidFinish(frame: frame)
             }
         }

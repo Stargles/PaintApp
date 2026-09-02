@@ -115,6 +115,8 @@ struct TimelineTrackView: UIViewRepresentable {
         private var pinchAnchorLocationInScrollView: CGFloat = 0
 
         private let rulerView = TimelineRulerView()
+        /// RENDER §3.7's baked-frame indication, hung over the ruler's bottom edge.
+        private let bakeBarView = TimelineBakeBarView()
         private var rowViews: [TimelineRowView] = []
         private var folderRowViews: [TimelineFolderRowView] = []
         private let playheadView = TimelinePlayheadView()
@@ -243,6 +245,11 @@ struct TimelineTrackView: UIViewRepresentable {
                 // neither subsumes the other: a plain scroll raises no SwiftUI pass, and the first
                 // pass after the scroll view has a width raises no scroll event.
                 updateGraphBandViewport()
+                // **Which frames are baked is not in the key either, and deliberately so** — see
+                // `refreshBakeIndication`. This is the path a stroke's own pass takes, since a dab
+                // moves no cel id, start, length or thumbnail address: the artist's frame goes
+                // unbaked here, in the same pass that dirtied it.
+                refreshBakeIndication()
                 return
             }
             laidOutKey = built.key
@@ -271,6 +278,18 @@ struct TimelineTrackView: UIViewRepresentable {
             // fast path that skips it — one writer, so the two paths cannot disagree.
             rulerView.loopRange = (canvasManager.loopStartFrame != nil || canvasManager.loopEndFrame != nil) ? canvasManager.effectiveLoopRange : nil
             rulerView.setNeedsDisplay()
+
+            // **A sibling above the ruler rather than something the ruler draws**, which is the
+            // whole reason it can be refreshed at bake rate: invalidating the ruler relays out one
+            // `NSAttributedString` per visible frame, and the layout gate exists to stop exactly
+            // that happening often. The bar's own `draw` is a handful of `UIRectFill`s.
+            //
+            // It also earns its own accessibility element that way — `timeline.ruler` already is
+            // one, and hanging a second value off it would conflate the frame numbers with the
+            // bake state.
+            if bakeBarView.superview == nil { contentView.addSubview(bakeBarView) }
+            bakeBarView.frame = CGRect(x: 0, y: rulerHeight - TimelineBakeBar.height,
+                                       width: totalWidth, height: TimelineBakeBar.height)
 
             // Split the presented rows into the two kinds of track, each drawn from its own pool.
             let layerEntries = stackRows.enumerated().compactMap { position, row in
@@ -375,6 +394,85 @@ struct TimelineTrackView: UIViewRepresentable {
                             totalWidth: totalWidth)
 
             movePlayhead(totalHeight: totalHeight)
+            refreshBakeIndication()
+        }
+
+        // MARK: - The baked-frame indication (RENDER.md §3.7)
+
+        /// The baker this coordinator is listening to. `CanvasView.Coordinator.observedFrameBaker`'s
+        /// twin, held weakly and compared by identity for its reason: `syncFrameBake` *replaces* the
+        /// baker when the store's root moves — a different project, or the Render Resolution knob —
+        /// and an observation installed once would be left on the discarded one, so the bar would
+        /// freeze the moment the knob was touched.
+        private weak var observedFrameBaker: FrameBaker?
+
+        /// See `TimelineBakeBar.RefreshThrottle`.
+        private var bakeRefreshThrottle = TimelineBakeBar.RefreshThrottle()
+
+        /// **Recomputes the bar from the baker and hands it to the view.**
+        ///
+        /// ## Why this is not a `TimelineLayoutKey` field
+        ///
+        /// It is the obvious place — the key is where every other input the layout evaluates goes,
+        /// and its doc says so in those words. It is also wrong here, for the reason that doc gives
+        /// for leaving `currentFrame` out: *"nothing that moves faster than the layout does."* A
+        /// per-frame baked set moves once per baked frame, which during a bake of a long document is
+        /// hundreds of times a second, and the key is compared on **every** SwiftUI pass. Putting it
+        /// in would make the gate that exists to stop the timeline re-laying-out itself the thing
+        /// that guarantees it does — a full relayout per bake, one `NSAttributedString` per visible
+        /// frame each time, which is the exact cost `TimelineLayoutKey` was introduced to remove.
+        ///
+        /// So this is `movePlayhead`'s treatment: its own path, called from both sides of the gate,
+        /// touching one view. The difference from `movePlayhead` is that a bake finishing raises no
+        /// SwiftUI pass at all, so it also needs `observeFrameFinished` below.
+        ///
+        /// **Cheap enough to sit on both paths.** `FrameBaker.isBaked` is two dictionary lookups —
+        /// see its doc for why it is no longer a recipe mint and a `stat` — so this is O(scene
+        /// length) of hashing and no allocation per frame, against a key build that already walks
+        /// every cel of every layer.
+        private func refreshBakeIndication() {
+            guard contentView != nil else { return }
+            syncBakeObservation()
+            let baker = canvasManager.frameBaker
+            let spans = TimelineBakeBar.unbakedSpans(frameCount: canvasManager.sceneFrameCount) {
+                baker.isBaked(atFrame: $0)
+            }
+            bakeBarView.update(spans: spans, pixelsPerFrame: pixelsPerFrame)
+        }
+
+        /// Adopts whichever baker the manager currently holds.
+        ///
+        /// **Reading `canvasManager.frameBaker` is what instantiates it**, and that is safe from
+        /// here for the same reason it is safe from `CanvasView`: the property is lazy so a bake
+        /// directory is not created for every `CanvasManager` a logic-test run makes, and this is
+        /// only reached once the track has a `contentView`, which is a document on screen.
+        private func syncBakeObservation() {
+            let baker = canvasManager.frameBaker
+            guard observedFrameBaker !== baker else { return }
+            observedFrameBaker = baker
+            // The frame number is not used: a bake landing anywhere changes the bar, and the bar is
+            // recomputed whole. What the callback carries that matters is *when*.
+            baker.observeFrameFinished(self) { [weak self] _ in
+                self?.setNeedsBakeIndication()
+            }
+        }
+
+        /// A frame landed. Refresh the bar, but no more than ten times a second.
+        ///
+        /// **Only the clearing half is throttled, and that asymmetry is the design rather than a
+        /// consequence.** A frame going *unbaked* happens inside `syncDirty`, which runs in a
+        /// SwiftUI pass, so `relayout` draws it in the same turn with no delay — the artist's stroke
+        /// marks its frame at once. A frame going *baked* arrives here, on a callback that can fire
+        /// hundreds of times a second while a long bake deduplicates. Alarm is immediate;
+        /// reassurance settles in over a tenth of a second, which is the right way round.
+        private func setNeedsBakeIndication() {
+            guard bakeRefreshThrottle.request() else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + TimelineBakeBar.refreshInterval) {
+                [weak self] in
+                guard let self else { return }
+                self.bakeRefreshThrottle.fired()
+                self.refreshBakeIndication()
+            }
         }
 
         /// **Hangs the graph editor band under the row it belongs to** — KEYFRAMES.md §11.3.
@@ -1393,6 +1491,70 @@ private final class TimelineKeyMarkerBand: UIView {
             stroke.setStroke()
             path.lineWidth = 1
             path.stroke()
+        }
+    }
+}
+
+/// **The bake bar** — which stretches of the scene are not ready to play (RENDER.md §3.7).
+///
+/// One view for the whole document rather than one per row, because a baked frame is a property of
+/// the *frame* and not of a layer: the bake key is the whole resolved tree with `frame` left out
+/// (§3.3), so there is no per-layer answer to give. It therefore hangs off the ruler, which is the
+/// timeline's only other document-wide furniture.
+///
+/// **Every decision it makes is `TimelineBakeBar`'s**, for that type's stated reason — this file is
+/// not compiled into `PaintSoftwareUITests`, so anything decided here is decided where no fast-tier
+/// test can see it. What is left here is one `UIColor` and one `UIRectFill`.
+private final class TimelineBakeBarView: UIView {
+    private var spans: [TimelineBakeBar.Span] = []
+    private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        contentMode = .redraw
+        // Sits over the ruler's bottom edge, which is a scrub target. Touches have to reach it.
+        isUserInteractionEnabled = false
+        isAccessibilityElement = true
+        accessibilityTraits = .none
+        accessibilityIdentifier = "timeline.bakeBar"
+        accessibilityValue = ""
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// - Parameter spans: `TimelineBakeBar.unbakedSpans`' output, ascending and disjoint.
+    func update(spans: [TimelineBakeBar.Span], pixelsPerFrame: CGFloat) {
+        // `TimelineKeyMarkerBand`'s gate, and here it is load-bearing rather than a saving: this is
+        // refreshed on a timer while the baker runs (`TimelineBakeBar.RefreshThrottle`), so without
+        // it every tick of a bake that changed nothing visible would invalidate the bar. A pinch
+        // moves `pixelsPerFrame` without moving a single span, so both halves gate.
+        let changed = spans != self.spans || pixelsPerFrame != self.pixelsPerFrame
+        self.spans = spans
+        self.pixelsPerFrame = pixelsPerFrame
+        // **Not hidden when empty**, unlike the key-marker band. Empty is this view's most
+        // informative state — it is *"the whole scene is ready to play"* — and hiding it would take
+        // the one assertion a UI test most wants off the accessibility tree with it.
+        accessibilityValue = TimelineBakeBar.encode(spans)
+        if changed { setNeedsDisplay() }
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard pixelsPerFrame > 0 else { return }
+        // **Amber, not red.** §2.10 rules that playback may be visibly stale while the bake catches
+        // up, so an unbaked stretch is the expected transient state of a document being drawn in and
+        // not an error. Red would say something is wrong; this says *not yet*. It also has to be
+        // distinguishable from everything else already living in these 18 points — the loop band and
+        // the playhead are both `systemBlue`, and the key markers are white — which rules out most
+        // of the rest of the palette on contrast grounds alone.
+        UIColor.systemOrange.withAlphaComponent(0.85).setFill()
+        for span in spans {
+            let spanRect = TimelineBakeBar.rect(for: span,
+                                                pixelsPerFrame: pixelsPerFrame,
+                                                barHeight: bounds.height)
+            guard spanRect.intersects(rect) else { continue }
+            UIRectFill(spanRect)
         }
     }
 }

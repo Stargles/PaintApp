@@ -64,7 +64,7 @@ final class FrameBakerLogicTests: XCTestCase {
         var order: [Int] = []
         var settled = false
         let idle = expectation(description: "the bake queue drains and the loop stops")
-        baker.onFrameFinished = { order.append($0) }
+        baker.observeFrameFinished(self) { order.append($0) }
         baker.onIdle = {
             guard !settled else { return }
             settled = true
@@ -73,7 +73,7 @@ final class FrameBakerLogicTests: XCTestCase {
         baker.kick()
         wait(for: [idle], timeout: timeout)
         baker.onIdle = nil
-        baker.onFrameFinished = nil
+        baker.stopObservingFrameFinished(self)
         return order
     }
 
@@ -633,5 +633,128 @@ final class FrameBakerLogicTests: XCTestCase {
         for frame in 4..<10 {
             XCTAssertFalse(baker.bakeQueue.isPending(frame), "…and frame \(frame) is not in it.")
         }
+    }
+
+    // MARK: - §3.7, what the timeline's baked-frame indication reads
+
+    /// **`isBaked` before, during and after** — a frame the baker has never reached, the same frame
+    /// once it has, and the whole document once the loop has drained.
+    func testIsBakedIsFalseUntilTheLoopHasActuallyReachedTheFrame() {
+        let manager = perFrameDocument(frames: 4)
+        let baker = makeBaker(manager)
+
+        for frame in 0..<4 {
+            XCTAssertFalse(baker.isBaked(atFrame: frame),
+                           "Nothing has been baked yet, so nothing may claim to be.")
+        }
+
+        baker.noteDocumentChanged()
+        for frame in 0..<4 {
+            XCTAssertFalse(baker.isBaked(atFrame: frame),
+                           "The sweep has scheduled frame \(frame); scheduling is not baking.")
+        }
+
+        drain(baker)
+        for frame in 0..<4 {
+            XCTAssertTrue(baker.isBaked(atFrame: frame), "Frame \(frame) has a file now.")
+        }
+        XCTAssertFalse(baker.isBaked(atFrame: 4),
+                       "Frame 4 is past the end of a four-frame scene and was never baked.")
+    }
+
+    /// **The load-bearing half: an edit un-bakes the frames it reaches, and the file it had is still
+    /// sitting there.**
+    ///
+    /// `keyByFrame` is not cleared by an edit — entries are only forgotten on a *failure* — so the
+    /// five keys covering the edited cel still name five real files that still exist on disk. They
+    /// are the picture from *before* the edit. An `isBaked` that answered from `keyByFrame` alone
+    /// would therefore report every one of them baked, and the timeline would say a stretch was
+    /// ready to play while showing the artist's own edit missing from it. The pending check is what
+    /// makes that impossible, and this test is the pin on it: delete `!bakeQueue.isPending(frame) &&`
+    /// from `FrameBaker.isBaked` and the middle block below goes green-to-red.
+    func testAnEditUnbakesTheFramesItReachesThoughTheirOldFilesRemain() {
+        let manager = perFrameDocument(frames: 10, extraLayers: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 2, length: 5)])
+        manager.sceneFrameCount = 10
+
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let filesBefore = fileCount()
+        XCTAssertEqual(allFrames(manager).filter { baker.isBaked(atFrame: $0) }, Array(0..<10),
+                       "Setup: the whole scene is baked.")
+
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, frame: 4,
+                                      CanvasFixture.solidImage(.blue,
+                                                               rect: CGRect(x: 4, y: 4, width: 30, height: 30)))
+        baker.syncDirty()
+
+        XCTAssertEqual(allFrames(manager).filter { !baker.isBaked(atFrame: $0) }, [2, 3, 4, 5, 6],
+                       "The five frames the edit reached are no longer ready to play…")
+        XCTAssertEqual(allFrames(manager).filter { baker.isBaked(atFrame: $0) }, [0, 1, 7, 8, 9],
+                       "…and the five it did not reach still are.")
+        for frame in [2, 3, 4, 5, 6] {
+            XCTAssertNotNil(baker.keyByFrame[frame],
+                            "Frame \(frame) still has a recorded key — that is exactly the trap: it "
+                            + "names a real file holding the picture from before the edit.")
+        }
+        XCTAssertEqual(fileCount(), filesBefore, "And that file is still on disk, unchanged.")
+
+        drain(baker)
+        XCTAssertEqual(allFrames(manager).filter { baker.isBaked(atFrame: $0) }, Array(0..<10),
+                       "Once the loop has caught up, the whole scene is ready again.")
+    }
+
+    // MARK: - The observer registry
+
+    /// **Two consumers, one event.** Stage 4d gave the single `onFrameFinished` slot to the canvas;
+    /// §3.7's indication is the second listener, and the registry is what lets both have it without
+    /// a second callback beside the first (§2.15).
+    ///
+    /// Delete either `observer.body(frame)` call site's loop in `notifyFrameFinished` — or reduce it
+    /// to a single stored closure — and one of these two arrays comes back empty.
+    func testEveryObserverIsToldAboutEveryFrame() {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        let canvas = NSObject()
+        let timeline = NSObject()
+        var heardByCanvas: [Int] = []
+        var heardByTimeline: [Int] = []
+        baker.observeFrameFinished(canvas) { heardByCanvas.append($0) }
+        baker.observeFrameFinished(timeline) { heardByTimeline.append($0) }
+
+        baker.noteDocumentChanged()
+        let visited = drain(baker)
+
+        XCTAssertEqual(heardByCanvas.sorted(), visited.sorted())
+        XCTAssertEqual(heardByTimeline.sorted(), visited.sorted())
+        XCTAssertEqual(heardByCanvas.count, 3)
+    }
+
+    /// Registering twice from one owner replaces rather than stacks, which is what lets both callers
+    /// install unconditionally on every pass; and an owner that has gone away is dropped rather than
+    /// kept forever.
+    func testAnOwnerRegistersOnceAndAnOwnerThatDiesIsForgotten() {
+        let manager = perFrameDocument(frames: 2)
+        let baker = makeBaker(manager)
+        let owner = NSObject()
+        var first = 0
+        var second = 0
+        baker.observeFrameFinished(owner) { _ in first += 1 }
+        baker.observeFrameFinished(owner) { _ in second += 1 }
+
+        var ghostCalls = 0
+        // Released explicitly rather than by scope, so the test does not rest on where the optimiser
+        // chooses to end a `let`'s lifetime.
+        var transient: NSObject? = NSObject()
+        baker.observeFrameFinished(transient!) { _ in ghostCalls += 1 }
+        transient = nil
+
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        XCTAssertEqual(first, 0, "The second registration from one owner replaces the first.")
+        XCTAssertEqual(second, 2, "…and it is the one that hears both frames.")
+        XCTAssertEqual(ghostCalls, 0, "An observer whose owner is gone is not called.")
     }
 }

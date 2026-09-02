@@ -104,13 +104,55 @@ final class FrameBaker {
     /// it; the app does not, and a walk that failed to terminate is a hung expectation there.
     var onIdle: (() -> Void)?
 
-    /// Called on the main actor after each frame the loop visits, whatever the outcome.
+    /// One consumer's interest in "a frame landed", held weakly by whoever registered it.
+    private struct FrameObserver {
+        weak var owner: AnyObject?
+        let body: (Int) -> Void
+    }
+
+    /// Who is listening, by owner identity. See `observeFrameFinished`.
+    private var frameObservers: [ObjectIdentifier: FrameObserver] = [:]
+
+    /// **Called on the main actor after each frame the loop visits, whatever the outcome.**
     ///
-    /// Stage 4d's other half of the read path: the canvas showing a stale picture (§2.10) needs to
-    /// be told the moment its frame is ready, and the timeline's baked-frame indication (§3.7) needs
-    /// to be told about every frame. One callback rather than a `@Published` counter, because the
-    /// consumer wants the frame number and not a redraw of the whole timeline per bake.
-    var onFrameFinished: ((Int) -> Void)?
+    /// The read path's other half: the canvas showing a stale picture (§2.10) needs to be told the
+    /// moment its own frame is ready, and the timeline's baked-frame indication (§3.7) needs to be
+    /// told about every frame. A callback rather than a `@Published` counter, because publishing
+    /// would put a whole SwiftUI pass behind every bake — and a bake that is deduping finishes a
+    /// frame in one mint and one `stat`, so that is hundreds of passes a second for a status light.
+    ///
+    /// **A registry rather than the single `var onFrameFinished` slot this was**, because stage 4d
+    /// gave that slot to `CanvasView.Coordinator` and the timeline is a second consumer of the same
+    /// event. Two named callbacks would be the peculiarity §2.15 rules out; one event with N
+    /// listeners is the same path.
+    ///
+    /// **Keyed by owner and self-pruning.** Registering twice from one owner replaces rather than
+    /// stacks, which is what lets both callers install unconditionally on a pass; and an entry whose
+    /// owner has been deallocated is dropped the next time the baker reports a frame, so a
+    /// coordinator that goes away leaves nothing behind. The `ObjectIdentifier` carries the ABA
+    /// hazard `LayerContentVersion` documents — a freed owner's address reused by a new one — and
+    /// here that resolves *correctly* on its own: the new owner's registration replaces the dead
+    /// one's, which is exactly what was wanted.
+    func observeFrameFinished(_ owner: AnyObject, _ body: @escaping (Int) -> Void) {
+        frameObservers[ObjectIdentifier(owner)] = FrameObserver(owner: owner, body: body)
+    }
+
+    /// Stops `owner` listening. Not needed for correctness — a dead owner prunes itself — but a
+    /// consumer that wants to stop while it is still alive has no other way to say so.
+    func stopObservingFrameFinished(_ owner: AnyObject) {
+        frameObservers[ObjectIdentifier(owner)] = nil
+    }
+
+    /// Reports `frame` to every live observer and forgets the dead ones.
+    private func notifyFrameFinished(_ frame: Int) {
+        for (id, observer) in frameObservers {
+            guard observer.owner != nil else {
+                frameObservers[id] = nil
+                continue
+            }
+            observer.body(frame)
+        }
+    }
 
     // MARK: - What is on disk
 
@@ -212,11 +254,39 @@ final class FrameBaker {
         return image(for: key)
     }
 
-    /// Whether `frame`'s current key has a file — the timeline's baked-frame indication (§3.7).
-    /// One O(layers) mint and one `stat`, no decode.
+    /// **Whether the baker holds a current file for `frame`** — the timeline's baked-frame
+    /// indication (§3.7). Two dictionary lookups: no recipe, no key, no `stat`, no decode.
+    ///
+    /// ## This was one mint and one `stat`, and that spelling cannot serve the consumer §3.7 names
+    ///
+    /// The obvious body is `store.contains(currentKey(atFrame: frame))`, and that is what stood here
+    /// while nothing called it. It is the right answer for **one** frame — it is what the loop does
+    /// per iteration — and it is unusable for a whole ruler, which is the only thing that ever asks.
+    /// A mint is `makeFrameRecipe`: a `LeafSnapshot` per visible leaf, which freezes a
+    /// `VectorCanvas` or takes a raster tier's `CGContext.makeImage()`. Asking it once per frame of
+    /// a 300-frame document is 300 × layers of that per redraw, and the bar redraws while the baker
+    /// is running. It would cost far more than the bake it is describing.
+    ///
+    /// ## What "baked" means here, stated exactly, because it is not the same claim
+    ///
+    /// **The frame is not pending, and the baker recorded a key for it.** Those two facts together
+    /// are the baker's own belief that `frame`'s current key has a file:
+    ///
+    /// - `keyByFrame` alone is not enough. An edit to a cel spanning frames 2–6 leaves those five
+    ///   entries in place — they are only forgotten on a *failure* — so the file they name is the
+    ///   picture from before the edit. The dirty bit is what says so.
+    /// - The dirty bit alone is not enough either. A frame the baker has never visited is clean the
+    ///   moment `markClean` runs on a write failure, and un-recorded from the start.
+    ///
+    /// So this is the **scheduler's** state rather than a fresh statement about the filesystem, and
+    /// that is the honest thing to draw: it is the same state the canvas is in. §3.3 forbids showing
+    /// a stale *file* as fresh, and nothing here does — the display path still mints its own key
+    /// (`image(atFrame:)`) and a miss keeps the previous picture. This answers a different question,
+    /// *"is this stretch ready to play"*, and `BakeQueue`'s own rule that over-marking dirty is
+    /// always safe carries straight over: the failure this cannot have is claiming ready when it is
+    /// not, and marking too much unbaked is at worst a band that clears a moment later.
     func isBaked(atFrame frame: Int) -> Bool {
-        guard let key = currentKey(atFrame: frame) else { return false }
-        return store.contains(key)
+        !bakeQueue.isPending(frame) && keyByFrame[frame] != nil
     }
 
     // MARK: - Dirty marking (RENDER §3.6)
@@ -462,7 +532,7 @@ final class FrameBaker {
             forget(frame: frame)
         }
 
-        onFrameFinished?(frame)
+        notifyFrameFinished(frame)
         kick()
     }
 
