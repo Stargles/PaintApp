@@ -258,7 +258,21 @@ struct FloatingPiece {
 /// A Distort corner drag in flight — **`TextFrameDrag`'s distort arm, for the raster floating
 /// piece**, and deliberately the same three rules: the corner goes where the finger is, the other
 /// three stay exactly where they were, and a delta that would make an undrawable quad is refused
-/// rather than clamped.
+/// rather than clamped. KEYFRAMES.md §8's stage-5b row names that function as the gesture a raster
+/// Distort should be, and this is it.
+///
+/// **What is shared is `Homography.isValidQuad`, and that is the right amount.** `TextFrameDrag`
+/// cannot be called with a floating piece: it is built from a `TextFrame` and writes six of its
+/// fields back (`corners`, `size`, `autoSize`, `mode`, and the basis two of them imply), none of
+/// which a bitmap has. What the two genuinely share is the refusal — one predicate, in `Deform`,
+/// asked by both — and the two lines around it are `quad[corner] = point`.
+///
+/// **The one real difference is which space the corners live in, and it follows from what each type
+/// holds.** A `TextFrame`'s corners *are* canvas points, because a text box has no separate affine —
+/// the corners are its whole pose. A floating piece has `transform`, so its corners hold the
+/// projective *residue* and nothing else, in the piece's own space, and the affine composes on top.
+/// Storing them in canvas space instead would put the piece's position in two fields at once, and
+/// every one of Move, Rotate 45°, Mirror and Reset would have to write both.
 ///
 /// **Latched at touch-down**, for `ObjectTransformDrag`'s reason rather than for tidiness: the
 /// artist can pinch-zoom mid-drag, and a reference frame recomputed per delta would let the second

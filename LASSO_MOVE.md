@@ -127,6 +127,56 @@ compatible only because that is the cheaper implementation. And it stopped short
 (stage 5), which is a homography and needs eight numbers; this is the stored shape that one will
 compose into, not the solver.
 
+### Distort, on the raster floating piece — shipped 2026-09-02 (stage 5)
+
+Four corners that move independently is a **homography** and nothing smaller, which is why this is the
+one member of §3 stage 4's list that really did need a quad. It got one — and no solver, because
+`Engine/Deform/Homography.swift`, `Quad.swift` and `Engine/ImageWarp.swift` were built for the
+perspective text box and are general by construction.
+
+| what | where |
+|---|---|
+| the stored shape — four corners in the piece's **own local space**, nil for a piece nobody has distorted | `FloatingPiece.distortQuad`. It holds the projective *residue* only; `transform` stays the whole of the affine pose, so Move, the corner scale, the rotate knob, Rotate 45°/90° and both Mirrors are untouched by this feature and compose on top of it. The same split §5.18 struck for text and stage 3c for a placed image |
+| the one map both the preview and the bake read | `FloatingPiece.homography`, over `canvasQuad` — which is also what the outline, the four grips and `transformedBounds` are drawn from, so nothing on screen can disagree about where the piece is |
+| the live drag, rasterizing nothing | `Homography.catransform3D` on the piece's image layer (`FloatingPieceOverlayView.layoutFromPiece`), anchor point and position zero so the matrix is the layer's whole map. §4 rule 2 holds: a 60 Hz drag assigns a transform |
+| the bake | `PixelOps.render(floatingPiece:into:)`'s distort arm → `ImageWarp.warpedImage`, destination clipped to the canvas, capped at `PixelOps.maximumFloatingWarpTexels` |
+| one corner, dragged | `FloatingDistortDrag` — `TextFrameDrag.distortedFrame`'s three rules, sharing `Homography.isValidQuad` with it and nothing else, because that function writes six `TextFrame` fields a bitmap has none of |
+| Reset | `resetFloating` clears the quad with the transform; `canResetFloating` gains it as a second term, so a pulled corner alone makes the button live (§5.16) |
+
+**The preview and the bake are exact, not bounded, and that is the difference from §5.17.** A Freeform
+stretch's latched bitmap stretches the ink where the bake keeps it round, so the latch is dropped at
+every gesture end to stop the error accumulating. Here there is no second interpretation: a 2D
+homography *is* what a `CATransform3D`'s `m14`/`m24` express, and both readers take the same
+`Homography`. MEASURED agreeing at **0.0** over the box interior (standalone `swiftc -O`, and again in
+`DistortLogicTests.testThePreviewMatrixAndTheBakeMatrixAreTheSameMap`). What differs is the resampling
+filter, which already differs for a plain scale.
+
+**Two identities make the seam free rather than merely close.** An undistorted quad solves to
+`g == h == 0` and lands its corners on the piece's own affine at **exactly zero error**, so the affine
+draw is kept for it bit for bit rather than routed through the warp. And validity is **pose
+independent** — an invertible affine preserves convexity, simplicity and, identically, the box-corner
+weights, since its third matrix row is `[0 0 1]` — MEASURED at **zero disagreements over 6,396**
+pose/quad pairs, which is what lets the drag work in local space and a distort survive a later rotate
+or mirror unchanged.
+
+**`TransformMode.isImplemented` and *"Coming soon — acts like Uniform for now"* are deleted** (§2.15,
+*"no legacy code left by the previous functionality"*). The caption slot has a new tenant rather than
+an empty one: `CanvasManager.distortUnavailableReason` refuses Distort on a lassoed **vector** float
+and says so. That is a statement about one piece where the old one was a statement about the whole
+mode, and it is §5.14's tell-"not yet" from "never" applied to a sentence.
+
+**Why the vector float is refused, and it is a measurement.** A homography's local scale varies across
+the plane — MEASURED at **1.3x on a mild keystone and 8.5x with one corner dragged in**, where the best
+single scalar for `VectorStroke.size` is wrong by **15% and 315%** (KEYFRAMES.md §8). Distorting ink now
+would ship a visible width error on every line in the selection. The prerequisite is KEYFRAMES.md
+§4.2's rest-space dab bake, which is not built. **Text and a placed image would each survive a
+homography** — a `TextFrame` is four free corners already, and stage 3c gave an image a stored shape —
+but a float carrying one almost always carries ink beside it, and a per-kind refusal is exactly what
+stage 3c deleted, so the refusal is per float and costs one sentence.
+
+**Nothing is persisted.** A floating piece is transient by construction, so Distort owes no
+file-format change at all — the same position stage 3a reached for `aspect`.
+
 ### Three membership rules — shipped 2026-08-28 (TODO item (20)), moved to Select 2026-09-02 (item (23))
 
 `Enclosed · Cut · Touching`, ordered by how much the loop takes with the shipped rule in the middle
@@ -976,11 +1026,17 @@ about makes the pair a *general affine* and still not a homography.
   frame down to 0.401 ms on a 24,000-sample cel.
 - ~~**Placed images holding a stretched shape**~~ (3c) — **done, 2026-09-02**, see §0. Three stored
   fields beside `VectorImageElement.transform` and one shared compose-and-decompose arm; it closed
-  Mirror as well as Freeform, since both wanted the same field. **Distort** (stage 5) over the shared
-  `Homography` solver is what is left of this line — the one member that really does need a quad, and
-  eight numbers rather than six-plus-a-bit. Text reached both Mirror and Freeform on 2026-08-27
-  (stage 3d) without needing 3c's stored field, because a `TextFrame` already carries four free
-  corners.
+  Mirror as well as Freeform, since both wanted the same field. Text reached both Mirror and Freeform
+  on 2026-08-27 (stage 3d) without needing 3c's stored field, because a `TextFrame` already carries
+  four free corners.
+- ~~**Distort**~~ (stage 5) — **done for the raster floating piece, 2026-09-02**, over the shared
+  `Homography`/`ImageWarp` pair; see §0. It is the one member of this list that really did need a
+  quad, and it stores one. **A lassoed vector float is still refused, out loud**, and the boundary is
+  KEYFRAMES.md §8's measurement rather than a policy: a homography's local scale spans 1.3x-8.5x
+  across one quad, so `VectorStroke.size` — a scalar — has no right value, and the best available one
+  is wrong by 15%-315%. What unblocks it is KEYFRAMES.md §4.2's rest-space dab bake, and
+  `CanvasManager.distortUnavailableReason` is where the refusal and the unblocking condition are
+  written down.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.
@@ -1179,8 +1235,12 @@ fourth are decisions this stage had to make and are recorded so they are not re-
 14. **Warp is not a feature.** Verbatim: *"Unlike procreate, Warp will not be a feature (like
     liquify)."* The case is **deleted from `TransformMode`**, not hidden — a permanently-hidden case
     stays in `allCases`, keeps answering `switch`es, and gives the next reader no way to tell "not
-    yet" from "never". Nothing decoded it, so no migration was owed. `.distort` is the opposite kind
-    of absence and keeps its "acts like Uniform for now" caption.
+    yet" from "never". Nothing decoded it, so no migration was owed. `.distort` was the opposite kind
+    of absence and carried an *"acts like Uniform for now"* caption until it shipped on 2026-09-02
+    (§0, stage 5); the caption is gone, and what is left in that slot is a refusal about one piece
+    rather than about the mode. **This ruling is the reason that refusal is a sentence and not
+    silence**: a lassoed vector float still cannot be distorted, and the next reader is owed the
+    difference between "not yet, and here is what unblocks it" and "never".
 15. **Rotate 45° composes onto the box's current angle; it does not re-derive from the pick-up
     state.** Re-deriving would mean that tapping 45° after turning the piece by hand silently threw
     the hand-turn away. The cost is that a running sum of `π/4` does not close a loop, so each press
