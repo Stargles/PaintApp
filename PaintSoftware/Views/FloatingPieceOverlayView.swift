@@ -133,16 +133,38 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         // `Homography.catransform3D`'s doc states. Both are put back on the affine arm below, so a
         // piece that stops being distorted (Reset) goes straight back to the `center`-based layout.
         if piece.distortQuad != nil, let homography = piece.homography {
-            let box = CGRect(origin: .zero, size: piece.baseSize)
-            for view in [pieceImageView, outlineView] {
-                view.transform = .identity
-                view.bounds = box
-                view.layer.anchorPoint = .zero
-                view.layer.position = .zero
-                view.layer.transform = homography.catransform3D
-            }
-            outlineDashLayer.frame = box
-            outlineDashLayer.path = CGPath(rect: box, transform: nil)
+            pieceImageView.transform = .identity
+            pieceImageView.bounds = CGRect(origin: .zero, size: piece.baseSize)
+            pieceImageView.layer.anchorPoint = .zero
+            pieceImageView.layer.position = .zero
+            pieceImageView.layer.transform = homography.catransform3D
+
+            // **The outline stays an ordinary axis-aligned view, and that is a fix rather than a
+            // simplification.** A projective `CATransform3D` draws correctly and **hit-tests
+            // unreliably**: UIKit inverts a layer's transform to decide whether a touch is inside it,
+            // and with `m14`/`m24` live that inversion stops answering. This view carries the move
+            // band's pan recognizer, so putting the matrix on it silently took the band away the
+            // moment a piece was distorted — the piece could be reshaped and then not dragged.
+            // `DistortUITests` caught it; nothing in the model could have.
+            //
+            // So the band claims the quad's **bounding box** while the dashes are drawn along the
+            // quad itself. The band over-claims at the corners by however much the quad is
+            // foreshortened, which is bounded and benign: the four grips are later subviews and are
+            // therefore hit first, so the only touches the difference changes are ones that would
+            // otherwise have fallen through to the tap-away commit.
+            let outline = quad.boundingBox
+            outlineView.layer.transform = CATransform3DIdentity
+            outlineView.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            outlineView.transform = .identity
+            outlineView.bounds = CGRect(origin: .zero, size: outline.size)
+            outlineView.center = CGPoint(x: outline.midX, y: outline.midY)
+            outlineDashLayer.frame = outlineView.bounds
+            let path = CGMutablePath()
+            path.addLines(between: quad.points.map {
+                CGPoint(x: $0.x - outline.minX, y: $0.y - outline.minY)
+            })
+            path.closeSubpath()
+            outlineDashLayer.path = path
         } else {
             let affine = CGAffineTransform.identity
                 .rotated(by: t.rotation)
