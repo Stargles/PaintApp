@@ -21,6 +21,9 @@ struct ActionsMenu: View {
     /// be dragged back, and a resize that cropped artwork cannot (`history.removeAll()`, until
     /// CANVAS_RESIZE.md stage 3 gives it an undo step).
     @State private var showingResize = false
+    /// Whether the "Export" sheet is up. A sheet for `showingResize`'s reason and one more: §3.9's
+    /// visible progress needs a place to be visible.
+    @State private var showingExport = false
 
     var body: some View {
         // Scrolled, not just stacked: the panel that hosts this is capped at a fixed height, and a
@@ -34,6 +37,9 @@ struct ActionsMenu: View {
         .background(Color.black.opacity(0.9))
         .sheet(isPresented: $showingResize) {
             CanvasResizeSheet(canvasManager: canvasManager)
+        }
+        .sheet(isPresented: $showingExport) {
+            ExportSheet(canvasManager: canvasManager)
         }
     }
 
@@ -71,6 +77,8 @@ struct ActionsMenu: View {
             paddingControl
 
             bakePrecisionRow
+
+            exportRow
 
             Rectangle()
                 .fill(Color.white.opacity(0.15))
@@ -194,6 +202,39 @@ struct ActionsMenu: View {
         }
     }
 
+    /// TODO item (29) — RENDER.md §3.9. The animation as video, or one frame as an image.
+    ///
+    /// **The last row above the divider, because it is the last thing you do to a document.**
+    /// Everything above the divider acts on the drawing and everything below it is a preference;
+    /// an export reads the drawing and produces something from it, which puts it on the acting side
+    /// — and at the end of it, where "I am finished" belongs.
+    ///
+    /// A sheet rather than two rows, for `CanvasResizeSheet`'s reason plus one of its own: the wait
+    /// needs somewhere to live. §3.9 asks for visible progress, and an export of a document the
+    /// baker has not caught up with is a real wait that has to be cancellable and has to end
+    /// somewhere the file can be picked up from.
+    private var exportRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                showingExport = true
+            } label: {
+                row(icon: "square.and.arrow.up", title: "Export",
+                    enabled: canvasManager.canvasSize != nil)
+            }
+            .disabled(canvasManager.canvasSize == nil)
+            .accessibilityIdentifier("actions.exportRow")
+
+            Text("Saves the animation as a video, or the frame you are on as an image, at the "
+                 + "Render Resolution below.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
+                .padding(.leading, 24)   // clears the row's icon column, as "Add Text" does
+                .padding(.bottom, 6)
+        }
+    }
+
     /// Nil when "Add Text" is usable on the layer the artist is standing on. Recomputed per render
     /// off `activeLayerKind`, so selecting another layer enables or disables the row with no state
     /// of its own to keep in step.
@@ -229,9 +270,17 @@ struct ActionsMenu: View {
     /// everything below it is a setting.
     ///
     /// A segmented picker, not a slider: there are three values and the artist should be able to see
-    /// all of them and land on one exactly. The subtitle says what the trade *is*, because "50%" on
-    /// its own does not tell anybody that the export is unaffected — which is the fact that makes the
-    /// setting safe to leave on.
+    /// all of them and land on one exactly.
+    ///
+    /// **The subtitle used to say *"Your artwork, exports and thumbnails are always saved at full
+    /// size"*, and RENDER §2.8 makes the middle third of that false.** The knob is now the export
+    /// resolution — it is what the background baker mints at (stage 4d), so it is what the frame
+    /// files hold, and export reads those files and re-renders nothing (§2.1). Leaving the old
+    /// sentence there would have been the worst kind of stale copy: reassurance, about the one thing
+    /// the change altered, on the control that alters it. What survives is the true half — the
+    /// document's own layers and strokes are stored at full size and this setting cannot touch them
+    /// — plus the fact the artist now needs, which the export sheet's caption repeats at the moment
+    /// they are about to hand a file to somebody.
     private var renderResolutionControl: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -250,7 +299,8 @@ struct ActionsMenu: View {
             .accessibilityIdentifier("actions.renderResolutionPicker")
 
             Text("Lower settings redraw layered artwork faster and look softer while you work. "
-                 + "Your artwork, exports and thumbnails are always saved at full size.")
+                 + "Playback and anything you export come out at this size too; your layers "
+                 + "and strokes themselves are always kept at full size.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
