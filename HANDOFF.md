@@ -10,35 +10,25 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## State
 
-**`main` is `43f839c`.** Every commit of this pass is code or the docs that rule it, so a `git log`
-tip further along means another session has moved the tree — `git fetch` before trusting anything
-here.
+**`main` is `35c0db6`.** Everything this pass built is merged; there are no worktrees and no `tmp/*`
+branches. `git fetch` before trusting any of this — `origin/main` is a shared ref.
 
-**Fast tier: 2330 declared, 2330 executed, 2327 passed, 0 failed, 3 skipped.** Count it statically at
-your own base before trusting any number in a brief, including this one.
+**Full suite at `35c0db6`, on an idle machine: 2482 tests in 21.7 min, 2474 passed, 2 failed, 6
+skipped.** Both failures re-ran clean in isolation — `SandwichCompositingUITests`'
+`testAMultiplyLayerLooksMultipliedOnTheLiveCanvas` at 48 s and `InterpolationWorkflowUITests`'
+`testInterpolateModeEndToEndFromGestureToScrub` at 140 s — so both are environmental and neither is a
+finding. The per-class table is re-taken in CLAUDE.md.
 
-**No full suite was run this pass.** It has not run since `41eafa9`, which is now many commits back,
-and this pass merged a change to the compositing path. **A full run is the first thing the next
-session owes**, and it is a phase boundary in CLAUDE.md's sense: `simctl shutdown all` + `erase`
-immediately before it, nothing else on the machine, and **pull the per-class table out of
-`xcresulttool` the moment it finishes** — the triage runs that follow evict the xcresult that owns it.
+**Fast tier: 2351 declared, counted statically.** No executed count was taken at this exact sha; the
+last measured runs were per-branch before their merges. Count `func test` at your own base before
+trusting any number in a brief, including this one.
 
-**Two branches are in flight and neither agent had reported when this was written.** Do not merge
-either on the strength of this file; a worker's tree is a workbench and only its own completion
-report says which bytes are the product.
-
-- `tmp/imagestretch` at `31fd14b` in `../PaintApp-imagestretch` — LASSO_MOVE stage 3c, a placed image
-  storing its own shape so it stretches and mirrors.
-- `tmp/metalchunk` in `../PaintApp-metalchunk` — the Metal half of the stage 3 pin below.
-
-`git worktree list` and the `tmp/*` tips are the real state of both.
-
-**`PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts` is still unresolved** and still needs one
-isolated run on a genuinely idle machine. It was not run this pass either. **The reason the machine
-is never idle was found and it is not the test suite**: Adobe Creative Cloud's daemons —
-`AdobeIPCBroker`, `Adobe Desktop Service`, `Creative Cloud` — were burning ~250% CPU across 8 cores
-with no Adobe app open. The owner gave standing permission to kill weighty programs; `pkill` on those
-three takes the machine back. `Adobe Desktop Service` is a LaunchDaemon and returns.
+**`PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts` is resolved and is not a regression.** It
+passed in 4.5 s on an 80.8%-idle machine. It had failed across three passes because the machine was
+never idle, and the reason for that was not the test suite: **Adobe Creative Cloud's daemons —
+`AdobeIPCBroker`, `Adobe Desktop Service`, `Creative Cloud` — burn ~250% CPU across 8 cores with no
+Adobe app open.** `pkill` on those three takes the machine back; `Adobe Desktop Service` is a
+LaunchDaemon and returns. The owner has given standing permission to kill weighty programs.
 
 ## What is being built: TODO (29), the background renderer
 
@@ -108,12 +98,19 @@ whole frame becomes an image; the eyedropper and `ProjectStore`'s thumbnail go t
 - **A brief's prescription is a hypothesis, and two of this pass's were refuted by the worker holding
   the code.** Both refutations are in the list above. Invite the refutation explicitly in the brief;
   it is the cheapest review in the project.
-- **A stage can ship a hole that every test agrees with.** Stage 3's whole pin runs on CoreGraphics,
-  while the app ships `.automatic` and picks Metal for any graded document — and two lines of the
-  chunking are Metal-only, one of them a pooled-texture clear whose absence shows the *previous frame*
-  underneath. `tmp/metalchunk` is closing it. **Metal is reachable in the fast tier**:
+- **A stage can ship a hole that every test agrees with.** Stage 3's pin ran on CoreGraphics only,
+  while the app ships `.automatic` and picks Metal for any graded document. Closed:
+  `ChunkedCompositeMetalLogicTests` is byte-exact Metal-against-Metal at six chunk widths with no
+  tolerance, and both Metal-only lines are mutation-pinned. **Metal is reachable in the fast tier** —
   `CompositorParityLogicTests` hand-lists `Composite.metal` into the UI-test target so the bundle gets
   its own `default.metallib`.
+- **`Compositor.composite(_:resolving: .metal)` falls back to CoreGraphics silently**, so a suite that
+  merely forces `.metal` agrees with itself perfectly while measuring nothing on the GPU. Take the
+  reference through `MetalCompositor.attempt` and assert the answer was `.image`.
+- **A stale accumulator texture is a subset of the live one**, so a chunk-continuation clear that is
+  deleted is invisible under opaque *or* fully transparent ink. Reaching it needs no paper, translucent
+  ink, and two draws before the cut at once. A test written without all three passes under the
+  mutation — `ChunkedCompositeMetalLogicTests` records that falsification beside the test that works.
 - **Do not act on a worker's tree before its completion notification arrives.** A committed branch tip
   is not a finished agent.
 
@@ -123,8 +120,8 @@ whole frame becomes an image; the eyedropper and `ProjectStore`'s thumbnail go t
 §8's 3b row was stale and is corrected, and the width gate is answered above. **Distort is one feature
 reachable from two items** — LASSO_MOVE stage 5 and KEYFRAMES 5b — and it is the owner's named next
 want. Its raster tier needs nothing that is not merged; **its ink tier wants stage 4's rest-space bake**
-by the measurement above, so build raster first rather than shipping a visible width error. It also
-collides with `tmp/imagestretch`'s files, so land that branch before starting it.
+by the measurement above, so build raster first rather than shipping a visible width error. Move stage
+3c is merged, so the placed-image half of it is unblocked and its files are free.
 
 (31) holds the three large-canvas symptoms; **16383² still cannot be composited at all** and needs a
 downscaled display proxy. (32)-(34) are small. (22), (24), (35)-(37) and (26)-(30) are unstarted, and

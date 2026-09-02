@@ -95,37 +95,40 @@ so the work is unchanged and only its granularity moved. **The longest of the th
 515 s**, which drops this file below `SelectionAndMoveUITests` and makes *that*, at 327 s, the suite's
 new floor.
 
-**MEASURED 2026-08-30 at `72c7cc1`, and it settles the split question while opening a different one —
-2358 tests in 24.4 min, 2351 passed, 1 failed, 6 skipped** — the one failure
-(`SandwichCompositingUITests/testALayerDropsStraightIntoANodeAndBecomesItsFirstInput`) re-ran clean in
-isolation at 26 s, so it is environmental and not a finding. Freshly erased simulator, under `simlock`,
-nothing else on the machine; the build was incremental (~1 min) so almost all of that is test execution.
-**The splits worked.** `LayerPanelUITests`' 515 s floor is gone — its three heirs measured 206 / 191 /
-112 s — and `GraphEditorUITests` came in at 156 / 149. But the ~15–16 min this section INFERRED after the
-splits did not arrive, and **the reason is not another long class**.
+**MEASURED 2026-09-02 at `35c0db6`, on an idle machine — 2482 tests in 21.7 min, 2474 passed, 2 failed,
+6 skipped.** Both failures re-ran clean in isolation (48 s and 140 s) and are environmental, not
+findings. Freshly erased simulator, under `simlock`, nothing else running.
 
 | class | seconds | tests |
 |---|---|---|
-| **`SandwichCompositingUITests`** | **344** | 10 |
-| `SelectionAndMoveUITests` | 300 | 10 |
-| `BlendModesAndCompositorUITests` | 286 | 8 |
-| `PerfBaselineTests` | 220 | 53 |
-| `LayerFolderAndMaskMenuUITests` | 206 | 7 |
-| `EraserAndPersistenceUITests` | 194 | 7 |
-| `LayerPanelControlsUITests` | 191 | 7 |
-| `GraphEditorUITests` / `GraphEditorGestureUITests` | 156 / 149 | 7 / 3 |
+| **`SandwichCompositingUITests`** | **356** | 10 |
+| `SelectionAndMoveUITests` | 309 | 10 |
+| `BlendModesAndCompositorUITests` | 259 | 8 |
+| `LayerPanelControlsUITests` | 238 | 7 |
+| `LayerFolderAndMaskMenuUITests` | 196 | 7 |
+| `CuttingModesUITests` | 170 | 4 |
+| `EraserAndPersistenceUITests` | 169 | 7 |
+| `PerfBaselineTests` | 164 | 54 |
+| `LayerStackUITests` | 162 | 5 |
+| `GraphEditorUITests` / `GraphEditorGestureUITests` | 142 / 138 | 7 / 3 |
 
-**3,893 class-seconds across 102 classes. Four clones therefore hold 16.2 min of ideal work against a
-24.4 min run, and the longest class is 5.7 min — so for the first time the gap is NOT the
-indivisible-class story this section has told since 2026-08-15.** About 7 min, ~45% over ideal, is
-scheduling: clone boot, per-class setup, and the tail where classes run out before the clones do.
-**That moves the lever.** Splitting further cannot recover it, and past some point makes it worse
-because every new class pays its own setup — INFERRED from the arithmetic, not from an experiment, and
-the experiment nobody has run is a full suite with the class count deliberately *reduced*.
+**3,794 class-seconds across 109 classes. Four clones hold 15.8 min of ideal work against a 21.7 min
+run, and the longest class is 5.9 min — so the gap is NOT the indivisible-class story this section told
+from 2026-08-15 to 2026-08-29.** About 5.9 min, ~37% over ideal, is scheduling: clone boot, per-class
+setup, and the tail where classes run out before the clones do. **That is where the lever is now.**
+Splitting further cannot recover it and past some point makes it worse, because every new class pays its
+own setup — INFERRED from the arithmetic, and the experiment nobody has run is a full suite with the
+class count deliberately *reduced*.
 
-**`SandwichCompositingUITests` is the new longest class and it is also the one that reds**, which is
-what this file already predicts of a class held long under parallel clones. It is the next split
-candidate on both counts.
+**`SandwichCompositingUITests` is the longest class and again one of the two that red**, which is what
+this file predicts of a class held long under parallel clones. It has been the next split candidate
+across three consecutive full runs and has not moved; splitting it buys at most the difference between
+356 s and the ~309 s class behind it, which is why nobody has.
+
+**Two failing tests, two classes whose names differ from their files** — `SandwichCompositingUITests`
+lives in `LayerUITests.swift` and `InterpolationWorkflowUITests` in `TimelineAndUndoUITests.swift`. A
+selector built from the filename matches nothing and reports `** TEST SUCCEEDED **`. Resolve the class
+from the source every time; the snippet below does it.
 
 **A run measured against a busy machine is not a measurement, and this section nearly recorded one.**
 The first attempt ran concurrently with a research workflow whose agents read files and compiled with
