@@ -64,8 +64,25 @@ final class FrameBaker {
     var ringLookahead: Int = 24
 
     /// Which way the playhead is travelling — `BakeQueue`'s band 2. `.forward` during playback and
-    /// at rest; stage 4d sets `.backward` from a backwards scrub.
+    /// at rest; `CanvasManager.syncFrameBake` sets `.backward` when the playhead moved backwards.
     var playbackDirection: BakeQueue.Direction = .forward
+
+    /// **True while the artist's hand is down**, and the one thing that stops the loop starting a
+    /// frame it has every other reason to start.
+    ///
+    /// A dab bumps `VectorCanvas.version` (`syncDirty` below reads exactly those counters), so a
+    /// sweep taken mid-stroke sees the artist's frame move on *every* pass. Baking it would
+    /// composite a picture the artist is in the middle of replacing — against §2's *"this should not
+    /// interfere with the FPS of the user interface"*, and worse than merely wasted, because each
+    /// intermediate version mints its own `PixelOps.rasterize` memo entry that nothing will ever ask
+    /// for again and evicts the entries the live canvas is using.
+    ///
+    /// **The dirty set still accumulates while this is set** — this suspends the *loop*, it does not
+    /// discard a request (§3.6). The `kick` that `CanvasManager.syncFrameBake` makes on the pass
+    /// after lift is what starts the bake of the stroke that just landed; there is deliberately no
+    /// `didSet` here, because that same caller always kicks and a second kick nothing reaches is the
+    /// kind of half-live mechanism §2.15 rules out.
+    var isSuspended = false
 
     // MARK: - Scheduling state
 
@@ -134,10 +151,39 @@ final class FrameBaker {
     /// It is deliberately not a lookup in `keyByFrame`, which records what the baker last saw and is
     /// therefore exactly the stale answer §3.3 forbids.
     func currentKey(atFrame frame: Int) -> FrameBakeKey? {
-        guard let manager,
-              let recipe = manager.makeFrameRecipe(atFrame: frame, includeBackground: true)
-        else { return nil }
+        guard let manager, let recipe = Self.recipe(manager, atFrame: frame) else { return nil }
         return FrameBakeKey(recipe: recipe, renderResolution: manager.renderResolution)
+    }
+
+    /// **One mint, so the display path's key and the loop's key cannot disagree** — the same
+    /// argument `liveCompositeSize` makes for its own two callers, and a stronger one here because
+    /// disagreeing costs a file that is never read rather than a soft picture.
+    ///
+    /// ## `.liveComposite`, not `.native`, and that is stage 4d's correction to 4c
+    ///
+    /// The bake is what the live canvas shows at rest (§3.6), so it has to be **the same size** as
+    /// the two halves the same canvas shows mid-stroke. Not for the picture's sake — the sandwich
+    /// views are `.scaleToFill` and either size draws — but for the flatten's. `PixelOps.rasterize`
+    /// is memoized on cel version **and size**, and the halves are minted at `liveCompositeSize`; a
+    /// bake at `.native` would therefore flatten every cel of the document a *second* time at a
+    /// second size, into the same byte-budgeted memo, and the two working sets would evict each
+    /// other. PERFORMANCE §11 measures the flatten at 276 ms against an 84 ms composite, so that is
+    /// the expensive half doubled — on a knob position the artist chose to make things cheaper.
+    /// `MaskResolver.CacheKey` carries width and height too, so a masked document pays it twice over
+    /// (`RenderSizing.liveComposite` writes that argument out in full).
+    ///
+    /// **So §3.6's *"served by the same worker and the same memo"* is bought by the size and not by
+    /// the queue.** The memo is process-wide and keyed; sharing it needs the two mints to agree, not
+    /// the two composites to run on one thread.
+    ///
+    /// The knob is inside `liveCompositeSize`, which is also what §2.8 wants of an export that reads
+    /// these files, and what makes `FrameBakeStore.defaultRoot`'s per-resolution directory name
+    /// something other than three copies of one picture. `CompositorBudget.affordableSize` is inside
+    /// it as well and is §2.12's known defect; it is removed from *that one function* in stage 5,
+    /// which is what keeps the two sizes moving together rather than drifting apart here.
+    @MainActor
+    private static func recipe(_ manager: CanvasManager, atFrame frame: Int) -> FrameRecipe? {
+        manager.makeFrameRecipe(atFrame: frame, includeBackground: true, sizing: .liveComposite)
     }
 
     /// The finished picture for `key`: the ring first, then the store, decoding into the ring on the
@@ -201,6 +247,7 @@ final class FrameBaker {
         framesByDigest = [:]
         lastStructure = nil
         lastCels = nil
+        ringWalk = nil
         bakedCount = 0
         dedupedCount = 0
         failedCount = 0
@@ -215,7 +262,7 @@ final class FrameBaker {
     /// Re-entrant and cheap: every path that could have changed what wants baking calls it, and the
     /// two guards below make a redundant call free.
     func kick() {
-        guard !isBaking, let manager else { return }
+        guard !isBaking, !isSuspended, let manager else { return }
         bakeQueue.frameCount = manager.sceneFrameCount
 
         let playhead = manager.currentFrame
@@ -223,13 +270,17 @@ final class FrameBaker {
                                          direction: playbackDirection,
                                          playbackRange: Self.playbackRange(of: manager),
                                          looping: manager.isLoopEnabled) else {
+            // Nothing left to composite. The frames ahead of the playhead may still be cold in the
+            // ring, though — see `fillRingAhead`, which is the other half of §3.5's promise that
+            // play never decodes on the display thread.
+            if fillRingAhead(playhead: playhead) { return }
             onIdle?()
             return
         }
 
         // Step 1, on the main actor and O(layers) with no pixel work — RENDER §3.2's whole seam.
         // Nothing proportional to canvas area may join these two lines.
-        guard let recipe = manager.makeFrameRecipe(atFrame: frame, includeBackground: true) else {
+        guard let recipe = Self.recipe(manager, atFrame: frame) else {
             // No canvas to composite into. The frame stays pending rather than being marked clean:
             // marking it would discard the request, and §3.6 says the queue never discards. The loop
             // stops here and the next `kick` — after a canvas exists — picks it up.
@@ -275,6 +326,89 @@ final class FrameBaker {
                 self?.finish(frame: frame, key: key, outcome: outcome)
             }
         }
+    }
+
+    // MARK: - Ring top-up
+
+    /// Decodes one frame from the store into the ring, for the frames inside the lookahead the loop
+    /// will never visit — and returns whether it started a job.
+    ///
+    /// **The loop cannot fill the ring on its own, and that gap is what this closes.** The bake job
+    /// rings the frame it just wrote, so the ring is warm on the pass that *dirties* the document.
+    /// Playback dirties nothing: on the second lap every frame is clean, `BakeQueue.next` answers
+    /// nil, and the ring holds whatever survived from the first lap — which at a realistic budget is
+    /// a handful of frames. Every tick past those would call `store.loadDecoded` from
+    /// `image(for:)`, i.e. a file read and an LZ4 decode **on the display thread**, which is exactly
+    /// what §3.5 rules out (*"Play never decodes on the display thread"*).
+    ///
+    /// `keyByFrame` rather than a fresh mint, and that is what makes this cheap enough to sit in
+    /// `kick`: a frame the loop has visited and nothing has dirtied since resolves to the key
+    /// recorded there, so the whole scan is dictionary lookups. A frame the baker has never seen is
+    /// simply skipped — it is dirty, so the branch above this one is handling it.
+    ///
+    /// **One frame per call, under `isBaking`**, so this obeys the same one-job-at-a-time discipline
+    /// the composite does and cannot run beside it. `finishRingFill` goes round again.
+    ///
+    /// ## The walk is a marker rather than a rescan, and without that it does not terminate
+    ///
+    /// The obvious spelling — scan from the playhead each time, fill the first frame that is not
+    /// resident — spins forever the moment the lookahead is wider than the ring's byte budget, which
+    /// is the ordinary case (24 frames at 8.4 MB is 200 MB against a budget of ~96). Filling
+    /// `playhead + 20` evicts `playhead + 2`, the rescan finds `+2` missing, filling it evicts
+    /// something else, and nothing ever converges. Worse than the spin, the ring would end up
+    /// holding the *far* end of the window and not the near end, which is backwards.
+    ///
+    /// So the walk only ever moves outward for a given playhead, and `finishRingFill` ends it the
+    /// first time the ring has no room. What that leaves resident is the nearest N frames, which is
+    /// what a playhead about to walk through them wants. The marker is dropped the moment the
+    /// playhead or the direction moves, so a tick re-walks — and finds the near frames already in.
+    private func fillRingAhead(playhead: Int) -> Bool {
+        guard ringLookahead > 0 else { return false }
+        var distance = 0
+        if let walk = ringWalk, walk.playhead == playhead, walk.direction == playbackDirection {
+            distance = walk.nextDistance
+        }
+        while distance <= ringLookahead {
+            let frame = playbackDirection == .forward ? playhead + distance : playhead - distance
+            guard let key = keyByFrame[frame], !ring.contains(key.fileName) else {
+                distance += 1
+                continue
+            }
+            ringWalk = (playhead, playbackDirection, distance + 1)
+            isBaking = true
+            workQueue.async { [weak self, store] in
+                let decoded = store.loadDecoded(key)
+                Task { @MainActor in self?.finishRingFill(key: key, decoded: decoded) }
+            }
+            return true
+        }
+        ringWalk = (playhead, playbackDirection, ringLookahead + 1)
+        return false
+    }
+
+    /// How far the top-up has already walked, and from where. See `fillRingAhead`.
+    private var ringWalk: (playhead: Int, direction: BakeQueue.Direction, nextDistance: Int)?
+
+    /// Takes one decoded frame in and goes round again — **but only if there was room for it**.
+    ///
+    /// `ring.count` growing is the test, and it is the honest one: `DecodedFrameRing.insert` evicts
+    /// to stay under its ceiling and reports `true` either way, so a `true` that displaced something
+    /// means the ring is full and everything farther from the playhead would only displace something
+    /// nearer to it. It also covers the outright refusal — a frame larger than the whole budget,
+    /// which that type declines by design — and a file the store no longer holds. All three end the
+    /// walk for this playhead rather than the whole feature: the next tick re-walks.
+    private func finishRingFill(key: FrameBakeKey, decoded: DecodedFrame?) {
+        isBaking = false
+        let before = ring.count
+        guard let decoded, ring.insert(decoded, for: key.fileName), ring.count > before else {
+            if var walk = ringWalk {
+                walk.nextDistance = ringLookahead + 1
+                ringWalk = walk
+            }
+            onIdle?()
+            return
+        }
+        kick()
     }
 
     /// What one iteration did.

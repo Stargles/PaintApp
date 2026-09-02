@@ -420,13 +420,18 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     /// and `RenderNode.effect` and `LayerContentVersion.effect` are each compared verbatim. Because
     /// both are built from `layerEffect(atFrame:)`, a keyed grade moves them on its own.
     ///
-    /// **The keys also carry `frame`, which is why the obvious test would be vacuous** — two keys at
-    /// two frames differ whatever the tree says. So the frame is held *equal* below and the tree and
-    /// contents are derived at two different frames, which isolates the claim actually being made:
-    /// the resolved grade, not merely the frame number, is what moves the key. That matters because
-    /// the frame is not in every cache — `MaskResolver`'s is keyed on these content versions and
-    /// carries no tree and no frame at all, so a version that failed to move would go on serving
-    /// coverage resolved under the old grade wherever the grade reshapes alpha.
+    /// **The bake key carries no `frame` at all** (RENDER.md §3.3 — a nine-frame hold is one file),
+    /// which is what makes this test say what it means rather than passing on the frame number. Two
+    /// keys derived at two frames of a document with no track are therefore *equal*, and the control
+    /// at the bottom asserts exactly that; the claim being made is that the resolved grade, and not
+    /// the frame, is what moves the key. That matters because the frame is not in every cache —
+    /// `MaskResolver`'s is keyed on these content versions and carries no tree and no frame at all,
+    /// so a version that failed to move would go on serving coverage resolved under the old grade
+    /// wherever the grade reshapes alpha.
+    ///
+    /// It was written against `SandwichFullKey`, which stage 4d deleted along with the reuse rule it
+    /// existed for; `FrameBakeKey` is its successor and a strictly stronger one — a content-addressed
+    /// digest with a discriminator per enum case and no `default:` clause anywhere.
     func testAKeyedGradeMovesTheCacheKeyEvenWithTheFrameHeldEqual() {
         let manager = gradedManager(.blur(Effect.Blur(radius: 2)))
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "blur.radius",
@@ -440,24 +445,29 @@ final class EffectParameterTrackLogicTests: XCTestCase {
                                            effect: manager.layers[index].layerEffect(atFrame: frame))
             }
         }
-        // The frame field is pinned to 0 in both, so nothing below can pass because of it.
-        func key(derivedAt frame: Int) -> SandwichFullKey {
-            SandwichFullKey(tree: manager.renderTree(atFrame: frame), frame: 0,
-                            contents: versions(atFrame: frame), renderResolution: .full,
-                            canvasBackgroundColor: manager.canvasBackgroundColor,
-                            isCanvasBackgroundVisible: manager.isCanvasBackgroundVisible)
+        // Through the app's own mint rather than a hand-built value: a stand-in that assembles the
+        // key its own way is not testing the builder the app uses, which is how the derivation came
+        // to be missing from `SandwichKey` in the first place.
+        func key(derivedAt frame: Int, _ document: CanvasManager = manager) -> FrameBakeKey? {
+            document.makeFrameRecipe(atFrame: frame, includeBackground: true, sizing: .liveComposite)
+                .map { FrameBakeKey(recipe: $0, renderResolution: document.renderResolution) }
         }
 
         XCTAssertNotEqual(manager.renderTree(atFrame: 0), manager.renderTree(atFrame: 10),
                           "`RenderNode.effect` is the resolved grade, so the tree itself moves")
         XCTAssertNotEqual(versions(atFrame: 0), versions(atFrame: 10),
                           "…and so does the content version, which is the key `MaskResolver` uses and which carries no frame")
+        XCTAssertNotNil(key(derivedAt: 0), "Fixture needs a canvas size")
         XCTAssertNotEqual(key(derivedAt: 0), key(derivedAt: 10),
-                          "So the sandwich key moves for the grade, not merely for the frame number")
+                          "So the bake key moves for the grade, and it cannot be the frame number: "
+                          + "`FrameBakeKey` has no frame field")
 
         let untracked = gradedManager(.blur(Effect.Blur(radius: 2)))
         XCTAssertEqual(untracked.renderTree(atFrame: 0), untracked.renderTree(atFrame: 10),
                        "And a document with no track derives one tree, which is the other half of the claim")
+        XCTAssertEqual(key(derivedAt: 0, untracked), key(derivedAt: 10, untracked),
+                       "…so its two frames are one file, which is what says the assertion above "
+                       + "measured the grade rather than the frame")
     }
 
     /// The end of the wire: two frames of the same document composite to **different pixels**.

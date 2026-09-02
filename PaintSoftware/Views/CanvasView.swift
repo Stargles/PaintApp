@@ -931,6 +931,12 @@ struct CanvasView: UIViewRepresentable {
                 }
             }
 
+            // **RENDER.md §3.6's dirty sweep, at this pass's cadence and not on a hook** — see
+            // `CanvasManager.syncFrameBake`, which carries the argument for why the pass *is* the
+            // right clock. Before `updateSandwich`, so that a frame the baker already holds is asked
+            // for after the sweep has had its say about whether it is still current.
+            syncFrameBake()
+
             // After the per-layer loop, which owns `isHidden`/`alpha`/interaction — the sandwich's
             // blanking is a `layer.mask` and rides on top of all three (see `LayerHostView.setBlanked`).
             updateSandwich(tree: tree, engaged: sandwichEngaged)
@@ -959,10 +965,14 @@ struct CanvasView: UIViewRepresentable {
         // Core Animation has no per-view Multiply against arbitrary siblings, so a blended layer
         // cannot be drawn by handing every layer to Core Animation as a flat sibling — which is what
         // `reconcileLayers` above does and will keep doing for every document that does not need
-        // more. Where it does, the compositor draws instead, in two states over three cached images:
+        // more. Where it does, the compositor draws instead, in two states over three images that
+        // now come from two places:
         //
-        //   at rest      `composite(full)` in the lower view, every host blanked. One image, exact
-        //                for every mode and every nesting, byte-identical to the thumbnail.
+        //   at rest      the **baked frame** in the lower view, every host blanked. One image, exact
+        //                for every mode and every nesting, byte-identical to the thumbnail — and,
+        //                since RENDER.md §3.6 stage 4d, composited by `FrameBaker` on its own queue
+        //                and read back off disk rather than composited here. A frame that is not
+        //                baked yet is a miss, and a miss leaves the previous picture up (§2.10).
         //   mid-stroke   `composite(below)` | the active layer's live host | `composite(above)`.
         //
         // Both halves of the mid-stroke picture are approximations and both are deliberate for this
@@ -970,11 +980,17 @@ struct CanvasView: UIViewRepresentable {
         // that view, and a layer *above* it degrades too because a texture composited onto
         // transparency has no backdrop left to blend against. `SandwichLogicTests` pins the exact
         // measured deltas (127, 127, 64) so that a later session cannot come to believe the
-        // mid-stroke path is exact. Lift is what snaps it back to `full`.
+        // mid-stroke path is exact. Lift is what snaps it back to the baked frame.
         //
-        // All three images come out of one rebuild and are cached, so switching state is an image
-        // swap — which is what lets the switch happen on a stroke's first touch without a hitch, and
-        // what keeps the compositor off the drawing path entirely (§2, §5.2).
+        // Both are cached, so switching state is an image swap — which is what lets the switch
+        // happen on a stroke's first touch without a hitch, and what keeps the compositor off the
+        // drawing path entirely (§2, §5.2). The two halves are still built here, by
+        // `startSandwichRebuild`, and deliberately: they are a different product from the bake — cut
+        // at the active leaf, wanted *now* on the artist's own gesture rather than eventually, and
+        // never stored — so they belong on `sandwichQueue` at `.userInitiated` rather than behind a
+        // frame queue at `.utility`. What they must share with the bake is not a thread but a
+        // **size**, because `PixelOps.rasterize`'s memo is keyed on it; `FrameBaker.recipe` is where
+        // that is arranged and argued.
 
         /// Whether §5.2's sandwich drives the live canvas at all this pass.
         ///
@@ -1088,16 +1104,38 @@ struct CanvasView: UIViewRepresentable {
         weak var sandwichBelowView: UIImageView?
         weak var sandwichAboveView: UIImageView?
 
-        /// The three composites of one rebuild, wrapped as `UIImage` once so assigning them is an
-        /// identity check rather than a fresh wrapper — and therefore a Core Animation no-op — on
-        /// every one of the many SwiftUI passes that change nothing.
-        private var sandwichImages: (full: UIImage, below: UIImage, above: UIImage)?
+        /// The two composites of one rebuild — everything strictly below the active layer and
+        /// everything strictly above — wrapped as `UIImage` once so assigning them is an identity
+        /// check rather than a fresh wrapper, and therefore a Core Animation no-op, on every one of
+        /// the many SwiftUI passes that change nothing.
+        ///
+        /// **`full` is not here any more: it is the baked frame** (RENDER.md §3.6, stage 4d). These
+        /// two are the mid-stroke picture and nothing else — a different product from the bake, keyed
+        /// additionally by which leaf the tree is cut at, and transient rather than stored.
+        private var sandwichHalves: (below: UIImage, above: UIImage)?
         /// The key as of the last pass. What `makeSandwichKey` freezes the active layer against, and
         /// deliberately *not* the same thing as `sandwichCacheKey`.
         private var sandwichKey: SandwichKey?
-        /// The key `sandwichImages` was built from. Stale images are still shown — they are at most
+        /// The key `sandwichHalves` was built from. Stale halves are still shown — they are at most
         /// one edit behind — while the rebuild that replaces them runs.
         private var sandwichCacheKey: SandwichKey?
+
+        /// The rest picture, from the baker (§3.6), wrapped once for the same identity reason.
+        ///
+        /// **A miss keeps this exactly where it is**, which is §2.10's *"playback may be visibly
+        /// stale while the bake catches up"*: `sandwichFullKey` still names the older frame, the
+        /// canvas goes on showing it, and `FrameBaker.onFrameFinished` brings the pass that replaces
+        /// it. That pairing is why the key is stored beside the image rather than derived — "is what
+        /// I am holding this frame's picture?" is the question both §2.10 and trap 2 below ask.
+        private var sandwichFull: UIImage?
+        /// The `SandwichKey` `sandwichFull` was fetched for, or nil when it is a miss away from
+        /// current. Compared rather than the bake key itself so that this costs a comparison the
+        /// pass has already made: `SandwichKey` carries strictly more than `FrameBakeKey` does
+        /// (the active leaf, and the content of a layer the bake key folds into the tree), so a
+        /// `SandwichKey` that has not moved is a `FrameBakeKey` that has not moved.
+        private var sandwichFullKey: SandwichKey?
+
+        /// One rebuild of the two halves in flight at a time. See `startSandwichRebuild`.
         private var isSandwichRebuilding = false
         /// True from the first touch of a stroke to its lift. The only input to this whole section
         /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
@@ -1158,6 +1196,29 @@ struct CanvasView: UIViewRepresentable {
             updateSandwich(tree: tree, engaged: isSandwichEngaged(tree))
         }
 
+        /// The baker this coordinator has already given its callback to.
+        ///
+        /// **Weak and compared by identity rather than assigned once**, because `syncFrameBake`
+        /// replaces the baker when the store's root moves — a different project, or the artist
+        /// moving the Render Resolution knob. A callback installed once in `makeUIView` would be
+        /// left on the discarded baker, and the canvas would stop being told its frames had landed
+        /// the moment the knob was touched: §2.10 with no way out of it.
+        private weak var observedFrameBaker: FrameBaker?
+
+        /// Runs the sweep, starts the loop, and adopts whichever baker came out of it.
+        ///
+        /// Called from `reconcileLayers` — see `CanvasManager.syncFrameBake` for why that is the
+        /// cadence rather than a hook.
+        private func syncFrameBake() {
+            canvasManager.syncFrameBake(suspended: isSandwichStrokeLive)
+            let baker = canvasManager.frameBaker
+            guard observedFrameBaker !== baker else { return }
+            observedFrameBaker = baker
+            baker.onFrameFinished = { [weak self] frame in
+                self?.bakerDidFinish(frame: frame)
+            }
+        }
+
         /// Picks the presentation, schedules a rebuild when the key has moved, and applies both.
         ///
         /// Called at the end of `reconcileLayers` — so every host exists and has had its own
@@ -1184,7 +1245,8 @@ struct CanvasView: UIViewRepresentable {
                     for host in layerHosts.values { host.setContentMask(nil) }
                     liveMaskImage = nil
                 }
-                guard sandwichPresentation != .disengaged || sandwichImages != nil else { return }
+                guard sandwichPresentation != .disengaged || sandwichHalves != nil
+                        || sandwichFull != nil else { return }
                 // Everything back to today's path, and the images dropped rather than kept warm: three
                 // canvas-sized images is 50 MB at 2048² and 192 MB at 4000² (§5.3), which is not a
                 // cache to hold against a document that has stopped needing it. Re-engaging pays one
@@ -1194,11 +1256,16 @@ struct CanvasView: UIViewRepresentable {
                 aboveView.image = nil
                 aboveView.isHidden = true
                 for host in layerHosts.values { host.setBlanked(false) }
-                sandwichImages = nil
+                sandwichHalves = nil
                 sandwichKey = nil
                 sandwichCacheKey = nil
-                // With the images, not after them: `sandwichFullKey` says "the `full` we are holding
-                // was built from this", and once we are holding none it is a claim about nothing.
+                // The baked frame goes with them, and for the same accounting rather than to save
+                // the bake: the file stays on disk and re-engaging pays one decode, but a
+                // canvas-sized `UIImage` held for a canvas that has stopped showing it is 16 MB at
+                // 2048² with nothing on screen to justify it. With the image, not after it —
+                // `sandwichFullKey` says "the picture we are holding is this frame's", and once we
+                // are holding none it is a claim about nothing.
+                sandwichFull = nil
                 sandwichFullKey = nil
                 // The mask image goes with them and for the same reason — it is another canvas-sized
                 // 16 MB, and re-engaging pays one `makeMaskImage` alongside the one rebuild.
@@ -1210,6 +1277,10 @@ struct CanvasView: UIViewRepresentable {
             let key = makeSandwichKey(tree: tree)
             sandwichKey = key
             if key != sandwichCacheKey { startSandwichRebuild(for: key) }
+            // **The rest picture comes off the bake now** (§3.6), so this is a lookup and not a
+            // composite: ring, then store, then a miss. A miss changes nothing on screen (§2.10) and
+            // `FrameBaker.onFrameFinished` brings the pass that turns it into a hit.
+            refreshBakedFull(for: key)
 
             // **Nearest-neighbour is right at full resolution and wrong below it.** `makeSandwichView`
             // chooses `.nearest` because the composite is exactly canvas-sized, so the only scaling is
@@ -1226,7 +1297,9 @@ struct CanvasView: UIViewRepresentable {
             // nearest for an image that genuinely needs interpolating, and the blocky result would
             // look like the bug the comment above exists to prevent, on the device least able to
             // afford being reported as broken.
-            let composited = sandwichImages?.full.size ?? .zero
+            // Either product answers: the bake and the halves are minted at one size, which is
+            // `FrameBaker.recipe`'s whole argument for `.liveComposite`.
+            let composited = sandwichFull?.size ?? sandwichHalves?.below.size ?? .zero
             let isReduced = composited != .zero
                 && composited != (canvasManager.canvasSize ?? composited)
             let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
@@ -1235,26 +1308,34 @@ struct CanvasView: UIViewRepresentable {
                 aboveView.layer.magnificationFilter = filter
             }
 
-            // **Trap 1: do not blank the hosts until the first composite has landed.** On the very
-            // first engage there is nothing cached, and blanking now would flash an empty canvas for
-            // however long the rebuild takes.
-            guard let images = sandwichImages else { return paperIsNowPaintedBy(false) }
-
-            // **Trap 2: stay mid-stroke until the new `full` lands.** On lift the key unfreezes and
-            // a rebuild starts; flipping to rest right away would show a `full` composited before the
-            // stroke existed, and the artist would watch their just-finished stroke vanish and come
-            // back a beat later. `key != sandwichCacheKey` is exactly "the rebuild lift asked for has
-            // not landed yet".
+            // **Trap 2: stay mid-stroke until this frame's bake lands.** On lift the key unfreezes,
+            // so the baker's key moves too and its file does not exist yet; flipping to rest right
+            // away would show the picture composited *before* the stroke existed, and the artist
+            // would watch their just-finished stroke vanish and come back a beat later.
+            // `sandwichFullKey != key` is exactly "the frame lift asked for has not landed yet", and
+            // it is the same condition this trap used before the bake existed — `sandwichCacheKey`
+            // named the rebuild that was going to produce `full`, and this names the bake that is.
+            //
+            // Holding the mid-stroke pair is the *right* picture to hold meanwhile, not merely the
+            // older one: the stroke is committed to the cel, the active host still draws it, and it
+            // sits between two halves that never contained it.
             let midStroke = isSandwichStrokeLive
-                || (sandwichPresentation == .midStroke && key != sandwichCacheKey)
+                || (sandwichPresentation == .midStroke && sandwichFullKey != key)
 
+            // **Trap 1: do not blank the hosts until there is something to blank them in favour
+            // of.** On the very first engage nothing is cached, and blanking now would flash an
+            // empty canvas for however long the composite takes. Asked of the presentation actually
+            // about to be applied, because the two now come from two places and either can be the
+            // one that is missing.
             if midStroke {
-                if belowView.image !== images.below { belowView.image = images.below }
-                if aboveView.image !== images.above { aboveView.image = images.above }
+                guard let halves = sandwichHalves else { return paperIsNowPaintedBy(false) }
+                if belowView.image !== halves.below { belowView.image = halves.below }
+                if aboveView.image !== halves.above { aboveView.image = halves.above }
             } else {
-                if belowView.image !== images.full { belowView.image = images.full }
-                // Nothing in the upper view at rest: `full` is the whole tree, so a second image over
-                // it would be everything above the active layer drawn a second time.
+                guard let full = sandwichFull else { return paperIsNowPaintedBy(false) }
+                if belowView.image !== full { belowView.image = full }
+                // Nothing in the upper view at rest: the baked frame is the whole tree, so a second
+                // image over it would be everything above the active layer drawn a second time.
                 if aboveView.image != nil { aboveView.image = nil }
             }
             if belowView.isHidden { belowView.isHidden = false }
@@ -1378,12 +1459,12 @@ struct CanvasView: UIViewRepresentable {
         /// carry, and the active index is what decides *where the tree is cut*.
         ///
         /// `activeLayerIndex` moving rebuilds `below` and `above`, which is exactly right —
-        /// switching layers changes where the tree is cut. It used to rebuild `full` too, for a
-        /// picture identical to the one already cached, and this comment used to say that was "worth
-        /// the wasted composite rather than a second key and a second cache to keep them apart".
-        /// **That is no longer the trade.** `SandwichFullKey` is this key minus `activeLayerIndex`,
-        /// and the second cache costs nothing but the key: the image it hands back is the one
-        /// `sandwichImages` is already retaining. See `startSandwichRebuild`.
+        /// switching layers changes where the tree is cut. **It reaches the rest picture not at all**,
+        /// and no longer needs a second key beside this one to say so: the rest picture is the baked
+        /// frame, `FrameBakeKey` has no field for the active leaf, so a layer tap is a hit in the
+        /// ring rather than a composite that was going to be skipped. This key is also what
+        /// `refreshBakedFull` compares against, and soundly — it carries strictly more than the bake
+        /// key does, so a `SandwichKey` that has not moved is a `FrameBakeKey` that has not moved.
         private struct SandwichKey: Equatable {
             let tree: [RenderNode]
             let activeLayerIndex: Int
@@ -1391,7 +1472,7 @@ struct CanvasView: UIViewRepresentable {
             /// Parallel to `layers`; nil where a layer has no cel at this frame.
             let contents: [LayerContentVersion?]
             /// **An evaluation input like any other, and the one that is easiest to leave out.**
-            /// `RenderResolution` changes the size of all three cached images without changing a
+            /// `RenderResolution` changes the size of every cached image without changing a
             /// single thing this key otherwise reads — not the tree, not a content version, not the
             /// frame — so omitting it leaves the canvas showing the previous resolution's images until
             /// something unrelated happens to move the key. That is not a stale *picture*, which this
@@ -1400,11 +1481,10 @@ struct CanvasView: UIViewRepresentable {
             /// **The paper is inside `full` and `below` now** (EFFECT_BACKDROP.md §6 step 3), so it is
             /// an evaluation input and belongs here for exactly `renderResolution`'s reason above.
             ///
-            /// This is the key that decides whether to *rebuild at all*; `SandwichFullKey` beside it
-            /// only decides whether an already-composited `full` may be reused. **Both need the
-            /// field and neither covers for the other**: without it here nothing recomposites when
-            /// the artist recolours the canvas, and without it there the rebuild that does happen
-            /// hands back the old `full` anyway. EFFECT_BACKDROP.md §6 names only the second.
+            /// This is the key that decides whether to *rebuild at all* — and, through
+            /// `refreshBakedFull`, whether the baked frame on hand is still this frame's. Without it
+            /// nothing recomposites when the artist recolours the canvas. `FrameBakeKey` carries the
+            /// resolved colour for the same reason from the other side of the seam.
             let canvasBackgroundColor: Color
             /// Invisible is not the same key as white — it is the difference between an effect
             /// grading a backdrop and an effect grading nothing, which is the whole subject here.
@@ -1485,24 +1565,48 @@ struct CanvasView: UIViewRepresentable {
         private static let sandwichQueue = DispatchQueue(label: "com.paintapp.CanvasView.sandwich",
                                                          qos: .userInitiated)
 
-        /// One rebuild in flight at a time. A key that moves while one is running is not queued: the
-        /// far end of every rebuild re-derives the key from the model, so it picks up whatever has
-        /// happened since rather than compositing an intermediate picture nobody will ever see.
-        /// What the `full` currently in `sandwichImages` was composited from, or nil when there is
-        /// none. Dropped with the images themselves on disengage — an address for pixels that have
-        /// been released is not a cache, it is a bug waiting for a coincidence.
-        private var sandwichFullKey: SandwichFullKey?
+        /// Asks the baker for this frame's finished picture, and holds it.
+        ///
+        /// **A miss leaves everything alone**, which is the whole of §2.10 in one line: the image and
+        /// the key it belongs to move together or not at all, so a canvas holding frame 4's picture
+        /// while the playhead sits on an unbaked frame 5 goes on showing frame 4 and *says* it is
+        /// showing frame 4 — which is what trap 2 in `updateSandwich` reads to decide whether the
+        /// rest presentation is ready.
+        ///
+        /// Gated on the key so that a hit is one dictionary comparison per pass rather than a mint
+        /// and a digest. The mint behind `FrameBaker.image(atFrame:)` is O(layers) with no pixel
+        /// work, but it is O(layers) on the main thread on every SwiftUI pass, and a canvas at rest
+        /// has a great many passes that change nothing.
+        private func refreshBakedFull(for key: SandwichKey) {
+            guard sandwichFullKey != key else { return }
+            guard let image = canvasManager.frameBaker.image(atFrame: canvasManager.currentFrame) else {
+                return
+            }
+            sandwichFull = UIImage(cgImage: image, scale: 1, orientation: .up)
+            sandwichFullKey = key
+        }
 
-        /// `key` with the active layer taken out — what `full` actually depends on. See
-        /// `SandwichFullKey`.
-        private func fullKey(from key: SandwichKey) -> SandwichFullKey {
-            SandwichFullKey(tree: key.tree, frame: key.frame, contents: key.contents,
-                            renderResolution: key.renderResolution,
-                            canvasBackgroundColor: key.canvasBackgroundColor,
-                            isCanvasBackgroundVisible: key.isCanvasBackgroundVisible)
+        /// The baker's *"this frame is ready"*, wired to the canvas that is showing the previous one.
+        ///
+        /// Installed once from `makeUIView` — §2.10's other half. Without it a frame that lands
+        /// while nothing else is happening sits on disk until some unrelated pass comes along, which
+        /// is the "a control that visibly does nothing" failure in its rendering costume: at rest
+        /// there is no next pass, because a canvas nobody is touching publishes nothing.
+        private func bakerDidFinish(frame: Int) {
+            guard frame == canvasManager.currentFrame else { return }
+            applySandwichPresentationNow()
         }
 
         private func startSandwichRebuild(for key: SandwichKey) {
+            // **Mutual exclusion, not a discard, and the difference is `finishSandwichRebuild`.**
+            // §3.6 rules that the bake queue *"reorders, it never discards"*, and `FrameBaker`
+            // honours that with `isBaking` — a flag every path clears before kicking again. This is
+            // the same contract in the same shape: the far end reconciles, which re-derives the key
+            // from the model and starts the rebuild this call declined, so a request arriving
+            // mid-rebuild waits one iteration rather than evaporating. What it does *not* do is
+            // start a second composite per SwiftUI pass, which on a serial queue during a scrub
+            // would queue a rebuild per display frame and hand the artist a minutes-long backlog of
+            // pictures nobody will see.
             guard !isSandwichRebuilding else { return }
             // Nil for a stale or non-leaf `activeLayerIndex`, or a degenerate canvas — it does not
             // fall back to `full`, deliberately, so that a wrong cut is never composited. The canvas
@@ -1514,14 +1618,6 @@ struct CanvasView: UIViewRepresentable {
                                                                 activeLayerIndex: canvasManager.currentLayerIndex)
             else { return }
 
-            // **Reuse `full` when only the cut moved.** A layer tap changes `activeLayerIndex` and
-            // nothing else, so `SandwichFullKey` does not move and the picture `full` would
-            // composite is the one already on screen — see that type for why that is a property of
-            // `makeSandwichRecipe` rather than a hope. Carried into the closure as a value, so the
-            // background queue reads no main-actor state.
-            let wantedFullKey = fullKey(from: key)
-            let reusableFull = (sandwichFullKey == wantedFullKey) ? sandwichImages?.full : nil
-
             isSandwichRebuilding = true
             Self.sandwichQueue.async { [weak self] in
                 // **The flatten happens here now, not on the main actor before the hop** — RENDER.md
@@ -1529,41 +1625,37 @@ struct CanvasView: UIViewRepresentable {
                 // the artist makes while this runs reaches the live tiers and not these; the picture
                 // that lands is the one the recipe named, which is at worst one edit stale and is
                 // exactly what `finishSandwichRebuild`'s key check already tolerates.
+                //
+                // **`requests.full` is deliberately not composited here.** It is the same product as
+                // the baked frame, and §2.15 allows exactly one producer of it; that producer is
+                // `FrameBaker`, which chunks the walk under a memory ceiling (§3.4) and writes the
+                // result where play and export can read it. The request value still exists because
+                // the *cut* is defined against it — `below` and `above` are correct precisely when
+                // they recompose to `full` — and that invariant is what `SandwichLogicTests` pins.
                 let requests = recipe.resolve()
-                // `Compositor.composite` is skipped entirely rather than called and discarded: the
-                // count is the measurement (`CompositeProbe`), and a call that happens is a call that
-                // costs whatever the document makes it cost.
-                let full = reusableFull?.cgImage ?? Compositor.composite(requests.full)
                 let below = Compositor.composite(requests.below)
                 let above = Compositor.composite(requests.above)
                 Task { @MainActor in
-                    self?.finishSandwichRebuild(key: key, fullKey: wantedFullKey,
-                                                full: full, below: below, above: above,
-                                                reusedFull: reusableFull)
+                    self?.finishSandwichRebuild(key: key, below: below, above: above)
                 }
             }
         }
 
-        private func finishSandwichRebuild(key: SandwichKey, fullKey: SandwichFullKey,
-                                           full: CGImage?, below: CGImage?, above: CGImage?,
-                                           reusedFull: UIImage?) {
+        private func finishSandwichRebuild(key: SandwichKey, below: CGImage?, above: CGImage?) {
             isSandwichRebuilding = false
-            // All three or none: a half-updated set would put a `below` from this frame under an
+            // Both or neither: a half-updated pair would put a `below` from this frame under an
             // `above` from the last one. `composite` returns nil only for a degenerate canvas.
-            if let full, let below, let above, key == sandwichKey {
-                // The reused image is passed straight back through rather than re-wrapped, so the
-                // `!==` identity checks in `updateSandwich` still read "nothing changed" and Core
-                // Animation is handed no new contents for a picture that did not move.
-                sandwichImages = (full: reusedFull ?? UIImage(cgImage: full, scale: 1, orientation: .up),
-                                  below: UIImage(cgImage: below, scale: 1, orientation: .up),
+            if let below, let above, key == sandwichKey {
+                sandwichHalves = (below: UIImage(cgImage: below, scale: 1, orientation: .up),
                                   above: UIImage(cgImage: above, scale: 1, orientation: .up))
                 sandwichCacheKey = key
-                sandwichFullKey = fullKey
             }
             // The whole reconciliation rather than only the image swap: this result may be the first
             // one, and the first one is what unblocks blanking the hosts (trap 1 in `updateSandwich`).
             // It is also what starts the next rebuild when this result was the stale one — the key it
-            // recomputes is the model's current answer, not the one this rebuild was asked for.
+            // recomputes is the model's current answer, not the one this rebuild was asked for — and
+            // that is the whole of the "a declined request waits one iteration" contract the guard at
+            // the top of `startSandwichRebuild` rests on.
             reconcileLayers()
         }
 

@@ -523,6 +523,13 @@ extension Array where Element == RenderNode {
 struct SandwichRequests {
 
     /// The whole tree, exactly as `makeRenderRequest` would have built it.
+    ///
+    /// **Nothing in the app composites this any more** — RENDER.md §3.6 stage 4d moved the rest
+    /// picture onto `FrameBaker`, which is now its only producer (§2.15 allows exactly one). It is
+    /// still here because it is not a *second* producer, it is the **definition** of the other two:
+    /// `below` and `above` are correct precisely when they recompose to it, and that invariant is
+    /// what `SandwichLogicTests` measures the mid-stroke approximation's deltas against. Composite it
+    /// in a test; do not composite it on the canvas.
     let full: RenderRequest
 
     /// Everything strictly below the active layer in evaluation order.
@@ -533,61 +540,6 @@ struct SandwichRequests {
     /// backdrop left to blend against. Accepted for this phase, and it snaps correct on lift because
     /// lift is when the canvas goes back to `full`.
     let above: RenderRequest
-}
-
-/// What `SandwichRequests.full` depends on — which is everything `CanvasView.SandwichKey` carries
-/// **except** `activeLayerIndex`.
-///
-/// **The claim this type makes, and it is checkable by reading `makeSandwichRecipe`.** All three
-/// requests are built over one set of leaves; `activeLayerIndex` is used in exactly one place, the
-/// `tree.split(atLeaf:)` that produces `below` and `above`. `full` is `request(tree)` — the whole
-/// tree, uncut. So switching the active layer changes *where the tree is cut* and nothing about the
-/// picture `full` composites, and a rebuild triggered by a layer tap recomposites, at native canvas
-/// size, an image byte-identical to the one already on screen.
-///
-/// `SandwichKey`'s own doc comment named this fix and declined it, in these words: "Worth the wasted
-/// composite rather than a second key and a second cache to keep them apart." What changed is the
-/// accounting rather than the argument — the composite it calls wasted is roughly 21 ms of a 54.8 ms
-/// rebuild on a six-layer document at the owner's canvas, and a layer tap is not a rare gesture. The
-/// second cache turns out to cost nothing extra either: the reused image is the one `sandwichImages`
-/// is already retaining, so this is a key beside it and not a second copy of the pixels.
-///
-/// Lives here rather than inside the coordinator so it can be tested as the value type it is: the
-/// property the reuse rests on — that this key moves for every input except the active layer — is
-/// exactly what a headless test can pin.
-struct SandwichFullKey: Equatable {
-    let tree: [RenderNode]
-    let frame: Int
-    /// Parallel to `layers`; nil where a layer has no cel at this frame.
-    let contents: [LayerContentVersion?]
-    let renderResolution: RenderResolution
-
-    /// **The paper is an input to the picture now, so it is an input to the key.** Before
-    /// EFFECT_BACKDROP.md §6 step 3 the composite did not contain the canvas colour at all — it was a
-    /// `UIView` behind the images — so recolouring the canvas moved nothing here and correctly needed
-    /// no rebuild. It is inside `full` and `below` now, and a key that does not carry it would leave
-    /// the artist looking at the old colour until something unrelated happened to move the key. Same
-    /// failure `renderResolution` is in `SandwichKey` for, and stated the same way: a control that
-    /// visibly does nothing when you use it.
-    ///
-    /// Two fields rather than the resolved `RenderBackground`, because these are the model's own and
-    /// the resolution through `PixelOps.uiColor` is one more thing that could make two equal states
-    /// compare unequal.
-    let canvasBackgroundColor: Color
-    /// Invisible is not the same key as white: it is the difference between a graded backdrop and a
-    /// transparent one, which is the whole subject of this change.
-    let isCanvasBackgroundVisible: Bool
-
-    init(tree: [RenderNode], frame: Int, contents: [LayerContentVersion?],
-         renderResolution: RenderResolution,
-         canvasBackgroundColor: Color, isCanvasBackgroundVisible: Bool) {
-        self.tree = tree
-        self.frame = frame
-        self.contents = contents
-        self.renderResolution = renderResolution
-        self.canvasBackgroundColor = canvasBackgroundColor
-        self.isCanvasBackgroundVisible = isCanvasBackgroundVisible
-    }
 }
 
 // MARK: - Building one
@@ -902,7 +854,7 @@ extension CanvasManager {
     /// of layer hosts** — §5.2's engagement predicate, and the containment for the whole compositor
     /// phase.
     ///
-    /// It lives here rather than in `CanvasView.Coordinator` for `SandwichFullKey`'s reason: a
+    /// It lives here rather than in `CanvasView.Coordinator` for `SandwichRequests`' reason: a
     /// `UIViewRepresentable` coordinator is not reachable headlessly, and every input to this answer
     /// is document state. The coordinator calls it and owns nothing but the call.
     ///

@@ -3,8 +3,11 @@ import CryptoKit
 
 // MARK: - The bake key (RENDER.md §3.3)
 //
-// One key names the pixels of one frame. It is `SandwichFullKey` **with `frame` removed** and the
-// inputs a persistent store needs added — and the removal is the whole design, not a saving: a
+// One key names the pixels of one frame: the resolved tree, one `LayerContentVersion` per leaf, the
+// resolved mask stacks, the buffer size, the paper and the knob — everything `CanvasView.SandwichKey`
+// carries except `activeLayerIndex` (which decides where the tree is *cut*, not what it composites to)
+// and `frame`, plus the inputs a persistent store needs. **Leaving `frame` out is the whole design,
+// not a saving**: a
 // nine-frame hold is one `Cel`, so every frame of it has byte-identical leaf versions and an
 // identical tree, and leaving `frame` out is what makes those nine frames resolve to one file.
 // `frame` reaches no pixel; the compositor reads it only to rebuild sub-requests
@@ -122,7 +125,7 @@ struct BakeKeyEncoder {
         cgFloat(value.size.width); cgFloat(value.size.height)
     }
 
-    /// **The resolved colour, not the model's `Color`.** `SandwichFullKey` deliberately carries the
+    /// **The resolved colour, not the model's `Color`.** `CanvasView.SandwichKey` deliberately carries the
     /// model's `Color` and its visibility flag rather than the resolved `RenderBackground`, on the
     /// grounds that resolving through `PixelOps.uiColor` is one more thing that could make two equal
     /// states compare unequal. That argument is about a live in-memory cache being *missed*. Here

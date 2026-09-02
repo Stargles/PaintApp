@@ -402,89 +402,37 @@ final class SandwichLogicTests: XCTestCase {
         }
     }
 
-    /// …and the key that decides whether to reuse it moves for everything **except** the active
-    /// layer. Both halves are needed: the property above makes reuse *sound*, this makes it *happen
-    /// exactly when it should*. A key that failed to move on a content change would serve pre-edit
-    /// pixels, which is the failure mode `LayerContentVersion` was written to prevent.
-    func testTheFullKeyIgnoresTheActiveLayerAndNothingElse() {
-        let manager = stack(3)
-        func key(frame: Int = 0, resolution: RenderResolution = .full) -> SandwichFullKey {
-            SandwichFullKey(tree: manager.renderTree(atFrame: frame),
-                            frame: frame,
-                            // `contentVersion(ofLayer:atFrame:)` rather than a copy of its field list:
-                            // this stands in for `makeSandwichKey`, and a stand-in that builds the
-                            // value its own way is not testing the builder the app uses — which is
-                            // how the derivation came to be missing from that key in the first place.
-                            contents: manager.layers.indices.map { manager.contentVersion(ofLayer: $0, atFrame: frame) },
-                            renderResolution: resolution,
-                            canvasBackgroundColor: manager.canvasBackgroundColor,
-                            isCanvasBackgroundVisible: manager.isCanvasBackgroundVisible)
-        }
-
-        let base = key()
-        // The active layer is not an input — that is the whole point, and it is expressed by the type
-        // having no field for it rather than by a test that sets one and hopes.
-        manager.currentLayerIndex = 2
-        XCTAssertEqual(base, key(), "Switching the active layer leaves `full`'s key exactly where it was")
-
-        XCTAssertNotEqual(base, key(frame: 1), "A different frame is a different picture")
-        XCTAssertNotEqual(base, key(resolution: .half), "A reduced composite is a different size of picture")
-
-        manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
-        XCTAssertNotEqual(base, key(), "A blend mode change moves the tree, and the tree is in the key")
-
-        let treeChanged = key()
-        CanvasFixture.setBakedContent(manager, layerIndex: 0,
-                                      CanvasFixture.solidImage(cyan, rect: CGRect(x: 2, y: 2, width: 10, height: 10)))
-        XCTAssertNotEqual(treeChanged, key(), "New pixels on a layer move its content version")
-
-        // **The paper, as of EFFECT_BACKDROP.md §6 step 3.** `full` carries the canvas colour now, so
-        // recolouring the canvas is a new picture and has to be a new key. Without this the artist
-        // changes the paper and the canvas keeps showing the old one until something unrelated moves
-        // the key — the same "a control that visibly does nothing" failure `renderResolution` is in
-        // the key to prevent.
-        let painted = key()
-        manager.canvasBackgroundColor = .yellow
-        XCTAssertNotEqual(painted, key(), "A different paper is a different picture")
-
-        let yellow = key()
-        manager.isCanvasBackgroundVisible = false
-        XCTAssertNotEqual(yellow, key(),
-                          "…and turning the paper off is not the same as any colour it could have been: "
-                          + "it is the difference between an effect grading a backdrop and grading nothing")
-    }
-
-    /// The saving, counted. `CompositeProbe` records what the compositor was actually asked to do, so
-    /// this is an integer about the calls rather than a millisecond about the machine — which matters
-    /// on a Mac where CLAUDE.md records contention making suites return wrong answers.
+    /// …and **nothing about that picture is keyed on the active layer any more**, because nothing
+    /// caches it here. RENDER.md §3.6 stage 4d moved the rest picture onto `FrameBaker`, whose key
+    /// has no field for the active leaf at all, so a layer tap is a ring hit rather than a composite
+    /// that a second key had to be kept in order to skip.
     ///
-    /// Replays the two composites a layer-switch rebuild runs under the reuse rule, against the three
-    /// it ran before. It does not drive `CanvasView.Coordinator`, which is a `UIViewRepresentable`
-    /// coordinator and not reachable headlessly — what it pins is the arithmetic that coordinator
-    /// now does, over the same requests, on the same document.
-    func testALayerSwitchCompositesTwiceRatherThanThreeTimes() {
+    /// Two tests stood here until then and both were about machinery that is gone:
+    /// `testTheFullKeyIgnoresTheActiveLayerAndNothingElse` pinned `SandwichFullKey`'s field list,
+    /// which `FrameBakeKeyLogicTests` now does one row per field against a digest rather than an
+    /// `Equatable`; and `testALayerSwitchCompositesTwiceRatherThanThreeTimes` counted the two
+    /// composites a layer switch cost under the reuse rule, which is the count below and is now
+    /// simply *what a rebuild is* rather than a saving over three.
+    func testARebuildIsTheTwoHalvesAndNothingElse() {
         let manager = stack(4)
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)
-        guard let before = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
-              let after = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 2)?.resolve() else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 2)?.resolve() else {
             return XCTFail("Fixture needs a canvas size")
         }
 
+        // The two composites `CanvasView.startSandwichRebuild` runs, replayed over the same requests
+        // on the same document. It does not drive `CanvasView.Coordinator`, which is a
+        // `UIViewRepresentable` coordinator and not reachable headlessly — what it pins is the
+        // arithmetic that coordinator does.
         CompositeProbe.begin()
-        _ = Compositor.composite(before.full)
-        _ = Compositor.composite(before.below)
-        _ = Compositor.composite(before.above)
-        XCTAssertEqual(CompositeProbe.end().count, 3, "Control: a first rebuild composites all three")
-
-        // The layer tap. `SandwichFullKey` has not moved, so `full` is served from what is already
-        // on screen and only the two halves are recomposited.
-        CompositeProbe.begin()
-        _ = Compositor.composite(after.below)
-        _ = Compositor.composite(after.above)
+        _ = Compositor.composite(requests.below)
+        _ = Compositor.composite(requests.above)
         let sizes = CompositeProbe.end()
-        XCTAssertEqual(sizes.count, 2, "A layer switch costs two composites, where it used to cost three")
-        XCTAssertEqual(Set(sizes), [after.full.canvasSize],
-                       "…and the two it does run are the same size as the one it skipped, so the saving is a whole composite")
+        XCTAssertEqual(sizes.count, 2,
+                       "A rebuild is the two halves; the third picture is the bake's and is not composited here")
+        XCTAssertEqual(Set(sizes), [requests.full.canvasSize],
+                       "…and both are the size the bake mints at, which is what lets the three share "
+                       + "one `PixelOps.rasterize` memo — see `FrameBaker.recipe`")
     }
 
     /// **The one measured cost of the extra intermediate, and it is smaller and lopsided in a way

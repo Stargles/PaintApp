@@ -263,7 +263,20 @@ final class FrameBakeStore {
 
     // MARK: - Purging and eviction
 
-    /// §2.11's launch-time dump, as something the app calls rather than something `init` does.
+    /// **§2.11's launch dump, for every document at once** — what `PaintApp.init` calls.
+    ///
+    /// Static rather than per-store because at launch no store exists yet: the bakes of documents
+    /// the artist is not about to open are exactly the ones with nobody to purge them, and building
+    /// one `FrameBakeStore` per directory found on disk would create the directory it is about to
+    /// delete. One `removeItem` on the root does it.
+    ///
+    /// The *keep-beside-the-project* option §2.11 also names is stage 6 and is deliberately not
+    /// here; this root is the Caches copy, which is the one the ruling says is dumped by default.
+    static func purgeEverything() {
+        try? FileManager.default.removeItem(at: bakesRootDirectory)
+    }
+
+    /// The same dump for one store's own corner, for a document that is closing or being re-rooted.
     func purgeAll() {
         let fm = FileManager.default
         for url in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {

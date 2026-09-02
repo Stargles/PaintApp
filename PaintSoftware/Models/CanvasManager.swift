@@ -1820,6 +1820,88 @@ final class CanvasManager: ObservableObject {
         schedulePlaybackTimer()
     }
 
+    // MARK: - The frame baker (RENDER.md §3.5-§3.7)
+
+    /// This document's background baker: the store, the ring, the queue and the serial loop.
+    ///
+    /// **Here rather than on `CanvasView.Coordinator`**, for the reason the playback clock was
+    /// hoisted here in stage 1 and stated in the same words: a `UIViewRepresentable` coordinator is
+    /// per-*view* and the bake is per-*document*, `FrameBaker` is `@MainActor` and already holds a
+    /// `weak var manager` pointing back here, and the timeline's baked-frame indication needs to
+    /// reach it from somewhere that is not the canvas.
+    ///
+    /// **Lazy, and that is load-bearing rather than a micro-optimisation.** `FrameBakeStore.init`
+    /// creates its root directory, so a baker built eagerly would put a `bakes/<uuid>/` folder in
+    /// the real Caches directory for every `CanvasManager` that has ever existed — including the
+    /// hundreds a logic-test run makes. Nothing touches this until a canvas view reconciles
+    /// (`syncFrameBake`), which is exactly when a document is on screen.
+    @MainActor private(set) lazy var frameBaker: FrameBaker = makeFrameBaker()
+
+    /// The decoded ring's ceiling, in bytes.
+    ///
+    /// A number rather than a fraction of the device, for `FrameBakeStore.defaultByteCeiling`'s
+    /// reason: §2.6 forbids a budget only one OS can compute. 96 MiB is eleven frames at the owner's
+    /// 2048×1024 and five at 2048², against a `ringLookahead` of 24 — so the ring is expected to be
+    /// the binding constraint on the lookahead rather than the other way round, which is what
+    /// `FrameBaker.fillRingAhead`'s walk is written to cope with.
+    static let frameRingByteBudget = 96 * 1024 * 1024
+
+    @MainActor
+    private func makeFrameBaker() -> FrameBaker {
+        FrameBaker(manager: self,
+                   store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
+                                                                          renderResolution: renderResolution)),
+                   ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget))
+    }
+
+    /// Where the playhead was the last time `syncFrameBake` ran, so a scrub can be given a direction.
+    private var lastBakePlayhead = 0
+
+    /// **The cadence.** Called once per canvas reconciliation pass — see
+    /// `CanvasView.Coordinator.reconcileLayers`, which is the only caller.
+    ///
+    /// ## Why that is the right rate, and why there is no hook instead
+    ///
+    /// §3.6 established there is no push funnel in this model that knows a frame, so dirty marking
+    /// is a sweep (`FrameBaker.syncDirty`). A sweep needs a clock, and the one this picks is **the
+    /// same clock the live canvas has always redrawn on**: a SwiftUI pass that reaches
+    /// `reconcileLayers`. That makes its sufficiency an identity rather than a hope — the set of
+    /// events that publish is precisely the set that used to move `SandwichKey` and rebuild the
+    /// composite, so a bake started here is started at the exact moment the old rebuild was. A
+    /// mutation that reaches no pass would not have redrawn the canvas either.
+    ///
+    /// It is also cheap enough to sit there. `syncDirty` is O(layers + cels) of integer and pointer
+    /// comparison beside a `renderTree` derivation and a whole-tree `==` that `reconcileLayers` is
+    /// already paying for on the same line.
+    ///
+    /// **`suspended` is the one thing the sweep cannot work out for itself** — see
+    /// `FrameBaker.isSuspended`. A dab publishes nothing, so mid-stroke passes are rare rather than
+    /// absent (the cel spawn on the first stroke of a frame is one), and each would otherwise start
+    /// a composite of a picture the artist is halfway through replacing.
+    @MainActor
+    func syncFrameBake(suspended: Bool) {
+        // Re-rooted rather than reset when the store's directory moves — a different document, or
+        // the artist moving the Render Resolution knob, which `defaultRoot` puts in the path. The
+        // read of `frameBaker` on this line is what instantiates it, against the *current* values,
+        // so the first call through here never rebuilds.
+        let wanted = FrameBakeStore.defaultRoot(projectID: projectID, renderResolution: renderResolution)
+        if frameBaker.store.root != wanted { frameBaker = makeFrameBaker() }
+
+        let baker = frameBaker
+        // §3.6's band 2. Equal leaves it alone: a pass that did not move the playhead says nothing
+        // about which way the artist is going.
+        if currentFrame > lastBakePlayhead {
+            baker.playbackDirection = .forward
+        } else if currentFrame < lastBakePlayhead {
+            baker.playbackDirection = .backward
+        }
+        lastBakePlayhead = currentFrame
+
+        baker.isSuspended = suspended
+        baker.syncDirty()
+        baker.kick()
+    }
+
     // MARK: - Drawing updates
 
     // Live strokes are stamped directly into the `RasterLayerTexture` instance already referenced by
