@@ -570,6 +570,33 @@ strips existed: `canvasSize` is the band, `RenderBackground.rect` is the paper t
 fill each backend already does, the sources are the leaves drawn through a translated CTM (`PixelOps.rasterize`
 gained a `window`), and masks resolve from those. **Neither backend gained a code path; they gained one uniform.**
 
+**The two mid-stroke sandwich halves were left composing the frame whole, and were then the only
+composites in the app a strip did not cover** — fixed 2026-09-02, one commit after stage 5.
+`CanvasView.startSandwichRebuild` called `Compositor.composite` on `below` and `above` directly, so on
+a document over the budget both reached `MetalCompositor.attempt`'s `guard wanted <= budget`, came back
+`.unavailable`, and fell to `CoreGraphicsCompositor` **for the duration of every stroke** — drawing on
+exactly the documents §3.8 exists to serve got *worse* than before stage 5, a shrunk frame on the GPU
+becoming a full-size one on the CPU reference. **The premise was checked before it was built on and it
+held**: MEASURED on the striping zoo at a budget one byte under `peakCompositeTextures · textureBytes`,
+`attempt` on the whole lower half answers `.unavailable` with `Admission.overBudget`, and `attempt` on
+every band of that same half answers `.image`. `SandwichRecipe.compositeHalves` is the fix — each half
+is an ordinary `FrameRecipe` through `StripedCompositor`, one budget account, no second arithmetic —
+and `resolve()` stays as the *definition* of the cut with nothing on the canvas resolving it.
+**Striping costs a fitting document nothing**, and that is a property of the code rather than a
+measurement to be trusted: `plan` answers one strip, `ChunkedCompositor` answers one chunk, and
+`testAFittingDocumentStillCostsExactlyOneCompositePerHalf` pins the probe at exactly two composites at
+the frame's own size. `LiveHalvesStripLogicTests` (8) and `LiveHalvesStripMetalLogicTests` (4) are the
+pin; **only one of the twelve reds when the routing is removed**, and it is the probe one — the
+byte-for-byte tests stay green under that mutation, because the defect was never a wrong picture.
+
+**`StripedCompositor.assemble` bounded the walk and not the destination**, and that is fixed in the same
+change. It collected every strip's crop and then drew them into one full-frame renderer — a peak of about
+two frames, ~1 GB at 16383², and worse than it reads because `CGImage.cropping` retains the image it
+cropped, so the array held each strip's whole *buffer* rather than its core. Each strip is now composited
+and drawn inside the renderer's own closure under an `autoreleasepool`, taking the peak to the frame plus
+**one** strip. What is left is the destination itself, which is a whole frame by construction and belongs
+to the separate "16383² cannot be composited at all" item.
+
 **A frame that fits takes the unstripped path verbatim** — `plan` answers one strip covering everything, and
 `composite` hands the unwindowed recipe straight to `ChunkedCompositor` with no window, no apron, no crop and no
 reassembly. That is a property of the code rather than of the output, and `testAFrameThatFitsIsCompositedWithNoWindowAtAll`
