@@ -107,6 +107,29 @@ final class TransformChannelLogicTests: XCTestCase {
                        "The posed frame shows the drawing 24pt to the right of where the cel stores it")
     }
 
+    /// **§4.5's trap at the pixel level, between two frames that are *both* posed.**
+    ///
+    /// The test above it compares a resting frame against a posed one, and those two differ in
+    /// whether a derivation exists at all — so it survives a poisoned identity and pins "a posed frame
+    /// shows posed pixels" rather than the cache key. **That was found by mutation, not by reading**:
+    /// dropping the resolved maps from `PosedCelIdentity` left it green. Two posed frames whose maps
+    /// differ is the case where the key is the only thing standing between the artist and the wrong
+    /// picture, and this is that case in pixels.
+    func testTwoDifferentlyPosedFramesDoNotShareOneFlatten() throws {
+        let (manager, layerID, celID) = fixture()
+        animate(manager, layerID: layerID, celID: celID)
+        let cel = manager.layers[1].cels[0]
+
+        let early = PixelOps.rasterize(cel: cel, canvasSize: size,
+                                       derived: manager.derivedCelContent(for: cel, atFrame: 2))
+        let late = PixelOps.rasterize(cel: cel, canvasSize: size,
+                                      derived: manager.derivedCelContent(for: cel, atFrame: 8))
+        let earlyBounds = try XCTUnwrap(inkBounds(early))
+        let lateBounds = try XCTUnwrap(inkBounds(late))
+        XCTAssertGreaterThan(lateBounds.minX - earlyBounds.minX, 12,
+                             "Frame 8 is 24pt along a linear span and frame 2 is 6pt — one flatten cannot be both")
+    }
+
     /// **The mutation target, and the field it names is `maps`.** Two frames of one cel whose poses
     /// differ are two cache entries; delete the resolved maps from `PosedCelIdentity` and these two
     /// become one, at which point the test above serves the resting pixels for the posed frame.
