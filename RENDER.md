@@ -339,10 +339,12 @@ preceded them got the *split* backwards, which PERFORMANCE §10.2 keeps as a war
   decode.** The old `load(_:) -> CGImage?` decompressed into a `[UInt8]`, copied it again so a
   `CGContext` could own the buffer, then `makeImage()`d a third: **1.6-2.6 ms of `CGImage` build against
   the LZ4's 1.3-1.4** at 2048x1024, and 15.3-21.5 against 12.9-13.2 at 4096² — larger, at every size,
-  than the codec it sat behind. `DecodedFrame.makeImage()` measures **0.0 ms at every size**. Two
-  cautions for whoever finds the next one of these: it was invisible in Debug, where that column read as
-  8% of the decode against the codec's 91%; and it only ever showed up because the decode was measured
-  *split* rather than as a total.
+  than the codec it sat behind. `DecodedFrame.makeImage()` measures **0.0 ms at every size** — and that
+  is the *eager* copy going away, not a claim about the display: both spellings produce a deferred
+  `CGImage`, and the pixels reach Core Animation at composite time in either. Two cautions for whoever
+  finds the next one of these: it was invisible in Debug, where that column read as 8% of the decode
+  against the codec's 91%; and it only ever showed up because the decode was measured *split* rather
+  than as a total.
 - **The encode, which this section never mentions, is 5-13 ms a frame at 2048x1024 and 25-31 ms at
   4096².** The BGRA convert inside it is 1.2-2.4 ms at the owner's canvas and 12.7-13.8 at 4096² — so the
   `readBack`-into-`bgra8Unorm` change named in the paragraph above is worth a fraction of the bake where

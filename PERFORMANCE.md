@@ -2062,6 +2062,15 @@ fell too (13.2 → 9.6 at 4096² cel art), which is the `Array`→`Data` copy go
 **1.6–2.8× on the whole decode for removing memcpys**, which is the kind of win that only shows up when
 the split is measured rather than the total.
 
+**Be precise about what the 0.0 ms is, because "decode to a displayable image" could be read as more
+than it is.** Both the old and the new `makeImage` produce a *deferred* `CGImage` — the pixels reach Core
+Animation when the layer is composited, and neither figure includes that. What stage 4c actually deleted
+is the **eager** full-frame memcpy that ran whether or not the image was ever drawn, and it is only
+because the store's rows are already BGRA premultiplied-first — Core Animation's own layout, RENDER §3.5 —
+that the deferred half costs nothing extra either. So the table above is the cost of *getting a frame
+ready to hand to a layer*, which is the thing the 41.6 ms budget has to cover alongside everything else a
+tick does; it is not a claim about the display itself.
+
 **5. The BGRA convert on the *encode* is worth less than a Debug run implied, and mostly at large
 canvases.** `bgraBytes` is **1.2–2.4 ms of a 4.7–12.8 ms encode at 2048×1024** — the spread is the
 atomic write inside the whole, not the convert — against **12.7–13.8 of 25.2–31.0 at 4096², about half**.
