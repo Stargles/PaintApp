@@ -388,6 +388,60 @@ struct RenderRequest {
     /// carry "a quality" and the app already has exactly one notion of what that means.
     let quality: RenderQuality
 
+    /// **Nil for an ordinary whole-frame composite; set when this request is one chunk of a chunked
+    /// frame** (RENDER.md §3.4). It changes exactly two things about the walk and nothing else.
+    let continuation: ChunkContinuation?
+
+    /// One chunk's link to the chunks before it.
+    ///
+    /// The accumulator crosses a chunk boundary as a **synthetic leaf** appended past the end of the
+    /// real `sources` array — §3.4's own wording, and the reason neither backend needs a new
+    /// compositing mode. This names the two indices a continuation walk has to know about.
+    ///
+    /// **What it changes, and why each is unavoidable.**
+    ///
+    /// 1. **The background is not filled again.** `background` still carries the frame's paper —
+    ///    it has to, because rule 3 below lays it back down — but the accumulator leaf already holds
+    ///    it, and filling a translucent paper twice is a different picture. So the fill at the top of
+    ///    the walk is skipped, and `paperInBackdrop` stays `background != nil` exactly as before,
+    ///    which is what keeps `.ink` effects live across a cut.
+    /// 2. **An `.ink` effect's re-walk starts from the paper-free twin.** `Effect.Input.ink` re-walks
+    ///    `tree.split(atLeaf:).below` to build an input whose alpha still means coverage
+    ///    (EFFECT_BACKDROP.md §3). In a chunk that cut lands on the accumulator leaf, which has the
+    ///    paper in it — so the driver carries a **second accumulator without paper** alongside the
+    ///    first (§3.4 rule 3 / EFFECT_BACKDROP §3 option C) and both backends substitute one leaf for
+    ///    the other in the cut before compositing it.
+    struct ChunkContinuation: Equatable {
+
+        /// Index in `sources` of the leaf holding everything already composited — the paper too,
+        /// where the frame has paper.
+        let accumulatorIndex: Int
+
+        /// Index of that leaf's paper-free twin, or nil where no node in this chunk can ask for one.
+        ///
+        /// **The invariant, which the driver owns and a mutation test pins:** this is non-nil for
+        /// every chunk that holds a root-level `.ink`-input effect leaf while the frame has paper.
+        /// Past the last such chunk it is nil, because carrying a second accumulator nothing reads is
+        /// a whole extra composite per chunk. A nil here is read as "no substitution", which is the
+        /// pre-chunking behaviour and correct exactly while that invariant holds.
+        let inkOnlyIndex: Int?
+    }
+
+    init(tree: [RenderNode], sources: [LayerRenderSource?], contentVersions: [LayerContentVersion?],
+         maskStacks: [MaskSource: [RenderNode]], frame: Int, canvasSize: CGSize,
+         background: RenderBackground?, quality: RenderQuality,
+         continuation: ChunkContinuation? = nil) {
+        self.tree = tree
+        self.sources = sources
+        self.contentVersions = contentVersions
+        self.maskStacks = maskStacks
+        self.frame = frame
+        self.canvasSize = canvasSize
+        self.background = background
+        self.quality = quality
+        self.continuation = continuation
+    }
+
     /// The canvas size a composite should use to fill a `bound`-sized box, aspect preserved and
     /// **never larger than the canvas itself**.
     ///
@@ -441,6 +495,20 @@ struct RenderRequest {
     /// zero-sized allocation.
     static func wholePixels(_ size: CGSize) -> CGSize {
         CGSize(width: max(1, size.width.rounded()), height: max(1, size.height.rounded()))
+    }
+}
+
+extension Array where Element == RenderNode {
+
+    /// The cut an `.ink` effect is about to composite, with a chunk's accumulator leaf swapped for
+    /// its paper-free twin — **RENDER.md §3.4 rule 3, written once for both backends.**
+    ///
+    /// The identity for an ordinary whole-frame request (no continuation) and for a continuation with
+    /// no ink twin, which is what makes it safe to call at the fork unconditionally rather than
+    /// behind a branch each backend would have to spell for itself.
+    func substitutingChunkAccumulator(of request: RenderRequest) -> [RenderNode] {
+        guard let carry = request.continuation, let ink = carry.inkOnlyIndex else { return self }
+        return substituting(leaf: carry.accumulatorIndex, with: ink)
     }
 }
 

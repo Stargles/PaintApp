@@ -70,11 +70,27 @@ struct FrameRecipe {
     let quality: RenderQuality
 
     /// The frame's pixels. Pure, and safe on any thread: every value it reads was frozen at mint.
+    ///
+    /// **Every leaf at once, which is the thing RENDER.md §3.4 is about.** One canvas-sized image per
+    /// visible leaf is 840 MB for a hundred leaves at 2048x1024, against a 192 MiB budget on the
+    /// owner's iPad — so this is the whole-frame resolve that `composite(budgetBytes:)` replaces for
+    /// anything that wants an image rather than a request. It stays because `SandwichRecipe` and
+    /// `liveMaskRequest` legitimately want one request over every leaf.
     func resolve() -> RenderRequest {
         let resolved = FrameRecipe.resolveSources(leaves, canvasSize: canvasSize, quality: quality)
         return RenderRequest(tree: tree, sources: resolved.sources, contentVersions: resolved.versions,
                              maskStacks: maskStacks, frame: frame, canvasSize: canvasSize,
                              background: background, quality: quality)
+    }
+
+    /// **This frame as an image, under a memory ceiling** — RENDER.md §3.4, and the way a whole frame
+    /// becomes pixels. `resolve()` + `Compositor.composite` is the unchunked spelling and holds every
+    /// leaf at once; this holds a chunk's worth.
+    ///
+    /// Identical output, byte for byte — `ChunkedCompositeLogicTests` is the pin — so a caller that
+    /// only wants the picture has no reason to take the other path.
+    func composite(budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> CGImage? {
+        ChunkedCompositor.composite(self, budgetBytes: budgetBytes)
     }
 
     /// Pass 2, unchanged in everything but where it runs: the survivors rasterized across every core
@@ -85,7 +101,19 @@ struct FrameRecipe {
     ///
     /// **A value layer is not in the fan-out**, for the reason it was never in pass 2 either: it is a
     /// memset rather than a rasterize, so there is nothing to distribute.
-    static func resolveSources(_ leaves: [LeafSnapshot?], canvasSize: CGSize, quality: RenderQuality)
+    ///
+    /// **`subset` is RENDER.md §3.4's "the only change to the snapshot".** Nil is every leaf, which is
+    /// what `resolve()` wants. A chunk passes the leaves that chunk actually reads — its own, plus
+    /// every leaf reachable from a mask it applies (§3.4 rule 4) — and the rest come back nil, which
+    /// the compositor already treats as "contributes nothing" for a leaf that is not in its tree.
+    ///
+    /// **`versions` stays full whatever `subset` says, and that is not an oversight.**
+    /// `MaskResolver`'s cache key is built from `contentVersions(readBy:)`, so a truncated array would
+    /// mint a different key per chunk and re-resolve the same coverage once per chunk — and, worse,
+    /// two chunks clipped by one mask would hold two `ResolvedMask` objects where the design says they
+    /// share one. A version is eight bytes of identity; the pixels are what the subset is about.
+    static func resolveSources(_ leaves: [LeafSnapshot?], canvasSize: CGSize, quality: RenderQuality,
+                               subset: Set<Int>? = nil)
     -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
         var sources = [LayerRenderSource?](repeating: nil, count: leaves.count)
         var versions = [LayerContentVersion?](repeating: nil, count: leaves.count)
@@ -93,6 +121,7 @@ struct FrameRecipe {
         for (index, leaf) in leaves.enumerated() {
             guard let leaf else { continue }
             versions[index] = leaf.version
+            guard subset?.contains(index) ?? true else { continue }
             switch leaf.content {
             case nil:
                 continue

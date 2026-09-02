@@ -306,11 +306,15 @@ enum ProjectStore {
             // The renderer's downscale is then very nearly the identity and is kept: it is what makes
             // this correct for a canvas whose aspect the budget clamp did move, and it costs a copy
             // of a tile-sized image.
+            // **A recipe composited chunk-wise, since RENDER.md stage 3.** The tile is small enough
+            // that the plan is one chunk on any device, so nothing about this save's cost moves; what
+            // moves is that there is one way for a whole frame to become an image (§2.15) rather than
+            // a second path beside it.
             if let size = canvasManager.canvasSize,
-               let request = canvasManager.makeRenderRequest(atFrame: canvasManager.currentFrame,
-                                                             includeBackground: true,
-                                                             sizing: .fitting(Self.thumbnailBounds)),
-               let composited = Compositor.composite(request) {
+               let recipe = canvasManager.makeFrameRecipe(atFrame: canvasManager.currentFrame,
+                                                          includeBackground: true,
+                                                          sizing: .fitting(Self.thumbnailBounds)),
+               let composited = recipe.composite() {
                 thumbnail = ThumbnailRenderer.render(UIImage(cgImage: composited, scale: 1, orientation: .up),
                                                      canvasSize: size, thumbnailSize: Self.thumbnailBounds)
             } else {

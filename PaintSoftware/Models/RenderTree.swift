@@ -683,6 +683,39 @@ extension Array where Element == RenderNode {
     /// need somewhere to hang, and a folder that is empty only at this frame must not blink out of
     /// the tree between frames — and a half that was pruned to nothing has neither reason.
     /// `testAnEmptyFolderSurvivesIntoWhicheverHalfItRanksIn` is the fixture for the difference.
+    /// This stack with every leaf naming `old` renamed to `new`, everything else untouched.
+    ///
+    /// **RENDER.md §3.4 rule 3 is the only caller and the whole reason this exists.** A chunk's tree
+    /// begins with a synthetic leaf holding the accumulator; an `.ink` effect inside that chunk cuts
+    /// the tree with `split(atLeaf:)` and must grade a *paper-free* input, so the cut has the
+    /// accumulator leaf swapped for its paper-free twin before it is composited.
+    ///
+    /// **Recursive rather than a subscript on `below.first`, deliberately.** `split(atLeaf:)` does
+    /// return the root-level prefix first, so today the accumulator leaf is always element 0 of the
+    /// cut — but that is a property of how the cut is built, not something this rename needs, and a
+    /// rename that silently did nothing if the element moved would be a wrong picture with no error.
+    /// Walking the whole list costs O(nodes) against a canvas-sized composite.
+    func substituting(leaf old: Int, with new: Int) -> [RenderNode] {
+        map { node in
+            switch node.content {
+            case .leaf(let index):
+                guard index == old else { return node }
+                return RenderNode(id: node.id, content: .leaf(layerIndex: new),
+                                  opacity: node.opacity, isVisible: node.isVisible,
+                                  blendMode: node.blendMode, isIsolated: node.isIsolated,
+                                  masks: node.masks, effect: node.effect)
+            case .node(let op, let inputs):
+                return RenderNode(id: node.id,
+                                  content: .node(op: op, inputs: inputs.map {
+                                      $0.substituting(leaf: old, with: new)
+                                  }),
+                                  opacity: node.opacity, isVisible: node.isVisible,
+                                  blendMode: node.blendMode, isIsolated: node.isIsolated,
+                                  masks: node.masks, effect: node.effect)
+            }
+        }
+    }
+
     func split(atLeaf layerIndex: Int) -> (below: [RenderNode], above: [RenderNode])? {
         for (position, node) in enumerated() {
             switch node.content {

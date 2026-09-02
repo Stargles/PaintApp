@@ -194,10 +194,34 @@ carrying the accumulator across the cut is **exact**, with four rules:
    and already cached; resolving every mask first, from its own small source subset, releases the constraint.
 
 The accumulator crosses a chunk boundary as a **synthetic leaf**: chunk k's `RenderRequest` is
-[accumulator, chunk nodes…] with `background: nil` for k > 0, so `Compositor.composite` needs no new mode.
-The chunk width N is chosen from the budget — `N = (textureBudgetBytes − fixed) / textureBytes(renderSize)` — and
-the peak is `2 + N + 1 + depth-pairs + ≤2 effect intermediates + masks at 1 B/px`, independent of layer count.
+[accumulator, chunk nodes…], so `Compositor.composite` needs no new mode.
 `renderSources` gains a leaf-subset parameter; that is the only change to the snapshot.
+
+**Built 2026-09-02 (stage 3), and three details of the paragraph above came out differently.**
+`Engine/ChunkedComposite.swift` is the driver; `RenderRequest.ChunkContinuation` is the two lines each
+backend gained.
+
+- **`background: nil` for k > 0 is wrong, and it is rule 3 that says so.** The paper still has to reach a
+  continuation chunk, because `gradedInkOverPaper` lays it back down under the graded ink — so the field
+  keeps the frame's paper for *every* chunk and the continuation suppresses only the *fill* at the top of
+  the walk. `paperInBackdrop` is then `background != nil` unchanged in both backends, which is what keeps
+  an `.ink` effect live across a cut at all; had `background` gone nil, the re-walk would have silently
+  not happened and the effect would have graded the paper-bearing accumulator. Metal needs one extra line
+  the CPU does not: `UIGraphicsImageRenderer` starts transparent, a pooled texture holds the last frame.
+- **The width is `N = budget/textureBytes(renderSize) − carried − peakCompositeTextures`**, counted in
+  *leaf sources* rather than nodes. `peakCompositeTextures` is already `2 + depth-pairs + ≤2 effect
+  intermediates` — it counts the root accumulator pair itself — so the `2 +` in the sentence above was
+  double-counted; `carried` is 2, the accumulator and its paper-free twin. **Masks are not a separate
+  term**: rule 4 puts a mask's source leaves *inside* N, which is stricter than costing the coverage at
+  1 B/px, because the canvas-sized source it resolves *from* is four times the coverage it resolves *to*.
+- **One backend for the whole frame.** `Compositor.composite` resolves `.automatic` from
+  `request.tree.prefersGPUCompositing`, and a chunk's tree is not the frame's — a hundred-leaf document
+  prefers Metal while two-leaf chunks of it prefer CoreGraphics, and the two agree only to within a
+  channel step on the blend modes. So `Compositor.composite(_:resolving:)` takes the answer as an
+  argument and the driver asks the whole tree once. A frame can still mix backends: a `.metal` chunk that
+  comes back `.unavailable` falls back to CoreGraphics for that chunk alone, exactly as before. That is a
+  property of the device rather than of where the boundary fell, and it is the same fallback every
+  composite in the app has always had.
 
 The compositor's own intermediates were never the problem: `peakCompositeTextures` (`RenderTree.swift:543-552`) is
 2 for a flat stack of any length and grows with depth. The problem is `sources`, one canvas per visible leaf, all
@@ -344,10 +368,16 @@ it is the dependency order.
 
    The main-thread figure this removes, MEASURED on the same device run: **`snapshotCold` 36.3 ms
    against a 41.6 ms frame budget** — 87% of a frame — plus the 70.3 ms re-render above.
-3. **Chunked compositing** (§3.4) with `renderSources(subset:)`. Pin: chunked equals unchunked byte-for-byte on a
-   fixture holding a graded folder at 60% opacity, a mask whose source is above the masked layer, an Outline effect
-   at root, Bloom with ink input, a hue-blend leaf, and an isolated folder over a blend — and a fixture that must
-   *fail* if any of the four rules is deleted.
+3. ~~**Chunked compositing** (§3.4) with `renderSources(subset:)`.~~ **Done 2026-09-02.**
+   `Engine/ChunkedComposite.swift` is the driver — a pure `plan` over the tree, then one ordinary
+   `RenderRequest` per chunk — and `FrameRecipe.composite(budgetBytes:)` is how a whole frame becomes an
+   image. §3.4 above carries the three places its own text was wrong. `ChunkedCompositeLogicTests` is the
+   pin: byte-for-byte on the fixture §5 asked for, at every chunk width from 1 to past the document, with
+   and without paper; four fixtures MEASURED red by deleting each rule in turn; and a plan that
+   composites nothing. **The two whole-frame consumers are routed through it** — the project thumbnail
+   and the eyedropper, whose flatten therefore leaves the main actor as well — so there is no second
+   whole-frame path (§2.15). `makeRenderRequest`/`resolve()` stay: `SandwichRecipe` and `liveMaskRequest`
+   legitimately want one request over every leaf, and stage 4 is what moves the live canvas.
 4. **Store and scheduler** (§3.5, §3.6): the key, the LZ4 files, the ring, the queue, the live canvas and play served
    from it, the timeline's baked-frame indication. MEASURE the compression ratio and the decode time on the device.
 5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.

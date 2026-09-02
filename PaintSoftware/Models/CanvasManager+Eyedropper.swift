@@ -60,9 +60,15 @@ extension CanvasManager {
     /// The thumbnail's bounding box is likewise not passed here, and must not be: a sampled colour is
     /// the artist's answer to "what colour is *that* pixel", and a reduced composite would blend the
     /// neighbours into it.
+    ///
+    /// **A recipe rather than a request, since RENDER.md stage 3.** The two halves this file is split
+    /// at are exactly `FrameRecipe`'s: minting is O(layers) on the main actor and touches no pixel,
+    /// and the flatten moves to `sampledColor` with the composite it feeds. So the main-thread cost of
+    /// a pick stops being proportional to canvas area, and the composite that follows is chunked under
+    /// the same memory ceiling everything else is.
     @MainActor
-    func eyedropperRequest() -> RenderRequest? {
-        makeRenderRequest(atFrame: currentFrame, quality: .full, includeBackground: true)
+    func eyedropperRecipe() -> FrameRecipe? {
+        makeFrameRecipe(atFrame: currentFrame, quality: .full, includeBackground: true)
     }
 
     /// Step 2, pure and safe from any thread — the same contract `Compositor.composite` states, and
@@ -81,10 +87,10 @@ extension CanvasManager {
     ///
     /// Nil means "nothing to pick": off the canvas, or a fully transparent pixel. `Eyedropper` decides
     /// which; this only carries the answer.
-    static func sampledColor(from request: RenderRequest, atCanvasPoint point: CGPoint) -> Color? {
-        let canvasSize = request.canvasSize
+    static func sampledColor(from recipe: FrameRecipe, atCanvasPoint point: CGPoint) -> Color? {
+        let canvasSize = recipe.canvasSize
         guard canvasSize.width > 0, canvasSize.height > 0,
-              let image = Compositor.composite(request),
+              let image = recipe.composite(),
               image.width > 0, image.height > 0,
               // `CoreGraphicsCompositor`'s, even when the image came back from the Metal backend:
               // this is the app's one spelling of "redraw into device RGB, premultiplied last, row 0
@@ -148,10 +154,10 @@ extension CanvasManager {
     @MainActor
     @discardableResult
     func pickColor(atCanvasPoint point: CGPoint) -> Bool {
-        guard let request = eyedropperRequest() else {
+        guard let recipe = eyedropperRecipe() else {
             leaveEyedropper()
             return false
         }
-        return applyEyedropperResult(Self.sampledColor(from: request, atCanvasPoint: point))
+        return applyEyedropperResult(Self.sampledColor(from: recipe, atCanvasPoint: point))
     }
 }

@@ -683,7 +683,15 @@ final class CompositorMetalEngine {
             pool.release(back)
         }
 
-        fillBackground(request, into: front, encoder: encoder, width: width, height: height)
+        // **A chunk continuation does not re-fill the paper** (RENDER.md §3.4) — the accumulator leaf
+        // it is about to draw already holds it. `front` still has to be *cleared*, which is the one
+        // asymmetry with the CPU reference: a `UIGraphicsImageRenderer` starts transparent and a
+        // texture out of the pool holds whatever the last composite left in it.
+        if request.continuation == nil {
+            fillBackground(request, into: front, encoder: encoder, width: width, height: height)
+        } else {
+            fill(front, with: SIMD4<Float>(repeating: 0), encoder: encoder, width: width, height: height)
+        }
 
         // One upload per distinct mask for this composite, not per masked node — the resolution is
         // already shared (`MaskResolver`), and re-uploading the same 4.2 MB once per layer clipped
@@ -743,7 +751,9 @@ final class CompositorMetalEngine {
                     let inkBelow: [RenderNode]?
                     switch effect.input {
                     case .ink:
-                        inkBelow = paperInBackdrop ? request.tree.split(atLeaf: layerIndex)?.below : nil
+                        inkBelow = paperInBackdrop
+                            ? request.tree.split(atLeaf: layerIndex)?.below.substitutingChunkAccumulator(of: request)
+                            : nil
                     case .backdrop:
                         inkBelow = nil
                     }

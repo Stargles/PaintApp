@@ -3479,7 +3479,7 @@ struct CanvasView: UIViewRepresentable {
         /// composite, which §11 measured at 84 ms against a 276 ms source snapshot on six layers at
         /// 2048², and doing that inline would freeze the canvas for the length of a tap on a large
         /// document. The split is the one `CanvasManager+Eyedropper.swift` is written around —
-        /// `eyedropperRequest` on the main actor captures the document as a value, `sampledColor` is
+        /// `eyedropperRecipe` on the main actor captures the document as a value, `sampledColor` is
         /// pure and states it is safe from any thread (the same contract `Compositor.composite`
         /// makes), and `applyEyedropperResult` comes back to the main actor to write the colour.
         ///
@@ -3539,7 +3539,7 @@ struct CanvasView: UIViewRepresentable {
             let canvasPoint = recognizer.location(in: container)
             guard CanvasTouchOwner.owner(in: canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))) == .eyedropper else { return }
 
-            guard let request = canvasManager.eyedropperRequest() else {
+            guard let recipe = canvasManager.eyedropperRecipe() else {
                 canvasManager.applyEyedropperResult(nil, revertTool: false)
                 eyedropperRevertPending = true
                 finishEyedropperIfSettled()
@@ -3555,7 +3555,7 @@ struct CanvasView: UIViewRepresentable {
             // one composite to fit. The cost of sharing it is that a pick can wait a rebuild out,
             // which is tens of milliseconds on a deliberate tap.
             Self.sandwichQueue.async { [weak self] in
-                let picked = CanvasManager.sampledColor(from: request, atCanvasPoint: canvasPoint)
+                let picked = CanvasManager.sampledColor(from: recipe, atCanvasPoint: canvasPoint)
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.eyedropperPickInFlight = false

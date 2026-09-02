@@ -380,8 +380,29 @@ enum Compositor {
     /// Returns nil for a degenerate canvas size, **and now for one more case**: a GPU composite
     /// declined because the process is out of memory right now. See below.
     static func composite(_ request: RenderRequest) -> CGImage? {
+        composite(request, resolving: backend)
+    }
+
+    /// **`.automatic` resolved by the caller instead of by this request** — the one-frame-one-backend
+    /// rule RENDER.md §3.4's chunking needs.
+    ///
+    /// `.automatic` is a predicate over `request.tree` (`prefersGPUCompositing`), and a chunk's tree is
+    /// not the frame's: a hundred-leaf document resolves to Metal, while chunk after chunk of two
+    /// leaves apiece resolves to CoreGraphics. The two backends agree exactly for source-over and to
+    /// within a channel step for the blend modes, so a frame that switched between them mid-walk would
+    /// be a frame whose bytes depend on where the chunk boundaries fell — and §5 stage 3's pin is
+    /// byte-for-byte. So `ChunkedCompositor` asks the *whole* tree once and hands the answer to every
+    /// chunk.
+    ///
+    /// **This does not make a frame single-backend, and that is worth saying plainly.** A `.metal`
+    /// chunk that comes back `.unavailable` — no GPU, no metallib, a failed encode — still falls back
+    /// to CoreGraphics for that chunk alone, exactly as it always has. What is removed is the
+    /// *systematic* mixing that `.automatic` would do on tree size; what remains is the same
+    /// per-composite fallback the app has always had, and it fires for reasons that are properties of
+    /// the device rather than of the chunk boundary.
+    static func composite(_ request: RenderRequest, resolving choice: CompositorBackend) -> CGImage? {
         CompositeProbe.record(request.canvasSize)
-        switch backend {
+        switch choice {
         case .coreGraphics:
             return CoreGraphicsCompositor.composite(request)
         // **The shipped path, and it asks the tree rather than a constant.** See
@@ -721,7 +742,13 @@ enum CoreGraphicsCompositor {
 
         let image = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
             .image { context in
-                fillBackground(request.background)
+                // **Skipped for a chunk continuation, and `background` is still the paper**
+                // (RENDER.md §3.4). The accumulator leaf this walk is about to draw already holds
+                // the paper; filling it again would lay a translucent one down twice. Everything
+                // downstream still reads `request.background` — `paperInBackdrop` below, and
+                // `gradedInkOverPaper`, which is the whole reason the field is not simply nil here.
+                // `UIGraphicsImageRenderer` starts transparent, so skipping the fill is all it takes.
+                if request.continuation == nil { fillBackground(request.background) }
                 // **`paperInBackdrop` is `request.background != nil`, and it is the only reason an
                 // `.ink` effect has anything to do** — EFFECT_BACKDROP.md §3 option A. It says "the
                 // accumulator this walk is about to build starts with the canvas paper in it", which
@@ -811,7 +838,9 @@ enum CoreGraphicsCompositor {
                     let inkBelow: [RenderNode]?
                     switch effect.input {
                     case .ink:
-                        inkBelow = paperInBackdrop ? request.tree.split(atLeaf: layerIndex)?.below : nil
+                        inkBelow = paperInBackdrop
+                            ? request.tree.split(atLeaf: layerIndex)?.below.substitutingChunkAccumulator(of: request)
+                            : nil
                     case .backdrop:
                         inkBelow = nil
                     }
