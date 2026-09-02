@@ -407,12 +407,7 @@ final class SandwichLogicTests: XCTestCase {
     /// has no field for the active leaf at all, so a layer tap is a ring hit rather than a composite
     /// that a second key had to be kept in order to skip.
     ///
-    /// Two tests stood here until then and both were about machinery that is gone:
-    /// `testTheFullKeyIgnoresTheActiveLayerAndNothingElse` pinned `SandwichFullKey`'s field list,
-    /// which `FrameBakeKeyLogicTests` now does one row per field against a digest rather than an
-    /// `Equatable`; and `testALayerSwitchCompositesTwiceRatherThanThreeTimes` counted the two
-    /// composites a layer switch cost under the reuse rule, which is the count below and is now
-    /// simply *what a rebuild is* rather than a saving over three.
+    /// A rebuild is the two halves and the count below is what one costs.
     func testARebuildIsTheTwoHalvesAndNothingElse() {
         let manager = stack(4)
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)

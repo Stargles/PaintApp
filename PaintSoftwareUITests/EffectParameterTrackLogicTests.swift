@@ -428,10 +428,6 @@ final class EffectParameterTrackLogicTests: XCTestCase {
     /// `MaskResolver`'s is keyed on these content versions and carries no tree and no frame at all,
     /// so a version that failed to move would go on serving coverage resolved under the old grade
     /// wherever the grade reshapes alpha.
-    ///
-    /// It was written against `SandwichFullKey`, which stage 4d deleted along with the reuse rule it
-    /// existed for; `FrameBakeKey` is its successor and a strictly stronger one — a content-addressed
-    /// digest with a discriminator per enum case and no `default:` clause anywhere.
     func testAKeyedGradeMovesTheCacheKeyEvenWithTheFrameHeldEqual() {
         let manager = gradedManager(.blur(Effect.Blur(radius: 2)))
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: "blur.radius",
