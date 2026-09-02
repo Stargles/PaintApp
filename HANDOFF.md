@@ -45,43 +45,11 @@ suspect first, both new:
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**One branch was in flight when this pass ran out of budget.** Each was told to commit before it
-died, which this repo does because a background agent does not survive a limit and its committed work
-does. **None has been reviewed or merged. Harvest their commits; do not trust their working trees** — a
-worker's tree legitimately holds deliberate poison from mutation testing, and this repo shipped that to
-`main` once.
+**Nothing is in flight. No worktrees, no `tmp/*` branches, nothing uncommitted.**
 
-- **`tmp/dab-bake`** — KEYFRAMES stage 4, the rest-space dab bake. One checkpoint, *"engine and render
-  seam, does not build yet"*. Its acceptance signal already exists: stage 5 left
-  `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` **written to go red when this lands**.
+**Fast tier: 2622 total / 2619 passed / 0 failed / 3 skipped.** It was 2351 at the start of the pass.
 
-**None of the three had a green test run.** Treat every one as a starting point, not as work to finish
-blind — and note that `tmp/live-halves-strips` may have nothing on it at all, in which case the
-regression below is unstarted and its premise is still unconfirmed.
-
-### The regression stage 5 introduced is fixed, and its lesson outlives it
-
-Stage 5 deleted `affordableSize` and striped the whole frame, but **the two mid-stroke sandwich halves
-were not routed with it**, so a document over the budget fell to CoreGraphics for the length of every
-stroke — 203 ms where striping costs 84. Fixed and merged; the halves go through the same striped path,
-and `assemble` now holds frame + one strip rather than frame + every strip (`CGImage.cropping` retains
-the buffer it cropped, so `pieces` was holding whole strips, not cores).
-
-**The lesson is about the tests, not the fix.** Reverting it reds **exactly one of the twelve** new
-tests. Every byte-for-byte test stays green, because the defect was never a wrong picture — it is the
-same pixels down a path that costs two and a half times as much. **A suite built on stage 5's own
-template — byte-identity at several strip heights, on both backends — would have been completely green
-against the regression that stage shipped.** The load-bearing test asserts the budget *inequality*
-through `CompositeProbe` and `CompositorMetalEngine.lastAdmission`, not a strip count and not a pixel.
-When the property you care about is *which path ran*, no amount of comparing outputs will see it.
-
-Two things that fix found which nothing had named: **`MetalCompositor.attempt`'s guard counts
-`peakCompositeTextures`, not sources** — 2 for a flat stack of any length — so a hundred-leaf flat
-document is admitted while holding 840 MB of sources the guard never sees; and the halves now resolve
-only the leaves each half reads, which is *less* rasterization than the shared whole-document resolve
-they had.
-
-## RENDER (29): stages 0 through 5 are merged, and export is what is left
+## RENDER (29) is delivered through stage 6; stage 7 is what is left
 
 [RENDER.md](RENDER.md) is the specification. **§2 is sixteen owner rulings; read them rather than
 re-deriving them.** §5 is the build order.
@@ -105,7 +73,7 @@ hash, because a manifest stamp bumped from edit sites inherits every hole the sw
 in a *persistent* content-addressed store a missed site is a wrong picture with no error. §3.9a carries
 the reasoning and the two things beyond the stamp that a kept store needs.
 
-Superseded — this said stage 6 was next: Video is `AVAssetWriter` over the store in frame order,
+ Video is `AVAssetWriter` over the store in frame order,
 H.264 in `.mp4` at the document's fps and the knob's resolution; a frame is the baked frame as PNG.
 **Both re-render nothing** — that is §2.1 and it is the whole reason the store exists. Delivery is the
 system share sheet. §3.9 says nothing so far forces a second renderer; if something does, say so and
@@ -223,6 +191,26 @@ were found by hand in this pass, and nobody has looked systematically.
   down the canvas on an ordinary drawing with no effect, mask or blend. `MetalCompositor.UploadCache.Key`
   **has no CoreGraphics counterpart**, so the CPU suite was green on every fixture in the file while the
   GPU repeated a band.
+
+**On the dab bake (KEYFRAMES stage 4, merged)**
+
+- **A pure translation re-phases the dab walk** — 110 dabs or 111 depending on the frame. Nothing
+  predicted this; §4.2's framing was about non-uniform maps and stage 5 had already found the Uniform
+  arm reaching it.
+- **`BrushLibrary.square` does not re-phase over an ordinary shrink** (spacingFraction 0.15 clears the
+  1 pt floor to scale 0.278) while Pencil does on 24 of 24, so §4.2's "two non-round-dab cases" are one
+  brush.
+- **§2.16's "a stroke you Move keeps its grain" was declined rather than delivered.** A commit rewrites
+  the stored samples, so the rest space itself moves; storing the multiplier would be ~8 floats per
+  stored sample for a derivable value. **This is an owner ruling that the implementation did not
+  honour — worth putting back to the owner rather than leaving as a silent decline.**
+- The fix was **one field** (`VectorStroke.restWalk`) plus a 15-line `DabTarget` decorator, and no
+  change to grain code at all: wrapping the *sink* rather than the walk leaves `stampSpacing`,
+  `applyScatter`, `grainAlphaMultiplier` and `stampApproximateSquare` running unchanged in rest space.
+  Nothing went on the wire — `VectorStroke`'s hand-written coder names every key, so the field is off
+  it by construction, and no migration was owed.
+- **Per-dab projective width is now reachable**, which is what unblocks Distort's ink tier: `DabPose`
+  returns nil for `constantScale` exactly when the map is projective and asks `localScale(at:)` per dab.
 
 **On poses**
 
