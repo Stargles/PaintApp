@@ -614,6 +614,90 @@ Video: walk the store in frame order, hand each decoded BGRA frame to `AVAssetWr
 the paper is hidden). Both wait for missing bakes with visible progress and neither composites anything. Delivery is
 the system share sheet. One store serves both (§2.9); nothing so far forces a second renderer.
 
+**Built 2026-09-02 (stage 6). `Engine/FrameExport.swift` is the pure half, `Engine/FrameExportSession.swift` the
+driver, `Views/ExportSheet.swift` the sheet. Nothing forced a second renderer** — the export file imports no
+compositor at all, and its only pixel source is `FrameBakeStore.loadDecoded`. Five things the paragraph above does
+not say.
+
+- **An export is a scrub, so the scheduler needed one field and no second queue.** §3.6 orders the bake around the
+  playhead and an export walks 1..N; those look like different orders and are the same order seen from a different
+  place to stand. `BakeQueue.next` is already a pure function of the playhead it is handed and re-derives all three
+  bands every call — its own doc comment says *"an artist scrubbing the timeline therefore reorders the whole queue
+  at no cost"* — so `FrameBaker.exportFocus` substitutes a **virtual playhead** and band 1 answers the frame the
+  export is blocked on while band 2 prebakes the frames it will ask for next. Two things then follow rather than
+  being built: `FrameBakeStore.store(…, playhead:)` reads the same local, so its *"files farthest from the playhead
+  go first"* eviction drops what the export has already written instead of what it is about to read; and
+  `fillRingAhead` warms the ring ahead of the cursor. The focus also replaces the loop markers in band 2, because an
+  artist can export a document whose markers cover four frames of it, and it forces `looping: false` — band 2 wrapping
+  would send the export back behind itself.
+- **The frame count is `playbackStartFrame...playbackEndFrame`, and the other two answers are both wrong in a way
+  that ships.** `sceneFrameCount` is the *laid-out* track — 12 on a new document — so an export driven by it ships
+  empty frames, which is the exact bug `contentEndFrame` was introduced to fix for playback. `contentEndFrame` is
+  right about content and blind to intent, and it is already what `playbackEndFrame` falls back to with no markers
+  set. So the artist exports what pressing play would show, and there is one account of "how long is this" rather
+  than a second one inside export. It is then clamped into `0..<sceneFrameCount`, which is **not** belt and braces:
+  `BakeQueue`'s universe is that range and `markDirty` silently drops anything outside it, so an unclamped frame is an
+  export that waits for ever rather than one that errors.
+- **Premultiplied BGRA reinterpreted as opaque BGRA is already the frame composited over black**, so the video
+  conversion touches no colour channel at all. Source-over onto an opaque backdrop is `src.rgb + (1 - src.a) ·
+  backdrop`, and at black the second term vanishes exactly — no division, no rounding, one byte per pixel. With the
+  paper visible (the default) every pixel is opaque and the choice is unobservable; it is reachable only with the
+  paper hidden, which is asking for transparency in a container that has none.
+- **PNG is the opposite and is the one that goes wrong quietly.** It wants *straight* alpha, so the un-premultiply
+  (`c · 255 / a`, rounded, clamped) happens here rather than being left to ImageIO — which does do it, but silently,
+  and the failure mode when it stops is a dark fringe on every soft edge and no error. MEASURED by deleting the
+  three `straighten` calls: `testPNGStoresStraightColourRatherThanPremultiplied` reads **127.5 back out of the file
+  where 255 belongs**, which is that fringe as a number. `CGImage` accepts `CGImageAlphaInfo.last` from a data
+  provider (a `CGBitmapContext` would not), which is why that route is a provider and never a context.
+- **`AVAssetWriter` takes an odd frame size**, MEASURED: 63x33 in, 63x33 back out of `AVAssetReader`. That matters
+  because three quarters of an odd canvas is odd, and a movie one pixel wider than the artwork would be a wrong file
+  with no error.
+
+**Still owed at stage 6**: the driver and the sheet have no tests — `FrameExportLogicTests` is 14 green on the pure
+half only, and the frame walk, the focus hand-back and the progress phases are covered by nothing. No XCUITest, so
+"the menu row exists, the progress is visible, the share sheet appears" is unverified. Nothing has run on the
+device.
+
+**§2.8's stale copy is fixed here rather than left.** `ActionsMenu.renderResolutionControl`'s subtitle promised
+*"Your artwork, exports and thumbnails are always saved at full size"*, and stage 4d made the middle third of that
+false by putting the knob inside the bake — export reads those files, so the knob **is** the export resolution. It
+now says playback and exports come out at this size and the document's own layers do not, and the export sheet
+repeats the pixel size at the moment the artist is about to hand a file to somebody. Thumbnails are unaffected and
+the claim is dropped rather than restated: the gallery thumbnail is `sizing: .fitting` and the eyedropper `.native`,
+so neither reads the knob. `RenderResolution`'s own doc comment still says *"It reaches only `makeSandwichRecipe`"*
+and *"cannot degrade anything that is written to disk or looked at later"* — **both stale since stage 4d**, and not
+corrected by this change.
+
+### 3.9a The keep-the-bake option is deferred, and the stamp is decided
+
+§2.11 gives the artist an option to keep the bake beside the project, and §3.5 says stage 6 picks between **a per-cel
+content stamp saved in the manifest** and **a hash of the cel's encoded tiers**. Stage 6 picked the hash and did not
+build it, and the reason for the split is that the option is not one field — it is a fourth store with a lifecycle.
+
+**The manifest stamp is rejected, on evidence this file already carries.** It has to be bumped on every edit, and
+§3.6 established at length that **there is no push funnel in this model that knows a content change**: `recordUndo`
+has seventeen call sites and the undo *closures* do not go through it, `objectWillChange` misses the mutation that
+matters most because a dab lands in a class, and `beginCanvasEdit` runs before an edit rather than after. That is
+precisely why dirty marking is a **sweep**. A stamp bumped from edit sites inherits every one of those holes, and a
+missed site in a *persistent* content-addressed store is the wrong picture served with no error — the failure §3.5
+says the store has no second chance about. Bumping it from the sweep instead does not rescue it: the counter is
+monotonic, so undo and redo both move it forward and every reopened document re-bakes everything it ever edited.
+
+**The encoded-tier hash has none of that** — it is exact, needs no hook, survives undo, redo and reopen identically
+because the same bytes hash the same, and `ProjectStore` already encodes exactly those tiers on save. Its cost is
+that hashing a cel's pixels per frame per mint would put canvas-area work back on the main actor, which §3.1 exists
+to remove; so it **must be memoized against the in-memory version counters the process-lifetime key already reads**
+(`RasterLayerTexture.version`, `VectorCanvas.version`), making it one hash per cel per edit rather than one per
+frame. The first mint after opening a document still hashes every cel once, and that is the real cost to measure
+before building it.
+
+**And the stamp is not the whole of it, which is the argument for a stage rather than a corner of this one.** Three
+more things are unanswered: `AlphaMask.tuningGeneration` is in the key (§3.3) and is an in-memory counter that
+restarts at 0 every launch, so two different tunings both read as generation 0 across a relaunch and collide — it
+has to become a hash of the tuning *values*; a kept store lives at `Documents/Projects/<Name>.paintbake/` and needs
+a rename, delete and orphan-sweep policy that `Library/Caches` gets from the OS for free; and `FrameBakeStore` has no
+format-migration path, so a stored bake outlives the code that wrote it in a way a cache never does. None of that is
+export, and none of it should ride in on export's back.
 ### 3.10 What a composite is not
 
 Floating Move pieces, lasso floats, motion-group overlays, guides and onion skins are drawn outside every cel and are
@@ -806,7 +890,16 @@ it is the dependency order.
 
    **Still owed: the owner's confirmation on the device.** The knob-versus-canvas symptom is TODO (31)'s first
    report, taken on the "UI Test" canvas on their iPad 9, and nothing here has been run on that.
-6. **Export** (§3.9).
+6. **Export** (§3.9). **Landed 2026-09-02, partially.** `Engine/FrameExport.swift`,
+   `Engine/FrameExportSession.swift`, `Views/ExportSheet.swift` and one field on `FrameBaker`
+   (`exportFocus`); §3.9 above carries the five places its own text was thin and §3.9a defers the
+   keep-the-bake option with the stamp decided. **`FrameExportLogicTests`, 14 tests, 0 failed,
+   0 skipped, static `func test` count reconciled at 14**, MEASURED on a dedicated iOS 26.5
+   simulator. One mutation MEASURED red, restored after: deleting the three `straighten` calls from
+   `unpremultipliedRGBA` reds two, and the informative one reads **127.5 back out of the PNG where
+   255 belongs** — the dark fringe as a number, taken from the file through ImageIO rather than from
+   the suite's own arithmetic. **Owed: the driver and the sheet are untested** (the frame walk, the
+   focus hand-back, the progress phases), there is no XCUITest, and nothing has run on the device.
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
    budgets, a `MemoryPressure` seam so Android and Windows can signal eviction, undo cost for whole-cel raster steps,
    `SaveSnapshot` off the main actor.
