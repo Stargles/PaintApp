@@ -10,35 +10,16 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first
 
-**Run the full suite.** It is owed and nothing else should start before it. The last one was at
-`35c0db6`; since then the compositor gained striped rendering, the live canvas and playback moved onto
-an on-disk bake, and `CanvasView`'s sandwich path was substantially rewritten — so the suite is
-measuring a genuinely different program and no result from before it transfers.
+**Nothing is owed before you start.** The full suite was run at `04099a9` on an idle machine —
+**2759 tests, 2752 passed, 1 failed, 6 skipped** — and the single failure,
+`BlendModesAndCompositorUITests`' `testHidingFolderHidesContentsOnCanvasAndReshowingRestoresThem`,
+**passed clean in isolation**. Environmental, not a finding. The per-class table is re-taken in
+CLAUDE.md, and it records a change of shape: the top three classes are now within 25 seconds of each
+other at ~330 s, so the "split the one long class" lever that section tracked since August no longer
+exists.
 
-```bash
-pgrep -x xcodebuild                          # nobody else on the machine?
-top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1     # idle, or the numbers are void
-xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03
-tools/simlock.sh xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
-  -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
-  -derivedDataPath build/DerivedData
-```
-
-**Pull the per-class table immediately afterwards**, before running anything else against that derived
-data path — the triage runs that follow a full suite evict its own bundle, and CLAUDE.md's cost model
-is asking to be re-taken. Two XCUITest classes are new since the last table (`BakeWiringUITests`,
-`TimelineBakeIndicationUITests`, `DistortUITests`) and one class was deleted from `PerfBaselineTests`.
-
-**Expect some red, and triage it before believing it.** An isolated re-run is thirty seconds and the
-answer is usually environmental; CLAUDE.md's triage section is exact about how. Two specific things to
-suspect first, both new:
-
-- **"Rest" is an eventual state now** — MEASURED 0.40 s after a stroke, 0.024 s after a frame step.
-  Any test asserting the canvas has settled *immediately* is racing. `PaintUITestCase.waitForSandwichState`
-  is the helper; `"off"` is deliberately not waited for, because disengaging is synchronous.
-- **A background program, not the suite, has been the cause three times running.** Adobe's daemons at
-  ~250% across 8 cores with no Adobe app open; then `StocksWidget` at 76.7%, which took the machine
-  from 52.7% idle to **0.0%**. Read the real number, kill the offender (standing permission), re-measure.
+**Pick up from "Everything else open" at the bottom, or from the review candidates in BUGS.md.** The
+two worth checking first are named there.
 
 ## State
 
