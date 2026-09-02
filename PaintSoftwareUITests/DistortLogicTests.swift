@@ -101,9 +101,13 @@ final class DistortLogicTests: XCTestCase {
     ///
     /// This is the seam §5.17 argues every mode boundary needs: Distort has to *contain* the
     /// unmoved case rather than sit beside it, or a piece would jump the instant the picker changed.
-    /// Two operands, and they are deliberately different in kind — the corners `transformedBounds`
-    /// has always measured through `FloatingTransform.affineTransform`, against the corners the
-    /// solved `Homography` maps the bitmap's texel box onto.
+    ///
+    /// **The load-bearing assertions are the two zeros**, and they are independent facts: `g` and `h`
+    /// coming out of `Homography`'s closed form as exact zeros is what makes `affine()` answer at all,
+    /// and therefore what keeps `PixelOps.render`'s affine arm reachable. The corner comparison below
+    /// is a **round trip** rather than a second opinion — the homography was solved to hit those very
+    /// points — so it is asserting that the closed form reproduces its own correspondence, which is
+    /// worth pinning and is not the same claim.
     func testAnUndistortedPieceSolvesToItsOwnAffineExactly() throws {
         var p = piece(mode: .uniform)
         p.transform.rotation = 0.4
