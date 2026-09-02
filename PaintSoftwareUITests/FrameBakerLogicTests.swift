@@ -319,6 +319,98 @@ final class FrameBakerLogicTests: XCTestCase {
                        "An undone edit must leave every frame naming the file it named before it.")
     }
 
+    /// **An edit that lands while a bake is in flight is not swallowed by that bake's completion.**
+    ///
+    /// The race is real and reachable from the loop's own shape: `kick` mints the key on the main
+    /// actor and hops to `workQueue`, `BakeQueue.next` does not consume, and `syncDirty` marking an
+    /// already-dirty frame is a no-op — so a sweep between the mint and the hop back does its job and
+    /// leaves no trace of having done it. A `finish` that clears the bit regardless discards it.
+    ///
+    /// **The fixture is deterministic rather than timed**, and that is what makes it worth having:
+    /// everything between `kick()` and the next suspension point runs while this test holds the main
+    /// actor, so the composite's `Task { @MainActor in }` hop *cannot* land in the middle of it. The
+    /// edit is therefore guaranteed to be the mid-flight one.
+    func testAnEditLandingDuringABakeIsNotClearedByIt() {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+
+        // Synchronous: mints frame 0's key and dispatches its composite. Nothing can hop back yet.
+        baker.kick()
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                                      CanvasFixture.solidImage(.blue, rect: CGRect(x: 1, y: 1, width: 20, height: 20)))
+        baker.syncDirty()
+
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [],
+                       "The loop must settle — the edit is baked, not merely re-marked forever.")
+        XCTAssertEqual(baker.keyByFrame[0], baker.currentKey(atFrame: 0),
+                       "Frame 0 must end up naming the file for the picture the document actually has.")
+    }
+
+    // MARK: - The two stamps' other blind spots
+
+    /// **A folder's animated grade dirties the document.** A folder's effect is carried by no
+    /// `LayerContentVersion` — it is not a cel's content — and `renderTree(atFrame: 0)` sees only what
+    /// the grade resolves to at frame 0, so a curve edited to change frame 2 and not frame 0 is
+    /// visible in exactly one place: the tracks the structural stamp holds.
+    func testAnAnimatedFolderGradeIsAStructuralChange() {
+        let manager = perFrameDocument(frames: 3)
+        let folder = manager.addFolder(name: "Graded")
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [])
+
+        let index = try? XCTUnwrap(manager.folders.firstIndex { $0.id == folder })
+        guard let index else { return XCTFail("The folder just added must be in `folders`.") }
+        // Frame 0 is deliberately left where it was: a stamp reading the tree at frame 0 alone
+        // cannot tell this apart from no edit, which is the whole reason the tracks are stamped.
+        manager.folders[index].effectTracks["bloom.intensity"] =
+            AnimationCurve(keys: [AnimationCurve.Key(frame: 0, value: 0),
+                                  AnimationCurve.Key(frame: 2, value: 1)])
+
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [0, 1, 2],
+                       "§3.6 rules a structural edit dirties every frame, and a folder's grade is one.")
+    }
+
+    /// **Retiming an in-between dirties its span**, which no other tier of the sweep can do for it.
+    ///
+    /// Tier 3 exists for an in-between whose *referenced* cel moved and is gated on `touchedACel`;
+    /// a retime moves no cel at all, so that gate is shut. The recipe is stamped in `CelStamp`
+    /// instead, and tier 1 marks exactly this cel's own span — which is tighter than tier 3 would
+    /// have been anyway.
+    func testRetimingAnInBetweenDirtiesItsOwnSpanAndNothingElse() {
+        let manager = perFrameDocument(frames: 6)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0,
+                                   [(start: 0, length: 2), (start: 2, length: 2), (start: 4, length: 2)])
+        manager.sceneFrameCount = 6
+        for (index, frame) in [0, 2, 4].enumerated() {
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: frame,
+                                          CanvasFixture.solidImage(.red, rect: CGRect(x: index * 6, y: 0,
+                                                                                      width: 10, height: 10)))
+        }
+        let cels = manager.layers[0].cels
+        manager.layers[0].cels[1].interpolation = InterpolationRecipe(
+            references: [InterpolationReference(layerID: manager.layers[0].id, celID: cels[0].id),
+                         InterpolationReference(layerID: manager.layers[0].id, celID: cels[2].id)],
+            t: 0.5)
+
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [])
+
+        // The whole of a retime: `setInterpolationT` writes this field and nothing else — no cel is
+        // touched, no tier object's version moves.
+        manager.layers[0].cels[1].interpolation?.t = 0.25
+
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [2, 3],
+                       "Only the in-between's own span, and it must not be empty.")
+    }
+
     // MARK: - §3.3, the dedupe the whole key design was built for
 
     /// **A nine-frame hold is one file and one composite**, end to end.

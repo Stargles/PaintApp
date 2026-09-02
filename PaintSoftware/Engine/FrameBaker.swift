@@ -576,7 +576,25 @@ final class FrameBaker {
     /// re-raises it, and the *key* still says truthfully that there is no file.
     private func finish(frame: Int, key: FrameBakeKey, outcome: Outcome) {
         isBaking = false
-        bakeQueue.markClean(frame)
+
+        // **The document can move while a composite is in flight, and clearing the bit regardless
+        // would discard the edit that moved it.** `kick` mints the key on the main actor and then
+        // hops to `workQueue`, so an edit landing in between is an edit this bake did not see. It
+        // cannot announce itself either: `BakeQueue.next` does not consume, so the frame is still
+        // dirty, and `syncDirty`'s `markDirty` on an already-dirty frame is a no-op — the sweep does
+        // its job and leaves no trace of having done it. Re-minting here is the same O(layers) the
+        // display path pays per redraw, against a composite that has just run, so it is free at this
+        // point in the loop.
+        //
+        // **Only when something reached disk**, and only on a key that mints. A frame whose write or
+        // composite failed is marked clean as it always was: re-dirtying a frame that cannot be baked
+        // is a spin, and the failure is already counted and reported.
+        let current = currentKey(atFrame: frame)
+        if outcome.isOnDisk, let current, current != key {
+            bakeQueue.markDirty(frame..<(frame + 1))
+        } else {
+            bakeQueue.markClean(frame)
+        }
 
         switch outcome {
         case .baked:
@@ -667,13 +685,14 @@ final class FrameBaker {
     ///    here is the ruling rather than a compromise. See `StructuralStamp`.
     /// 3. **Any cel change also dirties every interpolated cel's span.** §3.6's precise rule is that
     ///    an in-between whose `InterpolatedCelIdentity.references` name the edited cel dirties its own
-    ///    span; this is that rule with the reference test dropped, which marks strictly more. It is
-    ///    deliberate: an in-between's picture also moves when its *recipe* changes (`t`, the spacing
-    ///    curve, a refitted lattice), `InterpolationRecipe` is `Codable` and not `Equatable`, and a
-    ///    hand-written comparison of its fields is precisely the "which field did I forget" hazard
-    ///    that a content-addressed store punishes with a wrong picture and no error. §3.3 makes the
-    ///    over-marking cheap by construction: the key is the truth, so an in-between the change did
-    ///    not reach has the file it had and costs one mint and no composite.
+    ///    span; this is that rule with the reference test dropped, which marks strictly more. §3.3
+    ///    makes the over-marking cheap by construction: the key is the truth, so an in-between the
+    ///    change did not reach has the file it had and costs one mint and no composite.
+    ///
+    ///    **This tier is about a *referenced* cel moving, and it cannot cover an in-between's own
+    ///    recipe** — retiming one moves no other cel, so `touchedACel` stays false and the gate below
+    ///    returns before this loop runs. The recipe is stamped in `CelStamp` instead, where tier 1
+    ///    marks exactly the in-between's own span.
     func syncDirty() {
         guard let manager else { return }
         let structure = StructuralStamp(manager)
@@ -764,6 +783,12 @@ final class FrameBaker {
         let isDerived: Bool
         /// The pose channels animating this cel's own ink — KEYFRAMES.md stage 5.
         let poses: [String: TransformTrack]
+        /// **The in-between's recipe, whole**, for `poses`' reason and one stronger: `t`, the spacing
+        /// curve and a refitted lattice each move the picture and none of them touches a tier object,
+        /// so a retime is invisible to every other field here. `InterpolationRecipe.Content-
+        /// Fingerprint` decides what counts, beside the identity the bake key is minted from, rather
+        /// than a second list of recipe fields kept here.
+        let recipe: InterpolationRecipe.ContentFingerprint?
 
         var span: Range<Int> { start..<(start + count) }
 
@@ -774,6 +799,7 @@ final class FrameBaker {
             version = LayerContentVersion(cel: cel)
             isDerived = cel.interpolation != nil
             poses = cel.transformTracks
+            recipe = cel.interpolation?.contentFingerprint
         }
     }
 
@@ -798,11 +824,21 @@ final class FrameBaker {
     /// frame 0 and plain in `effectTracks`.
     private struct StructuralStamp: Equatable {
         let tree: [RenderNode]
-        /// The animated half of every layer's effect, which a single probe frame cannot see.
+        /// The animated half of every layer's **and every folder's** effect, which a single probe
+        /// frame cannot see. Layers first, then folders, in each array's own order — the two are
+        /// concatenated rather than kept as four fields because nothing here reads them, it only
+        /// compares them, and `LayerFolder.effectTracks` is `Layer.effectTracks`'s twin in every
+        /// observable respect. A folder's grade is carried by no `LayerContentVersion`, so this is
+        /// the only place an animated one can be seen at all.
         let effectTracks: [[String: AnimationCurve]]
         let keyframeMarks: [[Int]]
         let canvasSize: CGSize?
         let canvasPadding: CGFloat
+        /// **Guides, by value.** They are named from a recipe by id and edited in place keeping it,
+        /// which is why `InterpolatedCelIdentity` compares them by value too — and they live on the
+        /// document rather than on any cel, so no `CelStamp` can hold them. One guide reaches every
+        /// in-between that binds it, which is §3.6's own definition of a structural edit.
+        let guides: [GuideStroke]
         let paperColor: Color
         let paperVisible: Bool
         let renderResolution: RenderResolution
@@ -816,10 +852,11 @@ final class FrameBaker {
         @MainActor
         init(_ manager: CanvasManager) {
             tree = manager.renderTree(atFrame: 0)
-            effectTracks = manager.layers.map(\.effectTracks)
-            keyframeMarks = manager.layers.map(\.keyframeMarks)
+            effectTracks = manager.layers.map(\.effectTracks) + manager.folders.map(\.effectTracks)
+            keyframeMarks = manager.layers.map(\.keyframeMarks) + manager.folders.map(\.keyframeMarks)
             canvasSize = manager.canvasSize
             canvasPadding = manager.canvasPadding
+            guides = manager.guideStrokes
             paperColor = manager.canvasBackgroundColor
             paperVisible = manager.isCanvasBackgroundVisible
             renderResolution = manager.renderResolution

@@ -202,6 +202,34 @@ struct InterpolationRecipe: Codable {
 
     /// Frame-wide easing. A group with its own `spacing` overrides this.
     var spacing: SpacingCurve
+    /// **What decides an in-between's picture, out of what this recipe stores** — the fingerprint
+    /// `FrameBaker`'s dirty sweep compares, because a retime touches no cel and moves no tier
+    /// object, so nothing else the sweep looks at can see one.
+    ///
+    /// **It mirrors `InterpolatedCelIdentity`'s recipe half exactly, and that is the point**: the
+    /// identity is the maintained enumeration of what the evaluator reads, the bake key is minted
+    /// from it, and a second list derived independently would be the "which field did I forget"
+    /// hazard a content-addressed store punishes with a wrong picture and no report. Add a field to
+    /// this recipe that reaches a pixel and it belongs in both, together.
+    ///
+    /// **Local edits by id, not by value**, for the identity's own stated reason — ids tell undo and
+    /// redo of one edit apart from a different edit — and with the identity's own consequence: a
+    /// local edit's stroke rewritten in place under the same id moves neither. That hole is the
+    /// identity's rather than this fingerprint's, and closing it means giving `LocalEdit` a version.
+    var contentFingerprint: ContentFingerprint {
+        ContentFingerprint(t: t, mode: mode, spacing: spacing, groups: groups,
+                           guideIDs: guideIDs, localEditIDs: localEdits.map(\.id))
+    }
+
+    struct ContentFingerprint: Equatable {
+        let t: CGFloat
+        let mode: InterpolationMode
+        let spacing: SpacingCurve
+        let groups: [MotionGroupBinding]
+        let guideIDs: [UUID]
+        let localEditIDs: [UUID]
+    }
+
 
     init(references: [InterpolationReference] = [],
          t: CGFloat = 0,
