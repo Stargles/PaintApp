@@ -3,6 +3,43 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The bake's dirty sweep does not see a pose edit, and three more sites are suspected
+
+`FrameBaker.syncDirty()` is the whole of RENDER §3.6's dirty marking: it diffs the cel layout against
+the layout last seen, because this model has **no push funnel that knows a frame**. The diff is
+`CelStamp`, which captures `id`, the span, a `LayerContentVersion` and `isDerived`
+(`Engine/FrameBaker.swift:693-699`).
+
+**CONFIRMED by reading the code: `Cel.transformTracks` (`Models/Cel.swift:42`) is in none of them.**
+The keyframe transform channel and the bake's sweep were built in parallel, in separate branches, and
+the seam between them was never walked: editing or undoing a **pose keyframe** changes
+`cel.transformTracks` and moves nothing `syncDirty` compares, so the baker never marks that cel's span
+and never recomputes its key. The bake *key* does carry the pose — stage 5's `PosedCelIdentity` reaches
+it through `LayerContentVersion.derived` — which is why this is staleness rather than corruption: §3.3's
+"a stale file can never be shown as fresh" still holds at the display path, so the artist sees the
+previous picture rather than a wrong one. But nothing schedules the re-bake, so it does not self-heal
+until something else dirties that span.
+
+**The fix is one line in `CelStamp.init` and a test that would have caught it** — a fixture that poses a
+cel, drains the baker, edits a pose key, and asserts the span is dirty. That test does not exist for any
+of the four sites below, which is the more interesting fact: the sweep is the one place in this design
+where "what reaches a pixel" and "what the differ compares" are two hand-maintained lists, and nothing
+holds them together.
+
+**Three more candidates from the same review, NOT yet verified** — each is a specific claim with a line
+number and each is checkable in minutes:
+
+- `FrameBaker.swift:518` — `finish()` marks the frame clean unconditionally, so an edit that lands
+  *during* a bake is discarded and the frame stays stale.
+- `FrameBaker.swift:741` — `StructuralStamp` stamps only **layers'** effect tracks, so an animated
+  **folder** grade is invisible to the sweep. §3.3 notes a folder's grade is carried by no
+  `LayerContentVersion`, which is what makes this plausible.
+- `FrameBaker.swift:667` — sweep tier 3 is gated on `touchedACel`, so an edit that changes only an
+  interpolation recipe reaches nothing.
+
+Verify each before fixing: a claim read off the code is a hypothesis, and this repo has had reviewers
+wrong before.
+
 ## The Render Resolution knob's reassurance copy becomes false the day export ships
 
 `ActionsMenu.renderResolutionControl` (`Views/ActionsMenu.swift:253`) tells the artist: *"Your artwork,
