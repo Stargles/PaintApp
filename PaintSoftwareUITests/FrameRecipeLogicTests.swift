@@ -97,11 +97,21 @@ final class FrameRecipeLogicTests: XCTestCase {
 
     /// One resolved image per `layers` index, walked on the main actor straight off the live model —
     /// exactly what `renderSources` did before `FrameRecipe` existed.
+    ///
+    /// **It draws the four tiers itself rather than calling `PixelOps.rasterize`, and the first
+    /// version of this file did call it — which made the parity assertion prove nothing.** Both sides
+    /// would then go through `PixelOps.FrozenCel`, so a field dropped from the freeze would be dropped
+    /// from the oracle too and the comparison would pass. MEASURED by mutation, 2026-09-02: with
+    /// `FrozenCel.fillImage` deliberately set to nil, the `rasterize`-based oracle passed and this one
+    /// fails. Two implementations of a four-line draw order is exactly the duplication
+    /// `CompositorParityLogicTests.flatWalkComposite` accepts one tier up, and for the same reason: an
+    /// oracle that shares an implementation with the thing it checks is not an oracle.
     private func referenceSources(_ manager: CanvasManager, atFrame frame: Int,
                                   canvasSize: CGSize, quality: RenderQuality = .full) -> [CGImage?] {
         var sources = [CGImage?](repeating: nil, count: manager.layers.count)
         let wanted = maskSourceLayers(manager, atFrame: frame)
         let provider = manager.celContentProvider(atFrame: frame)
+        let bounds = CGRect(origin: .zero, size: canvasSize)
         for index in manager.layers.indices {
             let layer = manager.layers[index]
             guard layer.isVisible || wanted.contains(index),
@@ -114,8 +124,18 @@ final class FrameRecipeLogicTests: XCTestCase {
                            canvasSize: canvasSize)
                 continue
             }
-            sources[index] = PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize,
-                                                quality: quality, derived: derived).cgImage
+            // The flatten, frozen: baked → the raster tier's own pixels → the vector tier, replaced
+            // by a derivation where there is one → the live fill preview on top (LASSO_FILL §2a).
+            let cel = layer.cels[celIndex]
+            let strokes = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
+            let vector = derived?.render(quality) ?? cel.vector?.render(quality: quality)
+            sources[index] = UIGraphicsImageRenderer(bounds: bounds,
+                                                     format: PixelOps.transparentFormat()).image { _ in
+                cel.bakedImage?.draw(in: bounds)
+                strokes?.draw(in: bounds)
+                vector?.draw(in: bounds)
+                cel.fillImage?.draw(in: bounds)
+            }.cgImage
         }
         return sources
     }
@@ -210,8 +230,15 @@ final class FrameRecipeLogicTests: XCTestCase {
         let (manager, _) = everyKindOfLeaf()
         PixelOps.clearRasterizeCache()
 
-        // The live path: every contributing cel flattened through the ordinary call.
-        _ = referenceSources(manager, atFrame: 0, canvasSize: size)
+        // The live path: every contributing cel flattened through the ordinary call. **Not the
+        // oracle** — that one deliberately draws the tiers itself and so fills no memo at all, which
+        // is exactly what makes it an oracle everywhere else in this file.
+        let provider = manager.celContentProvider(atFrame: 0)
+        for index in manager.layers.indices {
+            guard let celIndex = manager.activeCelIndex(inLayer: index, atFrame: 0) else { continue }
+            let cel = manager.layers[index].cels[celIndex]
+            _ = PixelOps.rasterize(cel: cel, canvasSize: size, derived: provider.content(for: cel))
+        }
         let warm = PixelOps.rasterizeCacheBytes
         XCTAssertGreaterThan(warm, 0, "Setup: the walk must have filled the memo")
 
