@@ -112,14 +112,16 @@ The compositor is not the freeze. At pen-up the main thread runs, in order (`Vie
 | re-rasterise the whole cel — every dab of every stroke — into a fresh canvas-sized bitmap | `StrokeCanvasView.swift:986` → `Engine/VectorLayer.swift:3016` | canvas area × dabs on the cel |
 | the snapshot: `renderSources` flattens **every visible leaf** to a canvas-sized `CGImage`, fanned over cores but blocking the caller | `Engine/RenderRequest.swift:883-995`, `Services/PixelOps.swift:45-59` | canvas area × layer count |
 | Core Animation converts three `premultipliedLast` RGBA composites to its native BGRA inside the commit | `CanvasView.swift:1531-1535`; BUGS.md "a hitch per stroke-lift" | canvas area × 3 |
-| the live mask resolve at **native** size, no `fittingWithin` | `CanvasView.swift:1337` | canvas area × layers, masked documents |
-| 400 ms later: the thumbnail flattens the cel at **full** canvas size, then downsamples to 120 px, then publishes a second whole SwiftUI pass | `Models/CanvasManager.swift:1063-1068`, `:1769-1779`, `:1798` | canvas area |
+| the live mask resolve, `RenderSizing.liveComposite` | `CanvasView.swift`, `liveMaskStrokeBegan` | render size × layers, masked documents |
+| 400 ms later: the thumbnail flattens the cel into `celThumbnailRasterBound`, downsamples to 120 px, then publishes a second whole SwiftUI pass | `Models/CanvasManager.swift`, `celThumbnailImage` | bounded, then one SwiftUI pass |
 
-Two of those thrash each other: `RasterizeKey` carries width and height (`PixelOps.swift:156-157`), so the sandwich at
-its clamped size and the thumbnail at native size mint separate entries per cel in one 192 MiB memo. Six layers at
-4096² need 201 MiB clamped plus 384 MiB native, so at that canvas the memo never holds one frame and every rebuild is
-cold. At 2048x1024 the same six entries are 48 MiB and everything hits. That is why the freeze is a large-canvas
-symptom.
+**Those last two used to thrash the flatten memo and no longer do**, which is worth stating because it is the one
+figure in this section that moved rather than merely being described. `RasterizeKey` carries width and height
+(`PixelOps.swift:156-157`), so the sandwich at its clamped size and a *native* thumbnail minted separate canvas-sized
+entries per cel in one 192 MiB memo — six layers at 4096² needing 201 MiB clamped plus 384 MiB native, so the memo
+never held one frame and every rebuild was cold. At 2048x1024 the same six entries are 48 MiB and everything hit,
+which is why the freeze read as a large-canvas symptom. Both consumers are now bounded, and the live mask resolves at
+the sandwich's own size rather than a second one.
 
 **After this design the main thread does exactly four things**: handle input and draw the live stroke scratch; mutate
 the model and publish; mint a `FrameRecipe` on request (§3.2) in O(layers) with no pixel work; and put finished
@@ -300,14 +302,8 @@ Each stage merges alone, with a test that would fail without it. Stage 0 first b
 it is the dependency order.
 
 0. **Stop the bleeding.** The 16k crash is the live-stroke scratch: `StrokeCanvasView.swift:843-849` allocates the
-   scratch at `vectorCanvas.size`, `RasterLayerTexture.swift:298-300` mints the full-canvas context on the first dab
-   and `:339` a full-canvas `makeImage()` per touch-move, and `StrokeCanvasView.swift:578` snapshots a blank raster
-   tier at canvas size before any of it. Size the scratch to the stroke's dirty rect (`_strokeDirtyRect`,
-   `RasterLayerTexture.swift:432-434`), skip the blank snapshot, and stop `PixelOps.swift:299` minting a canvas-sized
-   transparent bitmap for every vector cel's empty raster tier (BUGS.md, memory audit item 1). Pass the sandwich's
-   render size into `resolveLiveMask` and the thumbnail path. Fix the two stale doc
-   comments that call the eyedropper the only caller skipping the cap (`RenderTree.swift:530`,
-   `CanvasManager+Document.swift:305-307`).
+   scratch at `vectorCanvas.size`, and `RasterLayerTexture` mints the full-canvas context on the first dab and a
+   full-canvas `makeImage()` per touch-move. Size the scratch to the stroke's dirty rect (`_strokeDirtyRect`).
 1. **Hoist the playback clock** onto `CanvasManager` (§3.7).
 2. **The recipe** (§3.2): `FrameRecipe`/`LeafSnapshot`, a static leaf render from values, `renderSources` off the
    main actor, the committed cel's re-render made asynchronous with the scratch retained until the new image lands

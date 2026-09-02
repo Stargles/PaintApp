@@ -374,9 +374,9 @@ frames, and the price is unchanged (a stroke whose first frames have no visible 
 latency-sensitive path in the app). Revisit it if a document is found that misses the budget *after*
 9(b) — the 4096² stress case and the iPad's ~1.3× are where to look.
 
-**5. Give `makeRenderRequest` a render-size hint. — SHIPPED** (`fittingWithin:`, and
+**5. Give `makeRenderRequest` a render-size hint. — SHIPPED** (`RenderSizing.fitting`, and
 `RenderRequest.renderSize(fitting:within:)`). Applied at one call site, the thumbnail composite in
-`ProjectStore.SaveSnapshot`; nil everywhere else, which is native and byte-for-byte as before.
+`ProjectStore.SaveSnapshot`; `.native` everywhere else, which is byte-for-byte as before.
 *Win, now MEASURED as a size rather than inferred*: the save's composite was **2048×1024 and is now
 320×160** at the owner's canvas, asserted by `testTheProjectThumbnailCompositesAtTileSizeRatherThanCanvasSize`
 via `CompositeProbe`. That is 2,097,152 pixels for the 51,200 the tile occupies — **41× the pixels**,
@@ -1011,8 +1011,10 @@ So the document paid three canvas-sized PNG encodes per save and three 2048·204
 
 *The mechanism, as it was.* `ProjectStore.writeCel` wrote `cel.rasterImage` for **every** cel
 unconditionally; `cel.rasterImage` was `cel.raster.renderToUIImage()`, and
-`RasterLayerTexture.renderToUIImage()` has a non-optional return — with no backing context it **mints**
-a transparent canvas-sized image and **memoizes** it in `cachedImage`, which nothing ever drops. So
+`RasterLayerTexture.renderToUIImage()` has a non-optional return — with no backing context it then
+**minted** a transparent canvas-sized image and **memoized** it in `cachedImage`, which nothing
+dropped. (That half is fixed at the source as of 2026-09-01: a tier with no bitmap answers with a
+shared 1×1 and memoizes nothing.) So
 merely *taking a save snapshot* allocated 16 MiB per blank cel on the main actor and pinned it for the
 session, before the encode this item was named after had even started.
 

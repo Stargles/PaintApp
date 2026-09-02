@@ -1086,16 +1086,16 @@ mapper.
    most.** The app has no separate export feature; the only full-document composite on the save path is
    the manifest thumbnail (`ProjectStore.swift:270-294`), and since `2f4b737` (2026-08-20, "Composite
    the gallery tile at the tile's size, not the whole canvas") it is bounded to a 320×320 box
-   (`fittingWithin: Self.thumbnailBounds`) that routes through the same `renderSize(fitting:within:)` →
+   (`RenderSizing.fitting(Self.thumbnailBounds)`) that routes through the same `renderSize(fitting:within:)` →
    `CompositorBudget.affordableSize` pipeline as the live canvas (`RenderRequest.swift:527-545`). At
    that bound the composite can never approach even the 64 MiB budget floor, on any canvas size —
    saving and thumbnailing are unaffected by this gate regardless of how large the canvas grows. The
    native-size arm is not empty, though; it just is not the thumbnail any more.
 
-   **Two ordinary, in-session gestures live on that native-size arm, and they reach it by two different
-   routes.** `makeRenderRequest`'s own doc comment says so directly (`RenderRequest.swift:522-524`):
-   passing no `fittingWithin` bound is what makes the eyedropper, the live-mask resolve and every parity
-   test composite at native size, "an identity that `affordableSize` does not promise." The eyedropper
+   **One ordinary, in-session gesture lives on that native-size arm.** `RenderSizing.native` is what
+   makes the eyedropper and every parity test composite at native size, "an identity that
+   `affordableSize` does not promise" — and since 2026-09-01 the live-mask resolve is not among them:
+   it takes `RenderSizing.liveComposite` and is sized with the sandwich. The eyedropper
    (`CanvasManager+Eyedropper.swift:47-52`) is uncapped on purpose — a reduced composite would blend
    neighbouring pixels into the sampled colour, and a wrong colour looks exactly like a right one — and
    its request runs through `Compositor.composite`, so on a document over the gate it genuinely falls
@@ -1104,9 +1104,10 @@ mapper.
    direction.** `MaskResolver.coverage` calls `CoreGraphicsCompositor.composite` directly and
    unconditionally, once per mask source (`MaskResolver.swift:9-14`, `:180-181` — "Always the CPU
    reference, whichever backend asked"), which is a parity decision and not a fallback, so it never
-   touches `MetalCompositor` and cannot "reach" this gate the way the eyedropper does. Its cost still
-   grows with native canvas size on every stroke begun on a masked layer; it simply pays that cost
-   always, gate or no gate, rather than only once the document is over it.
+   touches `MetalCompositor` and cannot "reach" this gate the way the eyedropper does. It pays a CPU
+   composite on every stroke begun on a masked layer, gate or no gate, rather than only once the
+   document is over it — now at the sandwich's render size rather than at the canvas's, so the knob and
+   the clamp bound it as they bound the picture.
 
    **Either way, this is where the 7047 ms vs 18.8 ms figure actually bites, during an interactive
    gesture rather than offline** — though the figure needs its own scope stated rather than borrowed
