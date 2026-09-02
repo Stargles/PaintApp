@@ -121,7 +121,9 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// `stampSpacing`'s 1 pt floor binds below `brushSize * spacingFraction == 1`, so a stroke
     /// animated from scale 1.0 to 0.3 walks a *different lattice* on almost every frame even though
     /// the map is a similarity. MEASURED over 24 frames of a 24 pt Hard Round: the shipped path
-    /// produces **24 distinct dab counts, 34 through 111**; the rest-space bake produces **one**.
+    /// produces **19 distinct dab counts, 34 through 92**; the rest-space bake produces **one**. The
+    /// Pencil, whose `spacingFraction` is 0.04 against Hard Round's 0.05, produces **24 of 24** — the
+    /// smaller the fraction the sooner the floor binds, which is the mechanism stated as arithmetic.
     ///
     /// That is why §8 says *"pose through the similarity path and nothing re-phases"* is not
     /// available as a fallback, and it is the strongest single number in this file.
@@ -138,7 +140,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
             shipped.insert(walkedAfterPosing(run(), brush, size: 24, through: t).count)
         }
         XCTAssertEqual(baked, [rest.count], "one walk, 24 frames")
-        XCTAssertEqual(shipped.count, 24, "and 24 walks before this stage")
+        XCTAssertEqual(shipped.count, 19, "and 19 distinct walks before this stage")
         XCTAssertEqual(shipped.min(), 34)
         XCTAssertEqual(shipped.max(), rest.count)
     }
@@ -147,7 +149,16 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// artifact, and it comes free because `stampApproximateSquare` runs inside the rest-space walk
     /// and emits ordinary `stampCircle` calls that the pose maps like any other.
     ///
-    /// MEASURED over the same 24-frame shrink: **19 distinct sub-dab counts** before, one after.
+    /// **And it refutes half of §4.2's framing of this artifact.** §4.2 names Square's sub-lattice
+    /// beside Pencil's grain as the two non-round-dab cases that shimmer. Pencil's does, on 24 frames
+    /// of 24. Square's **does not, over an ordinary shrink**: MEASURED over the same 24-frame 1.0 →
+    /// 0.3 animation, `BrushLibrary.square` produces **one** sub-dab count before this stage as well
+    /// as after. Its `spacingFraction` is **0.15**, three times Hard Round's, so `24 * 0.15 = 3.6` pt
+    /// stays clear of `stampSpacing`'s 1 pt floor all the way down to scale 0.278 — and
+    /// `stampApproximateSquare`'s own two 1 pt floors are clear at 0.3 too. Under a uniform map with
+    /// no floor binding the walk is *similar to itself*, so the sub-lattice is a scaled copy and
+    /// nothing shimmers. The artifact is real but it needs a deeper shrink than an artist is likely
+    /// to key, and the brush §4.2 should have named for everyday exposure is the Pencil.
     ///
     /// **Coverage is preserved under a uniform scale and this is why**: the grid's step and its
     /// sub-dab radius are both rest-space numbers and both are multiplied by the same local scale, so
@@ -168,7 +179,8 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
             shipped.insert(walkedAfterPosing(run(), brush, size: 24, through: t).count)
         }
         XCTAssertEqual(baked, [rest.count])
-        XCTAssertEqual(shipped.count, 19)
+        XCTAssertEqual(shipped.count, 1,
+                       "and the shipped path was already stable here — see the note above")
 
         // Coverage: step-to-radius is the same number at rest and at 0.3x.
         let shrunk = BrushStamper.DabPose(CGAffineTransform(scaleX: 0.3, y: 0.3))
@@ -215,10 +227,11 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
             let k = sqrt(abs(t.a * t.d - t.b * t.c))
             XCTAssertEqual(try XCTUnwrap(pose.constantScale), k, accuracy: 0,
                            "an affine's area root is a constant, so it is resolved once")
-            let ratios = rest.compactMap { pose.applied(to: $0) }
-                .enumerated().map { $0.element.radius / rest[$0.offset].radius }
-            XCTAssertEqual(ratios.min(), k, accuracy: 0)
-            XCTAssertEqual(ratios.max(), k, accuracy: 0)
+            // The radius, not the ratio: `r * k` is exact and `r * k / r` is not — a 0.5/0.5/1.5
+            // rotation-and-scale map came back one ULP off through the division alone.
+            for dab in rest {
+                XCTAssertEqual(try XCTUnwrap(pose.applied(to: dab)).radius, dab.radius * k, accuracy: 0)
+            }
         }
     }
 
@@ -317,7 +330,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// the unposed one has to be the shipped one to the last dab — every document that has never been
     /// keyframed takes it, on every render.
     func testAnUnposedStrokeStampsExactlyWhatItAlwaysDid() {
-        let identity = BrushStamper.DabPose(.identity)
+        let identity = BrushStamper.DabPose.identity
         XCTAssertTrue(identity.isIdentity)
         let rest = bake(run(), BrushLibrary.pencil)
         let through = rest.compactMap { identity.applied(to: $0) }
@@ -338,10 +351,14 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
                                   size: 12, opacity: 1,
                                   samples: [VectorSample(x: 1, y: 2, pressure: 1),
                                             VectorSample(x: 30, y: 44, pressure: 0.5)])
-        let bare = try JSONEncoder().encode(stroke)
+        let encoder = JSONEncoder()
+        // Two encodes of one value do not agree on key order otherwise, and this test is about the
+        // key *set*.
+        encoder.outputFormatting = .sortedKeys
+        let bare = try encoder.encode(stroke)
         stroke.restWalk = StrokeRestWalk(samples: stroke.samples, lattice: nil, size: 12,
                                          pose: BrushStamper.DabPose(CGAffineTransform(translationX: 9, y: 9)))
-        let posed = try JSONEncoder().encode(stroke)
+        let posed = try encoder.encode(stroke)
         XCTAssertEqual(bare, posed, "the field is absent from CodingKeys, so it is absent from the wire")
 
         let decoded = try JSONDecoder().decode(VectorStroke.self, from: posed)
