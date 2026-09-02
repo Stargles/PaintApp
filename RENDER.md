@@ -333,6 +333,15 @@ default store dies with the process.
 A small **decoded ring** holds the frames just ahead of the playhead, under a byte budget rather than a count. Play
 never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from it.
 
+**The read path is `store.loadDecoded(key) -> DecodedFrame?` → `ring.insert` → `.makeImage()`, and there is no
+second spelling beside it (stage 4c).** `load(_:) -> CGImage?` and `FrameBakeStore.image(fromBGRA:)` are
+*deleted*, not kept: that path decoded into a `[UInt8]`, built a `CGContext` over it and called `makeImage()`,
+which is a second canvas-sized copy and a re-encode of bytes that were already exactly what Core Animation
+wants — and a store answering in `CGImage` could not fill the ring at all without decoding twice.
+`decompress` returns `Data` for the same reason: `DecodedFrame` holds `Data` so `makeImage()` can hand the
+same allocation to a `CGDataProvider`, and an `Array` → `Data` copy in between is 16.8 MB moved per frame at
+2048², at 24 fps, for nothing.
+
 **Disk full** is a bake failure, not a document failure: the store stops writing, drops files farthest from the
 playhead, and playback falls back to stale frames (§2.10). The document is untouched.
 
@@ -349,6 +358,47 @@ The baker also produces the three sandwich halves for the current frame (`full` 
 additionally by the active leaf), so the live canvas is served by the same worker and the same memo, and the stroke
 still sits between two finished pictures. **The single-slot drop-if-busy behaviour of `isSandwichRebuilding`
 (`CanvasView.swift:1490`) is not inherited**: the queue reorders, it never discards.
+
+**Built 2026-09-02 (stage 4c): `Engine/FrameBaker.swift`.** `CanvasView.startSandwichRebuild`'s idiom — a
+`@MainActor` owner, a serial `DispatchQueue` at `.utility`, a hop back — with `isBaking` as mutual exclusion
+rather than a slot, so a request arriving mid-bake waits one iteration instead of evaporating.
+
+**There is no push funnel that knows a frame, and the paragraph above assumed one.** `beginCanvasEdit()` is a
+chokepoint but the wrong one: it runs *before* an edit, to bake pending transients, so it cannot know what the
+edit is about to touch. `recordUndo` is documented as *"the shared entry point every call site funnels
+through"* and has seventeen — but the undo and redo *closures* it stores do not go through it, so replaying a
+step would reach no frame at all. `objectWillChange` fires for tool and brush state that reaches no pixel and
+misses the mutation that matters most: a dab lands in `VectorCanvas`/`RasterLayerTexture`, which are classes,
+so `@Published var layers` is never written and nothing is published.
+
+The one thing every content edit *does* reach is the tier object's own version counter
+(`VectorCanvas.invalidate()`, `RasterLayerTexture`'s four bumps), and `LayerContentVersion` already reads
+exactly those. **So the seam is a sweep, not a hook**: `FrameBaker.syncDirty()` compares the document's cel
+layout against the layout it last saw and dirties the difference. O(layers + cels) of integer and pointer
+comparison with no pixel work, no call site to remember, and it catches undo, redo and every mutation site
+that does not exist yet — it is §0's missing *"inversion of `Cel.startFrame`/`frameCount` into a frame →
+dirty map"*. Three tiers, and two are coarse on purpose because §3.3 makes over-marking cost one O(layers)
+mint and no composite:
+
+1. **Exact.** A cel whose content or span moved dirties **both** its old span and its new one — the frames it
+   left show something else now. This is §2.16's tier.
+2. **Every frame**, for any structural change, which is this section's own ruling rather than a compromise.
+   `StructuralStamp` is `renderTree(atFrame: 0)` — the model's own projection of order, folders, opacity,
+   visibility, blend, isolation and masks, already `Equatable` because `SandwichKey` compares whole trees —
+   plus the paper, the knob, the scene length, `AlphaMask.tuningGeneration`, `Compositor.backend`, and
+   `effectTracks`/`keyframeMarks`. **The probe frame is 0 and fixed**, so scrubbing does not read as a
+   structural change; `effectTracks` is what closes the gap that leaves, since a curve moving frame 7 and not
+   frame 0 is invisible in the tree at the probe frame.
+3. **Every interpolated cel's span**, whenever any cel changed. That is this section's reference rule with the
+   reference test dropped, and deliberately: an in-between's picture also moves when its *recipe* changes
+   (`t`, spacing, a refitted lattice), `InterpolationRecipe` is `Codable` and not `Equatable`, and a
+   hand-written comparison of its fields is exactly the "which field did I forget" hazard a content-addressed
+   store punishes with a wrong picture and no error.
+
+**A write failure marks the frame clean, and that is the non-spinning choice.** Leaving it pending would put
+the loop in a tight cycle re-compositing a frame it cannot write, for no better picture. The dirty bit is a
+hint and this one is spent; the *key* still says truthfully that there is no file, so the read path is a miss
+and §2.10's previous picture stays.
 
 ### 3.7 Playback
 
@@ -460,9 +510,28 @@ it is the dependency order.
    **4a is done, 2026-09-02** — `Engine/FrameBakeKey.swift` and `Engine/FrameBakeStore.swift`, both pure and
    headless; §3.5 above carries the three places its own text was wrong and the two measured ratios.
    `Engine/BakeQueue.swift` and `Engine/DecodedFrameRing.swift` landed the same day from the other half of the
-   stage. **Still owed: the wiring** — the queue driving the store, the live canvas and play reading frames out of
-   it, the timeline's baked-frame indication, and the device measurement of both the ratio and the decode time on
-   the owner's "UI Test" document.
+   stage. **4c is done, 2026-09-02** — `Engine/FrameBaker.swift` is the serial loop that joins all five, plus
+   the read path (`loadDecoded` → ring → `makeImage`) and the digest→frames map nothing else could own; §3.6
+   above carries the dirty-marking finding and §3.5 the deletion. **Still owed (4d): the wiring** — the live
+   canvas and play reading frames out of the baker, the timeline's baked-frame indication, and the device
+   measurement of both the ratio and the decode time on the owner's "UI Test" document.
+
+   MEASURED on a dedicated iOS 26.5 simulator: `FrameBakerLogicTests`, **21 tests, 0 failed, 0 skipped**,
+   static `func test` count reconciled at 21; fast tier **2468 / 2465 passed / 0 failed / 3 skipped** against
+   2447 / 2444 / 0 / 3 at `4e91777`, a delta of exactly the 21. **§2.16's acceptance test:** a ten-frame
+   document, one cel spanning `[2, 7)`, ten composites the first pass, one edit inside that cel, then
+   **exactly five** — dirty set asserted `[2,3,4,5,6]`, those five keys asserted moved and the other five
+   asserted unmoved. Three mutations MEASURED red: disabling the `store.contains(key)` dedupe takes the
+   nine-frame hold from 1 composite to 9 and the scrub from 0 to 81; deleting `StructuralStamp.effectTracks`
+   reds exactly the test whose premise asserts the probe frame's tree is unchanged; dropping the old-span
+   `markDirty` for a moved cel reports `[6, 7]` where `[1, 2, 6, 7]` belongs.
+
+   **Two fixture traps worth carrying to 4d.** A document made of holds *cannot* count frames — nine frames of
+   one cel are one key and one composite by design — so a test that wants to say "these five frames
+   re-rendered" has to give every frame its own picture first. And `CompositeProbe` counts calls to
+   `Compositor.composite`, which is once per *chunk*: every count in that suite rests on a 64² canvas planning
+   as one chunk, which is why `testABakeOfOneFrameIsExactlyOneComposite` exists as its own test rather than as
+   an assumption inside five others.
 5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.
 6. **Export** (§3.9).
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
