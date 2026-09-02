@@ -482,6 +482,23 @@ comparable.** Re-taking item 4b's table: snapshot cold **78.2 → 23.9 / 21.2 ms
 11.0 → 11.4/11.5, `below` 6.7 → 6.6, `above` 4.5 → 4.4 — three unchanged terms within 4%. So **~56 ms
 of main-actor work leaves every playback or scrub tick on which the playhead moves to a new frame.**
 
+**Every figure above is the simulator, and on the owner's actual iPad the flatten fan-out is worth
+1.41×, not ~3.9×.** MEASURED 2026-09-02, iPad 9th generation, Release, iOS 26.5.2, from a device run
+of `PerfBaselineTests`: `testTheSnapshotFanOutIsSpreadOverCoresRatherThanWalkedSerially` reports
+**serial 22.0 ms against parallel 15.6 ms over 6 cels at 2048×1024**, with
+`activeProcessorCount = 6`. The A13 is two performance cores and four efficiency ones, so the count
+is not the speedup — the 3.89×/3.92× above are what a simulator's six equal host cores give, and
+nothing on the device reproduces them. **Do not quote the ~3.5× reading anywhere as a device
+figure.**
+
+The reading is not that the fan-out was a mistake — 6.4 ms a tick is real and it cost one primitive —
+but that it never removed the term, and RENDER.md stage 2 does: the whole flatten now resolves on
+`CanvasView.sandwichQueue`. `renderSources` no longer exists as one function; its two passes are
+`CanvasManager.leafSnapshots` (main actor, O(layers), no pixel) and `FrameRecipe.resolveSources`
+(the fan-out, on whatever queue resolved the recipe). **The device number that sizes stage 2 is the
+snapshot itself: `snapshotCold` 36.3 ms against a 41.6 ms frame budget**, 87% of a frame on the main
+thread at pen-up, plus a 70.3 ms committed re-render in front of it.
+
 **(c) The gallery's open no longer waits on thumbnails.** The cels arrive with `thumbnail == nil` —
 the placeholder already existed, since `TimelineTrackView`'s cell hides its image view when there is
 none — and `CanvasManager.backfillMissingThumbnails()` fills them in a layer at a time, off the main

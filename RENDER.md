@@ -313,10 +313,29 @@ it is the dependency order.
    `Engine/StrokeScratch.swift` is that scratch as a window over the stroke's own dirty rect, and both tiers stamp into
    it rather than into the layer, so nothing on the stroke path scales with canvas area.
 1. ~~**Hoist the playback clock** onto `CanvasManager` (§3.7).~~ **Done 2026-09-01.**
-2. **The recipe** (§3.2): `FrameRecipe`/`LeafSnapshot`, a static leaf render from values, `renderSources` off the
-   main actor, the committed cel's re-render made asynchronous with the scratch retained until the new image lands
-   (§2.13). Pin: a logic test that the recipe's pixels equal the live snapshot's; a perf baseline for main-thread time
-   at pen-up.
+2. ~~**The recipe** (§3.2)~~ **Done 2026-09-02.** `Engine/FrameRecipe.swift` is `FrameRecipe`,
+   `SandwichRecipe` and `LeafSnapshot`; `renderSources` is cut at the seam it already had, into
+   `CanvasManager.leafSnapshots` (main actor, O(layers), no pixel) and `FrameRecipe.resolveSources`
+   (pure, any queue). `makeSandwichRequests` is deleted — `CanvasView.startSandwichRebuild` mints on
+   main and resolves inside the `sandwichQueue.async` it already had — and `makeRenderRequest` is
+   `makeFrameRecipe(…)?.resolve()` for the callers that are legitimately synchronous. The freeze is
+   `PixelOps.FrozenCel`, which is also now the only thing `rasterizeUncached` draws from, so the live
+   path and the bake cannot draw a cel differently. `StrokeCanvasView.refreshDisplay` rasterizes the
+   committed render on its own queue and holds the finished stroke's scratch until it lands (§2.13);
+   `DeferredVectorRender` is the ordering, headless.
+
+   **Two things worth carrying forward.** (a) `VectorCanvas.Frozen` keeps a live reference beside its
+   frozen values and renders through `render(quality:ifStillAtVersion:)`, so the composite shares the
+   display's memo instead of re-stamping the cel — MEASURED on the owner's iPad 9 in Release,
+   2026-09-02: a 20-stroke cel at 2048² is **70.3 ms** to rasterize and **0.0 ms** to read back, so a
+   snapshot that carried only the elements would have doubled the very work this stage removes.
+   (b) `liveMaskRequest` — §3.1's fourth row — is **not** deferred: both callers need the coverage in
+   the turn they ask for it (a `CALayer.mask` at first touch, and the onion skin's cache key). Its
+   flattens are memo hits behind the rebuild; the cold case is stage 3's `renderSources(subset:)`,
+   not a queue hop.
+
+   The main-thread figure this removes, MEASURED on the same device run: **`snapshotCold` 36.3 ms
+   against a 41.6 ms frame budget** — 87% of a frame — plus the 70.3 ms re-render above.
 3. **Chunked compositing** (§3.4) with `renderSources(subset:)`. Pin: chunked equals unchunked byte-for-byte on a
    fixture holding a graded folder at 60% opacity, a mask whose source is above the masked layer, an Outline effect
    at root, Bloom with ink input, a hue-blend leaf, and an isolated folder over a blend — and a fixture that must

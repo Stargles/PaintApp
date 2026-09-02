@@ -444,7 +444,8 @@ struct RenderRequest {
     }
 }
 
-/// The three requests §5.2's sandwich is assembled from, over one snapshot.
+/// The three requests §5.2's sandwich is assembled from, over one set of resolved leaves —
+/// `SandwichRecipe.resolve()`'s answer.
 ///
 /// **`full` is not a spare.** The settled scope for phase 5b is that at rest the canvas shows one
 /// image — `composite(full)`, exact for every mode and every nesting, with every layer host hidden —
@@ -470,7 +471,7 @@ struct SandwichRequests {
 /// **except** `activeLayerIndex`.
 ///
 /// **The claim this type makes, and it is checkable by reading `makeSandwichRecipe`.** All three
-/// requests are built over one snapshot; `activeLayerIndex` is used in exactly one place, the
+/// requests are built over one set of leaves; `activeLayerIndex` is used in exactly one place, the
 /// `tree.split(atLeaf:)` that produces `below` and `above`. `full` is `request(tree)` — the whole
 /// tree, uncut. So switching the active layer changes *where the tree is cut* and nothing about the
 /// picture `full` composites, and a rebuild triggered by a layer tap recomposites, at native canvas
@@ -591,6 +592,22 @@ extension CanvasManager {
     /// precisely the one that has to be pinned, because getting it wrong is silent. It costs no
     /// picture and no correctness; it costs a second `ResolvedMask` and a second set of canvas-sized
     /// flattens inside a shared budget. See `RenderSizing.liveComposite`.
+    ///
+    /// **This one stays synchronous, and RENDER.md §3.1's fourth row is therefore still on the main
+    /// thread on a masked document.** Both callers need the answer in the same turn they ask for it:
+    /// `liveMaskStrokeBegan` installs the coverage as a `CALayer.mask` at the first touch of a stroke
+    /// — a dab published before it lands is ink outside the mask — and `updateOnionSkin` compares the
+    /// resolved `CGImage` inside its own cache key, so a deferred answer would mean a key that says
+    /// "no mask" for one pass and rebuilds the ghost on the next. Neither is mechanical to defer and
+    /// deferring either changes behaviour rather than only timing.
+    ///
+    /// What it costs after stage 2 is a whole `FrameRecipe` — O(layers) of identity work and then a
+    /// `resolve()` whose flattens are memo hits, because the rebuild has just walked the same cels at
+    /// the same size (`RenderSizing.liveComposite` is what makes them the same entries). The cold
+    /// case is a masked document at a frame nothing has composited yet, and it is genuinely
+    /// canvas-sized main-thread work. **The fix is stage 3's `renderSources(subset:)`**, not a queue
+    /// hop: a mask reads a small subset of the leaves, and resolving only those is both cheaper and
+    /// the thing §3.4 rule 4 already needs built.
     @MainActor
     func liveMaskRequest(atFrame frame: Int) -> RenderRequest? {
         makeRenderRequest(atFrame: frame, includeBackground: false, sizing: .liveComposite)

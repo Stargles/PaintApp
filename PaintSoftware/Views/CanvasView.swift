@@ -2017,9 +2017,16 @@ struct CanvasView: UIViewRepresentable {
         /// Repaints every layer host whose backing content has drifted from what it last rendered.
         /// The synchronous form of `reconcileLayers`' per-pass version, needed for the moment a
         /// transient bakes so the baked pixels don't flicker in a pass later.
+        ///
+        /// **`waitingForTheRender: true` is what keeps that name true after RENDER.md stage 2**, and
+        /// it is the second of the two callers that ask for it (`beginVectorFloat` is the other). The
+        /// whole point here is that the overlay showing the transient comes off in the same turn the
+        /// baked ink goes on; a deferred render would put a frame between the two, which is exactly
+        /// the flicker this function exists to prevent. A shape or fill commit is a discrete gesture
+        /// rather than a per-pass cost, so paying a rasterize for it is a trade this makes knowingly.
         func syncLayerDisplays() {
             for host in layerHosts.values {
-                host.strokeView.refreshDisplayIfStale()
+                host.strokeView.refreshDisplayIfStale(waitingForTheRender: true)
             }
         }
 

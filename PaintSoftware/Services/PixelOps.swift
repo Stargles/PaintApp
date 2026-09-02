@@ -187,6 +187,16 @@ enum PixelOps {
     /// Building one costs at most what `rasterizeUncached` used to do inline — one memoized
     /// `renderToUIImage()` and one `VectorCanvas.freeze` — so nothing on the live path pays for the
     /// existence of the bake path.
+    ///
+    /// **What it does cost is one copy-on-write duplication, transiently, and RENDER.md §3.2 names
+    /// it as the price.** `renderToUIImage()`'s image shares the tier's `CGContext` buffer
+    /// copy-on-write, and until this type existed the only thing retaining it was
+    /// `RasterLayerTexture.cachedImage`, which the next stamp drops *before* it writes — so the write
+    /// was in place. A recipe in flight is a second retainer, so a stamp landing while one is
+    /// unresolved duplicates the canvas. That window is one composite long, it is bounded at one
+    /// buffer per raster leaf being edited, and it is what "the expensive state is already
+    /// copy-on-write" buys: the alternative is `ProjectStore.SaveSnapshot`'s eager copy of every cel,
+    /// which is the cost this stage removes.
     struct FrozenCel {
 
         /// Identity of a flatten, drawn entirely from model state.

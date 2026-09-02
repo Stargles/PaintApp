@@ -2958,17 +2958,34 @@ final class VectorCanvas {
         fileprivate let source: VectorCanvas
         /// `source.version` at the instant of the read.
         let version: Int
-        /// The same content in a canvas nothing else can reach: the artist's next edit mutates
-        /// `source` and cannot reach this. Never rendered while `source` is still at `version`.
-        fileprivate let detached: VectorCanvas
         /// `source`'s memo at `version`, when it had one. Present is the common case at rest and the
         /// end of the story — there is nothing left to rasterize.
         fileprivate let memoized: UIImage?
 
+        // The values themselves. Copy-on-write, so freezing them is a retain rather than a copy —
+        // which is the reason `Cel`'s two *class* tiers are the problem and its arrays are not.
+        fileprivate let size: CGSize
+        fileprivate let elements: [VectorElement]
+        fileprivate let transform: CGAffineTransform
+        fileprivate let suppressed: Set<UUID>
+
         /// The pixels these frozen values render to, safe to call from any thread.
+        ///
+        /// Three answers in the order they get cheaper to be wrong about: the memo the canvas already
+        /// had, the memo it is about to have (still at `version`, so its render *is* these values and
+        /// the two paths share one rasterize), and — only once the artist has moved on — a canvas
+        /// built from the frozen values, which nothing else can reach and which is therefore the
+        /// atomicity guarantee this whole type exists for.
         func render(quality: RenderQuality) -> UIImage {
             if let memoized { return memoized }
             if let shared = source.render(quality: quality, ifStillAtVersion: version) { return shared }
+            // Built here rather than at freeze time so a mint over a hundred leaves allocates
+            // nothing: this branch is reached only by a resolve the artist has raced.
+            let detached = VectorCanvas(size: size, elements: elements, transform: transform)
+            // Assigned rather than passed to the initialiser because it is transient state (see
+            // `suppressedElementIDs`) and the setter is the one place that knows to invalidate; on a
+            // canvas nobody has rendered yet that invalidation costs a counter.
+            if !suppressed.isEmpty { detached.suppressedElementIDs = suppressed }
             return detached.render(quality: quality)
         }
     }
@@ -2980,13 +2997,10 @@ final class VectorCanvas {
     func freeze(quality: RenderQuality) -> Frozen {
         lock.lock()
         defer { lock.unlock() }
-        let detached = VectorCanvas(size: size, elements: _elements, transform: _transform)
-        // Assigned rather than passed to the initialiser because it is transient state (see
-        // `suppressedElementIDs`) and the setter is the one place that knows to invalidate; on a
-        // canvas nobody has rendered yet that invalidation costs a counter.
-        if !_suppressedElementIDs.isEmpty { detached.suppressedElementIDs = _suppressedElementIDs }
-        return Frozen(source: self, version: version, detached: detached,
-                      memoized: quality == .full ? cachedImage : cachedPreviewImage)
+        return Frozen(source: self, version: version,
+                      memoized: quality == .full ? cachedImage : cachedPreviewImage,
+                      size: size, elements: _elements, transform: _transform,
+                      suppressed: _suppressedElementIDs)
     }
 
     /// Caller must hold `lock`.

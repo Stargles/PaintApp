@@ -244,8 +244,14 @@ final class StrokeCanvasView: UIView {
     /// goes through `endScratch` and every one of those is followed by `refreshDisplay()`, so
     /// this is belt and braces; it is here because the failure it prevents is silent, permanent, and
     /// looks to the artist like corrupted artwork rather than like a bug in a preview.
+    ///
+    /// **A new scratch also ends any hold on the last one.** A stroke started before the previous
+    /// stroke's re-render landed would otherwise have its own window torn out from under it when that
+    /// render arrived and released the hold — see `scratchIsHeldForRerender`.
     private var scratch: StrokeScratch? {
-        didSet { if scratch == nil { showScratch(nil) } }
+        didSet {
+            if scratch == nil { showScratch(nil) } else { scratchIsHeldForRerender = false }
+        }
     }
 
     /// How `scratch` relates to the canvas's own render, which differs per tool and — for the
@@ -491,10 +497,7 @@ final class StrokeCanvasView: UIView {
         if plan.showsScratchLayer { livePreviewFrames += 1 }
         // Last, and in the same turn as the assignment above, so Core Animation commits the new base
         // and the removal of the scratch together — see `scratchIsHeldForRerender`.
-        if scratchIsHeldForRerender {
-            scratchIsHeldForRerender = false
-            endScratch()
-        }
+        if scratchIsHeldForRerender { endScratch() }
     }
 
     /// Rasterizes `version` of `canvas` on `renderQueue` and hands the result back on main.
@@ -535,10 +538,7 @@ final class StrokeCanvasView: UIView {
         pendingVectorRenderVersion = nil
         if imageView.image !== image { imageView.image = image }
         displayedVectorVersion = version
-        if scratchIsHeldForRerender {
-            scratchIsHeldForRerender = false
-            endScratch()
-        }
+        if scratchIsHeldForRerender { endScratch() }
     }
 
     // MARK: - The lasso move's floating piece
@@ -1209,6 +1209,8 @@ final class StrokeCanvasView: UIView {
     /// flight. Called on every exit from a stroke — lift, interruption, cancel, and the smart-shape
     /// revert — so the window's pixels live no longer than the stroke that needed them.
     private func endScratch() {
+        // Before the release, so the `didSet` below cannot see a hold that is being ended.
+        scratchIsHeldForRerender = false
         scratch = nil
         vectorScratchRole = .overlay
         lastPreviewSample = nil
