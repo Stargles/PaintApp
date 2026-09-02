@@ -336,9 +336,19 @@ private extension BakeKeyEncoder {
         }
     }
 
-    /// **`effect` is in here, and it is the field that would have been silently wrong.**
-    /// `LayerContentVersion.hash(into:)` skips it on purpose (see this file's header); equality does
-    /// not, and a digest is standing in for equality.
+    /// **`effect` is in here, and it is the field a digest built out of `Hashable` would have
+    /// dropped.** `LayerContentVersion.hash(into:)` skips it on purpose (see this file's header);
+    /// equality does not, and a digest stands in for equality.
+    ///
+    /// **MEASURED redundant, and kept anyway.** Deleting this one line leaves the whole suite green,
+    /// because a leaf carrying a grade is also a `RenderNode` in the encoded tree carrying the same
+    /// resolved grade — `leafSnapshots` and `renderNodes` read the same `layerEffect(atFrame:)` and
+    /// say so in each other's comments. The *folder's* grade is the one this key would lose without
+    /// the tree, and dropping `encode(node:)`'s effect line is what turns
+    /// `testAFoldersGradeMovesTheDigest` red. This line stays because RENDER §3.3 names both lists
+    /// and because the coupling that makes it redundant is two accessors agreeing, not a structural
+    /// guarantee: the day a leaf's grade is resolved somewhere the tree derivation does not see, the
+    /// redundancy is the only thing standing between that and a wrong picture on disk.
     mutating func encode(version: LayerContentVersion) {
         uuid(version.celID)
         objectID(version.raster)
