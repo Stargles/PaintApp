@@ -372,7 +372,7 @@ struct RenderRequest {
     /// The canvas size a composite should use to fill a `bound`-sized box, aspect preserved and
     /// **never larger than the canvas itself**.
     ///
-    /// This is the rule behind `makeRenderRequest`'s `renderSize` hint, and it takes a bounding box
+    /// This is the rule behind `RenderSizing.fitting`, and it takes a bounding box
     /// rather than an exact size on purpose: the caller that wants a small composite knows the box it
     /// is filling (a 320×320 gallery tile) and has no business also computing which of the two
     /// dimensions binds. Getting that arithmetic wrong is silent — a request whose `canvasSize` has
@@ -412,11 +412,10 @@ struct RenderRequest {
     /// amount of rounding `RenderBackground.rect` reaches it.
     ///
     /// **Every path that finalises a size has to pass through here, which is why this is not folded
-    /// into `RenderResolution.renderSize`.** That one is bypassed twice: `makeRenderRequest` sets
-    /// `renderSize = canvasSize` outright when it has no bounding box (the eyedropper, the live-mask
-    /// resolve, every parity test), and `renderSize(fitting:within:)` returns `canvasSize` verbatim
-    /// whenever the box is larger than the canvas. Deleting the `.full` guard alone would have fixed
-    /// neither.
+    /// into `RenderResolution.renderSize`.** That one is bypassed twice: `RenderSizing.native` sets
+    /// `renderSize = canvasSize` outright (the eyedropper, every parity test), and
+    /// `renderSize(fitting:within:)` returns `canvasSize` verbatim whenever the box is larger than the
+    /// canvas. Deleting the `.full` guard alone would have fixed neither.
     ///
     /// `max(1, …)` for `RenderResolution.renderSize`'s reason: a degenerate canvas stays degenerate
     /// in the direction the rest of the pipeline already guards for, rather than becoming a
@@ -505,51 +504,105 @@ struct SandwichFullKey: Equatable {
 
 // MARK: - Building one
 
+/// **How a request picks the buffer it composites into.** Three answers, named, because one of them
+/// is not expressible as a bounding box and the difference between them is a cache key.
+enum RenderSizing {
+
+    /// The canvas itself, in whole pixels — no `RenderResolution`, no `CompositorBudget` cap.
+    ///
+    /// The eyedropper is what this is for: a sampled colour is the artist's answer to "what colour is
+    /// *that* pixel", and a reduced composite would blend the neighbours into it. Every parity test
+    /// composites here too, because `affordableSize` promises no identity on a 4096² document with a
+    /// deep stack and those tests compare down the byte.
+    case native
+
+    /// Exactly what `makeSandwichRequests` composites the live canvas at.
+    ///
+    /// **The live mask resolve must ask for this and not `.native`.** `MaskResolver.CacheKey` carries
+    /// width and height and so does `PixelOps.RasterizeKey`, so a mask resolved at a different size is
+    /// a second `ResolvedMask` built over a second whole set of canvas-sized flattens — two disjoint
+    /// working sets evicting each other inside one budget, on the one document (a masked one) that can
+    /// least afford it.
+    case liveComposite
+
+    /// Fitted inside a bounding box, then capped by what the device can hold.
+    ///
+    /// **Why this exists.** The project thumbnail composited the entire canvas to make a 320×320
+    /// gallery tile: 2,097,152 pixels rendered to fill 51,200 at the owner's 2048×1024, and 16.8M at
+    /// 4096². That is main-actor work inside every save, and until the scene-phase gate landed it was
+    /// three of them per app switch. `makeSandwichRequests` has had the machinery to render smaller
+    /// since the live preview grew a resolution setting; this is that pattern at a second call site.
+    ///
+    /// A box rather than a size: `RenderRequest.renderSize(fitting:within:)` fits the canvas's aspect
+    /// inside it and refuses to go above native. The cap is inert at any thumbnail-sized box and is
+    /// applied anyway, so a future caller asking for something large is bounded by the same rule the
+    /// live canvas is.
+    case fitting(CGSize)
+}
+
 extension CanvasManager {
+
+    /// **The size the live canvas composites at**: the artist's `RenderResolution`, then
+    /// `CompositorBudget.affordableSize` for what this tree's walk holds, then whole pixels.
+    ///
+    /// One function rather than two copies, because two callers have to agree on it *exactly* and one
+    /// pixel of drift is a cache miss rather than a soft picture — see `RenderSizing.liveComposite`.
+    ///
+    /// Whole pixels last, after the cap: `affordableSize` returns its argument verbatim on any
+    /// document that already fits, so it passes a fractional canvas straight through — see
+    /// `RenderRequest.wholePixels` for the 80.2-is-80-or-81 measurement this closes.
+    @MainActor
+    func liveCompositeSize(of tree: [RenderNode], canvasSize: CGSize) -> CGSize {
+        RenderRequest.wholePixels(
+            CompositorBudget.affordableSize(for: renderResolution.renderSize(for: canvasSize),
+                                            textures: Self.budgetTextures(of: tree)))
+    }
+
+    /// What `CompositorBudget` sizes a composite against: the walk's peak plus the leaves the upload
+    /// cache would hold, capped at four. Both halves of that are argued at the call site in
+    /// `makeSandwichRequests`; it is a function here so the two sizing paths cannot count differently.
+    static func budgetTextures(of tree: [RenderNode]) -> Int {
+        tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
+    }
+
+    /// The request `CanvasView.Coordinator.resolveLiveMask` resolves its coverage against.
+    ///
+    /// Here rather than in the coordinator for `isSandwichEngaged`'s reason: a `UIViewRepresentable`
+    /// coordinator is not reachable headlessly, and the one decision made here — **which size** — is
+    /// precisely the one that has to be pinned, because getting it wrong is silent. It costs no
+    /// picture and no correctness; it costs a second `ResolvedMask` and a second set of canvas-sized
+    /// flattens inside a shared budget. See `RenderSizing.liveComposite`.
+    @MainActor
+    func liveMaskRequest(atFrame frame: Int) -> RenderRequest? {
+        makeRenderRequest(atFrame: frame, includeBackground: false, sizing: .liveComposite)
+    }
 
     /// Captures the current stack at `frame` as a `RenderRequest`.
     ///
     /// `@MainActor` for the same reason `ProjectStore.SaveSnapshot.init` is (ProjectStore.swift:185):
     /// this is the half that reads published state and renders, and it is deliberately the *only*
     /// half that may. Everything downstream of the value it returns is pure.
-    /// `fittingWithin` is an optional **bounding box for the composite**, and nil — the default and
-    /// every caller but one — means "native, exactly as before".
     ///
-    /// **Why the hint exists.** The project thumbnail composited the entire canvas to make a 320×320
-    /// gallery tile: 2,097,152 pixels rendered to fill 51,200 at the owner's 2048×1024, and 16.8M at
-    /// 4096². That is main-actor work inside every save, and until the scene-phase gate landed it was
-    /// three of them per app switch. `makeSandwichRequests` has had the machinery to render smaller
-    /// since the live preview grew a resolution setting; this is that pattern at a second call site,
-    /// and nothing more.
-    ///
-    /// **It is a bounding box rather than a size, and a hint rather than an instruction.**
-    /// `RenderRequest.renderSize(fitting:within:)` fits the canvas's aspect inside it and refuses to
-    /// go above native; `CompositorBudget.affordableSize` then caps what the device can hold, in that
-    /// order, for `makeSandwichRequests`' reason — a preference may ask for less than the device
-    /// allows and never for more. The cap is inert at any thumbnail-sized box and is applied anyway,
-    /// so a future caller asking for something large is bounded by the same rule the live canvas is.
-    ///
-    /// **Nil skips all of it rather than passing the canvas through the same arithmetic**, so the
-    /// eyedropper, the live-mask resolve and every parity test composite at native size down the byte
-    /// — an identity that `affordableSize` does not promise on a 4096² document with a deep stack.
+    /// `sizing` picks the buffer — see `RenderSizing`, which carries the argument for each of the
+    /// three. `.native` is the default and what every parity test and the eyedropper take.
     @MainActor
     func makeRenderRequest(atFrame frame: Int,
                            quality: RenderQuality = .full,
                            includeBackground: Bool,
-                           fittingWithin bound: CGSize? = nil) -> RenderRequest? {
+                           sizing: RenderSizing = .native) -> RenderRequest? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
         let tree = renderTree(atFrame: frame)
         let renderSize: CGSize
-        if let bound {
-            let wanted = RenderRequest.renderSize(fitting: canvasSize, within: bound)
-            let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
-            // Whole pixels last, after the cap: `affordableSize` returns its argument verbatim on any
-            // document that already fits, so it passes a fractional canvas straight through — see
-            // `RenderRequest.wholePixels` for the 80.2-is-80-or-81 measurement this closes.
-            renderSize = RenderRequest.wholePixels(CompositorBudget.affordableSize(for: wanted, textures: textures))
-        } else {
+        switch sizing {
+        case .native:
             renderSize = RenderRequest.wholePixels(canvasSize)
+        case .liveComposite:
+            renderSize = liveCompositeSize(of: tree, canvasSize: canvasSize)
+        case .fitting(let bound):
+            let wanted = RenderRequest.renderSize(fitting: canvasSize, within: bound)
+            renderSize = RenderRequest.wholePixels(
+                CompositorBudget.affordableSize(for: wanted, textures: Self.budgetTextures(of: tree)))
         }
 
         let maskStacks = maskSourceStacks(of: tree)
@@ -703,11 +756,10 @@ extension CanvasManager {
         // ms a composite there, so roughly 128 ms at 4096², times three for a rebuild. Gating the cap
         // on `prefersGPUCompositing` would leave the CPU path uncapped at exactly the canvas size
         // where it is most expensive, to preserve sharpness on the frames least able to afford it.
-        let wanted = renderResolution.renderSize(for: canvasSize)
-        let textures = tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
-        // `wholePixels` last, for `makeRenderRequest`'s reason: the cap is a no-op on a document that
-        // already fits, so it hands a fractional canvas back unchanged.
-        let renderSize = RenderRequest.wholePixels(CompositorBudget.affordableSize(for: wanted, textures: textures))
+        //
+        // **The arithmetic itself lives in `liveCompositeSize`**, because the live mask resolve has to
+        // land on the same number down to the pixel — see `RenderSizing.liveComposite`.
+        let renderSize = liveCompositeSize(of: tree, canvasSize: canvasSize)
 
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
         let maskStacks = maskSourceStacks(of: tree)

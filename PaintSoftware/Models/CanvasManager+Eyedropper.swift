@@ -51,14 +51,15 @@ extension CanvasManager {
     /// like a regression and is not, which is why it is written here rather than left to be
     /// rediscovered. **Nothing tests this in either direction.**
     ///
-    /// `quality: .full`, and `makeRenderRequest` is also the request builder that does *not* apply
-    /// `renderResolution` (that is `makeSandwichRequests`, by design — see `RenderRequest.swift`). So
-    /// an artist running a reduced live preview still samples the true colour rather than a
-    /// downscaled approximation of it.
+    /// `quality: .full` and `RenderSizing.native` — the default, and **this is now the only live
+    /// consumer that takes it**. `renderResolution` and `CompositorBudget.affordableSize` are both
+    /// skipped here on purpose, so an artist running a reduced live preview still samples the true
+    /// colour rather than a downscaled approximation of it. The live mask resolve used to share that
+    /// exemption by accident and no longer does (`RenderSizing.liveComposite`).
     ///
-    /// The `fittingWithin` hint added for the project thumbnail is likewise not passed here, and
-    /// must not be: a sampled colour is the artist's answer to "what colour is *that* pixel", and a
-    /// reduced composite would blend the neighbours into it.
+    /// The thumbnail's bounding box is likewise not passed here, and must not be: a sampled colour is
+    /// the artist's answer to "what colour is *that* pixel", and a reduced composite would blend the
+    /// neighbours into it.
     @MainActor
     func eyedropperRequest() -> RenderRequest? {
         makeRenderRequest(atFrame: currentFrame, quality: .full, includeBackground: true)
@@ -71,12 +72,12 @@ extension CanvasManager {
     /// (see `Eyedropper`'s note on why there is no zoom arithmetic anywhere in this feature).
     ///
     /// **The point is mapped into the composited image's own grid rather than assumed equal to it.**
-    /// Today they are equal for *this* caller — `eyedropperRequest` passes no size hint — so the two
-    /// lines are a no-op. They are here because the failure they prevent is silent: were a scale ever
-    /// applied upstream, an unmapped point would sample a real pixel at the wrong place, and a wrong
-    /// colour looks exactly like a right one. `makeRenderRequest` grew a `fittingWithin` hint on
-    /// 2026-08-20, which makes that hypothetical a live capability of the builder rather than a
-    /// speculation about one; this function is correct either way because it maps.
+    /// Today they are equal for *this* caller — `eyedropperRequest` takes `RenderSizing.native` — so
+    /// the two lines are a no-op. They are here because the failure they prevent is silent: were a
+    /// scale ever applied upstream, an unmapped point would sample a real pixel at the wrong place,
+    /// and a wrong colour looks exactly like a right one. Two of `RenderSizing`'s three cases do apply
+    /// one, which makes that a live capability of the builder rather than a speculation about one;
+    /// this function is correct either way because it maps.
     ///
     /// Nil means "nothing to pick": off the canvas, or a fully transparent pixel. `Eyedropper` decides
     /// which; this only carries the answer.

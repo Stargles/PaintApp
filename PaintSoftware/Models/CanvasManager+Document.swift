@@ -303,11 +303,12 @@ struct SpacingFloorSurvey: Equatable {
 /// `sandwichTextures` is what `makeSandwichRequests` asks for, and the live canvas never *fails*
 /// there — `CompositorBudget.affordableSize` shrinks the request first, so past this threshold the
 /// canvas composites fewer pixels and looks **softer** while the artist works. `nativeTextures` is a
-/// request built with no `fittingWithin` bound: the eyedropper composites at native size on purpose,
-/// so past *that* threshold one colour pick genuinely falls to `CoreGraphicsCompositor`. (The
-/// live-mask preview is on the CPU reference unconditionally and does not reach this gate in either
-/// direction; it simply costs more as the canvas grows. Saving and the project thumbnail are bounded
-/// to a 320×320 box and are unaffected at any canvas size.)
+/// request built at `RenderSizing.native`: the eyedropper composites at native size on purpose, and
+/// it is the only live consumer that does, so past *that* threshold one colour pick genuinely falls
+/// to `CoreGraphicsCompositor`. (The live-mask preview is on the CPU reference unconditionally and
+/// reaches this gate in neither direction; it is sized with the sandwich, so it softens where the
+/// canvas does rather than growing without bound. Saving and the project thumbnail are bounded to a
+/// 320×320 box and are unaffected at any canvas size.)
 ///
 /// Neither is a refusal: §5 rule 14 is *warn and proceed*, and there is nothing here to fall back
 /// from silently.

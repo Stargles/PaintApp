@@ -131,15 +131,21 @@ enum MaskResolver {
         return CoreGraphicsCompositor.makeImage(fromPremultiplied: bytes, width: width, height: height)
     }
 
-    /// Drops every resolved mask. For tests that need to measure an uncached resolution, and for a
-    /// memory warning — nothing here is state, so throwing it away only costs time.
+    /// Drops every resolved mask. For tests that need to measure an uncached resolution, and for
+    /// memory pressure — nothing here is state, so throwing it away only costs time.
     ///
-    /// **The memory warning half of that sentence is now true.** It was not until 2026-08-20: every
+    /// **The pressure half of that sentence is now true.** It was not until 2026-08-20: every
     /// call site in the repo was a test, so a warning reached the Metal caches and the flatten memo
     /// and stepped around this one entirely while the comment said otherwise. `MaskCache.init`
-    /// subscribes now — see the note there, and `PixelOps.RasterizeCache.init`, which is the same
-    /// defect found and fixed one file earlier.
+    /// subscribes now — to backgrounding as well as to the warning, which is the event that actually
+    /// arrives — see the note there, and `PixelOps.RasterizeCache.init`, which is the same defect
+    /// found and fixed one file earlier.
     static func clearCache() { cache.removeAll() }
+
+    /// How many resolved masks this is holding, for the tests. Nothing in the render path reads it —
+    /// `PixelOps.rasterizeCacheBytes` and `CompositorMetalEngine.uploadCacheEntryCount` are the same
+    /// instrument on the caches either side of this one.
+    static var cacheEntryCount: Int { cache.entryCount }
 
     // MARK: - Resolution
 
@@ -364,6 +370,17 @@ enum MaskResolver {
             ) { [weak self] _ in
                 self?.removeAll()
             }
+            // **The event that actually arrives** — `PixelOps.RasterizeCache.init` and
+            // `CompositorMetalEngine.init` both carry this line for the reason PERFORMANCE.md item 12
+            // records: the memory warning never fires on the owner's device, so a cache that drops
+            // only on one sits at its high-water mark against a document nobody is looking at for as
+            // long as the app is backgrounded. Same `removeAll()`, same correctness-neutral
+            // guarantee, paid back as one cold resolve per mask when the artist comes back.
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
+            ) { [weak self] _ in
+                self?.removeAll()
+            }
         }
 
         func value(for key: CacheKey) -> ResolvedMask? {
@@ -382,6 +399,11 @@ enum MaskResolver {
         func removeAll() {
             lock.lock(); defer { lock.unlock() }
             entries.removeAll(); order.removeAll()
+        }
+
+        var entryCount: Int {
+            lock.lock(); defer { lock.unlock() }
+            return entries.count
         }
     }
 }

@@ -1757,6 +1757,21 @@ final class CanvasManager: ObservableObject {
     /// second literal is how they would start disagreeing about what a thumbnail is.
     static let celThumbnailSize = CGSize(width: 120, height: 120)
 
+    /// The box a cel is flattened into on the way to `celThumbnailSize`.
+    ///
+    /// **A thumbnail must never mint a native-size entry in `PixelOps.rasterizeCache`.**
+    /// `RasterizeKey` carries width and height, so a flatten at canvas size is a *different* entry
+    /// from the one the sandwich holds for the same cel at its clamped render size. Both are
+    /// canvas-sized — 64 MiB apiece at 4096², where six layers of sandwich already need 201 MiB
+    /// against a 192 MiB budget — so the two sets evicted each other and every rebuild ran cold. At
+    /// 2048×1024 the same pair is 48 MiB and nothing showed, which is why this was a large-canvas
+    /// symptom.
+    ///
+    /// Four times the tile on the long side is more resolution than a 120 pt tile can show, and it
+    /// bounds the entry at ~0.9 MiB whatever the canvas is. The downsample in `ThumbnailRenderer`
+    /// still runs from the true `canvasSize`, so the tile's own dimensions are unchanged.
+    static let celThumbnailRasterBound = CGSize(width: 480, height: 480)
+
     /// One cel's thumbnail pixels. **Pure, and reachable from any thread**: it reads the cel it is
     /// handed and nothing else, which is what lets the deferred backfill render off the main actor
     /// through the *same* code the synchronous path uses. Every tier it touches serialises on its own
@@ -1769,10 +1784,15 @@ final class CanvasManager: ObservableObject {
     static func celThumbnailImage(for cel: Cel, canvasSize: CGSize,
                                   derived: DerivedCelContent? = nil) -> UIImage {
         if derived != nil || cel.bakedImage != nil || cel.vector != nil {
-            // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already.
-            return ThumbnailRenderer.render(PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                                               derived: derived),
-                                            canvasSize: canvasSize, thumbnailSize: celThumbnailSize)
+            // PixelOps.rasterize folds fillImage/bakedImage/raster/vector into one image already —
+            // into `celThumbnailRasterBound` rather than the whole canvas, which is what keeps its
+            // memo entry out of the compositor's way (see the constant).
+            let flattened = PixelOps.rasterize(cel: cel,
+                                               canvasSize: RenderRequest.renderSize(fitting: canvasSize,
+                                                                                    within: celThumbnailRasterBound),
+                                               derived: derived)
+            return ThumbnailRenderer.render(flattened, canvasSize: canvasSize,
+                                            thumbnailSize: celThumbnailSize)
         }
         return ThumbnailRenderer.render(cel.raster, fillImage: cel.fillImage,
                                         canvasSize: canvasSize, thumbnailSize: celThumbnailSize)

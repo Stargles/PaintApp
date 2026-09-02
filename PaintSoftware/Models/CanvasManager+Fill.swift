@@ -515,7 +515,14 @@ extension CanvasManager {
             // fill, which the owner overruled in the same breath — *"Cover everything."* One order,
             // both symptoms, one fix. `PixelOps.rasterizeUncached` draws the live preview last for
             // the same reason, so the picture does not rearrange itself when the pencil lifts.
-            let existing = PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: cel.raster.renderToUIImage())
+            //
+            // **`hasContent` first, because `compositeOver` takes its bounds from the overlay.** A
+            // blank tier renders to a shared 1×1 (see `RasterLayerTexture.renderToUIImage`), so
+            // handing it over as the overlay would size the whole composite to one pixel — and a
+            // first fill on a fresh raster cel is exactly that case.
+            let existing = cel.raster.hasContent
+                ? PixelOps.compositeOver(base: fillGestureBaseBaked, overlay: cel.raster.renderToUIImage())
+                : fillGestureBaseBaked
             let finalImage = PixelOps.compositeOver(base: existing, overlay: preview)
             registerUndoableCelChange(layerID: layerID, celID: celID,
                                       oldRaster: cel.raster, oldBaked: fillGestureBaseBaked, oldFill: nil,

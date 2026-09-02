@@ -328,19 +328,33 @@ final class RasterLayerTexture: DabTarget {
 
     // MARK: - Reading
 
-    /// The current pixel content, or a fully transparent canvas-sized image if nothing's been
-    /// drawn yet. Always at native resolution (scale 1) — callers that need a smaller render
-    /// (thumbnails) downscale this themselves, same as the existing `fillImage`/`bakedImage` path.
+    /// What a tier with no bitmap renders to instead of a canvas-sized sheet of transparent pixels —
+    /// `VectorCanvas.transparentPixel`'s pattern, one tier down, and for the same arithmetic.
+    private static let transparentPixel: UIImage = {
+        UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1),
+                                format: PixelOps.transparentFormat()).image { _ in }
+    }()
+
+    /// The current pixel content, or a shared 1×1 transparent image when there is no bitmap. Always
+    /// at native resolution (scale 1) — callers that need a smaller render (thumbnails) downscale
+    /// this themselves, same as the existing `fillImage`/`bakedImage` path.
+    ///
+    /// **The blank answer is shared and memoises nothing, and that is the whole of it.** Every vector
+    /// cel carries an empty raster tier, and this used to mint a canvas-sized transparent bitmap for
+    /// each one and park it in `cachedImage`, which no budget bounds and no pressure hook evicts —
+    /// 2.4 GB across 300 cels at 2048×1024, materialised for the whole document the moment
+    /// `startThumbnailBackfill` walks it on open. Callers draw the result into a rect they already
+    /// know, so a 1×1 stretched over that rect is pixel-for-pixel the same nothing.
+    ///
+    /// **A caller that reads the returned image's *size* must ask `hasContent` first**, which is what
+    /// `PixelOps.rasterizeUncached` and `CanvasManager.commitInteractiveFill` now do — they were the
+    /// only two, and both derived a canvas from this image rather than drawing into one.
     func renderToUIImage() -> UIImage {
         lock.lock()
         defer { lock.unlock() }
         if let cachedImage { return cachedImage }
-        let image: UIImage
-        if let context, let cg = context.makeImage() {
-            image = UIImage(cgImage: cg, scale: 1, orientation: .up)
-        } else {
-            image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in }
-        }
+        guard let context, let cg = context.makeImage() else { return Self.transparentPixel }
+        let image = UIImage(cgImage: cg, scale: 1, orientation: .up)
         cachedImage = image
         return image
     }

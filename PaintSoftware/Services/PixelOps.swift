@@ -296,7 +296,10 @@ enum PixelOps {
     private static func rasterizeUncached(cel: Cel, canvasSize: CGSize, quality: RenderQuality,
                                           derived: DerivedCelContent? = nil) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
-        let strokesImage = cel.raster.renderToUIImage()
+        // **The raster tier is skipped outright when it holds no bitmap**, rather than drawn as a
+        // sheet of transparency. Every vector cel has an empty raster tier, so this is the common
+        // case and not the odd one, and the draw it removes is a full-canvas blit of nothing.
+        let strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
         // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
         // not in `raster` — include it so fill, select/move, and cross-layer fill references treat
         // a vector layer's content as pixels just like a raster layer's.
@@ -313,7 +316,7 @@ enum PixelOps {
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
             cel.bakedImage?.draw(in: bounds)
-            strokesImage.draw(in: bounds)
+            strokesImage?.draw(in: bounds)
             vectorImage?.draw(in: bounds)
             // **`fillImage` is last, and that is the whole of LASSO_FILL.md §2a on the preview side.**
             // A fill covers everything already on the cel, so the live preview has to stack the way

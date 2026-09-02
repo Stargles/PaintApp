@@ -194,10 +194,11 @@ final class ProjectSaveLogicTests: XCTestCase {
         let box = CGSize(width: 320, height: 320)
 
         guard let native = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
-              let hinted = manager.makeRenderRequest(atFrame: 0, includeBackground: false, fittingWithin: box) else {
+              let hinted = manager.makeRenderRequest(atFrame: 0, includeBackground: false,
+                                                     sizing: .fitting(box)) else {
             return XCTFail("Both requests must build")
         }
-        XCTAssertEqual(native.canvasSize, Self.ownersCanvas, "No hint means native, exactly as before")
+        XCTAssertEqual(native.canvasSize, Self.ownersCanvas, "`.native` means the canvas, exactly as before")
         XCTAssertEqual(hinted.canvasSize, CGSize(width: 320, height: 160))
 
         guard let nativeImage = Compositor.composite(native),

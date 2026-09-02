@@ -604,8 +604,8 @@ final class CompositorMetalEngine {
             // `.unavailable`, not `.underPressure`: this is a *static* verdict about the device and
             // the canvas size, and the CPU reference is the only thing that can render this frame at
             // all. On the live canvas it should never fire, because `makeSandwichRequests` has
-            // already sized the request against the same budget — it is a request built with no
-            // `fittingWithin` bound (the eyedropper, `CanvasManager+Eyedropper.swift`, composites at
+            // already sized the request against the same budget — it is a request built at
+            // `RenderSizing.native` (the eyedropper, `CanvasManager+Eyedropper.swift`, composites at
             // native size on purpose so a colour pick never blends in a downscale) that reaches it.
             return .unavailable
         }

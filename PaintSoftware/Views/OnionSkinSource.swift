@@ -882,7 +882,7 @@ enum OnionSkinRasterCache {
     private static let lock = NSLock()
     private static var entries: [Key: UIImage] = [:]
     private static var order: [Key] = []
-    private static var memoryObserver: NSObjectProtocol?
+    private static var pressureObservers: [NSObjectProtocol] = []
 
     /// `cel`'s content at `size`, from the cache when it can be.
     ///
@@ -924,7 +924,7 @@ enum OnionSkinRasterCache {
         return reduced
     }
 
-    /// Called on a memory warning and by tests that need to measure an uncached cost.
+    /// Called on a memory warning, on backgrounding, and by tests that need to measure an uncached cost.
     static func removeAll() {
         lock.lock(); defer { lock.unlock() }
         entries.removeAll(); order.removeAll()
@@ -942,11 +942,21 @@ enum OnionSkinRasterCache {
 
     /// Registered lazily rather than in a static initialiser so a process that never turns onion skin
     /// on never registers at all. Called under `lock`.
+    ///
+    /// **Two events, because the warning is the one that never arrives.** PERFORMANCE.md item 12
+    /// records that the owner's device does not post a memory warning; `PixelOps.RasterizeCache` and
+    /// `CompositorMetalEngine` both drop on backgrounding for that reason, and a ghost cache holding
+    /// canvas-reduced flattens against a document nobody is looking at is the same shape of debt.
+    /// Correctness-neutral either way — an entry here is derived from its key and costs one
+    /// re-rasterize to rebuild.
     private static func installMemoryObserverIfNeeded() {
-        guard memoryObserver == nil else { return }
-        memoryObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
-        ) { _ in removeAll() }
+        guard pressureObservers.isEmpty else { return }
+        pressureObservers = [UIApplication.didReceiveMemoryWarningNotification,
+                             UIApplication.didEnterBackgroundNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
+                removeAll()
+            }
+        }
     }
 }
 
