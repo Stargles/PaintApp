@@ -68,8 +68,12 @@ a later session reinstating it by rediscovering the argument that produced it.
    cannot be held either. Neither applies now, and both would apply again to any future mode reached
    by a gesture.
 2. **Transform channels must eventually cover all three Move modes — Uniform, Freeform and perspective
-   Distort** — including the Distort that is not implemented today
-   (`TransformMode.distort.isImplemented == false`, `Models/SelectionModels.swift:54`).
+   Distort.** Distort was *"not implemented today"* when this was written and shipped on 2026-09-02
+   for the raster floating piece (LASSO_MOVE.md §0, stage 5) — `FloatingPiece.distortQuad` through
+   `Homography`/`ImageWarp` — which is the same representation §2.14 asks a transform key to store, so
+   the two still meet with no migration. It is refused on a lassoed *vector* float
+   (`CanvasManager.distortUnavailableReason`) for §8's own reason: the per-dab width a homography
+   needs is §4.2's rest-space bake, which is stage 5b's prerequisite and not stage 5's.
 3. **A transformation layer re-poses the vector objects below it**, rather than resampling the
    composited pixels below it. The owner wants crisp lines, not a bitmap magnify. This answers the
    question TODO (21) raises and calls *"different features wearing the same name"*.

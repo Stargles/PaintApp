@@ -422,9 +422,10 @@ enum LassoMembership: String, CaseIterable, Identifiable {
     }
 
     /// One line under the picker saying what the selected segment does — the same job
-    /// `MoveTransformBottomBar`'s "Coming soon — acts like Uniform for now" caption does, and needed
-    /// for the same reason: the difference between the three is invisible until the artist has
-    /// already moved something.
+    /// `MoveTransformBottomBar`'s caption slot does (`CanvasManager.distortUnavailableReason`, which
+    /// replaced the "Coming soon — acts like Uniform for now" this once named), and needed for the
+    /// same reason: the difference between the three is invisible until the artist has already moved
+    /// something.
     var explanation: String {
         switch self {
         case .enclosed: return "Moves only what lies completely inside the loop."
