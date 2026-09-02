@@ -262,10 +262,11 @@ struct FloatingPiece {
 /// Distort should be, and this is it.
 ///
 /// **What is shared is `Homography.isValidQuad`, and that is the right amount.** `TextFrameDrag`
-/// cannot be called with a floating piece: it is built from a `TextFrame` and writes six of its
-/// fields back (`corners`, `size`, `autoSize`, `mode`, and the basis two of them imply), none of
-/// which a bitmap has. What the two genuinely share is the refusal — one predicate, in `Deform`,
-/// asked by both — and the two lines around it are `quad[corner] = point`.
+/// cannot be called with a floating piece: it is built from a `TextFrame` and writes three of its
+/// fields back — `corners`, `autoSize` and the derived `mode` — none of which a bitmap has. What the
+/// two genuinely share is the refusal, one predicate in `Deform` asked by both, and the line around
+/// it is `quad[corner] = point`. Extracting that into a third function would be a wrapper, not a
+/// seam.
 ///
 /// **The one real difference is which space the corners live in, and it follows from what each type
 /// holds.** A `TextFrame`'s corners *are* canvas points, because a text box has no separate affine —
