@@ -161,6 +161,35 @@ is half of its class's floor by itself and decomposing it is still what going be
 The next class worth cutting is `SandwichCompositingUITests` at 344 s. **Re-take this table rather than
 trusting it — it has now gone stale twice, been confirmed once, and been acted on once.**
 
+**MEASURED at `04099a9` on an idle machine — 2759 tests, 2752 passed, 1 failed, 6 skipped.** The one
+failure, `BlendModesAndCompositorUITests`' `testHidingFolderHidesContentsOnCanvasAndReshowingRestoresThem`,
+**passed clean in isolation** and is environmental. That run followed a pass that rewrote the compositing
+path — the bake store, the scheduler, striped rendering, the live canvas served from disk, export.
+
+| class | seconds | tests |
+|---|---|---|
+| `SelectionAndMoveUITests` | 336 | 10 |
+| `SandwichCompositingUITests` | 330 | 10 |
+| **`BlendModesAndCompositorUITests`** | **311** | 8 |
+| `LayerFolderAndMaskMenuUITests` | 240 | 7 |
+| `PerfBaselineTests` | 233 | 56 |
+| `LayerPanelControlsUITests` | 214 | 7 |
+| `LayerStackUITests` | 165 | 5 |
+| `EraserAndPersistenceUITests` | 163 | 7 |
+| `CuttingModesUITests` | 161 | 4 |
+| `GraphEditorUITests` / `GraphEditorGestureUITests` | 157 / 143 | 7 / 3 |
+
+**4,206 class-seconds across 129 classes**, against 3,794 across 109 at `35c0db6` — the cost of ~280 new
+tests, which is close to free per test.
+
+**The shape of the problem has changed, and this section should stop looking for one long class.** From
+2026-08-15 to 2026-08-29 the lever was always a single indivisible class: `LayerPanelUITests` at 515 s,
+then `SandwichCompositingUITests` at 356 s. **The top three are now within 25 seconds of each other at
+~330 s**, so no split buys anything — cutting the longest just makes the second-longest the floor. Four
+clones hold ~17.5 min of ideal work; whatever the gap to wall clock is, it is scheduling and per-class
+setup, not one class. **Splitting further now makes it worse**, because every new class pays its own
+setup, and the class count has already grown 109 → 129.
+
 If you split a class again, **verify by test count from the xcresult** — a test that stops running
 still prints green — and take the count *before* you merge as well as after: a split branch cut
 before something was deleted will silently resurrect it, and the count is the only signal.
