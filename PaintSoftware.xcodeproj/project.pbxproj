@@ -206,6 +206,10 @@
 		6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */; };
 		A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */; };
 		0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */; };
+		4970E029C1941A9DE297A5F7 /* PaintSoftware/Engine/BakeQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */; };
+		570B5769358A417C9445BA8D /* PaintSoftware/Engine/DecodedFrameRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */; };
+		761838C1269614EE92EC33E3 /* BakeQueueLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */; };
+		35920CC67FD055702411F872 /* DecodedFrameRingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */; };
 		DFDC16BB1BE8C70A41A45C65 /* ChunkedCompositeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */; };
 		F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */; };
 		4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */; };
@@ -429,6 +433,10 @@
 		1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/VectorPreviewPlan.swift; sourceTree = "<group>"; };
 		C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameRecipe.swift; sourceTree = "<group>"; };
 		5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ChunkedComposite.swift; sourceTree = "<group>"; };
+		845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BakeQueue.swift; sourceTree = "<group>"; };
+		8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/DecodedFrameRing.swift; sourceTree = "<group>"; };
+		57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeQueueLogicTests.swift; sourceTree = "<group>"; };
+		58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DecodedFrameRingLogicTests.swift; sourceTree = "<group>"; };
 		3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeLogicTests.swift; sourceTree = "<group>"; };
 		98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeMetalLogicTests.swift; sourceTree = "<group>"; };
 		5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameRecipeLogicTests.swift; sourceTree = "<group>"; };
@@ -544,6 +552,8 @@
 				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
 				5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */,
 				3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */,
+				57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */,
+				58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */,
 				98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */,
 				62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
@@ -629,6 +639,8 @@
 				1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */,
 				C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */,
 				5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */,
+				845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */,
+				8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */,
 				3AD76CAA4B073F1308285DFF /* PaintSoftware/Views/GalleryOpenState.swift */,
 				E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */,
 				B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */,
@@ -913,6 +925,10 @@
 				6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */,
 				A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */,
 				0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */,
+				4970E029C1941A9DE297A5F7 /* PaintSoftware/Engine/BakeQueue.swift in Sources */,
+				570B5769358A417C9445BA8D /* PaintSoftware/Engine/DecodedFrameRing.swift in Sources */,
+				761838C1269614EE92EC33E3 /* BakeQueueLogicTests.swift in Sources */,
+				35920CC67FD055702411F872 /* DecodedFrameRingLogicTests.swift in Sources */,
 				DFDC16BB1BE8C70A41A45C65 /* ChunkedCompositeLogicTests.swift in Sources */,
 				F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */,
 				4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */,
