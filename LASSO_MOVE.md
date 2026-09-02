@@ -51,7 +51,7 @@ scale and one rotation. It now carries a second number beside it and the picker 
 | the non-similarity affine the box now implies | `VectorCanvas.affine(from:aspect:pivot:)`. `aspect == 1` is the old function bit for bit |
 | one element moved by it | `VectorCanvas.mapping(_:throughStretch:)`, beside the similarity one it does **not** widen. The two share `drawn(_:through:widthScale:)` — the half they agree about — and differ only in where the width scale comes from |
 | which of the two a nudge uses | `applyToVectorFloat`, on the *pose* and not on the mode: an unstretched float goes through the similarity arm exactly as it did before Freeform existed, assert and all |
-| Freeform refusing, out loud, on a piece carrying a **placed image** | `VectorCanvas.canBeStretched(_:)` → `CanvasManager.freeformUnavailableReason`, the Mirror pattern applied to the neighbouring impossibility. `vectorFloatIsFreeform` is the second guard, on the drag, because `transformMode` is shared with the raster tier and outlives the piece that chose it. **A text box was refused here until 2026-08-27 and is not any more** — see §5.18 and the stage 3d row below |
+| ~~Freeform refusing, out loud, on a piece carrying a **placed image**~~ | **Gone as of stage 3c.** It was `VectorCanvas.canBeStretched(_:)` → `CanvasManager.freeformUnavailableReason`. Text stopped being refused on 2026-08-27 (§5.18) and the placed image on stage 3c, so no kind can answer no — the predicate and the caption are **deleted** rather than left answering nil, and `vectorFloatIsFreeform` is `transformMode == .freeform` |
 | the stretch surviving undo, Reset and a mode switch | `frame.aspect` in the nudge's undo step; the `aspect != 1` term in `canResetFloating`; and `nudgeVectorFloat(to:aspect:)`'s defaulted `aspect`, which is what makes *"3:1 stays 3:1 and scales from there"* fall out rather than need a rule |
 
 **The ink keeps its shape and the path stretches — owner's ruling, 2026-08-26**, one toggle over
@@ -93,12 +93,39 @@ i.e. the toggle's other half.
   `allowedHandles` defaults to *all cases*, so a new grip switches itself on for the whole-layer box
   too, where there is nothing to store it in.
 - ~~**The box-only rotate knob**~~ (3b) — **shipped, all three phases**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store — `ObjectTransformFrame.stretchAxis`, which makes the map the general affine `R(ρ+φ)·S·R(−φ)` — §5.21 exempts a box-only turn from the undo stack, which is also the reason the recorded axis is not the live box angle, and §5.22 is phase 3 — the box's size and centre become a live function of the angle, so the hand-fit fits. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
-- **Placed images holding a stretched shape** (3c). This is now the *only* thing either refusal names: text was taught to mirror and to stretch on 2026-08-27 (stage 3d, §5.18), and a placed image is what is left — its `LayerTransform` needs a stored field and a decode migration before it can hold either.
+- ~~**Placed images holding a stretched shape**~~ (3c) — **shipped**, and it closed both refusals at once rather than only Freeform, because the field they each wanted was the same field. See the stage 3c section below.
 - **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
   `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
   discarded at the gesture's end. Both defaults — `ObjectTransformFrame.aspect` and
   `ObjectTransformDrag(freeform:)` — are the unstretched, uniform ones for that reason, and
   `testTheWholeLayerBoxIsUnstretchedAndItsDragIsUniform` is what keeps them there.
+
+### Placed images holding a stretched shape — shipped 2026-09-02 (stage 3c)
+
+A `VectorImageElement`'s whole placement was a `LayerTransform` — position, one scale, one rotation,
+i.e. a similarity — so the two Move controls that ask for anything else refused any piece carrying a
+photo. It now stores its own **shape** beside that transform, and both refusals are gone.
+
+| what | where |
+|---|---|
+| the stored shape — three fields, **beside** `transform` rather than inside it | `VectorImageElement.aspect`, `.stretchAxis`, `.mirrored`. `LayerTransform` stays exactly a similarity, which is what `mapping(_:throughSimilarity:)` asserts it is handed and what the Move box's own pose is; `ObjectTransformFrame` already holds the same pair beside a `LayerTransform`, so this is that split applied to the document |
+| the one place the fields become a matrix | `VectorImageElement.placement`, built from `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` with a zero pivot — the *same* builder the box's pose goes through. The render, the membership quad and the lasso's map all read it, so they cannot disagree about where the picture is |
+| one image moved by any invertible affine | `VectorCanvas.placed(_:through:)` — compose the map into the placement, peel the sign into `mirrored`, and read the rest back with `ObjectTransformFrame.decompose`, the closed-form 2×2 SVD the box's own second stretch already uses. **The form already is the SVD, so nothing is approximated** |
+| which arm reaches it | `mapping(_:throughStretch:)` always; `mapping(_:throughSimilarity:)` only for a **reflection**. An orientation-preserving similarity keeps the three lines it always had, bit for bit — `R(−φ)·S·R(ρ+φ)·kR(θ)` is `R(−φ)·(kS)·R(ρ+θ+φ)`, so the shape comes through untouched whatever it is |
+| what it costs the file | `VectorCanvasData.ImageRef` gains three **optional** keys. Absent means unstretched, so a photo nobody has reshaped writes byte-for-byte the payload it wrote before and an older file opens unchanged — the same idea `VectorCanvasData.transform` already applies to itself. **This is smaller code than the non-optional spelling**, which would have needed a hand-written `init(from:)` *and* a hand-written `encode`; it is not a migration |
+| the loose end 3b phase 3 predicted | `MoveBoxInk.cluster(of:)`'s disc now takes the **larger** axis scale, so a stretched photo is still enclosed. `padScale` is an axis-aligned pair and is no longer *exact* for that disc, which is what the note beside it warned — the error is loose by a fraction of the photo and is the same approximation a stroke's reach already takes under a stretched box |
+
+**The seventh value is a bit, not a number, and that is the right size.** §5.20's arithmetic — two
+translations, two angles, two scales is six — spans exactly the affines whose determinant is
+**positive**, because `R·S·R` with two positive scales is the identity component. The other component
+is that set composed with one reflection. So six numbers plus one bit is a general invertible affine
+with nothing left over, and a placed image is now as expressive as a `TextFrame`'s four free corners.
+
+**Two things it deliberately did not do.** It built **no** migration: the owner's standing
+*"everything on the ipad right now is expendable"* meant none was owed, and the optional keys are
+compatible only because that is the cheaper implementation. And it stopped short of **Distort**
+(stage 5), which is a homography and needs eight numbers; this is the stored shape that one will
+compose into, not the solver.
 
 ### Three membership rules — shipped 2026-08-28 (TODO item (20)), moved to Select 2026-09-02 (item (23))
 
@@ -149,7 +176,7 @@ has a vector arm.
 | the bar, for either kind of float | `MoveTransformBottomBar`, gated on `CanvasManager.isAnyPieceFloating` in `DrawingView` |
 | Done, for either kind | `CanvasManager.commitAnyFloatingPiece()` |
 | Mirror H/V | `CanvasManager.mirrorFloating(horizontal:)`. Raster toggles `FloatingTransform.flipH/flipV`; a vector float carries `VectorFloat.mirror`, a reflection folded in front of the map every nudge already applies — **`LayerTransform` has no flip, so there is nowhere else for it to go** |
-| what Mirror cannot do, and how it says so | `VectorCanvas.canBeMirrored(_:)` → `CanvasManager.mirrorUnavailableReason`. A **placed image**'s whole placement is a `LayerTransform`, which cannot hold a reflection, so with one in the piece the two buttons are **disabled and the bar says why**. A text box was refused here too until 2026-08-27; its corners reverse their winding under a reflection, which is what a mirror *is* — see §5.18 |
+| ~~what Mirror cannot do, and how it says so~~ | **Nothing, as of stage 3c.** It was `VectorCanvas.canBeMirrored(_:)` → `CanvasManager.mirrorUnavailableReason`, and it named a **placed image**, whose whole placement was a `LayerTransform` with no flip in it. Text stopped being refused on 2026-08-27 (§5.18) and the image on stage 3c, which gave it a stored `mirrored` bit; both the predicate and the caption are deleted |
 | Rotate 45° and Rotate 90°, both directions | `CanvasManager.rotateFloating(eighths:)` over `FixedAngleRotation.stepped(from:lift:eighths:)` — composed onto the box's current angle and re-quantised onto the eighth-turn grid, so eight presses of 45° return the piece **bit-exactly** to where it started |
 | Reset | `CanvasManager.resetFloating()` / `canResetFloating`. One undo step on a vector float (§5.13); nothing on a raster piece, which has no per-nudge steps for it to sit beside |
 | the Select menu standing down while anything floats | `DrawingView` — the *presentation* is suppressed, `activePanel` is deliberately not cleared, so the panel returns by itself at the bake |
@@ -947,10 +974,13 @@ about makes the pair a *general affine* and still not a homography.
   still assigned only at the two lifts and the offset has no route into any map. The re-fit runs per
   touch-move: `MoveBoxInk` takes a convex hull per element at the lift, which measured 2.223 ms a
   frame down to 0.401 ms on a 24,000-sample cel.
-- **Placed images holding a stretched shape** (3c), and then **Distort** (stage 5) over the shared
-  `Homography` solver — the one member of this list that really does need a quad. Text reached both
-  Mirror and Freeform on 2026-08-27 (stage 3d) without needing 3c's stored field, because a
-  `TextFrame` already carries four free corners.
+- ~~**Placed images holding a stretched shape**~~ (3c) — **done, 2026-09-02**, see §0. Three stored
+  fields beside `VectorImageElement.transform` and one shared compose-and-decompose arm; it closed
+  Mirror as well as Freeform, since both wanted the same field. **Distort** (stage 5) over the shared
+  `Homography` solver is what is left of this line — the one member that really does need a quad, and
+  eight numbers rather than six-plus-a-bit. Text reached both Mirror and Freeform on 2026-08-27
+  (stage 3d) without needing 3c's stored field, because a `TextFrame` already carries four free
+  corners.
 - **Ink-based membership behind a setting**, if the owner says the centreline rule feels wrong on
   thick lines — the named, deferred option §1 keeps on the board rather than deleting. It should
   move the *eraser* with it, since the argument for the centreline is that the two tools agree.
@@ -1169,11 +1199,12 @@ fourth are decisions this stage had to make and are recorded so they are not re-
     same rule rather than an exception: nothing about a raster Move's in-flight transform is on the
     stack, so there is no per-nudge step for it to sit beside.
 
-    **Mirror is the one button that can be unavailable**, and it says so rather than going quietly
-    grey. A reflection is not expressible for a placed image, whose placement *is* a `LayerTransform`,
-    so a piece carrying one disables both Mirror buttons with the reason in the bar. Strokes and fills
-    — what drawing on a vector layer produces — mirror exactly, and **so does text as of §5.18**, which
-    reversed the refusal this paragraph used to state for it.
+    ~~**Mirror is the one button that can be unavailable**~~ — true until stage 3c, and kept because
+    it is what the bar's caption mechanism was built for. A reflection was not expressible for a placed
+    image, whose placement *was* a `LayerTransform`, so a piece carrying one disabled both Mirror
+    buttons with the reason in the bar. Text stopped being refused at §5.18 and the image at stage 3c,
+    which gave it a stored `mirrored` bit; **Reset is now the only control on the bar that can be
+    off**, and only until the first nudge.
 
 ### Still needs a ruling
 
@@ -1216,8 +1247,8 @@ An eighteenth was settled on **2026-08-27**, and it reverses a refusal §0 and �
     hand-written policy switches (`VectorCanvas.canBeStretched` and `canBeMirrored`), not a limit of
     the object: a `TextFrame` already stores four free corners, which express any affine including a
     reflection and a per-axis stretch, and every path that draws text already concatenates the matrix
-    those corners imply. **A placed image is unaffected and still refuses both** — its placement *is* a
-    `LayerTransform`, so it needs a stored field and a decode migration first (stage 3c).
+    those corners imply. **A placed image was unaffected and refused both until stage 3c** — its placement *was* a
+    `LayerTransform`, so it needed a stored field first. It has one now, and no migration was owed.
 
     Two sub-behaviours were put to the owner the same day and answered. Verbatim, and not to be
     re-litigated:

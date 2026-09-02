@@ -1472,7 +1472,6 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginVectorLassoMove())
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
         let pivot = float.pivot
-        XCTAssertNil(manager.mirrorUnavailableReason, "strokes and fills mirror exactly")
 
         manager.mirrorFloating(horizontal: true)
 
@@ -1516,20 +1515,20 @@ final class LassoMoveLogicTests: XCTestCase {
                        "H then V is a point reflection, not a second horizontal flip")
     }
 
-    /// **Mirror refuses, out loud, when the lassoed piece carries a placed image.**
+    /// **A piece carrying a stroke *and* a photo mirrors as one thing, and mirroring back is the
+    /// drawing that was lifted.**
     ///
-    /// It is not expressible: the image's whole placement is a `LayerTransform` with no flip in it, so
-    /// carrying it through the reflection anyway is not a rounding error — `theta` becomes `atan2` of a
-    /// map that turns the plane over, and the photo would come back rotated a half turn instead of
-    /// mirrored. So the button is off and the bar says why, which is the difference between a disabled
-    /// control and a control that does nothing.
+    /// This test used to assert the opposite — that Mirror refused, out loud, on any piece holding a
+    /// placed image, because the image's whole placement was a `LayerTransform` with no flip in it and
+    /// `theta` would have read a plane turned over as an *angle*, coming back a half turn instead of a
+    /// mirror. §3 stage 3c gave the image a stored `mirrored` bit and the refusal went with it (as did
+    /// `mirrorUnavailableReason` itself, which no kind could answer any more).
     ///
-    /// **A text box used to be refused here too and is not any more** (owner, 2026-08-27; LASSO_MOVE.md
-    /// §5.18). Its half of this test moved to
-    /// `testMirroringALassoedTextBoxReflectsTheGlyphsAndMirroringBackIsPixelIdentical`, which asserts
-    /// the behaviour rather than the refusal; the image half stays here, pinned, because that one is a
-    /// stored-field-and-migration problem and not a policy switch.
-    func testMirrorIsRefusedAndSaysWhyWhenThePieceCarriesAnImage() {
+    /// **The mixed piece is what this keeps**, rather than the photo alone, which
+    /// `PlacedImageShapeLogicTests` covers: the stroke reflects through the map point for point and the
+    /// photo through a decomposed pose, and the two have to agree about the axis or the drawing comes
+    /// apart at the seam.
+    func testMirroringAPieceCarryingAStrokeAndAPhotoFlipsBothTogether() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
@@ -1537,21 +1536,29 @@ final class LassoMoveLogicTests: XCTestCase {
                                                                            size: CGSize(width: 6, height: 6)),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 34),
                                                                      scale: 1, rotation: 0)))
+        let pixelsBefore = cgImage(vector)
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
         XCTAssertTrue(manager.beginVectorLassoMove(), "the lift should have caught both")
-        let samplesBefore = vector.elements.compactMap(\.stroke).map(\.samples)
+        guard let pivot = manager.vectorFloat?.pivot else { return XCTFail("no float") }
         let stepsBefore = manager.history.undoStack.count
 
-        XCTAssertNotNil(manager.mirrorUnavailableReason, "the bar has to have something to say")
         manager.mirrorFloating(horizontal: true)
 
-        XCTAssertEqual(manager.vectorFloat?.mirror, CGAffineTransform.identity, "and the press changes nothing")
-        XCTAssertEqual(manager.history.undoStack.count, stepsBefore,
-                       "a refused button spends no undo step either")
-        let samplesAfter = vector.elements.compactMap(\.stroke).map(\.samples)
-        for (before, after) in zip(samplesBefore, samplesAfter) {
-            for (a, b) in zip(before, after) { XCTAssertEqual(a.x, b.x, accuracy: 1e-9) }
-        }
+        guard let stroke = vector.elements.compactMap(\.stroke).first?.samples,
+              let photo = vector.elements.compactMap(\.image).first
+        else { return XCTFail("both kinds survive the mirror") }
+        XCTAssertEqual(stroke.first?.x ?? 0, 2 * pivot.x - 26, accuracy: 1e-6,
+                       "the stroke reflects across the piece's own vertical centre line")
+        XCTAssertTrue(photo.mirrored, "and the photo takes the same reflection as a stored bit")
+        XCTAssertEqual(photo.transform.position.x, 2 * pivot.x - 30, accuracy: 1e-6,
+                       "about the same centre line, so the two do not come apart")
+        XCTAssertEqual(manager.history.undoStack.count, stepsBefore + 1,
+                       "a tap of Mirror is one thing the artist did — §5.5")
+
+        manager.mirrorFloating(horizontal: true)
+        manager.commitVectorFloatIfNeeded()
+        assertPixelsIdentical(cgImage(vector), pixelsBefore,
+                              "a mirror and a mirror back must change no pixel, photo included")
     }
 
     /// **Mirror reflects the rendered glyphs, and mirroring back is the drawing that was lifted.**
@@ -1579,7 +1586,6 @@ final class LassoMoveLogicTests: XCTestCase {
 
         select(manager, layerIndex, loop(CGRect(x: 10, y: 10, width: 44, height: 44)))
         XCTAssertTrue(manager.beginVectorLassoMove())
-        XCTAssertNil(manager.mirrorUnavailableReason, "text mirrors, as of the 2026-08-27 ruling")
 
         manager.mirrorFloating(horizontal: true)
 
@@ -1830,22 +1836,21 @@ final class LassoMoveLogicTests: XCTestCase {
         assertPixelsIdentical(cgImage(vector), before, "and the drawing is the one that was lifted")
     }
 
-    /// **Freeform refuses, out loud, when the piece carries a placed image** — the Mirror pattern,
-    /// applied to the neighbouring impossibility. An image's placement *is* a `LayerTransform`, which
-    /// has one scale and no second axis any more than it has a flip, so teaching it costs a stored
-    /// field and a decode migration.
+    /// **Freeform is offered on every kind a vector cel can hold**, and the piece with all four in it
+    /// stretches as one.
     ///
-    /// Both halves matter and they are separate guards: the bar disables the picker from the reason,
-    /// and `vectorFloatIsFreeform` refuses the drag even if `transformMode` arrived already set to
-    /// `.freeform` from a raster Move three gestures ago — which it can, since the mode is shared
-    /// with the raster tier and outlives the piece that chose it.
+    /// This test used to be the *refusal*: an image's placement was a `LayerTransform`, one scale and
+    /// no second axis, so a piece carrying a photo greyed the picker out with a caption. Text lost the
+    /// same refusal on 2026-08-27 (§5.18) because a `TextFrame` already carries four free corners; the
+    /// photo lost it on §3 stage 3c, which gave it a stored `aspect` and `stretchAxis` of its own. With
+    /// no kind left to refuse, `freeformUnavailableReason` was deleted rather than left answering nil,
+    /// and `vectorFloatIsFreeform` is `transformMode == .freeform`.
     ///
-    /// **A text box used to be refused here too and is not any more** (owner, 2026-08-27; LASSO_MOVE.md
-    /// §5.18) — a `TextFrame` already stores four free corners, so the stretch needed no new field. Its
-    /// half of this test moved to
-    /// `testAStretchedTextBoxDistortsItsLetterformsAndDoesNotReflowTheWords`; the text case is now one
-    /// of the *positive* cases at the bottom of this one.
-    func testFreeformIsRefusedAndSaysWhyWhenThePieceCarriesAnImage() {
+    /// **What the stretch does to each kind is elsewhere** — the stroke's `sqrt(|det|)` width in this
+    /// file, the text box in `testAStretchedTextBoxDistortsItsLetterformsAndDoesNotReflowTheWords`, the
+    /// photo in `PlacedImageShapeLogicTests`. What this one keeps is that a *mixed* piece takes the
+    /// mode at all, which is the thing the two deleted properties used to decide.
+    func testFreeformIsOfferedOnEveryKindThePieceCanCarry() {
         let (imageManager, imageLayer, imageVector) = fixture()
         imageVector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         imageVector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
@@ -1857,11 +1862,13 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertTrue(imageManager.beginVectorLassoMove(), "the lift should have caught both")
 
         imageManager.setTransformMode(.freeform)
-        XCTAssertNotNil(imageManager.freeformUnavailableReason, "the bar has to have something to say")
-        XCTAssertFalse(imageManager.vectorFloatIsFreeform,
-                       "and the drag refuses even with the mode already lit")
+        XCTAssertTrue(imageManager.vectorFloatIsFreeform,
+                      "a piece carrying a photo stretches as of stage 3c")
+        imageManager.nudgeVectorFloat(to: imageManager.vectorFloat!.frame.transform, aspect: 3)
+        XCTAssertEqual(imageVector.elements.compactMap(\.image).first?.aspect ?? 0, 3, accuracy: 1e-6,
+                       "and the drag reaches the photo rather than being swallowed")
 
-        // The same predicate answers the other way for what a drawing is actually made of — and, since
+        // The same predicate answers the same way for what a drawing is actually made of — and, since
         // the ruling, for type as well.
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
@@ -1876,8 +1883,7 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.setTransformMode(.freeform)
-        XCTAssertNil(manager.freeformUnavailableReason, "strokes, fills and text all stretch")
-        XCTAssertTrue(manager.vectorFloatIsFreeform)
+        XCTAssertTrue(manager.vectorFloatIsFreeform, "strokes, fills and text all stretch")
     }
 
     /// **A stretched text box distorts its letterforms and does not re-flow.** The owner's ruling of
@@ -2656,34 +2662,31 @@ final class LassoMoveLogicTests: XCTestCase {
         }
     }
 
-    /// **Freeform is offered at every box angle, and the placed image is the only thing that refuses
-    /// it** — phase 2 (LASSO_MOVE.md §5.20). This test is the phase-1 one turned round: it asserted
-    /// the caption *"The box is turned. Straighten it to stretch this piece."* and that
-    /// `vectorFloatIsFreeform` went false with it, and both are now gone rather than relaxed, because
-    /// `ObjectTransformDrag.stretched` measures from the *drawn* box and records the axis it pulled
-    /// along.
+    /// **Freeform is offered at every box angle, on every kind** — phase 2 (LASSO_MOVE.md §5.20). This
+    /// test is the phase-1 one turned round: it asserted the caption *"The box is turned. Straighten it
+    /// to stretch this piece."* and that `vectorFloatIsFreeform` went false with it, and both are gone
+    /// rather than relaxed, because `ObjectTransformDrag.stretched` measures from the *drawn* box and
+    /// records the axis it pulled along.
     ///
-    /// **The image arm stays and is a different refusal** — about what the piece is, not about how
-    /// the box is sitting — so it is checked here at a non-zero box angle, where the two used to be
-    /// confusable.
+    /// **The image arm was the last refusal left and §3 stage 3c removed it too**, so the second half
+    /// of this test is now positive: a photo on a *turned* box stretches, and the axis the drag was
+    /// made about is what lands in the element — the two used to be confusable and now have to agree.
     ///
     /// Uniform, Rotate 45° and Mirror keep working at any box angle, as they did in phase 1: a
     /// uniform drag scales the ratio of two radii about the anchor and a rotate knob measures a swept
     /// angle about the same one, so neither reads a rotation at all.
-    func testFreeformIsOfferedAtEveryBoxAngleAndOnlyAnImageStillRefusesIt() {
+    func testFreeformIsOfferedAtEveryBoxAngleAndOnEveryKind() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.setTransformMode(.freeform)
-        XCTAssertNil(manager.freeformUnavailableReason, "a straight box stretches")
-        XCTAssertTrue(manager.vectorFloatIsFreeform)
+        XCTAssertTrue(manager.vectorFloatIsFreeform, "a straight box stretches")
 
         for angle in [CGFloat(0.6), -1.4, CGFloat.pi / 2, 0] {
             manager.turnVectorFloatBox(to: angle)
-            XCTAssertNil(manager.freeformUnavailableReason,
-                         "a turned box stretches too, as of phase 2 — \(angle)")
-            XCTAssertTrue(manager.vectorFloatIsFreeform, "\(angle)")
+            XCTAssertTrue(manager.vectorFloatIsFreeform,
+                          "a turned box stretches too, as of phase 2 — \(angle)")
         }
 
         // Uniform, Rotate 45° and Mirror are unaffected, on a turned box as before.
@@ -2692,11 +2695,13 @@ final class LassoMoveLogicTests: XCTestCase {
         manager.nudgeVectorFloat(to: scaledBy(manager, 2))
         XCTAssertEqual(manager.vectorFloat?.frame.transform.scale ?? 0, box.scale * 2, accuracy: 1e-9,
                        "a uniform scale works at any box angle")
-        XCTAssertNil(manager.mirrorUnavailableReason, "and so does Mirror")
+        manager.mirrorFloating(horizontal: true)
+        XCTAssertNotNil(manager.vectorFloat, "and so does Mirror")
         manager.rotateFloating(eighths: 1)
         XCTAssertNotNil(manager.vectorFloat)
 
-        // The one refusal that is left, asserted on a turned box so the two cannot be confused.
+        // The refusal that used to be left, now asserted as behaviour and still on a turned box, so a
+        // stretch made about the visible edge cannot be confused with one made about the ink's own.
         let (imageManager, imageLayer, imageVector) = fixture()
         imageVector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         imageVector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
@@ -2707,12 +2712,18 @@ final class LassoMoveLogicTests: XCTestCase {
         select(imageManager, imageLayer, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
         XCTAssertTrue(imageManager.beginVectorLassoMove())
         imageManager.turnVectorFloatBox(to: 0.6)
-        guard let reason = imageManager.freeformUnavailableReason else {
-            return XCTFail("a placed image still has something to say")
+        imageManager.setTransformMode(.freeform)
+        XCTAssertTrue(imageManager.vectorFloatIsFreeform, "a photo stretches at a turned box too")
+
+        imageManager.nudgeVectorFloat(to: imageManager.vectorFloat!.frame.transform,
+                                      aspect: 2.5, stretchAxis: 0.6)
+        guard let photo = imageVector.elements.compactMap(\.image).first else {
+            return XCTFail("the photo survives the stretch")
         }
-        XCTAssertTrue(reason.lowercased().contains("image"),
-                      "and it names the image, not the box: \(reason)")
-        XCTAssertFalse(imageManager.vectorFloatIsFreeform)
+        XCTAssertEqual(photo.aspect, 2.5, accuracy: 1e-6,
+                       "the box's shape landed in the element's own stored aspect")
+        XCTAssertEqual(photo.stretchAxis, 0.6, accuracy: 1e-6,
+                       "and so did the axis it was pulled along — §5.20, in the document this time")
     }
 
     /// **Reset does not touch the box angle, and a turned box does not by itself offer Reset.**
@@ -2801,8 +2812,8 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// Phase 1 measured the same finger movement from `start.rotation` — the *ink's* angle, which
     /// here is zero — so it would have read it as a pull along the box's height and stretched the
-    /// drawing in the direction the artist did not point. That is what `freeformUnavailableReason`
-    /// refused rather than doing.
+    /// drawing in the direction the artist did not point. That is what phase 1's caption refused
+    /// rather than doing.
     func testAStretchOnAHandTurnedBoxMovesTheInkAlongTheBoxsVisibleAxes() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 22, y: 22), to: CGPoint(x: 42, y: 38), size: 4))
@@ -3861,8 +3872,8 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// **A pixel layer refuses, and says why.** Change Colour rewrites a colour field on a stored
     /// element; a raster cel has pixels and no elements (owner, 2026-08-28: pixel layers are out of
-    /// scope). `mirrorUnavailableReason` is the precedent — the artist gets a sentence, not a button
-    /// that looks live and does nothing.
+    /// scope). `selectionMembershipUnavailableReason` beside it is the precedent — the artist gets a
+    /// sentence, not a button that looks live and does nothing.
     func testChangeColourRefusesAPixelLayerWithAReasonRatherThanGoingQuietlyGrey() {
         let (manager, _, _) = fixture()
         manager.currentLayerIndex = 0                       // the raster layer the fixture starts with
@@ -4768,8 +4779,8 @@ final class LassoMoveLogicTests: XCTestCase {
     /// Select panel before anything has been lifted. This asserts both, on one manager, so the two
     /// readings cannot drift — a raster float can only ever have come off a raster layer.
     ///
-    /// It needs its own property rather than a fourth arm on `mirrorUnavailableReason`, which returns
-    /// **nil** for a raster piece: the two questions have opposite answers on that kind.
+    /// It is asked of the layer rather than of whatever is floating, which is why it can answer at all
+    /// with nothing lifted.
     func testAPixelLayerShowsCutFixedAndSaysWhy() {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
@@ -4791,8 +4802,6 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(manager.selectionMembershipUnavailableReason,
                        "A pixel layer can only cut at the selection.",
                        "and the float agrees with the layer it came off")
-        XCTAssertNil(manager.mirrorUnavailableReason,
-                     "Mirror answers nil for the same piece — one property could not have said both")
 
         manager.setSelectionMembership(.enclosed)
         XCTAssertEqual(manager.selectionMembership, .touching, "and nothing writes through it")

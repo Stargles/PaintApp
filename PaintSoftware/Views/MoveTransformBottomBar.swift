@@ -12,12 +12,14 @@ import SwiftUI
 /// clear `activePanel` — so when the piece bakes, the Select menu comes straight back if Select is
 /// still the artist's open panel, and they have not lost their place.
 ///
-/// **No control here is allowed to be pressed and do nothing.** Three can be unavailable, and each
-/// says so rather than going quietly grey: Mirror, when the lassoed piece carries a **placed image**
-/// (`CanvasManager.mirrorUnavailableReason` — `LayerTransform` has no flip); the **mode picker**, on a
-/// piece carrying one for the neighbouring reason that a `LayerTransform` has no second axis scale
-/// (`freeformUnavailableReason`); and Reset, when the piece is already sitting exactly where it was
-/// picked up.
+/// **No control here is allowed to be pressed and do nothing.** One can be unavailable, and it says
+/// so rather than going quietly grey: Reset, when the piece is already sitting exactly where it was
+/// picked up (`CanvasManager.canResetFloating`).
+///
+/// **Mirror and the mode picker were the other two until LASSO_MOVE.md §3 stage 3c.** Both refused a
+/// lassoed piece carrying a **placed image**, whose whole placement was a `LayerTransform` — no flip,
+/// and no second axis scale. The image stores its own shape now, so every kind mirrors and stretches,
+/// and the two captions are gone rather than left as sentences nothing can raise.
 ///
 /// **"What travels" is not here, and since 2026-09-02 that is the point rather than an omission**
 /// (TODO item (23)). Membership — Enclosed / Cut / Touching — is a property of the *selection*, not
@@ -27,52 +29,28 @@ import SwiftUI
 /// stated where it lands (`CanvasManager.setSelectionMembership`): the rule is chosen before the lift
 /// rather than flipped during it.
 ///
-/// **Text used to be refused by both and no longer is** (owner, 2026-08-27: *"I rule text should be
-/// able to be transformed"*), which leaves the placed image as the only kind either refusal names —
-/// so the two reasons coincide again, on one kind rather than on two.
+/// **Text stopped being refused on 2026-08-27** (owner: *"I rule text should be able to be
+/// transformed"*) and the placed image, the last kind either refusal named, on stage 3c. The picker
+/// is live for every float there is.
 struct MoveTransformBottomBar: View {
     @ObservedObject var canvasManager: CanvasManager
 
-    private var mirrorReason: String? { canvasManager.mirrorUnavailableReason }
-    private var freeformReason: String? { canvasManager.freeformUnavailableReason }
-
-    /// **The picker is live for a lassoed vector piece too, as of stage 3.** It used to be raster-only
-    /// with the caption *"A lassoed piece scales uniformly about its centre"*, which was true:
-    /// `ObjectTransformDrag`'s corner arm wrote one `scale`, so offering a working-looking Freeform
-    /// would have been the "acts like Uniform for now" caption with no caption. It now writes an
-    /// `ObjectTransformFrame.aspect` alongside it and `VectorCanvas.mapping(_:throughStretch:)` carries
-    /// it into the geometry, so the only float that still cannot stretch is one carrying a placed
-    /// image — and that one says so, in the caption, rather than going quietly grey.
-    private var modeIsAdjustable: Bool { freeformReason == nil }
-
-    /// One line under the buttons, or none. Ordered by which the artist is most likely to have just
-    /// pressed against — and with the two refusals merged where they coincide, so a piece with a
-    /// photo in it does not disable the picker with a caption that only mentions Mirror.
-    ///
-    /// The merged line names the **image alone** as of 2026-08-27. It is not bookkeeping: the two
-    /// reasons no longer coincide except on an image, since a text box now mirrors and stretches, and
-    /// a caption that still said "or a text box" would be telling the artist their type is stuck at
-    /// the moment they can see it move.
+    /// One line under the buttons, or none. The only thing left for it to say is that a mode is not
+    /// built yet — `.distort`, which is stage 5.
     private var caption: String? {
-        if mirrorReason != nil, freeformReason != nil {
-            return "A placed image can't be mirrored or stretched."
-        }
-        if let mirrorReason { return mirrorReason }
-        if let freeformReason { return freeformReason }
-        if !canvasManager.transformMode.isImplemented { return "Coming soon — acts like Uniform for now" }
-        return nil
+        canvasManager.transformMode.isImplemented ? nil : "Coming soon — acts like Uniform for now"
     }
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 14) {
-                iconButton("arrow.left.and.right", enabled: mirrorReason == nil) {
+                iconButton("arrow.left.and.right") {
                     canvasManager.mirrorFloating(horizontal: true)
                 }
                 .accessibilityLabel("Mirror Horizontal")
                 .accessibilityIdentifier("moveBar.mirrorHorizontalButton")
 
-                iconButton("arrow.up.and.down", enabled: mirrorReason == nil) {
+                iconButton("arrow.up.and.down") {
                     canvasManager.mirrorFloating(horizontal: false)
                 }
                 .accessibilityLabel("Mirror Vertical")
@@ -121,8 +99,6 @@ struct MoveTransformBottomBar: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 360)
-            .disabled(!modeIsAdjustable)
-            .opacity(modeIsAdjustable ? 1 : 0.45)
 
             precisionToggle
 
@@ -151,9 +127,8 @@ struct MoveTransformBottomBar: View {
     /// acts like Uniform for now": there is a price, it is paid in file size, and there is a way to
     /// stop paying it. A toggle whose cost is invisible is one an artist leaves on for a year.
     ///
-    /// Never disabled. Unlike Mirror and the mode picker there is no piece it cannot apply to — a
-    /// fill, a text box and a placed image simply have no samples to keep, and the strokes beside them
-    /// in the same lasso still do.
+    /// Never disabled. There is no piece it cannot apply to — a fill, a text box and a placed image
+    /// simply have no samples to keep, and the strokes beside them in the same lasso still do.
     private var precisionToggle: some View {
         VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: $canvasManager.preserveMovePrecision) {
@@ -173,8 +148,8 @@ struct MoveTransformBottomBar: View {
     }
 
     /// `enabled: false` uses `.disabled` rather than dropping the button, so the row does not reflow
-    /// under the artist's finger the moment a piece with text in it is lifted — and so an XCUITest can
-    /// assert the button is *there and off* rather than merely absent.
+    /// under the artist's finger — and so an XCUITest can assert the button is *there and off* rather
+    /// than merely absent. Reset is the only caller that passes it today.
     private func iconButton(_ system: String, badge: String? = nil, enabled: Bool = true,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {

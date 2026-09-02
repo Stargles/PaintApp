@@ -114,19 +114,20 @@ struct MoveBoxInk {
     ///  * A **fill** is a `CGPath` and needs no padding; its points — on-curve and control alike —
     ///    are what `boundingBoxOfPath` measures, so an unmapped measurement is the same rectangle
     ///    that function returns and a mapped one is tight instead of a mapped rectangle's corners.
-    ///  * A **placed image** is a *disc*: `hypot(w, h)/2` about its centre, the circumscribed circle
-    ///    rather than its four corners. That is what the lift has always measured, and keeping it is
-    ///    what makes an image's contribution invariant under the box angle — which is right, because
-    ///    the box cannot tell the artist anything more useful about a photo it refuses to stretch or
-    ///    mirror anyway (`freeformUnavailableReason`, `mirrorUnavailableReason`).
-    ///    **A disc is padded exactly for every pose a float carrying an image can reach**, and that
-    ///    is worth pinning rather than leaving to luck: `padScale` is an axis-aligned pair, which is
-    ///    exact for a disc only while the frame is a rotation — and it always is here, because
-    ///    Freeform is refused on a float holding an image, so `aspect` is 1 and the frame reduces to
-    ///    `R(−boxAngle)` (composed with the mirror, which is orthogonal too). Stage 3c, which teaches
-    ///    an image to hold a stretched shape, is what would make this inexact: a disc under a
-    ///    non-uniform map is an ellipse whose box wants the *row norms* of the frame, not one scalar
-    ///    per axis.
+    ///  * A **placed image** is a *disc*: `hypot(w, h)/2` about its centre scaled by the **larger** of
+    ///    its two axis scales, the circumscribed circle rather than its four corners. That is what the
+    ///    lift has always measured, and keeping it is what makes an image's contribution invariant
+    ///    under the box angle *and* under its own `stretchAxis` — the operator norm of `R·S·R` is
+    ///    `max(sx, sy)`, so no corner of a stretched photo reaches past this whichever axis it was
+    ///    stretched about. The same expression `VectorCanvas.bounds(of:)` uses, and identical to the
+    ///    pre-3c one at `aspect == 1`.
+    ///    **The disc is now padded conservatively rather than exactly, and that is stage 3c arriving
+    ///    where this paragraph said it would.** `padScale` is an axis-aligned pair, exact for a disc
+    ///    only while the frame is a rotation; a float carrying an image could not be stretched before
+    ///    3c, so the frame always was one. It can be now, and a disc under a non-uniform map is an
+    ///    ellipse whose box wants the frame's *row norms* rather than one scalar per axis. The error
+    ///    is in the loose direction — a box slightly larger than the photo — and it is the same
+    ///    approximation a stroke's own reach has always taken under a stretched box.
     ///  * A **text box** is its four corners, which under a turned box is *tighter* than the
     ///    `boundingBox` the lift used to take of them and identical to it at rest, since that
     ///    property is their axis-aligned hull.
@@ -163,8 +164,10 @@ struct MoveBoxInk {
             return Cluster(hull: hull(of: points), reach: 0)
         case .image(let image):
             let size = image.image.size
+            let axes = ObjectTransformFrame.axisScales(scale: image.transform.scale,
+                                                       aspect: image.aspect)
             return Cluster(hull: [image.transform.position],
-                           reach: hypot(size.width, size.height) / 2 * abs(image.transform.scale))
+                           reach: hypot(size.width, size.height) / 2 * max(abs(axes.x), abs(axes.y)))
         case .text(let text):
             guard !text.frame.corners.isEmpty else { return nil }
             return Cluster(hull: text.frame.corners, reach: 0)
@@ -284,9 +287,9 @@ struct VectorFloat {
     /// `mapping(_:throughSimilarity:)` accepts the product (a reflection has equal axis norms and
     /// perpendicular axes, so the shape assert holds and `hypot(t.a, t.b)` is still the true scale),
     /// and it is exact for the two element kinds a drawing produces, and for text — whose corners
-    /// reverse their winding under it, which is what a mirror *is*. It is **not** expressible for a
-    /// placed image — see `CanvasManager.mirrorUnavailableReason`, which is why the buttons refuse
-    /// rather than this quietly doing the wrong thing.
+    /// reverse their winding under it, which is what a mirror *is*. **A placed image was the one kind
+    /// it could not carry until stage 3c**; it now stores a `mirrored` bit of its own, and the
+    /// `.image` arm peels the sign out of the composed pose rather than reading it as an angle.
     var mirror: CGAffineTransform = .identity
 
     /// The whole display list before the split, and the selection before the lift — what a cancel or
@@ -557,8 +560,8 @@ extension CanvasManager {
     ///     they previously rotated — `LASSO_MOVE.md` stage 3b, TODO item (20).
     ///   * *Undo granularity changes* from one step per Move session to one step per gesture — which
     ///     is `LASSO_MOVE.md` §5.5's existing ruling, and is wanted.
-    ///   * *The Move bar now appears where there never was one*, and Mirror/Freeform grey out on a
-    ///     cel holding text or a placed image (`mirrorUnavailableReason`, `freeformUnavailableReason`).
+    ///   * *The Move bar now appears where there never was one.* Every button on it is live for
+    ///     every kind as of stage 3c; nothing greys out but Reset, and only until the first nudge.
     @discardableResult
     func beginVectorWholeCelMove() -> Bool {
         commitAllInteractiveState()

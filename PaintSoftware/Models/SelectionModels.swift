@@ -450,8 +450,14 @@ extension CanvasManager {
     // of stage 2. The bar used to be shown only while `floatingPiece != nil` — the *raster* Move —
     // so a lassoed vector piece got a transform box, a set of grips, and no menu at all: the
     // artist could drag it and nothing else. Each operation now has a raster arm and a vector arm,
-    // and the two properties that say when a button is *off* (`mirrorUnavailableReason`,
-    // `canResetFloating`) exist so that no button on the bar can be pressed and do nothing.
+    // and `canResetFloating` — the one property left that says when a button is *off* — exists so
+    // that no button on the bar can be pressed and do nothing.
+    //
+    // **Mirror and the mode picker used to be the other two, and stage 3c retired both.** They
+    // refused a piece carrying a placed image, whose whole placement was a `LayerTransform` with
+    // nowhere to put a flip or a second axis scale; the image now stores its own shape
+    // (`VectorImageElement.aspect`/`stretchAxis`/`mirrored`), so there is no kind either control can
+    // refuse and the refusals are gone rather than left answering nil.
 
     /// Whether anything is floating — a raster Move/Duplicate piece, or a lassoed vector region.
     /// The Move bar is up exactly when this is true, and the Select panel is suppressed for exactly
@@ -467,70 +473,15 @@ extension CanvasManager {
         return raster || vector
     }
 
-    /// Why Mirror is unavailable on whatever is floating, or nil when it is available. Shown in the
-    /// bar, in the artist's terms, rather than the buttons going quietly grey.
-    ///
-    /// **Only a vector float can refuse, and only because of what it is carrying.** A raster piece is
-    /// pixels and flips by negating a scale. A vector float's pose lives in `LayerTransform`, which
-    /// has no flip, so Mirror is carried instead as a reflection folded into the map every nudge
-    /// already applies (`VectorFloat.mirror`) — exact for strokes, fills and, as of the owner's ruling
-    /// of 2026-08-27, text, whose four free corners reverse their winding under a reflection and whose
-    /// glyphs therefore come out reflected. **A placed image is the one kind left**: its whole
-    /// placement is a `LayerTransform`, so carrying a reflection anyway would silently turn a mirrored
-    /// photo into a half-turned one. Refusing it is `VectorCanvas.canBeMirrored(_:)`.
-    var mirrorUnavailableReason: String? {
-        guard let float = vectorFloat else { return nil }
-        guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeMirrored) else {
-            return "Mirror can't flip a placed image."
-        }
-        return nil
-    }
-
-    /// Why **Freeform** is unavailable on whatever is floating, or nil when it is available. The
-    /// mode picker on the Move bar is disabled for exactly as long, with this in the caption.
-    ///
-    /// **The same shape as `mirrorUnavailableReason`, and now for the same *single* reason** — a placed
-    /// image's placement is a `LayerTransform`, which holds two axis scales no better than it holds a
-    /// flip. A text box does hold both, since it is four free corners over a layout size, and the owner
-    /// ruled on 2026-08-27 that it should: a stretch distorts the letterforms and does not re-flow the
-    /// words.
-    ///
-    /// It stays a *separate* property rather than collapsing into the one above, and the reason is
-    /// now visible rather than anticipated: the two questions came apart on text, and they will come
-    /// apart the other way on an image — teaching an image to hold a stretched shape (the owner's own
-    /// words) unblocks Freeform on it and leaves Mirror exactly where it is.
-    ///
-    /// A raster piece answers nil: `FloatingTransform` has held `scaleX`/`scaleY` since Move shipped,
-    /// which is why the picker was live for it and greyed for a vector float until this stage.
-    ///
-    /// **A hand-turned box was a second reason for one commit, and phase 2 removed it.** Stage 3b
-    /// phase 1 refused a stretch while `frame.boxAngle != 0` — *"The box is turned. Straighten it to
-    /// stretch this piece."* — because `ObjectTransformDrag.stretched` measured its axes from the
-    /// *ink's* rotation, which on a hand-turned box is not the box the artist can see. Phase 2 makes
-    /// the drag measure from the drawn box and record the axis it pulled along in
-    /// `ObjectTransformFrame.stretchAxis` (LASSO_MOVE.md §5.20), so there is nothing left to refuse
-    /// and the arm is gone rather than relaxed. **The image arm is the one that stays**, and it is a
-    /// different refusal: it is about what the piece *is*, not about how the box is sitting.
-    var freeformUnavailableReason: String? {
-        guard let float = vectorFloat else { return nil }
-        guard float.liftedInside.values.allSatisfy(VectorCanvas.canBeStretched) else {
-            return "Freeform can't stretch a placed image."
-        }
-        return nil
-    }
-
     /// Why the membership picker cannot be *changed* on the active layer, or nil when it can. Shown
-    /// under the picker in `SelectPanel`, in the artist's terms — the shape `mirrorUnavailableReason`
-    /// and `recolorUnavailableReason` already use, and for their reason: a control that is off says
-    /// why.
+    /// under the picker in `SelectPanel`, in the artist's terms — the shape `recolorUnavailableReason`
+    /// already uses, and for its reason: a control that is off says why.
     ///
     /// **A pixel layer is fixed on Cut, and it is a real limit rather than a policy.** Every one of
     /// the three consumers cuts at the selection there and can do nothing else: `PixelOps.maskedPiece`
     /// *is* Move's cut, `PixelOps.clear` is Clear's, and a recolour refuses on a pixel layer outright
     /// (`recolorUnavailableReason`). A raster cel has pixels and no elements, so "the strokes the loop
-    /// touches" has nothing to name. This is a separate property from `mirrorUnavailableReason`, which
-    /// returns **nil** for a raster piece — the two questions have opposite answers on that kind, so
-    /// folding them together would have made one of them wrong.
+    /// touches" has nothing to name.
     ///
     /// **It reads the layer, not the float, and that is TODO item (23) rather than a refactor.**
     /// While it lived on the Move bar the only pixel case it could meet was a floating raster piece;
@@ -563,14 +514,15 @@ extension CanvasManager {
 
     /// Whether a corner drag on the **lassoed vector piece** stretches the two axes independently.
     ///
-    /// **The one place the answer is decided**, and it is deliberately not just `transformMode ==
-    /// .freeform`: `transformMode` is shared with the raster tier and survives the piece that was
-    /// floating when it was chosen, so a float carrying a placed image could inherit `.freeform` from
-    /// a raster Move three gestures ago. The bar disables the picker and this refuses the drag; both
-    /// read the same reason, so neither can be the only guard.
-    var vectorFloatIsFreeform: Bool {
-        transformMode == .freeform && freeformUnavailableReason == nil
-    }
+    /// **The one place the answer is decided**, and it stays a property rather than collapsing into
+    /// its call site: `transformMode` is shared with the raster tier and survives the piece that was
+    /// floating when it was chosen, so this is the name a reader of `CanvasView` follows to find out
+    /// what a corner drag on *this* kind of float does.
+    ///
+    /// It carried a second term until stage 3c — `freeformUnavailableReason == nil`, which refused a
+    /// float carrying a placed image. An image holds its own stretched shape now, so no float can
+    /// refuse and the term went with the property.
+    var vectorFloatIsFreeform: Bool { transformMode == .freeform }
 
     /// Mirror Horizontal / Mirror Vertical, about the piece's own centre and along its own axes — so
     /// a piece the artist has already turned mirrors across the axis they can see, not the screen's.
@@ -579,7 +531,7 @@ extension CanvasManager {
             if horizontal { floatingPiece!.transform.flipH.toggle() } else { floatingPiece!.transform.flipV.toggle() }
             return
         }
-        guard let float = vectorFloat, mirrorUnavailableReason == nil else { return }
+        guard let float = vectorFloat else { return }
         let reflection = CGAffineTransform(translationX: float.pivot.x, y: float.pivot.y)
             .scaledBy(x: horizontal ? -1 : 1, y: horizontal ? 1 : -1)
             .translatedBy(x: -float.pivot.x, y: -float.pivot.y)
@@ -894,7 +846,7 @@ extension CanvasManager {
 
     /// Why **Change Colour** is unavailable on the active cel, or nil when it is available. Shown in
     /// the Select panel, in the artist's terms, rather than the button going quietly grey — the same
-    /// rule and the same voice as `mirrorUnavailableReason` on the Move bar.
+    /// rule and the same voice as `selectionMembershipUnavailableReason` beside it.
     ///
     /// Says nothing about whether a selection exists: the whole action row is already disabled
     /// without one (`SelectPanel.hasSelection`), so folding that in would put two captions on screen

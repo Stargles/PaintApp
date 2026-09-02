@@ -664,8 +664,8 @@ struct ObjectTransformDrag: Equatable {
     ///
     /// **The axes are the box's *drawn* ones, `start.rotation + startBoxAngle`** — the edges the
     /// artist can see, which on a hand-turned box are not the ink's. LASSO_MOVE.md §5.20, phase 2:
-    /// where phase 1 measured from `start.rotation` and `freeformUnavailableReason` refused the whole
-    /// gesture while the box was turned, this pulls along the visible edge and records which edge it
+    /// where phase 1 measured from `start.rotation` and refused the whole gesture while the box was
+    /// turned, this pulls along the visible edge and records which edge it
     /// was in `Pose.stretchAxis`. At `startBoxAngle == 0` it is `-start.rotation` to the bit, so
     /// every un-turned box stretches exactly as it did.
     ///

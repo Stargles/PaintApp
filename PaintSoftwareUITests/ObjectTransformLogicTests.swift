@@ -876,8 +876,8 @@ final class ObjectTransformLogicTests: XCTestCase {
     ///
     /// Phase 1 measured this drag from `start.rotation`, the *ink's* angle, which here is 0 — so it
     /// would have read the same finger movement as a pull along the box's height and stretched the
-    /// drawing in the direction the artist did not point. That is what `freeformUnavailableReason`
-    /// refused rather than doing, and what the recorded axis replaces.
+    /// drawing in the direction the artist did not point. That is what phase 1's caption refused
+    /// rather than doing, and what the recorded axis replaces.
     func testAStretchOnATurnedBoxPullsAlongTheBoxsVisibleAxes() {
         let frame = turned(.pi / 2)
         let centre = frame.centre

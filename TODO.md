@@ -115,8 +115,6 @@ LAYER_TRANSFORM.md.
       Stages 1-3 shipped together, Freeform is 3a, flips are in stage 2, the box-only rotate knob is 3b
       in all three phases, and the three membership rules moved to Select as item (23). What remains:
 
-      - **Placed images holding a stretched shape (3c)** — the stored field a non-uniform scale on an
-        image needs. It gates part of Distort.
       - **Distort (stage 5)** over the shared quad. **This is the same feature as KEYFRAMES §8 stage
         5b**, which schedules it as raster tier first, then ink through §4.2's point map, then placed
         images *behind* Move 3c. Build it once, from whichever item reaches it first.
@@ -372,8 +370,9 @@ once; and (29) was blocked on derived content being invisible to the render walk
       video is exactly content that must. (21) introduces that; this is its first consumer.
       **A tripwire**: `"video"` is currently the **sentinel** for "a layer kind nothing implements" in the
       forward-compatibility tests. Implementing it takes that sentinel away and those tests need a new one.
-      **The one live coupling**: a video element inherits whatever Move stage 3c decides about
-      `VectorImageElement.transform`.
+      **The one live coupling**: a video element inherits what Move stage 3c decided about
+      `VectorImageElement` — a `LayerTransform` plus a stored `aspect`/`stretchAxis`/`mirrored`, read
+      back through `VectorImageElement.placement`.
       **Ask first**: what "a specific length" means when the cel's `frameCount` and the video's duration
       disagree — resize, retime, or refuse; whether cropping trims or retimes; one video per *layer* or per
       *cel*; and at what rate a 30 fps source plays in a 24 fps document.
@@ -481,18 +480,18 @@ once; and (29) was blocked on derived content being invisible to the render walk
   the bake step's undo *re-creating the float* at its last transform, which doubles what a raster Move
   retains and needs `finalizePendingGesturesForHistoryAction` to grow a raster-float arm it has never had.
   A second feature. See LASSO_MOVE.md §3 stage 4.
-- **Move stages 3c and 5** — placed images holding a stretched shape; Distort on both tiers consuming
-  the shared `Homography` solver, with the ink-deformation toggle defaulting off. LASSO_MOVE.md §0 lists
-  what each deliberately left out. **Stage 3b left this list on 2026-08-28, built and merged in three
-  phases** — the knob `330efd4`, the stretch axis `c78de6e`, the re-fitting box `5b5577e`. **3c is now
-  the only half of the
-  Freeform/Mirror gate still closed** — text was opened 2026-08-27, images were not, because
-  `VectorImageElement.transform` is a `LayerTransform` with nowhere to put a flip or a second-axis scale
-  and so needs a stored field plus a decode migration, where text's four corners cost neither.
-  **Stage 3b phase 3 left 3c a tripwire**: the re-fitting box measures a placed image exactly, but only
-  because Freeform is refused on a float holding one, so its frame is always a rotation and the
-  axis-aligned pad is exact. Teaching images to stretch breaks that, and the code note beside it says
-  what the fit would then need — the frame's row norms rather than a scalar pair.
+- **Move stage 5** — Distort on both tiers consuming the shared `Homography` solver, with the
+  ink-deformation toggle defaulting off. LASSO_MOVE.md §0 lists what it deliberately left out.
+  **Stage 3b left this list on 2026-08-28** — the knob `330efd4`, the stretch axis `c78de6e`, the
+  re-fitting box `5b5577e` — **and 3c left it on 2026-09-02**, which closed the Freeform/Mirror gate on
+  its last kind: a placed image now stores `aspect`, `stretchAxis` and `mirrored` beside its
+  `LayerTransform`, and no migration was owed. `canBeStretched`/`canBeMirrored` and the two bar captions
+  they fed are **deleted**, because no kind could answer no any more.
+  **3b phase 3's tripwire fired as predicted and is accepted**: the re-fitting box pads a placed image's
+  disc with an axis-aligned pair, which was exact only while a float holding one could not be stretched.
+  It can be now, so the pad is conservative rather than exact — loose by a fraction of the photo, and the
+  same approximation a stroke's own reach already takes under a stretched box. The exact fix is still the
+  frame's row norms rather than a scalar pair.
 - **A Freeform-stretched text box inherits the distort-mode minimum-size exemption**, so it can be dragged
   smaller than its own text. Rode along with the 2026-08-27 text-transform change, is recorded in
   `sizedInBoxSpace`'s own doc with the two-line conditional that would undo it, and is **unruled**.

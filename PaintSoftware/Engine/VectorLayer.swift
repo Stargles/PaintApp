@@ -260,12 +260,67 @@ struct VectorFillElement: Identifiable, Codable {
 
 /// An imported image placed on a vector layer, movable/scalable/rotatable via its own transform.
 /// `image` is runtime-only; persistence stores a file name + the transform (see `ProjectStore`).
+///
+/// **Its placement is a general affine as of LASSO_MOVE.md §3 stage 3c**, and the three fields that
+/// make it one sit *beside* `transform` rather than inside it. `LayerTransform` is position, one
+/// scale and one rotation — a similarity — and that is exactly what
+/// `VectorCanvas.mapping(_:throughSimilarity:)` asserts it is handed and what the Move box's own pose
+/// is; `ObjectTransformFrame` already holds `aspect` and `stretchAxis` beside a `LayerTransform` for
+/// that reason, and this is the same split applied to the document rather than to the box. Widening
+/// `LayerTransform` itself would give the box two homes for one number.
 struct VectorImageElement: Identifiable {
     var id: UUID = UUID()
     var image: UIImage
     var transform: LayerTransform
+
+    /// **How much wider than tall the placement is** — `ObjectTransformFrame.aspect`'s number, stored.
+    /// 1 is a photo nobody has stretched, and the *area* factor stays in `transform.scale`, which is
+    /// the geometric mean of the two axis scales. `ObjectTransformFrame.axisScales(scale:aspect:)` is
+    /// the one place the pair is turned back into two axis scales, here as on the box.
+    var aspect: CGFloat = 1
+
+    /// **The axis a stretch was made about** — LASSO_MOVE.md §5.20's second angle, stored. 0 for a
+    /// placement nobody has stretched off-axis, where the map reduces to `R(rotation)·S` exactly.
+    ///
+    /// With `transform`'s four numbers and `aspect` this is six, which §5.20's own arithmetic says
+    /// *is* a general affine — so nothing is left for a later stage to invent. (Distort is a
+    /// homography and needs eight; it is stage 5 and is not reachable from here.)
+    var stretchAxis: CGFloat = 0
+
+    /// **Whether the picture is reflected.** The seventh value, and it is a `Bool` rather than a
+    /// seventh number because the six above are the SVD `R·S·R` with both scales positive, which
+    /// covers exactly the affines whose determinant is positive. The other component of the group is
+    /// that set composed with one reflection, so one bit is the whole of it.
+    ///
+    /// It flips the image in **its own** space, before everything else (`placement` below), which is
+    /// what makes Mirror-then-Mirror-back the original: `CanvasManager.applyToVectorFloat` maps the
+    /// *lift's* element every nudge, so two presses hand this arm a delta with the reflection folded
+    /// in twice, i.e. no reflection at all.
+    ///
+    /// Which axis it flips is free: `diag(-1, 1)` and `diag(1, -1)` differ by a half turn, and the
+    /// half turn lands in `transform.rotation` when the pose is decomposed.
+    var mirrored: Bool = false
+
     /// Set once the element has been persisted, so save can reuse the same file.
     var fileName: String?
+
+    /// **The one place the four fields become a matrix**, so the render, the membership quad and the
+    /// lasso's own map cannot come to disagree about where the picture is. It maps the image's
+    /// centred rect — `CGRect(x: -size.width / 2, y: -size.height / 2, ...)` — into layer-local space.
+    ///
+    /// Built from `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` with a zero pivot, which is
+    /// the same builder the Move box's pose goes through, and which spells `aspect == 1` and
+    /// `stretchAxis == 0` as their shorter expressions rather than computing them — so an unstretched
+    /// placement produces bit-for-bit the `translate · rotate · scale` this type had before 3c.
+    var placement: CGAffineTransform {
+        let base = VectorCanvas.affine(from: transform, aspect: aspect, stretchAxis: stretchAxis,
+                                       pivot: .zero)
+        return mirrored ? Self.sourceFlip.concatenating(base) : base
+    }
+
+    /// The reflection `mirrored` means, in the image's own space. See that field for why the axis is
+    /// arbitrary.
+    static let sourceFlip = CGAffineTransform(scaleX: -1, y: 1)
 }
 
 /// One entry in a `VectorCanvas`'s display list, drawn back to front. Not three parallel arrays,
@@ -1541,9 +1596,16 @@ final class VectorCanvas {
     /// A placed image's local-space bounding box, taken as the circumscribing circle of its scaled
     /// size so the answer is rotation-independent — conservative, and rotation is stored as a free
     /// angle rather than a quadrant.
+    ///
+    /// **The radius takes the larger of the two axis scales**, which keeps it independent of
+    /// `stretchAxis` as well: the operator norm of `R·S·R` is `max(sx, sy)`, so no corner of the
+    /// stretched rectangle can reach further than this whatever axis the stretch was made about. At
+    /// `aspect == 1` the two scales are one number and this is the expression it was before stage 3c.
     private static func bounds(of element: VectorImageElement) -> CGRect {
         let size = element.image.size
-        let radius = hypot(size.width, size.height) / 2 * abs(element.transform.scale)
+        let axes = ObjectTransformFrame.axisScales(scale: element.transform.scale,
+                                                   aspect: element.aspect)
+        let radius = hypot(size.width, size.height) / 2 * max(abs(axes.x), abs(axes.y))
         return CGRect(x: element.transform.position.x - radius, y: element.transform.position.y - radius,
                       width: radius * 2, height: radius * 2)
     }
@@ -1617,12 +1679,13 @@ final class VectorCanvas {
     /// for a membership rule the artist is going to check against the picture. And **not the four
     /// corners tested one at a time** — four corners inside a crescent-shaped loop does not mean the
     /// rectangle is inside it.
+    /// **A mirrored placement reverses this rectangle's winding, and that changes no answer.** The two
+    /// `CGPath` booleans the membership rules run it through normalise the fill rule (LASSO_MOVE.md
+    /// §1's measured table), and under `.winding` a rectangle traversed either way has a winding
+    /// number of ±1 and is filled.
     static func quad(of element: VectorImageElement) -> CGPath {
         let size = element.image.size
-        var t = CGAffineTransform(translationX: element.transform.position.x,
-                                  y: element.transform.position.y)
-            .rotated(by: element.transform.rotation)
-            .scaledBy(x: element.transform.scale, y: element.transform.scale)
+        var t = element.placement
         return CGPath(rect: CGRect(x: -size.width / 2, y: -size.height / 2,
                                    width: size.width, height: size.height), transform: &t)
     }
@@ -2041,14 +2104,14 @@ final class VectorCanvas {
     /// stroke and fill arms with this one through `drawn(_:through:widthScale:)` and differs only in
     /// where the ink's width scale comes from.
     ///
-    /// **A *reflection* passes that assert, and is deliberately allowed — for three of the four
-    /// kinds.** The Move menu's Mirror folds one into `t` (`VectorFloat.mirror`), and the shape test
-    /// above cannot see it: a reflection has equal axis norms and perpendicular axes, so `k` is still
-    /// the true scale and strokes, fills and text follow the map exactly. What a reflection does break
-    /// is `theta`, which `atan2(t.b, t.a)` reads as an *angle* — meaningless for a map that turns the
-    /// plane over. That is read by the `.image` arm alone, which is why that one asserts the
-    /// determinant is positive and the others do not; `canBeMirrored(_:)` below is the same fact stated
-    /// where a caller can ask it *before* offering the artist the button.
+    /// **A *reflection* passes that assert, and is deliberately allowed — for all four kinds as of
+    /// LASSO_MOVE.md §3 stage 3c.** The Move menu's Mirror folds one into `t` (`VectorFloat.mirror`),
+    /// and the shape test above cannot see it: a reflection has equal axis norms and perpendicular
+    /// axes, so `k` is still the true scale and strokes, fills and text follow the map exactly. What a
+    /// reflection does break is `theta`, which `atan2(t.b, t.a)` reads as an *angle* — meaningless for
+    /// a map that turns the plane over. Only the `.image` arm reads `theta`, and it now branches on
+    /// the determinant and composes-and-decomposes the pose instead, which is what `VectorImageElement`
+    /// gaining a stored `mirrored` bit bought.
     ///
     /// ## Why scaling one scalar is exact, and where it stops being
     ///
@@ -2093,14 +2156,21 @@ final class VectorCanvas {
         case .stroke, .fill:
             return drawn(element, through: t, widthScale: k) ?? element
         case .image(var image):
-            // A placed image is a `LayerTransform` — position, **one** scale, one rotation — which is
-            // exactly a similarity and so follows this map whole. It is also why a flip or a Freeform
-            // stretch cannot be handed to this function: neither fits in that shape.
-            assert(t.a * t.d - t.b * t.c > 0,
-                   "mapping(_:throughSimilarity:) was handed the reflection \(t) with a placed image "
-                   + "in the piece. `LayerTransform` has no flip, so `theta` below would turn the "
-                   + "photo through \(theta) rad instead of mirroring it. "
-                   + "Ask `canBeMirrored(_:)` before offering Mirror.")
+            // **An orientation-preserving similarity moves the three fields it names and leaves the
+            // stored shape alone, whatever that shape is** — and that is arithmetic rather than a
+            // special case for unstretched photos. The placement's linear part is
+            // `F^m · R(−φ) · S · R(ρ+φ)`; post-multiplying by `k·R(θ)` gives
+            // `F^m · R(−φ) · (kS) · R(ρ+θ+φ)`, because a scalar commutes with everything and the two
+            // rotations on the right add. So `aspect`, `stretchAxis` and `mirrored` come through
+            // untouched and these are the same three lines this arm had before stage 3c, bit for bit,
+            // including the `!= 1` / `!= 0` guards that keep a pure translation from multiplying a
+            // stored number by a 1.0 that rounding might not be.
+            guard t.a * t.d - t.b * t.c > 0 else {
+                // A **reflection** — the Move bar's Mirror. `theta` is meaningless for a map that
+                // turns the plane over (that is what this arm used to assert about), so the pose is
+                // composed and re-decomposed instead.
+                return .image(placed(image, through: t))
+            }
             image.transform.position = image.transform.position.applying(t)
             if k != 1 { image.transform.scale *= k }
             if theta != 0 { image.transform.rotation += theta }
@@ -2213,7 +2283,7 @@ final class VectorCanvas {
     /// right — but the exactness claim the similarity carries does **not** extend here, and no test
     /// should be written as though it did.
     ///
-    /// ## Text stretches; a placed image is the one kind this still refuses
+    /// ## Text stretches, and so does a placed image
     ///
     /// **Text distorts its letterforms and does not re-flow** — the owner's ruling of 2026-08-27,
     /// verbatim in LASSO_MOVE.md §5.18: *"Same words, same line breaks, wider or taller glyphs."* A
@@ -2222,13 +2292,13 @@ final class VectorCanvas {
     /// aspect is written down, and it is what makes this arm reduce to the similarity arm exactly at
     /// `aspect == 1`.
     ///
-    /// A **placed image** genuinely cannot. `VectorImageElement.transform` *is* a `LayerTransform` —
-    /// position, one scale, one rotation — with nowhere to put a second axis scale any more than a
-    /// flip, so teaching it costs a stored field and a persistence migration and is its own stage (the
-    /// owner's *"Teach images to hold a stretched shape"*). `canBeStretched(_:)` is the question asked
-    /// *before* the artist is offered the mode, exactly as `canBeMirrored(_:)` is asked before they are
-    /// offered the button; the two answers now differ, which is what that pair of properties was always
-    /// separate for.
+    /// A **placed image** is a rectangle of pixels drawn through one matrix, so a per-axis stretch is
+    /// simply what that matrix now is — there is no "keep the ink round" question to answer, and no
+    /// analogue of the box/residual split text needs. What it cost was a **stored shape**: three
+    /// fields beside `VectorImageElement.transform` (§3 stage 3c), which is the last thing either of
+    /// this feature's two refusals named. `placed(_:through:)` is the arm, and it is shared with the
+    /// reflection case of `mapping(_:throughSimilarity:)` because the two are one problem — compose
+    /// the pose, read it back out.
     static func mapping(_ element: VectorElement, throughStretch t: CGAffineTransform) -> VectorElement {
         guard !t.isIdentity else { return element }
         let k = sqrt(abs(t.a * t.d - t.b * t.c))
@@ -2243,18 +2313,64 @@ final class VectorCanvas {
             // non-uniform map leaves on a box the artist had rotated — lands in `corners`, where
             // `TextFrame.affineTransform` reads it as the glyphs' own distortion.
             return .text(mapped(text, through: t, uniformScale: k))
-        case .image:
-            assertionFailure("mapping(_:throughStretch:) was handed a placed image, whose "
-                             + "`LayerTransform` cannot hold the per-axis stretch in \(t). Ask "
-                             + "`canBeStretched(_:)` before offering Freeform.")
-            return element
+        case .image(let image):
+            // The one kind that goes through the *whole* map rather than through a width scale: a
+            // placed image is a rectangle of pixels, so a per-axis stretch is simply what its own
+            // placement now is. `sqrt(|det t|)` above is not read here — it lands in `scale` by
+            // construction, since `placed` splits the composed pose's two axis scales into their
+            // geometric mean and their ratio.
+            return .image(placed(image, through: t))
         }
     }
 
+    /// **A placed image moved by any invertible affine** — the arm both public mappings hand their
+    /// hard cases to, and the whole of LASSO_MOVE.md §3 stage 3c.
+    ///
+    /// Compose, then read the answer back out: the new placement is the old one followed by `t`, and
+    /// `ObjectTransformFrame.decompose` is the closed-form 2×2 SVD that turns that product into the
+    /// four fields the element stores. **The form already *is* the SVD, so nothing is approximated
+    /// and nothing is dropped** — the same sentence `ObjectTransformDrag.stretched` earns for the
+    /// box, one level down.
+    ///
+    /// **The reflection comes off first, because the SVD cannot carry it.** `decompose` refuses a
+    /// negative determinant (`guard y > 0`), which is correct: `R·S·R` with two positive scales spans
+    /// exactly the orientation-preserving affines. So the sign is peeled into `mirrored` — toggled
+    /// when `t` turns the plane over — and the residue, which now has a positive determinant, is what
+    /// is decomposed. That is one bit plus six numbers for a group with two components of six
+    /// dimensions each, which is exactly the right size.
+    ///
+    /// `preferringAxisNear` is handed the element's *current* axis for the reason the drag hands it
+    /// the pose it started from: the two branches a quarter turn apart describe the same matrix, and
+    /// asking for the one already stored means a delta that changes the placement by nothing changes
+    /// the stored numbers by nothing.
+    ///
+    /// **A degenerate product returns the element unmoved rather than writing NaN.** `decompose`
+    /// answers nil only for a singular or non-finite map — `sqrt(aspect)` would then be NaN and the
+    /// picture would vanish with nothing on screen to explain it. Refusing one nudge is the same
+    /// choice `ObjectTransformDrag` makes, and the artist can see it and drag again.
+    private static func placed(_ element: VectorImageElement,
+                               through t: CGAffineTransform) -> VectorImageElement {
+        var element = element
+        let mirrored = element.mirrored != (t.a * t.d - t.b * t.c < 0)
+        var composed = element.placement.concatenating(t)
+        if mirrored { composed = VectorImageElement.sourceFlip.concatenating(composed) }
+        guard let pose = ObjectTransformFrame.decompose(composed,
+                                                        preferringAxisNear: element.stretchAxis)
+        else { return element }
+        element.transform.position = element.transform.position.applying(t)
+        element.transform.rotation = pose.rotation
+        element.transform.scale = sqrt(pose.x * pose.y)
+        element.aspect = pose.x / pose.y
+        element.stretchAxis = pose.stretchAxis
+        element.mirrored = mirrored
+        return element
+    }
+
     /// The two kinds that follow **any** affine — a polyline of points carrying one scalar width, and
-    /// a `CGPath`. Nil for the two whose own placement is a `LayerTransform` or four ordered corners,
-    /// which each caller answers for itself because the answer differs: a similarity carries them and
-    /// a stretch cannot.
+    /// a `CGPath`. Nil for the two whose own placement is a stored pose or four ordered corners, which
+    /// each caller answers for itself because the currency differs: a text box splits the map into a
+    /// uniform part its layout follows and a residual its glyphs carry, and a placed image composes
+    /// the map into its own placement and re-decomposes it.
     ///
     /// Shared by both public mappings so the half they agree about cannot drift — the same discipline
     /// `mapping(_:throughSimilarity:)`'s own header states for the kinds. `widthScale` is the one
@@ -2296,37 +2412,6 @@ final class VectorCanvas {
         }
     }
 
-    /// Whether this element can go through `mapping(_:throughStretch:)` — i.e. whether **Freeform** is
-    /// offerable on a float carrying it.
-    ///
-    /// The same shape as `canBeMirrored(_:)` below and for the same underlying reason, but they are
-    /// two questions and not one: a reflection is a *similarity* that only the `.image` arm mishandles,
-    /// and a per-axis stretch is not a similarity at all. **They no longer coincide** — as of the
-    /// owner's ruling of 2026-08-27 a text box does both and a placed image still does neither — which
-    /// is what the Move bar asking each separately was always for.
-    ///
-    ///  * a **stroke** is points plus one width, and a stretch moves the points and scales the width
-    ///    by the map's own area root — visibly right, and the only sense in which a round dab can
-    ///    follow a non-uniform map without becoming an ellipse;
-    ///  * a **fill** is a `CGPath`, which carries any affine exactly, stretch included — so a fill is
-    ///    the one kind Freeform is *perfect* on;
-    ///  * a **text box** is four free corners over a layout `size`, so the stretch has somewhere to go
-    ///    that costs no stored field and no decode migration: the box takes the map's *uniform* part,
-    ///    which keeps the same words on the same lines, and the residual per-axis part stays in the
-    ///    corners, where `TextFrame.affineTransform` reads it as the glyphs' own distortion. That is
-    ///    the ruling — *"Same words, same line breaks, wider or taller glyphs"* — and it is a different
-    ///    problem from perspective text, which needs the map to stop being affine at all;
-    ///  * a **placed image** stores position, **one** scale and one rotation. There is nowhere in that
-    ///    shape for two axis scales, and inventing one means a stored field and a decode migration. It
-    ///    is the one kind still refused, and the only reason the two properties below are not now the
-    ///    same function.
-    static func canBeStretched(_ element: VectorElement) -> Bool {
-        switch element {
-        case .stroke, .fill, .text: return true
-        case .image: return false
-        }
-    }
-
     /// Whether `mapping(_:throughSimilarity:)` would actually **carry** this element, or silently
     /// hand back the one it was given.
     ///
@@ -2357,39 +2442,6 @@ final class VectorCanvas {
         switch element {
         case .stroke, .text, .image: return true
         case .fill(let fill): return fill.cgPath != nil
-        }
-    }
-
-    /// Whether this element can go through `mapping(_:throughSimilarity:)` with a **reflection** — the
-    /// Move menu's Mirror — rather than only with an orientation-preserving similarity.
-    ///
-    /// Three kinds can, exactly, and one cannot at all:
-    ///
-    ///  * a **stroke** follows the map point for point, and its one scalar (`size`) is untouched by a
-    ///    reflection, whose `k` is 1. A reflection preserves arc length, so `BrushStamper` walks the
-    ///    identical number of dabs at the identical parameters and the seeded RNG draws the identical
-    ///    sequence — the same argument the scale case makes above, with `k == 1`;
-    ///  * a **fill** is a `CGPath`, which carries any affine including this one. Reversing every
-    ///    subpath's winding together leaves the same interior under both fill rules;
-    ///  * a **text box** is four corners over a layout size, and reflecting them reverses their
-    ///    winding — which is precisely what a mirror *is*. The corners' order is not a fact the layout
-    ///    acts on; the layout runs in the box's own coordinates and `TextFrame.affineTransform` carries
-    ///    it out, sign and all, so a negative determinant reflects the rendered glyphs and the words
-    ///    read backwards. **The owner ruled that is the wanted behaviour** on 2026-08-27
-    ///    (LASSO_MOVE.md §5.18): a mirror reflects what is drawn, as in a real mirror, and does not
-    ///    re-lay-out the string right-to-left. Mirror and mirror back is the original, exactly;
-    ///  * a **placed image**'s whole placement is a `LayerTransform` — position, one *unsigned-in-
-    ///    practice* scale, one rotation. There is no flip in that shape and no way to put one there
-    ///    without a stored field and a decode migration, so a mirrored photo is not expressible. It is
-    ///    the one kind left, and the `.image` arm of `mapping(_:throughSimilarity:)` still asserts.
-    ///
-    /// Stated here, beside the function that would be wrong, rather than in the Move bar: the bar asks
-    /// (`CanvasManager.mirrorUnavailableReason`) and the `.image` arm above asserts. A third kind added
-    /// to `VectorElement` has to answer this switch before it can be lassoed and mirrored.
-    static func canBeMirrored(_ element: VectorElement) -> Bool {
-        switch element {
-        case .stroke, .fill, .text: return true
-        case .image: return false
         }
     }
 
@@ -3280,10 +3332,11 @@ final class VectorCanvas {
 
     private static func draw(image element: VectorImageElement, into cg: CGContext) {
         cg.saveGState()
-        let t = element.transform
-        cg.translateBy(x: t.position.x, y: t.position.y)
-        cg.rotate(by: t.rotation)
-        cg.scaleBy(x: t.scale, y: t.scale)
+        // `placement` rather than a translate/rotate/scale sequence spelled again here: a stretched or
+        // mirrored placement has two more terms and a sign, and the quad the membership rules test
+        // against is built from the same property. At `aspect == 1`, `stretchAxis == 0` and
+        // `mirrored == false` it is the identical matrix the three calls used to build.
+        cg.concatenate(element.placement)
         let imgSize = element.image.size
         element.image.draw(in: CGRect(x: -imgSize.width / 2, y: -imgSize.height / 2,
                                       width: imgSize.width, height: imgSize.height))
@@ -3371,12 +3424,28 @@ final class VectorCanvas {
 /// three kind-buckets. Images are stored by file name only (PNGs written separately by
 /// `ProjectStore`, since `UIImage` isn't `Codable`); strokes and fills are stored inline.
 struct VectorCanvasData: Codable {
+    /// **The three stage-3c keys are optional, and that is the smaller code rather than a migration.**
+    /// A `VectorImageElement`'s stored shape (`aspect`, `stretchAxis`, `mirrored`) is absent from the
+    /// payload for a placement a similarity can hold — which is every image nobody has stretched or
+    /// mirrored — so an unstretched photo writes exactly the bytes it wrote before the fields existed
+    /// and reads back identically. Spelling them non-optional would have needed a hand-written
+    /// `init(from:)` with `decodeIfPresent` (`VectorStroke`'s pattern) *and* a hand-written `encode`
+    /// to keep the default off disk; optional gets both from the synthesized conformance.
+    ///
+    /// This is the same idea `VectorCanvasData.transform` already applies one level up: absent means
+    /// the identity, and writing the identity out would only add bytes and a version gap.
     struct ImageRef: Codable {
         var fileName: String
         var x: Double
         var y: Double
         var scale: Double
         var rotation: Double
+        /// Absent means 1 — `VectorImageElement.aspect`.
+        var aspect: Double?
+        /// Absent means 0 — `VectorImageElement.stretchAxis`.
+        var stretchAxis: Double?
+        /// Absent means false — `VectorImageElement.mirrored`.
+        var mirrored: Bool?
     }
 
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
@@ -3594,7 +3663,10 @@ struct VectorCanvasData: Codable {
                 // rather than persisted as a dangling ref.
                 guard let name = el.fileName ?? imageFileNames[el.id] else { return nil }
                 return .image(ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,
-                                       scale: el.transform.scale, rotation: el.transform.rotation))
+                                       scale: el.transform.scale, rotation: el.transform.rotation,
+                                       aspect: el.aspect == 1 ? nil : Double(el.aspect),
+                                       stretchAxis: el.stretchAxis == 0 ? nil : Double(el.stretchAxis),
+                                       mirrored: el.mirrored ? true : nil))
             }
         }
         transform = []
@@ -3695,6 +3767,9 @@ struct VectorCanvasData: Codable {
                 return .image(VectorImageElement(image: image,
                                                  transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                                                            scale: ref.scale, rotation: ref.rotation),
+                                                 aspect: CGFloat(ref.aspect ?? 1),
+                                                 stretchAxis: CGFloat(ref.stretchAxis ?? 0),
+                                                 mirrored: ref.mirrored ?? false,
                                                  fileName: ref.fileName))
             }
         }
