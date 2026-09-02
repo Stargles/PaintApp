@@ -173,6 +173,38 @@ enum CanvasFixture {
         return manager
     }
 
+    // MARK: - The striping zoo
+
+    /// **The chunking zoo plus the two effects an apron cannot pay for** — RENDER.md §3.8, and the
+    /// document `StripedCompositeLogicTests` holds the strip cut to.
+    ///
+    /// `chunkingZoo()` already carries every shape §3.4's four rules are about, and a strip has to
+    /// survive all of them: the cut is orthogonal to the node cut and the two run nested. What it
+    /// does *not* carry is anything that reads its own coordinate, and those are exactly the effects
+    /// a strip breaks silently:
+    ///
+    /// | | what | what it would break |
+    /// |---|---|---|
+    /// | 10 | Noise, monochrome, a fixed seed | `noiseValue` hashes `gid`, so a strip restarts the grain at every seam |
+    /// | 11 | Posterize with the ordered screen at full strength | `screenValue` indexes a 4x4 Bayer cell by `gid & 3`, so a strip whose origin is not a multiple of 4 jumps the screen's phase |
+    ///
+    /// Neither is a neighbourhood read, so no apron helps and `EffectParams.originX/originY` is what
+    /// carries them. They sit at the root and above the two `.ink` effects, so they grade the finished
+    /// picture rather than a sub-walk — which is the shape that makes the seam visible across the
+    /// whole frame instead of only where the ink is.
+    ///
+    /// Amounts are deliberately large. A noise amplitude the eye would accept is a difference of two
+    /// or three bytes, and the gate here is byte-for-byte, so a small one would still be caught — but
+    /// a large one makes the *failure* legible when it happens, which is what a fixture owes the
+    /// person reading its output at 3am.
+    static func stripingZoo() -> CanvasManager {
+        let manager = chunkingZoo()
+        manager.addValueLayer(effect: .noise(Effect.Noise(amount: 0.5, isMonochrome: true, seed: 12_345)))
+        manager.addValueLayer(effect: .posterize(Effect.Posterize(levels: 3, screen: .ordered,
+                                                                   screenStrength: 1)))
+        return manager
+    }
+
     /// Raw RGBA bytes of an image — device RGB, premultiplied-last, 8 bits per component, row-major.
     ///
     /// That format is not a choice made here; it is the one every byte path in the app already agrees
