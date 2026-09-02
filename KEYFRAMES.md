@@ -482,6 +482,11 @@ similarity. So each dab's width comes from the pose at render time. **No per-sam
 `VectorSample` change, no wire-format change, no decode migration** — which was supposed to be the
 expensive half of vector Distort.
 
+**The problem it dissolves is Distort's, not Freeform's**, and §8 carries the measurement. An affine's
+`|det|` does not vary with position, so under a Uniform or a Freeform pose the single scalar
+`VectorStroke.size` already *is* the per-dab area root, and `mapping(_:throughStretch:)` already writes
+it. It is a homography whose `|det J|` varies across one stroke, and that is the case no scalar answers.
+
 **Build the pose as a point map, not a `CGAffineTransform`.** `drawn(_:through:widthScale:)`
 (`VectorLayer.swift:2262`) and every CTM seam take an affine and cannot hold a homography; `CGContext`
 has no projective CTM at all. One evaluator over `Homography.map` + `localScale(at:)` serves Uniform,
@@ -809,7 +814,7 @@ Each stage is mergeable and leaves the app working.
 | **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
 | **2b** ✅ | **The same channel on the other grade home: `LayerFolder.effect`** — §2.21. `effectTracks` on the folder, `resolvedEffect(atFrame:)` filled in, `setEffectParameterTrack(folderID:…)`, the optional `FolderManifest` key. Nothing in it is new machinery; the whole stage is the one arm §2.21 costs. | It also closed a **pre-existing** defect §4.1 had recorded as a KNOWN GAP: `MaskResolver`'s cache key is per-*layer* content versions and a folder is not a leaf, so a mask naming a graded folder served coverage resolved under the old grade. A hand edit hit it once; a track hits it every frame, which is what forced it. The key now carries the mask stacks' node grades. |
 | **3a** ✅ | **The effect-parameter channel end to end, from the artist's side** — the settings bar reading the value **resolved at the playhead**, the keyframe writer that keys many channels as one undo step, and `KeyframeTarget` making §2.21's two grade homes one path. | Two findings the plan did not have. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored grades side by side. And **a routing rule that a view holds is a rule the fast tier cannot see**, which is why the whole edit path is a `CanvasManager` method rather than a `switch` in a callback. This stage also shipped Animate mode, which §2.26 withdrew the same day; §2.1 carries what that cost and what it taught. |
-| **3b** | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27. The **model** half is built: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form are built too** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is now the **union** of marks and curve keys, with a bare mark drawn hollow and a mixed run drawn landed. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. What is left is the channel panel and the drawer. **Decide which shape each one is before writing it** — `CanvasPresentation` covers only presentations whose openness is held in a `Binding`, i.e. real `.popover`s, and one of those must add a case, an `overlapsLiveCanvas` arm, an entry in `CanvasPresentationLogicTests.expectedOverlapsLiveCanvas` and route through `.canvasPresentation` or it reproduces the stroke-teardown bug. An inline docked panel is **not** a presentation and adding a case for one would be wrong. An `ActivePanel` case is a third thing again, and breaks `CanvasTouchOwnerLogicTests`' hand-derived 1_920/440 constants — loudly, but they must be re-derived rather than bumped. **§10 carries what the drawer actually attaches to, and it is a constraint rather than a preference.** |
+| **3b** ✅ | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27, and §11's D1 through D4. The **model** half: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes` in `KeyframeControl.swift`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is the **union** of marks and curve keys, with a bare mark drawn hollow and a mixed run drawn landed. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. **The drawer** is `TimelineGraphBand`, drawn by `TimelineTrackView`'s coordinator inside the scroll content (§11.1) and sized through `CanvasManager.graphBandExpansion` in the layout key — not a presentation of any kind. **The channel panel** is `TimelineGraphChannelList`, raised from `timeline.graphChannelsButton` and presented as `CanvasPresentation.graphChannelList`; §11.5 is why it is a filter rather than a navigator. §2.22's keyframe button became the graph-editor button, which is why the marks are placed from the cel menu. |
 | **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
 | **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
 | **5b** | **Real Distort** | §2.13. **Moved here from the end of this table on 2026-08-29.** Raster tier first (the gesture is `TextFrameDrag.distortedFrame` and the bake is `ImageWarp`), then ink through §4.2's point map, then placed images behind Move stage 3c. |
@@ -830,10 +835,44 @@ construction exists to remove the per-frame shimmer of re-walking the dab lattic
 map — and the owner checked that shimmer on the device against a build of `main` and said *"the
 interpolation shimmer seems fine for now, I can't notice it… disregard for now."* So stage 5 may pose ink
 through the path that ships today and accept an artifact the owner has already accepted, rather than
-blocking on stage 4 to avoid it. **INFERRED and load-bearing, so establish it before building**: what
-stage 5 owes without stage 4 is the *width* rule — LASSO_MOVE §5.17's `sqrt(|det|)`, which §4.2 says the
-rest-space bake dissolves "completely" — and whether the shipped mapped-stroke path can express it. If it
-cannot, stage 4 is a real prerequisite after all and the owner should be told the order has to change.
+blocking on stage 4 to avoid it.
+
+**And the width rule costs stage 5 nothing, because a pose stage 5 can store is affine and an affine's
+area root is a constant.** `mapping(_:throughStretch:)` already computes LASSO_MOVE §5.17's rule verbatim
+— `sqrt(abs(t.a * t.d - t.b * t.c))` into `stroke.size` — so the ink follows a Uniform or a Freeform pose
+with no new machinery at all. It is not an approximation that improves toward the similarity limit: for
+an affine, `|det|` does not vary with position, so the single scalar `VectorStroke.size` carries **is**
+the per-dab local area root at every dab. MEASURED over eight poses — uniform, axis-aligned Freeform, and
+Freeform about a hand-turned box — sampled at 41 points along a diagonal stroke,
+`Homography.localScale(at:)` holds `max/min == 1.0` to seventeen digits on every one of them and sits **0**
+away from `sqrt(|det|)` in double precision. `tools/pose_width_ab.swift` is the harness, compiling the
+shipped `Homography` and `Quad` unmodified, and carries every other figure below. Two further identities fall
+out and are worth keeping because they make the channel cheap: `sqrt(|det|)` equals `ObjectTransformFrame`'s
+own `transform.scale` exactly for every one of the eight, `stretchAxis` and `aspect` included, so a pure
+shape change moves no ink weight; and the stage-5 chain a stored **quad** implies — `Homography(boxSize:to:)`
+then `affine()` — returns the width scale it was built from to within **2.2e-16**.
+
+**What needs per-dab width is the projective case, which is stage 5b.** A homography's `|det J|` varies
+across the plane, so no scalar can be right: MEASURED over the same stroke, local scale spans **1.3x** on a
+mild keystone and **8.5x** on a quad with one corner dragged in, where the best single scalar — the
+linearisation at the stroke's midpoint — is wrong by 15% and by 315% at the far end. **§4.2's rest-space
+bake is therefore a prerequisite of stage 5b and not of stage 5**, and that is the whole of what "it
+dissolves the per-sample-width problem completely" buys.
+
+**Two things stage 5 does inherit, both already accepted.** The **dab walk** is what loses exactness under
+a non-uniform map, not the width: MEASURED at Hard Round's own spacing, a 1:1 → 4:1 stretch animated over
+24 frames re-derives a different dab count on all 24 of them. It is the shimmer §4.2 describes and the
+owner disregarded. And it is **not confined to Freeform** — `stampSpacing`'s 1 pt floor makes a *Uniform*
+shrink re-phase too, on 19 of 24 frames for a 24 pt Hard Round animated from 1.0 to 0.3, because the floor
+binds below scale 0.833 there. A re-phased walk is invisible on a round dab — no built-in sets `scatter`
+or `rotationJitter` — and §4.2 already names the two that are not round dabs, Pencil's grain and Square's
+sub-lattice. What is new is that the Uniform arm reaches it too, so "pose through the similarity path and
+nothing re-phases" is not available as a fallback.
+
+**Pose ink through `mapping(_:throughStretch:)`, not through the interpolation evaluator.** They are two
+per-frame mapped-stroke paths and only one carries the rule: `InterpolationEvaluator.warped` scales
+`result.size` by `thicknessFade` alone and never by an area root, which is right for a lattice warp — whose
+local scale varies per point, so it is the projective case again — and wrong for a pose.
 
 **Why Distort moved, ruled 2026-08-29.** It sat last, which read as a dependency and was not one: Distort
 needs the **transform channel and nothing else** — not bake, not the playback cache, not the
@@ -959,10 +998,11 @@ cache entry per frame of a held cel).
 ## 11. The graph editor
 
 Asks 4, 5 and 6 of 2026-08-29, and §2.17 sharpened by the owner from *"a drawer that grows the timeline
-upward"* to *"it pops up above the layer that has it when on"*. **D1 and D2 are built; D3 onward is
-not.** Line numbers are **gone from §11.2 and §11.3** rather than re-taken: every one they carried was
-stale twice, and D2 moved all four timeline files again. Name the symbol, not the line — the two
-sections below now do, and §11.4's remaining numbers should be re-taken rather than trusted.
+upward"* to *"it pops up above the layer that has it when on"*. **D1 through D4 are built, and §11.6 is
+empty**, so the drawer and the channel panel §8's 3b row owes are the ones described here. Line numbers
+are **gone from §11.2 and §11.3** rather than re-taken: every one they carried was stale twice, and D2
+moved all four timeline files again. Name the symbol, not the line — the two sections below now do, and
+§11.4's remaining numbers should be re-taken rather than trusted.
 
 **Scope, ruled 2026-08-29: one band at a time, under the selected layer.** Offered per-layer toggles and
 an open-every-animated-layer mode, the owner took the selected layer. It is also the cheapest of the

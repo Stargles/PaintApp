@@ -42,14 +42,13 @@ app, and whoever notices that should come back and say so rather than assuming i
 
   **The next stage is 5, the transform channel — not 4.** The owner ruled the order on 2026-08-30
   (§8): stage 4's rest-space dab bake fixes a shimmer they looked at and disregarded, while stage 5 is
-  where the feature becomes something an artist can use. §8's 3b row still lists "the channel panel and
-  the drawer" as outstanding; the graph-editor work has landed since it was written, so **check that row
-  against the code before planning from it**.
+  where the feature becomes something an artist can use.
 
-  **One thing to establish before stage 5 starts, INFERRED and load-bearing** (§8): what stage 5 owes
-  without stage 4 is the *width* rule — LASSO_MOVE §5.17's `sqrt(|det|)`. If ink cannot be posed
-  correctly without the rest-space bake, then stage 4 is a real prerequisite after all and the order has
-  to change back.
+  **Stage 4 is not a prerequisite, and §8 now carries the measurement.** The width rule LASSO_MOVE §5.17
+  settles — `sqrt(|det|)` — is what `mapping(_:throughStretch:)` already computes, and it is exact rather
+  than approximate for both poses stage 5 stores: an affine's area root does not vary with position, so
+  the one scalar `VectorStroke.size` carries is the right width at every dab. The projective case is the
+  one with no scalar answer, so the bake is a prerequisite of **5b**, Distort.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
