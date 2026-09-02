@@ -147,17 +147,19 @@ perspective text box and are general by construction.
 stretch's latched bitmap stretches the ink where the bake keeps it round, so the latch is dropped at
 every gesture end to stop the error accumulating. Here there is no second interpretation: a 2D
 homography *is* what a `CATransform3D`'s `m14`/`m24` express, and both readers take the same
-`Homography`. MEASURED agreeing at **0.0** over the box interior (standalone `swiftc -O`, and again in
+`Homography`. MEASURED agreeing at **0.0** over the box interior (`tools/distort_seam_ab.swift`, and again in
 `DistortLogicTests.testThePreviewMatrixAndTheBakeMatrixAreTheSameMap`). What differs is the resampling
 filter, which already differs for a plain scale.
 
-**Two identities make the seam free rather than merely close.** An undistorted quad solves to
-`g == h == 0` and lands its corners on the piece's own affine at **exactly zero error**, so the affine
-draw is kept for it bit for bit rather than routed through the warp. And validity is **pose
-independent** — an invertible affine preserves convexity, simplicity and, identically, the box-corner
-weights, since its third matrix row is `[0 0 1]` — MEASURED at **zero disagreements over 6,396**
-pose/quad pairs, which is what lets the drag work in local space and a distort survive a later rotate
-or mirror unchanged.
+**Two identities make the seam free rather than merely close.** An undistorted quad solves to `g`
+and `h` of **exactly zero** — which is what makes `Homography.affine()` answer at all — and lands its
+corners on the piece's own affine to within **4.5e-13** across ±3 rad, scales from 0.05 to 8 and both
+mirrors, so the affine draw is kept for it bit for bit rather than routed through the warp. And
+validity is **pose independent** — an invertible affine preserves convexity, simplicity and,
+identically, the box-corner weights, since its third matrix row is `[0 0 1]` — MEASURED at **zero
+disagreements over 6,396** pose/quad pairs, which is what lets the drag work in local space and a
+distort survive a later rotate or mirror unchanged. `tools/distort_seam_ab.swift` is the harness for
+all three figures, compiling the shipped `Quad` and `Homography` unmodified.
 
 **`TransformMode.isImplemented` and *"Coming soon — acts like Uniform for now"* are deleted** (§2.15,
 *"no legacy code left by the previous functionality"*). The caption slot has a new tenant rather than

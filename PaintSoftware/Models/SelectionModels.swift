@@ -201,10 +201,12 @@ struct FloatingPiece {
     /// inside it.
     ///
     /// **Nil is not merely a default, it is a measured identity.** A quad that is still the plain
-    /// rectangle solves through `Homography(rect:to:)` to `g == h == 0` and lands its corners on the
-    /// affine's own answer at **exactly** zero error (MEASURED standalone with `swiftc -O`,
-    /// 2026-09-02), so a piece that is never distorted takes the affine path it always took and the
-    /// two paths agree at the seam rather than merely near it.
+    /// rectangle solves through `Homography(rect:to:)` to `g` and `h` of **exactly zero** — which is
+    /// what makes `affine()` answer rather than refuse — and lands its corners on the affine's own
+    /// answer to within **4.5e-13** across ±3 rad, scales from 0.05 to 8 and both mirrors
+    /// (`tools/distort_seam_ab.swift`, MEASURED 2026-09-02). So the two paths meet at the seam
+    /// instead of diverging at it, and keeping the affine draw for an undistorted piece is a choice
+    /// about which resampler runs, not a hedge against the solver.
     ///
     /// Transient like everything else on this type — a floating piece is never persisted (see the
     /// type's own doc comment), so Distort owes no file-format change at all.
@@ -236,7 +238,7 @@ struct FloatingPiece {
     /// and the latch has to be dropped at every gesture end to stop the error accumulating. Distort
     /// on a raster piece has no such gap — a `CATransform3D`'s `m14`/`m24` express exactly the same
     /// projective divide `Homography.map` performs, and the two were MEASURED agreeing to **0.0** over
-    /// the box's interior (`swiftc -O`, 2026-09-02). What differs between preview and bake is the
+    /// the box's interior, across ±3 rad and both mirrors (`tools/distort_seam_ab.swift`, 2026-09-02). What differs between preview and bake is the
     /// resampling filter, which is what already differs for a plain scale.
     ///
     /// Nil for a quad no homography can be drawn through — a collapsed or self-crossed box. The drag

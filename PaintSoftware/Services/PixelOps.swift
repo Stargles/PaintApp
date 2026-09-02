@@ -536,11 +536,11 @@ enum PixelOps {
     ///
     /// **Two arms, and the affine one is untouched.** A piece nobody has distorted takes the
     /// `concatenate`-and-draw it always took, bit for bit — which matters more than it looks, because
-    /// the projective solver *would* have answered for it: an undistorted quad comes back with
-    /// `g == h == 0` and lands its corners on the affine's own answer at exactly zero error (MEASURED,
-    /// `swiftc -O`, 2026-09-02). Routing it through the warp anyway would trade CoreGraphics'
-    /// resampler for `ImageWarp`'s bilinear one on every existing Move, which is a change to shipped
-    /// output for no gain.
+    /// the projective solver *would* have answered for it: an undistorted quad comes back with `g`
+    /// and `h` at exactly zero and its corners within 4.5e-13 of the affine's own answer
+    /// (`tools/distort_seam_ab.swift`, MEASURED 2026-09-02). Routing it through the warp anyway would
+    /// trade CoreGraphics' resampler for `ImageWarp`'s bilinear one on every existing Move, which is
+    /// a change to shipped output for no gain.
     static func render(floatingPiece piece: FloatingPiece, into canvasSize: CGSize) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())

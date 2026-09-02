@@ -165,9 +165,9 @@ final class DistortLogicTests: XCTestCase {
     /// a plausible bug in the solver rather than a transposition. Hence the two operands here: the
     /// `CATransform3D` evaluated by hand as Core Animation would, against `Homography.map`.
     ///
-    /// MEASURED agreeing at **exactly zero** over the box interior on a standalone `swiftc -O` probe
-    /// (2026-09-02) before this file existed; the accuracy below is slack for the simulator's own
-    /// arithmetic, not an admission of drift.
+    /// MEASURED agreeing at **exactly zero** over the box interior by `tools/distort_seam_ab.swift`,
+    /// which compiles the shipped `Quad` and `Homography` unmodified; the accuracy below is slack for
+    /// the simulator's own arithmetic, not an admission of drift.
     func testThePreviewMatrixAndTheBakeMatrixAreTheSameMap() throws {
         var p = piece()
         p.transform.rotation = -0.55
