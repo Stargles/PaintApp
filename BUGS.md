@@ -1463,8 +1463,12 @@ menu's keyframe items, and deliberately not fixed there.
 
 ## Missing / stubbed, as designed
 
-- Distort/Warp transform modes render and gesture identically to Uniform but still appear in the Move
-  bottom-bar picker.
+- Distort acts on a **raster** floating piece and not on a lassoed **vector** one, where it goes on
+  gesturing as Uniform — the Move bar says so in its caption slot
+  (`CanvasManager.distortUnavailableReason`). Not a stub: a homography's local scale spans 1.3x-8.5x
+  across one quad, so `VectorStroke.size` has no right value, and KEYFRAMES.md §4.2's rest-space dab
+  bake is what unblocks it. LASSO_MOVE.md §0, stage 5. (*Warp is not here and is not coming — §5.14
+  deleted the case outright.*)
 - Adjust panel and ActionsMenu's Cut/Copy/Paste/Drawing Guide are "Coming soon"; the timeline block
   menu's "Select Multiple" is permanently disabled.
 - No UI to change `fps` (fixed at 24) or edit scene length directly.
