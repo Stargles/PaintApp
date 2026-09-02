@@ -19,6 +19,9 @@ import CoreGraphics
 /// 3. **Nothing changes for a document nobody has keyframed.** The routing rule's `.storedValue` arm
 ///    is the safety property the whole feature is shaped around, and it is asserted directly rather
 ///    than assumed.
+/// The class is `@MainActor` because `ProjectStore.save`/`load` are, and the round-trip test below
+/// needs `wait(for:)` to spin the run loop so the completion handler's main-actor hop can run.
+@MainActor
 final class TransformChannelLogicTests: XCTestCase {
 
     private var size: CGSize { CanvasFixture.canvasSize }
@@ -335,5 +338,81 @@ final class TransformChannelLogicTests: XCTestCase {
         manager.currentFrame = 0
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "and allowed where it is in register")
         manager.cancelVectorFloat()
+    }
+
+    /// **§2.5's write-at-commit, driven through the real gesture rather than through the writer.**
+    /// Lift, nudge, commit — and the key lands at the commit, not at the nudge.
+    ///
+    /// The `.key` arm is the one that takes the bake back: the cel holds one drawing in its rest
+    /// position and the keys hold the poses, so the display list must come back to where it was while
+    /// the pose records where the artist put it.
+    func testACommittedMoveOnAnAnimatedCelWritesAPoseAndTakesTheBakeBack() throws {
+        let (manager, layerID, celID) = fixture()
+        manager.currentLayerIndex = 1
+        manager.currentFrame = 0
+        // One key at frame 0 holding the rest pose: a channel in force, resting where the box is.
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: box))
+        let restX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
+            .samples.first?.point.x)
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        var pose = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        pose.position.x += 15
+        manager.nudgeVectorFloat(to: pose)
+        XCTAssertEqual(manager.layers[1].cels[0].transformTracks["cel"]?.keys.count, 1,
+                       "A nudge writes no key — §2.5, and it is the ruling rather than a convenience")
+
+        manager.commitVectorFloatIfNeeded()
+        let track = try XCTUnwrap(manager.layers[1].cels[0].transformTracks["cel"])
+        XCTAssertEqual(track.keys.count, 1, "The key replaces the one on this frame")
+        // **Against the pose's *own* box, which is the float's measured ink bounds rather than this
+        // file's fixture rectangle.** The first draft compared to the fixture and read 14 for a 15pt
+        // drag — the difference being `MoveBoxInk`'s half-a-stroke-width padding, which is exactly the
+        // reason a pose stores the box it was measured against instead of assuming one.
+        let key = track.keys[0].pose
+        XCTAssertEqual(key.corners.p0.x - key.box.minX, 15, accuracy: 1e-6)
+
+        let afterX = try XCTUnwrap(manager.layers[1].cels[0].vector?.elements.first?.stroke?
+            .samples.first?.point.x)
+        XCTAssertEqual(afterX, restX, accuracy: 1e-9,
+                       "The bake is taken back: the cel stores one drawing, in its rest position")
+    }
+
+    // MARK: - Persistence
+
+    /// §3.5's track sidecar, end to end. A pose channel and a held baseline both have to survive a
+    /// save — the baseline especially, because it is the state *between* keyframe A and keyframe B and
+    /// that gap is exactly what a save can land in.
+    func testPoseChannelsAndHeldBaselinesSurviveASaveAndReload() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transform-channel-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        ProjectBackupManager.rootDirectoryOverride = root
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let (manager, layerID, celID) = fixture()
+        animate(manager, layerID: layerID, celID: celID)
+        manager.holdPoseBaseline(layerID: layerID, celID: celID, channel: .cel, pose: slide(-7))
+        let group = AnimationGroup(displayName: "Arm",
+                                   tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.animationGroups = [group]
+
+        let url = root.appendingPathComponent("round-trip.paintproj", isDirectory: true)
+        let finished = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        wait(for: [finished], timeout: 30)
+
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: url),
+                      "The validator has to know about the animation sidecar it now names (§3.5)")
+        let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
+        let cel = try XCTUnwrap(reloaded.layers.first { $0.id == layerID }?.cels.first)
+        XCTAssertEqual(cel.transformTracks["cel"],
+                       manager.layers[1].cels[0].transformTracks["cel"])
+        XCTAssertEqual(cel.pendingPoseBaselines["cel"], slide(-7))
+        XCTAssertEqual(reloaded.animationGroups, [group])
     }
 }
