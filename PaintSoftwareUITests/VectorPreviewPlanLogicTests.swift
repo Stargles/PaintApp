@@ -56,10 +56,9 @@ final class VectorPreviewPlanLogicTests: XCTestCase {
                        + "stroke does not touch the canvas until lift")
         XCTAssertTrue(plan.showsScratchLayer,
                       "The live ink must reach the screen through its own layer. False here is the "
-                      + "regression that puts the per-dab canvas-sized composite back")
-        XCTAssertTrue(plan.publishesLivePreviewFrame,
-                      "Each overlay refresh is a published preview frame — the only signal "
-                      + "VectorEraserUITests can read to tell a live scratch layer from a stuck one")
+                      + "regression that puts the per-dab canvas-sized composite back — and it is "
+                      + "also the published-frame count VectorEraserUITests reads to tell a live "
+                      + "scratch layer from a stuck one")
     }
 
     /// Drawing at an in-between keeps its stroke preview: the derived frame takes the base slot and
@@ -77,31 +76,35 @@ final class VectorPreviewPlanLogicTests: XCTestCase {
 
     // MARK: - Role 2 of 3: .replacement, which must not regress
 
-    /// Mode 1 previews by **replacing** the display with a punched copy of the layer's own render.
-    /// One canvas-sized render, no second layer, and that is what it cost before item 11 too.
-    func testMode1ReplacesTheDisplayAndAddsNoSecondLayer() {
+    /// Mode 1 previews by punching into a copy of the layer's own render — a copy of the **window**
+    /// the stroke has reached, since `StrokeScratch`, so the copy cannot be the whole display any
+    /// more. The committed render is the base and the punched window sits over it, with the base
+    /// punched out underneath (`StrokeCanvasView.showScratch`).
+    ///
+    /// `showsScratchLayer == true` is the assertion that matters. False is the regression that
+    /// leaves the erasure in a buffer nothing shows: the artist drags the eraser across their line
+    /// and sees nothing happen until they lift.
+    func testMode1ShowsItsPunchedWindowOverTheCommittedRender() {
         let plan = VectorPreviewPlan.forVectorLayer(role: .replacement,
                                                     hasScratch: true,
                                                     hasInterpolationImage: false)
-        XCTAssertEqual(plan.base, .scratch,
-                       "The punched copy *is* the display. Anything else means the artist sees no "
-                       + "erasure until they lift")
-        XCTAssertFalse(plan.showsScratchLayer,
-                       "…and it must not *also* be layered over itself, which would show the "
-                       + "un-punched render through the holes it just made")
-        XCTAssertTrue(plan.publishesLivePreviewFrame)
+        XCTAssertEqual(plan.base, .committedRender,
+                       "The window is the size of the stroke, so the layer's own render is what "
+                       + "covers the rest of the canvas")
+        XCTAssertTrue(plan.showsScratchLayer,
+                      "The punched window has to reach the screen, and its own layer is now the "
+                      + "only slot that can carry it")
     }
 
-    /// Mode 1 at an in-between is still Mode 1: `beginVectorStroke` seeds the scratch from the
-    /// evaluated frame rather than from the (empty) canvas, so the role — not the presence of an
-    /// interpolated image — decides the base slot. An interpolation image winning here would show
-    /// the derived frame with no holes in it for the whole drag.
-    func testMode1AtAnInBetweenStillShowsThePunchedCopy() {
+    /// Mode 1 at an in-between is still Mode 1, and now takes the same base as every other role:
+    /// `beginVectorStroke` seeds the scratch's backdrop from the evaluated frame, so the frame is
+    /// both what the window was copied from and what surrounds it.
+    func testMode1AtAnInBetweenPunchesTheDerivedFrame() {
         let plan = VectorPreviewPlan.forVectorLayer(role: .replacement,
                                                     hasScratch: true,
                                                     hasInterpolationImage: true)
-        XCTAssertEqual(plan.base, .scratch)
-        XCTAssertFalse(plan.showsScratchLayer)
+        XCTAssertEqual(plan.base, .interpolation)
+        XCTAssertTrue(plan.showsScratchLayer)
     }
 
     // MARK: - Role 3 of 3: .none, which must not regress either
@@ -122,60 +125,43 @@ final class VectorPreviewPlanLogicTests: XCTestCase {
                                                         hasInterpolationImage: false)
             XCTAssertEqual(plan.base, .committedRender, "hasScratch=\(hasScratch)")
             XCTAssertFalse(plan.showsScratchLayer,
-                           "'.none' must add no layer — hasScratch=\(hasScratch)")
-            XCTAssertFalse(plan.publishesLivePreviewFrame,
-                           "…and publish no frames, which VectorEraserUITests asserts as 0 "
-                           + "— hasScratch=\(hasScratch)")
+                           "'.none' must add no layer, and so publish no frames — which "
+                           + "VectorEraserUITests asserts as 0. hasScratch=\(hasScratch)")
         }
     }
 
     // MARK: - The properties that hold across every input
 
-    /// **The scratch layer appears for exactly one role.** Stated over the whole domain rather than
-    /// role by role, because the cost item 11 removed is paid by whoever shows a second canvas-sized
-    /// image, and "only `.overlay` does" is the invariant that keeps the other two at one operation.
-    func testOnlyTheOverlayRoleEverShowsASecondLayer() {
+    /// **The scratch layer appears for exactly the roles that draw.** Stated over the whole domain
+    /// rather than role by role. It was "only `.overlay`" until `StrokeScratch` made the scratch a
+    /// window: a window cannot fill the base slot, so `.replacement` joined the layer rather than
+    /// replacing the display, and `.none` — which draws nothing at all — is the one that stays out.
+    func testEveryRoleThatDrawsShowsItsScratchLayer() {
         forEveryCombination { role, hasScratch, hasInterpolation, plan in
-            let expected = role == .overlay && hasScratch
+            let expected = role != .none && hasScratch
             XCTAssertEqual(plan.showsScratchLayer, expected,
                            "role=\(role.traceName) scratch=\(hasScratch) interp=\(hasInterpolation)")
         }
     }
 
     /// **No scratch, no preview, ever** — the plan cannot ask for an image that does not exist.
-    /// `refreshDisplay` reads `vectorScratch?` optionally, so a plan that said otherwise would not
+    /// `refreshDisplay` reads `scratch?` optionally, so a plan that said otherwise would not
     /// crash; it would quietly hand the scratch layer nil and hide it, and the bug would surface as
     /// a stroke that previews on some gestures and not others.
     func testNoPlanAsksForAScratchThatIsNotThere() {
         forEveryCombination { role, hasScratch, _, plan in
             guard !hasScratch else { return }
             XCTAssertFalse(plan.showsScratchLayer, "role=\(role.traceName)")
-            XCTAssertNotEqual(plan.base, .scratch, "role=\(role.traceName)")
-            XCTAssertFalse(plan.publishesLivePreviewFrame, "role=\(role.traceName)")
         }
     }
 
-    /// **A published frame means something was published.** The counter is the one number
-    /// `lastVectorGestureTrace` carries, and `VectorEraserUITests` reads it to decide whether a live
-    /// path ran at all — so it has to track the preview rather than the refresh. A refresh that
-    /// shows only the committed render has previewed nothing, whatever role is set.
-    func testAFrameIsPublishedExactlyWhenSomethingOtherThanTheCommittedContentIsShown() {
-        forEveryCombination { role, hasScratch, hasInterpolation, plan in
-            let previewed = plan.base == .scratch || plan.showsScratchLayer
-            XCTAssertEqual(plan.publishesLivePreviewFrame, previewed,
-                           "role=\(role.traceName) scratch=\(hasScratch) interp=\(hasInterpolation)")
-        }
-    }
-
-    /// The interpolated frame wins the base slot wherever it exists **except** under `.replacement`,
-    /// whose scratch was itself seeded from that frame. This is the folded-in early return stated as
-    /// a property, and it is why the fold is safe.
-    func testTheDerivedFrameWinsTheBaseSlotExceptWhereTheScratchAlreadyContainsIt() {
+    /// The interpolated frame wins the base slot wherever it exists, in **every** role. It used to
+    /// lose to `.replacement`, whose canvas-sized scratch held its own copy of that frame; the
+    /// window holds a copy of only the part it has reached, so the frame has to surround it.
+    func testTheDerivedFrameWinsTheBaseSlotWhereverItExists() {
         forEveryCombination { role, hasScratch, hasInterpolation, plan in
             guard hasInterpolation else { return }
-            let expected: VectorPreviewPlan.Base = (role == .replacement && hasScratch)
-                ? .scratch : .interpolation
-            XCTAssertEqual(plan.base, expected,
+            XCTAssertEqual(plan.base, .interpolation,
                            "role=\(role.traceName) scratch=\(hasScratch)")
         }
     }
