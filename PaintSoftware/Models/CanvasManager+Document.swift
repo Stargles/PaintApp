@@ -300,7 +300,7 @@ struct SpacingFloorSurvey: Equatable {
 /// belongs at sheet-open, not at every keystroke.
 ///
 /// **Two counts because there are two consumers and they reach the gate differently** (§6 Q5).
-/// `sandwichTextures` is what `makeSandwichRequests` asks for, and the live canvas never *fails*
+/// `sandwichTextures` is what `makeSandwichRecipe` asks for, and the live canvas never *fails*
 /// there — `CompositorBudget.affordableSize` shrinks the request first, so past this threshold the
 /// canvas composites fewer pixels and looks **softer** while the artist works. `nativeTextures` is a
 /// request built at `RenderSizing.native`: the eyedropper composites at native size on purpose, and

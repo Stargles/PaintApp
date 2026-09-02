@@ -603,7 +603,7 @@ final class CompositorMetalEngine {
             lastAdmission = .overBudget(wantedBytes: wanted, budgetBytes: budget)
             // `.unavailable`, not `.underPressure`: this is a *static* verdict about the device and
             // the canvas size, and the CPU reference is the only thing that can render this frame at
-            // all. On the live canvas it should never fire, because `makeSandwichRequests` has
+            // all. On the live canvas it should never fire, because `makeSandwichRecipe` has
             // already sized the request against the same budget — it is a request built at
             // `RenderSizing.native` (the eyedropper, `CanvasManager+Eyedropper.swift`, composites at
             // native size on purpose so a colour pick never blends in a downscale) that reaches it.
@@ -1146,7 +1146,7 @@ final class CompositorMetalEngine {
     /// puts the compositor on the drawing path, because a dab still schedules no rebuild at all.
     ///
     /// A `nil` content version falls through to an uncached upload rather than failing. That pairing
-    /// is documented as impossible in `renderSources` (a leaf with pixels always carries a version),
+    /// is documented as impossible in `leafSnapshots` (a leaf with pixels always carries a version),
     /// and treating it as "upload it, don't remember it" keeps a future change to that invariant a
     /// performance question instead of a black frame.
     ///

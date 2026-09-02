@@ -1285,7 +1285,7 @@ extension CanvasManager {
     ///
     /// The reference keyframes' display lists are **resolved now**, on the main actor, into a plain
     /// dictionary the closure captures — rather than capturing `interpolationContentProvider`, which
-    /// reads `layers`. `RenderRequest.renderSources` calls `render` from `PixelOps.parallelMap`'s
+    /// reads `layers`. `FrameRecipe.resolveSources` calls `render` from `PixelOps.parallelMap`'s
     /// worker threads, and `[VectorElement]` is a value type with copy-on-write storage, so this
     /// costs a retain per reference rather than a copy of the ink.
     ///

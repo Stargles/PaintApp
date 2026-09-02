@@ -2883,6 +2883,114 @@ final class VectorCanvas {
     func render(quality: RenderQuality = .full) -> UIImage {
         lock.lock()
         defer { lock.unlock() }
+        return renderLocked(quality: quality)
+    }
+
+    /// `render(quality:)`, but **only while this canvas is still at `version`** — nil the moment the
+    /// artist has moved on.
+    ///
+    /// This is what lets a bake share the display path's rasterize instead of doubling it, and it is
+    /// the reason `Frozen` below carries a live reference alongside its frozen values. The two paths
+    /// that want a vector cel's pixels at pen-up are `StrokeCanvasView.refreshDisplay` and the
+    /// compositor's snapshot; both memoize into `cachedImage`, so today's synchronous ordering makes
+    /// the second a cache read. Freezing the *values* and rendering them somewhere else would give a
+    /// correct picture and stamp every dab of the cel a second time — the pessimisation this method
+    /// exists to refuse. When the version has moved, the caller falls back to the values it froze,
+    /// which is the whole atomicity guarantee and is the rare branch rather than the hot one.
+    ///
+    /// The version test and the render are one lock acquisition on purpose: taken separately, the
+    /// image handed back could be of a version other than the one that was checked.
+    func render(quality: RenderQuality, ifStillAtVersion version: Int) -> UIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.version == version else { return nil }
+        return renderLocked(quality: quality)
+    }
+
+    /// What `render(quality:)` would hand back **without rasterizing anything** — the question
+    /// `StrokeCanvasView.refreshDisplay` has to ask before it decides whether to block.
+    ///
+    /// Three answers rather than an optional, because "there is nothing to draw" and "there is
+    /// something to draw and it is not rendered yet" are different instructions to a display: the
+    /// first is free and final, the second is a dispatch. `.ready` also covers the empty canvas's
+    /// shared 1×1, which `render()` returns without memoizing — see there.
+    enum CachedRender {
+        /// Nothing to draw. `renderIfNonEmpty()`'s nil, decided without touching a pixel.
+        case empty(version: Int)
+        /// The memoized render at `version`.
+        case ready(UIImage, version: Int)
+        /// Non-empty, not memoized: rasterizing is the only way to get `version`'s pixels.
+        case needsRasterize(version: Int)
+
+        /// What goes in a display's base slot for the two answers that have one now — nil for an
+        /// empty canvas, which is a picture rather than a missing one (see `renderIfNonEmpty`).
+        var image: UIImage? {
+            if case .ready(let image, _) = self { return image }
+            return nil
+        }
+
+        var version: Int {
+            switch self {
+            case .empty(let version), .ready(_, let version), .needsRasterize(let version):
+                return version
+            }
+        }
+    }
+
+    func cachedRender(quality: RenderQuality = .full) -> CachedRender {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !_elements.isEmpty else { return .empty(version: version) }
+        let memo = quality == .full ? cachedImage : cachedPreviewImage
+        if let memo { return .ready(memo, version: version) }
+        return .needsRasterize(version: version)
+    }
+
+    /// One canvas's render inputs, read under a **single** lock acquisition — what a `LeafSnapshot`
+    /// carries so a composite can rasterize a vector tier off the main actor without the artist's
+    /// next dab tearing the frame.
+    ///
+    /// **Reading the version and the elements under two acquisitions is the defect this type
+    /// closes**: the key would then name a version the pixels are not.
+    struct Frozen {
+        /// The canvas these values came from, so `render` can share its memo while it is still at
+        /// `version` — see `VectorCanvas.render(quality:ifStillAtVersion:)`.
+        fileprivate let source: VectorCanvas
+        /// `source.version` at the instant of the read.
+        let version: Int
+        /// The same content in a canvas nothing else can reach: the artist's next edit mutates
+        /// `source` and cannot reach this. Never rendered while `source` is still at `version`.
+        fileprivate let detached: VectorCanvas
+        /// `source`'s memo at `version`, when it had one. Present is the common case at rest and the
+        /// end of the story — there is nothing left to rasterize.
+        fileprivate let memoized: UIImage?
+
+        /// The pixels these frozen values render to, safe to call from any thread.
+        func render(quality: RenderQuality) -> UIImage {
+            if let memoized { return memoized }
+            if let shared = source.render(quality: quality, ifStillAtVersion: version) { return shared }
+            return detached.render(quality: quality)
+        }
+    }
+
+    /// Freezes this canvas's render inputs. See `Frozen`.
+    ///
+    /// `quality` picks which memo is looked at, so a request that will rasterize at `.preview` does
+    /// not freeze a `.full` image it is never going to draw.
+    func freeze(quality: RenderQuality) -> Frozen {
+        lock.lock()
+        defer { lock.unlock() }
+        let detached = VectorCanvas(size: size, elements: _elements, transform: _transform)
+        // Assigned rather than passed to the initialiser because it is transient state (see
+        // `suppressedElementIDs`) and the setter is the one place that knows to invalidate; on a
+        // canvas nobody has rendered yet that invalidation costs a counter.
+        if !_suppressedElementIDs.isEmpty { detached.suppressedElementIDs = _suppressedElementIDs }
+        return Frozen(source: self, version: version, detached: detached,
+                      memoized: quality == .full ? cachedImage : cachedPreviewImage)
+    }
+
+    /// Caller must hold `lock`.
+    private func renderLocked(quality: RenderQuality) -> UIImage {
         // An empty canvas is now the steady state of a freshly added layer, and it is reached
         // eagerly: `StrokeCanvasView.vectorCanvas`'s `didSet` renders on assignment. Without this,
         // every empty vector layer would retain 16.8 MB of transparent pixels at 2048², 64 MB at

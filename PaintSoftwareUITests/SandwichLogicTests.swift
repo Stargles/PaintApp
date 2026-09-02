@@ -8,7 +8,7 @@ import UIKit
 /// correctly in the thumbnail and shows nothing on the live canvas. §5.2's answer is three views —
 /// the composite of everything below the active layer, that layer's own stroke host untouched, and
 /// the composite of everything above — and `Array<RenderNode>.split(atLeaf:)` with
-/// `CanvasManager.makeSandwichRequests` is the cut and the snapshot that feed them. Nothing here
+/// `CanvasManager.makeSandwichRecipe` is the cut and the snapshot that feed them. Nothing here
 /// touches `CanvasView`; the wiring is a separate change against this API.
 ///
 /// **The scope is narrower than §5.2 reads, and the tests are split along that line.**
@@ -26,7 +26,7 @@ import UIKit
 /// a failure reads as geometry rather than as brush output, and so both sides rasterize identical
 /// leaves and the only thing under comparison is the walk.
 ///
-/// `@MainActor` because `makeSandwichRequests` is — the app target compiles with
+/// `@MainActor` because `makeSandwichRecipe` is — the app target compiles with
 /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and this one does not.
 @MainActor
 final class SandwichLogicTests: XCTestCase {
@@ -202,7 +202,7 @@ final class SandwichLogicTests: XCTestCase {
     /// Core Animation has no other option, and that degradation is the phase's accepted cost.
     private func sandwichComposite(_ manager: CanvasManager, active: Int, atFrame frame: Int = 0) -> CGImage? {
         guard let canvasSize = manager.canvasSize,
-              let requests = manager.makeSandwichRequests(atFrame: frame, activeLayerIndex: active),
+              let requests = manager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: active)?.resolve(),
               let below = Compositor.composite(requests.below),
               let above = Compositor.composite(requests.above) else { return nil }
         let bounds = CGRect(origin: .zero, size: canvasSize)
@@ -337,8 +337,8 @@ final class SandwichLogicTests: XCTestCase {
     func testTheSandwichReassemblesToTheExactCompositeWhereverNothingAboveBlends() {
         var worst = 0
         for testCase in battery() {
-            guard let requests = testCase.manager.makeSandwichRequests(atFrame: 0,
-                                                                      activeLayerIndex: testCase.active),
+            guard let requests = testCase.manager.makeSandwichRecipe(atFrame: 0,
+                                                                      activeLayerIndex: testCase.active)?.resolve(),
                   let exact = Compositor.composite(requests.full),
                   let sandwich = sandwichComposite(testCase.manager, active: testCase.active) else {
                 XCTFail("\(testCase.name): both sides must composite")
@@ -360,7 +360,7 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(3)
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
               // **`includeBackground: true`, as of EFFECT_BACKDROP.md §6 step 3.** `full` carries the
               // paper now, so the reference has to as well or this compares a graded picture against
               // a transparent one and fails for a reason that has nothing to do with the tree.
@@ -375,7 +375,7 @@ final class SandwichLogicTests: XCTestCase {
     // MARK: - `full` does not depend on the active layer (PERFORMANCE.md item 4)
 
     /// **The property the `full` cache rests on.** Switching layers changes where the tree is cut and
-    /// nothing about the picture `full` composites — `makeSandwichRequests` uses `activeLayerIndex`
+    /// nothing about the picture `full` composites — `makeSandwichRecipe` uses `activeLayerIndex`
     /// in exactly one place, the `split(atLeaf:)` that makes `below` and `above`. Until 2026-08-20
     /// every layer tap therefore recomposited, at full canvas size, an image byte-identical to the
     /// one already on screen.
@@ -387,12 +387,12 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(4)
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)
 
-        guard let reference = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
+        guard let reference = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve(),
               let referenceImage = Compositor.composite(reference.full) else {
             return XCTFail("Fixture needs a canvas size")
         }
         for active in 1..<manager.layers.count {
-            guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: active) else {
+            guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: active)?.resolve() else {
                 return XCTFail("Every leaf should cut")
             }
             XCTAssertEqual(requests.full.tree, reference.full.tree,
@@ -465,8 +465,8 @@ final class SandwichLogicTests: XCTestCase {
     func testALayerSwitchCompositesTwiceRatherThanThreeTimes() {
         let manager = stack(4)
         manager.setLayerBlendMode(layerIndex: 2, to: .multiply)
-        guard let before = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
-              let after = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 2) else {
+        guard let before = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
+              let after = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 2)?.resolve() else {
             return XCTFail("Fixture needs a canvas size")
         }
 
@@ -523,7 +523,7 @@ final class SandwichLogicTests: XCTestCase {
     /// what the compositor says the frame actually is.
     private func makeSandwichAndExact(_ manager: CanvasManager, active: Int,
                                       atFrame frame: Int = 0) -> (sandwich: CGImage, exact: CGImage)? {
-        guard let requests = manager.makeSandwichRequests(atFrame: frame, activeLayerIndex: active),
+        guard let requests = manager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: active)?.resolve(),
               let exact = Compositor.composite(requests.full),
               let sandwich = sandwichComposite(manager, active: active, atFrame: frame) else { return nil }
         return (sandwich, exact)
@@ -548,7 +548,7 @@ final class SandwichLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve(),
               let exact = Compositor.composite(requests.full),
               let sandwich = sandwichComposite(manager, active: 0) else {
             return XCTFail("Fixture needs a canvas size")
@@ -575,7 +575,7 @@ final class SandwichLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
               let exact = Compositor.composite(requests.full),
               let sandwich = sandwichComposite(manager, active: 1) else {
             return XCTFail("Fixture needs a canvas size")
@@ -617,7 +617,7 @@ final class SandwichLogicTests: XCTestCase {
         // measured 64 is a claim about the sandwich's arithmetic, not about what is behind it.
         manager.isCanvasBackgroundVisible = false
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve(),
               let exact = Compositor.composite(requests.full),
               let sandwich = sandwichComposite(manager, active: 0) else {
             return XCTFail("Fixture needs a canvas size")
@@ -956,7 +956,7 @@ final class SandwichLogicTests: XCTestCase {
     /// it three times would cost more than the compositing does.
     func testTheThreeRequestsShareOneSnapshot() {
         let manager = stack(3)
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1) else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve() else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertEqual(requests.full.sources.count, manager.layers.count, "Parallel to `layers`, as the type says")
@@ -983,7 +983,7 @@ final class SandwichLogicTests: XCTestCase {
         manager.canvasBackgroundColor = .white
         manager.isCanvasBackgroundVisible = true
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve() else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertNotNil(requests.full.background, "`full` is what the canvas shows at rest")
@@ -994,7 +994,7 @@ final class SandwichLogicTests: XCTestCase {
         // The other switch, and it is not the same as painting white: an invisible canvas is what a
         // caller asking for a transparent-backed composite gets, and an effect over it grades nothing.
         manager.isCanvasBackgroundVisible = false
-        guard let hidden = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+        guard let hidden = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve() else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertNil(hidden.full.background, "The artist turned the paper off, so there is no paper")
@@ -1004,7 +1004,7 @@ final class SandwichLogicTests: XCTestCase {
 
     func testTheHalvesCarryTheSplitTreesAndTheFrameAndQualityTheyWereAskedFor() {
         let manager = stack(3)
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1, quality: .preview) else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1, quality: .preview)?.resolve() else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertEqual(requests.below.tree.leafLayerIndices, [0])
@@ -1018,13 +1018,13 @@ final class SandwichLogicTests: XCTestCase {
     }
 
     func testThereAreNoSandwichRequestsForALayerThatIsNotInTheTree() {
-        XCTAssertNil(stack(2).makeSandwichRequests(atFrame: 0, activeLayerIndex: 7),
+        XCTAssertNil(stack(2).makeSandwichRecipe(atFrame: 0, activeLayerIndex: 7)?.resolve(),
                      "A caller with a stale active index gets nil rather than a silently wrong cut")
     }
 
     func testThereAreNoSandwichRequestsWithoutACanvas() {
         let manager = CanvasManager()
-        XCTAssertNil(manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
+        XCTAssertNil(manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve(),
                      "Same degenerate-size guard `makeRenderRequest` has")
     }
 
@@ -1035,7 +1035,7 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(3)
         CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 5, length: 3)])
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
               // Like for like: `full` carries the paper, so the reference does too.
               let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture needs a canvas size")
@@ -1091,7 +1091,7 @@ final class SandwichLogicTests: XCTestCase {
         guard let canvasSize = manager.canvasSize else { return XCTFail("Fixture needs a canvas size") }
         manager.renderResolution = .half
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
               let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
             return XCTFail("Fixture must produce both shapes of request")
         }
@@ -1120,7 +1120,7 @@ final class SandwichLogicTests: XCTestCase {
     func testFullResolutionIsTheIdentityByteForByte() {
         let manager = stack(3)
         manager.renderResolution = .full
-        guard let scaled = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+        guard let scaled = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
               // Like for like: `full` carries the paper, so the reference does too.
               let reference = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must produce both shapes of request")
@@ -1137,7 +1137,7 @@ final class SandwichLogicTests: XCTestCase {
         let manager = stack(3)
         manager.canvasSize = CGSize(width: 65, height: 63)
         manager.renderResolution = .threeQuarter
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1) else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve() else {
             return XCTFail("Fixture must produce a sandwich")
         }
         let composite = Compositor.composite(requests.full)
@@ -1222,7 +1222,7 @@ final class SandwichLogicTests: XCTestCase {
         XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: tree),
                       "An in-between under the playhead must no longer take the compositor off the canvas")
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 5, activeLayerIndex: 1),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 5, activeLayerIndex: 1)?.resolve(),
               let multiplied = Compositor.composite(requests.full) else {
             return XCTFail("Fixture needs a canvas size")
         }
@@ -1232,8 +1232,8 @@ final class SandwichLogicTests: XCTestCase {
         let blank = try inBetweenOverBackdrop()
         blank.setLayerBlendMode(layerIndex: 1, to: .multiply)
         blank.layers[1].cels[1].interpolation = nil
-        guard let withoutTheInBetween = blank.makeSandwichRequests(atFrame: 5, activeLayerIndex: 1)
-            .flatMap({ Compositor.composite($0.full) }) else {
+        guard let withoutTheInBetween = blank.makeSandwichRecipe(atFrame: 5, activeLayerIndex: 1)
+            .flatMap({ Compositor.composite($0.resolve().full) }) else {
             return XCTFail("Control needs a canvas size")
         }
         XCTAssertNotEqual(CanvasFixture.rgbaBytes(multiplied), CanvasFixture.rgbaBytes(withoutTheInBetween),
@@ -1242,8 +1242,8 @@ final class SandwichLogicTests: XCTestCase {
         // (3) — the same document drawn source-over, which is what Core Animation's flat row of hosts
         // produces and therefore what the artist saw before this change.
         let plain = try inBetweenOverBackdrop()
-        guard let sourceOver = plain.makeSandwichRequests(atFrame: 5, activeLayerIndex: 1)
-            .flatMap({ Compositor.composite($0.full) }) else {
+        guard let sourceOver = plain.makeSandwichRecipe(atFrame: 5, activeLayerIndex: 1)
+            .flatMap({ Compositor.composite($0.resolve().full) }) else {
             return XCTFail("Control needs a canvas size")
         }
 

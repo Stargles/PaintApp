@@ -29,7 +29,7 @@ enum PixelOps {
     /// `transform` applied to `0..<count` across every core, results in index order.
     ///
     /// **The one fan-out primitive for the two per-cel walks PERFORMANCE.md item 9 is about**, which
-    /// are the same walk: `ProjectStore.load` decodes one cel per iteration, and `renderSources`
+    /// are the same walk: `ProjectStore.load` decodes one cel per iteration, and `FrameRecipe.resolveSources`
     /// rasterizes one. Both were serial, both are embarrassingly parallel — no iteration reads what
     /// another writes — and the second was MEASURED at 78.2 ms on the main actor for six layers at
     /// 2048×1024 on a playback tick, which was the largest main-thread term on that tick. With this
@@ -140,61 +140,136 @@ enum PixelOps {
     /// entry. KEYFRAMES §4.5, "pin this on day one".
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
                           memoize: Bool = true, derived: DerivedCelContent? = nil) -> UIImage {
+        let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity)
         guard memoize else {
-            return rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality, derived: derived)
+            return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived, quality: quality),
+                                     canvasSize: canvasSize, quality: quality)
         }
-        let key = RasterizeKey(cel: cel, canvasSize: canvasSize, quality: quality,
-                               derived: derived?.identity)
+        let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality)
         if let hit = rasterizeCache.value(for: key) { return hit }
-        let image = rasterizeUncached(cel: cel, canvasSize: canvasSize, quality: quality, derived: derived)
+        // Frozen only after the memo has missed, so a hit never touches either tier — the tiers'
+        // own memos are not free to fill (`RasterLayerTexture.renderToUIImage` pins the context's
+        // buffer copy-on-write) and a warm flatten has no business filling them.
+        let image = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived, quality: quality),
+                                      canvasSize: canvasSize, quality: quality)
         rasterizeCache.store(image, for: key)
         return image
     }
 
-    /// Identity of a flatten, drawn entirely from model state.
+    /// The same flatten over values a caller froze earlier — `FrameRecipe`'s half of this function,
+    /// and the reason the two cannot draw a cel differently from each other.
     ///
-    /// The two `UIImage` tiers are compared by object identity rather than content because that is
-    /// how they change: a fill or a bake *replaces* `fillImage`/`bakedImage` wholesale rather than
-    /// drawing into them, so a new object is exactly the signal that the pixels are new.
+    /// **Through the same memo, keyed exactly as the live path keys it**, which is not an
+    /// optimisation but the correctness rule: the live canvas and the bake must hit the same entries
+    /// or an unchanged cel is flattened twice. `FrozenCel.Identity` is what makes that literal —
+    /// there is one key type and one field list, built either from a live `Cel` or from the frozen
+    /// copy of the same fields.
+    static func rasterize(_ frozen: FrozenCel, canvasSize: CGSize, quality: RenderQuality) -> UIImage {
+        let key = RasterizeKey(cel: frozen.identity, canvasSize: canvasSize, quality: quality)
+        if let hit = rasterizeCache.value(for: key) { return hit }
+        let image = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality)
+        rasterizeCache.store(image, for: key)
+        return image
+    }
+
+    /// One cel's render inputs, frozen — every value `rasterizeUncached` draws, owned outright, plus
+    /// the identity those values have.
+    ///
+    /// **Why a cel copy is not a freeze, which is the whole point of this type.** `Cel` is a struct,
+    /// but `cel.raster` is a `RasterLayerTexture` *class* and `cel.vector` a `VectorCanvas` *class*.
+    /// While the flatten is synchronous on the main actor no artist edit can interleave with it — the
+    /// atomicity `renderSources` used to defend by staying there — but the moment it is not, a `Cel`
+    /// copy still points at the live tiers and the next dab tears the frame. So the two class tiers
+    /// are read here, once, and the two `UIImage` tiers are held by reference because a fill or a
+    /// bake *replaces* them wholesale rather than drawing into them: holding the reference **is** the
+    /// freeze for those.
+    ///
+    /// Building one costs at most what `rasterizeUncached` used to do inline — one memoized
+    /// `renderToUIImage()` and one `VectorCanvas.freeze` — so nothing on the live path pays for the
+    /// existence of the bake path.
+    struct FrozenCel {
+
+        /// Identity of a flatten, drawn entirely from model state.
+        ///
+        /// The two `UIImage` tiers are compared by object identity rather than content because that
+        /// is how they change: a fill or a bake *replaces* `fillImage`/`bakedImage` wholesale rather
+        /// than drawing into them, so a new object is exactly the signal that the pixels are new.
+        struct Identity: Hashable {
+            let celID: UUID
+            let raster: ObjectIdentifier
+            let rasterVersion: Int
+            let vector: ObjectIdentifier?
+            let vectorVersion: Int
+            let fillImage: ObjectIdentifier?
+            let bakedImage: ObjectIdentifier?
+            /// **The seam's half of the key.** Nil for a cel that shows what it stores, which is
+            /// every cel in a document using neither animation system — so an untouched document's
+            /// keys are exactly the keys it had before `DerivedCelContent` existed. Type-erased
+            /// because the *derivation* owns the enumeration: interpolation folds in the recipe's
+            /// `t`, mode, spacing, group lattices, guides, local-edit ids and its keyframes' content
+            /// versions, and a pose key will fold in the frame, and neither this type nor this file
+            /// should have to learn either list. `AnyHashable` compares unequal across types, so two
+            /// derivations can never collide on one entry.
+            let derived: AnyHashable?
+
+            init(cel: Cel, derived: AnyHashable?) {
+                self.derived = derived
+                celID = cel.id
+                // **Identity *and* version, for both tiers, and the identity is the load-bearing
+                // half.** A version alone is monotonic only within one object's lifetime, while a
+                // cel id outlives any number of them: reopening a project rebuilds every
+                // `RasterLayerTexture` with its counter back at 0 under the same cel id saved in the
+                // manifest, so a version-only key could match an entry cached before the last edit
+                // and serve pre-edit pixels. Undoing a cel-content change can swap in a texture
+                // object the same way. Keying on the object as well makes a fresh buffer a fresh key
+                // by construction, which is cheaper to guarantee than to remember to clear the cache
+                // at every point one can be replaced.
+                raster = ObjectIdentifier(cel.raster)
+                rasterVersion = cel.raster.version
+                vector = cel.vector.map(ObjectIdentifier.init)
+                // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
+                vectorVersion = cel.vector?.version ?? -1
+                fillImage = cel.fillImage.map(ObjectIdentifier.init)
+                bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+            }
+        }
+
+        let identity: Identity
+        let bakedImage: UIImage?
+        /// The raster tier's pixels, or nil where it holds no bitmap at all — the skip
+        /// `rasterizeUncached` has always made, taken at freeze time so the answer cannot change
+        /// under the draw. Every vector cel has an empty raster tier, so nil is the common case.
+        let strokesImage: UIImage?
+        let vector: VectorCanvas.Frozen?
+        let fillImage: UIImage?
+        /// Already values-only and thread-safe by its own contract — see `DerivedCelContent.render`.
+        let derived: DerivedCelContent?
+
+        init(cel: Cel, identity: Identity, derived: DerivedCelContent?, quality: RenderQuality) {
+            self.identity = identity
+            self.derived = derived
+            bakedImage = cel.bakedImage
+            fillImage = cel.fillImage
+            strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
+            // Frozen even when `derived` will replace it: the thunk answers nil for a recipe that
+            // is not evaluable yet, and the fallback is this tier (see `rasterizeUncached`).
+            vector = cel.vector?.freeze(quality: quality)
+        }
+
+        init(cel: Cel, derived: DerivedCelContent?, quality: RenderQuality) {
+            self.init(cel: cel, identity: Identity(cel: cel, derived: derived?.identity),
+                      derived: derived, quality: quality)
+        }
+    }
+
     private struct RasterizeKey: Hashable {
-        let celID: UUID
-        let raster: ObjectIdentifier
-        let rasterVersion: Int
-        let vector: ObjectIdentifier?
-        let vectorVersion: Int
-        let fillImage: ObjectIdentifier?
-        let bakedImage: ObjectIdentifier?
+        let cel: FrozenCel.Identity
         let width: Int
         let height: Int
         let quality: RenderQuality
-        /// **The seam's half of the key.** Nil for a cel that shows what it stores, which is every
-        /// cel in a document using neither animation system — so an untouched document's keys are
-        /// exactly the keys it had before `DerivedCelContent` existed. Type-erased because the
-        /// *derivation* owns the enumeration: interpolation folds in the recipe's `t`, mode,
-        /// spacing, group lattices, guides, local-edit ids and its keyframes' content versions, and
-        /// a pose key will fold in the frame, and neither this type nor this file should have to
-        /// learn either list. `AnyHashable` compares unequal across types, so two derivations can
-        /// never collide on one entry.
-        let derived: AnyHashable?
 
-        init(cel: Cel, canvasSize: CGSize, quality: RenderQuality, derived: AnyHashable? = nil) {
-            self.derived = derived
-            celID = cel.id
-            // **Identity *and* version, for both tiers, and the identity is the load-bearing half.**
-            // A version alone is monotonic only within one object's lifetime, while a cel id outlives
-            // any number of them: reopening a project rebuilds every `RasterLayerTexture` with its
-            // counter back at 0 under the same cel id saved in the manifest, so a version-only key
-            // could match an entry cached before the last edit and serve pre-edit pixels. Undoing a
-            // cel-content change can swap in a texture object the same way. Keying on the object as
-            // well makes a fresh buffer a fresh key by construction, which is cheaper to guarantee
-            // than to remember to clear the cache at every point one can be replaced.
-            raster = ObjectIdentifier(cel.raster)
-            rasterVersion = cel.raster.version
-            vector = cel.vector.map(ObjectIdentifier.init)
-            // -1 rather than 0 for "no vector tier at all", so acquiring an empty one is a change.
-            vectorVersion = cel.vector?.version ?? -1
-            fillImage = cel.fillImage.map(ObjectIdentifier.init)
-            bakedImage = cel.bakedImage.map(ObjectIdentifier.init)
+        init(cel: FrozenCel.Identity, canvasSize: CGSize, quality: RenderQuality) {
+            self.cel = cel
             width = Int(canvasSize.width.rounded())
             height = Int(canvasSize.height.rounded())
             self.quality = quality
@@ -303,13 +378,14 @@ enum PixelOps {
     /// What the flatten memo is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
     static var rasterizeCacheBytes: Int { rasterizeCache.bytesResident }
 
-    private static func rasterizeUncached(cel: Cel, canvasSize: CGSize, quality: RenderQuality,
-                                          derived: DerivedCelContent? = nil) -> UIImage {
+    private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
+                                          quality: RenderQuality) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         // **The raster tier is skipped outright when it holds no bitmap**, rather than drawn as a
         // sheet of transparency. Every vector cel has an empty raster tier, so this is the common
-        // case and not the odd one, and the draw it removes is a full-canvas blit of nothing.
-        let strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
+        // case and not the odd one, and the draw it removes is a full-canvas blit of nothing. The
+        // test is `FrozenCel.strokesImage` being nil, taken when the cel was frozen.
+        //
         // A vector cel's live strokes/images live in `vector` (rendered to a native-res image),
         // not in `raster` — include it so fill, select/move, and cross-layer fill references treat
         // a vector layer's content as pixels just like a raster layer's.
@@ -322,11 +398,11 @@ enum PixelOps {
         //
         // A nil answer from the thunk is "not yet" (a recipe mid-edit is not evaluable), and falls
         // back to the stored tier rather than to a hole.
-        let vectorImage = derived?.render(quality) ?? cel.vector?.render(quality: quality)
+        let vectorImage = cel.derived?.render(quality) ?? cel.vector?.render(quality: quality)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
             cel.bakedImage?.draw(in: bounds)
-            strokesImage?.draw(in: bounds)
+            cel.strokesImage?.draw(in: bounds)
             vectorImage?.draw(in: bounds)
             // **`fillImage` is last, and that is the whole of LASSO_FILL.md §2a on the preview side.**
             // A fill covers everything already on the cel, so the live preview has to stack the way

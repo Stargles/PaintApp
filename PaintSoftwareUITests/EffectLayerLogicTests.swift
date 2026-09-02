@@ -1405,11 +1405,11 @@ final class EffectLayerLogicTests: XCTestCase {
     /// What the live canvas shows at rest: `composite(full)` out of the three requests the sandwich
     /// is built from. **The distinction from `composite(_:)` above matters and is the whole subject
     /// of these tests** — `makeRenderRequest(includeBackground: false)` composites onto transparency
-    /// by the caller's choice, while `makeSandwichRequests` is what the artist is actually looking
+    /// by the caller's choice, while `makeSandwichRecipe` is what the artist is actually looking
     /// at, and until 2026-08-27 it hardcoded `background: nil` on all three.
     private func liveCanvas(_ manager: CanvasManager, active: Int = 0, atFrame frame: Int = 0) -> CGImage? {
-        manager.makeSandwichRequests(atFrame: frame, activeLayerIndex: active)
-            .flatMap { Compositor.composite($0.full) }
+        manager.makeSandwichRecipe(atFrame: frame, activeLayerIndex: active)
+            .flatMap { Compositor.composite($0.resolve().full) }
     }
 
     /// **The owner's report, as one assertion.** From their iPad, 2026-08-27: *"Chromatic abberation
@@ -1521,7 +1521,7 @@ final class EffectLayerLogicTests: XCTestCase {
     }
 
     /// **`above` keeps `background: nil`, and this test is the guard rail on the one hazard the fix
-    /// could reintroduce.** `makeSandwichRequests`' own doc comment named it before the fix existed:
+    /// could reintroduce.** `makeSandwichRecipe`'s own doc comment named it before the fix existed:
     /// a background in the upper half is an opaque sheet drawn over the live stroke and over
     /// everything beneath it. `full` and `below` are the two that sit at the bottom of what the
     /// artist sees; `above` is composited onto transparency by design.
@@ -1531,7 +1531,7 @@ final class EffectLayerLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 16, height: 16)))
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve() else {
             return XCTFail("Every leaf should cut")
         }
         XCTAssertNotNil(requests.full.background, "`full` is what the canvas shows at rest, paper included")
@@ -1566,7 +1566,7 @@ final class EffectLayerLogicTests: XCTestCase {
         XCTAssertEqual(manager.canvasSize, CGSize(width: 80, height: 80),
                        "Premise: padding is folded into the canvas, so the buffer grew by 8 on every side")
 
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0),
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve(),
               let background = requests.full.background else {
             return XCTFail("Fixture must produce a sandwich with a paper in it")
         }
@@ -1583,7 +1583,7 @@ final class EffectLayerLogicTests: XCTestCase {
         // A padding-0 canvas of the same size, to state the other half: the inset is arithmetic that
         // vanishes at the default rather than a special case that only the default avoids.
         let plain = CanvasFixture.manager(layerCount: 2)
-        guard let plainRequests = plain.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0) else {
+        guard let plainRequests = plain.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve() else {
             return XCTFail("Every leaf should cut")
         }
         XCTAssertEqual(plainRequests.full.background?.rect,
@@ -1980,7 +1980,7 @@ final class EffectLayerLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: Self.inkRect))
         manager.addValueLayer(effect: .sobel(Effect.Sobel()))
-        guard let request = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 0)?.full else {
+        guard let request = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 0)?.resolve().full else {
             return XCTFail("Fixture must build a request")
         }
         guard let cpu = CoreGraphicsCompositor.composite(request),

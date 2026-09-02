@@ -58,10 +58,10 @@ struct DerivedCelContent {
     /// reduced image (the onion skin) draws this into its own smaller context, exactly as
     /// `PixelOps.rasterizeUncached` already does with `cel.vector`'s render.
     ///
-    /// **Must be pure and thread-safe.** `RenderRequest.renderSources` resolves providers on the
-    /// main actor in its first pass and then calls this from `PixelOps.parallelMap`'s workers, so an
-    /// implementation has to capture the values it needs rather than reach back into `@Published`
-    /// document state.
+    /// **Must be pure and thread-safe.** `CanvasManager.leafSnapshots` resolves providers on the main
+    /// actor and `FrameRecipe.resolveSources` then calls this from `PixelOps.parallelMap`'s workers,
+    /// on whatever queue resolved the recipe, so an implementation has to capture the values it needs
+    /// rather than reach back into `@Published` document state.
     let render: (RenderQuality) -> UIImage?
 
     init(identity: AnyHashable, render: @escaping (RenderQuality) -> UIImage?) {

@@ -509,7 +509,7 @@ extension Array where Element == RenderNode {
     ///
     /// **Derived here rather than in `MetalCompositor` because it is a property of the tree**, the
     /// same argument `needsOwnBuffer` makes: the main thread has to know what a composite will cost
-    /// *before* it asks for one (`makeSandwichRequests` sizes the request by it), and the engine has
+    /// *before* it asks for one (`makeSandwichRecipe` sizes the request by it), and the engine has
     /// to know the same number when it decides whether to accept that request. Two spellings of it
     /// would be two things to keep in step with `CompositorMetalEngine.encode`, which is the walk
     /// this counts.
@@ -533,7 +533,7 @@ extension Array where Element == RenderNode {
     /// **Visibility is not consulted, here or in `uploadableLeafCount`, for the reason
     /// `needsCompositorOnCanvas` gives for the same choice.** A hidden layer costs the walk nothing,
     /// so honouring the flag would be more accurate — and would make toggling an eye change the
-    /// sharpness of the whole canvas, because the size this feeds is `makeSandwichRequests`'s. A
+    /// sharpness of the whole canvas, because the size this feeds is `makeSandwichRecipe`'s. A
     /// number that only moves when the document's *structure* does is worth more than a number that
     /// is exactly right, and the inaccuracy is in the safe direction.
     ///
@@ -635,7 +635,7 @@ extension Array where Element == RenderNode {
     }
 
     /// How many leaves of this tree would put a texture in the upload cache — the leaves that hold
-    /// pixels, which is every leaf that is not grading (`renderSources` elides those, so they have no
+    /// pixels, which is every leaf that is not grading (`leafSnapshots` elides those, so they have no
     /// source to upload). Visibility is not consulted; see `peakCompositeTextures`.
     ///
     /// Used to size a composite so an ordinary document's cache still fits alongside the walk. Capped

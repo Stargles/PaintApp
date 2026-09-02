@@ -817,7 +817,7 @@ final class MaskParityLogicTests: XCTestCase {
         // Two textures' worth at this canvas, against a walk that wants more — see `affordableSize`.
         CompositorBudget.budgetOverrideBytes = 32 * 1024
 
-        guard let sandwich = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+        guard let sandwich = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 1)?.resolve(),
               let live = manager.liveMaskRequest(atFrame: 0),
               let native = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
             return XCTFail("All three requests must build")

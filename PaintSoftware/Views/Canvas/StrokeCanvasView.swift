@@ -182,11 +182,49 @@ final class StrokeCanvasView: UIView {
     /// When non-nil, this is a vector layer: strokes are recorded as geometry into this
     /// `VectorCanvas` rather than stamped into `raster`.
     var vectorCanvas: VectorCanvas? {
-        didSet { refreshDisplay() }
+        didSet {
+            // A rasterize in flight belongs to the canvas that asked for it; a different canvas at
+            // the same version number is a coincidence, not a match. Cleared here so
+            // `finishVectorRender`'s pending test can be a plain integer comparison.
+            pendingVectorRenderVersion = nil
+            refreshDisplay()
+        }
     }
     /// The `VectorCanvas.version` last shown, so the coordinator can detect in-place vector edits
     /// (transform, image add) and refresh.
+    ///
+    /// **Never set to a version that is not actually on screen.** It is what
+    /// `refreshDisplayIfStale` compares, so claiming a version early — for instance when a
+    /// background rasterize of it has merely been *started* — stops the view repainting and freezes
+    /// the canvas on whatever was up. See `DeferredVectorRender`.
     private var displayedVectorVersion: Int = -1
+
+    /// The `VectorCanvas.version` a background rasterize is running for, or nil. The other half of
+    /// `DeferredVectorRender`'s two-integer ordering rule; always about `vectorCanvas`, because the
+    /// `didSet` above clears it whenever that changes.
+    private var pendingVectorRenderVersion: Int?
+
+    /// Where the committed render is rasterized — RENDER.md §2.13, and stage 2's second half.
+    ///
+    /// **Serial, and static.** Serial because the work is canvas-sized and there is no gain in
+    /// running two of them at once; static because exactly one layer is being drawn on at a time, so
+    /// a queue per view would be a queue per layer with one of them ever busy.
+    ///
+    /// `.userInitiated` rather than `.utility`: the artist is looking at the result, and it is
+    /// racing the next stroke.
+    private static let renderQueue = DispatchQueue(label: "com.paintapp.StrokeCanvasView.render",
+                                                   qos: .userInitiated)
+
+    /// True between a vector stroke committing and its re-render landing, while the finished
+    /// stroke's own scratch stands in for ink the base slot does not contain yet.
+    ///
+    /// **Releasing it is the frame the artist would otherwise see the stroke vanish on.** The
+    /// commit puts the ink in the display list and invalidates the render, so the base is
+    /// momentarily a picture *without* the stroke in it; dropping the scratch at that moment — which
+    /// is what `endScratch()` did straight after `commitVectorStroke` — would blink the stroke out
+    /// for as long as the rasterize takes. So it is dropped by the refresh that installs the new
+    /// base, in the same main-thread turn and therefore the same Core Animation commit.
+    private var scratchIsHeldForRerender = false
     /// The `RasterLayerTexture.version` last shown — the raster twin of `displayedVectorVersion`.
     /// Both texture types are reference types mutated in place, so a content change alone never
     /// triggers a SwiftUI repaint; without this guard a baked shape or undone fill stays stale
@@ -340,9 +378,9 @@ final class StrokeCanvasView: UIView {
     /// Repaints only when the backing content has moved on from what's displayed. Called once per
     /// layer on every SwiftUI pass, making in-place mutations self-healing — see
     /// `displayedRasterVersion`.
-    func refreshDisplayIfStale() {
+    func refreshDisplayIfStale(waitingForTheRender wait: Bool = false) {
         if let vectorCanvas {
-            if displayedVectorVersion != vectorCanvas.version { refreshDisplay() }
+            if displayedVectorVersion != vectorCanvas.version { refreshDisplay(waitingForTheRender: wait) }
         } else if let raster, displayedRasterVersion != raster.version {
             refreshDisplay()
         }
@@ -373,7 +411,19 @@ final class StrokeCanvasView: UIView {
     /// The decision of what goes where is `VectorPreviewPlan.forVectorLayer` — pure, and tested
     /// headlessly across all twelve inputs, because this file is not in the UI-test target and the
     /// only other way to check the three roles is a 22-minute suite.
-    func refreshDisplay() {
+    ///
+    /// **The committed render is rasterized off the main thread when it is not already memoized**
+    /// (RENDER.md §2.13, stage 2): the base slot keeps the picture it is holding, the finished
+    /// stroke's own scratch stays over it, and the new base lands when it lands. What decides which
+    /// of those happens is `DeferredVectorRender`, pure and headless for this function's own reason.
+    ///
+    /// - Parameter waitingForTheRender: block until the render is in hand. **One caller passes
+    ///   true** — `beginVectorFloat`, where the picture *is* the thing the whole drag is expressed
+    ///   against: the lasso latch shows the lifted piece over the hole it came out of, and a base
+    ///   one frame behind is the layer with the piece still in it, so the artist would see their ink
+    ///   twice for the first frames of the move. Everywhere else a stale base for a frame is exactly
+    ///   what §2.13 permits.
+    func refreshDisplay(waitingForTheRender: Bool = false) {
         // While the Move tool is dragging a lifted piece, Core Animation is already showing every
         // delta (see `beginVectorFloat`) and a rasterize here would be the redundant work
         // [PERFORMANCE.md](PERFORMANCE.md) item 11 removed from the stroke path: the moved ids are
@@ -395,25 +445,100 @@ final class StrokeCanvasView: UIView {
             showScratch(scratch)
             return
         }
-        displayedVectorVersion = vectorCanvas.version
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
                                                     hasScratch: scratch != nil,
                                                     hasInterpolationImage: interpolationImage != nil)
         // At an in-between the cel's own canvas is empty, so the interpolated frame wins the base
         // slot — and it must, or an in-between would display as nothing now that an empty canvas
-        // renders to nil rather than to a transparent sheet.
+        // renders to nil rather than to a transparent sheet. It is already an image, so there is
+        // nothing to rasterize and nothing to defer.
         let base: UIImage?
         switch plan.base {
-        case .interpolation: base = interpolationImage
-        case .committedRender: base = vectorCanvas.renderIfNonEmpty()
+        case .interpolation:
+            displayedVectorVersion = vectorCanvas.version
+            base = interpolationImage
+        case .committedRender:
+            let cached = vectorCanvas.cachedRender()
+            switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion) {
+            case .showNow(let version):
+                pendingVectorRenderVersion = nil
+                displayedVectorVersion = version
+                base = cached.image
+            case .rasterize(let version):
+                if waitingForTheRender {
+                    pendingVectorRenderVersion = nil
+                    displayedVectorVersion = version
+                    base = vectorCanvas.render()
+                } else {
+                    pendingVectorRenderVersion = version
+                    startVectorRender(of: vectorCanvas, atVersion: version)
+                    // The base slot keeps what it has. `displayedVectorVersion` deliberately stays
+                    // where it is: it means "on screen", and this version is not.
+                    showScratch(plan.showsScratchLayer ? scratch : nil)
+                    return
+                }
+            case .wait:
+                showScratch(plan.showsScratchLayer ? scratch : nil)
+                return
+            }
         }
-        // Identity-checked because `renderIfNonEmpty()` is memoized on the canvas's `version` and an
+        // Identity-checked because the committed render is memoized on the canvas's `version` and an
         // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
         // hands back the *same* image, and re-assigning it would put a Core Animation contents
         // change on the frame for nothing.
         if imageView.image !== base { imageView.image = base }
         showScratch(plan.showsScratchLayer ? scratch : nil)
         if plan.showsScratchLayer { livePreviewFrames += 1 }
+        // Last, and in the same turn as the assignment above, so Core Animation commits the new base
+        // and the removal of the scratch together — see `scratchIsHeldForRerender`.
+        if scratchIsHeldForRerender {
+            scratchIsHeldForRerender = false
+            endScratch()
+        }
+    }
+
+    /// Rasterizes `version` of `canvas` on `renderQueue` and hands the result back on main.
+    ///
+    /// **`render(quality:ifStillAtVersion:)` rather than `render()`, and that is what makes a
+    /// superseded request cheap**: a drag that invalidates faster than this can rasterize gets one
+    /// lock acquisition per abandoned request instead of one canvas-sized rasterize.
+    ///
+    /// It is also the call that keeps the memo *shared*. The composite's snapshot asks the same
+    /// canvas for the same version through `VectorCanvas.Frozen`, so whichever of the two arrives
+    /// first fills `cachedImage` and the other reads it — which is the arrangement the synchronous
+    /// code had for free and the one thing this change could quietly have thrown away.
+    private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int) {
+        Self.renderQueue.async { [weak self] in
+            let image = canvas.render(quality: .full, ifStillAtVersion: version)
+            DispatchQueue.main.async {
+                self?.finishVectorRender(image, of: canvas, atVersion: version)
+            }
+        }
+    }
+
+    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int) {
+        // A different canvas is a different layer; this view has moved on and owes it nothing.
+        guard canvas === vectorCanvas else { return }
+        guard let image, DeferredVectorRender.mayShow(rendered: version, current: canvas.version,
+                                                      pending: pendingVectorRenderVersion) else {
+            // Two ways to be here. **Superseded**: a newer rasterize is already running and will
+            // land, so leave `pendingVectorRenderVersion` naming it and do nothing. **The canvas
+            // moved with nothing running for the new version**: the request this view is waiting on
+            // can never be shown, so drop it and ask again — otherwise the base stays at whatever
+            // was up until some unrelated edit happens to refresh it.
+            if pendingVectorRenderVersion == version {
+                pendingVectorRenderVersion = nil
+                refreshDisplay()
+            }
+            return
+        }
+        pendingVectorRenderVersion = nil
+        if imageView.image !== image { imageView.image = image }
+        displayedVectorVersion = version
+        if scratchIsHeldForRerender {
+            scratchIsHeldForRerender = false
+            endScratch()
+        }
     }
 
     // MARK: - The lasso move's floating piece
@@ -439,8 +564,11 @@ final class StrokeCanvasView: UIView {
     /// iPad on 2026-08-21 — and the fix was not a faster re-render but *no* re-render, because Core
     /// Animation was compositing the result anyway.
     func beginVectorFloat(image: UIImage?, base: CGAffineTransform) {
-        // Before the latch, or a stale hole would be the picture the whole drag is expressed against.
-        refreshDisplayIfStale()
+        // Before the latch, or a stale hole would be the picture the whole drag is expressed
+        // against — and **synchronously**, which is the one place RENDER.md §2.13's "the previous
+        // picture for a split second" is not good enough: the previous picture here is the layer
+        // with the lifted piece still in it, under a float showing the same piece again.
+        refreshDisplayIfStale(waitingForTheRender: true)
         vectorFloatBase = base
         floatView.transform = .identity
         floatView.image = image
@@ -1029,7 +1157,15 @@ final class StrokeCanvasView: UIView {
         // Recorded before `endScratch` resets the role and before `refreshDisplay` runs.
         Self.lastVectorGestureTrace = "\(vectorScratchRole.traceName),\(livePreviewFrames)"
 
-        endScratch()
+        // **The scratch is not dropped here, and that is RENDER.md §2.13 in one line.** The commit
+        // above put this stroke's ink in the display list and invalidated the render, so the base
+        // slot is now a picture the stroke is *not* in; the rasterize that puts it back happens off
+        // the main thread. Dropping the scratch now would blink the stroke out for the length of
+        // that rasterize — MEASURED at 70.3 ms for a 20-stroke cel at 2048² on the owner's iPad in
+        // Release (`PerfBaselineTests.testVectorLayerRenderCostAndMemory`, 2026-09-02) — which is a
+        // worse thing to show the artist than the freeze it replaces. `refreshDisplay` releases it
+        // in the same turn as the new base. See `scratchIsHeldForRerender`.
+        scratchIsHeldForRerender = true
         currentVectorSamples = []
         lastStampPoint = nil
         refreshDisplay()

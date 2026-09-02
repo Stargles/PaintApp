@@ -1234,7 +1234,7 @@ final class CanvasManager: ObservableObject {
     ///
     /// It gets an empty cel, for `addVectorLayer`'s reason — every cel-lifecycle path in the app
     /// assumes a layer has one, and a blank cel is free (§8.1). Nothing ever draws into it: in
-    /// flat-colour mode the fill is resolved into the snapshot's source at `renderSources`, and in
+    /// flat-colour mode the fill is resolved into the snapshot's source at `leafSnapshots`, and in
     /// effect mode the snapshot elides the layer's pixels entirely and the compositor reaches the leaf
     /// by its grade before it would look for a source.
     func addValueLayer(color: PaletteColor = ValueFill.defaultColor, effect: Effect? = nil,

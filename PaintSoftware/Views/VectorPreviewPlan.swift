@@ -1,4 +1,4 @@
-import Foundation
+import UIKit
 
 /// How the live-preview scratch raster relates to the vector canvas's own render. Differs per tool
 /// and — for the eraser — per mode. Set once in `StrokeCanvasView.beginVectorStroke`, read by
@@ -98,5 +98,68 @@ struct VectorPreviewPlan: Equatable {
         let base: Base = hasInterpolationImage ? .interpolation : .committedRender
         // Every role that draws draws into the scratch layer; `.none` is the one that does not draw.
         return VectorPreviewPlan(base: base, showsScratchLayer: hasScratch && role != .none)
+    }
+}
+
+/// Whether `StrokeCanvasView.refreshDisplay` may put the committed render on screen now, or has to
+/// rasterize it somewhere else first — RENDER.md stage 2's other half.
+///
+/// **The problem it solves.** At pen-up the committed cel is re-stamped, dab by dab, into a fresh
+/// canvas-sized bitmap on the main thread (RENDER.md §3.1's first row; PERFORMANCE.md item 10
+/// MEASURED the vector eraser's Mode 3 at ~95 ms a sample doing exactly this). §2.13 rules that *"a
+/// canvas that shows the previous composite for a split second after pen-up is acceptable, provided
+/// the main thread never freezes"*, which is permission to move the rasterize and keep the finished
+/// stroke's own scratch on screen until it lands.
+///
+/// **Ordering is the whole hazard and it is why this is a value.** A render that finishes after the
+/// artist has drawn again must not be shown, and — the subtler half — a version must never be
+/// recorded as displayed before it is, or `refreshDisplayIfStale` stops repainting and the canvas
+/// freezes on whatever was up. Both rules are three lines of arithmetic over two integers, and
+/// `StrokeCanvasView.swift` is not in the UI-test target, so they live here beside
+/// `VectorPreviewPlan` for that type's own stated reason.
+enum DeferredVectorRender {
+
+    /// What one refresh does about the base slot.
+    enum Step: Equatable {
+        /// Install `VectorCanvas.CachedRender.image` — an image, or nil for an empty canvas — and
+        /// record `version` as displayed. Free: the answer was already memoized.
+        case showNow(version: Int)
+        /// Start a rasterize of `version` off the main thread. The base slot keeps whatever it is
+        /// holding until that lands, and `displayedVectorVersion` stays where it is.
+        case rasterize(version: Int)
+        /// A rasterize for the version the canvas is at is already running. Do nothing.
+        case wait
+    }
+
+    /// - Parameter pending: the version a rasterize is already running for, or nil.
+    static func step(for cached: VectorCanvas.CachedRender, pending: Int?) -> Step {
+        switch cached {
+        case .empty, .ready:
+            // An empty canvas costs a `_elements.isEmpty` test and a memoized one costs a pointer,
+            // so neither has any reason to go anywhere. This is also what keeps a *stroke* free:
+            // an `.overlay` gesture does not touch the display list until lift, so every touch-move
+            // lands here and the canvas is never rasterized mid-stroke.
+            return .showNow(version: cached.version)
+        case .needsRasterize(let version):
+            // Not `pending != nil`: a rasterize running for an *older* version is one whose result
+            // will be refused, so a newer one has to start regardless. It is not wasted work either
+            // — the older one asks the canvas for its version before rasterizing anything, and gets
+            // nil (`VectorCanvas.render(quality:ifStillAtVersion:)`), so being superseded costs a
+            // lock acquisition. That is what keeps a fast Mode 3 drag from queueing a canvas-sized
+            // render per touch sample.
+            return pending == version ? .wait : .rasterize(version: version)
+        }
+    }
+
+    /// Whether a finished rasterize may be shown: the canvas must still be at the version it was
+    /// asked for, and this must still be the render the view is waiting on.
+    ///
+    /// **Both clauses, and neither covers the other.** `current` alone lets a superseded render land
+    /// after the one that replaced it — two renders of the same version are equally correct pictures
+    /// but the later assignment wins, and with the scratch released by the first the second is a
+    /// no-op at best. `pending` alone lets a render for a version the canvas has since left be
+    /// recorded as displayed, which is the freeze this type exists to avoid.
+    static func mayShow(rendered version: Int, current: Int, pending: Int?) -> Bool {
+        version == current && pending == version
     }
 }

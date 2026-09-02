@@ -109,7 +109,7 @@ enum CompositorBackend {
 ///
 /// **The upload cache's 192 MB cap was not the problem, and that is worth stating because it was the
 /// obvious suspect.** Two of the three layers in that scene are grading layers, which hold no pixels
-/// at all (`renderSources` elides them), so the cache holds exactly one entry and hits every time.
+/// at all (`leafSnapshots` elides them), so the cache holds exactly one entry and hits every time.
 /// The 320 MiB that is *not* the cache — the pool and the effect intermediates — had no budget of any
 /// kind. That is what this type gives it.
 ///
@@ -118,7 +118,7 @@ enum CompositorBackend {
 /// Two questions, deliberately answered by two different mechanisms:
 ///
 /// - **`textureBudgetBytes` is static for the process and derived from the device's total memory.**
-///   It has to be static because two callers must agree about it: `makeSandwichRequests` picks a
+///   It has to be static because two callers must agree about it: `makeSandwichRecipe` picks a
 ///   composite size on the main thread and `CompositorMetalEngine` decides whether to accept that
 ///   size on a background queue a moment later. A budget derived from free memory would let the
 ///   second answer differ from the first, and the sandwich would ask for a size the engine then
@@ -731,7 +731,7 @@ enum CoreGraphicsCompositor {
                 // would be work with no difference to show for it.
                 //
                 // **A root walk with no background passes false too, and there the claim is weaker
-                // than it reads.** The sandwich's `above` half is exactly that — `makeSandwichRequests`
+                // than it reads.** The sandwich's `above` half is exactly that — `makeSandwichRecipe`
                 // builds it with `background: nil` on purpose — so an `.ink` effect in it grades the
                 // accumulator as it stands, which holds only what is *above* the active layer rather
                 // than everything below the effect node. A truncated ink, not the ink. That is an

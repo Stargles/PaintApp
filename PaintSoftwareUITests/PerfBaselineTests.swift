@@ -1502,7 +1502,7 @@ final class PerfBaselineTests: XCTestCase {
 
         var requests: SandwichRequests?
         let snapshotCold = measuringPeakMemory {
-            requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3)
+            requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 3)?.resolve()
         }
         guard let requests else { return XCTFail("Six leaves must cut at index 3") }
 
@@ -1513,7 +1513,7 @@ final class PerfBaselineTests: XCTestCase {
         // one. Sizing either optimisation against a single "snapshot" number would be sizing it
         // against whichever of the two happened to get measured.
         let snapshotWarm = measuringPeakMemory {
-            _ = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 4)
+            _ = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 4)?.resolve()
         }
 
         // Warm: `PixelOps.rasterize` is memoized and the snapshot above has just walked these cels,
@@ -1724,7 +1724,7 @@ final class PerfBaselineTests: XCTestCase {
     /// `CanvasView.startSandwichRebuild` composites *three* requests per rebuild — `full`, `below`,
     /// `above` — off the main thread, and a rebuild is what a lift, a layer switch, an opacity nudge or
     /// an effect-slider tick each schedule. So the artist's felt latency is three composites, not one,
-    /// and the three share one `sources` array (see `makeSandwichRequests`), which is exactly the
+    /// and the three share one `leaves` array (see `makeSandwichRecipe`), which is exactly the
     /// sharing a per-leaf upload cache on the GPU side can convert into two free composites.
     ///
     /// Reported per backend so the flag flip has a before and an after. **Simulator numbers are
@@ -1747,7 +1747,7 @@ final class PerfBaselineTests: XCTestCase {
     @MainActor
     func testSandwichRebuildCostOnBothBackends() {
         let manager = compositorManager(layerCount: 6)
-        guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3) else {
+        guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 3)?.resolve() else {
             return XCTFail("The perf manager must produce a sandwich")
         }
 
@@ -1834,7 +1834,7 @@ final class PerfBaselineTests: XCTestCase {
 
         func rebuild(at resolution: RenderResolution) -> Double {
             manager.renderResolution = resolution
-            guard let requests = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3) else { return 0 }
+            guard let requests = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 3)?.resolve() else { return 0 }
             func once() {
                 autoreleasepool {
                     _ = Compositor.composite(requests.full)
@@ -2230,7 +2230,7 @@ final class PerfBaselineTests: XCTestCase {
     /// composite out of the critical path, and with it the theory that Core Animation minifying three
     /// canvas-sized layers was the cost. Whatever is spending the frame is something
     /// `renderResolution` does not reach — and `RenderResolution`'s own doc comment says exactly which
-    /// things those are: it is applied in `makeSandwichRequests` and nowhere else, so the *snapshot*
+    /// things those are: it is applied in `makeSandwichRecipe` and nowhere else, so the *snapshot*
     /// and the live stroke preview are both outside it.
     ///
     /// So this measures the live stroke preview directly, in the two shapes `StrokeCanvasView`
@@ -3317,7 +3317,7 @@ final class PerfBaselineTests: XCTestCase {
     /// answers rather than merely slow ones; a serial number from one run against a parallel number
     /// from another would measure the host. Alternating best-of-three puts both under the same load.
     ///
-    /// The parallel side goes through the real `makeSandwichRequests`, so it carries that call's tree
+    /// The parallel side goes through the real `makeSandwichRecipe`, so it carries that call's tree
     /// build and mask walk as well as the fan-out. Those are model reads on six layers — the ratio is
     /// therefore a slight *under*-statement of what the fan-out itself gained.
     @MainActor
@@ -3340,7 +3340,7 @@ final class PerfBaselineTests: XCTestCase {
         func parallelSnapshot() -> Double {
             PixelOps.clearRasterizeCache()
             return measuringPeakMemory {
-                autoreleasepool { _ = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 3) }
+                autoreleasepool { _ = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: 3)?.resolve() }
             }.seconds
         }
 
@@ -4763,7 +4763,7 @@ final class PerfBaselineTests: XCTestCase {
     /// Two costs, over one cold forward scrub across a span of distinct in-between cels:
     ///
     /// - `evalOnly` — today's per-frame cost: one derivation rendered for the layer host.
-    /// - `evalAndSandwich` — the same, plus `makeSandwichRequests` and its three composites, which
+    /// - `evalAndSandwich` — the same, plus `makeSandwichRecipe` and its three composites, which
     ///   is what an engaged canvas pays.
     ///
     /// It asserts nothing about the ratio. The figures go to PERFORMANCE.md; a threshold here would
@@ -4842,7 +4842,7 @@ final class PerfBaselineTests: XCTestCase {
         do {
             let warm = try document()
             evaluate(warm, frame: 1)
-            if let requests = warm.makeSandwichRequests(atFrame: 1, activeLayerIndex: 1) {
+            if let requests = warm.makeSandwichRecipe(atFrame: 1, activeLayerIndex: 1)?.resolve() {
                 _ = Compositor.composite(requests.full)
             }
         }
@@ -4866,7 +4866,7 @@ final class PerfBaselineTests: XCTestCase {
                 autoreleasepool {
                     after.currentFrame = frame
                     evaluate(after, frame: frame)
-                    guard let requests = after.makeSandwichRequests(atFrame: frame, activeLayerIndex: 1)
+                    guard let requests = after.makeSandwichRecipe(atFrame: frame, activeLayerIndex: 1)?.resolve()
                     else { return }
                     _ = Compositor.composite(requests.full)
                     _ = Compositor.composite(requests.below)
@@ -4887,7 +4887,7 @@ final class PerfBaselineTests: XCTestCase {
             for frame in 1...spanLength {
                 autoreleasepool {
                     sandwichOnly.currentFrame = frame
-                    guard let requests = sandwichOnly.makeSandwichRequests(atFrame: frame, activeLayerIndex: 1)
+                    guard let requests = sandwichOnly.makeSandwichRecipe(atFrame: frame, activeLayerIndex: 1)?.resolve()
                     else { return }
                     _ = Compositor.composite(requests.full)
                     _ = Compositor.composite(requests.below)
@@ -4904,7 +4904,7 @@ final class PerfBaselineTests: XCTestCase {
             for frame in 1...spanLength {
                 autoreleasepool {
                     control.currentFrame = frame
-                    guard let requests = control.makeSandwichRequests(atFrame: frame, activeLayerIndex: 1)
+                    guard let requests = control.makeSandwichRecipe(atFrame: frame, activeLayerIndex: 1)?.resolve()
                     else { return }
                     _ = Compositor.composite(requests.full)
                     _ = Compositor.composite(requests.below)
@@ -4956,5 +4956,123 @@ final class PerfBaselineTests: XCTestCase {
                       "the multiply layer is what makes this the document the clause is about")
         XCTAssertNotNil(after.layers[1].cels[1].interpolation, "the span must actually be in-betweens")
         XCTAssertNil(control.layers[1].cels[1].interpolation, "the control must not be")
+    }
+
+    // MARK: - RENDER.md stage 2: what pen-up costs on the main thread
+
+    /// **The number stage 2 exists to move**, split into the three terms the main thread used to run
+    /// in sequence when the artist lifted the pencil on a vector layer.
+    ///
+    /// | term | what it is | where it runs now |
+    /// |---|---|---|
+    /// | `committedRender` | the whole cel re-stamped, dab by dab, into a canvas-sized bitmap | `StrokeCanvasView.renderQueue` |
+    /// | `mint` | `makeSandwichRecipe` — tree, masks, per-leaf identity, no pixel | the main actor, and this is all that is left there |
+    /// | `resolve` | the flatten: every visible leaf to a canvas-sized image | `CanvasView.sandwichQueue` |
+    ///
+    /// So `mainThreadBefore` is the sum of the three and `mainThreadAfter` is `mint` alone. Both are
+    /// measured here, in one run on one fixture, because the synchronous path they are being compared
+    /// against no longer exists to be measured separately — reproducing it as arithmetic over the same
+    /// three terms is the honest form of a before/after when the "before" has been deleted.
+    ///
+    /// ## MEASURED on the owner's iPad 9th gen, Release, 2026-09-02, iOS 26.5.2 — the numbers to read
+    ///
+    /// These are device figures rather than this file's usual simulator ones, taken from a full
+    /// `PerfBaselineTests` run on the hardware (51 passed, 2 skipped) at the owner's 2048x1024 canvas
+    /// with six layers on the CoreGraphics backend:
+    ///
+    /// - **`snapshotCold = 36.3 ms`** (`testHowASandwichRebuildSplitsBetweenFullAndTheTwoHalvesAtTheOwnersCanvas`)
+    ///   — the main-thread flatten, against a 41.6 ms frame budget. **87% of a frame, on the main
+    ///   thread, at pen-up.** That is the freeze, measured; it is what `resolve()` moving to
+    ///   `sandwichQueue` removes. `snapshotWarm` is 0.2 ms, so the cost is entirely the cels the edit
+    ///   made cold.
+    /// - **`firstRender = 70.3 ms`, `cachedRender = 0.0 ms`** (`testVectorLayerRenderCostAndMemory`,
+    ///   20 strokes at 2048²) — the committed re-render, and the reason the memo sharing in
+    ///   `VectorCanvas.Frozen` is load-bearing rather than tidy: a `LeafSnapshot` that re-stamped from
+    ///   frozen elements instead of reusing `cachedImage` would turn that 0.0 ms into a second 70.3 ms,
+    ///   on a cel with twenty strokes in it. A real cel has far more.
+    /// - The three composites are 19.7 + 9.2 + 6.1 = **35.0 ms** and were already off-main; they are
+    ///   not this stage's business and are recorded so the ratio is readable.
+    ///
+    /// **A correction this test's own fixture makes visible.** The same device run measured the
+    /// snapshot fan-out at **serial 22.0 ms against parallel 15.6 ms — 1.41x on six processors**,
+    /// where PERFORMANCE.md item 9(b) records 78.2 → ~22 ms in the simulator and reads as ~3.5x. The
+    /// A13 is two performance cores and four efficiency ones, not six equal ones, so
+    /// `activeProcessorCount` is not the speedup. The consequence for this stage is the opposite of
+    /// discouraging: spreading the flatten over cores buys much less on the target device than the
+    /// docs imply, which makes moving it off the main thread entirely worth *more*, not less.
+    ///
+    /// The numbers this test prints are simulator, Debug figures and are for the **ratio** between
+    /// the three terms. Read the device figures above for magnitude.
+    @MainActor
+    func testWhatPenUpCostsOnTheMainThread() {
+        Compositor.backend = .coreGraphics
+        let manager = compositorManager(layerCount: 5, canvasSize: Self.ownersCanvasSize)
+        manager.addVectorLayer(name: "Ink")
+        let vectorIndex = manager.layers.count - 1
+        guard let canvas = manager.layers[vectorIndex].cels[0].vector else {
+            return XCTFail("The vector layer must have a tier")
+        }
+        manager.currentLayerIndex = vectorIndex
+
+        /// One stroke's worth of geometry, offset so the cel accumulates real overlapping ink rather
+        /// than the same line forty times.
+        func stroke(_ index: Int) -> VectorStroke {
+            VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                         color: CodableColor(red: 0, green: 0.2, blue: 0.8, alpha: 1),
+                         size: 14, opacity: 1,
+                         samples: stride(from: CGFloat(0), through: 1600, by: 40).map {
+                             VectorSample(x: 200 + $0,
+                                          y: 500 + 300 * sin(($0 + CGFloat(index) * 60) / 240),
+                                          pressure: 1)
+                         })
+        }
+        for index in 0..<40 { canvas.addStroke(stroke(index)) }
+
+        // The canvas at rest: the display has rendered the cel and the composite has flattened every
+        // leaf, which is the state the artist's pencil comes down on.
+        _ = canvas.render()
+        _ = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: vectorIndex)?.resolve()
+
+        // Pen-up. One stroke commits into the display list, which drops the cel's memoized render and
+        // moves its `LayerContentVersion` — so this cel is cold and the other five are warm, which is
+        // exactly the memo state a real lift produces and is why this is not measured from cold.
+        canvas.addStroke(stroke(40))
+
+        let committedRender = measuringPeakMemory { _ = canvas.render() }
+        var recipe: SandwichRecipe?
+        let mint = measuringPeakMemory {
+            recipe = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: vectorIndex)
+        }
+        guard let recipe else { return XCTFail("Six leaves must cut at the vector layer") }
+        let resolve = measuringPeakMemory { _ = recipe.resolve() }
+
+        let before = committedRender.seconds + mint.seconds + resolve.seconds
+        report("pen-up main-thread cost, 6 layers at 2048x1024 (CoreGraphics, simulator/Debug)", [
+            ("committedRender", milliseconds(committedRender.seconds)),
+            ("mint", milliseconds(mint.seconds)),
+            ("resolve", milliseconds(resolve.seconds)),
+            ("mainThreadBefore", milliseconds(before)),
+            ("mainThreadAfter", milliseconds(mint.seconds)),
+            ("removedShare", String(format: "%.3f", before > 0 ? 1 - mint.seconds / before : 0)),
+            ("leaves", "\(recipe.leaves.count)"),
+            ("compositeSize", "\(recipe.canvasSize)"),
+        ])
+
+        // **Structure, not timing** — this file's house rule. What is asserted is that the two terms
+        // that left the main thread are the large ones and the one that stayed is not, which is a
+        // claim about the design; the milliseconds are the machine's business.
+        XCTAssertLessThan(mint.seconds, before / 2,
+                          "Minting is O(layers) with no pixel in it, so it cannot be half of what pen-up used to cost — if it is, something canvas-sized has crept back into `leafSnapshots`")
+        XCTAssertEqual(recipe.leaves.count, manager.layers.count)
+        XCTAssertEqual(recipe.canvasSize, Self.ownersCanvasSize,
+                       "Nothing should have reduced a six-layer composite at this size")
+
+        // And the sharing, counted rather than timed: the composite resolved the cel the display had
+        // just rendered, so the whole pen-up produced **one** canvas-sized vector rasterize between
+        // the two paths. Two would be this stage turned into a pessimisation.
+        let rasterizations = canvas.rasterizations
+        _ = manager.makeSandwichRecipe(atFrame: 0, activeLayerIndex: vectorIndex)?.resolve()
+        XCTAssertEqual(canvas.rasterizations, rasterizations,
+                       "A second recipe over an unchanged cel must rasterize nothing at all")
     }
 }

@@ -64,6 +64,25 @@ struct LayerRenderSource {
 
 extension LayerRenderSource {
 
+    /// A `PaletteColor` already collapsed to numbers — what a value layer contributes, resolved.
+    ///
+    /// **It is a separate type because the resolution and the memset run in different places now.**
+    /// `Color.rgbaComponents` goes through `UIColor(_:).resolvedColor(with:)` and a
+    /// `UITraitCollection`, which is the one read on this whole path whose thread-safety no doc
+    /// comment in this codebase establishes; `renderSources` kept the value layer in its main-actor
+    /// pass for exactly that reason. Filling a canvas-sized buffer with four known numbers needs no
+    /// such argument, and it is the half that is proportional to canvas area. So the resolve stays on
+    /// the main actor at mint time (`LeafSnapshot.Content.solid`) and the fill moves with everything
+    /// else.
+    struct SolidColor: Hashable {
+        let r: Double, g: Double, b: Double, a: Double
+
+        init(_ color: PaletteColor) {
+            let c = color.color.rgbaComponents
+            (r, g, b, a) = (c.r, c.g, c.b, c.a)
+        }
+    }
+
     /// One flat colour across the whole canvas — §4.5's value layer, resolved into a source the
     /// compositor cannot tell apart from a layer somebody painted flat.
     ///
@@ -81,11 +100,11 @@ extension LayerRenderSource {
     ///
     /// Returns nil only for a degenerate canvas size, which is the answer the guard in
     /// `makeRenderRequest` already gives for the same input.
-    static func solid(_ color: PaletteColor, canvasSize: CGSize) -> CGImage? {
+    static func solid(_ color: SolidColor, canvasSize: CGSize) -> CGImage? {
         let width = Int(canvasSize.width.rounded()), height = Int(canvasSize.height.rounded())
         guard width > 0, height > 0 else { return nil }
 
-        let c = color.color.rgbaComponents
+        let c = color
         func byte(_ value: Double) -> UInt8 {
             UInt8((min(max(value, 0), 1) * 255).rounded(.toNearestOrEven))
         }
@@ -130,7 +149,7 @@ extension LayerRenderSource {
 /// no existing key moved when either field arrived.
 ///
 /// **`effect` is here even though it is elided from `sources`, and that pairing is the whole point.**
-/// `renderSources` renders no pixels for a grading layer (it has none) but still records a version for
+/// `leafSnapshots` records no pixels for a grading layer (it has none) but still records a version for
 /// it, because "what does this leaf contribute" and "what does this leaf draw" stopped being the same
 /// question when §4.4's wrapper became a mode of an ordinary layer. See that function.
 ///
@@ -201,7 +220,7 @@ struct LayerContentVersion: Hashable {
 /// pixels there are. An artist choosing between them is choosing between "slightly different mark"
 /// and "same picture, softer", which are not the same trade and should not share a control.
 ///
-/// **It reaches only `makeSandwichRequests`, and that containment is the whole safety argument.**
+/// **It reaches only `makeSandwichRecipe`, and that containment is the whole safety argument.**
 /// Everything else that composites goes through `makeRenderRequest` and is untouched: the project
 /// thumbnail, the saved package, `MaskResolver`'s source stacks. So this setting cannot degrade
 /// anything that is written to disk or looked at later — the only thing it can make smaller is the
@@ -333,7 +352,7 @@ struct RenderRequest {
     /// work nothing reads.
     ///
     /// **Phase 6 made that elision narrower, exactly as this note predicted.** §6.6 is that a mask
-    /// ignores its source's visibility — a hidden layer still masks — so `renderSources` now
+    /// ignores its source's visibility — a hidden layer still masks — so `leafSnapshots` now
     /// snapshots a hidden layer that is somebody's mask source. The nil case is unchanged and still
     /// means "contributes nothing at this frame".
     let sources: [LayerRenderSource?]
@@ -344,7 +363,7 @@ struct RenderRequest {
     /// Nil where the leaf contributes nothing at this frame — no block covering it, or hidden and not
     /// read for its alpha. **Not** nil merely because `sources` is, which is what this used to say:
     /// a grading leaf (§4.4) holds no pixels and still has content, so it carries a version while its
-    /// source stays nil. See `renderSources`, which argues the split.
+    /// source stays nil. See `leafSnapshots`, which argues the split.
     let contentVersions: [LayerContentVersion?]
 
     /// The stack each mask source resolves to (§6.2), keyed by source.
@@ -450,7 +469,7 @@ struct SandwichRequests {
 /// What `SandwichRequests.full` depends on — which is everything `CanvasView.SandwichKey` carries
 /// **except** `activeLayerIndex`.
 ///
-/// **The claim this type makes, and it is checkable by reading `makeSandwichRequests`.** All three
+/// **The claim this type makes, and it is checkable by reading `makeSandwichRecipe`.** All three
 /// requests are built over one snapshot; `activeLayerIndex` is used in exactly one place, the
 /// `tree.split(atLeaf:)` that produces `below` and `above`. `full` is `request(tree)` — the whole
 /// tree, uncut. So switching the active layer changes *where the tree is cut* and nothing about the
@@ -516,7 +535,7 @@ enum RenderSizing {
     /// deep stack and those tests compare down the byte.
     case native
 
-    /// Exactly what `makeSandwichRequests` composites the live canvas at.
+    /// Exactly what `makeSandwichRecipe` composites the live canvas at.
     ///
     /// **The live mask resolve must ask for this and not `.native`.** `MaskResolver.CacheKey` carries
     /// width and height and so does `PixelOps.RasterizeKey`, so a mask resolved at a different size is
@@ -530,7 +549,7 @@ enum RenderSizing {
     /// **Why this exists.** The project thumbnail composited the entire canvas to make a 320×320
     /// gallery tile: 2,097,152 pixels rendered to fill 51,200 at the owner's 2048×1024, and 16.8M at
     /// 4096². That is main-actor work inside every save, and until the scene-phase gate landed it was
-    /// three of them per app switch. `makeSandwichRequests` has had the machinery to render smaller
+    /// three of them per app switch. `makeSandwichRecipe` has had the machinery to render smaller
     /// since the live preview grew a resolution setting; this is that pattern at a second call site.
     ///
     /// A box rather than a size: `RenderRequest.renderSize(fitting:within:)` fits the canvas's aspect
@@ -560,7 +579,7 @@ extension CanvasManager {
 
     /// What `CompositorBudget` sizes a composite against: the walk's peak plus the leaves the upload
     /// cache would hold, capped at four. Both halves of that are argued at the call site in
-    /// `makeSandwichRequests`; it is a function here so the two sizing paths cannot count differently.
+    /// `makeSandwichRecipe`; it is a function here so the two sizing paths cannot count differently.
     static func budgetTextures(of tree: [RenderNode]) -> Int {
         tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
     }
@@ -577,19 +596,21 @@ extension CanvasManager {
         makeRenderRequest(atFrame: frame, includeBackground: false, sizing: .liveComposite)
     }
 
-    /// Captures the current stack at `frame` as a `RenderRequest`.
+    /// Captures the current stack at `frame` as a `FrameRecipe` — everything the model has to be
+    /// asked for, and no pixel.
     ///
     /// `@MainActor` for the same reason `ProjectStore.SaveSnapshot.init` is (ProjectStore.swift:185):
-    /// this is the half that reads published state and renders, and it is deliberately the *only*
-    /// half that may. Everything downstream of the value it returns is pure.
+    /// this is the half that reads published state, and it is deliberately the *only* half that may.
+    /// Everything downstream of the value it returns is pure — which as of RENDER.md stage 2 means
+    /// "runs on whatever queue the caller likes" rather than merely "reads no `@Published`".
     ///
     /// `sizing` picks the buffer — see `RenderSizing`, which carries the argument for each of the
     /// three. `.native` is the default and what every parity test and the eyedropper take.
     @MainActor
-    func makeRenderRequest(atFrame frame: Int,
-                           quality: RenderQuality = .full,
-                           includeBackground: Bool,
-                           sizing: RenderSizing = .native) -> RenderRequest? {
+    func makeFrameRecipe(atFrame frame: Int,
+                         quality: RenderQuality = .full,
+                         includeBackground: Bool,
+                         sizing: RenderSizing = .native) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
         let tree = renderTree(atFrame: frame)
@@ -606,12 +627,10 @@ extension CanvasManager {
         }
 
         let maskStacks = maskSourceStacks(of: tree)
-        let snapshot = renderSources(atFrame: frame, canvasSize: renderSize, quality: quality,
-                                     alsoIncluding: maskedLayerIndices(in: maskStacks))
-        return RenderRequest(
+        return FrameRecipe(
             tree: tree,
-            sources: snapshot.sources,
-            contentVersions: snapshot.versions,
+            leaves: leafSnapshots(atFrame: frame, quality: quality,
+                                  alsoIncluding: maskedLayerIndices(in: maskStacks)),
             maskStacks: maskStacks,
             frame: frame,
             canvasSize: renderSize,
@@ -620,10 +639,26 @@ extension CanvasManager {
         )
     }
 
+    /// The same stack, resolved to pixels here and now.
+    ///
+    /// **Its callers are legitimately synchronous and are not the path stage 2 supersedes**: the
+    /// eyedropper answers "what colour is *that* pixel" for a tap that has already happened, the
+    /// project thumbnail is inside a save, and the parity suites compare byte arrays. None of them is
+    /// on the stroke path, and none of them has anywhere to put a suspension. What did move is the
+    /// live canvas, which no longer comes through here at all — see `makeSandwichRecipe`.
+    @MainActor
+    func makeRenderRequest(atFrame frame: Int,
+                           quality: RenderQuality = .full,
+                           includeBackground: Bool,
+                           sizing: RenderSizing = .native) -> RenderRequest? {
+        makeFrameRecipe(atFrame: frame, quality: quality,
+                        includeBackground: includeBackground, sizing: sizing)?.resolve()
+    }
+
     /// The paper as a request carries it, or nil when the artist has turned it off.
     ///
     /// One builder for every caller, which is the point: `makeRenderRequest` and
-    /// `makeSandwichRequests` both need it, and the padding arithmetic is exactly the kind of thing
+    /// `makeSandwichRecipe` both need it, and the padding arithmetic is exactly the kind of thing
     /// that is written twice and then drifts. `renderedInto` is the request's own buffer size, which
     /// may be smaller than the canvas (`RenderResolution`, `CompositorBudget`, the thumbnail's
     /// bounding box), so the inset is scaled with it rather than applied in canvas pixels.
@@ -669,14 +704,21 @@ extension CanvasManager {
         return RenderBackground(color: PixelOps.uiColor(from: canvasBackgroundColor), rect: rect)
     }
 
-    /// The three requests §5.2's sandwich needs, or nil when there is no canvas to composite into or
-    /// `activeLayerIndex` is not a leaf of the tree (`Array<RenderNode>.split(atLeaf:)`).
+    /// The recipe §5.2's sandwich is assembled from, or nil when there is no canvas to composite
+    /// into or `activeLayerIndex` is not a leaf of the tree (`Array<RenderNode>.split(atLeaf:)`).
     ///
-    /// **All three share one `sources` array, and that sharing is the reason this is one call rather
-    /// than three.** `sources` is indexed by `layers` index rather than by position in a tree, so the
-    /// same array answers all three walks unchanged, and `PixelOps.rasterize` is memoized on cel
-    /// version — so the snapshot, which §11 measured at 276 ms against an 84 ms composite and is
-    /// therefore the expensive half, is paid once for the three instead of three times.
+    /// **There is no synchronous spelling of this and that is deliberate.** `CanvasView` mints here
+    /// and resolves inside `sandwichQueue.async`; a wrapper that did both on the main actor would be
+    /// test-only API for a path the app no longer takes, which RENDER.md §2.15 calls a peculiarity.
+    /// A test that wants the pixels says `makeSandwichRecipe(…)?.resolve()`, which is what the app
+    /// does with a queue hop in the middle.
+    ///
+    /// **All three requests share one `leaves` array, and that sharing is the reason this is one
+    /// call rather than three.** A leaf is indexed by `layers` index rather than by position in a
+    /// tree, so the same array answers all three walks unchanged, and `PixelOps.rasterize` is
+    /// memoized on cel version — so the flatten, which §11 measured at 276 ms against an 84 ms
+    /// composite and is therefore the expensive half, is paid once for the three instead of three
+    /// times.
     ///
     /// **The paper goes into `full` and `below`, and `above` keeps `background: nil`.**
     /// EFFECT_BACKDROP.md §6 step 3, which is the fix for BUGS.md's *"Every effect and blend mode is
@@ -697,9 +739,9 @@ extension CanvasManager {
     /// rather than on the sandwich merely being engaged (there is a window between the two: see the
     /// "do not blank the hosts until the first composite has landed" trap in `updateSandwich`).
     @MainActor
-    func makeSandwichRequests(atFrame frame: Int,
-                              activeLayerIndex: Int,
-                              quality: RenderQuality = .full) -> SandwichRequests? {
+    func makeSandwichRecipe(atFrame frame: Int,
+                            activeLayerIndex: Int,
+                            quality: RenderQuality = .full) -> SandwichRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
         let tree = renderTree(atFrame: frame)
         guard let halves = tree.split(atLeaf: activeLayerIndex) else { return nil }
@@ -713,12 +755,12 @@ extension CanvasManager {
         // **One size for all three halves, and it is forced rather than chosen.** The tempting design
         // is to render `full` natively and only reduce `below`/`above` — the artist would then see a
         // sharp picture at rest and a soft one only while a stroke is down, which is strictly the
-        // nicer behaviour. It is not available here: the three requests share one `sources` array, and
+        // nicer behaviour. It is not available here: the three requests share one `leaves` array, and
         // that sharing is the reason this is one call instead of three (see this function's note — the
-        // snapshot is the expensive half at 276 ms against an 84 ms composite). Two sizes means two
-        // snapshots, which costs more than the reduced composites save. So a reduced setting is soft
-        // at rest as well as mid-stroke, and making it otherwise is a change to how snapshots are
-        // taken rather than a change to this line.
+        // flatten is the expensive half at 276 ms against an 84 ms composite). Two sizes means two
+        // flattens, which costs more than the reduced composites save. So a reduced setting is soft
+        // at rest as well as mid-stroke, and making it otherwise is a change to how the leaves are
+        // frozen rather than a change to this line.
         //
         // **And then capped by what this device can actually hold, which is the other half.** The
         // artist's setting is a preference; `CompositorBudget.affordableSize` is a limit, and the two
@@ -763,20 +805,15 @@ extension CanvasManager {
 
         // From the *whole* tree, not from either half — see `RenderRequest.maskStacks`.
         let maskStacks = maskSourceStacks(of: tree)
-        let snapshot = renderSources(atFrame: frame, canvasSize: renderSize, quality: quality,
-                                     alsoIncluding: maskedLayerIndices(in: maskStacks))
-        func request(_ tree: [RenderNode], background: RenderBackground?) -> RenderRequest {
-            RenderRequest(tree: tree, sources: snapshot.sources, contentVersions: snapshot.versions,
-                          maskStacks: maskStacks, frame: frame, canvasSize: renderSize,
-                          background: background, quality: quality)
-        }
-        let paper = canvasBackground(renderedInto: renderSize)
-        return SandwichRequests(full: request(tree, background: paper),
-                                below: request(halves.below, background: paper),
-                                above: request(halves.above, background: nil))
+        return SandwichRecipe(
+            tree: tree, below: halves.below, above: halves.above,
+            leaves: leafSnapshots(atFrame: frame, quality: quality,
+                                  alsoIncluding: maskedLayerIndices(in: maskStacks)),
+            maskStacks: maskStacks, frame: frame, canvasSize: renderSize,
+            paper: canvasBackground(renderedInto: renderSize), quality: quality)
     }
 
-    /// **Whether the live canvas shows `makeSandwichRequests`' composite or Core Animation's flat row
+    /// **Whether the live canvas shows `makeSandwichRecipe`' composite or Core Animation's flat row
     /// of layer hosts** — §5.2's engagement predicate, and the containment for the whole compositor
     /// phase.
     ///
@@ -819,7 +856,7 @@ extension CanvasManager {
     /// effects and masks fall back to Core Animation for that frame"*, and an effect parameter
     /// animated near an interpolated cel was authored against a path where effects are off.
     ///
-    /// `renderSources` hands every flatten its `DerivedCelContent` now (VECTOR_INTERPOLATION item 18),
+    /// `leafSnapshots` hands every flatten its `DerivedCelContent` now (VECTOR_INTERPOLATION item 18),
     /// so the composite contains in-betweens and the clause has nothing left to protect. **Removing
     /// it was not free, and the part that was not free is not in this function**: `SandwichKey`'s
     /// content versions have to carry the derivation too, or the canvas engages on an in-between and
@@ -873,13 +910,13 @@ extension CanvasManager {
     /// One layer's `LayerContentVersion` at `frame`, resolving its derivation — what
     /// `CanvasView.makeSandwichKey` keys the live composite on.
     ///
-    /// **It exists so that there is one field list rather than two.** `renderSources` builds this
+    /// **It exists so that there is one field list rather than two.** `leafSnapshots` builds this
     /// value too, and `SandwichKey` is documented as its mirror; a mirror that is short a field is
     /// exactly the failure KEYFRAMES §4.5 calls invisible, because `SandwichKey` also compares the
     /// whole node tree and so rebuilds dutifully from a stale leaf. Both callers now go through
     /// `Self.contentVersion(of:celIndex:atFrame:derived:)`, so a field can only be added to both.
     ///
-    /// The two differ in exactly one thing and it is not a field: `renderSources` has already resolved
+    /// The two differ in exactly one thing and it is not a field: `leafSnapshots` has already resolved
     /// a `DerivedCelContent` for its own pass 2 and passes it in, while this resolves one and keeps
     /// only the identity. That costs a derivation resolve per layer per pass — a nil optional test for
     /// every cel that stores what it shows, which is every cel in a document using neither animation
@@ -894,7 +931,7 @@ extension CanvasManager {
     }
 
     /// The field list itself, over a `Layer` the caller already holds. Static and value-only so that
-    /// `renderSources`' pass 1 — which carries `Layer` by value precisely so pass 2 reads nothing off
+    /// `leafSnapshots` — which reads a `Layer` by value precisely so nothing downstream reads off
     /// `self` — can use it without reaching back into the document.
     static func contentVersion(of layer: Layer, celIndex: Int, atFrame frame: Int,
                                derived: DerivedCelContent?) -> LayerContentVersion {
@@ -904,50 +941,45 @@ extension CanvasManager {
                             derived: derived?.identity)
     }
 
-    /// One resolved image per `layers` index, and its content version, or nil where a layer
-    /// contributes nothing at this frame.
+    /// One `LeafSnapshot` per `layers` index, or nil where a layer contributes nothing at this
+    /// frame — **`FrameRecipe`'s pass 1**, and the last main-actor read on the whole render path.
     ///
-    /// Factored out of `makeRenderRequest` rather than copied into `makeSandwichRequests`, because a
+    /// Factored out of `makeRenderRequest` rather than copied into `makeSandwichRecipe`, because a
     /// second copy of the elision rule is a second thing to update — which phase 6 proved by
     /// changing it: `alsoIncluding` is §6.6's "a mask ignores its source's visibility", and a hidden
     /// layer that clips something has to be rasterized after all.
     ///
-    /// **Two passes as of PERFORMANCE.md item 9(b), and the split is the whole change.** Pass 1 asks
-    /// the model which layers contribute and from which cel — `@Published` reads, no pixels. Pass 2
-    /// rasterizes the survivors across every core via `PixelOps.parallelMap`, because two different
-    /// cels share no mutable state and this was the largest main-thread term on a playback tick:
-    /// **78.2 ms** for six layers at 2048×1024, memo-cold, against 22.2 ms for all three composites of
-    /// the rebuild put together. It is **~22 ms** now, so the snapshot and the composites are the same
-    /// size and neither dominates (both MEASURED 2026-08-20 — item 4b carries the before/after table
-    /// and the three unchanged composites that calibrate the two runs against each other).
+    /// **This used to be half of a function called `renderSources`, and the other half is now
+    /// `FrameRecipe.resolveSources`.** That function had been two passes since PERFORMANCE.md item
+    /// 9(b) — pass 1 asks the model which layers contribute and from which cel (`@Published` reads,
+    /// no pixels); pass 2 rasterizes the survivors across every core — and RENDER.md §3.2 cuts
+    /// exactly there. The fan-out was worth **78.2 ms → ~22 ms** for six layers at 2048×1024,
+    /// memo-cold, on a playback tick (both MEASURED 2026-08-20; PERFORMANCE.md item 4b carries the
+    /// table and the three unchanged composites that calibrate the two runs). What is left here is
+    /// O(layers) of array and dictionary work with no pixel in it.
     ///
-    /// **It is still on the main actor, and that is deliberate rather than unfinished.** The snapshot
-    /// being synchronous is what makes it *atomic* with respect to the artist's own edits: nothing can
-    /// stamp a dab into one of these textures between the first layer being read and the last.
-    /// Suspending in the middle would buy a free main thread at the price of a torn frame — some
-    /// layers pre-stroke, some post — on the most latency-sensitive path in the app. Spreading the
-    /// same work over cores shortens the block without opening that window at all.
+    /// **The argument that kept pass 2 on the main actor, and why it does not survive the cut.** It
+    /// was that the snapshot being synchronous is what makes it *atomic* with respect to the artist's
+    /// own edits: nothing can stamp a dab into one of these textures between the first layer being
+    /// read and the last. That is true, and it is an argument for the **synchrony** rather than for
+    /// the actor — the atomicity comes from nothing else running in between, not from which thread is
+    /// running. Freezing each leaf's values here buys the same guarantee without it: a
+    /// `PixelOps.FrozenCel` is what the cel was at this instant, and the artist's next dab reaches
+    /// the live tiers rather than the frozen ones. See `FrameRecipe`, and `PixelOps.FrozenCel`, where
+    /// the freeze is.
     ///
-    /// **A value layer stays in pass 1**, where its `resolvedColor(atFrame:)` runs on the main actor.
-    /// It is a memset rather than a rasterize, so there is nothing to parallelise, and resolving a
-    /// `Color` is the one thing here whose thread-safety is not already established by somebody else's
-    /// doc comment.
+    /// **A value layer's colour is resolved here** — `resolvedColor(atFrame:)` and then
+    /// `LayerRenderSource.SolidColor`, which is where that type's own note argues why the resolve
+    /// stays on the main actor and the canvas-sized fill does not.
     @MainActor
-    private func renderSources(atFrame frame: Int, canvasSize: CGSize, quality: RenderQuality,
-                               alsoIncluding maskSourceLayers: Set<Int> = [])
-    -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
-        var sources = [LayerRenderSource?](repeating: nil, count: layers.count)
-        var versions = [LayerContentVersion?](repeating: nil, count: layers.count)
-        // Layers that need a cel flattened, and which cel. Carries the `Layer` by value: it is a
-        // struct, so this is a copy of the metadata and a retain of the texture objects, and pass 2
-        // therefore reads nothing off `self`.
-        //
-        // **`derived` is resolved here, in pass 1, and that placement is load-bearing.** Resolving a
-        // `CelContentProvider` reads the document (`layers`, the guide registry, the mode flags) and
-        // pass 2 runs on `PixelOps.parallelMap`'s worker threads — the same rule the tuple's own note
-        // above states, extended to the seam. What crosses into pass 2 is a `DerivedCelContent` whose
-        // closure captures only values.
-        var rasterJobs: [(index: Int, layer: Layer, celIndex: Int, derived: DerivedCelContent?)] = []
+    private func leafSnapshots(atFrame frame: Int, quality: RenderQuality,
+                               alsoIncluding maskSourceLayers: Set<Int> = []) -> [LeafSnapshot?] {
+        var leaves = [LeafSnapshot?](repeating: nil, count: layers.count)
+        // **`derived` is resolved here rather than in `resolve()`, and that placement is
+        // load-bearing.** Resolving a `CelContentProvider` reads the document (`layers`, the guide
+        // registry, the mode flags) and `resolve()` runs on a background queue and on
+        // `PixelOps.parallelMap`'s workers. What crosses the seam is a `DerivedCelContent` whose
+        // closure captures only values — its own doc comment states that contract.
         let provider = celContentProvider(atFrame: frame)
         for index in layers.indices {
             let layer = layers[index]
@@ -998,9 +1030,12 @@ extension CanvasManager {
                   let celIndex = activeCelIndex(inLayer: index, atFrame: frame)
             else { continue }
             let derived = provider.content(for: layer.cels[celIndex])
-            versions[index] = Self.contentVersion(of: layer, celIndex: celIndex, atFrame: frame,
-                                                  derived: derived)
-            guard layer.layerEffect(atFrame: frame) == nil else { continue }
+            let version = Self.contentVersion(of: layer, celIndex: celIndex, atFrame: frame,
+                                              derived: derived)
+            guard layer.layerEffect(atFrame: frame) == nil else {
+                leaves[index] = LeafSnapshot(version: version, content: nil)
+                continue
+            }
 
             // **§4.5's value layer, resolved here, and this line's *placement* is the one
             // architectural decision that feature exists to get right.** This function already takes
@@ -1024,26 +1059,16 @@ extension CanvasManager {
             // layer's block at frame *n* removes its colour at *n*, which is what every other layer
             // does and what the timeline shows.
             if let fill = layer.valueFill {
-                if let image = LayerRenderSource.solid(fill.resolvedColor(atFrame: frame), canvasSize: canvasSize) {
-                    sources[index] = LayerRenderSource(image: image)
-                }
+                let colour = LayerRenderSource.SolidColor(fill.resolvedColor(atFrame: frame))
+                leaves[index] = LeafSnapshot(version: version, content: .solid(colour))
                 continue
             }
-            rasterJobs.append((index, layer, celIndex, derived))
+            leaves[index] = LeafSnapshot(
+                version: version,
+                content: .cel(PixelOps.FrozenCel(cel: layer.cels[celIndex], derived: derived,
+                                                 quality: quality)))
         }
-
-        // Pass 2. `parallelMap` returns in index order and runs inline below two jobs, so a one- or
-        // two-layer document behaves exactly as it did before this split.
-        let images = PixelOps.parallelMap(rasterJobs.count) { job in
-            PixelOps.rasterize(cel: rasterJobs[job].layer.cels[rasterJobs[job].celIndex],
-                               canvasSize: canvasSize, quality: quality,
-                               derived: rasterJobs[job].derived).cgImage
-        }
-        for (job, image) in zip(rasterJobs, images) {
-            guard let image else { continue }
-            sources[job.index] = LayerRenderSource(image: image)
-        }
-        return (sources, versions)
+        return leaves
     }
 
     // MARK: - Mask sources (§6.2)

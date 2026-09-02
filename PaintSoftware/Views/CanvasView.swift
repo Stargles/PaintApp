@@ -857,7 +857,7 @@ struct CanvasView: UIViewRepresentable {
                 // "this host paints no colour" and "the compositor is on" are one condition read
                 // twice, and `EffectLayerLogicTests` pins both halves.
                 //
-                // Resolved at `currentFrame` for `renderSources`' reason: the frame is the argument a
+                // Resolved at `currentFrame` for `leafSnapshots`' reason: the frame is the argument a
                 // later keyframe phase needs, and reading it here too keeps the live canvas and the
                 // composite asking the same question. Gated on `celIdx` for the same reason the
                 // snapshot is — a layer with no block at this frame contributes nothing at it.
@@ -980,7 +980,7 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// **The predicate itself is `CanvasManager.sandwichEngagesOnCanvas(tree:)`** — every input to
         /// it is document state, and a `UIViewRepresentable` coordinator cannot be driven headlessly,
-        /// so it lives beside `makeSandwichRequests` where `SandwichLogicTests` can reach it. That is
+        /// so it lives beside `makeSandwichRecipe` where `SandwichLogicTests` can reach it. That is
         /// also where its clauses, and the 2026-08-29 removal of the in-between one, are written down.
         /// Nothing but the call is left here.
         ///
@@ -1326,13 +1326,13 @@ struct CanvasView: UIViewRepresentable {
         /// **`RenderSizing.liveComposite` is the other half of that claim, and without it the
         /// sentence above was true only at Full on a device where `affordableSize` is inert.**
         /// `MaskResolver.CacheKey` carries width and height, so a native-size resolve here and a
-        /// clamped one in `makeSandwichRequests` are two entries — two `ResolvedMask`s over two
+        /// clamped one in `makeSandwichRecipe` are two entries — two `ResolvedMask`s over two
         /// disjoint sets of canvas-sized `PixelOps.rasterize` flattens, evicting each other inside one
         /// budget, on exactly the documents that have masks to resolve.
         ///
         /// It is also cheap despite building a whole request, because `PixelOps.rasterize` is
         /// memoized on cel identity *and size* and the rebuild has just walked the same cels at the
-        /// same size. `includeBackground` is false to match what `makeSandwichRequests` passes, though
+        /// same size. `includeBackground` is false to match what `makeSandwichRecipe` passes, though
         /// nothing downstream reads it — `MaskResolver` composites each source stack onto transparency
         /// regardless.
         private func resolveLiveMask(forLayerAt index: Int) -> CGImage? {
@@ -1365,7 +1365,7 @@ struct CanvasView: UIViewRepresentable {
         /// plus a quality. This one still enumerates by hand, because a composite's inputs are the
         /// tree and the document rather than one derivation; what it does not enumerate by hand any
         /// more is `contents`, which comes from `CanvasManager.contentVersion(ofLayer:atFrame:)` so
-        /// that it and `renderSources` cannot be short different fields. The derived tree carries every
+        /// that it and `leafSnapshots` cannot be short different fields. The derived tree carries every
         /// structural and group property already (`[RenderNode]` is `Equatable`), so it is most of
         /// the key on its own; the frame and the per-layer content versions are what it does not
         /// carry, and the active index is what decides *where the tree is cut*.
@@ -1450,7 +1450,7 @@ struct CanvasView: UIViewRepresentable {
                 // rebuilds dutifully from a stale leaf (KEYFRAMES §4.5).
                 //
                 // The answer is not a fourth argument here but **one builder** —
-                // `CanvasManager.contentVersion(ofLayer:atFrame:)`, which `renderSources` also goes
+                // `CanvasManager.contentVersion(ofLayer:atFrame:)`, which `leafSnapshots` also goes
                 // through. `SandwichKey` is documented as that function's mirror; sharing the field
                 // list is what makes the claim structural rather than a promise two files keep by
                 // hand. It resolves at `frame` for the same reason: a mirror that asks a different
@@ -1470,9 +1470,11 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: Rebuilding
 
-        /// Serialises the composite half of every rebuild off the main thread. `RenderRequest` is a
-        /// pure value — §9.1 point 3 designed it to be exactly this — so the only main-thread work is
-        /// the snapshot `makeSandwichRequests` takes and the assignment on the way back.
+        /// Serialises the **whole** of every rebuild off the main thread — since RENDER.md stage 2
+        /// that includes resolving the recipe's pixels, not only compositing them. `RenderRequest` is
+        /// a pure value (§9.1 point 3 designed it to be exactly this) and `SandwichRecipe` is the
+        /// instruction for building one, so the only main-thread work left is minting the recipe —
+        /// O(layers), no pixel — and the assignment on the way back.
         private static let sandwichQueue = DispatchQueue(label: "com.paintapp.CanvasView.sandwich",
                                                          qos: .userInitiated)
 
@@ -1501,20 +1503,26 @@ struct CanvasView: UIViewRepresentable {
             // path when nothing is cached yet. Both windows are one SwiftUI pass long in practice:
             // the index is only out of range between a delete and the reselect that follows it, and
             // the next pass schedules the rebuild this one declined.
-            guard let requests = canvasManager.makeSandwichRequests(atFrame: canvasManager.currentFrame,
-                                                                    activeLayerIndex: canvasManager.currentLayerIndex)
+            guard let recipe = canvasManager.makeSandwichRecipe(atFrame: canvasManager.currentFrame,
+                                                                activeLayerIndex: canvasManager.currentLayerIndex)
             else { return }
 
             // **Reuse `full` when only the cut moved.** A layer tap changes `activeLayerIndex` and
             // nothing else, so `SandwichFullKey` does not move and the picture `full` would
             // composite is the one already on screen — see that type for why that is a property of
-            // `makeSandwichRequests` rather than a hope. Carried into the closure as a value, so the
+            // `makeSandwichRecipe` rather than a hope. Carried into the closure as a value, so the
             // background queue reads no main-actor state.
             let wantedFullKey = fullKey(from: key)
             let reusableFull = (sandwichFullKey == wantedFullKey) ? sandwichImages?.full : nil
 
             isSandwichRebuilding = true
             Self.sandwichQueue.async { [weak self] in
+                // **The flatten happens here now, not on the main actor before the hop** — RENDER.md
+                // §3.2. `resolve()` is pure over the values `makeSandwichRecipe` froze, so an edit
+                // the artist makes while this runs reaches the live tiers and not these; the picture
+                // that lands is the one the recipe named, which is at worst one edit stale and is
+                // exactly what `finishSandwichRebuild`'s key check already tolerates.
+                let requests = recipe.resolve()
                 // `Compositor.composite` is skipped entirely rather than called and discarded: the
                 // count is the measurement (`CompositeProbe`), and a call that happens is a call that
                 // costs whatever the document makes it cost.

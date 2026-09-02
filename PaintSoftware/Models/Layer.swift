@@ -213,7 +213,7 @@ extension Layer {
     ///
     /// **The non-frame `layerEffect` stays, and the split between the two is a rule rather than an
     /// accident.** Everything on a *rendering* path asks this one, because a grade the artist animated
-    /// must be the grade at the frame being drawn — the tree's leaf derivation, `renderSources`'
+    /// must be the grade at the frame being drawn — the tree's leaf derivation, `leafSnapshots`'
     /// elision of a leaf that holds no pixels, and both content-version builders, all of which have a
     /// frame in hand and are documented as mirrors of each other. Everything on a *panel* path asks
     /// the property — `LayerPanel`'s effect row, `LayerStackListView`'s badge, `DrawingView`'s
@@ -309,7 +309,7 @@ struct ValueFill: Equatable, Hashable {
     /// **The colour at one frame, and the one function a later keyframe phase changes.**
     ///
     /// Constant today, and deliberately still stated as a function of the frame. The fill becomes
-    /// pixels inside `renderSources(atFrame:)`, which already takes the frame and already exists to
+    /// pixels inside `leafSnapshots(atFrame:)`, which already takes the frame and already exists to
     /// turn "one layer" into "one layer's pixels at one frame" — so **the compositor never learns that
     /// value layers exist**; it receives a source like any other leaf's. Resolving further in (in
     /// `Compositor.draw`, or by giving `RenderNode` a colour field) would put the constant somewhere
