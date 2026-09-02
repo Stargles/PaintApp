@@ -215,12 +215,71 @@ struct SandwichRecipe {
     let paper: RenderBackground?
     let quality: RenderQuality
 
-    /// The three requests. Pure, and safe on any thread — `CanvasView.startSandwichRebuild` calls it
-    /// inside `sandwichQueue.async`, which is the whole point of the type.
+    /// **The two halves the live canvas actually draws, each composited under the memory ceiling** —
+    /// RENDER.md §2.12 and §3.8, and the entry point `CanvasView.startSandwichRebuild` calls.
+    ///
+    /// **Both or neither.** A `below` from this frame under an `above` from the last one is a
+    /// coherent-looking picture that is wrong, so a decline on either half declines the pair. Nil
+    /// therefore means "keep showing what you have", which is at most one edit stale and is what
+    /// `finishSandwichRebuild` already does with it.
+    ///
+    /// ### Why this is the striped path and not `Compositor.composite(resolve().below)`
+    ///
+    /// Stage 5 deleted `CompositorBudget.affordableSize`, so nothing shrinks a composite below the
+    /// knob any more (§2.12) — and the whole-frame path was made safe by `StripedCompositor`. **These
+    /// two were left composing the frame whole**, which made them the only composites in the app a
+    /// strip does not cover, and on exactly the documents §3.8 exists to serve:
+    ///
+    /// - `MetalCompositor.attempt` refuses a request whose walk does not fit the device's texture
+    ///   budget, and `Compositor.composite` answers that refusal with `CoreGraphicsCompositor` — so a
+    ///   grading document over the budget composited **both halves on the CPU reference, for the
+    ///   duration of every stroke**. That is the path PERFORMANCE §11 measures at 203.3 ms, against a
+    ///   41.6 ms frame, on the artist's own gesture. §2.13's bar is that the main thread never
+    ///   freezes; this violated it on the machines that need it most.
+    /// - And `resolve()` holds **every leaf of the document at once** (one canvas-sized image apiece,
+    ///   840 MB for a hundred leaves at 2048x1024 against a 192 MiB budget), which is the thing §3.4
+    ///   is about. Going through `ChunkedCompositor` costs the halves a chunk's worth instead.
+    ///
+    /// **A document that fits pays nothing for this.** `StripedCompositor.plan` answers one strip,
+    /// `ChunkedCompositor.plan` answers one chunk, and what runs is one `Compositor.composite` per
+    /// half over an unwindowed request — the same call the canvas made before, at the same size, with
+    /// the same backend. The one difference is that each half now resolves **only the leaves its own
+    /// half reads** (§3.4 rule 4's subset) rather than sharing one whole-document resolve with the
+    /// other, and the two halves are disjoint, so that is less rasterization rather than more.
+    func compositeHalves(budgetBytes: Int = CompositorBudget.textureBudgetBytes)
+    -> (below: CGImage, above: CGImage)? {
+        guard let below = belowRecipe.composite(budgetBytes: budgetBytes),
+              let above = aboveRecipe.composite(budgetBytes: budgetBytes) else { return nil }
+        return (below, above)
+    }
+
+    /// The `below` half as an ordinary frame recipe — **the paper goes in here**, exactly as it does
+    /// in `resolve()`'s `below`.
+    var belowRecipe: FrameRecipe { frameRecipe(below, background: paper) }
+
+    /// The `above` half. **`background: nil`, and that is load-bearing rather than tidy**
+    /// (EFFECT_BACKDROP.md §6 step 3): `above` is drawn over the live stroke and over everything
+    /// beneath it, so paper in it would be an opaque sheet hiding the whole picture.
+    var aboveRecipe: FrameRecipe { frameRecipe(above, background: nil) }
+
+    /// One half as a whole-frame recipe: the same leaves, the same mask stacks, the same size — only
+    /// the tree and the paper differ. **`window` stays nil**, because a half is a whole frame as far
+    /// as anything downstream is concerned; `StripedCompositor` is what mints a window, and only when
+    /// the budget says the frame has to be cut.
+    private func frameRecipe(_ half: [RenderNode], background: RenderBackground?) -> FrameRecipe {
+        FrameRecipe(tree: half, leaves: leaves, maskStacks: maskStacks, frame: frame,
+                    canvasSize: canvasSize, background: background, quality: quality)
+    }
+
+    /// The three requests, over one shared resolve of every leaf.
+    ///
+    /// **This is the *definition* of the cut, and nothing on the canvas composites it** —
+    /// `compositeHalves` above is what the canvas takes. `below` and `above` are correct precisely
+    /// when they recompose to `full`, and that invariant is what `SandwichLogicTests` measures; the
+    /// shared `leaves` array is what makes the three one call rather than three.
     func resolve() -> SandwichRequests {
-        // No window: the sandwich is the live canvas's own pair and is never stripped. It is a
-        // different product from the bake — cut at the active leaf, wanted inside the artist's own
-        // gesture — and RENDER.md §5 stage 4d records that boundary.
+        // No window: this is the unstripped definition, and the size it composites at is the knob's.
+        // `compositeHalves` is where a frame that does not fit gets cut into bands instead.
         let resolved = FrameRecipe.resolveSources(leaves, canvasSize: canvasSize, quality: quality)
         func request(_ tree: [RenderNode], background: RenderBackground?) -> RenderRequest {
             RenderRequest(tree: tree, sources: resolved.sources, contentVersions: resolved.versions,

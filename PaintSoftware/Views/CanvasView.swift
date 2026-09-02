@@ -1629,17 +1629,24 @@ struct CanvasView: UIViewRepresentable {
                 // that lands is the one the recipe named, which is at worst one edit stale and is
                 // exactly what `finishSandwichRebuild`'s key check already tolerates.
                 //
-                // **`requests.full` is deliberately not composited here.** It is the same product as
-                // the baked frame, and §2.15 allows exactly one producer of it; that producer is
+                // **`full` is deliberately not composited here.** It is the same product as the
+                // baked frame, and §2.15 allows exactly one producer of it; that producer is
                 // `FrameBaker`, which chunks the walk under a memory ceiling (§3.4) and writes the
-                // result where play and export can read it. The request value still exists because
-                // the *cut* is defined against it — `below` and `above` are correct precisely when
-                // they recompose to `full` — and that invariant is what `SandwichLogicTests` pins.
-                let requests = recipe.resolve()
-                let below = Compositor.composite(requests.below)
-                let above = Compositor.composite(requests.above)
+                // result where play and export can read it. `SandwichRecipe.resolve()` still mints
+                // it because the *cut* is defined against it — `below` and `above` are correct
+                // precisely when they recompose to `full` — and that invariant is what
+                // `SandwichLogicTests` pins. Nothing on the canvas resolves it.
+                //
+                // **`compositeHalves` rather than `Compositor.composite`, and that is the whole of
+                // RENDER.md §2.12 on this path.** It takes each half through `StripedCompositor` and
+                // `ChunkedCompositor` — the same two cuts the bake takes — so a document whose
+                // textures do not fit the device is composited in horizontal bands at the size the
+                // knob asked for, rather than refused by the GPU and re-rendered whole on the CPU
+                // reference for the duration of every stroke. A document that fits takes the
+                // identical path it took before: one composite per half, unwindowed, unchunked.
+                let halves = recipe.compositeHalves()
                 Task { @MainActor in
-                    self?.finishSandwichRebuild(key: key, below: below, above: above)
+                    self?.finishSandwichRebuild(key: key, below: halves?.below, above: halves?.above)
                 }
             }
         }

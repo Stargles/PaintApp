@@ -231,32 +231,52 @@ enum StripedCompositor {
     /// *replace* the band they own rather than compositing onto whatever the renderer started with.
     /// Source-over would be the identity here only because the renderer starts transparent, which is
     /// a coincidence rather than the contract; `mixBack` ends the same way for the same reason.
+    ///
+    /// **Each strip is drawn as it is produced, and that is the destination's half of the budget.**
+    /// The obvious spelling — composite every strip into an array, then draw the array into one
+    /// renderer — bounds the *walk* and not the *destination*: the peak is the frame plus every strip
+    /// at once, which is about two frames, or roughly a gigabyte at 16383². Worse than it reads,
+    /// because `CGImage.cropping` keeps a reference to the image it cropped, so the array holds each
+    /// strip's whole buffer rather than its core. Producing inside the renderer's own closure takes
+    /// the peak to the frame plus **one** strip, which is the least a driver that writes bands into
+    /// one image can hold. What is left — the destination itself — is a whole frame by construction
+    /// and is the separate "16383² cannot be composited at all" problem, not this one.
+    ///
+    /// `autoreleasepool` per strip because both backends hand back autoreleased `CGImage`s through
+    /// `UIImage`, and a pool that only drained at the end of the loop would put every strip back on
+    /// the heap that this shape exists to keep them off.
     private static func assemble(_ strips: [PlannedStrip], of recipe: FrameRecipe,
                                  budgetBytes: Int) -> CGImage? {
         let frame = CGRect(origin: .zero, size: recipe.canvasSize)
-        var pieces: [(image: CGImage, at: CGRect)] = []
-        pieces.reserveCapacity(strips.count)
-
-        for strip in strips {
-            guard let composited = ChunkedCompositor.composite(recipe.windowed(to: strip.buffer),
-                                                               budgetBytes: budgetBytes) else { return nil }
-            // The apron is context, never output: it is composited so the core's kernels have real
-            // pixels to read, and then it is thrown away. Cropping in the strip's own coordinates,
-            // which is the core offset by the buffer's origin.
-            let inset = CGRect(x: 0, y: strip.core.minY - strip.buffer.minY,
-                               width: strip.core.width, height: strip.core.height)
-            guard let core = crop(composited, to: inset) else { return nil }
-            pieces.append((core, strip.core))
-        }
+        // A strip that declines is a frame that declines — half a frame is not a frame — and the
+        // renderer's closure has no way to say so, so the failure is carried out in a flag and the
+        // partial image is discarded.
+        var declined = false
 
         let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())
             .image { _ in
-                for piece in pieces {
-                    UIImage(cgImage: piece.image, scale: 1, orientation: .up)
-                        .draw(in: piece.at, blendMode: .copy, alpha: 1)
+                for strip in strips where !declined {
+                    autoreleasepool {
+                        guard let composited = ChunkedCompositor.composite(recipe.windowed(to: strip.buffer),
+                                                                           budgetBytes: budgetBytes) else {
+                            declined = true
+                            return
+                        }
+                        // The apron is context, never output: it is composited so the core's kernels
+                        // have real pixels to read, and then it is thrown away. Cropping in the
+                        // strip's own coordinates, which is the core offset by the buffer's origin.
+                        let inset = CGRect(x: 0, y: strip.core.minY - strip.buffer.minY,
+                                           width: strip.core.width, height: strip.core.height)
+                        guard let core = crop(composited, to: inset) else {
+                            declined = true
+                            return
+                        }
+                        UIImage(cgImage: core, scale: 1, orientation: .up)
+                            .draw(in: strip.core, blendMode: .copy, alpha: 1)
+                    }
                 }
             }
-        return image.cgImage
+        return declined ? nil : image.cgImage
     }
 
     /// `CGImage.cropping(to:)` with the rounding stated rather than inherited.
