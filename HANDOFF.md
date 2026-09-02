@@ -53,9 +53,17 @@ worker's tree legitimately holds deliberate poison from mutation testing, and th
 
 - **`tmp/live-halves-strips`** — a **regression stage 5 introduced**, described in full below. This is
   the one to pick up first if it did not land.
-- **`tmp/render-export`** — RENDER stage 6, export. Checkpointed as *"the pure half, does not build"*.
-- **`tmp/dab-bake`** — KEYFRAMES stage 4, the rest-space dab bake. Checkpointed as *"engine and render
-  seam, does not build yet"*.
+- **`tmp/render-export`** — RENDER stage 6, export. Two commits. **The design question the stage turns
+  on is answered**: *an export is a scrub*, so the playhead-ordered scheduler needed one field and no
+  second queue — an export walking 1..N is the same shape as an artist dragging the playhead, which the
+  queue already serves. Build on that rather than re-deriving it. Read its commits before its tree.
+- **`tmp/dab-bake`** — KEYFRAMES stage 4, the rest-space dab bake. One checkpoint, *"engine and render
+  seam, does not build yet"*. Its acceptance signal already exists: stage 5 left
+  `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` **written to go red when this lands**.
+
+**None of the three had a green test run.** Treat every one as a starting point, not as work to finish
+blind — and note that `tmp/live-halves-strips` may have nothing on it at all, in which case the
+regression below is unstarted and its premise is still unconfirmed.
 
 ### The regression, which matters more than anything else in flight
 
@@ -124,6 +132,24 @@ the main actor.
 - **PERFORMANCE §9's "still open from the twelve at `9c9d435`: all of them" wants re-taking.** Chunking
   closed part of audit item 1; the other eleven were not re-audited. The sentence names a commit so it is
   not false as written, but it is no longer a census.
+
+## A review found thirteen candidate defects and reached less than half the code
+
+BUGS.md carries them with line numbers. **One is confirmed** — the bake's dirty sweep does not see a
+pose edit, because `Cel.transformTracks` arrived with the keyframe channel and `CelStamp` was written
+for the sweep in a different branch, and nobody walked the seam. The general point outlives the fix:
+**the sweep is the one place in this design where "what reaches a pixel" and "what the differ compares"
+are two hand-maintained lists, and nothing holds them together.**
+
+Twelve more are unverified claims, each checkable in minutes. The two worth checking first are a Distort
+bake that may round a non-square crop into a stretch (wrong pixels in a *saved* document, not just on
+screen) and a posed derivation that may never reach the Core-Animation path (the feature not working on
+one of its two paths — the same shape RENDER stage 3 shipped and had to close later).
+
+**Four subsystems were never reviewed at all**: the bake key and store, striped compositing, the
+live-canvas wiring, and the ~230 tests this pass added. That last one is the one to run first, read only
+to ask of each test *what would have to break for this to go red* — four fixtures that measured nothing
+were found by hand in this pass, and nobody has looked systematically.
 
 ## What this pass established, and would otherwise be re-derived
 
