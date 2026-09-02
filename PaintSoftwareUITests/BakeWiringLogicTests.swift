@@ -197,8 +197,15 @@ final class BakeWiringLogicTests: XCTestCase {
     func testLiftIsWhatStartsTheBakeTheStrokeAskedFor() {
         let manager = perFrameDocument(frames: 4)
         let baker = manager.frameBaker
-        manager.syncFrameBake(suspended: true)
-        XCTAssertEqual(composites { }, 0, "Control: the probe sees nothing while suspended")
+        // **The suspended passes go inside the probe window.** They used to sit outside it and the
+        // control was `composites { }` over an *empty block*, whose zero is a fact about the empty
+        // closure rather than about suspension — true under any implementation whatever, including
+        // one that composites while the artist's hand is down.
+        let whileSuspended = composites {
+            manager.syncFrameBake(suspended: true)
+            manager.syncFrameBake(suspended: true)
+        }
+        XCTAssertEqual(whileSuspended, 0, "Control: nothing composites while the hand is down")
 
         manager.syncFrameBake(suspended: false)
         XCTAssertTrue(baker.isBaking, "Lift releases the loop on the very pass that reports it")

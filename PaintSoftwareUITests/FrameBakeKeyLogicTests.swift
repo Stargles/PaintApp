@@ -131,6 +131,69 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         XCTAssertEqual(key(manager), key(manager))
     }
 
+    /// **The `.sorted` in `canonicalBytes`, which nothing else in this suite can reach.**
+    ///
+    /// `FrameRecipe.maskStacks` is a `[MaskSource: [RenderNode]]`, and a dictionary has no order —
+    /// so two mints over one document can walk it two ways and, without the sort, name two files for
+    /// one picture. The two determinism tests above cannot see that: they compare `f(x)` with `f(x)`
+    /// for a pure function of a value type, and iterating one `Dictionary` twice gives one order.
+    /// Nor can anything else here, because `chunkingZoo()` sets exactly **one** mask and one entry
+    /// has only one order, so the `.sorted` could be deleted with the whole file green.
+    ///
+    /// **The fixture proves its own premise.** A `Dictionary`'s iteration order for a fixed key set
+    /// is a function of its bucket layout, not of the order things were put in, so the second order
+    /// is found by *searching* for a layout that differs — and the search failing is an `XCTFail`
+    /// rather than a quiet pass.
+    func testTwoMaskStacksInEitherIterationOrderAreOneDigest() {
+        let manager = CanvasFixture.manager(layerCount: 4)
+        for index in 0..<4 {
+            CanvasFixture.setBakedContent(manager, layerIndex: index,
+                                          CanvasFixture.solidImage(.red,
+                                                                   rect: CGRect(x: index * 4, y: 0,
+                                                                                width: 24, height: 24)))
+        }
+        manager.layers[0].alphaMask = AlphaMask(sources: [.layer(manager.layers[2].id)])
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[3].id)])
+        guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
+            return XCTFail("No recipe.")
+        }
+        XCTAssertEqual(recipe.maskStacks.count, 2,
+                       "One entry has only one order, so the sort needs two to be about anything.")
+
+        let entries = Array(recipe.maskStacks)
+        let order = Array(recipe.maskStacks.keys)
+        var reordered: [MaskSource: [RenderNode]]?
+        // A decoy key inserted and removed under a range of capacities perturbs the bucket layout.
+        // Each attempt is about even money, so sixty-four of them make a false negative vanishing
+        // and the `guard` below makes one loud rather than silent.
+        for attempt in 0..<64 {
+            var candidate = [MaskSource: [RenderNode]](minimumCapacity: 2 + attempt)
+            let decoy = MaskSource.layer(UUID())
+            candidate[decoy] = []
+            for (source, stack) in entries.reversed() { candidate[source] = stack }
+            candidate[decoy] = nil
+            if Array(candidate.keys) != order {
+                reordered = candidate
+                break
+            }
+        }
+        guard let reordered else {
+            return XCTFail("No second iteration order was found, so this test would prove nothing.")
+        }
+
+        func bytes(_ stacks: [MaskSource: [RenderNode]]) -> Data {
+            FrameBakeKey.canonicalBytes(
+                recipe: FrameRecipe(tree: recipe.tree, leaves: recipe.leaves, maskStacks: stacks,
+                                    frame: recipe.frame, canvasSize: recipe.canvasSize,
+                                    background: recipe.background, quality: recipe.quality),
+                renderResolution: .full, maskTuningGeneration: 0, backend: .coreGraphics,
+                formatVersion: FrameBakeStore.formatVersion)
+        }
+        XCTAssertEqual(bytes(recipe.maskStacks), bytes(reordered),
+                       "One document, two dictionary layouts — and a content-addressed store has no "
+                       + "second chance about which of the two files it reads.")
+    }
+
     // MARK: - Claim 2: the per-field table
     //
     // One row per field the key claims to cover. Adding a field to `FrameBakeKey` means adding a row
@@ -204,6 +267,88 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         row("paper colour") { $0.canvasBackgroundColor = .red }
         row("canvas padding") { $0.canvasPadding = 6 }
         row("paper hidden") { $0.isCanvasBackgroundVisible = false }
+
+        // ── The cel's own tiers, which nothing in this suite reached until now ─────────────────
+        //
+        // Seven of the nine fields of `LayerContentVersion` had no row at all: `rasterVersion`,
+        // `vectorVersion`, `raster`, `vector`, `fillImage`, `celID` and `derived`. **The first two
+        // are the fields an ordinary brush stroke moves, and the only ones** — a dab does not
+        // replace the cel, so `celID`, the raster object and `bakedImage` are all unchanged — so
+        // `int(version.rasterVersion)` could be deleted from the encoder with this whole file
+        // green, and the store would go on serving the pre-stroke picture for a frame the artist
+        // had just drawn on.
+        //
+        // **Each row moves exactly one field, and that is what makes the mutation attributable.**
+        // A row that merely *acquired* a tier would move that tier's identity and its version
+        // together and so stay green with either encoder line deleted; that is why the raster tier
+        // takes two rows and the vector tier three, and why the two "at an equal version" rows
+        // assert their own premise before mutating.
+        //
+        // Layer 7 is the probe — root level, raster, and still visible, unlike layer 0, which the
+        // visibility row above hid.
+        let probe = 7
+        XCTAssertTrue(manager.layers[probe].isVisible,
+                      "The probe layer must contribute a leaf, or every row below is vacuous.")
+        func probeCel() -> Cel { manager.layers[probe].cels[0] }
+
+        row("raster version — a dab") { _ in
+            BrushStamper.stampStroke(into: probeCel().raster, samples: Self.dabs(y: 8),
+                                     brush: BrushLibrary.hardRound, color: .green,
+                                     brushSize: 6, brushOpacity: 1)
+        }
+        // The object, with the counter deliberately held equal — a fresh texture carrying the same
+        // single stamp. Reopening a project rebuilds every `RasterLayerTexture` with its counter
+        // back at 0 under the cel id the manifest saved, and undo swaps one in the same way, so a
+        // key naming only the counter would serve pixels from before the edit.
+        row("raster object at an equal version") { m in
+            let replacement = RasterLayerTexture.empty(size: CanvasFixture.canvasSize)
+            BrushStamper.stampStroke(into: replacement, samples: Self.dabs(y: 8),
+                                     brush: BrushLibrary.hardRound, color: .green,
+                                     brushSize: 6, brushOpacity: 1)
+            XCTAssertEqual(replacement.version, probeCel().raster.version,
+                           "The premise: only the object may differ, or this is the version row again.")
+            m.layers[probe].cels[0].raster = replacement
+        }
+        row("fill image acquired") { m in
+            m.layers[probe].cels[0].fillImage =
+                CanvasFixture.solidImage(.blue, rect: CGRect(x: 3, y: 3, width: 12, height: 12))
+        }
+        // The fill tool replaces this tier wholesale rather than drawing into it, so a second image
+        // of identical pixels is a real edit and the object is the only signal there is of it.
+        row("fill image replaced by an identical picture") { m in
+            m.layers[probe].cels[0].fillImage =
+                CanvasFixture.solidImage(.blue, rect: CGRect(x: 3, y: 3, width: 12, height: 12))
+        }
+        // Acquiring a vector tier moves `vector` and `vectorVersion` together, so it pins neither on
+        // its own; the two rows after it are what separate them.
+        row("vector tier acquired") { m in
+            m.layers[probe].cels[0].vector = VectorCanvas.empty(size: CanvasFixture.canvasSize)
+        }
+        row("vector version — a stroke") { _ in probeCel().vector?.addStroke(Self.bar) }
+        row("vector object at an equal version") { m in
+            let replacement = VectorCanvas.empty(size: CanvasFixture.canvasSize)
+            replacement.addStroke(Self.bar)
+            XCTAssertEqual(replacement.version, probeCel().vector?.version,
+                           "The premise: only the object may differ.")
+            m.layers[probe].cels[0].vector = replacement
+        }
+        // Every tier object is carried across by hand, so the id is the only thing that moved.
+        row("cel identity") { m in
+            let old = probeCel()
+            m.layers[probe].cels[0] = Cel(id: UUID(), startFrame: old.startFrame,
+                                          frameCount: old.frameCount, raster: old.raster,
+                                          fillImage: old.fillImage, bakedImage: old.bakedImage,
+                                          vector: old.vector)
+        }
+        // `derived` — the `ContentProvider` seam's half, and the one field the encoder cannot switch
+        // over. A recipe is what makes a cel show something other than what it stores, and `t` moves
+        // that picture while touching no tier object at all.
+        row("derived content acquired") { m in
+            m.layers[probe].cels[0].interpolation = InterpolationRecipe(t: 0.25)
+        }
+        row("derived content retimed") { m in
+            m.layers[probe].cels[0].interpolation?.t = 0.75
+        }
 
         let unique = Set(digests.values)
         XCTAssertEqual(unique.count, digests.count,
@@ -449,6 +594,25 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// A short run of dabs, so a row can move a raster tier's version and nothing else about it.
+    /// Deterministic, because two rows stamp the *same* run into two different textures in order to
+    /// hold the version equal across a change of object.
+    private static func dabs(y: CGFloat) -> [BrushStamper.Sample] {
+        (0..<8).map { BrushStamper.Sample(point: CGPoint(x: 4 + CGFloat($0) * 3, y: y),
+                                          pressure: 0.9) }
+    }
+
+    /// One vector stroke, at fixed values for `dabs`' reason: two canvases are given the same
+    /// content so that they differ only in which object holds it.
+    private static var bar: VectorStroke {
+        VectorStroke(id: UUID(uuidString: "1D9E2C64-0000-4000-8000-00000000BA51")!,
+                     brush: BrushLibrary.hardRound,
+                     color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                     size: 5, opacity: 1,
+                     samples: [VectorSample(x: 8, y: 44, pressure: 1),
+                               VectorSample(x: 40, y: 44, pressure: 1)])
+    }
 
     private func duplicateReport(_ digests: [String: String]) -> String {
         var byDigest: [String: [String]] = [:]

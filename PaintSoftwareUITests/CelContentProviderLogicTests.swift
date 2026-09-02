@@ -69,7 +69,11 @@ final class CelContentProviderLogicTests: XCTestCase {
                      "Setup: Generate must attach a recipe")
         manager.layers[1].cels[1].interpolation?.t = t
         manager.exitInterpolateMode()
-        try XCTSkipIf(manager.layers[1].cels[1].interpolation == nil, "Setup: no recipe")
+        // **A fixture that has stopped working is a failure, not a skip.** This was an
+        // `XCTSkipIf`, so Generate quietly ceasing to attach a recipe would have reported as eleven
+        // skips across the eleven tests sharing this fixture — which read as green.
+        XCTAssertNotNil(manager.layers[1].cels[1].interpolation,
+                        "Setup: the middle cel must carry the recipe every test here is about")
         return (manager, cels, layerID)
     }
 

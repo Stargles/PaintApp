@@ -546,6 +546,78 @@ final class FrameBakerLogicTests: XCTestCase {
                        "An animated effect parameter must dirty the document even when frame 0 is unmoved.")
     }
 
+    /// **The six fields of `StructuralStamp` no fixture reached, one test each.**
+    ///
+    /// They share a shape, and it is the shape that makes them dangerous: none is a cel's content,
+    /// so the cel diff sees an unchanged document and marks nothing, while every one of them moves
+    /// the picture the bake key names. A field missing from the stamp is therefore not a frame baked
+    /// twice — it is a document whose every frame is a **permanent miss**, served the picture from
+    /// before the edit with nothing anywhere to explain why.
+    ///
+    /// `paperColor` is the sharpest. `FrameBakeKey` encodes `recipe.background`, so a paper-colour
+    /// change re-mints every frame's key on the display path the instant it happens; with the field
+    /// gone from the stamp, nothing ever schedules the bake that would fill those keys.
+    ///
+    /// One test per field rather than one table, because `syncDirty` is a state machine over the
+    /// previous sweep: a table's second row would be measuring what its first row left behind.
+    private func assertIsAStructuralEdit(_ why: String,
+                                         file: StaticString = #filePath, line: UInt = #line,
+                                         _ edit: (CanvasManager) -> Void) {
+        let manager = perFrameDocument(frames: 6)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [],
+                       "Setup: the sweep must start settled, or nothing below is attributable.",
+                       file: file, line: line)
+
+        edit(manager)
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), Array(0..<6),
+                       "§3.6 rules a structural edit dirties every frame, and \(why).",
+                       file: file, line: line)
+    }
+
+    func testThePaperColourIsAStructuralEdit() {
+        assertIsAStructuralEdit("the paper is an input to every frame's picture") {
+            $0.canvasBackgroundColor = .blue
+        }
+    }
+
+    func testHidingThePaperIsAStructuralEdit() {
+        assertIsAStructuralEdit("paper hidden is a different picture from paper white") {
+            $0.isCanvasBackgroundVisible = false
+        }
+    }
+
+    func testCanvasPaddingIsAStructuralEdit() {
+        assertIsAStructuralEdit("padding insets the paper's rect, which the key encodes") {
+            $0.canvasPadding = 6
+        }
+    }
+
+    func testTheCanvasSizeIsAStructuralEdit() {
+        assertIsAStructuralEdit("every frame then composites into a different buffer") {
+            $0.canvasSize = CGSize(width: 48, height: 48)
+        }
+    }
+
+    func testAKeyframeMarkIsAStructuralEdit() {
+        assertIsAStructuralEdit("a mark is what commits an edit made between two of them") {
+            $0.layers[0].keyframeMarks = [0, 3]
+        }
+    }
+
+    func testAGuideStrokeIsAStructuralEdit() {
+        assertIsAStructuralEdit("one guide reaches every in-between that binds it") { manager in
+            manager.guideStrokes.append(
+                GuideStroke(samples: [TimedSample(x: 4, y: 4, pressure: 1, time: 0),
+                                      TimedSample(x: 40, y: 40, pressure: 1, time: 1)],
+                            interval: KeyframeInterval(start: CelRef(layerID: UUID(), celID: UUID()),
+                                                       end: CelRef(layerID: UUID(), celID: UUID()))))
+        }
+    }
+
     /// A cel that **slid** dirties where it was as well as where it is. Both halves, because the
     /// frames it left show something else now.
     func testACelThatMovedDirtiesBothItsOldSpanAndItsNew() {

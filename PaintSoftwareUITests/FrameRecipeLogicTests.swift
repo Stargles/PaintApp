@@ -245,7 +245,14 @@ final class FrameRecipeLogicTests: XCTestCase {
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: false) else {
             return XCTFail("Fixture must mint a recipe")
         }
-        _ = recipe.resolve()
+        // **The assertion's other operand.** "The memo did not grow" is equally true of a resolve
+        // that produced no sources at all, so state what it did produce first: layers 0, 1, 2 and 5
+        // are cels, layer 3 is §4.5's solid, and layer 4 is §4.4's grading leaf, which carries a
+        // version and contributes no pixels.
+        let request = recipe.resolve()
+        XCTAssertEqual(request.sources.compactMap { $0 }.count, 5,
+                       "A resolve that produced nothing would satisfy the assertion below trivially")
+        XCTAssertNil(request.sources[4], "The grading leaf is the one that legitimately has no source")
         XCTAssertEqual(PixelOps.rasterizeCacheBytes, warm,
                        "A recipe over unchanged cels must hit the entries the live path already stored — a second key here is a second canvas-sized flatten per leaf per frame")
     }
