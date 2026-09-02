@@ -253,48 +253,72 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(posed[0].stroke).samples.first?.point.x ?? 0, 8, accuracy: 1e-9)
     }
 
-    /// **Grain boils under this channel, and that is a finding to record rather than a bug to fix
-    /// here** — KEYFRAMES.md §2.16 and §4.2's *"grain is the real one"*.
+    /// **Grain travels with the ink under this channel** — KEYFRAMES.md §2.16, delivered by stage 4's
+    /// rest-space dab bake (§4.2's *"grain is the real one"*).
     ///
-    /// `BrushStamper.grainAlphaMultiplier` reads an **absolute canvas-position** noise field at the
-    /// *posed* stamp point, so posing a stroke re-samples every dab's grain: the texture crawls
-    /// across the ink at 24 fps instead of travelling with it. `VectorLayer` dismisses that
-    /// re-sampling as "no regression" because it already happens under a plain translation — true of
-    /// a one-off Move, and false of an animation, which is exactly the sentence §4.2 corrects.
+    /// ## This test asserted the artifact until stage 4, and its operands were a proxy
     ///
-    /// **It is not this stage's to fix.** §2.16's ruling is that the multiplier is baked into the dab
-    /// record when the stroke is drawn, and that record is §4.2's rest-space dab bake — stage 4, which
-    /// the owner scheduled *after* this one. Pinned here so the next reader meets it as a known,
-    /// scheduled artifact rather than as a mystery, and **this test is meant to go red when stage 4
-    /// lands**: at that point the multiplier travels with the dab and the two arrays agree.
+    /// It used to sample `grainAlphaMultiplier` at the stroke's own **samples**, at rest and posed,
+    /// and require the two arrays to differ — with a note saying it was *"meant to go red when stage 4
+    /// lands"*. **It did not go red, and could not have.** `grainAlphaMultiplier` is a function of
+    /// canvas position, so it differs at two different positions under any construction whatever;
+    /// asserting that is asserting the definition of a noise field, not the behaviour of the ink. And
+    /// `posed` still maps a stroke's samples after stage 4 — it must, because §4.2 says
+    /// `resolveSources` hands on a *posed display list* and every bounds and preview reader believes
+    /// those points.
     ///
-    /// Only `.pencil` among the five built-ins enables grain, so this is the whole of the exposure
-    /// today; §4.2 names `.square`'s sub-lattice as the other one, which re-derives its grid from the
-    /// posed diameter against a 1pt floor.
-    func testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves() throws {
-        let grain = BrushLibrary.pencil.grain
-        XCTAssertTrue(grain.isEnabled, "Setup: the pencil is the one built-in that grains")
+    /// What actually changed is one level down, and it is where the pixels are: the walk now happens
+    /// in **rest space** and the pose maps only each finished dab, so the multiplier is read at the
+    /// rest stamp point and folded into the dab's alpha before it reaches any `DabTarget`. So the
+    /// right operands are the **dab alphas** across two poses of one stroke — which is exactly what
+    /// `stampCircle` receives, and therefore exactly what the artist sees. That is the rewrite, and
+    /// the lesson is CLAUDE.md's own: a green assertion is only as good as its two operands, and a
+    /// *red* one is too.
+    ///
+    /// `RestSpaceDabBakeLogicTests` carries the 24-frame form and the measurement (24 distinct alpha
+    /// sequences before, one after). This keeps the channel-level statement beside the channel.
+    ///
+    /// Only `.pencil` among the five built-ins enables grain, so this is the whole of the exposure;
+    /// §4.2 names `.square`'s sub-lattice as the other baked-walk artifact.
+    func testGrainTravelsWithTheInkUnderAPose() throws {
+        let brush = BrushLibrary.pencil
+        XCTAssertTrue(brush.grain.isEnabled, "Setup: the pencil is the one built-in that grains")
 
         let points = (0..<8).map { CGPoint(x: CGFloat($0) * 3, y: 10) }
         let elements: [VectorElement] = [.stroke(VectorStroke(
-            id: UUID(), brush: BrushLibrary.pencil,
+            id: UUID(), brush: brush,
             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
             size: 6, opacity: 1,
             samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }))]
-        let posed = CanvasManager.posed(elements,
-                                        through: [(.cel, CGAffineTransform(translationX: 17, y: 5))])
 
-        func grainValues(_ list: [VectorElement]) -> [CGFloat] {
-            (list.first?.stroke?.samples ?? []).map {
-                BrushStamper.grainAlphaMultiplier(at: $0.point, grain: grain)
-            }
+        /// The dabs one posed display list actually stamps — the walk `VectorCanvas.stamp` runs,
+        /// reached through the same `restWalk` the renderer reads.
+        func dabs(_ list: [VectorElement]) throws -> [BrushStamper.BakedDab] {
+            let stroke = try XCTUnwrap(list.first?.stroke)
+            let sink = BrushStamper.CollectingDabTarget()
+            let walk = stroke.restWalk
+            let target: DabTarget = walk.map { BrushStamper.PosedDabTarget(sink, pose: $0.pose) } ?? sink
+            BrushStamper.stampStroke(
+                into: target,
+                samples: (walk?.samples ?? stroke.samples).map {
+                    BrushStamper.Sample(point: $0.point, pressure: $0.pressure)
+                },
+                brush: stroke.brush, color: stroke.uiColor, brushSize: walk?.size ?? stroke.size,
+                brushOpacity: stroke.opacity, seed: BrushStamper.seed(for: stroke.id))
+            return sink.dabs
         }
-        let rest = grainValues(elements), moved = grainValues(posed)
-        XCTAssertEqual(rest.count, moved.count)
-        XCTAssertNotEqual(rest, moved,
-                          "The field is sampled in canvas space, so a posed dab lands on different tooth")
-        XCTAssertTrue(zip(rest, moved).contains { abs($0 - $1) > 0.05 },
-                      "and the difference is visible rather than a rounding artefact")
+
+        let rest = try dabs(elements)
+        let near = try dabs(CanvasManager.posed(elements, through: [(.cel, .init(translationX: 17, y: 5))]))
+        let far = try dabs(CanvasManager.posed(elements, through: [(.cel, .init(translationX: 41, y: -9))]))
+
+        XCTAssertGreaterThan(Set(rest.map(\.alpha)).count, 3,
+                             "Setup: the grain is varying dab to dab, or there is nothing to hold still")
+        XCTAssertEqual(near.map(\.alpha), rest.map(\.alpha),
+                       "the multiplier is baked at the rest stamp point, so it rides with the mark")
+        XCTAssertEqual(far.map(\.alpha), rest.map(\.alpha))
+        XCTAssertNotEqual(near.map(\.center), far.map(\.center),
+                          "and the ink itself did move, or the equality above is vacuous")
     }
 
     // MARK: - §2.28's union
