@@ -248,6 +248,14 @@ forty rows of an effect table were setting nothing. `Layer.valueFill` is `kind =
 ? fill : nil` and is inert the same way for a layer already in effect mode. Setting a field the shipped
 code does not read is the commonest way a fixture measures nothing.
 
+**And an assertion can be true of mathematics rather than of your code.** A test written to pin the
+grain artifact compared `BrushStamper.grainAlphaMultiplier` sampled at a stroke's *rest* points against
+the same function at its *posed* points, and required them to differ. That is the position-dependence
+of a noise field — **true by definition, under any implementation whatever**, including the one that
+fixes the bug. It could not have gone red. The right operands were one level down, where the pixels
+are: the dab **alphas** two poses of one stroke actually stamp. When an assertion would hold for any
+correct program *and* any incorrect one, it is measuring a definition, not a behaviour.
+
 **A fixture can be eaten by the optimisation it is testing.** The obvious ten-frame document for
 RENDER §2.16 — one cel spanning frames 2–6, edit it, count re-renders — measures nothing, because that
 cel *is* a hold, so those five frames are one bake key and one composite. Every frame needs its own
