@@ -1,16 +1,16 @@
 # Graph Report - PaintSoftware  (2026-09-02)
 
 ## Corpus Check
-- 334 files · ~1,586,327 words
+- 334 files · ~1,586,504 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 10939 nodes · 34409 edges · 319 communities (296 shown, 23 thin omitted)
+- 10939 nodes · 34409 edges · 319 communities (297 shown, 22 thin omitted)
 - Extraction: 90% EXTRACTED · 10% INFERRED · 0% AMBIGUOUS · INFERRED: 3440 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `faa0f683`
+- Built from commit: `5802ef19`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -130,7 +130,7 @@
 - PlaybackBoundsCharacterizationTests
 - GuideOverlayView
 - BrushBlendMode
-- CGRect
+- LassoFillLogicTests
 - GuidePath
 - EffectParityLogicTests
 - AnimationCurve
@@ -212,7 +212,7 @@
 - UndoHistory
 - Performance
 - PlacedImageShapeLogicTests
-- LassoFillLogicTests
+- UInt8
 - TimelineLayoutKeyLogicTests
 - CanvasHostView
 - Lasso Fill — Specification
@@ -246,7 +246,7 @@
 - Foundation
 - FrameBaker
 - FrameBakerLogicTests
-- FrameBakeStore
+- FrameBakeStoreLogicTests
 - WarpParams
 - .previewed
 - OnionSkinLogicTests
@@ -262,7 +262,7 @@
 - ProjectLoadDamage
 - TransformChannelLogicTests
 - .draw
-- .defaultRoot
+- FrameBakeStore
 - StructureSnapshot
 - DerivedCelContent
 - StrokeStabilizer
@@ -298,7 +298,7 @@
 - TransformOverlaySupport.swift
 - .canvas
 - AnimationGroup
-- ProjectStore.swift
+- Alignment
 - Resolution
 - CGContextDabTarget
 - ManifestSkeleton
@@ -364,7 +364,7 @@
 ## Hyperedges (group relationships)
 - **Stroke-delivery regression: default flip, gate, and recognizer state involved together** — bugs_stroke_delivery_regression, bugs_requirespencilonly, bugs_pencilonlydrawing, bugs_reconcilelayers, bugs_housekeeping_2026_07_26 [EXTRACTED 1.00]
 
-## Communities (319 total, 23 thin omitted)
+## Communities (319 total, 22 thin omitted)
 
 ### Community 0 - "PaintUITestCase"
 Cohesion: 0.07
@@ -491,8 +491,8 @@ Cohesion: 0.06
 Nodes (27): vertices, DeformedCellIndex, Hit, Lattice, .cellCount, .currentBounds, .restBounds, .restConfiguration (+19 more)
 
 ### Community 31 - "StrokeScratch"
-Cohesion: 0.11
-Nodes (16): Role, additive, replacing, StrokeScratch, .dirtyRect, .image, .replacesBase, .windowPixelCount (+8 more)
+Cohesion: 0.09
+Nodes (18): Role, additive, replacing, StrokeScratch, .dirtyRect, .image, .replacesBase, .windowPixelCount (+10 more)
 
 ### Community 32 - "HistoryActionLabel"
 Cohesion: 0.02
@@ -547,8 +547,8 @@ Cohesion: 0.06
 Nodes (34): Encoder, K, KeyedDecodingContainer, DecodeReport, .droppedCount, .isClean, ElementData, fill (+26 more)
 
 ### Community 45 - "FrameExportSession"
-Cohesion: 0.12
-Nodes (19): CheckedContinuation, task, FrameExportSession, .outputDirectory, Product, frame, video, Bool (+11 more)
+Cohesion: 0.13
+Nodes (18): CheckedContinuation, task, FrameExportSession, .outputDirectory, Product, frame, video, Bool (+10 more)
 
 ### Community 46 - "ContentView"
 Cohesion: 0.10
@@ -627,8 +627,8 @@ Cohesion: 0.07
 Nodes (14): CompositorParityLogicTests, BlendMode, Bool, CanvasManager, CGImage, Int, MaskSource, RenderNode (+6 more)
 
 ### Community 65 - "CanvasManager"
-Cohesion: 0.04
-Nodes (55): Identifiable, CanvasManager, .activeCelIsInBetween, .guideChips, .guideRefusal, .hasAnonymousWholeFrameGroup, .interpolationCommitOptions, .interpolationContentProvider (+47 more)
+Cohesion: 0.05
+Nodes (44): Identifiable, CanvasManager, .activeCelIsInBetween, .guideChips, .guideRefusal, .hasAnonymousWholeFrameGroup, .interpolationCommitOptions, .interpolationContentProvider (+36 more)
 
 ### Community 66 - "EffectSettingsBar"
 Cohesion: 0.08
@@ -639,8 +639,8 @@ Cohesion: 0.07
 Nodes (19): UIColor, ChunkedCompositeMetalLogicTests, Bool, CanvasManager, Int, StaticString, String, UInt (+11 more)
 
 ### Community 68 - "GalleryOpenState"
-Cohesion: 0.10
-Nodes (19): ProjectSummary, Date, GalleryOpenState, .isBusy, Bool, UUID, ProjectVersionsView, RecentlyDeletedView (+11 more)
+Cohesion: 0.08
+Nodes (25): os, CodableColor, .color, Color, .codable, ProjectSummary, CodableColor, Date (+17 more)
 
 ### Community 69 - "SaveDamageGateLogicTests"
 Cohesion: 0.17
@@ -755,8 +755,8 @@ Cohesion: 0.15
 Nodes (5): .placement, ObjectTransformDrag, .corners, Pose, CGSize
 
 ### Community 111 - "GuideStroke"
-Cohesion: 0.09
-Nodes (22): Alignment, center, .displayName, .id, justified, left, right, CodingKeys (+14 more)
+Cohesion: 0.08
+Nodes (26): InterpolationRefusal, alreadyInterpolated, interpolationNotEvaluable, .message, noInterpolationToGuide, notAVectorLayer, notEnoughReferences, nothingToCommit (+18 more)
 
 ### Community 112 - "float3"
 Cohesion: 0.22
@@ -774,9 +774,9 @@ Nodes (17): Editing, handles, none, spacing, Grip, Guide, GuideOverlayView, Bool
 Cohesion: 0.07
 Nodes (26): BrushBlendMode, .cgBlendMode, darken, .id, lighten, multiply, normal, screen (+18 more)
 
-### Community 116 - "CGRect"
-Cohesion: 0.17
-Nodes (5): .loopAroundEverything, CanvasManager, CGRect, TimeInterval, UIImage
+### Community 116 - "LassoFillLogicTests"
+Cohesion: 0.19
+Nodes (6): LassoFillLogicTests, .loopAroundEverything, CanvasManager, CGRect, TimeInterval, UIImage
 
 ### Community 117 - "GuidePath"
 Cohesion: 0.14
@@ -923,12 +923,12 @@ Cohesion: 0.13
 Nodes (14): ExportSheet, .body, .caption, .exportSize, .running, .statusLine, .videoDetail, .videoRange (+6 more)
 
 ### Community 153 - ".rasterize"
-Cohesion: 0.20
+Cohesion: 0.17
 Nodes (6): LassoFillMask, Float, Int, SIMD4, UInt8, mask
 
 ### Community 154 - "RasterLayerTexture"
-Cohesion: 0.11
-Nodes (16): RasterLayerTexture, .approximateCost, .dabGradientCacheHits, .dabGradientCacheMisses, .hasContent, .strokeDirtyRect, Bool, CGRect (+8 more)
+Cohesion: 0.14
+Nodes (14): RasterLayerTexture, .approximateCost, .dabGradientCacheHits, .dabGradientCacheMisses, .hasContent, .strokeDirtyRect, Bool, CGRect (+6 more)
 
 ### Community 155 - "Gesture"
 Cohesion: 0.13
@@ -1094,9 +1094,9 @@ Nodes (27): 10.1 Compression ratio — MEASURED, exact, build-independent, 10.2 
 Cohesion: 0.17
 Nodes (10): PlacedImageShapeLogicTests, Bool, CanvasManager, CGAffineTransform, CGRect, Int, StaticString, String (+2 more)
 
-### Community 198 - "LassoFillLogicTests"
-Cohesion: 0.16
-Nodes (6): LassoFillLogicTests, CGPath, ClosedRange, Int, UInt64, UInt8
+### Community 198 - "UInt8"
+Cohesion: 0.15
+Nodes (5): CGPath, ClosedRange, Int, UInt64, UInt8
 
 ### Community 199 - "TimelineLayoutKeyLogicTests"
 Cohesion: 0.11
@@ -1220,15 +1220,15 @@ Nodes (8): AVFoundation, Foundation, ImageIO, CodingUserInfoKey, AppVersion, .ve
 
 ### Community 230 - "FrameBaker"
 Cohesion: 0.09
-Nodes (30): FrameBakeKey, .fileName, CelStamp, .span, ExportFocus, FrameBaker, FrameObserver, Outcome (+22 more)
+Nodes (28): CelStamp, .span, ExportFocus, FrameBaker, FrameObserver, Outcome, alreadyOnDisk, compositeFailed (+20 more)
 
 ### Community 231 - "FrameBakerLogicTests"
 Cohesion: 0.22
 Nodes (6): FrameBakerLogicTests, CanvasManager, Int, TimeInterval, URL, Void
 
-### Community 232 - "FrameBakeStore"
-Cohesion: 0.08
-Nodes (28): Compression, Data, FrameBakeStore, .bakesRootDirectory, .cachesDirectory, .totalBytes, Bool, CGImage (+20 more)
+### Community 232 - "FrameBakeStoreLogicTests"
+Cohesion: 0.18
+Nodes (9): FrameBakeKey, .fileName, Bool, FrameBakeStoreLogicTests, CGImage, Int, UInt8, URL (+1 more)
 
 ### Community 233 - "WarpParams"
 Cohesion: 0.20
@@ -1289,6 +1289,10 @@ Nodes (5): CanvasManager, CGSize, UUID, TransformChannelLogicTests, .size
 ### Community 247 - ".draw"
 Cohesion: 0.27
 Nodes (11): CoreGraphicsCompositor, Bool, CGImage, CGRect, Double, Int, RenderNode, UIImage (+3 more)
+
+### Community 248 - "FrameBakeStore"
+Cohesion: 0.09
+Nodes (23): Compression, Data, FrameBakeStore, .bakesRootDirectory, .cachesDirectory, .totalBytes, CGImage, Int (+15 more)
 
 ### Community 249 - "StructureSnapshot"
 Cohesion: 0.17
@@ -1391,8 +1395,8 @@ Cohesion: 0.20
 Nodes (5): FontResolveLogicTests, StubFontProvider, Bool, String, UIFont
 
 ### Community 274 - "Phase"
-Cohesion: 0.22
-Nodes (9): Phase, baking, failed, finished, .fraction, idle, .isRunning, writing (+1 more)
+Cohesion: 0.18
+Nodes (10): Phase, baking, failed, finished, .fraction, idle, .isRunning, writing (+2 more)
 
 ### Community 275 - "Coordinator"
 Cohesion: 0.07
@@ -1430,9 +1434,9 @@ Nodes (7): DeferredVectorRender, Step, rasterize, showNow, Int, DeferredVectorRe
 Cohesion: 0.17
 Nodes (12): AnimationGroup, CodingKeys, displayName, id, tagColor, Bool, CodableColor, Decoder (+4 more)
 
-### Community 284 - "ProjectStore.swift"
-Cohesion: 0.38
-Nodes (6): os, CodableColor, .color, Color, .codable, CodableColor
+### Community 284 - "Alignment"
+Cohesion: 0.29
+Nodes (7): Alignment, center, .displayName, .id, justified, left, right
 
 ### Community 285 - "Resolution"
 Cohesion: 0.29
@@ -1551,21 +1555,21 @@ Nodes (10): rest, VectorStroke, BrushStamper, RestSpaceDabBakeLogicTests, BrushS
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1531 isolated node(s):** `graphify-guard.sh script`, `gallery`, `sizePicker`, `editor`, `.now` (+1526 more)
+- **1531 isolated node(s):** `Do this first`, `State`, `RENDER (29) is delivered through stage 6; stage 7 is what is left`, `A review found thirteen candidate defects and reached less than half the code`, `What this pass established, and would otherwise be re-derived` (+1526 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **23 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **What is the exact relationship between `Stroke-delivery regression (pencil-only-drawing default)` and `Fill tool off-center fill vertically mirrored (regression)`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `CGFloat` connect `CGFloat` to `PaintUITestCase`, `ShapeGeometry`, `Coordinator`, `PointCloudIndex`, `CanvasManager`, `Homography`, `ShapeOverlayView`, `cels`, `StrokeCanvasView`, `ActionRecorder`, `TimelineGraphBand`, `CGPoint`, `VectorEraserLogicTests`, `LassoMoveLogicTests`, `.rasterize`, `CanvasManager`, `TextHitTestLogicTests`, `PerfBaselineTests`, `Lattice`, `StrokeScratch`, `Binding`, `VectorFloat`, `FloatingPieceOverlayView`, `AnimationTimeline`, `ProjectSaveLogicTests`, `LayerStackCell`, `VectorCanvas`, `VectorCanvasData`, `StrokeGeometryLogicTests`, `TextRecipe`, `TimelineKeyMarkersLogicTests`, `ObjectTransformFrame`, `TextOverlayView`, `XCUIApplication`, `BrushEngineLogicTests`, `AlphaMask`, `ProjectStore`, `FrameRecipe`, `SideToolbar`, `CompositorParityLogicTests`, `CanvasManager`, `EffectSettingsBar`, `ColorMathOklabLogicTests`, `ObjectTransformOverlayView`, `CompositorMetalEngine`, `.makeUIView`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `InterpolationMotionGroupLogicTests`, `.solidImage`, `DeformFactorization`, `.evaluate`, `InterpolationRenderLogicTests`, `ObjectTransformDrag`, `GuideOverlayView`, `BrushBlendMode`, `GuidePath`, `.group`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`, `FontDescriptor`, `CanvasManager`, `linear_light_q1q2.swift`, `Typography`, `Codable`, `InterpolateBar`, `XCUIApplication`, `VectorEraserHybridLogicTests`, `BakeKeyEncoder`, `CanvasResizeLogicTests`, `.assertLinear`, `OnionSkinSettingsSource`, `LayerStackListView`, `CanvasManager`, `PinchMergeGateLogicTests`, `.rasterize`, `RasterLayerTexture`, `CanvasTransformFreezeUITests`, `.lassoFill`, `CurveEditor`, `StrokeSpatialIndex`, `Int`, `TextLayout`, `.compositeSize`, `TransformChannelID`, `WarpAgreementCharacterizationTests`, `.rgbaBytes`, `ObjectTransformLogicTests`, `CanvasResizeSheet`, `TextSettingsPanel`, `String`, `PlacedImageShapeLogicTests`, `LassoFillLogicTests`, `TimelineLayoutKeyLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `VideoFrameWriter`, `TimelineRowLayoutLogicTests`, `CelContentProviderLogicTests`, `SizePreviewWindow`, `linear_light_ab.swift`, `SpacingChart`, `TransformTrack`, `Brush`, `TimelineLayoutKey`, `FrameBaker`, `.previewed`, `TimelineBakeBar`, `ARAPLogicTests`, `PoseQuad`, `.assertChunkedMatchesWhole`, `TransformChannelLogicTests`, `.draw`, `StrokeStabilizer`, `DabTarget`, `DrawingView`, `Coordinator`, `WindowEventTap`, `PoseWidthAB`, `DistortLogicTests`, `FontResolveLogicTests`, `Coordinator`, `JSONValue`, `CodingKeys`, `.sample`, `TransformOverlaySupport.swift`, `Resolution`, `CGContextDabTarget`, `Kind`, `AppliedTool`, `RecordingDabTarget`, `RenderResolution`, `LayerTransform`, `CanvasManager`, `LayerRowModel`, `PackedSampleRun`, `.testGrainTravelsWithTheInkUnderAPose`, `RestSpaceDabBakeLogicTests`?**
-  _High betweenness centrality (0.235) - this node is a cross-community bridge._
-- **Why does `CGPoint` connect `CGPoint` to `ShapeGeometry`, `Coordinator`, `PointCloudIndex`, `CanvasManager`, `Homography`, `ShapeOverlayView`, `cels`, `StrokeCanvasView`, `TimelineGraphBand`, `VectorEraserLogicTests`, `LassoMoveLogicTests`, `.rasterize`, `CanvasManager`, `TextHitTestLogicTests`, `PerfBaselineTests`, `Lattice`, `StrokeScratch`, `VectorFloat`, `FloatingPieceOverlayView`, `AnimationTimeline`, `ProjectSaveLogicTests`, `VectorCanvas`, `ColorPickerPanel`, `SelectionOverlayView`, `VectorCanvasData`, `StrokeGeometryLogicTests`, `TextRecipe`, `ObjectTransformFrame`, `TextOverlayView`, `BrushEngineLogicTests`, `AlphaMask`, `ProjectStore`, `CanvasManager`, `EffectSettingsBar`, `SaveDamageGateLogicTests`, `ColorMathOklabLogicTests`, `ObjectTransformOverlayView`, `.makeUIView`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `InterpolationMotionGroupLogicTests`, `.solidImage`, `DeformFactorization`, `.evaluate`, `InterpolationRenderLogicTests`, `ObjectTransformDrag`, `GuideOverlayView`, `BrushBlendMode`, `CGRect`, `GuidePath`, `.group`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`, `linear_light_q1q2.swift`, `Typography`, `EyedropperLogicTests`, `Codable`, `VectorEraserHybridLogicTests`, `CanvasResizeLogicTests`, `.assertLinear`, `FillGestureRestartLogicTests`, `CanvasManager`, `.rasterize`, `RasterLayerTexture`, `CanvasManager`, `CurveEditor`, `StrokeSpatialIndex`, `TextLayout`, `.setUpGestures`, `TransformChannelID`, `WarpAgreementCharacterizationTests`, `.rgbaBytes`, `ObjectTransformLogicTests`, `String`, `PlacedImageShapeLogicTests`, `TimelineLayoutKeyLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `CelContentProviderLogicTests`, `XCTestCase`, `linear_light_ab.swift`, `Brush`, `CGFloat`, `ARAPLogicTests`, `PoseQuad`, `TransformChannelLogicTests`, `StrokeStabilizer`, `DabTarget`, `WindowEventTap`, `PoseWidthAB`, `LayerStackListView.Coordinator`, `DistortLogicTests`, `Coordinator`, `.sample`, `TransformOverlaySupport.swift`, `CGContextDabTarget`, `Kind`, `DistortUITests`, `.draw`, `.sampledColor`, `RecordingDabTarget`, `LayerTransform`, `CanvasManager`, `PackedSampleRun`, `.testGrainTravelsWithTheInkUnderAPose`, `RestSpaceDabBakeLogicTests`?**
-  _High betweenness centrality (0.200) - this node is a cross-community bridge._
-- **Why does `XCTestCase` connect `XCTestCase` to `ShapeGeometry`, `ProjectBackupManager`, `.manager`, `Homography`, `ValueLayerLogicTests`, `cels`, `TimelineGraphBand`, `CGPoint`, `UIKit`, `VectorEraserLogicTests`, `LassoMoveLogicTests`, `Effect`, `.drawLine`, `TextHitTestLogicTests`, `PerfBaselineTests`, `Lattice`, `ProjectSaveLogicTests`, `SelectionOverlayView`, `VectorCanvasData`, `StrokeGeometryLogicTests`, `TextRecipe`, `TimelineKeyMarkersLogicTests`, `FrameExportLogicTests`, `BrushEngineLogicTests`, `AlphaMask`, `FrameRecipe`, `CompositorParityLogicTests`, `.assertChunkedMatchesWholeOnGPU`, `GalleryOpenState`, `SaveDamageGateLogicTests`, `LayerTreeCharacterizationTests`, `ColorMathOklabLogicTests`, `KeyframeControlLogicTests`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `InterpolationMotionGroupLogicTests`, `.solidImage`, `EffectMultiPassLogicTests`, `InterpolationRenderLogicTests`, `PlaybackBoundsCharacterizationTests`, `EffectParityLogicTests`, `VectorSample`, `InterpolationGuideLogicTests`, `Typography`, `EyedropperLogicTests`, `Codable`, `VectorEraserHybridLogicTests`, `CanvasResizeLogicTests`, `CanvasNotice`, `FillGestureRestartLogicTests`, `PinchMergeGateLogicTests`, `ShapeHoldClock`, `BakeQueueLogicTests`, `VectorPreviewPlanLogicTests`, `EffectParameterTrackLogicTests`, `WarpAgreementCharacterizationTests`, `AnimationCurveLogicTests`, `CanvasTouchOwnerLogicTests`, `.rgbaBytes`, `ObjectTransformLogicTests`, `FillBoundaryLogicTests`, `PlacedImageShapeLogicTests`, `LassoFillLogicTests`, `TimelineLayoutKeyLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `TimelineRowLayoutLogicTests`, `CelContentProviderLogicTests`, `BlockDragCharacterizationTests`, `TimelineGraphChannelListLogicTests`, `TransformTrack`, `DecodedFrameRing`, `FrameBakerLogicTests`, `FrameBakeStore`, `.previewed`, `OnionSkinLogicTests`, `TimelineBakeBar`, `ARAPLogicTests`, `PoseQuad`, `MemoryBudgetLogicTests`, `.assertChunkedMatchesWhole`, `TransformChannelLogicTests`, `CanvasLayerFilterLogicTests`, `CanvasGeometryLogicTests`, `StrokeGestureRecognizer`, `BakeWiringLogicTests`, `DistortLogicTests`, `FontResolveLogicTests`, `.canvas`, `PackedSampleRun`, `RestSpaceDabBakeLogicTests`?**
-  _High betweenness centrality (0.115) - this node is a cross-community bridge._
+- **Why does `CGFloat` connect `CGFloat` to `PaintUITestCase`, `ShapeGeometry`, `Coordinator`, `PointCloudIndex`, `CanvasManager`, `Homography`, `ShapeOverlayView`, `cels`, `StrokeCanvasView`, `ActionRecorder`, `TimelineGraphBand`, `CGPoint`, `VectorEraserLogicTests`, `LassoMoveLogicTests`, `.rasterize`, `CanvasManager`, `TextHitTestLogicTests`, `PerfBaselineTests`, `Lattice`, `StrokeScratch`, `Binding`, `VectorFloat`, `FloatingPieceOverlayView`, `AnimationTimeline`, `ProjectSaveLogicTests`, `LayerStackCell`, `VectorCanvas`, `VectorCanvasData`, `StrokeGeometryLogicTests`, `TextRecipe`, `TimelineKeyMarkersLogicTests`, `ObjectTransformFrame`, `TextOverlayView`, `XCUIApplication`, `BrushEngineLogicTests`, `AlphaMask`, `ProjectStore`, `FrameRecipe`, `SideToolbar`, `CompositorParityLogicTests`, `CanvasManager`, `EffectSettingsBar`, `ColorMathOklabLogicTests`, `ObjectTransformOverlayView`, `CompositorMetalEngine`, `.makeUIView`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `InterpolationMotionGroupLogicTests`, `.solidImage`, `DeformFactorization`, `.evaluate`, `InterpolationRenderLogicTests`, `ObjectTransformDrag`, `GuideOverlayView`, `BrushBlendMode`, `LassoFillLogicTests`, `GuidePath`, `.group`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`, `FontDescriptor`, `CanvasManager`, `linear_light_q1q2.swift`, `Typography`, `Codable`, `InterpolateBar`, `XCUIApplication`, `VectorEraserHybridLogicTests`, `BakeKeyEncoder`, `CanvasResizeLogicTests`, `.assertLinear`, `OnionSkinSettingsSource`, `LayerStackListView`, `CanvasManager`, `PinchMergeGateLogicTests`, `.rasterize`, `RasterLayerTexture`, `CanvasTransformFreezeUITests`, `.lassoFill`, `CurveEditor`, `StrokeSpatialIndex`, `Int`, `TextLayout`, `.compositeSize`, `TransformChannelID`, `WarpAgreementCharacterizationTests`, `.rgbaBytes`, `ObjectTransformLogicTests`, `CanvasResizeSheet`, `TextSettingsPanel`, `String`, `PlacedImageShapeLogicTests`, `UInt8`, `TimelineLayoutKeyLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `VideoFrameWriter`, `TimelineRowLayoutLogicTests`, `CelContentProviderLogicTests`, `SizePreviewWindow`, `linear_light_ab.swift`, `SpacingChart`, `TransformTrack`, `Brush`, `TimelineLayoutKey`, `FrameBaker`, `.previewed`, `TimelineBakeBar`, `ARAPLogicTests`, `PoseQuad`, `.assertChunkedMatchesWhole`, `TransformChannelLogicTests`, `.draw`, `StrokeStabilizer`, `DabTarget`, `DrawingView`, `Coordinator`, `WindowEventTap`, `PoseWidthAB`, `DistortLogicTests`, `FontResolveLogicTests`, `Coordinator`, `JSONValue`, `CodingKeys`, `.sample`, `TransformOverlaySupport.swift`, `Resolution`, `CGContextDabTarget`, `Kind`, `AppliedTool`, `RecordingDabTarget`, `RenderResolution`, `LayerTransform`, `CanvasManager`, `LayerRowModel`, `PackedSampleRun`, `.testGrainTravelsWithTheInkUnderAPose`, `RestSpaceDabBakeLogicTests`?**
+  _High betweenness centrality (0.292) - this node is a cross-community bridge._
+- **Why does `CGPoint` connect `CGPoint` to `ShapeGeometry`, `Coordinator`, `PointCloudIndex`, `CanvasManager`, `Homography`, `ShapeOverlayView`, `cels`, `StrokeCanvasView`, `TimelineGraphBand`, `VectorEraserLogicTests`, `LassoMoveLogicTests`, `.rasterize`, `CanvasManager`, `TextHitTestLogicTests`, `PerfBaselineTests`, `Lattice`, `StrokeScratch`, `VectorFloat`, `FloatingPieceOverlayView`, `AnimationTimeline`, `ProjectSaveLogicTests`, `VectorCanvas`, `ColorPickerPanel`, `SelectionOverlayView`, `VectorCanvasData`, `StrokeGeometryLogicTests`, `TextRecipe`, `ObjectTransformFrame`, `TextOverlayView`, `BrushEngineLogicTests`, `AlphaMask`, `ProjectStore`, `CanvasManager`, `EffectSettingsBar`, `SaveDamageGateLogicTests`, `ColorMathOklabLogicTests`, `ObjectTransformOverlayView`, `.makeUIView`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `InterpolationMotionGroupLogicTests`, `.solidImage`, `DeformFactorization`, `.evaluate`, `InterpolationRenderLogicTests`, `ObjectTransformDrag`, `GuideOverlayView`, `BrushBlendMode`, `LassoFillLogicTests`, `GuidePath`, `.group`, `VectorSample`, `InterpolationGuideLogicTests`, `TextTransformOverlayView`, `linear_light_q1q2.swift`, `Typography`, `EyedropperLogicTests`, `Codable`, `VectorEraserHybridLogicTests`, `CanvasResizeLogicTests`, `.assertLinear`, `FillGestureRestartLogicTests`, `CanvasManager`, `.rasterize`, `RasterLayerTexture`, `CanvasManager`, `CurveEditor`, `StrokeSpatialIndex`, `TextLayout`, `.setUpGestures`, `TransformChannelID`, `WarpAgreementCharacterizationTests`, `.rgbaBytes`, `ObjectTransformLogicTests`, `String`, `PlacedImageShapeLogicTests`, `TimelineLayoutKeyLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `CelContentProviderLogicTests`, `XCTestCase`, `linear_light_ab.swift`, `Brush`, `CGFloat`, `ARAPLogicTests`, `PoseQuad`, `TransformChannelLogicTests`, `StrokeStabilizer`, `DabTarget`, `WindowEventTap`, `PoseWidthAB`, `LayerStackListView.Coordinator`, `DistortLogicTests`, `Coordinator`, `.sample`, `TransformOverlaySupport.swift`, `CGContextDabTarget`, `Kind`, `DistortUITests`, `.draw`, `.sampledColor`, `RecordingDabTarget`, `LayerTransform`, `CanvasManager`, `PackedSampleRun`, `.testGrainTravelsWithTheInkUnderAPose`, `RestSpaceDabBakeLogicTests`?**
+  _High betweenness centrality (0.204) - this node is a cross-community bridge._
+- **Why does `XCTestCase` connect `XCTestCase` to `ShapeGeometry`, `ProjectBackupManager`, `.manager`, `Homography`, `ValueLayerLogicTests`, `cels`, `TimelineGraphBand`, `CGPoint`, `UIKit`, `VectorEraserLogicTests`, `LassoMoveLogicTests`, `Effect`, `.drawLine`, `TextHitTestLogicTests`, `PerfBaselineTests`, `Lattice`, `ProjectSaveLogicTests`, `SelectionOverlayView`, `VectorCanvasData`, `StrokeGeometryLogicTests`, `TextRecipe`, `TimelineKeyMarkersLogicTests`, `FrameExportLogicTests`, `BrushEngineLogicTests`, `AlphaMask`, `FrameRecipe`, `CompositorParityLogicTests`, `.assertChunkedMatchesWholeOnGPU`, `GalleryOpenState`, `SaveDamageGateLogicTests`, `LayerTreeCharacterizationTests`, `ColorMathOklabLogicTests`, `KeyframeControlLogicTests`, `SandwichLogicTests`, `VectorCanvasDataLogicTests`, `TextBakeCharacterizationTests`, `InterpolationMotionGroupLogicTests`, `.solidImage`, `EffectMultiPassLogicTests`, `InterpolationRenderLogicTests`, `PlaybackBoundsCharacterizationTests`, `LassoFillLogicTests`, `EffectParityLogicTests`, `VectorSample`, `InterpolationGuideLogicTests`, `Typography`, `EyedropperLogicTests`, `Codable`, `VectorEraserHybridLogicTests`, `CanvasResizeLogicTests`, `CanvasNotice`, `FillGestureRestartLogicTests`, `PinchMergeGateLogicTests`, `ShapeHoldClock`, `BakeQueueLogicTests`, `VectorPreviewPlanLogicTests`, `EffectParameterTrackLogicTests`, `WarpAgreementCharacterizationTests`, `AnimationCurveLogicTests`, `CanvasTouchOwnerLogicTests`, `.rgbaBytes`, `ObjectTransformLogicTests`, `FillBoundaryLogicTests`, `PlacedImageShapeLogicTests`, `TimelineLayoutKeyLogicTests`, `InterpolationEngineDiagnosticsLogicTests`, `TimelineRowLayoutLogicTests`, `CelContentProviderLogicTests`, `BlockDragCharacterizationTests`, `TimelineGraphChannelListLogicTests`, `TransformTrack`, `DecodedFrameRing`, `FrameBakerLogicTests`, `FrameBakeStoreLogicTests`, `.previewed`, `OnionSkinLogicTests`, `TimelineBakeBar`, `ARAPLogicTests`, `PoseQuad`, `MemoryBudgetLogicTests`, `.assertChunkedMatchesWhole`, `TransformChannelLogicTests`, `CanvasLayerFilterLogicTests`, `CanvasGeometryLogicTests`, `StrokeGestureRecognizer`, `BakeWiringLogicTests`, `DistortLogicTests`, `FontResolveLogicTests`, `.canvas`, `PackedSampleRun`, `RestSpaceDabBakeLogicTests`?**
+  _High betweenness centrality (0.108) - this node is a cross-community bridge._
 - **Are the 123 inferred relationships involving `CGPoint` (e.g. with `.init()` and `.finish()`) actually correct?**
   _`CGPoint` has 123 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 24 inferred relationships involving `CGFloat` (e.g. with `.draw()` and `.append()`) actually correct?**
