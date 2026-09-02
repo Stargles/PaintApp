@@ -230,6 +230,50 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(posed[0].stroke).samples.first?.point.x ?? 0, 8, accuracy: 1e-9)
     }
 
+    /// **Grain boils under this channel, and that is a finding to record rather than a bug to fix
+    /// here** — KEYFRAMES.md §2.16 and §4.2's *"grain is the real one"*.
+    ///
+    /// `BrushStamper.grainAlphaMultiplier` reads an **absolute canvas-position** noise field at the
+    /// *posed* stamp point, so posing a stroke re-samples every dab's grain: the texture crawls
+    /// across the ink at 24 fps instead of travelling with it. `VectorLayer` dismisses that
+    /// re-sampling as "no regression" because it already happens under a plain translation — true of
+    /// a one-off Move, and false of an animation, which is exactly the sentence §4.2 corrects.
+    ///
+    /// **It is not this stage's to fix.** §2.16's ruling is that the multiplier is baked into the dab
+    /// record when the stroke is drawn, and that record is §4.2's rest-space dab bake — stage 4, which
+    /// the owner scheduled *after* this one. Pinned here so the next reader meets it as a known,
+    /// scheduled artifact rather than as a mystery, and **this test is meant to go red when stage 4
+    /// lands**: at that point the multiplier travels with the dab and the two arrays agree.
+    ///
+    /// Only `.pencil` among the five built-ins enables grain, so this is the whole of the exposure
+    /// today; §4.2 names `.square`'s sub-lattice as the other one, which re-derives its grid from the
+    /// posed diameter against a 1pt floor.
+    func testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves() throws {
+        let grain = BrushLibrary.pencil.grain
+        XCTAssertTrue(grain.isEnabled, "Setup: the pencil is the one built-in that grains")
+
+        let points = (0..<8).map { CGPoint(x: CGFloat($0) * 3, y: 10) }
+        let elements: [VectorElement] = [.stroke(VectorStroke(
+            id: UUID(), brush: BrushLibrary.pencil,
+            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+            size: 6, opacity: 1,
+            samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }))]
+        let posed = CanvasManager.posed(elements,
+                                        through: [(.cel, CGAffineTransform(translationX: 17, y: 5))])
+
+        func grainValues(_ list: [VectorElement]) -> [CGFloat] {
+            (list.first?.stroke?.samples ?? []).map {
+                BrushStamper.grainAlphaMultiplier(at: $0.point, grain: grain)
+            }
+        }
+        let rest = grainValues(elements), moved = grainValues(posed)
+        XCTAssertEqual(rest.count, moved.count)
+        XCTAssertNotEqual(rest, moved,
+                          "The field is sampled in canvas space, so a posed dab lands on different tooth")
+        XCTAssertTrue(zip(rest, moved).contains { abs($0 - $1) > 0.05 },
+                      "and the difference is visible rather than a rounding artefact")
+    }
+
     // MARK: - §2.28's union
 
     /// A pose key is a keyframe. Both device reports behind §2.28 were the timeline and the model
