@@ -517,9 +517,11 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertFalse(manager.layers[1].cels[1].transformTracks.isEmpty, "and so does the right")
 
         for frame in 0..<12 {
-            let now = shownDX(manager, atFrame: frame)
-            XCTAssertNotNil(now, "frame \(frame) still has a pose")
-            XCTAssertEqual(now!, before[frame]!, accuracy: 1e-9,
+            guard let now = shownDX(manager, atFrame: frame), let was = before[frame] else {
+                XCTFail("frame \(frame) lost its pose across the cut")
+                continue
+            }
+            XCTAssertEqual(now, was, accuracy: 1e-9,
                            "frame \(frame) shows the pose it showed before the cut")
         }
     }
@@ -689,8 +691,8 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(track.keys.map(\.frame), [4, 8],
                        "The held pose lands on frame 4 — the nearest keyframe below, which is a pose key")
         XCTAssertTrue(track.isAnimated)
-        XCTAssertEqual(track.keys[0].pose, slide(-18), "keyframe A holds where the drawing was")
-        XCTAssertTrue(track.keys[1].pose.isIdentity, "and B holds where it is now")
+        XCTAssertEqual(track.key(atFrame: 4)?.pose, slide(-18), "keyframe A holds where the drawing was")
+        XCTAssertEqual(track.key(atFrame: 8)?.pose.isIdentity, true, "and B holds where it is now")
         XCTAssertTrue(manager.layers[1].cels[0].pendingPoseBaselines.isEmpty)
     }
 
