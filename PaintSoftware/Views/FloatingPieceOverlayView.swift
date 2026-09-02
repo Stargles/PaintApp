@@ -236,10 +236,14 @@ final class FloatingPieceOverlayView: TransformOverlayView {
             // Latched at touch-down with everything else on this gesture, so flipping the Move bar's
             // picker mid-drag cannot change what the finger already down means.
             distortDrag = piece.mode == .distort ? FloatingDistortDrag(piece: piece, corner: index) : nil
-            // The anchor is the *quad's* opposite corner rather than the box's, so a scale made after
-            // a distort holds the corner the artist can see. Identical to the box's for an
-            // undistorted piece, which is every piece the affine arm could previously meet.
-            dragAnchor = piece.canvasQuad[(index + 2) % 4]
+            // **The anchor stays the *box's* opposite corner, not the quad's**, and that is not the
+            // conservative choice — it is the only self-consistent one. `resizeFromAnchor` derives
+            // the new position as `anchor + half a scaled box extent`, so an anchor that is not a box
+            // corner puts the centre in the wrong place and the piece jumps by the difference the
+            // moment it is distorted. Feeding it the box corner keeps the arithmetic closed: the
+            // affine scales, and the quad rides it, so the whole distorted shape grows about that
+            // corner. For an undistorted piece it is the value this line always had, to the bit.
+            dragAnchor = dragStartTransform.projected(Quad.rect(piece.localBox)[(index + 2) % 4])
         case .changed:
             if let distortDrag {
                 // A delta that would make an undrawable quad is refused rather than clamped, so the

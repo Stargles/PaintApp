@@ -1763,7 +1763,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// The raster Move's version of travelling ants. Its piece writes its transform to the model
-        /// on every delta already (`updateFloatingTransform`), so unlike the vector float this needs
+        /// on every delta already (`updateFloatingPose`), so unlike the vector float this needs
         /// no live latch of its own — it is the same one transform on the outline, read off the piece.
         private func rasterFloatAntsTransform() -> CGAffineTransform {
             guard let piece = canvasManager.floatingPiece, piece.kind == .move else { return .identity }

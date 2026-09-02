@@ -47,6 +47,37 @@ final class DistortUITests: PaintUITestCase {
         }
     }
 
+    /// A probe taken once the canvas has stopped changing — **two consecutive readings that agree**,
+    /// or the last one at the deadline.
+    ///
+    /// **"The canvas at rest" is becoming an *eventual* state rather than an immediate one.** The
+    /// bake-wiring work serves the resting canvas from a baked frame that arrives after the gesture
+    /// (MEASURED 0.40 s after a stroke, 0.024 s after a frame step), so a screenshot taken on the
+    /// line after `Done` can catch the frame before the commit landed. Waiting for *stability* rather
+    /// than for the answer is what keeps that from turning into a test that passes by retrying until
+    /// it likes what it sees: the assertions below still run once, against whatever settled.
+    private func settledProbe(_ canvas: XCUIElement,
+                              timeout: TimeInterval = 6) throws -> (Double, Double) -> Bool {
+        // A coarse fingerprint of the region the piece lives in — cheap to compare, and it changes
+        // whenever the artwork under it does.
+        func fingerprint(_ probe: (Double, Double) -> Bool) -> [Bool] {
+            (0..<24).flatMap { yi in (0..<24).map { xi in
+                probe(0.45 + 0.45 * Double(xi) / 24, 0.15 + 0.40 * Double(yi) / 24)
+            } }
+        }
+        var probe = try inkProbe(canvas)
+        var previous = fingerprint(probe)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let next = try inkProbe(canvas)
+            let current = fingerprint(next)
+            probe = next
+            if current == previous { return probe }
+            previous = current
+        }
+        return probe
+    }
+
     /// How wide the ink is along one row, in normalized units, over a window known to contain it.
     private func inkedWidth(_ probe: (Double, Double) -> Bool, row dy: Double,
                             from x0: Double = 0.50, to x1: Double = 0.90) -> Double {
@@ -119,7 +150,7 @@ final class DistortUITests: PaintUITestCase {
         // selection standing, so Move lifts the same rectangle that was just painted and the box's
         // top-left grip sits on the ink's own top-left. Drawing a second loop would have put a
         // second, differently-undershot rectangle between the measurement and the grip.
-        let filled = try inkTopLeft(try inkProbe(canvas),
+        let filled = try inkTopLeft(try settledProbe(canvas),
                                     in: CGRect(x: 0.50, y: 0.19, width: 0.36, height: 0.27))
         app.buttons["toolbar.moveButton"].tap()
 
@@ -136,15 +167,30 @@ final class DistortUITests: PaintUITestCase {
                      to: CGVector(dx: filled.x + 0.20, dy: filled.y))
         XCTAssertTrue(app.buttons["moveBar.resetButton"].isEnabled,
                       "a pulled corner is a change Reset has to be able to put back")
+
+        // **A distorted box is still draggable by its band**, which is the one thing the preview's
+        // change of mechanism could plausibly have broken: while a piece is distorted the outline and
+        // the artwork are shown under a `CATransform3D` with the layer's anchor point moved to its
+        // origin, so UIKit has to invert a *projective* layer transform to decide the touch is on the
+        // band. Nothing in the model can say whether it did.
+        let held = try inkTopLeft(try settledProbe(canvas),
+                                  in: CGRect(x: 0.50, y: 0.19, width: 0.40, height: 0.30))
+        dragOnCanvas(app, from: CGVector(dx: filled.x + 0.16, dy: filled.y + 0.09),
+                     to: CGVector(dx: filled.x + 0.16, dy: filled.y + 0.15))
+        let moved = try inkTopLeft(try settledProbe(canvas),
+                                   in: CGRect(x: 0.50, y: 0.19, width: 0.40, height: 0.36))
+        XCTAssertGreaterThan(moved.y, held.y + 0.02,
+                             "the move band still takes a touch through the perspective transform")
+
         doneButton.tap()
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5), "the piece baked and the Select menu came back")
 
-        // Two rows of the committed canvas, near the top of the piece and near its bottom. The
-        // window is wide enough to hold the whole block at either row, so what separates them is the
-        // map and nothing else.
-        let after = try inkProbe(canvas)
-        let top = inkedWidth(after, row: filled.y + 0.02)
-        let bottom = inkedWidth(after, row: filled.y + 0.14)
+        // Two rows of the committed canvas, near the top of the piece and near its bottom — measured
+        // from where the band drag left it, not from where it was lifted. The window is wide enough
+        // to hold the whole block at either row, so what separates them is the map and nothing else.
+        let after = try settledProbe(canvas)
+        let top = inkedWidth(after, row: moved.y + 0.02)
+        let bottom = inkedWidth(after, row: moved.y + 0.14)
         XCTAssertGreaterThan(bottom, 0.12, "the bottom edge of the piece is still its full width")
         XCTAssertLessThan(top, bottom - 0.06,
                           "the committed piece is a trapezoid, which no affine transform of a "

@@ -1442,7 +1442,7 @@ final class LassoMoveLogicTests: XCTestCase {
         dragged.position = CGPoint(x: lift.position.x + 12, y: lift.position.y + 3)
         dragged.scaleX = 1.6
         dragged.scaleY = 1.6
-        manager.updateFloatingTransform(dragged)
+        manager.updateFloatingPose(transform: dragged, distortQuad: nil)
         manager.mirrorFloating(horizontal: true)
         XCTAssertTrue(manager.canResetFloating)
 

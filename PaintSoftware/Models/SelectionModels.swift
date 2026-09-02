@@ -563,10 +563,6 @@ extension CanvasManager {
 
     // MARK: Adjusting the floating piece
 
-    func updateFloatingTransform(_ transform: FloatingTransform) {
-        floatingPiece?.transform = transform
-    }
-
     /// The pose a live drag produces: the affine, and Distort's four corners beside it.
     ///
     /// **One call rather than two**, for the reason `ObjectTransformDrag.Pose` gives: a path that
@@ -604,7 +600,11 @@ extension CanvasManager {
     /// is exactly what stage 3c deleted. So the refusal is per *float*, once, with one sentence.
     var distortUnavailableReason: String? {
         guard transformMode == .distort, vectorFloat != nil else { return nil }
-        return "Distort needs pixels. A lassoed drawing moves, scales and mirrors instead."
+        // **"Not yet" in the artist's words as well as in this file's.** §5.14's rule is that a
+        // reader must be able to tell a deferral from a refusal, and the artist is a reader too: a
+        // sentence that merely said what Distort needs would read as "never" to the one person who
+        // asked for it. Move, scale, turn and mirror all still work on the piece they are holding.
+        return "Distort needs a pixel selection — not available on a lassoed drawing yet."
     }
 
     func setTransformMode(_ mode: TransformMode) {
