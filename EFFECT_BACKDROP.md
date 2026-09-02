@@ -10,8 +10,8 @@ settled — §5's four questions were answered the same day and two of them over
 > **STALE BY CONSTRUCTION — READ THIS FIRST.** This section describes the tree **before this document's
 > own build order (§6) ran**, and §6 has since shipped (`2a0379d`, `d90b329`, `5c00201`). Its first
 > bullet in particular — *"The paper is not in the composite"* — **is no longer true**:
-> `makeSandwichRequests` now builds `full` and `below` with `background: paper`
-> (`RenderRequest.swift:722-724`), both backends fill it, and `EffectLayerLogicTests:1491` is
+> `SandwichRecipe.resolve()` now builds `full` and `below` with `background: paper`
+> (`Engine/FrameRecipe.swift:230-231`), both backends fill it, and `EffectLayerLogicTests:1491` is
 > `testEveryBlendModeBlendsAgainstThePaper`. Only the disengaged Core Animation path still has the
 > paper as a plain view. **A shipped spec's what-is-already-true section is the most
 > confidently-worded stale text in the repo** — it carries the commits it was verified at, so it reads
@@ -345,9 +345,10 @@ Nothing here should land as one commit.
    stop painting inside the artwork rect or a translucent canvas colour is applied twice — and note
    `canvasSize` includes `canvasPadding` (`CanvasManager.swift:20-27`) while both compositors fill
    across the whole bounds and `paperView` is inset (`CanvasView.swift:544-551`), so the padding margin
-   needs deciding rather than inheriting. `SandwichFullKey` (`RenderRequest.swift:385-398`) must gain
+   needs deciding rather than inheriting. The key that decides whether to recomposite must gain
    `canvasBackgroundColor` and `isCanvasBackgroundVisible`, or a paper-colour change will not invalidate
-   the cached composite.
+   the cached composite — `CanvasView.SandwichKey` carries both, and `FrameBakeKey` carries the resolved
+   background from the other side of the seam.
 4. **Option A's re-walk for `.ink` effects**, which is what makes Outline work and what makes Bloom's
    ink setting mean anything. (It was Sobel's too until the owner deleted that setting — §5.2.)
 5. **Bloom's control**, its persisted field and its decode default (§4). Sobel's fixed `.backdrop` is a
@@ -378,9 +379,12 @@ independent reviewers found four defects, all measured rather than argued.
 
 1. **`PerfBaselineTests` is RED, in a file the branch never opened.** `RenderTree`'s texture estimate
    **doubled, 5 to 10**, for a bloom document, because Bloom's ruled default is `.ink` and the re-walk
-   counts a second pair. That number feeds `CompositorBudget.affordableSize`, so **every composite on a
-   memory-constrained device shrinks** — and the failing test is the owner's own crash scene, 4096² with
-   vector + bloom + blur on the iPad 9 budget. The estimate must count the re-walk's peak, not its sum.
+   counts a second pair. That number is what the budget is divided by — `ChunkedCompositor.chunkSources`
+   and `StripedCompositor`'s strip height both spend it, and `MetalCompositor.attempt` admits against it
+   — so doubling it **halves the chunk width and the strip height on a memory-constrained device**, and
+   on the mid-stroke halves, which are composited whole, it can tip the frame onto the CPU reference.
+   The failing test is the owner's own crash scene, 4096² with vector + bloom + blur on the iPad 9
+   budget. The estimate must count the re-walk's peak, not its sum.
 2. **An `.ink` effect composites the ink a second time, and it is not subtle.** The re-walk builds the
    sub-tree on transparency and draws it over an accumulator that already holds the same sub-tree over
    paper; `blendOver` with `da == 0` returns the source unblended, so the ink is source-over'd onto

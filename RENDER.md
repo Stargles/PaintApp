@@ -20,8 +20,10 @@ the build order.
   invalidation signal today is whole-tree structural equality, recomputed every SwiftUI pass.
 - **A hold is one `Cel` spanning `frameCount` frames**, so `LayerContentVersion` is byte-identical at every
   frame of it. Holds dedupe for free the moment `frame` is left out of the key (§4).
-- `CompositorBudget.affordableSize` shrinks any composite whose textures do not fit `physicalMemory / 16`
-  (192 MiB on a 3 GB iPad), whatever the knob says. §2.12 forbids that.
+- `CompositorBudget.textureBudgetBytes` is `physicalMemory / 16` — MEASURED **183.7 MB** on the owner's
+  3 GB iPad 9, where the `3 << 30 / 16` arithmetic the docs used to write reads 192. It chooses a **strip
+  height** (§3.8) and never a smaller canvas, because §2.12 forbids answering the knob with less than it asked
+  for.
 - One raw frame at 2048² is 16.8 MB; ten seconds at 24 fps is 4 GB. Baked frames must be compressed on disk,
   never held as raw textures.
 - Composited playback already misses 24 fps on the owner's iPad with no in-betweens present: a six-layer
@@ -102,10 +104,12 @@ the build order.
 
 ## 3. Design
 
-### 3.1 What the main thread does today, and what it will do
+### 3.1 What the main thread does, and the pen-up cost this design removed
 
-The compositor is not the freeze. At pen-up the main thread runs, in order (`Views/Canvas/StrokeCanvasView.swift:919-996`,
-`Views/CanvasView.swift:363-392`):
+The compositor is not the freeze. **The table below is the pen-up cost as it stood before stage 2 and is
+what the stages after it took off the main thread** — it is here as the evidence the design was shaped
+by, not as a description of the running app; the paragraph after it is the present state. At pen-up the
+main thread ran, in order (`Views/Canvas/StrokeCanvasView.swift:919-996`, `Views/CanvasView.swift:363-392`):
 
 | step | where | scales with |
 |---|---|---|
@@ -117,8 +121,8 @@ The compositor is not the freeze. At pen-up the main thread runs, in order (`Vie
 
 **Those last two used to thrash the flatten memo and no longer do**, which is worth stating because it is the one
 figure in this section that moved rather than merely being described. `RasterizeKey` carries width and height
-(`PixelOps.swift:156-157`), so the sandwich at its clamped size and a *native* thumbnail minted separate canvas-sized
-entries per cel in one 192 MiB memo — six layers at 4096² needing 201 MiB clamped plus 384 MiB native, so the memo
+(`PixelOps.swift:156-157`), so the sandwich at its reduced size and a *native* thumbnail minted separate canvas-sized
+entries per cel in one 192 MiB memo — six layers at 4096² needing 201 MiB reduced plus 384 MiB native, so the memo
 never held one frame and every rebuild was cold. At 2048x1024 the same six entries are 48 MiB and everything hit,
 which is why the freeze read as a large-canvas symptom. Both consumers are now bounded, and the live mask resolves at
 the sandwich's own size rather than a second one.
@@ -144,8 +148,9 @@ re-flattened.
 
 ### 3.3 The bake key
 
-One key names the pixels of a frame. It is `SandwichFullKey` (`RenderRequest.swift:471-504`) **with `frame` removed**
-and three inputs added that no cache carries today:
+One key names the pixels of a frame: `FrameBakeKey` (`Engine/FrameBakeKey.swift`), built from a `FrameRecipe`,
+carrying everything the live canvas's own `SandwichKey` compares **with `frame` removed** and three inputs no
+in-memory cache carries:
 
 - the resolved tree (`[RenderNode]`: structure, opacity, visibility, blend mode, isolation, masks including the
   implicit clip-to-below mask, each node's effect resolved at the frame — a **folder's** grade is resolved here
@@ -361,7 +366,7 @@ preceded them got the *split* backwards, which PERFORMANCE §10.2 keeps as a war
   Adopting it would have multiplied the decode by four to make the file 39% bigger. If the ratio ever does disappoint, reach for a coder that models
   prediction error at all — not a filter in front of a match-only one.
 
-**The key is `SandwichFullKey` minus `frame`, built from a `FrameRecipe` by a hand-written canonical byte
+**The key is §3.3's field list with no `frame`, built from a `FrameRecipe` by a hand-written canonical byte
 encoder rather than from any `Hashable`, and that is not fastidiousness.**
 `LayerContentVersion.hash(into:)` deliberately omits `effect` — correctly, since every in-memory cache in
 this app compares `==` after the bucket lookup, so a collision costs one compare. A content-addressed
@@ -379,7 +384,7 @@ because `CanvasManager.canvasSize` includes the margin and the margin's only rou
 is `RenderBackground.rect`, which `canvasBackground(renderedInto:)` insets by it — with the paper hidden
 the padding reaches nothing at all. **`RenderResolution` is *not* implied by `canvasSize`** and is a
 separate field: `RenderSizing.native` ignores the knob outright, so all three positions mint one buffer,
-and even under `.liveComposite` two positions can land on one size once `affordableSize` clamps them.
+and under `.liveComposite` two positions can round to one size on a small enough canvas.
 
 **A kept bake needs a stable stamp.** The process-lifetime key uses object identity and in-memory version counters
 (`RasterLayerTexture.version`, `VectorCanvas.version`), which restart at every open. A bake the artist keeps beside
@@ -521,7 +526,7 @@ the ruler's bottom 3 pt. Four things came out differently from what this section
 
 ### 3.8 Full means full
 
-`affordableSize` stops sizing the live composite. When the native texture set exceeds the budget the baker
+Nothing sizes a composite below the knob. When the native texture set exceeds the budget the baker
 composites in **horizontal strips**, each with an apron equal to the summed kernel radius of the effects in the tree,
 and writes the strips into one frame. Sources are cropped to the strip plus apron, so the peak is a strip's worth of
 textures, and the budget chooses the strip height instead of the resolution.
@@ -699,8 +704,7 @@ it is the dependency order.
      the artist's own gesture, never stored) and they want `.userInitiated` where the bake wants `.utility`.
      Sharing the size is what §3.6 actually needed. The knob is now inside the bake, which is also what §2.8
      wants of an export that reads these files and what makes `defaultRoot`'s per-resolution directory
-     something other than three copies of one picture; `affordableSize` is inside it too and stays §2.12's
-     known defect until stage 5 removes it from that one function, which keeps the two sizes moving together.
+     something other than three copies of one picture.
    - **`isSandwichRebuilding` is not a discard, and §3.6's claim that its behaviour "is not inherited" was
      already satisfied.** `finishSandwichRebuild` ends in `reconcileLayers()`, which re-derives the key from
      the model and starts the rebuild the guard declined — the same "waits one iteration" contract

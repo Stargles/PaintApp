@@ -29,10 +29,12 @@ toolset, and a frame-by-frame animation timeline.
   effects (one input). Picks its backend per composite: the GPU (Metal) for anything that grades or
   has four or more layers, the Core Graphics implementation — which is also the byte-for-byte
   reference and the fallback where there is no GPU — below that, because the two have opposite cost
-  shapes on real hardware. The GPU path is also sized to the device it runs on (`CompositorBudget`):
-  a canvas whose working set would not fit is composited smaller rather than crashing, which is what
-  a 4K canvas with two effect layers does on a 3 GB iPad. See
-  [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md)
+  shapes on real hardware. A composite is bounded by the device it runs on (`CompositorBudget`)
+  without ever being made smaller: a frame whose working set would not fit — a 4K canvas with two
+  effect layers on a 3 GB iPad — is walked in horizontal strips, and within a strip node by node, at
+  the size that was asked for. The canvas at rest and playback are not composited on demand at all;
+  they are read from a background bake on disk. See [LAYER_COMPOSITING.md](LAYER_COMPOSITING.md) and
+  [RENDER.md](RENDER.md)
 - **Effects**: 13, all configurable from the layer panel — levels, curves, brightness/contrast, HSV
   shift, gradient map, chromatic aberration, posterize, noise, gaussian/directional blur, bloom,
   sobel, sharpen and outline — with a curve editor and a gradient-stop editor for the two that need
@@ -257,8 +259,9 @@ reasoning for all of it is in `Services/SaveDamageGate.swift`.
 See [BUGS.md](BUGS.md) for the tracked list. Notable ones: **two-finger pan/pinch/rotate is reported
 dead on device while the Fill tool is selected**, unexplained and unreproduced on the simulator;
 square/custom brush stamps are approximated as tiled round dabs (not true shaped stamps yet);
-Distort/Warp transform modes render identically to Uniform; Cut/Copy/Paste and Drawing Guide are
-still "Coming soon" stubs.
+Distort works on a raster floating piece and on a text box but not on lassoed vector ink, where it
+goes on gesturing as Uniform and the Move bar says so; Cut/Copy/Paste and Drawing Guide are still
+"Coming soon" stubs.
 
 ## License
 

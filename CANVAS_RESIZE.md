@@ -232,7 +232,7 @@ closed off explicitly: **the header and every buffer move together, in one opera
 | `copiedCel` | `CanvasManager.swift:481` | **clear it** — see §0 | same |
 | `canvasPadding` | `CanvasManager.swift:27` | preserved literally, in points | preserved literally — see §5 |
 | every size-keyed cache | `PixelOps.RasterizeKey`, `MaskResolver.CacheKey`, `EffectPipelines.scratchSize`, `OnionSkinRasterCache` | self-invalidating; purge to reclaim the bytes | same |
-| compositor admission | `MetalCompositor.swift:516-525` | — | **re-checked implicitly, and the gate is about memory, not speed** — jetsam kills the process before `Metal.makeTexture` would return nil (`:505-506`). Growing the canvas raises `peakCompositeTextures × w·h·4` against `CompositorBudget.textureBudgetBytes`, a threshold set by the document's layer/effect structure as much as by the canvas. The live canvas is pre-shrunk below it by `affordableSize` and softens instead of refusing; the dialog warns and proceeds — §5 rule 14, §6 Q5 |
+| compositor admission | `MetalCompositor.swift:516-525` | — | **re-checked implicitly, and the gate is about memory, not speed** — jetsam kills the process before `Metal.makeTexture` would return nil (`:505-506`). Growing the canvas raises `peakCompositeTextures × w·h·4` against `CompositorBudget.textureBudgetBytes`, a threshold set by the document's layer/effect structure as much as by the canvas. Nothing is shrunk below it — a frame that does not fit is composited in horizontal strips at full size (RENDER §3.8), so growing the canvas costs passes rather than sharpness; the dialog warns and proceeds — §5 rule 14, §6 Q5 |
 
 **A resize that handles the active cel and forgets the other 999 is a data-loss bug**, and the shape
 of that bug is already in the tree: PERFORMANCE.md item 14 records three independently-scoped
@@ -476,10 +476,11 @@ The budget is 192 MiB on the owner's iPad 9 (`physicalMemory / 16`, clamped `[64
 return nil under this pressure, jetsam kills the process first (`MetalCompositor.swift:505-506`). An
 over-budget composite is declined (`:516-525`), but nothing is purged there: the cache-dropping purge
 belongs to the *other*, dynamic gate (`os_proc_available_memory()` pressure, `:530-538`), which reacts
-to the OS rather than to canvas size. On the live canvas the size gate never fires at all —
-`makeSandwichRequests` sizes its request through `CompositorBudget.affordableSize` first, so an
-over-large document composites fewer pixels instead of being refused (§6 Q5). The arithmetic that
-matters, all **INFERRED** from `w·h·4`:
+to the OS rather than to canvas size. On the live canvas the rest picture never reaches the gate —
+`StripedCompositor` cuts a frame that does not fit into bands that do, at the size the knob asked for
+(RENDER §3.8) — while the two mid-stroke halves are composited whole and can still be refused to the
+CPU reference on a document over it (§6 Q5). The arithmetic that matters, all **INFERRED** from
+`w·h·4`:
 
 | | 2048×1024 | growing to 4096×2048 |
 |---|---|---|
@@ -977,19 +978,17 @@ mapper.
     `size × spacingFraction` per stroke, and a binary search per keystroke, because a stroke crosses at
     factor `k` exactly when its threshold lies in `[min(1, 1/k), max(1, 1/k))`. The sentence is
     conditional on this document actually having such a stroke, not shown whenever scaling.
-14. **A resize that would push the document past the compositor's admission gate warns and lets the
-    artist proceed — it never refuses and there is nothing to fall back silently from.** The warning
-    has two halves (§6 Q5). The live canvas itself never reaches the gate: past it, the canvas
-    composites at reduced resolution instead, softer rather than slower. But the eyedropper's colour
-    pick does reach it and falls to the CPU reference for that one pick; the live-mask preview on a
-    masked layer runs on the CPU reference unconditionally, gate or no gate, so it only gets slower as
-    the canvas grows. Export and the project thumbnail are unaffected at any canvas size.
-    **Shipped in stage 2, not stage 3**, because the warning is a property of the dialog rather than of
-    undo: `CompositorSizeGate` holds the two texture counts the live tree gives
-    (`peakCompositeTextures` for the eyedropper's native-size request, plus `uploadableLeafCount` for
-    the sandwich's) and asks `CompositorBudget.affordableSize` at the typed extent. Two counts because
-    the two thresholds are genuinely different — at 4096×2048 on the owner's iPad 9 the canvas softens
-    while the eyedropper still fits.
+14. **A resize never refuses, and it warns about nothing on the compositor's account.** There is no
+    size at which the canvas renders something other than what the knob asked for: a frame whose
+    textures exceed the budget is composited in horizontal strips at full size, and the eyedropper's
+    native-size pick is stripped the same way rather than dropped to the CPU reference (RENDER §3.8).
+    `CompositorSizeGate` and the Resize sheet's warning built on it are deleted, because a picker that
+    tells the truth has nothing left to tell.
+    **What growing the canvas still costs is time.** The two mid-stroke halves are composited whole
+    rather than stripped, so past the gate they fall to the CPU reference for the duration of a stroke;
+    the live-mask preview on a masked layer runs on the CPU reference unconditionally, gate or no gate,
+    so it only gets slower as the canvas grows. Export and the project thumbnail are unaffected at any
+    canvas size. §6 Q5.
 15. **A resize may block, provided the app says it is loading. Owner-ruled 2026-08-28**, on being
     told the operation freezes the main thread for seconds at 300 cels:
 
@@ -1072,12 +1071,13 @@ mapper.
    checked against `peakCompositeTextures × canvasBytes` (`RenderTree.swift:542`), so the size a
    document tips over at depends on its **layer and effect structure**, not on the canvas alone.
 
-   **On the live canvas the gate never fires, and there is no CPU fallback.** `makeSandwichRequests`
-   sizes its request through `CompositorBudget.affordableSize` before `attempt` ever sees it
-   (`RenderRequest.swift:697-701`; the scaling itself is `Compositor.swift:221-246`, `sqrt(budget /
-   wanted)`). An over-large document therefore stays on the GPU and composites **fewer pixels** — the
-   canvas gets *softer*, not slower, on an image the artist is already told is a preview
-   (`RenderResolution`). The thing that actually purges the whole cache, `purgeLocked()`, belongs to a
+   **On the live canvas nothing composites below the knob, and the gate's answer is a strip rather
+   than a smaller canvas** (RENDER §3.8). `StripedCompositor` cuts a frame whose textures exceed the
+   budget into horizontal bands that each fit it and writes them into one frame at the size the artist
+   asked for, so growing the canvas costs passes rather than sharpness. **The two mid-stroke halves are
+   the one live-canvas composite that is not stripped** — `CanvasView.startSandwichRebuild` composites
+   each whole — so on a document over the gate those two are refused and fall to the CPU reference for
+   the duration of the stroke. The thing that actually purges the whole cache, `purgeLocked()`, belongs to a
    *different*, dynamic gate (`os_proc_available_memory()` pressure, `:530-538`) that reacts to the OS
    rather than to canvas size; the static, size-based refusal a resize can cause just declines that one
    composite (`:516-525`) and purges nothing.
@@ -1086,28 +1086,28 @@ mapper.
    most.** The app has no separate export feature; the only full-document composite on the save path is
    the manifest thumbnail (`ProjectStore.swift:270-294`), and since `2f4b737` (2026-08-20, "Composite
    the gallery tile at the tile's size, not the whole canvas") it is bounded to a 320×320 box
-   (`RenderSizing.fitting(Self.thumbnailBounds)`) that routes through the same `renderSize(fitting:within:)` →
-   `CompositorBudget.affordableSize` pipeline as the live canvas (`RenderRequest.swift:527-545`). At
+   (`RenderSizing.fitting(Self.thumbnailBounds)`), fitted by `renderSize(fitting:within:)` and clamped
+   at 1× so a hint may only ask for less. At
    that bound the composite can never approach even the 64 MiB budget floor, on any canvas size —
    saving and thumbnailing are unaffected by this gate regardless of how large the canvas grows. The
    native-size arm is not empty, though; it just is not the thumbnail any more.
 
    **One ordinary, in-session gesture lives on that native-size arm.** `RenderSizing.native` is what
-   makes the eyedropper and every parity test composite at native size, "an identity that
-   `affordableSize` does not promise" — and since 2026-09-01 the live-mask resolve is not among them:
-   it takes `RenderSizing.liveComposite` and is sized with the sandwich. The eyedropper
-   (`CanvasManager+Eyedropper.swift:47-52`) is uncapped on purpose — a reduced composite would blend
-   neighbouring pixels into the sampled colour, and a wrong colour looks exactly like a right one — and
-   its request runs through `Compositor.composite`, so on a document over the gate it genuinely falls
-   back to `CoreGraphicsCompositor` for that one pick (`Compositor.swift:365-366`). **The live-mask
+   makes the eyedropper and every parity test composite at native size, the one sizing with no
+   `RenderResolution` in it — and the live-mask resolve is not among them: it takes
+   `RenderSizing.liveComposite` and is sized with the sandwich. The eyedropper
+   (`CanvasManager+Eyedropper.swift:47-52`) composites at native size on purpose — a reduced composite
+   would blend neighbouring pixels into the sampled colour, and a wrong colour looks exactly like a
+   right one — and it goes through `FrameRecipe.composite`, so a pick too large for the budget is
+   **stripped** rather than dropped to the CPU reference. **The live-mask
    preview (`CanvasView.swift:1367`, `resolveLiveMask`) does not go through the gate at all, in either
    direction.** `MaskResolver.coverage` calls `CoreGraphicsCompositor.composite` directly and
    unconditionally, once per mask source (`MaskResolver.swift:9-14`, `:180-181` — "Always the CPU
    reference, whichever backend asked"), which is a parity decision and not a fallback, so it never
    touches `MetalCompositor` and cannot "reach" this gate the way the eyedropper does. It pays a CPU
    composite on every stroke begun on a masked layer, gate or no gate, rather than only once the
-   document is over it — now at the sandwich's render size rather than at the canvas's, so the knob and
-   the clamp bound it as they bound the picture.
+   document is over it — at the sandwich's render size rather than at the canvas's, so the knob bounds
+   it as it bounds the picture.
 
    **Either way, this is where the 7047 ms vs 18.8 ms figure actually bites, during an interactive
    gesture rather than offline** — though the figure needs its own scope stated rather than borrowed
@@ -1116,26 +1116,20 @@ mapper.
    i.e. the cost of a document with a grading layer in the tree, not of a plain stack — a plain stack's
    CPU/GPU gap is the much smaller per-layer-slope and fixed-intercept pair in `Compositor.swift`'s own
    table, above. A document large or effect-heavy enough to sit over the gate pays the large figure on
-   every eyedropper tap that reaches the fallback; the live-mask preview sits somewhere on that same
-   curve on every stroke begun on a masked layer, scaled by canvas size and by how many sources the
-   mask has.
+   the two mid-stroke halves, which are the composites that are not stripped; the live-mask preview
+   sits somewhere on that same curve on every stroke begun on a masked layer, scaled by canvas size and
+   by how many sources the mask has.
 
-   **Three in-source comments carried the stale claim, corrected in place rather than only here.**
-   `MetalCompositor.swift:518-523` and `RenderTree.swift:529-531` each named `ProjectStore`'s thumbnail
-   as the consumer that reaches this gate at native size; both now name the eyedropper instead, which is
-   the one that actually does. `MetalCompositor.swift:563-566` made the same size claim in passing, for
-   an unrelated point about the upload cache holding two composite sizes per session; it now states the
-   thumbnail's true, `affordableSize`-bounded size rather than repeating "native." All three were true
-   when written (`ca1680b`, 2026-08-16) and stopped being true four days later when `2f4b737` bounded the
-   thumbnail's composite; none were updated to match. This document's own §1 row and §2 "Memory and
-   time" section carried the same stale claim and are corrected alongside this answer.
+   **The thumbnail is not the consumer that reaches this gate at native size and the eyedropper is** —
+   `MetalCompositor.attempt`'s own admission comment and `RenderTree.peakCompositeTextures`'s doc both
+   say so, and both are worth reading before anyone re-derives the question from the gate alone.
 
-   **The dialog's warning therefore has two halves.** Past a size that depends on this document's layer
-   stack: the canvas itself composites at reduced resolution and looks softer while you work — not
-   "falls back to CPU," which is not what the artist experiences on the canvas. And picking a colour, or
-   beginning a stroke on a masked layer, can pay the CPU reference's cost for that one composite — which
-   is where "falls back to CPU" is actually true, just not on the canvas itself. Saving and exporting
-   pay neither cost. §5 rule 14.
+   **The dialog warns about none of this.** There is no size at which the canvas renders something
+   other than what the knob asked for, so there is nothing to tell the artist at the moment they type a
+   larger extent; `CompositorSizeGate` and the Resize sheet's warning built on it are deleted (RENDER
+   §3.8). What remains is time rather than sharpness: on a document over the gate the two mid-stroke
+   halves pay the CPU reference for the duration of a stroke, and beginning a stroke on a masked layer
+   pays it at any size. Saving and exporting pay neither. §5 rule 14.
 
 6. **May a resize block the app? ANSWERED — yes, if it says it is loading, 2026-08-28.** *"resize
    freezing canvas isnt that big of an issue, as long as the user knows its loading. It is a one time

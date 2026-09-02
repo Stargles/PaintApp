@@ -31,11 +31,16 @@ app, and whoever notices that should come back and say so rather than assuming i
 ## In flight
 
 - **(29) Rendering** — spec at [RENDER.md](RENDER.md), whose §2 is sixteen owner rulings and §5 the
-  build order. **Stages 0 through 3 are merged**: the live stroke no longer scales with canvas area, the
+  build order. **Stages 0 through 5 are merged**: the live stroke no longer scales with canvas area, the
   playback clock is the model's, the pen-up snapshot is a `FrameRecipe` minted on the main actor and
-  resolved off it — MEASURED 174-313 ms of main-thread work at pen-up down to **0.2 ms** — and a frame
-  composites one chunk at a time under a memory ceiling, byte-exact on both backends. **Stage 4, the
-  store and the scheduler, is next.**
+  resolved off it — MEASURED 174-313 ms of main-thread work at pen-up down to **0.2 ms** — a frame
+  composites one chunk at a time under a memory ceiling, byte-exact on both backends, the canvas at rest
+  and playback are served from LZ4 frames on disk, and a frame whose textures do not fit the budget is
+  composited in horizontal strips at the size the artist asked for. **Stage 6, export, is next.**
+
+  **Two things stage 5 still owes**, both on the device: the owner's own confirmation that the slider
+  reads Full and the canvas is full on the "UI Test" canvas they reported it on, and the compression
+  ratio measured against that same document rather than against the synthetic fixtures.
 
 - **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
   half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
@@ -81,12 +86,13 @@ LAYER_TRANSFORM.md.
 
 - [ ] > "rendering: add the ability to export animations as video or a frame as image"
 
-      Spec at [RENDER.md](RENDER.md): §1 the ask in full, **§2 fourteen owner rulings**, §3 the design.
+      Spec at [RENDER.md](RENDER.md): §1 the ask in full, **§2 sixteen owner rulings**, §3 the design.
       The load-bearing ones: the baker **replaces** live main-thread compositing rather than sitting beside
       it; export **reads the bake** and re-renders nothing; the Render Resolution knob is the truth for
-      both the canvas and the export, so `CompositorBudget.affordableSize`'s silent shrink is a defect, not
-      a trade; playback may be visibly stale while the bake catches up, with the artist's current frame
-      baked first; and the bake is dumped between launches unless the artist keeps it in the project folder.
+      both the canvas and the export, so a frame too large for the device's texture budget is cut into
+      horizontal strips rather than composited smaller; playback may be visibly stale while the bake
+      catches up, with the artist's current frame baked first; and the bake is dumped between launches
+      unless the artist keeps it in the project folder.
       Item (31)'s three symptoms are this item's acceptance tests on a real device.
 
 ### (21) Keyframes — animating properties across the frames one cel spans
@@ -162,8 +168,8 @@ LAYER_TRANSFORM.md.
       **Verdict: do not.**
 
       **The paper is already in the composite**, so the tidiness argument is the only one left — the
-      reachability one does not apply. `makeSandwichRequests` builds `full` and `below` with
-      `background: paper` (`RenderRequest.swift:722-724`), both backends fill it
+      reachability one does not apply. `SandwichRecipe.resolve()` builds `full` and `below` with
+      `background: paper` (`Engine/FrameRecipe.swift:230-231`), both backends fill it
       (`Compositor.swift:713-716`, `MetalCompositor.swift:941-974`), thumbnails pass
       `includeBackground: true` (`ProjectStore.swift:311`), and `EffectLayerLogicTests:1491` is
       `testEveryBlendModeBlendsAgainstThePaper`. Only the disengaged Core Animation path draws the paper
@@ -282,9 +288,11 @@ LAYER_TRANSFORM.md.
       (LINEAR_LIGHT_AB.md §4).
 
       **Five things any implementation must handle**, each found by reading the tree rather than guessed:
-      `PixelOps.RasterizeKey`, `CanvasView.SandwichKey`, `RenderRequest.SandwichFullKey` and
+      `PixelOps.RasterizeKey`, `CanvasView.SandwichKey`, `MetalCompositor`'s `UploadCache.Key` and
       `MaskResolver`'s key all carry render inputs and none carries a colour-pipeline field, so a stale
-      composite serves silently; `ProjectStore.swift:1158` rebuilds every tier on load with no format
+      composite serves silently — and `FrameBakeKey` is the same hole on disk, where the filename *is*
+      the digest and a missing field is the wrong picture with no error;
+      `ProjectStore.swift:1158` rebuilds every tier on load with no format
       argument, so a document forgets the setting on reopen; `RasterLayerTexture.ensureContext` memoizes
       the backing format with no invalidation, so the setting cannot change mid-document; six other sites
       reconstruct a `RasterLayerTexture` and would drop its format; and a linear tier changes the PNG on

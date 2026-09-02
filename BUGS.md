@@ -106,9 +106,12 @@ editor on the iPad 9", or thirty seconds of the owner's own time.
 Found while designing RENDER.md; the compositor's budget is sound and almost nothing else consults it. RENDER §5 stage
 7 takes these. Canvas bytes are `w·h·4`: 8 MiB at 2048x1024, 64 MiB at 4096², 1 GiB at 16383².
 
-1. **`renderSources` holds one canvas-sized image per visible leaf, all at once, with no budget**
-   (`Engine/RenderRequest.swift:884-993`). `affordableSize` bounds the canvas, never the count: 100 leaves at 2048x1024
-   is 800 MiB. RENDER §3.4 is the fix.
+1. **`FrameRecipe.resolveSources` holds one canvas-sized image per visible leaf, all at once, with no budget**
+   (`Engine/FrameRecipe.swift:155`). Sizing bounds the buffer, never the count: 100 leaves at 2048x1024 is
+   800 MiB whatever the knob says. **RENDER §3.4 closed the whole-frame consumers** — the bake, the project
+   thumbnail and the eyedropper composite through `FrameRecipe.composite`, which holds a chunk's worth — and
+   the site survives on the two callers that legitimately want one request over every leaf: the sandwich
+   halves (`CanvasView.startSandwichRebuild`) and `liveMaskRequest`.
 2. **Nothing on the live-stroke path consults `hasHeadroom`**, which has exactly one call site
    (`Engine/MetalCompositor.swift:620`). The stroke itself no longer needs it — `Engine/StrokeScratch.swift` bounds the
    scratch by the stroke's own dirty rect rather than by the canvas, on both tiers — but committing one still opens the
@@ -281,52 +284,41 @@ drawing viewport-relative as a whole. D2 did clip its *sampling* to the visible 
 per-redraw CPU cost is now O(viewport) regardless of document length; this entry is about the
 allocation, which that change does not touch.
 
-## Picking a colour or starting a masked stroke can pay a full CPU composite mid-gesture (2026-08-28)
+## Starting a masked stroke pays a full CPU composite mid-gesture (2026-08-28)
 
 Found while writing CANVAS_RESIZE.md §6 Q5, and it is independent of that feature — nothing about it
 needs a resize to exist, since Canvas Padding already reaches the sizes that trigger it. The "Raising
 the canvas maximum reaches a raster-storage cost `CompositorBudget` never bounds" entry already
 establishes that TODO item (13) raised the canvas maximum to 16383.
 
-**Two different mechanisms, and they stopped being the same one on 2026-09-01.** The eyedropper is
-native-size and deliberately uncapped by `CompositorBudget.affordableSize` — `RenderSizing.native`,
-now the only live consumer that takes it, for the correctness reason its own doc comment gives. The
-live-mask resolve used to share that exemption by accident and now takes `RenderSizing.liveComposite`,
-so it is sized with the sandwich; **its cost falls with the knob and the clamp, but the entry below
-still stands**, because what makes it expensive is the backend rather than the size.
+**This was two mechanisms and is now one; the eyedropper's half is closed.** A pick composites at
+`RenderSizing.native` on purpose — a downscaled composite would blend neighbouring pixels into the
+sampled colour, and a wrong colour looks exactly like a right one — and since RENDER §3.8 a native
+composite whose textures do not fit the budget is cut into **strips that each fit it**, so the tap
+stays on whichever backend the tree chose instead of dropping to the CPU reference. The whole-frame
+walk is also off the main actor and chunked (`FrameRecipe.composite`, RENDER §3.4).
 
-1. **The eyedropper falls back to the CPU reference once the document is over the compositor's
-   admission gate.** `eyedropperRequest()` (`CanvasManager+Eyedropper.swift:47-52`) composites at
-   native canvas size on purpose — a downscaled composite would blend neighbouring pixels into the
-   sampled colour, and a wrong colour looks exactly like a right one — so once `peakCompositeTextures
-   × canvasBytes` exceeds `CompositorBudget.textureBudgetBytes` (`MetalCompositor.swift:516-525`),
-   every tap runs `CoreGraphicsCompositor.composite` instead of Metal (`Compositor.swift:365-366`).
-   That entry computes the owner's own crash-scene shape (6 `peakCompositeTextures`) tips
-   over the iPad 9's 192 MiB budget at **2896²** — reachable today through Canvas Padding alone, well
-   under the new 16383 maximum.
+**What remains is the live-mask preview, on the CPU reference unconditionally.**
+`MaskResolver.coverage` calls `CoreGraphicsCompositor.composite` directly, once per mask source,
+"whichever backend asked" — a parity decision, not a fallback, so it never touches `MetalCompositor`
+at all (`MaskResolver.swift:9-14`, `:180-181`). `resolveLiveMask` (`CanvasView.swift`) runs it
+once at the start of every stroke on a layer clipped by a non-empty mask (`liveMaskStrokeBegan`),
+before the result is cached, and synchronously — both its callers need the coverage in the turn they
+ask for it. Sizing it with the sandwich (`RenderSizing.liveComposite`) reduced this and did not remove
+it: at Full the resolve is the same canvas-sized CPU composite it always was.
 
-2. **The live-mask preview is on the CPU reference unconditionally, gate or no gate.**
-   `MaskResolver.coverage` calls `CoreGraphicsCompositor.composite` directly, once per mask source,
-   "whichever backend asked" — a parity decision, not a fallback, so it never touches `MetalCompositor`
-   at all (`MaskResolver.swift:9-14`, `:180-181`). `resolveLiveMask` (`CanvasView.swift`) runs it
-   once at the start of every stroke on a layer clipped by a non-empty mask (`liveMaskStrokeBegan`),
-   before the result is cached. Sizing it with the sandwich reduced this and did not remove it: at
-   Full on a document the budget does not clamp, the resolve is the same canvas-sized CPU composite
-   it always was.
-
-**The cost, transferred rather than newly measured.** Both call the identical
+**The cost, transferred rather than newly measured.** It calls the identical
 `CoreGraphicsCompositor.composite`/`.grade` that `Compositor.swift`'s own device table and
 `PerfBaselineTests.testEffectCompositeCostOnBothBackends` already measured: **203.3 ms** (iPad 9,
 Release, warm, 2048²) for one grading layer in the stack, **7047 ms** (Debug, 4.2M px) for the same
 operation off-device. MEASURED for those tests, not for this path directly — the transfer is sound
-because it is the same function call, not a resembling one, but no test has timed an actual eyedropper
-tap or mask resolve. A mask whose sources include a grading layer pays that cost on every stroke begun
-on the layer it clips; an eyedropper tap on a document over the gate pays it on every tap.
+because it is the same function call, not a resembling one, but no test has timed an actual mask
+resolve. A mask whose sources include a grading layer pays that cost on every stroke begun on the
+layer it clips.
 
 Not fixed here — flagged, the same posture as the raster-storage entry just named. A fix means either
-budgeting these two consumers too (which contradicts why each is uncapped: correctness for the
-eyedropper, backend parity for the mask) or caching further up the call chain; both are
-product/architecture decisions outside this document's scope.
+budgeting this consumer too (which contradicts why it is uncapped — backend parity) or caching further
+up the call chain; both are product/architecture decisions outside this document's scope.
 
 ## An in-between's interpolation recipe vanishes with no report if it will not decode (2026-08-27)
 
@@ -360,13 +352,17 @@ TODO.md item (13) raised `CanvasSizePickerView.maxDimension` 8192 -> 16383 and l
 grow to a 1024 base. The item itself asked to check what a 16383² canvas costs before shipping it,
 rather than shipping a setting that crashes — this is that check, and the answer splits in two.
 
-**The interactive composite is fine — `CompositorBudget` already covers it, unmodified.**
-`CompositorBudget.affordableSize` scales the GPU composite down to `textureBudgetBytes` before it
-allocates anything. On the owner's own 3 GB iPad 9 (`textureBudgetBytes(physicalMemory: 3 GB) == 192
-MiB`), a 16383² canvas holding the owner's own crash-scene shape (6 live textures,
-`peakCompositeTextures`) composites at roughly **2896²** instead of full size — a softer preview, not
-a crash. That is the exact mechanism `CompositorBudget`'s own doc comment describes, doing its job on
-a canvas four times the pixels of the one it was written against.
+**The interactive composite does not soften, and `CompositorBudget` bounds the walk rather than the
+picture.** Since RENDER §3.8 nothing sizes a composite below the knob: a frame whose textures exceed
+`textureBudgetBytes` is cut into horizontal strips and written into one frame at the size that was
+asked for. INFERRED from the sizing rule this entry was written against — `sqrt(budget / wanted)`
+over `textureBudgetBytes(physicalMemory: 3 GB) == 192 MiB` — a 16383² canvas holding the owner's own
+crash-scene shape (6 live textures, `peakCompositeTextures`) would have composited at roughly
+**2896²**: a softer preview rather than a crash. **That is the half that changed and the half that
+matters here did not.** Strips bound the *walk*; the destination is still one full-frame buffer, and
+`StripedCompositor.assemble` holds every strip's core alive while it renders them into it — so at
+16383² the compositor's own output is the same **1.02 GB** the paragraph below computes for a raster
+tier, with no budget consulted about it either.
 
 **A freshly created canvas — even at 16383² — costs nothing extra by itself.** `RasterLayerTexture` is
 lazy: a blank cel has no backing `CGContext` (`context` stays `nil` until the first stamp or a load),

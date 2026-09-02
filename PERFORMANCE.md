@@ -50,9 +50,10 @@ explanation and whatever caused it is unexplained. It no longer matters in pract
 of the fan-out (item 15) is on the owner's iPad now, and they report leaving the gallery **instant**.
 
 **`CompositorBudget` is inert at this size.** Six canvas-sized textures are 48 MiB at 2048×1024
-against a 192 MiB device-derived budget (`Compositor.swift:167-170`, `physicalMemory / 16` on a 3 GB
-iPad 9), so `affordableSize` never shrinks anything. The 384 MiB crash table at
-`Compositor.swift:91-97` is 4096² arithmetic. Do not tune these constants.
+against a device-derived budget of **183.7 MB** (MEASURED on the owner's iPad 9, §9;
+`Compositor.swift:167-170`, `physicalMemory / 16` — 192 MiB is the `3 << 30 / 16` arithmetic rather
+than the number the device produces), so nothing at this canvas is ever cut into strips or chunks. The
+384 MiB crash table at `Compositor.swift:91-97` is 4096² arithmetic. Do not tune these constants.
 
 ### What the correction promotes
 
@@ -299,22 +300,20 @@ moved, or, for the playhead, that it did not. Plus `TimelineGestureUITests` (10)
 headlessly; and a millisecond taken on this Mac is the least trustworthy number available (CLAUDE.md
 records contention making suites return wrong answers). The counts are the honest instrument here.
 
-**4a. Cache `full` across a pure `activeLayerIndex` change. — SHIPPED** (`SandwichFullKey` in
-`RenderRequest.swift`, used by `CanvasView.startSandwichRebuild`). `SandwichKey`'s own comment named
-this fix and declined it — "worth the wasted composite rather than a second key and a second cache to
-keep them apart" — and what changed is the accounting, not the argument.
-*Why it is sound*: `makeSandwichRequests` reads `activeLayerIndex` in exactly one place, the
-`split(atLeaf:)` that makes `below` and `above`. `full` is the whole tree, uncut. Pinned by
+**4a. Cache `full` across a pure `activeLayerIndex` change. — SHIPPED, then SUPERSEDED by the baker.**
+The live canvas does not composite `full` at all now: the rest picture is read out of the on-disk bake
+(RENDER.md §3.6, stage 4d), whose key has no field for the active leaf, so a layer tap is a ring or
+store hit rather than a composite a second key had to be kept in order to skip. `SandwichFullKey` and
+the reuse path it keyed are deleted, and a rebuild is the two halves and nothing else
+(`testARebuildIsTheTwoHalvesAndNothingElse`).
+*The claim underneath it still holds*: `activeLayerIndex` is read in exactly one place, the
+`split(atLeaf:)` that makes `below` and `above`, and `full` is the whole tree, uncut — pinned by
 `testFullIsTheSamePictureWhicheverLayerIsActive`, pixel-identical over every index on a document with
 a blend in it.
-*Why the second cache is free*: the image handed back is the one `sandwichImages` already retains,
-and it is passed through un-rewrapped so `updateSandwich`'s `!==` checks still read "nothing changed".
-*Verified*: the call count this document asked for. `CompositeProbe` (new, in `Compositor.swift`)
-records every composite and its size; `testALayerSwitchCompositesTwiceRatherThanThreeTimes` asserts
-**2 where there were 3**, all the same size.
-*Sized properly for the first time*, and it is a bigger fraction than the old estimate implied — see
-4b's table, where a layer switch turns out to be snapshot-warm and therefore almost entirely
-composite.
+*What the cache measured while it existed*: `CompositeProbe` (in `Compositor.swift`, and now the
+instrument the chunk and bake suites count with) records every composite and its size, and the layer
+switch came out at **2 composites where there were 3**, all the same size. That saving was on a path
+that is gone; the equivalent count today is the 2 above.
 
 **4b. Compute `below`/`above` lazily. — DECLINED, on a measurement.** Not deferred on risk: the
 number that justified it was arithmetic over a per-layer slope, and taking the real one changes the
@@ -398,7 +397,8 @@ filling and has no business also deciding which dimension binds — getting that
 because a request whose `canvasSize` has the wrong aspect composites a stretched picture that still
 looks like a picture. So the fit rule is written once and is the same `min` of the two ratios
 `ThumbnailRenderer` uses, and `ProjectStore` passes one named constant to both. Clamped at 1× (a hint
-may only ask for less), then capped by `CompositorBudget.affordableSize`.
+may only ask for less), and bounded below that by nothing: a box too large for the device's texture
+budget is `StripedCompositor`'s problem, exactly as a native composite is (RENDER.md §3.8).
 *Verified*: the size rule alone (aspect, both binding dimensions, the clamp, whole pixels, degenerate
 inputs); the probed save; and the two tiles compared, since a saving that changes the picture is not
 a saving — a mean-channel-difference bound rather than byte equality, because the two paths filter in
@@ -1373,9 +1373,10 @@ merge blocker.
 Naming the work that is not worth doing was an explicit requirement of this investigation, and it is
 the half a future session is most likely to discard. It carries the same weight as §3.
 
-**Do not tune `CompositorBudget`, `textureBudgetBytes`, or `affordableSize`.** At 2048×1024 six
-canvas-sized textures are 48 MiB against a 192 MiB budget. The admission valve never fires. Every
-number that forced it into existence is 4096² arithmetic.
+**Do not tune `CompositorBudget` or `textureBudgetBytes`.** At 2048×1024 six canvas-sized textures are
+48 MiB against a 183.7 MB budget. The admission valve never fires, and the strip planner that spends
+the same number answers "one strip" — the unstripped path verbatim, no window, no apron, no crop.
+Every number that forced any of it into existence is 4096² arithmetic.
 
 **Do not re-derive a problem from the flatten memo's "1.61 GB at 4096²" comment**
 (`PixelOps.swift:120-124`). It is historical and already superseded by the byte bound the same
