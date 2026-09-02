@@ -14,8 +14,14 @@ import SwiftUI
 ///
 /// **It is the one action here that can refuse**, and it says why rather than going quietly grey —
 /// `CanvasManager.recolorUnavailableReason`, the rule and the voice `MoveTransformBottomBar` states
-/// for Mirror. At most one caption is ever on screen: the refusal replaces the "draw a selection"
-/// hint rather than stacking under it.
+/// for Mirror. At most one caption is ever on screen at the foot of the bar: the refusal replaces the
+/// "draw a selection" hint rather than stacking under it.
+///
+/// **"What the loop catches" sits directly above the action row** (TODO item (23)), because that row
+/// is what obeys it: Move — reached from the toolbar, not from here — and Recolour both read
+/// `CanvasManager.selectionMembership`, so the artist should be able to read the rule and the buttons
+/// in one glance. It is above rather than below because it is chosen *first*: the panel's order is
+/// how you select (the mode tabs), what the loop then catches, and what to do with it.
 struct SelectPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
@@ -45,6 +51,10 @@ struct SelectPanel: View {
             }
             .padding(.horizontal, 10)
             .padding(.top, 12)
+
+            divider
+
+            membershipPicker
 
             divider
 
@@ -99,6 +109,57 @@ struct SelectPanel: View {
         .cornerRadius(16)
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+    }
+
+    /// **TODO item (23) — "What the loop catches".** `Enclosed · Cut · Touching`, ordered by how much
+    /// of the drawing the loop takes, with the shipped rule — Cut — in the middle and selected until
+    /// the artist touches it.
+    ///
+    /// **It moved here from the Move bar rather than being copied here**, which is the owner's ask:
+    /// *"i feel like it would be better in select menu because i want it to affect recolour"*
+    /// (2026-08-29). One property, one control; the tools that consume a lasso read it.
+    ///
+    /// **Available with no selection**, like the mode tabs above and unlike the action row, because it
+    /// is the rule the *next* loop will answer with — an artist who has to draw a lasso before they
+    /// can choose how it behaves has the order backwards.
+    ///
+    /// **It refuses on a pixel layer and says why** (`selectionMembershipUnavailableReason`), which is
+    /// a real limit rather than a policy: every consumer cuts at the selection there and can do
+    /// nothing else. Disabled and captioned rather than dropped, so switching layers does not reflow
+    /// the bar under a finger.
+    ///
+    /// Its caption carries the refusal when there is one and otherwise says what the *selected* rule
+    /// does, because the difference between the three is invisible until something has already been
+    /// moved or recoloured.
+    private var membershipPicker: some View {
+        let reason = canvasManager.selectionMembershipUnavailableReason
+        let shown = canvasManager.displayedSelectionMembership
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("What the Loop Catches")
+                .font(.caption)
+                .foregroundColor(.white)
+
+            Picker("What the Loop Catches", selection: Binding(
+                get: { shown },
+                set: { canvasManager.setSelectionMembership($0) }
+            )) {
+                ForEach(LassoMembership.allCases) { membership in
+                    Text(membership.displayName).tag(membership)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(reason != nil)
+            .opacity(reason == nil ? 1 : 0.45)
+            .accessibilityIdentifier("selectPanel.membershipPicker")
+
+            Text(reason ?? shown.selectionExplanation)
+                .font(.caption2)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("selectPanel.membershipCaption")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     /// A plain iOS-switch look-alike (capsule track + circular knob) purely for display — the

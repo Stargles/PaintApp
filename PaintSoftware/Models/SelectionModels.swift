@@ -202,6 +202,27 @@ struct FloatingPiece {
     }
 }
 
+// MARK: - What the loop catches
+
+/// The Select panel's voice for the three membership rules (TODO item (23)).
+///
+/// **A second explanation rather than an edit to `LassoMembership.explanation`, and only because the
+/// enum sits in a file this change could not open.** `explanation` is written in Move's voice —
+/// *"Moves only what lies completely inside the loop"* — which was right while the picker lived on
+/// the Move bar and is wrong the moment the same rule also governs Recolour. These sentences name no
+/// tool, which is the whole of item (23): the rule belongs to the selection and the tools obey it.
+/// **`LassoMembership.explanation` now has no caller and should be replaced by this one when
+/// `VectorLayer.swift` is next open.**
+extension LassoMembership {
+    var selectionExplanation: String {
+        switch self {
+        case .enclosed: return "Only what lies completely inside the loop."
+        case .cutting:  return "Cuts at the loop, and takes what is inside."
+        case .touching: return "Anything the loop touches, whole."
+        }
+    }
+}
+
 // MARK: - CanvasManager operations
 
 extension CanvasManager {
@@ -498,49 +519,46 @@ extension CanvasManager {
         return nil
     }
 
-    /// Whether the Move bar offers the **membership picker** — "what travels" — at all.
+    /// Why the membership picker cannot be *changed* on the active layer, or nil when it can. Shown
+    /// under the picker in `SelectPanel`, in the artist's terms — the shape `mirrorUnavailableReason`
+    /// and `recolorUnavailableReason` already use, and for their reason: a control that is off says
+    /// why.
     ///
-    /// **False for the whole-cel float, and that is the one place it is dropped rather than
-    /// disabled.** `beginVectorWholeCelMove` sets `selectionBeforeLift: nil`: there is no loop, so
-    /// there is no membership question, and a greyed three-way picker would invite the artist to
-    /// wonder what it would have done. Nothing else in the bar distinguishes the two floats, which is
-    /// why this reads the float's own loop rather than the tool state.
+    /// **A pixel layer is fixed on Cut, and it is a real limit rather than a policy.** Every one of
+    /// the three consumers cuts at the selection there and can do nothing else: `PixelOps.maskedPiece`
+    /// *is* Move's cut, `PixelOps.clear` is Clear's, and a recolour refuses on a pixel layer outright
+    /// (`recolorUnavailableReason`). A raster cel has pixels and no elements, so "the strokes the loop
+    /// touches" has nothing to name. This is a separate property from `mirrorUnavailableReason`, which
+    /// returns **nil** for a raster piece — the two questions have opposite answers on that kind, so
+    /// folding them together would have made one of them wrong.
     ///
-    /// Dropping it cannot reflow the row under a finger, which is `iconButton`'s rule: the answer is
-    /// fixed at the lift and does not move for the float's life. The picker is *disabled* — not
-    /// dropped — for the two reasons that can change while a float is up.
-    var lassoMembershipPickerIsOffered: Bool {
-        if floatingPiece != nil { return true }
-        guard let float = vectorFloat else { return false }
-        return float.selectionBeforeLift != nil
+    /// **It reads the layer, not the float, and that is TODO item (23) rather than a refactor.**
+    /// While it lived on the Move bar the only pixel case it could meet was a floating raster piece;
+    /// now it is asked in the Select panel before anything has been lifted, and the honest subject of
+    /// the sentence is the layer the artist is standing on. The two agree wherever both can be asked:
+    /// a raster float can only have come off a raster layer.
+    ///
+    /// **Nothing here about a nudged float.** `setSelectionMembership` still refuses one — the guard
+    /// is in the setter, where a new call site cannot get past it — but the refusal has no caption
+    /// because there is no picker on screen to caption: `DrawingView` shows `SelectPanel` only when
+    /// nothing floats (LASSO_MOVE.md §5.13).
+    /// **A value layer gets its own sentence rather than the pixel one**, because it is a different
+    /// refusal wearing the same shape: it holds no pixels *and* no elements
+    /// (`Layer.hasNoDrawingSurface`), so nothing there cuts at the selection either. The voice is
+    /// `Tool.textUnavailableReason(onLayerOfKind:)`'s, which already had to say this once.
+    var selectionMembershipUnavailableReason: String? {
+        guard layers.indices.contains(currentLayerIndex) else { return nil }
+        switch layers[currentLayerIndex].kind {
+        case .vector: return nil
+        case .raster: return "A pixel layer can only cut at the selection."
+        case .value:  return "A value layer holds nothing a lasso can catch."
+        }
     }
 
-    /// Why the membership picker cannot be *changed* on whatever is floating, or nil when it can.
-    /// Shown under the picker, in the artist's terms — the shape `mirrorUnavailableReason` and
-    /// `recolorUnavailableReason` already use, and for their reason: a control that is off says why.
-    ///
-    /// **A raster piece is fixed on Cut, and it is a real limit rather than a policy.**
-    /// `PixelOps.maskedPiece` *is* the cut: a pixel layer has no elements to be whole or partial, so
-    /// "move the strokes the loop touches" has nothing to name. This is a separate property from
-    /// `mirrorUnavailableReason`, which returns **nil** for a raster piece — the two questions have
-    /// opposite answers on that kind, so folding them together would have made one of them wrong.
-    ///
-    /// **After the first nudge it says so rather than going quietly grey.** Changing the rule re-lifts
-    /// the float (`setLassoMoveMembership`), and a re-lift after the artist has moved something would
-    /// have to rewrite undo steps already on the stack against a display list that no longer matches
-    /// them. Undo is the way back to a rule they can still change, and the caption says that in those
-    /// words.
-    var lassoMembershipUnavailableReason: String? {
-        if floatingPiece != nil { return "A pixel layer can only cut at the selection." }
-        guard let float = vectorFloat else { return nil }
-        if float.nudges > 0 { return "Undo your moves to change what travels." }
-        return nil
-    }
-
-    /// The rule the picker should *show*. The artist's own choice, except on a raster piece, which is
-    /// fixed on Cut for the reason above and must not be shown holding a setting it does not obey.
-    var displayedLassoMembership: LassoMembership {
-        floatingPiece != nil ? .cutting : lassoMoveMembership
+    /// The rule the picker should *show*. The artist's own choice, except on a pixel layer, which is
+    /// fixed on Cut for the reason above and must not be shown holding a setting nothing obeys.
+    var displayedSelectionMembership: LassoMembership {
+        selectionMembershipUnavailableReason == nil ? selectionMembership : .cutting
     }
 
     /// Whether a corner drag on the **lassoed vector piece** stretches the two axes independently.
@@ -887,18 +905,50 @@ extension CanvasManager {
         return nil
     }
 
-    /// Every stroke, fill and text object the selection caught takes the picked colour — **whole**,
-    /// even where it hangs outside the loop.
+    /// Every stroke, fill and text object the selection caught takes the picked colour — under the
+    /// rule the artist picked in the Select panel.
     ///
     /// > *"When the user uses select, there should be an option called something like change color
     /// > which changes the color of all the strokes and fills inside the selection to the current
     /// > picked color. It's alright if part of the stroke is outside the selection."* — owner,
     /// > 2026-08-28.
     ///
-    /// That last sentence is the load-bearing one, and it makes this deliberately **unlike** a lasso
-    /// move: a move splits a straddling stroke into two independent strokes at the boundary
-    /// (LASSO_MOVE.md §5.2), a recolour splits nothing. `VectorCanvas.elementIDs(insideLocalPath:)`
-    /// is the seam that says so, and its doc comment is why `splitForLassoMove` could not be reused.
+    /// > *"i feel like it would be better in select menu because i want it to affect recolour. For
+    /// > enclosed on recolour, it would have to split the strokes and other objects around the lasso
+    /// > border and then recolour the ones inside. Luckly, the splitting already exists in enclosed
+    /// > move, so you can reuse that."* — owner, 2026-08-29 (TODO item (23)).
+    ///
+    /// **The second quote supersedes the first, and it is the whole of what changed here.** Until
+    /// item (23) this function was ruled to split nothing: a straddling stroke took the colour whole,
+    /// on the strength of *"It's alright if part of the stroke is outside"*. The newer ask is for the
+    /// opposite to be **available**, and it is now one of three rules rather than the only one:
+    ///
+    ///   * **Enclosed** — only elements lying wholly inside the loop are recoloured, whole.
+    ///   * **Cut** (the default) — the display list is split at the loop and only the inside pieces
+    ///     take the colour. This is the arm the owner described, and it is
+    ///     `VectorCanvas.splitForLassoMove` — the same call `beginVectorLassoMove` and
+    ///     `clearSelectionPixels` make, so no new geometry was written for it.
+    ///   * **Touching** — anything the loop reaches is recoloured whole, ink outside the loop
+    ///     included. This is the 2026-08-28 behaviour, still one tap away.
+    ///
+    /// **The owner's word was "enclosed" and the mode that splits is Cut.** Their sentence describes
+    /// the behaviour unambiguously — *"split the strokes … around the lasso border and then recolour
+    /// the ones inside"* — and that is `LassoMembership.cutting`, whose own doc comment already says
+    /// *"Only `.cutting` [cuts at the boundary], and that is the whole difference in the engine."*
+    /// Reading it as `.enclosed` would have given one mode two meanings depending on which tool asked,
+    /// which is the per-tool copy item (23) exists to end.
+    ///
+    /// **A consequence worth stating: the default recolour now splits.** `.cutting` is the shared
+    /// default, so a plain lasso-and-Recolour leaves the outside piece behind as its own stroke in the
+    /// old colour, where until 2026-09-02 the whole line changed. Touching is the rule that restores
+    /// the old behaviour, and it is in the same panel as the button.
+    ///
+    /// **Elements the recolour cannot touch are split along with the rest**, because the split is one
+    /// pass over the display list and cannot be told to spare them: a straddling `.erase` punch caught
+    /// under Cut becomes two punches that draw the identical hole. That is LASSO_MOVE.md §5.7's rule
+    /// — an eraser mark is an ordinary element — and it costs nothing visible. It is only ever
+    /// committed when something else in the same loop actually changed colour: `changed == 0` returns
+    /// before the new list is assigned, so a loop that caught only erasers discards the split too.
     ///
     /// **Only the hue travels; the opacity stays** (owner, 2026-08-28): a faint stroke stays faint, a
     /// solid one stays solid, a fill keeps the transparency it was made with. That is one write
@@ -943,8 +993,38 @@ extension CanvasManager {
         // over their own line.
         let loop = vectorCanvas.localPath(fromCanvas: selection.path)
                                .normalized(using: VectorCanvas.lassoFillRule)
-        let caught = vectorCanvas.elementIDs(insideLocalPath: loop)
-        guard !caught.isEmpty else { return }
+
+        // **The one branch the three rules cost.** Cut is the only rule that changes geometry, which
+        // is `LassoMembership.cutsAtTheBoundary`'s whole job — so it takes `splitForLassoMove`, whose
+        // `insideIDs` is exactly the recolour list, and the other two take the classifier that cuts
+        // nothing. Both doors answer "what did the loop catch" out of the same `caughtIDs` body, so
+        // Touching here and Touching on a Move cannot drift apart.
+        let membership = selectionMembership
+        let elementsBefore = vectorCanvas.elements
+        let working: [VectorElement]
+        let caught: Set<UUID>
+        if membership.cutsAtTheBoundary {
+            // Nil is "the loop caught nothing", and for a recolour that is a silent no-op with no
+            // undo step — `clearSelectionPixels` reads the same nil the same way.
+            guard let split = vectorCanvas.splitForLassoMove(insideLocalPath: loop,
+                                                             membership: membership) else { return }
+            // Cut cannot reach §5.24's case — it catches everything Touching does for strokes and
+            // fills — so a nil here really is bare paper and stays silent, exactly as a lift's does.
+            working = split.elements
+            caught = split.insideIDs
+        } else {
+            working = elementsBefore
+            caught = vectorCanvas.elementIDs(insideLocalPath: loop, membership: membership)
+            guard !caught.isEmpty else {
+                // **Enclosed catching nothing says so here too** (LASSO_MOVE.md §5.24). The ruling is
+                // written about a lift, but its argument names no tool: a loop full of ink, a rule the
+                // artist has just picked, and a button that does nothing and says nothing reads as
+                // broken. A recolour reaches that state through the same property since item (23), so
+                // it raises the same notice through the same call.
+                noteALassoThatCaughtNothing(vector: vectorCanvas, loop: loop)
+                return
+            }
+        }
 
         // `brushColor`, not `activeEditColor`: after `commitAllInteractiveState()` the two are
         // identical, and reading the computed one only opens a window in which they could differ.
@@ -956,11 +1036,12 @@ extension CanvasManager {
 
         // Rewritten **in place** at each index rather than gathered into per-kind buckets and
         // assigned back. Since `addFill` appends (LASSO_FILL.md §2a) a canvas can hold fills above
-        // *and* below the same stroke, and a recolour must not be what silently restacks them.
-        let elementsBefore = vectorCanvas.elements
-        var newElements = elementsBefore
+        // *and* below the same stroke, and a recolour must not be what silently restacks them. Under
+        // Cut the list walked is the *split* one, whose two halves already replace their parent at
+        // the parent's index (`splitForLassoMove`), so z-order survives the split the same way.
+        var newElements = working
         var changed = 0
-        for (index, element) in elementsBefore.enumerated() {
+        for (index, element) in working.enumerated() {
             switch element {
             case .stroke(var stroke):
                 guard caught.contains(stroke.id), stroke.composite == .paint,
@@ -988,7 +1069,9 @@ extension CanvasManager {
         }
         // Nothing changed, nothing recorded — a loop that caught only erasers and a photo, or one
         // whose contents are already the picked colour, must not cost the artist an undo press for
-        // an edit they cannot see. `bakePreciseStrokes` states the same idiom.
+        // an edit they cannot see. `bakePreciseStrokes` states the same idiom. **Under Cut this also
+        // throws the split away**, which is why a Cut recolour that recolours nothing leaves no cut
+        // behind: `working` is a local list and nothing has been assigned to the canvas yet.
         guard changed > 0 else { return }
 
         vectorCanvas.elements = newElements

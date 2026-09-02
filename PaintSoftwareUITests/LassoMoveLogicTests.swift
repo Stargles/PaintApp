@@ -3434,14 +3434,16 @@ final class LassoMoveLogicTests: XCTestCase {
                        """)
     }
 
-    /// **A straddling stroke is recoloured whole and is not cut.** The owner's sentence, stated as an
-    /// assertion: same element count, same id, same samples — only the hue moved.
+    /// **Under Touching a straddling stroke is recoloured whole and is not cut.** The owner's
+    /// 2026-08-28 sentence — *"It's alright if part of the stroke is outside the selection"* — stated
+    /// as an assertion: same element count, same id, same samples, only the hue moved.
     ///
-    /// The element count is the load-bearing half. Reaching for `splitForLassoMove` here (the obvious
-    /// reuse, and the first thing a scoping pass suggested) would leave two strokes where the artist
-    /// drew one, with only the inside piece recoloured — the artist would see their line change
-    /// colour halfway along and would then have to undo a split they never asked for.
-    func testAStrokeStraddlingTheLoopIsRecolouredWholeAndIsNotCut() {
+    /// **It is `.touching` here rather than the default because TODO item (23) moved that sentence off
+    /// the default and onto a rule the artist picks.** Until 2026-09-02 this was the only behaviour a
+    /// recolour had; it is now one of three, and Cut — the default — splits, which is
+    /// `testUnderCutAStraddlingStrokeIsSplitAndOnlyTheInsidePieceIsRecoloured` below. Nothing about
+    /// what Touching does changed.
+    func testUnderTouchingAStraddlingStrokeIsRecolouredWholeAndIsNotCut() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
         let originalID = vector.elements[0].id
@@ -3450,14 +3452,122 @@ final class LassoMoveLogicTests: XCTestCase {
         // x ≥ 30: the middle and end samples are inside, the first one is not. `beginVectorLassoMove`
         // on this very loop makes two strokes out of it — see `testAStrokeCrossingTheLoop…`.
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.setSelectionMembership(.touching)
         manager.brushColor = picked(1, 0, 0)
         manager.recolorSelection()
 
-        XCTAssertEqual(vector.elements.count, 1, "a recolour splits nothing — the stroke stays one stroke")
+        XCTAssertEqual(vector.elements.count, 1, "Touching splits nothing — the stroke stays one stroke")
         XCTAssertEqual(vector.elements[0].id, originalID, "and keeps its identity")
         XCTAssertEqual(vector.elements[0].stroke?.samples.count, originalSamples, "and every sample")
         assertRGB(vector.elements[0].stroke?.color, 1, 0, 0,
                   "the whole stroke takes the picked colour, including the part outside the loop")
+    }
+
+    /// **Under Cut a straddling stroke is split at the loop and only the inside piece is recoloured.**
+    ///
+    /// The owner, 2026-08-29 (TODO item (23)): *"it would have to split the strokes and other objects
+    /// around the lasso border and then recolour the ones inside. Luckly, the splitting already exists
+    /// in enclosed move, so you can reuse that."* This is that, and the reuse is literal —
+    /// `recolorSelection` calls the same `VectorCanvas.splitForLassoMove` a lift and a Clear call, so
+    /// no geometry was written for this feature.
+    ///
+    /// **Their word was "enclosed" and the mode that splits is Cut.** The behaviour they described is
+    /// unambiguous and `LassoMembership.cutting` is the only rule that cuts at the boundary — its own
+    /// doc comment says so. Reading it as `.enclosed` would have given one rule two meanings depending
+    /// on which tool asked, which is the per-tool copy item (23) exists to end.
+    ///
+    /// **This is a change to what the default does**, and it is the one behaviour change item (23)
+    /// carries: `.cutting` is the shared default, so a plain lasso-and-Recolour now leaves the outside
+    /// piece behind in the old colour. Touching is one tap away and is in the same panel as the
+    /// button.
+    func testUnderCutAStraddlingStrokeIsSplitAndOnlyTheInsidePieceIsRecoloured() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let originalID = vector.elements[0].id
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertEqual(manager.selectionMembership, .cutting, "fixture precondition: Cut is the default")
+        manager.brushColor = picked(1, 0, 0)
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        XCTAssertEqual(vector.elements.count, 2, "the stroke was cut at the loop")
+        let strokes = vector.elements.compactMap(\.stroke)
+        XCTAssertFalse(strokes.contains { $0.id == originalID },
+                       "both halves mint fresh ids, exactly as a lasso move's do")
+        // Outside first, at the parent's index — `splitForLassoMove`'s own ordering.
+        assertRGB(strokes[0].color, 0, 0, 0, "the piece outside the loop keeps the colour it had")
+        assertRGB(strokes[1].color, 1, 0, 0, "and the piece inside takes the picked one")
+        XCTAssertEqual(stepsSince(baseline, manager), 1, "one step for the split and the colour together")
+
+        manager.undo()
+        XCTAssertEqual(vector.elements.count, 1, "and one press gives back the uncut stroke")
+        XCTAssertEqual(vector.elements[0].id, originalID)
+        assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "in the colour it was drawn with")
+    }
+
+    /// **Under Enclosed a straddling stroke is not recoloured at all**, and the one wholly inside
+    /// beside it is — the same sentence Enclosed says for a Move, said for a recolour. Nothing is cut:
+    /// Enclosed catches whole elements or nothing, which is `LassoMembership.cutsAtTheBoundary`.
+    func testUnderEnclosedOnlyStrokesWhollyInsideTheLoopAreRecoloured() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 36, y: 40), to: CGPoint(x: 52, y: 40), size: 6))
+        let straddling = vector.elements[0].id
+        let inside = vector.elements[1].id
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.setSelectionMembership(.enclosed)
+        manager.brushColor = picked(1, 0, 0)
+        manager.recolorSelection()
+
+        XCTAssertEqual(vector.elements.map(\.id), [straddling, inside], "nothing was cut and nothing moved")
+        assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the straddling stroke is not wholly inside")
+        assertRGB(vector.elements[1].stroke?.color, 1, 0, 0, "the enclosed one takes the colour")
+    }
+
+    /// **An Enclosed recolour that catches nothing says so, and a bare-paper one still stays silent**
+    /// — LASSO_MOVE.md §5.24 reached through the recolour's door. The ruling is written about a lift
+    /// and its argument names no tool: what separates the two cases is whether the artist can *see*
+    /// the reason, and a loop full of ink that Enclosed excluded is the case where they cannot.
+    func testAnEnclosedRecolourThatCatchesNothingSaysSoAndBarePaperStaysSilent() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        manager.setSelectionMembership(.enclosed)
+        manager.brushColor = picked(1, 0, 0)
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "no stroke lies completely inside the loop")
+        assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "so nothing took the colour")
+        XCTAssertEqual(manager.notice?.code, "nothingWhollyInside", "and the artist is told why")
+
+        manager.notice = nil
+        select(manager, layerIndex, loop(CGRect(x: 4, y: 44, width: 16, height: 16)))
+        manager.recolorSelection()
+        XCTAssertNil(manager.notice,
+                     "but bare paper says nothing — §5.9, where the artist can see the reason")
+    }
+
+    /// **A Cut recolour that changes no colour leaves no cut behind.** The split is computed into a
+    /// local list and only assigned when something actually took the picked colour, so a loop whose
+    /// contents are already that colour costs the artist neither an undo step *nor* a stroke they now
+    /// have to rejoin. This is the sharpest way the split could have leaked: `changed == 0` returning
+    /// after the assignment would look identical in every other test in this file.
+    func testACutRecolourThatChangesNoColourLeavesNoCutBehind() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let originalID = vector.elements[0].id
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.brushColor = picked(0, 0, 0)              // exactly what the stroke already is
+        let baseline = manager.history.undoStack.count
+        manager.recolorSelection()
+
+        XCTAssertEqual(vector.elements.count, 1, "the stroke is still one stroke")
+        XCTAssertEqual(vector.elements[0].id, originalID, "with the id it was drawn with")
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "and nothing is recorded")
     }
 
     /// **Selection is by the centre line here too.** A 40 pt stroke whose spine is outside the loop is
@@ -3543,10 +3653,11 @@ final class LassoMoveLogicTests: XCTestCase {
         assertRGB(vector.elements[0].stroke?.color, 0, 0, 0, "the far-away stroke is not touched")
     }
 
-    /// **A fill that merely overlaps the loop is recoloured whole, and keeps its fill rule.** The rule
-    /// matters more than it looks: a clear-selection hole is stored `evenOddFill`, and a recolour that
-    /// rebuilt the element with the default would fill in the very hole it exists to make.
-    func testAFillOverlappingTheLoopIsRecolouredWholeAndKeepsItsEvenOddRule() {
+    /// **Under Touching a fill that merely overlaps the loop is recoloured whole, and keeps its fill
+    /// rule.** The rule matters more than it looks: a clear-selection hole is stored `evenOddFill`,
+    /// and a recolour that rebuilt the element with the default would fill in the very hole it exists
+    /// to make.
+    func testUnderTouchingAFillOverlappingTheLoopIsRecolouredWholeAndKeepsItsEvenOddRule() {
         let (manager, layerIndex, vector) = fixture()
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 44, height: 30),
                                                       transform: nil),
@@ -3555,16 +3666,42 @@ final class LassoMoveLogicTests: XCTestCase {
         let originalID = vector.elements[0].id
         let originalPath = vector.elements[0].fill?.pathData
 
-        // Overlaps the fill's right-hand end only — a move would cut it in two here.
+        // Overlaps the fill's right-hand end only — a move, or a Cut recolour, cuts it in two here.
         select(manager, layerIndex, loop(CGRect(x: 40, y: 2, width: 24, height: 60)))
+        manager.setSelectionMembership(.touching)
         manager.brushColor = picked(1, 0.5, 0)
         manager.recolorSelection()
 
-        XCTAssertEqual(vector.elements.count, 1, "a recolour splits no fill either")
+        XCTAssertEqual(vector.elements.count, 1, "Touching splits no fill either")
         XCTAssertEqual(vector.elements[0].id, originalID)
         XCTAssertEqual(vector.elements[0].fill?.pathData, originalPath, "and moves no geometry")
         XCTAssertEqual(vector.elements[0].fill?.evenOddFill, true, "the fill rule survives the rewrite")
         assertRGB(vector.elements[0].fill?.color, 1, 0.5, 0, "the whole fill takes the picked colour")
+    }
+
+    /// **Under Cut a fill is cut at the loop and only the inside chunk takes the colour** — the
+    /// owner's *"and other objects"*, which for a fill is the two Core Graphics booleans
+    /// `splitForLassoMove` already runs. Both halves keep the parent's even-odd rule, which is the
+    /// thing that would silently fill in a Clear-punched hole if it were dropped.
+    func testUnderCutAFillIsCutAtTheLoopAndOnlyTheInsideChunkIsRecoloured() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 44, height: 30),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
+                                         opacity: 1, evenOddFill: true))
+        let originalID = vector.elements[0].id
+
+        select(manager, layerIndex, loop(CGRect(x: 40, y: 2, width: 24, height: 60)))
+        XCTAssertEqual(manager.selectionMembership, .cutting, "fixture precondition: Cut is the default")
+        manager.brushColor = picked(1, 0.5, 0)
+        manager.recolorSelection()
+
+        let fills = vector.elements.compactMap(\.fill)
+        XCTAssertEqual(fills.count, 2, "the fill was cut at the loop")
+        XCTAssertFalse(fills.contains { $0.id == originalID }, "and both halves mint fresh ids")
+        assertRGB(fills[0].color, 0, 0, 1, "the chunk outside the loop keeps its blue")
+        assertRGB(fills[1].color, 1, 0.5, 0, "and the chunk inside takes the picked colour")
+        XCTAssertTrue(fills.allSatisfy { $0.evenOddFill }, "both halves carry the parent's fill rule")
     }
 
     /// **Text is caught by its box centre, and only by its box centre.** That is the rule
@@ -4328,8 +4465,12 @@ final class LassoMoveLogicTests: XCTestCase {
     /// both doors.
     ///
     /// The two deliberately **disagree** about text and images, which is the ruling this test pins
-    /// the other half of: `elementIDs` defaulted (the recolour's rule) answers those two by their
-    /// centre, and Touching answers them by their quad.
+    /// the other half of: `elementIDs` defaulted (`.cutting`, the cut rule rounded for the kinds that
+    /// cannot be cut) answers those two by their centre, and Touching answers them by their quad.
+    ///
+    /// The parenthesis used to read *"the recolour's rule"* and no longer does: since TODO item (23)
+    /// a recolour reads `CanvasManager.selectionMembership` like everything else, and under `.cutting`
+    /// it goes through `splitForLassoMove` rather than through this door at all.
     func testTouchingIsTheSamePredicateTheRecolourAsksThroughItsOwnDoor() {
         let (_, _, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
@@ -4353,7 +4494,7 @@ final class LassoMoveLogicTests: XCTestCase {
         // The text box spans x 20…36 and its centre is at x = 28 — outside the loop, which starts at
         // x = 30, while its right-hand strip is inside it.
         XCTAssertFalse(vector.elementIDs(insideLocalPath: local).contains(text),
-                       "the recolour's defaulted rule answers text by its centre, and misses it")
+                       "the defaulted rule answers text by its centre, and misses it")
         XCTAssertTrue(vector.elementIDs(insideLocalPath: local, membership: .touching).contains(text),
                       "Touching answers it by its quad, and takes it")
     }
@@ -4363,13 +4504,13 @@ final class LassoMoveLogicTests: XCTestCase {
     /// **The rule the artist picks applies at the next lift, and the shipped rule is the default.**
     func testTheDefaultRuleIsCutAndAChosenRuleAppliesAtTheNextLift() {
         let (manager, layerIndex, vector) = fixture()
-        XCTAssertEqual(manager.lassoMoveMembership, .cutting,
+        XCTAssertEqual(manager.selectionMembership, .cutting,
                        "nothing changes until the artist touches the picker")
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
         let id = vector.elements[0].id
 
         // No float, so this is a plain assignment: there is nothing to re-lift.
-        manager.setLassoMoveMembership(.touching)
+        manager.setSelectionMembership(.touching)
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
 
@@ -4398,7 +4539,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(vector.elements.count, 2, "fixture precondition: Cut split the stroke")
         let stepsAtLift = manager.history.undoStack.count
 
-        manager.setLassoMoveMembership(.touching)
+        manager.setSelectionMembership(.touching)
 
         XCTAssertNotNil(manager.selection,
                         "the loop survived, so the float was cancelled and not baked")
@@ -4431,9 +4572,9 @@ final class LassoMoveLogicTests: XCTestCase {
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
 
-        manager.setLassoMoveMembership(.enclosed)
+        manager.setSelectionMembership(.enclosed)
 
-        XCTAssertEqual(manager.lassoMoveMembership, .cutting, "the picker snaps back to the rule that works")
+        XCTAssertEqual(manager.selectionMembership, .cutting, "the picker snaps back to the rule that works")
         XCTAssertNotNil(manager.vectorFloat, "and the artist keeps the piece they had lifted")
         XCTAssertEqual(vector.elements.count, 2, "cut exactly as it was")
         XCTAssertEqual(manager.vectorFloat?.insideIDs.count, 1)
@@ -4450,7 +4591,7 @@ final class LassoMoveLogicTests: XCTestCase {
     func testEnclosedCatchingNothingSaysSoAndABlankLoopStillStaysSilent() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
-        manager.setLassoMoveMembership(.enclosed)
+        manager.setSelectionMembership(.enclosed)
 
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         XCTAssertFalse(manager.beginVectorLassoMove(), "no stroke lies completely inside the loop")
@@ -4465,76 +4606,145 @@ final class LassoMoveLogicTests: XCTestCase {
                      "but says nothing about it — §5.9, where the artist can see the reason")
     }
 
-    /// **The picker is offered for a lassoed float and dropped for the whole-cel one**, which has no
-    /// loop and therefore no membership question. Nothing else on the bar tells the two floats apart.
-    func testTheMembershipPickerIsOfferedForALassoFloatAndNotForAWholeCelOne() {
-        let (manager, layerIndex, vector) = fixture()
+    /// **The picker is live before anything has been selected at all**, which is the shape TODO item
+    /// (23) moved it into: it lives in the Select panel now, and the rule is what the *next* loop will
+    /// answer with. Asking an artist to draw a lasso before they may choose how it behaves has the
+    /// order backwards, and the mode tabs beside it already work that way.
+    ///
+    /// There is no longer an "is it offered" question to ask. On the Move bar the picker was dropped
+    /// for the whole-cel float, which has no loop; in the Select panel there is no float to ask about
+    /// and the control is simply there.
+    func testTheRuleCanBePickedBeforeAnythingIsSelected() {
+        let (manager, _, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
-        XCTAssertFalse(manager.lassoMembershipPickerIsOffered, "nothing floating, no bar, no picker")
+        XCTAssertNil(manager.selection, "fixture precondition: nothing lassoed yet")
+        XCTAssertNil(manager.selectionMembershipUnavailableReason, "and the picker is live anyway")
 
-        XCTAssertTrue(manager.beginVectorWholeCelMove())
-        XCTAssertFalse(manager.lassoMembershipPickerIsOffered,
-                       "a whole-cel move has no loop to be a member of")
-        manager.commitVectorFloatIfNeeded()
-
-        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
-        XCTAssertTrue(manager.beginVectorLassoMove())
-        XCTAssertTrue(manager.lassoMembershipPickerIsOffered)
-        XCTAssertNil(manager.lassoMembershipUnavailableReason, "and it is live before the first nudge")
+        manager.setSelectionMembership(.touching)
+        XCTAssertEqual(manager.selectionMembership, .touching, "the plain assignment arm took it")
+        XCTAssertEqual(manager.displayedSelectionMembership, .touching)
     }
 
-    /// **After the first nudge the picker is disabled with a reason, and the model refuses too.**
+    /// **A whole-cel float has no loop, so changing the rule under it re-lifts nothing** — it is the
+    /// plain assignment arm, kept from the days when the picker was dropped for that float entirely.
+    func testChangingTheRuleUnderAWholeCelFloatIsAPlainAssignment() {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        let ids = vector.elements.map(\.id)
+        let steps = manager.history.undoStack.count
+
+        manager.setSelectionMembership(.enclosed)
+
+        XCTAssertEqual(manager.selectionMembership, .enclosed, "taken for the next lasso lift")
+        XCTAssertNotNil(manager.vectorFloat, "and the whole-cel float is left exactly where it was")
+        XCTAssertEqual(vector.elements.map(\.id), ids)
+        XCTAssertEqual(manager.history.undoStack.count, steps)
+    }
+
+    /// **After the first nudge the model refuses the change**, for the reason
+    /// `setSelectionMembership` states: a re-lift then would have to rewrite undo steps already on
+    /// the stack against a display list that no longer matches them.
     ///
-    /// Two guards for one rule, in `vectorFloatIsFreeform`'s shape: a guard that lives only in the
-    /// view is one a new call site removes. Re-lifting after a nudge would have to rewrite undo steps
-    /// already on the stack against a display list that no longer matches them — deferred work, and
-    /// written down rather than discovered.
-    func testAfterTheFirstNudgeTheRuleIsFixedAndTheBarSaysWhy() {
+    /// **The caption that used to say so is gone with the Move bar's picker** (TODO item (23)). The
+    /// picker lives in `SelectPanel`, which `DrawingView` does not show while anything floats
+    /// (LASSO_MOVE.md §5.13), so this refusal has no control to grey out and no caption to carry. The
+    /// guard stays in the setter, which is where `vectorFloatIsFreeform`'s rule says a guard belongs:
+    /// one that lives only in a view is one a new call site removes.
+    func testAfterTheFirstNudgeTheModelRefusesToChangeTheRule() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
         select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
         XCTAssertTrue(manager.beginVectorLassoMove())
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 6, dy: 0))
 
-        XCTAssertEqual(manager.lassoMembershipUnavailableReason, "Undo your moves to change what travels.")
-
         let elementsAfterNudge = vector.elements.map(\.id)
         let steps = manager.history.undoStack.count
-        manager.setLassoMoveMembership(.touching)
+        manager.setSelectionMembership(.touching)
 
-        XCTAssertEqual(manager.lassoMoveMembership, .cutting, "the model refuses as well as the bar")
+        XCTAssertEqual(manager.selectionMembership, .cutting, "the setter refused")
         XCTAssertEqual(vector.elements.map(\.id), elementsAfterNudge, "and nothing was re-lifted")
         XCTAssertEqual(manager.history.undoStack.count, steps)
         XCTAssertEqual(manager.vectorFloat?.nudges, 1)
     }
 
-    /// **A raster float shows the picker fixed on Cut and says why** — and the reason is a real limit
-    /// rather than a policy: `PixelOps.maskedPiece` *is* the cut, and a pixel layer has no elements
-    /// for "whole or partial" to be about.
+    /// **A pixel layer shows Cut fixed and says why** — and the reason is a real limit rather than a
+    /// policy: `PixelOps.maskedPiece` is Move's cut there, `PixelOps.clear` is Clear's, a recolour
+    /// refuses outright, and a raster cel has no elements for "whole or partial" to be about.
+    ///
+    /// **The subject is the layer, not the float** (TODO item (23)): the picker is now asked in the
+    /// Select panel before anything has been lifted. This asserts both, on one manager, so the two
+    /// readings cannot drift — a raster float can only ever have come off a raster layer.
     ///
     /// It needs its own property rather than a fourth arm on `mirrorUnavailableReason`, which returns
     /// **nil** for a raster piece: the two questions have opposite answers on that kind.
-    func testARasterFloatShowsCutFixedAndSaysWhy() {
+    func testAPixelLayerShowsCutFixedAndSaysWhy() {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(.black, rect: CGRect(x: 10, y: 10, width: 20, height: 20)))
-        manager.lassoMoveMembership = .touching
+        manager.selectionMembership = .touching
+
+        XCTAssertEqual(manager.selectionMembershipUnavailableReason,
+                       "A pixel layer can only cut at the selection.",
+                       "asked of the layer, with nothing selected and nothing floating")
+        XCTAssertEqual(manager.displayedSelectionMembership, .cutting,
+                       "and never shown holding a setting nothing on this layer obeys")
+
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 8, y: 8, width: 24, height: 24), transform: nil),
                                       bounds: CGRect(x: 8, y: 8, width: 24, height: 24),
                                       layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id)
         manager.beginMove()
         XCTAssertNotNil(manager.floatingPiece, "fixture precondition: something lifted")
 
-        XCTAssertTrue(manager.lassoMembershipPickerIsOffered, "shown, not dropped")
-        XCTAssertEqual(manager.displayedLassoMembership, .cutting,
-                       "and never shown holding a setting the piece does not obey")
-        XCTAssertEqual(manager.lassoMembershipUnavailableReason,
-                       "A pixel layer can only cut at the selection.")
+        XCTAssertEqual(manager.selectionMembershipUnavailableReason,
+                       "A pixel layer can only cut at the selection.",
+                       "and the float agrees with the layer it came off")
         XCTAssertNil(manager.mirrorUnavailableReason,
                      "Mirror answers nil for the same piece — one property could not have said both")
 
-        manager.setLassoMoveMembership(.enclosed)
-        XCTAssertEqual(manager.lassoMoveMembership, .touching, "and nothing writes through it")
+        manager.setSelectionMembership(.enclosed)
+        XCTAssertEqual(manager.selectionMembership, .touching, "and nothing writes through it")
+    }
+
+    /// **A value layer gets its own sentence**, because it is a different refusal wearing the same
+    /// shape: `Layer.hasNoDrawingSurface` means no pixels *and* no elements, so "a pixel layer can
+    /// only cut at the selection" would name a mechanism that is not there either.
+    func testAValueLayerRefusesTheRuleInItsOwnWords() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.layers[0].kind = .value
+
+        XCTAssertEqual(manager.selectionMembershipUnavailableReason,
+                       "A value layer holds nothing a lasso can catch.")
+        XCTAssertEqual(manager.displayedSelectionMembership, .cutting)
+    }
+
+    /// **One rule, read by both tools — which is the whole of TODO item (23).**
+    ///
+    /// The owner, 2026-08-29: *"i feel like it would be better in select menu because i want it to
+    /// affect recolour."* Membership was `lassoMoveMembership` and lived on the Move bar; it is
+    /// `selectionMembership` and lives in the Select panel, and this asserts the consequence rather
+    /// than the rename — the same loop, the same setting, the same answer to "what did it catch",
+    /// whichever of the two doors asks.
+    ///
+    /// Asserted on **one** manager and with **one** `setSelectionMembership` call on purpose: two
+    /// fixtures each setting their own value would still pass if the two tools read two properties.
+    func testTheSameRuleGovernsBothARecolourAndALift() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let originalID = vector.elements[0].id
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.setSelectionMembership(.touching)
+
+        manager.brushColor = picked(1, 0, 0)
+        manager.recolorSelection()
+        XCTAssertEqual(vector.elements.count, 1, "Touching recoloured the straddling stroke whole")
+        XCTAssertEqual(vector.elements[0].id, originalID, "and cut nothing")
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(vector.elements.count, 1, "and the very same setting lifts it whole too")
+        XCTAssertEqual(manager.vectorFloat?.insideIDs, [originalID],
+                       "one property, two consumers — neither grew its own copy")
     }
 
     // MARK: - Helpers

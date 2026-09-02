@@ -346,9 +346,11 @@ extension CanvasManager {
     /// `beginMove`'s lift-time clear — which since 2026-08-22 is also the raster tool's behaviour, so
     /// the two feel the same on the same gesture.
     ///
-    /// **`lassoMoveMembership` chooses which of the three rules decides what travels** (TODO item
-    /// (20)). Read here rather than passed in, because every door into a lift — the toolbar, and the
-    /// picker's own re-lift — has to use the same one, and a parameter would let one of them forget.
+    /// **`selectionMembership` chooses which of the three rules decides what travels** (TODO items
+    /// (20) and (23)). Read here rather than passed in, because every door into a lift — the toolbar,
+    /// and the picker's own re-lift — has to use the same one, and a parameter would let one of them
+    /// forget. It is the *selection's* rule since item (23), so `recolorSelection` reads the same
+    /// property and the two tools cannot answer "what did the loop catch" differently.
     @discardableResult
     func beginVectorLassoMove() -> Bool {
         commitAllInteractiveState()
@@ -366,7 +368,7 @@ extension CanvasManager {
         // `handleLassoPan` appends one point per sample with no decimation and no simplification.
         let loop = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
         guard let split = vector.splitForLassoMove(insideLocalPath: loop,
-                                                   membership: lassoMoveMembership) else {
+                                                   membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: vector, loop: loop)
             return false
         }
@@ -441,14 +443,29 @@ extension CanvasManager {
     /// Only `.enclosed` can reach the interesting case at all: Touching catches everything the loop
     /// reaches, and Cut catches everything Touching does for strokes and fills, so a null answer from
     /// either really is bare paper.
-    private func noteALassoThatCaughtNothing(vector: VectorCanvas, loop: CGPath) {
-        guard lassoMoveMembership == .enclosed,
+    ///
+    /// **Not private, because a lift is no longer the only door** (TODO item (23)). `recolorSelection`
+    /// picks the same rule out of the same property and can fail for the same reason — a loop full of
+    /// ink that Enclosed excluded — and §5.24's argument does not mention Move: it is about a rule the
+    /// artist just picked being the thing that made a button do nothing.
+    func noteALassoThatCaughtNothing(vector: VectorCanvas, loop: CGPath) {
+        guard selectionMembership == .enclosed,
               !vector.elementIDs(insideLocalPath: loop, membership: .touching).isEmpty else { return }
         raise(.nothingWhollyInside)
     }
 
-    /// **Changes which of the three membership rules a lasso move follows** (TODO item (20)), and
-    /// re-lifts the float under the new rule so the artist can see what changed.
+    /// **Changes which of the three membership rules a lasso answers with** (TODO items (20) and
+    /// (23)) — for every tool that consumes one, not for Move alone — and re-lifts a float already up
+    /// under the new rule so the artist can see what changed.
+    ///
+    /// **The picker lives in the Select panel since item (23)**, which `DrawingView` suppresses for
+    /// as long as anything floats (LASSO_MOVE.md §5.13). So the re-lift arm below is no longer
+    /// something a finger can reach: the artist's ordinary path is now pick the rule, draw the loop,
+    /// then Move or Recolour. It is kept because it is what makes the value **safe to write at all**
+    /// — a float lifted under one rule and left standing under another is a `vectorFloat.insideIDs`
+    /// that no longer matches the rule the model claims — and because it is the one place the whole
+    /// cancel-then-lift order is written down. It is not a control's behaviour; it is the setter's
+    /// invariant.
     ///
     /// **The order is `cancelVectorFloat()` then `beginVectorLassoMove()`, and getting it the other
     /// way round is the worst bug available on this path.** `beginVectorLassoMove`'s first statement
@@ -458,9 +475,7 @@ extension CanvasManager {
     /// against. `cancelVectorFloat()` restores `elementsBeforeLift` and `selectionBeforeLift`
     /// verbatim and records nothing, which is exactly the undo of a lift.
     ///
-    /// **Only at `nudges == 0`**, which the bar enforces by disabling the picker with a reason and
-    /// this enforces again, for `vectorFloatIsFreeform`'s reason: a guard that lives only in the view
-    /// is a guard one new call site removes. Re-lifting *after* a nudge would mean rewriting steps
+    /// **Only at `nudges == 0`.** Re-lifting *after* a nudge would mean rewriting steps
     /// already on the undo stack against a display list that no longer matches them; it is a day's
     /// work with stale-closure risk and is deferred rather than undiscovered (LASSO_MOVE.md §3).
     ///
@@ -469,24 +484,26 @@ extension CanvasManager {
     /// previous rule is restored, which is guaranteed to succeed because it succeeded a moment ago
     /// against the list `cancelVectorFloat` has just put back, and the notice raised inside the
     /// failed lift is what says why the picker snapped back.
-    func setLassoMoveMembership(_ membership: LassoMembership) {
-        guard membership != lassoMoveMembership else { return }
-        // A raster piece can only cut at the selection — `PixelOps.maskedPiece` *is* the cut — so the
-        // bar shows the picker fixed on Cut, and nothing may write through it.
-        guard floatingPiece == nil else { return }
+    func setSelectionMembership(_ membership: LassoMembership) {
+        guard membership != selectionMembership else { return }
+        // A pixel layer can only cut at the selection — `PixelOps.maskedPiece` and `PixelOps.clear`
+        // *are* the cut, and a recolour refuses there outright — so the picker is shown fixed on Cut
+        // and nothing may write through it. `selectionMembershipUnavailableReason` is the one place
+        // that is decided, and the view reads the same property.
+        guard selectionMembershipUnavailableReason == nil else { return }
         // Nothing floating, or a **whole-cel** float, which has no loop and therefore no membership
         // question: take the value for the next lasso lift and re-lift nothing.
         guard let float = vectorFloat, float.selectionBeforeLift != nil else {
-            lassoMoveMembership = membership
+            selectionMembership = membership
             return
         }
         guard float.nudges == 0 else { return }
 
-        let previous = lassoMoveMembership
+        let previous = selectionMembership
         cancelVectorFloat()
-        lassoMoveMembership = membership
+        selectionMembership = membership
         guard beginVectorLassoMove() else {
-            lassoMoveMembership = previous
+            selectionMembership = previous
             beginVectorLassoMove()
             return
         }

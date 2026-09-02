@@ -453,19 +453,27 @@ final class CanvasManager: ObservableObject {
     /// Not persisted across launches, unlike `pencilOnlyDrawing`: that one is about the artist's
     /// hardware and this one is about the drawing in front of them.
     @Published var preserveMovePrecision: Bool = false
-    /// **TODO item (20) — "What travels" on the Move bar.** Which of the three membership rules a
-    /// lasso move follows: `Enclosed`, `Cut` (the default and the shipped behaviour), `Touching`.
+    /// **TODO item (23) — "What the loop catches", in the Select panel.** Which of the three
+    /// membership rules a lasso answers with: `Enclosed`, `Cut` (the default and the shipped
+    /// behaviour), `Touching`.
+    ///
+    /// **It belongs to the selection, not to the Move tool**, which is the whole of item (23) and is
+    /// why this is `selectionMembership` rather than the `lassoMoveMembership` it was named until
+    /// 2026-09-02. The owner, 2026-08-29: *"Right now the enclosed/cut/touching option for the select
+    /// move is in move, but i feel like it would be better in select menu because i want it to affect
+    /// recolour."* One property, one picker (`SelectPanel`), and every tool that consumes a lasso
+    /// reads it — `beginVectorLassoMove` and `recolorSelection` today — instead of each growing its
+    /// own copy.
     ///
     /// **Not persisted, and that is the ruling rather than an omission** — it draws exactly the line
     /// `preserveMovePrecision` above draws, one line up. This is per-drawing intent; storing it would
     /// make *last used* the default, which is not what the owner asked for. There is no `@AppStorage`
     /// anywhere in this project and this does not introduce one.
     ///
-    /// Written through `setLassoMoveMembership(_:)` while a piece is floating, never assigned
-    /// directly from the view: changing the rule at that moment has to re-lift the float so the
-    /// artist sees the difference, and the order that re-lift happens in is load-bearing (see
-    /// `CanvasManager+LassoMove.swift`).
-    @Published var lassoMoveMembership: LassoMembership = .cutting
+    /// Written through `setSelectionMembership(_:)`, never assigned directly from a view: a float
+    /// lifted under the old rule has to be re-lifted under the new one, and the order that re-lift
+    /// happens in is load-bearing (see `CanvasManager+LassoMove.swift`).
+    @Published var selectionMembership: LassoMembership = .cutting
     @Published var magicWandTolerance: Double = 0.15
     @Published var selection: Selection?
     @Published var floatingPiece: FloatingPiece? {

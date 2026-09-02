@@ -100,10 +100,15 @@ i.e. the toggle's other half.
   `ObjectTransformDrag(freeform:)` — are the unstretched, uniform ones for that reason, and
   `testTheWholeLayerBoxIsUnstretchedAndItsDragIsUniform` is what keeps them there.
 
-### Three membership rules — shipped 2026-08-28 (TODO item (20))
+### Three membership rules — shipped 2026-08-28 (TODO item (20)), moved to Select 2026-09-02 (item (23))
 
-`Enclosed · Cut · Touching`, on the Move bar, ordered by how much travels with the shipped rule in
-the middle and selected until the artist touches the picker. §5.23 and §5.24 are the rulings.
+`Enclosed · Cut · Touching`, ordered by how much the loop takes with the shipped rule in the middle
+and selected until the artist touches the picker. §5.23, §5.24 and §5.26 are the rulings.
+
+**They belong to the *selection*, not to Move** (§5.26, TODO item (23)). The picker was on the Move
+bar from 2026-08-28 to 2026-09-02 and is now in the Select panel, and `CanvasManager` calls the
+setting `selectionMembership` rather than `lassoMoveMembership` for that reason. Both `Move` and
+`Recolour` read it; **`Clear` deliberately does not** — see §5.26.
 
 | what | where |
 |---|---|
@@ -111,10 +116,11 @@ the middle and selected until the artist touches the picker. §5.23 and §5.24 a
 | which rule a lift follows | a **parameter** on `VectorCanvas.splitForLassoMove(insideLocalPath:membership:)`, defaulted to `.cutting`. A sibling would have duplicated the broad phase, `lassoFillRule`, the linear scan for the three kinds the stroke index does not hold, the empty-set contract and the `mayDiverge` call |
 | the one place a per-kind rule is decided | `VectorCanvas.caught(_:by:bounds:using:membership:)`, shared with `elementIDs(insideLocalPath:membership:)` — item (19)'s predicate, reused rather than re-derived. **Touching for a stroke or a fill is that predicate exactly** |
 | text and a placed image under the two new rules | their own quad — `VectorCanvas.quad(of:)`, two overloads — through the same two `CGPath` booleans the fill arm uses. A corners-only test would be wrong: four corners inside a crescent does not mean the rectangle is |
-| the picker | `MoveTransformBottomBar.membershipPicker`. Live while `nudges == 0`; **disabled with a reason** after (`CanvasManager.lassoMembershipUnavailableReason`); **dropped** for the whole-cel float, which has no loop (`lassoMembershipPickerIsOffered`); fixed on Cut for a raster piece, where `PixelOps.maskedPiece` *is* the cut |
-| changing the rule mid-float | `CanvasManager.setLassoMoveMembership(_:)` — `cancelVectorFloat()` **then** `beginVectorLassoMove()`, in that order, because the latter's first statement bakes the float. A rule that catches nothing restores the previous one rather than leaving the artist with no float |
+| the picker | `SelectPanel.membershipPicker`, above the action row it governs. Live with no selection at all — the rule is what the *next* loop answers with; **disabled with a reason on a pixel layer** (`CanvasManager.selectionMembershipUnavailableReason`), where every consumer cuts at the selection and can do nothing else |
+| which rule a **recolour** follows | `CanvasManager.recolorSelection` — the one branch the three rules cost. `.cutting` takes `splitForLassoMove` and recolours `insideIDs`; the other two take `elementIDs(insideLocalPath:membership:)` and recolour whole. §5.26 |
+| changing the rule mid-float | `CanvasManager.setSelectionMembership(_:)` — `cancelVectorFloat()` **then** `beginVectorLassoMove()`, in that order, because the latter's first statement bakes the float. No control reaches this any more (the Select panel is suppressed while anything floats, §5.13); it is the setter's invariant, not a picker's behaviour |
 | Enclosed catching nothing | `CanvasNotice.Kind.nothingWhollyInside`, raised only when a laxer rule *would* have caught something — §5.24, and the one deliberate exception to §5.9 |
-| the setting | `CanvasManager.lassoMoveMembership`, **not persisted** — per-drawing intent, the line `preserveMovePrecision` already draws |
+| the setting | `CanvasManager.selectionMembership`, **not persisted** — per-drawing intent, the line `preserveMovePrecision` already draws |
 
 **The two new rules are cheaper and safer than the one that ships**, which inverts the usual
 expectation: neither cuts, so there is no bisection, no boundary dab, no fresh ids, no lattice
@@ -1397,6 +1403,51 @@ about the box, and the first is the one that makes the three rules say one sente
     so a punch inside the loop is cleared with the ink around it. **A Clear that catches nothing is a
     silent no-op with no undo step** — the nil `splitForLassoMove` already returns, read as "nothing
     to delete" rather than as the failure a lift reads it as.
+
+---
+
+A twenty-sixth was settled on **2026-08-29** and built on **2026-09-02** (TODO item (23)). It is
+about *where the three rules live* rather than about what they do.
+
+26. **Membership belongs to the selection, not to the Move tool — and Recolour obeys it.** The
+    owner: *"Right now the enclosed/cut/touching option for the select move is in move, but i feel
+    like it would be better in select menu because i want it to affect recolour. For enclosed on
+    recolour, it would have to split the strokes and other objects around the lasso border and then
+    recolour the ones inside. Luckly, the splitting already exists in enclosed move, so you can reuse
+    that."* Asked again: *"right now the enclosed / cut / touching option for move is in the move
+    menu. It is more appropriate for the select menu."*
+
+    **It is a move of the control, not a copy of it.** `CanvasManager.selectionMembership` is the one
+    property, `SelectPanel.membershipPicker` is the one control, and the tools that consume a lasso
+    read it. §5.25's precedent — Clear joining the same engine seam rather than growing its own
+    membership rules — is the argument, and nothing in the code forced a duplicate.
+
+    **What the move cost, disclosed rather than discovered.** The picker was on the Move bar for a
+    stated reason: §5.13 replaces the Select menu for as long as anything floats, which is exactly
+    when the artist can *see* what the rule did, so flipping it there re-lifted the float and showed
+    the difference immediately. In the Select panel that is unreachable — the rule is chosen before
+    the lift, not flipped during it. `setSelectionMembership`'s re-lift arm is kept as the setter's
+    invariant (a float lifted under one rule may not be left standing under another) and is no longer
+    something a finger reaches.
+
+    **The owner's word was "enclosed" and the mode that splits is Cut.** Their sentence describes the
+    behaviour without ambiguity — split at the border, recolour what is inside — and
+    `LassoMembership.cutting` is the only rule that cuts at the boundary; `.enclosed` catches whole
+    elements or nothing. Reading it literally would have given one rule two meanings depending on
+    which tool asked, which is the per-tool copy this item exists to end. **TODO item (23)'s own
+    summary says "Enclosed move already cuts strokes and fills at the lasso boundary", and that is
+    false of the code** — it is Cut that cuts. The summary inherited the owner's wording.
+
+    **So the default recolour now splits, and that is the one behaviour change.** Until 2026-09-02 a
+    recolour split nothing on the strength of the owner's *"It's alright if part of the stroke is
+    outside the selection"* (2026-08-28); the 2026-08-29 ask supersedes that, and Touching — one tap
+    away, in the same panel as the button — is where the old behaviour lives now.
+
+    **`Clear` deliberately does not inherit the rule.** §5.25 rules it *"`splitForLassoMove` under
+    `.cutting`"* in those words, and putting Clear on the picker would mean Touching deleting whole
+    strokes the loop merely brushes — the outcome §5.25 explicitly chose against. The owner's ask
+    names Recolour and only Recolour. **This is the one place "every tool that consumes a lasso
+    inherits it" stops, and it is left for the owner rather than assumed either way.**
 
 
 ## 6. Open risks
