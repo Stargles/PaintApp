@@ -211,6 +211,114 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(again, 0)
     }
 
+    // MARK: - The half of a cel's picture `LayerContentVersion` cannot see
+
+    /// The box every pose in this file is read off, and the one the bar sits inside.
+    private var posedBox: CGRect { CGRect(x: 4, y: 6, width: 16, height: 8) }
+
+    /// Ten countable frames, plus a vector cel over `[2, 7)` holding one bar, posed by a whole-cel
+    /// channel with keys at cel-local 0 (resting) and 4 (slid 20 right).
+    private func posedDocument() -> (manager: CanvasManager, layerID: UUID, celID: UUID) {
+        let manager = perFrameDocument(frames: 10)
+        manager.addVectorLayer()
+        let cel = Cel(id: UUID(), startFrame: 2, frameCount: 5,
+                      raster: .empty(size: CanvasFixture.canvasSize),
+                      vector: .empty(size: CanvasFixture.canvasSize))
+        cel.vector?.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                                           color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                           size: 6, opacity: 1,
+                                           samples: [VectorSample(x: 6, y: 10, pressure: 1),
+                                                     VectorSample(x: 18, y: 10, pressure: 1)]))
+        manager.layers[1].cels = [cel]
+        let layerID = manager.layers[1].id
+        manager.setTransformPoseKey(layerID: layerID, celID: cel.id, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(restingIn: posedBox))
+        manager.setTransformPoseKey(layerID: layerID, celID: cel.id, channel: .cel,
+                                    atCelLocalFrame: 4,
+                                    pose: PoseQuad(box: posedBox,
+                                                   mappedBy: CGAffineTransform(translationX: 20, y: 0)))
+        return (manager, layerID, cel.id)
+    }
+
+    /// **Dragging a pose keyframe dirties the span of the cel it poses** — KEYFRAMES.md stage 5's
+    /// channel meeting §3.6's sweep.
+    ///
+    /// `Cel.transformTracks` is the one thing a cel's picture depends on that `LayerContentVersion`
+    /// cannot supply. A pose is a *derivation*: the identity naming it reaches
+    /// `LayerContentVersion.derived` only where a caller resolves the derivation, and the sweep
+    /// deliberately does not. Nothing else moves either — `commitCelPoseState` writes the track,
+    /// schedules a thumbnail and publishes, and bumps no tier's version counter — so a `CelStamp` that
+    /// does not carry the tracks sees an unchanged document, schedules nothing, and leaves the artist
+    /// looking at the picture from before the edit until something else dirties that span.
+    ///
+    /// **Three assertions, and they are three because any one of them can pass for the wrong reason.**
+    /// The dirty set says the scheduler reached the span. The keys say the picture actually moved on
+    /// the four frames whose resolved pose changed — which is also the only thing that can prove the
+    /// pose reaches the bake *key*, not merely the dirty bit. The composite count says frame 2, inside
+    /// the span but resolving to the resting pose it already had, cost one mint and no render, which
+    /// is §3.3's claim that over-marking is cheap by construction.
+    func testEditingAPoseKeyframeDirtiesTheCelsSpan() {
+        let (manager, layerID, celID) = posedDocument()
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let before = baker.keyByFrame
+        XCTAssertEqual(before.count, 10)
+
+        // The edit: the key at cel-local 4 — frame 6 — dragged further right. Frames 3 through 6
+        // resolve to a new map; frame 2 is the resting key and resolves to the one it had.
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 4,
+                                    pose: PoseQuad(box: posedBox,
+                                                   mappedBy: CGAffineTransform(translationX: 34, y: 0)))
+
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [2, 3, 4, 5, 6],
+                       "A pose edit must dirty the span of the cel it posed.")
+
+        let second = composites { drain(baker) }
+        XCTAssertEqual(second, 4, "Four frames changed picture; frame 2 keeps the resting pose it had.")
+
+        let after = baker.keyByFrame
+        for frame in [3, 4, 5, 6] {
+            XCTAssertNotEqual(before[frame], after[frame],
+                              "Frame \(frame) resolves to a new pose, so its key must have moved.")
+        }
+        for frame in [0, 1, 2, 7, 8, 9] {
+            XCTAssertEqual(before[frame], after[frame],
+                           "Frame \(frame) shows what it showed, so it must keep the file it had.")
+        }
+    }
+
+    /// **Undoing the pose edit dirties the span again.** The sweep is what makes undo work at all
+    /// here — nothing in the stored undo closure reaches the baker, and `applyCelPoseState` is the one
+    /// mutation both directions go through — so a stamp that misses the tracks misses the undo too,
+    /// and this is the half an artist notices first.
+    func testUndoingAPoseKeyframeEditDirtiesTheCelsSpanAgain() {
+        let (manager, layerID, celID) = posedDocument()
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let before = baker.keyByFrame
+
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 4,
+                                    pose: PoseQuad(box: posedBox,
+                                                   mappedBy: CGAffineTransform(translationX: 34, y: 0)))
+        baker.syncDirty()
+        drain(baker)
+
+        manager.undo()
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [2, 3, 4, 5, 6],
+                       "Undoing a pose edit must dirty the span the edit dirtied.")
+
+        let back = composites { drain(baker) }
+        XCTAssertEqual(back, 0, "Every frame is back to a picture the store already holds.")
+        XCTAssertEqual(baker.keyByFrame, before,
+                       "An undone edit must leave every frame naming the file it named before it.")
+    }
+
     // MARK: - §3.3, the dedupe the whole key design was built for
 
     /// **A nine-frame hold is one file and one composite**, end to end.

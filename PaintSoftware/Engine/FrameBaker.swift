@@ -741,6 +741,20 @@ final class FrameBaker {
     /// land. Its `effect` and `valueFill` fields stay nil here because those are layer-level and
     /// belong to `StructuralStamp`; its `derived` field stays nil because an in-between is covered by
     /// tier 3 of the sweep instead.
+    ///
+    /// **`Cel.transformTracks` is the one content field `LayerContentVersion` cannot supply, so it is
+    /// carried here in full.** A pose is a *derivation*: the picture is `posedCelContent`'s, and the
+    /// identity naming it reaches `LayerContentVersion.derived` only when a caller resolves the
+    /// derivation, which this sweep does not — resolving every cel's pose on every pass would cost a
+    /// `poseMappings` per cel to answer what the stored tracks already answer. Comparing the tracks is
+    /// strictly coarser than comparing the resolved maps and exactly as safe: a track that did not
+    /// move resolves to maps that did not move, and §3.3 makes the over-marking one mint and no
+    /// composite. Tier 3 cannot stand in for this either — `isDerived` is `interpolation != nil`, and
+    /// a posed cel stores its own ink.
+    ///
+    /// **`pendingPoseBaselines` is deliberately not here.** It is §2.27's authoring state between two
+    /// marks, read by the writer that commits the next mark and by nothing that renders, so it reaches
+    /// no pixel and dirtying a span for it would schedule a bake that produces the file it already has.
     private struct CelStamp: Equatable {
         let id: UUID
         let start: Int
@@ -748,6 +762,8 @@ final class FrameBaker {
         let version: LayerContentVersion
         /// Whether this cel's content is computed rather than stored — sweep tier 3.
         let isDerived: Bool
+        /// The pose channels animating this cel's own ink — KEYFRAMES.md stage 5.
+        let poses: [String: TransformTrack]
 
         var span: Range<Int> { start..<(start + count) }
 
@@ -757,6 +773,7 @@ final class FrameBaker {
             count = cel.frameCount
             version = LayerContentVersion(cel: cel)
             isDerived = cel.interpolation != nil
+            poses = cel.transformTracks
         }
     }
 
