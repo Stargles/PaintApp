@@ -77,7 +77,10 @@ final class FrameBakeStoreLogicTests: XCTestCase {
             bytes[i] = next(); bytes[i + 1] = next(); bytes[i + 2] = next()
             bytes[i + 3] = 255
         }
-        return FrameBakeStore.image(fromBGRA: bytes, width: side, height: side, bytesPerRow: side * 4)!
+        // `DecodedFrame` rather than a store helper of its own: RENDER stage 4c deleted
+        // `FrameBakeStore.image(fromBGRA:)` along with the `CGImage`-returning `load`, and this is
+        // now the app's one spelling of "these BGRA premultiplied-first bytes, as an image".
+        return DecodedFrame(width: side, height: side, pixels: Data(bytes)).makeImage()!
     }
 
     private func bgra(_ image: CGImage) -> [UInt8]? { FrameBakeStore.bgraBytes(image)?.bytes }
@@ -104,7 +107,9 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         guard case .success = store.store(composited, for: key) else {
             return XCTFail("The write must succeed into a fresh temp root.")
         }
-        guard let loaded = store.load(key) else { return XCTFail("The frame just written must load.") }
+        guard let loaded = store.loadDecoded(key)?.makeImage() else {
+            return XCTFail("The frame just written must load.")
+        }
 
         XCTAssertEqual(loaded.width, composited.width)
         XCTAssertEqual(loaded.height, composited.height)
@@ -145,7 +150,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         let rawPixels = 256 * 256 * 4
         XCTAssertEqual(size, FrameBakeStore.headerBytes + rawPixels,
                        "A raw file is exactly the pixels plus one header — never more.")
-        XCTAssertEqual(store.load(key).flatMap { bgra($0) }, bgra(image),
+        XCTAssertEqual(store.loadDecoded(key)?.makeImage().flatMap { bgra($0) }, bgra(image),
                        "The raw branch must round-trip too, not only the compressed one.")
     }
 
@@ -195,14 +200,14 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         let key = syntheticKey(0x31), store = store()
         XCTAssertEqual(store.store(flatColourImage(64), for: key).isSuccess, true)
         corrupt(store, key) { $0[0] = 0x58 }
-        XCTAssertNil(store.load(key))
+        XCTAssertNil(store.loadDecoded(key))
     }
 
     func testAWrongFormatVersionIsAMiss() {
         let key = syntheticKey(0x32), store = store()
         XCTAssertEqual(store.store(flatColourImage(64), for: key).isSuccess, true)
         corrupt(store, key) { $0[4] = $0[4] &+ 1 }
-        XCTAssertNil(store.load(key))
+        XCTAssertNil(store.loadDecoded(key))
     }
 
     /// **The one that matters most.** A file whose digest names another key is exactly the stale
@@ -212,14 +217,14 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         let key = syntheticKey(0x33), store = store()
         XCTAssertEqual(store.store(flatColourImage(64), for: key).isSuccess, true)
         corrupt(store, key) { $0[40] = $0[40] &+ 1 }
-        XCTAssertNil(store.load(key), "A digest mismatch must be a miss and never a picture.")
+        XCTAssertNil(store.loadDecoded(key), "A digest mismatch must be a miss and never a picture.")
     }
 
     func testATruncatedFileIsAMiss() {
         let key = syntheticKey(0x34), store = store()
         XCTAssertEqual(store.store(flatColourImage(64), for: key).isSuccess, true)
         corrupt(store, key) { $0 = $0.prefix($0.count / 2) }
-        XCTAssertNil(store.load(key))
+        XCTAssertNil(store.loadDecoded(key))
     }
 
     /// A payload that survives every header check and is then garbage — the case the length checks
@@ -230,17 +235,17 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         corrupt(store, key) { file in
             for i in FrameBakeStore.headerBytes..<file.count { file[i] = 0xFF }
         }
-        XCTAssertNil(store.load(key))
+        XCTAssertNil(store.loadDecoded(key))
     }
 
     func testAZeroLengthFileIsAMiss() {
         let key = syntheticKey(0x36), store = store()
         try? Data().write(to: store.url(for: key))
-        XCTAssertNil(store.load(key))
+        XCTAssertNil(store.loadDecoded(key))
     }
 
     func testAKeyWithNoFileIsAMiss() {
-        XCTAssertNil(store().load(syntheticKey(0x37)))
+        XCTAssertNil(store().loadDecoded(syntheticKey(0x37)))
         XCTAssertFalse(store().contains(syntheticKey(0x37)))
     }
 
@@ -368,7 +373,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         }
         XCTAssertEqual(failure, .couldNotWrite)
         XCTAssertEqual(store.totalBytes, 0, "A failed write must not be counted.")
-        XCTAssertNil(store.load(syntheticKey(0x81)))
+        XCTAssertNil(store.loadDecoded(syntheticKey(0x81)))
     }
 
     func testAFrameLargerThanTheWholeCeilingIsRefusedRatherThanEvictingEverything() {

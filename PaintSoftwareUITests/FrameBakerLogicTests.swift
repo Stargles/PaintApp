@@ -1,0 +1,628 @@
+import XCTest
+import UIKit
+import SwiftUI
+
+/// RENDER.md §5 stage 4c's pin on the **loop** — the serial worker that joins the key, the store,
+/// the queue, the ring and the recipe.
+///
+/// **The acceptance test is §2.16 in the owner's own words**, and it is
+/// `testEditingInsideACelSpanningTwoToSixRecompositesExactlyThoseFiveFrames`:
+///
+/// > *"If I had frame 1 through 10 and I edited something inside a cel which spanned frames 2 to 6,
+/// > then only frames 2 to 6 would need to get re-rendered."*
+///
+/// **Composites are counted with `CompositeProbe`, never with a proxy for them.** The baker keeps
+/// counters of its own (`bakedCount`, `dedupedCount`) and they are asserted too, but they are the
+/// baker's own account of what it did — a probe inside `Compositor.composite` is the only thing that
+/// can say a composite did or did not *happen*, which is the whole claim §2.16 makes.
+///
+/// **Every fixture is on a temp root** (`FrameBakeStore(root:)`) and forces `.coreGraphics` in
+/// `setUp`, restoring `Compositor.defaultBackend` — not the literal — in `tearDown`, for the reason
+/// `ChunkedCompositeLogicTests` writes out: restoring the literal is how one suite silently switches
+/// every later suite in the process off the shipped backend.
+@MainActor
+final class FrameBakerLogicTests: XCTestCase {
+
+    private var root: URL!
+
+    override func setUp() {
+        super.setUp()
+        Compositor.backend = .coreGraphics
+        MaskResolver.clearCache()
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FrameBakerLogicTests-" + UUID().uuidString, isDirectory: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: root)
+        FrameBakeStore.cachesDirectoryOverride = nil
+        Compositor.backend = Compositor.defaultBackend
+        MaskResolver.clearCache()
+        CompositeProbe.end()
+        super.tearDown()
+    }
+
+    // MARK: - Fixtures
+
+    private func makeBaker(_ manager: CanvasManager,
+                           ceiling: Int = FrameBakeStore.defaultByteCeiling,
+                           ringBytes: Int = 32 * 1024 * 1024) -> FrameBaker {
+        FrameBaker(manager: manager,
+                   store: FrameBakeStore(root: root, byteCeiling: ceiling),
+                   ring: DecodedFrameRing(byteBudget: ringBytes))
+    }
+
+    /// Runs the loop to a stop and returns the frames it visited, **in the order it visited them**.
+    ///
+    /// The loop is asynchronous by construction — main actor, serial queue, hop back — so there is no
+    /// synchronous drain and deliberately none added: a second, test-only spelling of the loop would
+    /// be a suite pinning something the app does not run (§2.15, and CLAUDE.md's banner-versus-count
+    /// trap wearing a third costume). `onIdle` is the loop's own "nothing left", so waiting on it
+    /// waits on exactly the thing under test.
+    @discardableResult
+    private func drain(_ baker: FrameBaker, timeout: TimeInterval = 60) -> [Int] {
+        var order: [Int] = []
+        var settled = false
+        let idle = expectation(description: "the bake queue drains and the loop stops")
+        baker.onFrameFinished = { order.append($0) }
+        baker.onIdle = {
+            guard !settled else { return }
+            settled = true
+            idle.fulfill()
+        }
+        baker.kick()
+        wait(for: [idle], timeout: timeout)
+        baker.onIdle = nil
+        baker.onFrameFinished = nil
+        return order
+    }
+
+    /// A document whose every frame is a **different picture**, so every frame is its own bake key.
+    ///
+    /// One one-frame cel per frame on layer 0, each carrying its own content. That matters more than
+    /// it looks: a document made of holds resolves many frames to one file by design (§3.3), which is
+    /// exactly right for the app and useless for counting *which* frames were re-rendered. Where a
+    /// test wants to count frames, the fixture has to make frames countable.
+    private func perFrameDocument(frames: Int, extraLayers: Int = 0) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1 + extraLayers)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<frames).map { (start: $0, length: 1) })
+        manager.sceneFrameCount = frames
+        for frame in 0..<frames {
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: frame,
+                                          CanvasFixture.solidImage(.red, rect: CGRect(x: frame * 2, y: 0,
+                                                                                      width: 10, height: 10)))
+        }
+        return manager
+    }
+
+    /// Every frame index this manager lays out.
+    private func allFrames(_ manager: CanvasManager) -> [Int] { Array(0..<manager.sceneFrameCount) }
+
+    private func pending(_ baker: FrameBaker, _ manager: CanvasManager) -> [Int] {
+        allFrames(manager).filter { baker.bakeQueue.isPending($0) }
+    }
+
+    private func fileCount() -> Int {
+        (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))?.count ?? 0
+    }
+
+    /// Composites recorded while `body` runs. `CompositeProbe` counts calls to
+    /// `Compositor.composite`, so a frame cut into several chunks would count several times — every
+    /// fixture here is a 64×64 canvas under the default budget, which `ChunkedCompositor` plans as
+    /// exactly one chunk, and `testABakeOfOneFrameIsExactlyOneComposite` pins that so the arithmetic
+    /// in every other test below is not a hope.
+    private func composites(_ body: () -> Void) -> Int {
+        CompositeProbe.begin()
+        body()
+        return CompositeProbe.end().count
+    }
+
+    // MARK: - The unit of measurement
+
+    /// **The premise every count below rests on**: one frame is one call to `Compositor.composite`.
+    ///
+    /// If the fixture ever grew past one chunk this would go to 2 and every "5 composites" assertion
+    /// in this file would be measuring chunks rather than frames. Stated as its own test so that
+    /// failure names itself instead of arriving as five unrelated ones.
+    func testABakeOfOneFrameIsExactlyOneComposite() {
+        let manager = perFrameDocument(frames: 1)
+        let baker = makeBaker(manager)
+        let count = composites {
+            baker.noteDocumentChanged()
+            drain(baker)
+        }
+        XCTAssertEqual(count, 1, "A 64×64 frame under the default budget is one chunk, so one composite.")
+        XCTAssertEqual(baker.bakedCount, 1)
+        XCTAssertEqual(fileCount(), 1)
+    }
+
+    // MARK: - §2.16, the acceptance test
+
+    /// **RENDER §2.16, in the owner's own words, as an executable claim.**
+    ///
+    /// > *"If I had frame 1 through 10 and I edited something inside a cel which spanned frames 2 to
+    /// > 6, then only frames 2 to 6 would need to get re-rendered."*
+    ///
+    /// Ten frames; layer 0 gives each of them its own picture so that frames are countable; layer 1
+    /// holds one cel spanning `[2, 7)`, which is frames 2 through 6 inclusive — `Cel.endFrame` is one
+    /// past the last frame covered, which is the same half-open shape `BakeQueue.markDirty` takes.
+    ///
+    /// Three assertions, and they are three because any one of them alone can pass for the wrong
+    /// reason. The dirty set says the *scheduler* reached exactly those five. The probe says exactly
+    /// five composites *happened*. The keys say the five that moved are the five that changed picture
+    /// and the other five kept the file they had — which is §3.3's claim that the key, not the dirty
+    /// bit, is the proof.
+    func testEditingInsideACelSpanningTwoToSixRecompositesExactlyThoseFiveFrames() {
+        let manager = perFrameDocument(frames: 10, extraLayers: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 2, length: 5)])
+        manager.sceneFrameCount = 10
+        XCTAssertEqual(manager.layers[1].cels.map { ($0.startFrame, $0.endFrame) }.map(\.0), [2])
+        XCTAssertEqual(manager.layers[1].cels[0].endFrame, 7,
+                       "The cel must cover frames 2 through 6 inclusive — that is what §2.16 says.")
+
+        let baker = makeBaker(manager)
+        let firstPass = composites {
+            baker.noteDocumentChanged()
+            drain(baker)
+        }
+        XCTAssertEqual(firstPass, 10, "Ten distinct pictures is ten composites the first time.")
+        let before = baker.keyByFrame
+        XCTAssertEqual(before.count, 10)
+
+        // The edit: one image into the cel that spans 2…6. Frame 4 is inside it, and
+        // `setBakedContent` resolves the cel covering that frame rather than an index.
+        CanvasFixture.setBakedContent(manager, layerIndex: 1, frame: 4,
+                                      CanvasFixture.solidImage(.blue, rect: CGRect(x: 4, y: 4, width: 30, height: 30)))
+
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [2, 3, 4, 5, 6],
+                       "Only the frames the edited cel spans may be scheduled.")
+
+        let secondPass = composites { drain(baker) }
+        XCTAssertEqual(secondPass, 5, "Exactly five frames may be re-rendered, and no more.")
+        XCTAssertEqual(baker.bakedCount, 15, "Ten the first time, five the second.")
+        XCTAssertEqual(baker.dedupedCount, 0)
+
+        let after = baker.keyByFrame
+        for frame in [2, 3, 4, 5, 6] {
+            XCTAssertNotEqual(before[frame], after[frame],
+                              "Frame \(frame) is inside the edited cel and its key must have moved.")
+        }
+        for frame in [0, 1, 7, 8, 9] {
+            XCTAssertEqual(before[frame], after[frame],
+                           "Frame \(frame) is outside the edited cel and must keep the file it had.")
+        }
+    }
+
+    /// The same edit again, and the second time it costs **nothing** — the change did not move, so
+    /// nothing did. This is the difference between "only the frames that matter are rebaked" and
+    /// "the frames that matter are rebaked, repeatedly".
+    func testASweepThatFindsNothingSchedulesNothing() {
+        let manager = perFrameDocument(frames: 10)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        let again = composites {
+            baker.syncDirty()
+            XCTAssertEqual(pending(baker, manager), [], "An unchanged document schedules no frame at all.")
+            drain(baker)
+        }
+        XCTAssertEqual(again, 0)
+    }
+
+    // MARK: - §3.3, the dedupe the whole key design was built for
+
+    /// **A nine-frame hold is one file and one composite**, end to end.
+    ///
+    /// This is the claim `FrameBakeKey` leaves `frame` out of the key to make: a hold is one `Cel`,
+    /// so every frame of it has byte-identical leaf versions and an identical tree, and the nine
+    /// frames resolve to one digest. Eight of the nine cost one O(layers) mint and one `stat`.
+    func testANineFrameHoldIsOneFileAndOneComposite() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 9)])
+        manager.sceneFrameCount = 9
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                                      CanvasFixture.solidImage(.green, rect: CGRect(x: 8, y: 8, width: 40, height: 40)))
+
+        let baker = makeBaker(manager)
+        let count = composites {
+            baker.noteDocumentChanged()
+            drain(baker)
+        }
+
+        XCTAssertEqual(count, 1, "Nine frames of one hold are one picture, so one composite.")
+        XCTAssertEqual(fileCount(), 1, "…and one file.")
+        XCTAssertEqual(baker.bakedCount, 1)
+        XCTAssertEqual(baker.dedupedCount, 8, "The other eight found the file the first one wrote.")
+        XCTAssertEqual(Set(baker.keyByFrame.keys), Set(0..<9), "Every frame must resolve to something.")
+        XCTAssertEqual(baker.framesByDigest.count, 1, "One digest…")
+        XCTAssertEqual(baker.framesByDigest.values.first, Set(0..<9), "…named by all nine frames.")
+    }
+
+    /// **Scrubbing through a hold costs zero composites**, however coarsely it is marked.
+    ///
+    /// The playhead walks all nine frames of the hold and every frame is marked dirty at every step —
+    /// the coarsest hint the scheduler can be given, and far coarser than a scrub actually produces.
+    /// Nothing composites, because §3.3's exact test is the key and the key has a file. That is what
+    /// makes dirty marking safe to be sloppy about.
+    func testAScrubThroughAHoldCostsNoComposites() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 9)])
+        manager.sceneFrameCount = 9
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                                      CanvasFixture.solidImage(.green, rect: CGRect(x: 4, y: 4, width: 20, height: 20)))
+
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        let bakedBefore = baker.bakedCount
+
+        let count = composites {
+            for frame in 0..<9 {
+                manager.currentFrame = frame
+                baker.markEverythingDirty()
+                drain(baker)
+            }
+        }
+        XCTAssertEqual(count, 0, "Every frame of the hold already has its file.")
+        XCTAssertEqual(baker.bakedCount, bakedBefore, "Nothing was written either.")
+        XCTAssertEqual(fileCount(), 1)
+    }
+
+    // MARK: - §2.10, the order
+
+    /// **The frame the artist is on is baked first**, so they can keep drawing (§2.10).
+    ///
+    /// The whole document is marked dirty with the playhead parked on 5, and 5 is what comes back
+    /// first — ahead of frame 0, which a queue that simply walked the document would have taken.
+    func testThePlayheadsFrameIsBakedFirst() {
+        let manager = perFrameDocument(frames: 10)
+        manager.currentFrame = 5
+
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        let order = drain(baker)
+
+        XCTAssertEqual(order.count, 10, "Every frame must be visited exactly once.")
+        XCTAssertEqual(order.first, 5, "§2.10: the frame the artist is on goes first.")
+        guard let indexOfZero = order.firstIndex(of: 0) else { return XCTFail("Frame 0 must be baked.") }
+        XCTAssertGreaterThan(indexOfZero, 0, "Frame 0 must not beat the playhead's own frame.")
+        XCTAssertEqual(Set(order), Set(0..<10))
+    }
+
+    // MARK: - §3.6, structural edits
+
+    /// A structural edit dirties every frame — §3.6 rules it outright, and layer opacity is the
+    /// shortest thing that is one.
+    func testAStructuralEditDirtiesEveryFrame() {
+        let manager = perFrameDocument(frames: 10)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [])
+
+        manager.layers[0].opacity = 0.5
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), Array(0..<10),
+                       "Opacity is not confined to a cel's span, so it reaches every frame.")
+
+        let count = composites { drain(baker) }
+        XCTAssertEqual(count, 10, "A different opacity is a different picture at every frame.")
+        XCTAssertEqual(fileCount(), 20, "Ten new files beside the ten the first pass wrote.")
+    }
+
+    /// **The gap a single probe frame cannot see, and the field that closes it.**
+    ///
+    /// `StructuralStamp` reads `renderTree(atFrame: 0)` — one probe frame, fixed so that scrubbing
+    /// does not read as a structural change. An animation curve on an effect parameter is invisible
+    /// there whenever it does not move frame 0, and `effectTracks` is the field in the stamp that
+    /// catches it anyway.
+    ///
+    /// The test proves its own premise rather than assuming it: the tree at the probe frame is
+    /// asserted **identical** either side of the edit, so a green result cannot come from the tree
+    /// having noticed. Deleting `effectTracks` from `StructuralStamp` takes this test red and no
+    /// other.
+    ///
+    /// It marks every frame for a track that reaches no pixel on this raster layer, and that is
+    /// deliberate over-marking rather than a bug: §3.3 makes it cost one mint and no composite, and
+    /// the alternative — asking whether the track reaches a pixel — is the "which field did I
+    /// forget" hazard that a content-addressed store punishes with a wrong picture and no error.
+    func testAnEffectTrackEditIsCaughtEvenThoughTheProbeFrameCannotSeeIt() {
+        let manager = perFrameDocument(frames: 10)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [])
+
+        let treeBefore = manager.renderTree(atFrame: 0)
+        manager.layers[0].effectTracks["intensity"] =
+            AnimationCurve(keys: [.init(frame: 0, value: 1), .init(frame: 7, value: 0.25)])
+        XCTAssertEqual(manager.renderTree(atFrame: 0), treeBefore,
+                       "The premise: the probe frame's tree must be unchanged, or this test proves nothing.")
+
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), Array(0..<10),
+                       "An animated effect parameter must dirty the document even when frame 0 is unmoved.")
+    }
+
+    /// A cel that **slid** dirties where it was as well as where it is. Both halves, because the
+    /// frames it left show something else now.
+    func testACelThatMovedDirtiesBothItsOldSpanAndItsNew() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<10).map { (start: $0, length: 1) })
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 1, length: 2)])
+        manager.sceneFrameCount = 10
+
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [])
+
+        manager.layers[1].cels[0].startFrame = 6
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [1, 2, 6, 7],
+                       "Where it was and where it is, and nothing in between.")
+    }
+
+    /// A deleted cel dirties the span it used to cover. Nothing else knows those frames changed —
+    /// the cel is gone, so a sweep that only looked at what is there would see nothing at all.
+    func testADeletedCelDirtiesTheSpanItUsedToCover() {
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<10).map { (start: $0, length: 1) })
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 3, length: 3)])
+        manager.sceneFrameCount = 10
+
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        manager.layers[1].cels.removeAll()
+        baker.syncDirty()
+        XCTAssertEqual(pending(baker, manager), [3, 4, 5])
+    }
+
+    // MARK: - The loop itself
+
+    /// **It drains and stops rather than spinning**, and a kick against a drained queue composites
+    /// nothing. `isBaking` false at rest is the other half: a loop that stopped while still holding
+    /// its own mutual-exclusion flag would never start again.
+    func testTheLoopDrainsAndStops() {
+        let manager = perFrameDocument(frames: 6)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        XCTAssertEqual(baker.bakeQueue.pendingCount, 0)
+        XCTAssertFalse(baker.isBaking, "The loop must not still hold its own lock at rest.")
+
+        let idle = composites { drain(baker) }
+        XCTAssertEqual(idle, 0, "Kicking a drained queue composites nothing.")
+        XCTAssertEqual(baker.bakedCount, 6)
+    }
+
+    /// **Never two composites at once.** The loop is serial by construction — one job is in flight
+    /// at a time and `finish` is what starts the next — so a second kick landing mid-bake must not
+    /// dispatch a second job. Ten kicks in a row are one job.
+    func testKickingRepeatedlyDoesNotStartASecondComposite() {
+        let manager = perFrameDocument(frames: 8)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        XCTAssertTrue(baker.isBaking, "The first kick must have a job in flight.")
+
+        let count = composites {
+            for _ in 0..<10 { baker.kick() }
+            drain(baker)
+        }
+        XCTAssertEqual(count, 8, "Eight frames, eight composites — the extra kicks bought nothing.")
+        XCTAssertEqual(baker.bakedCount, 8)
+    }
+
+    // MARK: - §3.5, a write failure is a bake failure
+
+    /// **Disk full leaves the document untouched and the loop running** (§3.5, §2.10).
+    ///
+    /// A ceiling of eight bytes is smaller than the 64-byte header, so every write is refused with
+    /// `exceedsCeiling` before a byte is written. What must survive that: every frame is still
+    /// visited (the loop did not stop at the first refusal), nothing is left pending (it did not spin
+    /// either), the store holds nothing, and the model is exactly as it was.
+    func testAStoreThatCannotWriteLeavesTheDocumentUntouchedAndTheLoopRunning() {
+        let manager = perFrameDocument(frames: 10)
+        let celCount = manager.layers[0].cels.count
+        let firstCelHasContent = manager.layers[0].cels[0].bakedImage != nil
+
+        let baker = makeBaker(manager, ceiling: 8)
+        baker.noteDocumentChanged()
+        let order = drain(baker)
+
+        XCTAssertEqual(order.count, 10, "Every frame must still be visited — the loop continues.")
+        XCTAssertEqual(baker.failedCount, 10)
+        XCTAssertEqual(baker.bakedCount, 0)
+        XCTAssertEqual(baker.bakeQueue.pendingCount, 0,
+                       "A spent hint is not re-raised, or the loop would spin on an unwritable disk.")
+        XCTAssertEqual(baker.store.totalBytes, 0)
+        XCTAssertEqual(fileCount(), 0)
+        XCTAssertTrue(baker.keyByFrame.isEmpty, "Nothing may claim a file that was never written.")
+        XCTAssertTrue(baker.framesByDigest.isEmpty)
+        if case .exceedsCeiling = baker.lastWriteFailure {} else {
+            XCTFail("The refusal must be the ceiling one: \(String(describing: baker.lastWriteFailure))")
+        }
+
+        XCTAssertEqual(manager.layers.count, 1, "The document is untouched.")
+        XCTAssertEqual(manager.layers[0].cels.count, celCount)
+        XCTAssertEqual(manager.layers[0].cels[0].bakedImage != nil, firstCelHasContent)
+        XCTAssertEqual(manager.sceneFrameCount, 10)
+    }
+
+    /// A refused frame is a **miss** on the read path, not a wrong picture. §2.10's "the previous
+    /// picture stays" is only safe because the frame that was never written reads back as nil.
+    func testAFrameThatCouldNotBeWrittenReadsBackAsAMiss() {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager, ceiling: 8)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        for frame in 0..<3 {
+            XCTAssertNil(baker.image(atFrame: frame), "Frame \(frame) was never written.")
+            XCTAssertFalse(baker.isBaked(atFrame: frame))
+        }
+    }
+
+    // MARK: - The read path stage 4d wires
+
+    /// Ring, then store, then nothing — and what comes back is the frame that was baked.
+    func testTheReadPathAnswersWithTheFrameThatWasBaked() {
+        let manager = perFrameDocument(frames: 4)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        for frame in 0..<4 {
+            XCTAssertTrue(baker.isBaked(atFrame: frame))
+            guard let image = baker.image(atFrame: frame) else {
+                return XCTFail("Frame \(frame) is on disk and must come back.")
+            }
+            XCTAssertEqual(CGSize(width: image.width, height: image.height), CanvasFixture.canvasSize)
+        }
+    }
+
+    /// **`currentKey` is minted from the model, not looked up.** §3.3: the display path computes the
+    /// current frame's key to find its file, and a key with no file shows the previous picture. A
+    /// lookup in `keyByFrame` would answer with what the baker last saw — which is exactly the stale
+    /// answer that section forbids.
+    func testTheDisplayPathsKeyMovesWithTheModelRatherThanWithTheBaker() {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        let recorded = baker.keyByFrame[1]
+        XCTAssertEqual(baker.currentKey(atFrame: 1), recorded)
+
+        // An edit the baker has not been told about at all.
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 1,
+                                      CanvasFixture.solidImage(.blue, rect: CGRect(x: 2, y: 2, width: 20, height: 20)))
+
+        XCTAssertNotEqual(baker.currentKey(atFrame: 1), recorded,
+                          "The key is derived from the model, so it moved the moment the model did.")
+        XCTAssertNil(baker.image(atFrame: 1),
+                     "A key with no file is a miss — §2.10's previous picture, never a stale one.")
+        XCTAssertEqual(baker.keyByFrame[1], recorded,
+                       "The baker's own record is what is stale, which is why nothing reads it for a picture.")
+    }
+
+    /// **The ring is filled ahead of the playhead, and only ahead of it** (§3.5).
+    ///
+    /// Lookahead 3 with the playhead on 0 admits frames 0, 1, 2 and 3 and nothing else — play never
+    /// decodes on the display thread, and the frames behind are not what play is about to want.
+    func testTheRingIsFilledAheadOfThePlayhead() {
+        let manager = perFrameDocument(frames: 10)
+        manager.currentFrame = 0
+
+        let baker = makeBaker(manager)
+        baker.ringLookahead = 3
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        XCTAssertEqual(baker.ring.count, 4, "The playhead's frame and the three ahead of it.")
+        for frame in 0...3 {
+            guard let key = baker.keyByFrame[frame] else { return XCTFail("Frame \(frame) must be baked.") }
+            XCTAssertTrue(baker.ring.contains(key.fileName), "Frame \(frame) is inside the lookahead.")
+        }
+        for frame in 4..<10 {
+            guard let key = baker.keyByFrame[frame] else { return XCTFail("Frame \(frame) must be baked.") }
+            XCTAssertFalse(baker.ring.contains(key.fileName),
+                           "Frame \(frame) is past the lookahead and belongs on disk only.")
+        }
+    }
+
+    /// A hold is one entry in the ring as well as one file — the ring is keyed by digest for the same
+    /// reason the store is, and nine frames of a hold must not be nine copies of one picture in
+    /// memory on a device this feature exists to fit inside.
+    func testAHoldIsOneRingEntryForAllOfItsFrames() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 9)])
+        manager.sceneFrameCount = 9
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                                      CanvasFixture.solidImage(.green, rect: CGRect(x: 1, y: 1, width: 30, height: 30)))
+
+        let baker = makeBaker(manager)
+        baker.ringLookahead = 100
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        XCTAssertEqual(baker.ring.count, 1, "Nine frames, one digest, one resident frame.")
+        XCTAssertEqual(baker.ring.byteCount, Int(CanvasFixture.canvasSize.width * CanvasFixture.canvasSize.height) * 4)
+    }
+
+    // MARK: - Bookkeeping
+
+    /// The digest→frames map is the baker's alone, and it must stay in step in **both** directions —
+    /// the store's playhead-distance eviction reads it to answer "how far is the nearest frame that
+    /// still wants this file", and a stale entry there evicts the wrong file.
+    func testTheDigestToFramesMapFollowsTheFramesItNames() {
+        let manager = perFrameDocument(frames: 4)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        XCTAssertEqual(baker.framesByDigest.count, 4)
+        for (frame, key) in baker.keyByFrame {
+            XCTAssertEqual(baker.framesByDigest[key.fileName], [frame])
+        }
+
+        let oldKey = baker.keyByFrame[2]!
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 2,
+                                      CanvasFixture.solidImage(.blue, rect: CGRect(x: 1, y: 1, width: 40, height: 40)))
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        XCTAssertNil(baker.framesByDigest[oldKey.fileName],
+                     "The file frame 2 used to name is named by nothing now.")
+        XCTAssertEqual(baker.framesByDigest[baker.keyByFrame[2]!.fileName], [2])
+        XCTAssertEqual(baker.framesByDigest.count, 4)
+    }
+
+    /// `reset()` forgets everything the baker believes and leaves the store alone — purging is
+    /// §2.11's own call, made by the app, not a side effect of dropping bookkeeping.
+    func testResetForgetsTheBookkeepingAndNotTheStore() {
+        let manager = perFrameDocument(frames: 4)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(fileCount(), 4)
+
+        baker.reset()
+        XCTAssertTrue(baker.keyByFrame.isEmpty)
+        XCTAssertTrue(baker.framesByDigest.isEmpty)
+        XCTAssertEqual(baker.bakeQueue.pendingCount, 0)
+        XCTAssertEqual(baker.ring.count, 0)
+        XCTAssertEqual(baker.bakedCount, 0)
+        XCTAssertEqual(fileCount(), 4, "The files on disk are not the baker's to throw away.")
+
+        // And the store is still the truth: everything comes back as a dedupe, not a re-bake.
+        let count = composites {
+            baker.noteDocumentChanged()
+            drain(baker)
+        }
+        XCTAssertEqual(count, 0)
+        XCTAssertEqual(baker.dedupedCount, 4)
+    }
+
+    /// A scene that shrinks must not leave the baker asking for frames the document no longer has.
+    func testASceneThatShrinksDropsTheFramesItNoLongerHas() {
+        let manager = perFrameDocument(frames: 10)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+
+        manager.sceneFrameCount = 4
+        baker.syncDirty()
+        XCTAssertEqual(baker.bakeQueue.frameCount, 4)
+        XCTAssertEqual(pending(baker, manager), Array(0..<4),
+                       "The scene length is in the structural stamp, so the shorter scene is a re-bake…")
+        for frame in 4..<10 {
+            XCTAssertFalse(baker.bakeQueue.isPending(frame), "…and frame \(frame) is not in it.")
+        }
+    }
+}

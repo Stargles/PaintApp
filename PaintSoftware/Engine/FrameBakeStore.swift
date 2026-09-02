@@ -218,7 +218,16 @@ final class FrameBakeStore {
     /// build does not write, a digest naming some other key, a truncated file, a decode that comes
     /// up short. That is what makes §3.3's "a stale file can never be shown as fresh" mechanical:
     /// the caller asks for a key, and either gets that key's pixels or gets nothing and re-bakes.
-    func load(_ key: FrameBakeKey) -> CGImage? {
+    ///
+    /// **`DecodedFrame` rather than `CGImage`, and there is no `CGImage` spelling beside it.** There
+    /// was one until RENDER stage 4c — a `load(_:) -> CGImage?` that decoded into a `[UInt8]`, built a
+    /// `CGContext` over it and called `makeImage()`, which is a second canvas-sized copy and a
+    /// re-encode of bytes that were already exactly what Core Animation wants. `DecodedFrame.makeImage()`
+    /// wraps the same `Data` in a `CGDataProvider` and copies nothing, and the ring it feeds
+    /// (`DecodedFrameRing`) holds `DecodedFrame`s rather than images by design — so a store that
+    /// answered in `CGImage` could not fill the ring at all without decoding twice. §2.15: the
+    /// superseded path is deleted rather than kept beside the new one.
+    func loadDecoded(_ key: FrameBakeKey) -> DecodedFrame? {
         guard let file = try? Data(contentsOf: url(for: key)),
               file.count >= Self.headerBytes,
               Array(file.prefix(4)) == Self.magic,
@@ -241,15 +250,15 @@ final class FrameBakeStore {
               file.count == Self.headerBytes + payloadCount else { return nil }
 
         let payload = file.subdata(in: Self.headerBytes..<(Self.headerBytes + payloadCount))
-        let raw: [UInt8]
+        let raw: Data
         if flags & Self.flagCompressed != 0 {
             guard let decoded = Self.decompress(payload, to: rawCount) else { return nil }
             raw = decoded
         } else {
             guard payloadCount == rawCount else { return nil }
-            raw = [UInt8](payload)
+            raw = payload
         }
-        return Self.image(fromBGRA: raw, width: width, height: height, bytesPerRow: bytesPerRow)
+        return DecodedFrame(width: width, height: height, bytesPerRow: bytesPerRow, pixels: raw)
     }
 
     // MARK: - Purging and eviction
@@ -332,16 +341,6 @@ final class FrameBakeStore {
         return (bytes, width, height)
     }
 
-    static func image(fromBGRA bytes: [UInt8], width: Int, height: Int, bytesPerRow: Int) -> CGImage? {
-        guard bytes.count == height * bytesPerRow else { return nil }
-        var copy = bytes
-        let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        guard let ctx = CGContext(data: &copy, width: width, height: height, bitsPerComponent: 8,
-                                  bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: info) else { return nil }
-        return ctx.makeImage()
-    }
-
     // MARK: - LZ4
 
     /// Nil when the encoder declines — which for `_RAW` is what incompressible input looks like, and
@@ -362,13 +361,19 @@ final class FrameBakeStore {
     /// Nil on anything short of `expected` bytes, which is what a truncated or corrupt payload
     /// produces. The size comes from the header, which is what a raw LZ4 block needs and does not
     /// carry itself.
-    static func decompress(_ payload: Data, to expected: Int) -> [UInt8]? {
+    ///
+    /// **`Data` out, not `[UInt8]`.** `DecodedFrame` holds `Data` so that `makeImage()` can hand the
+    /// same allocation straight to a `CGDataProvider`; returning an array here would put an
+    /// `Array` → `Data` copy of the whole frame between the decoder and the ring, which at 2048² is
+    /// 16.8 MB moved per frame at 24 fps for no reason at all.
+    static func decompress(_ payload: Data, to expected: Int) -> Data? {
         guard expected > 0, !payload.isEmpty else { return nil }
-        var out = [UInt8](repeating: 0, count: expected)
-        let written = payload.withUnsafeBytes { src -> Int in
-            guard let base = src.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-            return out.withUnsafeMutableBufferPointer { dst in
-                compression_decode_buffer(dst.baseAddress!, expected, base, payload.count, nil, algorithm)
+        var out = Data(count: expected)
+        let written = out.withUnsafeMutableBytes { dst -> Int in
+            guard let destination = dst.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+            return payload.withUnsafeBytes { src -> Int in
+                guard let base = src.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+                return compression_decode_buffer(destination, expected, base, payload.count, nil, algorithm)
             }
         }
         return written == expected ? out : nil
