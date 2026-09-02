@@ -245,6 +245,18 @@ private final class UploadCache {
         let quality: RenderQuality
         let width: Int
         let height: Int
+        /// **Which band of the frame these pixels are** — nil for a whole frame, and RENDER.md
+        /// §3.8's strip otherwise.
+        ///
+        /// **Without it a stripped frame is one band repeated down the canvas, on this backend
+        /// only.** The rest of this key is the leaf's model identity plus the buffer's *size*, and a
+        /// strip plan's strips are all the same size but the last — so every strip of one leaf keys
+        /// the same entry, and strips 1..N are handed strip 0's texture. It is the third memo in the
+        /// app with that shape (`PixelOps.RasterizeKey` and `MaskResolver.CacheKey` are the other
+        /// two) and the only one the CoreGraphics reference has no counterpart for, which is why
+        /// `StripedCompositeMetalLogicTests` found it and `StripedCompositeLogicTests` — green on
+        /// every fixture in the file — could not.
+        let window: StripWindow?
     }
 
     /// What is left of `CompositorBudget.textureBudgetBytes` once the walk's own textures are
@@ -1173,7 +1185,8 @@ final class CompositorMetalEngine {
             return Self.upload(source.image, device: device)
         }
         let key = UploadCache.Key(content: version, quality: request.quality,
-                                  width: source.image.width, height: source.image.height)
+                                  width: source.image.width, height: source.image.height,
+                                  window: request.window)
         if let hit = uploads.texture(for: key) { return hit }
         guard let texture = Self.upload(source.image, device: device) else { return nil }
         uploads.store(texture, for: key)

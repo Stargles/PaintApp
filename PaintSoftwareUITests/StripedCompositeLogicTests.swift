@@ -216,9 +216,17 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// vertically with a hard horizontal edge inside every band, and the blur radius is larger than
     /// the strips are tall, so **every** core row is within the kernel's reach of a seam.
     ///
-    /// MEASURED by mutation (2026-09-02), with `apron(of:maskStacks:)` forced to 0: red, "Composites
-    /// differ at (0, 8) channel R: got 129, expected 121" — the first row of the second strip
-    /// reading its own clamped edge instead of the eight rows above it.
+    /// **MEASURED by mutation** (2026-09-02), with `apron(of:maskStacks:)` forced to 0: **six tests in
+    /// this file red**, this one reporting "Composites differ at (0, 16) channel R: got 255, expected
+    /// 254. Pixel got RGBA(255, 0, 0, 255), expected RGBA(254, 0, 1, 255)" — the first row of the
+    /// second strip, blurred against its own clamped edge instead of against the rows above it.
+    ///
+    /// **One byte, and that is the honest number rather than a weak result.** A blur that reads a
+    /// clamped edge instead of nearly-identical neighbours is off by a rounding step in the middle of
+    /// a flat region and by a great deal at a hard edge; the byte-for-byte gate is what makes the
+    /// small end of that range a failure at all. The same mutation reports "got 128, expected 0" in
+    /// `testAStripIsChunkedWhenOneStripStillDoesNotFit`, where the kernel is an Outline over a
+    /// silhouette.
     func testABlurAtAStripSeamReadsTheApronRatherThanTheEdge() {
         let manager = CanvasFixture.manager(layerCount: 2)
         // Hard horizontal edges, so a kernel that reads the wrong rows produces a different number
@@ -293,9 +301,12 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// grain at a pixel does not depend on any neighbour, so composing more rows around it changes
     /// nothing.
     ///
-    /// MEASURED by mutation (2026-09-02), with `Effect.passes(inFrameAt:)` returning `passes`
-    /// unchanged: red, "Composites differ at (0, 16) channel R: got 156, expected 189" — the second
-    /// strip repeating the first strip's grain.
+    /// **MEASURED by mutation** (2026-09-02), with `Effect.passes(inFrameAt:)` returning `passes`
+    /// unchanged: **five tests in this file red**, this one reporting "Composites differ at (0, 16)
+    /// channel R: got 29, expected 158. Pixel got RGBA(29, 29, 29, 255), expected RGBA(158, 158, 158,
+    /// 255)" — row 16 is the first row of the second strip, and it is showing row 0's grain. 129
+    /// bytes of difference on a monochrome grain, which is what a hash restarting rather than
+    /// continuing looks like.
     func testANoiseFieldDoesNotRestartAtAStripSeam() {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
@@ -394,9 +405,11 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// stripping budget and then again, and asserts the second answer as well: the first run fills
     /// the memo and the second is the one that would hit a colliding entry.
     ///
-    /// MEASURED by mutation (2026-09-02), with `window` removed from `RasterizeKey`: red,
-    /// "Composites differ at (0, 16) channel R: got 255, expected 0" — the top band's red stripe
-    /// repeated where the second band's transparency belongs.
+    /// **MEASURED by mutation** (2026-09-02), with `RasterizeKey.window` forced to nil: **eight tests
+    /// in this file red**, this one reporting "Composites differ at (0, 16) channel R: got 255,
+    /// expected 0. Pixel got RGBA(255, 0, 0, 255), expected RGBA(0, 0, 0, 0)" — the top band's red bar
+    /// repeated into the second band, where transparency belongs. Eight, because a colliding flatten
+    /// spoils every fixture in the file that strips at all; this is the one that names the cause.
     func testTwoStripsOfEqualHeightDoNotShareAFlattenMemoEntry() {
         let manager = CanvasFixture.manager(layerCount: 2)
         // Horizontal bars at different heights, so every band of the canvas holds different pixels.
@@ -437,9 +450,13 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// A mask whose coverage differs band to band, on strips of equal height. Without the window, the
     /// second strip clips the layer with the first strip's coverage.
     ///
-    /// MEASURED by mutation (2026-09-02), with `window` removed from `MaskResolver.CacheKey`: red,
-    /// "Composites differ at (0, 16) channel R: got 0, expected 255" — the masked layer clipped away
-    /// in the second band by the first band's coverage.
+    /// **MEASURED by mutation** (2026-09-02), with `MaskResolver.CacheKey.window` forced to nil:
+    /// **exactly one test red — this one** — reporting "Composites differ at (0, 16) channel R: got
+    /// 255, expected 0. Pixel got RGBA(255, 0, 0, 255), expected RGBA(0, 0, 0, 0)": the second band
+    /// showing the layer unclipped, because it inherited the first band's coverage, which is opaque
+    /// there. One test and no collateral is the tell that nothing else in this file has a mask on a
+    /// stripped frame, and the reason this fixture has to exist rather than be assumed inside the
+    /// zoo.
     func testTwoStripsOfEqualHeightDoNotShareAResolvedMask() {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,

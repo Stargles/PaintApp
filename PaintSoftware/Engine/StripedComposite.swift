@@ -57,11 +57,17 @@ import UIKit
 //    would restart the grain and jump the screen's phase at every seam. No apron helps: it is not a
 //    neighbourhood read. `EffectParams.originX/originY` carries the strip's own top-left into both
 //    kernels, on both backends, and `Effect.readsAbsolutePosition` is the list a test holds them to.
-// 2. **A memo keyed on size alone.** `PixelOps.RasterizeKey` and `MaskResolver.CacheKey` both carry
-//    width and height and nothing about *where* the buffer sits, so two strips of equal height would
-//    collide on one entry and the second would be served the first's pixels. Both keys carry the
-//    window now. This is the single most dangerous thing about strips: it is silent, it needs no
-//    unusual document, and the picture it produces is a repeated band.
+// 2. **A memo keyed on size alone — and there are three of them.** `PixelOps.RasterizeKey`,
+//    `MaskResolver.CacheKey` and `UploadCache.Key` in `MetalCompositor` all carry width and height
+//    and nothing about *where* the buffer sits, so two strips of equal height would collide on one
+//    entry and the second would be served the first's pixels. All three carry the window now.
+//
+//    This is the single most dangerous thing about strips: it is silent, it needs no unusual
+//    document — bars at two heights and nothing else reaches it — and the picture it produces is one
+//    band repeated down the canvas. **The third was found by running the pin on the second backend**,
+//    which is the whole argument for `StripedCompositeMetalLogicTests` existing: the upload cache has
+//    no CoreGraphics counterpart, so the CPU suite was green on every fixture in the file while the
+//    GPU repeated a band.
 
 /// **Which pixels of a frame one buffer holds** — RENDER.md §3.8, and the value that makes a strip
 /// expressible without either compositor backend learning what a strip is.
