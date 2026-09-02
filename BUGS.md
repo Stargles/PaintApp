@@ -3,6 +3,76 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Memory allocation audit — seventeen sites, ranked (2026-09-01)
+
+Found while designing RENDER.md; the compositor's budget is sound and almost nothing else consults it. RENDER §5 stage
+0 takes the first five, stage 7 the rest. Canvas bytes are `w·h·4`: 8 MiB at 2048x1024, 64 MiB at 4096², 1 GiB at 16383².
+
+1. **A blank raster tier is rendered as a canvas-sized transparent bitmap and cached forever, once per cel.**
+   `Services/PixelOps.swift:299` calls `cel.raster.renderToUIImage()` unconditionally; `Engine/RasterLayerTexture.swift:322-325`
+   mints the bitmap when `context == nil` and memoises it, and nothing evicts `RasterLayerTexture.cachedImage` —
+   no budget, no memory-warning or background observer. `Models/CanvasManager.swift:1777` (`celThumbnailImage`) is the
+   second caller without the `hasContent` gate that `Services/ProjectStore.swift:282` has; `startThumbnailBackfill`
+   (`Models/CanvasManager+Document.swift:1136`) runs it over every cel on open. 300 vector cels at 2048x1024 is 2.4 GB
+   of nothing. Fix: a shared 1x1 transparent (the `VectorCanvas.transparentPixel` pattern, `Engine/VectorLayer.swift:2872`)
+   and skip the tier when `!hasContent`.
+2. **`renderSources` holds one canvas-sized image per visible leaf, all at once, with no budget**
+   (`Engine/RenderRequest.swift:884-993`). `affordableSize` bounds the canvas, never the count: 100 leaves at 2048x1024
+   is 800 MiB. RENDER §3.4 is the fix.
+3. **Whole-cel raster undo steps are charged 0 while holding two canvas buffers.** `Models/SelectionModels.swift:1065-1066`
+   costs `undoBaked`/`redoBaked`/`undoFill`/`redoFill`, which every caller passes as nil (`registerUndoableCelChange`'s
+   own doc `:1040-1046` mandates it); the payload is `undoRaster`/`redoRaster`. `Models/UndoHistory.swift:57-59` claims
+   16 MiB per step; `MemoryBudgetLogicTests.testWhatTheBudgetHoldsInWholeCelOperationsAtTheOwnersCanvas` computes that by
+   hand and never drives the production path. Fix: `RasterLayerTexture.approximateCost` and a test that reads
+   `history.currentCost`.
+4. **The first stroke on a 16383² canvas allocates two full-canvas buffers before a dab is visible** — RENDER §5 stage 0.
+   Vector eraser modes 1/2 allocate two at touch-down (`Views/Canvas/StrokeCanvasView.swift:845`). Nothing on the stroke
+   path consults `hasHeadroom`, which has exactly one call site (`Engine/MetalCompositor.swift:530`).
+5. **`resolveLiveMask` composites at native size while the sandwich composites at `renderSize`** (`Views/CanvasView.swift:1337`,
+   no `fittingWithin`). `MaskResolver.CacheKey` carries width and height (`Engine/MaskResolver.swift:288-290`), so a
+   masked document resolves two masks and flattens every layer twice into one 192 MiB memo. `CanvasView.swift:1322-1324`
+   asserts the two calls share one entry; that is true only at Full on a device where `affordableSize` is inert.
+6. **`MetalFillSession` allocates ~34 bytes per canvas pixel with no budget and no headroom check**
+   (`Engine/MetalFillEngine.swift:300-380`; 44 with a lasso and two colours) — 544 MiB at 4096². `compositeReferenceRGBA`
+   (`Models/CanvasManager+Fill.swift:842-852`) adds a transient canvas-sized image and byte array.
+7. **Blanked layer hosts keep every byte.** `Views/Canvas/LayerHostView.swift:97-103` `setBlanked` only installs a
+   zero-alpha mask; `reconcileLayers` (`CanvasView.swift:892`) still re-renders blanked hosts every pass. The sandwich's
+   three composites are paid on top of N × 3 host images, not instead of them.
+8. **Two caches are bounded by entry count, which is not a bound.** `MaskResolver.cache` is 8 entries
+   (`MaskResolver.swift:336`; 128 MiB at 4096², 2 GiB at 16383²), and `vectorRenderCacheLimit = 12`
+   (`Models/CanvasManager+Interpolation.swift:489-511`) holds up to two canvas images each, is evicted only from the Move
+   tool's `handleActiveContextChanged` (`SelectionModels.swift:249`), and has no pressure hook at all — 768 MiB to 1.5 GiB
+   at 4096².
+9. **`MaskResolver` and `OnionSkinRasterCache` drop on memory warning only** (`MaskResolver.swift:363`,
+   `Views/OnionSkinSource.swift:945-951`) where `PixelOps` and the Metal engine also drop on backgrounding — and
+   PERFORMANCE item 12 records that the warning never fires on the owner's device.
+10. **Every eviction signal is a `UIApplication` notification and the only valve is `os_proc_available_memory`**
+    (`PixelOps.swift:237,247`; `MetalCompositor.swift:391,403`; `MaskResolver.swift:363`; `OnionSkinSource.swift:948`;
+    `CanvasManager.swift:1098`; `Engine/Compositor.swift:195`). RENDER §2.6 rules portability; a `MemoryPressure` seam
+    with an iOS implementation is the shape.
+11. **The Metal upload cache's budget collapses to zero on any 4K document** — `MetalCompositor.swift:552-553` gives it
+    `budget − walkHighWaterBytes`, and three walk textures at 4096² are the whole budget, so `trimToBudget` empties it after
+    every composite. The pool and effect intermediates are discarded on every canvas-size change (`:558-566`,
+    `Engine/MetalEffects.swift:142-146`), which every autosave triggers through the 320² thumbnail (`ProjectStore.swift:305-315`).
+    `walkHighWaterBytes` (`:489, :552`) is shared across consumers and resets only with the pool.
+12. **Plain statics read from the compositing queue**: `CompositorBudget.budgetOverrideBytes` (`Compositor.swift:178`),
+    `Compositor.backend` (`:308`), `AlphaMask.storedThreshold`/`storedAntialiasHalfWidth`/`tuningGeneration`
+    (`Models/AlphaMask.swift:92-93, :143`), all written on main.
+13. **Vector element undo charges a flat 512 bytes per element** (`Models/CanvasManager+Text.swift:415`) while a
+    `VectorElement.image` carries a whole `UIImage` (`VectorLayer.swift:263-269`).
+14. **`OnionSkinRasterCache` computes its limit from the newest entry's size** (`OnionSkinSource.swift:918-923`), so
+    after a Half → Quarter change 84 MiB can sit under a 64 MiB budget.
+15. **`Cel.thumbnail`, one `DabGradientCache` per cel and one `StrokeSpatialIndex` per vector canvas have no global bound**
+    (`Models/Cel.swift:26`; `RasterLayerTexture.swift:123, 472`; `VectorLayer.swift:564`).
+16. **`LayerRenderSource.solid` renders a full canvas to express one colour, per value layer, per rebuild, unmemoised**
+    (`RenderRequest.swift:84-101`).
+17. **`SaveSnapshot` renders every content-bearing cel and copies every vector cel on the main actor, all live during the
+    write** (`ProjectStore.swift:134-305`).
+
+The five declared budgets sum to 656 MiB at 2048x1024 and are pinned to; add the undeclared ones above and one live
+rebuild reaches 850-950 MiB before a single cel of the document, against the ~1.4 GiB the repo cites as pre-jetsam
+(`Compositor.swift:102`). At 4096² the two count-bounded caches alone push the sum past that ceiling.
+
 ## A 250 pt timeline cannot hold four layers plus an open band (2026-08-30) — LEFT, deliberately
 
 The bottom row falls off the panel and the artist must drag it taller. **The content scrolls, so

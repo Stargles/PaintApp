@@ -222,6 +222,8 @@ LAYER_TRANSFORM.md.
 - [ ] > "When I select and duplicate, it does not support vector (the duplicated selection is a raster layer
       > not a vector)."
 
+      BUGS.md already carries this as "Duplicate rasterizes a vector layer, silently"; the entry names the path.
+
 ### (34) Imported images should arrive in a move box
 
 - [ ] > "Right now when you import images they appear in the center of the canvas with no move box. Make them
@@ -388,7 +390,7 @@ once; and (29) was blocked on derived content being invisible to the render walk
       **Nothing exists** — no audio framework is linked anywhere in the app.
       **The dependency the owner did not name, and it is the whole first move**: there is no clock to sync
       to. Playback is a `Timer` whose callback re-dispatches onto the main queue, with `isPlaying` and the
-      timer living on the *view* (`Views/AnimationTimeline.swift:13-14`, timer at `:976-989`). It drifts,
+      timer living on the *view* (`Views/AnimationTimeline.swift:12-14`, timer at `:1004-1008`). It drifts,
       and nothing notices today because the only consumer is the playhead. Audio is a hardware clock, so
       drift becomes what the artist *hears*, and lipsync is where they *see* it. **Hoisting playback onto
       the model behind a monotonic time base is a timeline change, not an audio feature** — and (21)'s

@@ -747,6 +747,10 @@ display refresh.
 
 ## 9. Background rendering
 
+> **Superseded by [RENDER.md](RENDER.md).** §9.1's items 1 and 2 were never built as described — no node carries a
+> content version (`Models/RenderTree.swift:116-118` records the rejection) and nothing inverts a cel's span into a
+> dirty-frame map; only item 3, the pure snapshot entry point, shipped. §9.2's renderer is RENDER §3.5-3.7.
+
 Aimed at the future video sequencer (many shots, many scenes chained). **Decision: build the
 substrate now, the thread and the disk cache when the sequencer exists.** The substrate is not
 speculative work — the compositor needs it anyway to avoid recompositing constantly.

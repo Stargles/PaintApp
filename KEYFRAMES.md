@@ -587,6 +587,10 @@ transformation layer is, and §4.6 is its answer.
 
 ### 4.6 The playback cache — and why Bake is not the performance answer
 
+> **The cache is specified in [RENDER.md](RENDER.md) §3.5-3.7 now; this section's rulings (§2.19, §2.20, §2.25) stand
+> and its store is that one.** Its claim that `LayerContentVersion` propagates dependencies is wrong: it is a flat
+> per-leaf value.
+
 **Owner's ruling, 2026-08-28**, and it corrects an earlier framing in this document:
 
 > "if bake into frames is able to speed up the transformations, is it possible to automatically cache
