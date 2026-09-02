@@ -1811,7 +1811,7 @@ final class CompositorParityLogicTests: XCTestCase {
                        "Backgrounding must drop the flatten memo too — same notification, `PixelOps.RasterizeCache.init`'s new observer")
     }
 
-    // MARK: - One scratch pool per size (BUGS.md memory audit item 11, RENDER.md §4)
+    // MARK: - One scratch pool per size (RENDER.md §4)
 
     /// The pixel size a request will actually be composited at — the same rounding
     /// `CompositorMetalEngine.attempt` does at its top, so a test can name the key the engine used.
@@ -1874,9 +1874,9 @@ final class CompositorParityLogicTests: XCTestCase {
     /// **The map is bounded, and the bound is what stops the fix becoming a leak.**
     ///
     /// A pool per size with no limit would accumulate one per render resolution the artist has ever
-    /// selected — the same unbounded-cache shape BUGS.md item 8 files against two other caches. Four
-    /// sizes into a limit of three, and the one that goes is the one nothing has composited at for
-    /// longest.
+    /// selected — the same unbounded-cache shape BUGS.md files against two other count-bounded caches.
+    /// Four sizes into a limit of three, and the one that goes is the one nothing has composited at
+    /// for longest.
     func testTheScratchPoolMapIsBoundedAndEvictsTheLeastRecentlyUsedSize() throws {
         try skipUnlessGPUAvailable()
         let engine = try XCTUnwrap(CompositorMetalEngine.shared, "Skipped above if nil")
@@ -1951,12 +1951,12 @@ final class CompositorParityLogicTests: XCTestCase {
                                  "…and what is left is inside the budget it was evicted to satisfy")
     }
 
-    // MARK: - The two development seams are read off the render queue (BUGS.md memory audit item 12)
+    // MARK: - The two development seams are read off the render queue (RENDER.md §4)
 
     /// **`Compositor.backend` and `CompositorBudget.budgetOverrideBytes` are written by a test and
     /// read by a composite that is not on the test's thread**, which is the shape RENDER.md §4 files
     /// against them: `composite` runs on `CanvasView.sandwichQueue` and on `ProjectStore`'s save
-    /// queue, and both statics were plain stored properties until 2026-09-01.
+    /// queue, and both were plain stored properties.
     ///
     /// **What this proves and what it does not.** Every composite below must hand back a picture of
     /// the requested size whichever backend and budget it happened to observe — a torn `Int?` or a

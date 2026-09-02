@@ -91,8 +91,8 @@ struct AlphaMask: Hashable {
 
     /// **The two tunables and their generation, read as one value under one lock.**
     ///
-    /// These were three plain statics until 2026-09-01 (BUGS.md memory audit item 12, RENDER.md §4).
-    /// They are written on the main actor by the mask tuning sliders and read from whichever queue is
+    /// These were three plain statics (RENDER.md §4). They are written on the main actor by the mask
+    /// tuning sliders and read from whichever queue is
     /// compositing — `CanvasView.sandwichQueue` for the live canvas, `ProjectStore`'s save queue for
     /// the thumbnail, and RENDER §3.6's baker next — so the plain reads were a data race in the
     /// language's terms whatever the hardware did with them.

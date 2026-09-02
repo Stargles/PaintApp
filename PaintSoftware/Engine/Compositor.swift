@@ -177,7 +177,7 @@ enum CompositorBudget {
     /// whole fix exists to get out of. Tests restore it to nil in `tearDown`.
     ///
     /// **Locked, because it is written on the test's thread and read from a compositing queue**
-    /// (BUGS.md memory audit item 12, RENDER.md §4). `textureBudgetBytes` reads it on whichever queue
+    /// (RENDER.md §4). `textureBudgetBytes` reads it on whichever queue
     /// `CompositorMetalEngine.attempt` is running on, and a test that arms it while a save's
     /// thumbnail composite is in flight was a plain unsynchronised `Int?` away from undefined
     /// behaviour. A lock rather than a snapshot into `RenderRequest`: this is the one of the four
@@ -327,8 +327,8 @@ enum Compositor {
     /// and an artist has no way to tell them apart except by waiting. The user-facing performance knob
     /// added alongside this is render resolution, which changes the *picture* and is therefore a
     /// choice somebody can actually make.
-    /// **Locked, because it is written on main and read from every compositing queue** (BUGS.md
-    /// memory audit item 12, RENDER.md §4). `composite` switches on it from `CanvasView.sandwichQueue`
+    /// **Locked, because it is written on main and read from every compositing queue** (RENDER.md
+    /// §4). `composite` switches on it from `CanvasView.sandwichQueue`
     /// and from `ProjectStore`'s save queue, while the fifty test sites that arm it do so from the
     /// test thread.
     ///

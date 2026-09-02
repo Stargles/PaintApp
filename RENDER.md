@@ -152,8 +152,8 @@ and three inputs added that no cache carries today:
   `DerivedCelContent.identity` of an in-between;
 - the mask source stacks;
 - render size, `RenderResolution`, `RenderQuality`, paper colour, paper visibility and canvas padding;
-- **`AlphaMask.tuningGeneration`** (`Models/AlphaMask.swift:92-93, :143`), **`Compositor.backend`**
-  (`Engine/Compositor.swift:308`), and a **store format version** — a persistent store must carry what a
+- **`AlphaMask.tuningGeneration`**, **`Compositor.backend`** (both accessors over a lock — §4), and a
+  **store format version** — a persistent store must carry what a
   process-lifetime cache could ignore.
 
 `frame` affects no pixel: the compositor reads it only to rebuild sub-requests (`Compositor.swift:1039`,
@@ -279,16 +279,17 @@ in no composite (`RenderRequest.swift:741-789`). A baked frame is the artwork, n
 (`RenderRequest.swift:815-819`) is the live-canvas predicate and is not the bake predicate: a document with one plain
 vector layer still bakes, because play and export need it.
 
-## 4. Shared engine state that must be fixed before a second consumer arrives
+## 4. Shared engine state the baker inherits
 
-- `CompositorMetalEngine` holds one `NSLock` across a whole composite, one texture pool and one upload cache
-  (`MetalCompositor.swift:471-498`); the pool is keyed by size and **discarded wholesale on a size mismatch**
-  (`:558-566`), so any consumer at a different size — today the 320² save thumbnail on every autosave — throws the
-  live canvas's pool and effect intermediates away. Key the pool by size with a small map. `walkHighWaterBytes`
-  (`:489, :552`) is shared across consumers and zeroes the upload-cache budget for everyone after one large walk.
-- Plain statics read from the background queue: `CompositorBudget.budgetOverrideBytes` (`Compositor.swift:178`),
-  `Compositor.backend` (`:308`), `AlphaMask.storedThreshold`/`storedAntialiasHalfWidth`/`tuningGeneration`
-  (`AlphaMask.swift:92-93, :143`). Make them atomic or snapshot them into the request.
+- `CompositorMetalEngine` holds one `NSLock` across a whole composite. Its scratch pool and `EffectPipelines`'
+  intermediates are bounded LRU maps over `TexturePixelSize` — `residentPoolSizeLimit` sizes each, one high-water
+  mark per pool, the map's total inside `CompositorBudget.textureBudgetBytes` — so a consumer at a new size evicts
+  the least recently used pool rather than whichever one the live canvas is holding. **The baker is the third
+  consumer that limit is sized for**; a fourth means raising it, not changing the rule.
+- `Compositor.backend`, `CompositorBudget.budgetOverrideBytes` and `AlphaMask`'s two tunables plus `tuningGeneration`
+  are accessors over a lock, and the tuning is one `AlphaMask.Tuning` snapshot so `coverage(forSourceAlpha:)` cannot
+  read a pair from two different writes. The bake key (§3.3) reads them through those accessors. Nothing on a render
+  queue touches a plain static.
 - `UndoHistory` has no lock (`Models/UndoHistory.swift:107`); the baker never records undo.
 - `textureBudgetBytes` being static is correct and stays (`Compositor.swift:120-126`): the request and the engine
   must agree on one number, and the baker reads the same one.
@@ -299,12 +300,12 @@ Each stage merges alone, with a test that would fail without it. Stage 0 first b
 it is the dependency order.
 
 0. **Stop the bleeding.** The 16k crash is the live-stroke scratch: `StrokeCanvasView.swift:843-849` allocates the
-   scratch at `vectorCanvas.size`, `RasterLayerTexture.swift:281-283` mints the full-canvas context on the first dab
-   and `:320` a full-canvas `makeImage()` per touch-move, and `StrokeCanvasView.swift:578` snapshots a blank raster
+   scratch at `vectorCanvas.size`, `RasterLayerTexture.swift:298-300` mints the full-canvas context on the first dab
+   and `:339` a full-canvas `makeImage()` per touch-move, and `StrokeCanvasView.swift:578` snapshots a blank raster
    tier at canvas size before any of it. Size the scratch to the stroke's dirty rect (`_strokeDirtyRect`,
-   `RasterLayerTexture.swift:436-437`), skip the blank snapshot, and stop `PixelOps.swift:299` minting a canvas-sized
+   `RasterLayerTexture.swift:432-434`), skip the blank snapshot, and stop `PixelOps.swift:299` minting a canvas-sized
    transparent bitmap for every vector cel's empty raster tier (BUGS.md, memory audit item 1). Pass the sandwich's
-   render size into `resolveLiveMask` and the thumbnail path. Key the Metal pool by size. Fix the two stale doc
+   render size into `resolveLiveMask` and the thumbnail path. Fix the two stale doc
    comments that call the eyedropper the only caller skipping the cap (`RenderTree.swift:530`,
    `CanvasManager+Document.swift:305-307`).
 1. **Hoist the playback clock** onto `CanvasManager` (§3.7).

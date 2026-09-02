@@ -239,7 +239,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     ///
     /// This case used to be arithmetic all the way down: it multiplied `2 * w * h * 4` itself and
     /// divided the budget by it. Every number it printed was right and the code charged **zero**
-    /// (BUGS.md memory audit item 3). `registerUndoableCelChange` mandates that a commit path hand
+    /// `registerUndoableCelChange` mandates that a commit path hand
     /// its flattened result over as a `RasterLayerTexture` and pass nil for `newBaked`/`newFill`, and
     /// the cost was computed from those four nils — so Move, Clear, Fill and Add Text each recorded a
     /// step of size 0, `UndoHistory.trim()` (which evicts by cost) could never reach one, and a test
@@ -282,7 +282,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                           label: .fill)
 
         XCTAssertEqual(manager.history.currentCost, wholeCelStep,
-                       "One whole-cel commit must be charged both canvas buffers it retains — this read 0 until 2026-09-01")
+                       "One whole-cel commit must be charged both canvas buffers it retains")
         XCTAssertEqual(wholeCelStep, 16 * Self.mib)
         XCTAssertEqual(budget / wholeCelStep, 12, "192 MiB holds twelve whole-cel operations at the owner's canvas")
         XCTAssertEqual((300 * Self.mib) / wholeCelStep, 18, "the literal it replaced held eighteen")

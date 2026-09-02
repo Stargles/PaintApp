@@ -186,10 +186,10 @@ final class MaskGuardLogicTests: XCTestCase {
         XCTAssertEqual(mask.coverage(forSourceAlpha: 0), 0)
     }
 
-    // MARK: - The invariant survives a reader on another thread (BUGS.md memory audit item 12)
+    // MARK: - The invariant survives a reader on another thread (RENDER.md §4)
 
-    /// **The guard can be broken by the reader as well as by the writer, and until 2026-09-01 it
-    /// was.** The two tunables were plain statics written by the tuning sliders on the main actor and
+    /// **The guard can be broken by the reader as well as by the writer, and it was.** The two
+    /// tunables were plain statics written by the tuning sliders on the main actor and
     /// read by `coverage(forSourceAlpha:)` on whichever queue is compositing — `CanvasView
     /// .sandwichQueue`, `ProjectStore`'s save queue, and RENDER.md §3.6's baker next. `coverage` read
     /// them one at a time, so a write landing between the two reads handed it a pair neither the

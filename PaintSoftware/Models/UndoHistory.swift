@@ -52,16 +52,16 @@ import Foundation
 ///    is the case that pins it. What the cut costs is *whole-cel* operations, which charge
 ///    `width x height x 4` twice: 16 MiB each at 2048x1024, so **18 of them at 300 MiB and 12 at 192**.
 ///
-///    **That sentence was arithmetic about a step the code charged nothing for, from the day it was
-///    written until 2026-09-01** (BUGS.md memory audit item 3). Move, Clear, Fill and Add Text hand
-///    their result to `registerUndoableCelChange` as a `RasterLayerTexture` and pass nil for the two
+///    **That sentence was arithmetic about a step the code charged nothing for.** Move, Clear, Fill
+///    and Add Text hand their result to `registerUndoableCelChange` as a `RasterLayerTexture` and
+///    pass nil for the two
 ///    images the cost was computed from, so every one of them recorded a cost of 0 while retaining a
 ///    before and an after buffer — and `trim()` evicts by cost, so no number of them could ever be
 ///    evicted. `CanvasManager.registerCelReversal` charges `RasterLayerTexture.approximateCost` on
 ///    both sides now, which is what makes the two figures above descriptions of the code rather than
 ///    of an intention. `MemoryBudgetLogicTests.testWhatTheBudgetHoldsInWholeCelOperationsAtTheOwnersCanvas`
-///    drives the production path for exactly this reason: it used to recompute `2 * w * h * 4` by
-///    hand and would have gone on passing with the charge missing altogether.
+///    drives the production path for exactly this reason: a case that recomputes `2 * w * h * 4` by
+///    hand goes on passing with the charge missing altogether.
 ///  * **The cut is self-targeting.** It only bites in a session that has already retained 192 MiB of
 ///    history, which is the session closest to the ceiling in the first place.
 ///  * **It buys the budget a response to pressure it did not have.** Before this, undo was the only
