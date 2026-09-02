@@ -29,18 +29,17 @@ A canvas-sized `CGBitmapContext` is lazily committed, which is why the raster co
 pages a dab never touches are never faulted in. The 1 GiB buffer is not the problem, it is not even
 expensive to *hold*; it is expensive to *clear and walk*, which is the second complaint, not the first.
 
-**What the artist actually cannot see has two measured causes, and neither is an allocation.**
+**What the artist actually cannot see had two measured causes, neither of them an allocation. (a) is
+fixed; (b) is what is still open here.**
 
-**(a) Every artwork layer is minified by Core Animation's default `.linear` filter with no mipmaps, and
-a default stroke is thinner than one screen pixel.** Every view that shows artwork sets
-`magnificationFilter` and none of them sets `minificationFilter` — `LayerHostView.swift:43-44`,
-`StrokeCanvasView.swift:336,352,360`, `CanvasView.swift:1114,1226-1228,2337` — so they all run Core
-Animation's default `.linear` minification, which has no mipmap chain. The only `minificationFilter` in the
-app is on `SelectionOverlayView`'s collar, which is chrome. `CanvasManager.brushSize`
-defaults to **5 canvas points** (`CanvasManager.swift:497`) and the canvas opens at `fitScale`
-(`CanvasView.swift:2607`). MEASURED — a 5-point line drawn into a canvas-sized image and minified to a
-400-point viewport, point-sampled (what an un-mipmapped `.linear` degenerates to at these ratios) against
-box-filtered:
+**(a) Artwork was minified by Core Animation's default `.linear` filter with no mipmaps, and a default
+stroke is thinner than one screen pixel — FIXED, the nine artwork layers ask for `.trilinear`.**
+`magnificationFilter` was set on every view that shows artwork and `minificationFilter` on none of them,
+so they all ran Core Animation's default `.linear` minification, which has no mipmap chain.
+`CanvasManager.brushSize` defaults to **5 canvas points** (`CanvasManager.swift:497`) and the canvas opens
+at `fitScale` (`CanvasView.swift:2607`). MEASURED — a 5-point line drawn into a canvas-sized image and
+minified to a 400-point viewport, point-sampled (what an un-mipmapped `.linear` degenerates to at these
+ratios) against box-filtered:
 
 | canvas | fit scale | stroke width on screen | point-sampled ink | box-filtered ink |
 |---|---|---|---|---|
@@ -49,10 +48,12 @@ box-filtered:
 | 8192² | 0.049 | 0.24 pt | **0** | 800 px |
 | 12288² | 0.033 | 0.16 pt | **0** | 800 px |
 
-**From 4096² up, a default stroke seen at fit zoom is not faint — it is gone**, and it is gone identically
-in the live scratch and in the committed render, because both are canvas-resolution images under the same
-transform. It is enough on its own to produce "the brushstroke disappears when you draw", it needs no
-16k-specific mechanism, and it is live on 4096² documents today.
+**From 4096² up, a default stroke seen at fit zoom was not faint — it was gone**, and gone identically in
+the live scratch and in the committed render, because both are canvas-resolution images under the same
+transform. It was enough on its own to produce "the brushstroke disappears when you draw", it needed no
+16k-specific mechanism, and it reached 4096² documents. The table is kept because it is the provenance of
+the fix and because it is still what `.linear` does: **the mipmap chain is the whole of the repair, and
+nothing measures it on the device yet** — `CanvasLayerFilterLogicTests` pins the property, not the pixels.
 
 **(b) At 16383² the image cannot be put on screen at all.** Same run: a `UIImageView` holding a
 canvas-sized image inside a container at `fitScale`, read back through `CALayer.render(in:)`, showed the
@@ -65,13 +66,13 @@ and the render-server behaviour is still unmeasured.)
 So the pixels exist and nothing reaches the screen — the opposite failure from the one hypothesised, and
 one no budget check on the allocation would have caught.
 
-**And (b) reproduces the owner's sentence more exactly than (a) does, which is why both are here.** The
+**And (b) reproduces the owner's sentence more exactly than (a) did, which is why both are here.** The
 live scratch is its own small image at `windowRect`, not the canvas: on a one-inch drag at 16383² that
-window measures 8617×8611 (see the next entry), which is between the 12288² that displayed and the 16383²
-that did not. INFERRED, not measured: **the scratch is displayable and the committed 1 GiB render is not,
-so ink appears under the pen and vanishes at lift** — which is what "the brushstroke disappears when you
-draw" says. (a) is the more general defect and reaches 4096² documents the owner has not complained about
-yet; (b) is the one that fits this report.
+window measured 8617×8611, between the 12288² that displayed and the 16383² that did not, and it is a
+band of about 8639×134 now that each axis pads itself. INFERRED, not measured: **the scratch is
+displayable and the committed 1 GiB render is not, so ink appears under the pen and vanishes at lift** —
+which is what "the brushstroke disappears when you draw" says. The band makes that inference stronger
+rather than weaker, since the scratch is now well under every size that displayed.
 
 **What stage 2 changed and what it did not.** On today's `9c9d435` the committed re-render is deferred to
 `StrokeCanvasView.renderQueue` and the finished stroke's scratch is held until it lands
@@ -86,78 +87,19 @@ blank. **That last sentence is INFERRED and is the one thing here nobody has wat
 XCUITest that reaches the editor on this device, which is the open entry "XCUITests cannot launch into the
 editor on the iPad 9", or thirty seconds of the owner's own time.
 
-**Recommended fix, cheapest first.**
+**What is left, cheapest first.**
 
-1. **Set `minificationFilter = .trilinear` on the artwork layers.** It is one property per view, it is
-   independent of `magnificationFilter` (which stays `.nearest`, so zoomed-in pixels stay crisp), and it
-   is what makes a zoomed-out canvas legible at *any* size — 4096² documents are affected today. It costs
-   Core Animation a mipmap chain, about a third more texture memory per displayed layer, which
-   `CompositorBudget` does not currently account for.
-2. **Bound the canvas the display can actually show.** 16383² is past what this device will composite
-   whatever the filter says. Either cap `maxCanvasExtent` at a size the display path is measured to
-   survive, or give the layer views a tiled/downsampled presentation image instead of the native one.
-   BUGS' "Raising the canvas maximum reaches a raster-storage cost `CompositorBudget` never bounds"
-   (2026-08-27) flagged the storage half of this; the display half was not known.
+1. **Bound the canvas the display can actually show.** 16383² is past what this device will composite
+   whatever the filter says, so `.trilinear` does not reach it. Either cap `maxCanvasExtent` at a size the
+   display path is measured to survive, or give the layer views a tiled/downsampled presentation image
+   instead of the native one. BUGS' "Raising the canvas maximum reaches a raster-storage cost
+   `CompositorBudget` never bounds" (2026-08-27) flagged the storage half of this; the display half was
+   not known.
+2. **A mipmap chain is about a third more texture per displayed layer and `CompositorBudget` does not
+   account for it.** That gap is PERFORMANCE §9 item 5 — nothing counts what Core Animation holds — and
+   the filter is now one more tenant of it. No measurement exists of what the chains cost on the device.
 3. **A brush size expressed in canvas points is a trap at any large canvas.** Not a bug on its own — see
-   PERFORMANCE §9 item 3 — but the reason (a) is invisible to whoever picks the default.
-
-**Not fixed here.** This entry is a diagnosis; nothing in it is a patch, and the two other sessions live in
-`StrokeScratch`/`RenderRequest`/`CanvasView` while it was written.
-
-## The live-stroke window pads both axes by the longer one, so a straight line gets a square (2026-09-02)
-
-`StrokeScratch` exists so the live stroke costs its own bounding box rather than the canvas
-(`Engine/StrokeScratch.swift`, RENDER §5 stage 0, `3ad312a`). It does bound the stroke — but the growth
-rule outsets **both** axes by half the current window's **longer** side:
-
-```swift
-let pad = max(Self.minimumPad, max(windowRect.width, windowRect.height) / 2)
-let next = wanted.insetBy(dx: -pad, dy: -pad).integral.intersection(canvas)
-```
-
-So the box is square from the first growth on (the 64-point `minimumPad` makes the first one 133×133) and
-doubles in both directions thereafter, whatever shape the stroke is. A horizontal line five points thick
-ends up in a square of side about 3× its length. MEASURED on the owner's iPad 9, Release, at `41eafa9` —
-one screen inch of pen travel at each canvas's fit zoom, which is the gesture the artist actually makes:
-
-| canvas | travel (canvas pt) | dabs | window | window bytes | stroke's own box | stamp time |
-|---|---|---|---|---|---|---|
-| 2048² | 352 | 352 | 1079×1078 | 4.4 MB | 0.007 MB | 11.2 ms |
-| 4096² | 704 | 704 | 2159×2158 | 17.8 MB | 0.014 MB | 22.0 ms |
-| 8192² | 1408 | 1408 | 4319×4318 | 71.1 MB | 0.027 MB | 148.2 ms |
-| 12288² | 2112 | 2112 | 4319×4318 | 71.1 MB | 0.040 MB | 81.3 ms |
-| **16383²** | **2816** | **2816** | **8617×8611** | **283.1 MB** | **0.054 MB** | **535.9 ms** |
-
-283 MB held for a stroke that covers 54 KB of pixels, against a 183.7 MB compositor budget on the same
-device (MEASURED 2026-09-02). The copying is what the time goes into: the window is reallocated about
-seven times on that stroke and each reallocation copies the whole previous box, so per-dab cost rises from
-0.032 ms at 2048² to 0.190 ms at 16383² for identical dabs.
-
-**Why it bites hardest exactly where the class was written to help.** The travel column is not incidental:
-the artist works at `fitScale`, so one screen inch is `132 / fitScale` canvas points and therefore grows
-in direct proportion to the canvas. A window bounded by the stroke is only bounded by the *canvas* when
-the stroke is a fixed fraction of the screen — which it is. RENDER §5 stage 0's closing line, *"nothing on
-the stroke path scales with canvas area"*, is true of the code as written and false of the gesture as
-made.
-
-**The fix is one expression: pad each axis by half of that axis's own extent in the union**, floored at
-`minimumPad` —
-
-```swift
-let padX = max(Self.minimumPad, wanted.width / 2)
-let padY = max(Self.minimumPad, wanted.height / 2)
-```
-
-— which keeps the per-axis geometric-growth guarantee the doc comment argues for (each axis at least
-half-again per reallocation, so total copying stays O(final area)) while letting the final area be the
-stroke's box rather than its square. INFERRED from the measured rows: the 16383² window becomes roughly
-4300×133, about **2.2 MB instead of 283.1 MB**.
-
-Risk is low and local — `StrokeScratchLogicTests` already asserts `windowPixelCount`, so the numbers it
-pins have to be re-taken deliberately rather than drifting. The one thing to check is a stroke drawn
-almost entirely along one axis then turned 90°: the union carries the turn, so the second axis grows
-geometrically from its own extent at that moment, which is the intended behaviour and not a regression to
-the square.
+   PERFORMANCE §9 item 3 — but the reason (a) was invisible to whoever picks the default.
 
 ## Memory allocation audit — twelve sites, ranked (2026-09-01)
 

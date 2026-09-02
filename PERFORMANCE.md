@@ -1792,22 +1792,43 @@ from `SelectionModels.swift:249` on every `currentFrame` write (`CanvasManager.s
 
 ### Ranked: what to do, what it costs now, what it would cost smarter
 
-**1. The live-stroke window pads both axes by the longer one.** See BUGS.md's entry of the same date.
-MEASURED: one screen inch of pen travel at fit zoom holds **283.1 MB** at 16383² and 4.4 MB at 2048²,
-against a stroke bounding box of 0.054 MB and 0.007 MB. Smarter: pad each axis by half of *that axis's*
-extent — INFERRED ~2.2 MB at 16383², and the 535.9 ms of stamping is mostly reallocation copying, so it
-falls with it. **One expression, and it is the best value in this list.** Risk: low; `StrokeScratch`'s own
-logic tests pin `windowPixelCount`, so the change has to re-take those numbers deliberately.
+**1. The live-stroke window padded both axes by the longer one — LANDED.** MEASURED before the change:
+one screen inch of pen travel at fit zoom held **283.1 MB** at 16383² and 4.4 MB at 2048², against a
+stroke bounding box of 0.054 MB and 0.007 MB. Each axis now pads by half of *that axis's* own extent, and
+only when the union has actually left it — `StrokeScratch.pad(held:wanted:)`, whose doc comment carries
+the amortisation argument per axis.
 
-**2. Core Animation minifies every artwork layer with no mipmaps.** MEASURED: a line of the default
-5-point brush width, minified to fit zoom by point sampling, leaves **zero** ink at 4096², 8192² and
-12288², and 800 pixels at 2048²; box-filtered it survives at every size. Every view that shows artwork sets
-`magnificationFilter` and none of them sets `minificationFilter`, so they all run CA's default `.linear`
-with no mipmap chain. Smarter: `.trilinear` on the artwork layers — one property per view, independent of
-`magnificationFilter`, which stays `.nearest` so zoomed-in pixels stay crisp. Cost: a mipmap chain is about
-a third more texture per displayed layer, which nothing in the app budgets (item 5 below). **This is the
-artist-visible one**: it is the whole of "the brushstroke disappears when you draw" and it is not confined
-to 16k.
+**The INFERRED ~2.2 MB was optimistic and the corrected figure is 4.42 MB**, from a simulation of the
+same gesture against both expressions (300 dabs, 2816 pt of travel, 16383² canvas): 8639×8638 →
+8639×134, i.e. 284.67 MB → 4.42 MB, a 64× cut. The simulation reproduces the device's own 8617×8611 to
+within 0.3%, which is what licenses it. The gap to 2.2 MB is that padding outsets *both* sides of the
+growing axis, so its final extent overshoots the ink by up to ~3× — padding only the side the stroke is
+leaving would recover most of that and has not been tried.
+
+**Total copying falls with it and the O(final area) bound survives**: 24.9 M → 1.14 M pixels copied over
+that stroke, at 0.98× the final window (it was 0.33×). The one case that copies *more* is a stroke that
+turns 90°, where the second axis now has to grow from its own extent: 1.08 M → 2.37 M pixels on an L in a
+2048² canvas, against a final window that is still smaller (6.16 → 5.68 MB). Both are simulated, not
+measured on the device. Pin:
+`BrushEngineLogicTests.testAStraightStrokeGetsABandAndNotASquare`, which fails at 4564 against a bound of
+268 if the expression goes back.
+
+**2. Core Animation minified every artwork layer with no mipmaps — LANDED.** MEASURED: a line of the
+default 5-point brush width, minified to fit zoom by point sampling, leaves **zero** ink at 4096², 8192²
+and 12288², and 800 pixels at 2048²; box-filtered it survives at every size. Every view that showed
+artwork set `magnificationFilter` and none set `minificationFilter`, so they all ran CA's default
+`.linear` with no mipmap chain. **Nine layers now ask for `.trilinear`** — the layer host's baked and fill
+tiers, the stroke canvas's picture, live scratch and float, the two sandwich views, the onion-skin ghost
+and the shape preview, plus the lifted raster piece — and `magnificationFilter` is untouched everywhere,
+so zoomed-in pixels stay crisp. `SelectionOverlayView`'s collar keeps `.nearest` at both ends because it
+is chrome, and that decision is now pinned rather than commented.
+
+**The cost is unmeasured and it is the honest gap here.** A mipmap chain is about a third more texture per
+displayed layer, which nothing in the app budgets (item 5 below), and the live scratch rebuilds its chain
+per touch-move batch — bounded by the stroke's own window, which item 1 has just made a band. **Nothing
+headless can see any of that, and nothing on the device has been asked**: `CanvasLayerFilterLogicTests`
+pins the property, not the pixels and not the frame time. **This is the artist-visible one**: it is the
+whole of "the brushstroke disappears when you draw" and it was not confined to 16k.
 
 **3. The sample gate and the dab spacing are in canvas points, so zooming out multiplies both.** The
 owner's own theory of the lag, and it is right. `BrushStamper.stampSpacing = max(brushSize × spacingFraction, 1)`
