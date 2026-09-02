@@ -10,70 +10,59 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## State
 
-`main` is clean at `f96cf42`, one worktree, no branches, no stray simulators.
+`main` is clean at `0b90718`, no worktrees, no branches, no stray simulators.
 
-**Fast tier: 2283 declared, 2280 passed, 0 failed, 3 skipped.** Three `testBrush` helpers match the
-counting regex and are not tests, which is why the declared and executed numbers differ by three.
+**Fast tier: 2316 declared, 2316 executed, 2313 passed, 0 failed, 3 skipped.** Count it statically at
+your own base before trusting any number in a brief, including this one.
 
-**The full suite has not been run since `72c7cc1`** — 2358 tests in 24.4 minutes, 1 environmental
-failure. Eleven merges have landed since, several on the stroke path. Budget a full run before the
-next phase boundary, and erase the simulator immediately before it.
+**The full suite was run this pass, at `41eafa9`: 2414 total, 2403 passed, 5 failed, 6 skipped.** Four
+failures re-ran clean in isolation and are environmental. The fifth,
+`PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts`, **failed again in isolation and is still
+unresolved** — but its isolated re-run was itself contended, the measured value walks toward the budget
+as load drops (1.111 ms → 0.913 ms against 0.833 ms), nothing in `MoveBoxInk.bounds`' path has changed
+since the last clean run, and it passes on the device. **It needs one isolated run on a genuinely idle
+machine.** That is thirty seconds and nobody has had an idle machine to spend.
 
-**The iPad carries a Release build of `7c38ba2`.** Nothing merged since is on the device: not the
-Oklab ramps, the dark colour scheme, the three graph-editor fixes, or any of this pass. The owner's
-"UI Test" canvas, which is where they see the resolution bug, is on that build. Ask rather than
-assume.
+**Six commits landed after that run**, including all of stage 2, so the suite has not been run on the
+tree as it stands.
+
+**The iPad carries a Release build of this pass.** It is the first build the owner has had since
+`7c38ba2`, so it is also their first with the 16k crash fix and the playback-clock hoist.
 
 ## What is being built: TODO (29), the background renderer
 
 [RENDER.md](RENDER.md) is the specification. **§1 is the ask in the owner's own words, §2 is sixteen
 rulings, §3 is the design, §5 is the build order.** Read §2 rather than re-deriving it.
 
-The shape in one paragraph: the main thread stops compositing. A background baker composites each
-frame and writes it to disk, keyed by a fingerprint of everything that affects its pixels, so an
-unchanged frame is never rebaked and an anime hold is one file. Play reads baked frames. Export reads
-the same files and re-renders nothing. Compositing walks the layer tree bottom-up under a memory
-ceiling, which is what lets a hundred layers fit in a device that cannot hold them all at once.
+**Stages 0, 1 and 2 are merged. Stage 3 — chunked compositing (§3.4) — is next.** It needs
+`renderSources(subset:)`, which is now a parameter on the recipe's resolve rather than on a main-actor
+function. §5 stage 3 names the fixture it has to pass and, more importantly, the fixture that must
+**fail** if any of the four chunking rules is deleted.
 
-**Stages 0 and 1 are merged. Stage 2 is next**, and it is the one that removes the pen-up freeze.
-
-### Stage 2 — the recipe
-
-The main thread still does two canvas-sized things at pen-up, and neither is the compositor:
-
-1. **The committed cel is re-rasterised in full** — every dab of every stroke, into a fresh
-   canvas-sized bitmap (`Views/Canvas/StrokeCanvasView.swift` `commitVectorStroke` → `refreshDisplay`
-   → `Engine/VectorLayer.swift` `renderLocalContent`).
-2. **The snapshot flattens every visible leaf** to a canvas-sized image, fanned over cores but
-   blocking the caller (`Engine/RenderRequest.swift` `renderSources`, `@MainActor` by design).
-
-Stage 2 introduces `FrameRecipe` and `LeafSnapshot` (RENDER §3.2): a value type minted on the main
-actor in O(layers) with no pixel work, holding the tree and, per leaf, the immutable inputs its render
-needs. The baker renders leaves from that on its own queue. `renderSources` leaves the main actor, and
-the committed cel's re-render becomes asynchronous with the stroke's scratch window retained until the
-new image lands — which is exactly the split-second stale canvas ruling §2.13 allows.
-
-Pin it with a logic test that the recipe's pixels equal the live snapshot's, and a perf baseline for
-main-thread time at pen-up. **§2.15 applies**: the synchronous path is deleted in the same change.
+Stage 2 shipped `Engine/FrameRecipe.swift`: the snapshot is minted on the main actor in O(layers) with
+no pixel work and resolved off it. MEASURED, simulator/Debug: **174-313 ms of main-thread work at
+pen-up down to 0.2 ms**. Sized on the owner's iPad in Release: a 36.3 ms snapshot and a 70.3 ms
+committed re-render both left the main thread.
 
 ## What this pass established, and would otherwise be re-derived
 
-- **Compositing already runs off the main thread** and has for some time — `Compositor.composite` on
-  `CanvasView.sandwichQueue`, pure over a request that holds no live model object. The freeze is
-  everything that *feeds* it. A design that starts "move compositing to a background thread" is
-  starting from a false premise.
-- **Bottom-up chunked compositing is exact**, with four rules, and RENDER §3.4 carries the proof:
-  no blend mode and no effect reads a layer above it, the walk already quantises per step, and a
-  readback-then-upload round trip is lossless. The four rules are the chunk unit being a node rather
-  than a layer index, ink-input effects pinning their sources, masks resolving first, and `.stack`
-  folders being transparent to the cut.
-- **A hold is one cel spanning many frames**, so leaving the frame out of the bake key makes holds
-  dedupe for free — an anime document's cheapest property, and it costs nothing to get.
-- **`renderSources` is the memory problem, not the compositor's intermediates.** The compositor peaks
-  at two canvas textures for a flat stack of any length; the snapshot holds one per visible leaf.
-- **Two claims in LAYER_COMPOSITING §9.1 describe work as built that is not built**: nothing
-  propagates a content version to an ancestor, and frame-scoped invalidation does not exist. TODO (29)
-  repeated both as "already built and must not be rebuilt". Do not skip that work.
+- **The 16k canvas is a display bug, not an allocation one.** A 16383² `VectorCanvas.render()` is
+  MEASURED at 143.5 ms on the device *with the ink present* — a `CGBitmapContext` is lazily committed,
+  so the 1 GiB buffer is cheap to hold and expensive to walk. Anything that starts "the allocation
+  fails" is starting from a refuted premise.
+- **Nothing set `minificationFilter`, and that was silently destroying ink at 4096² and above** — a
+  5-point brush point-sampled to `fitScale` left zero ink at 4096², 8192² and 12288². Fixed at nine
+  sites; `PaintSoftwareUITests/CanvasLayerFilterLogicTests.swift` pins it by scanning source, because
+  the views are not compiled into the test target.
+- **16383² still cannot be composited at all**, and no fix above touches that. It needs a downscaled
+  display proxy. Until then the 16k canvas is unusable while every size below it works.
+- **The fast-tier selector is filename-derived and loses tests in two directions** — a hand-rebuilt
+  filter drops `PerfBaselineTests`, and a class in a file of another name is never selected. Both print
+  green. CLAUDE.md now carries it; the cure is reconciling executed against a static count.
+- **`PixelOps.parallelMap`'s fan-out is 1.41x on the device, not the ~3.5x the simulator implied** —
+  the A13 is 2 performance cores plus 4 efficiency ones. PERFORMANCE item 9(b) carries the correction.
+  It makes moving work off the main thread worth more, not less.
+- **The compositor budget on the owner's iPad is 183.7 MB**, where the docs assumed 192.
 
 ## Standing instructions from the owner about how you work
 
@@ -84,39 +73,44 @@ main-thread time at pen-up. **§2.15 applies**: the synchronous path is deleted 
    overturned.
 3. **A replaced path is deleted, not left beside the new one.** RENDER §2.15 in the owner's words:
    *"very clean and non-redundant, with no peculiarities, and no legacy code left by the previous
-   functionality."* This is why stage 2 deletes the synchronous snapshot rather than gating it.
+   functionality."*
+4. **At most one investigation agent at a time.** Building is separate; this is about investigations.
 
 ## Traps this pass paid for
 
-- **A worker's working tree is a workbench.** One worker had to edit two hunks in a file another
-  worker owned, because the alternative was shipping a wrong-pixels regression. Tell concurrent
-  workers when `main` moves under them; do not let them discover it at rebase.
-- **Establish the test baseline yourself.** Three workers were given a stale count and each corrected
-  it. Count `func test` statically at your own base and at your head, and match the xcresult total to
-  the head. A brief's number is a hypothesis.
-- **`git checkout HEAD -- <dir>` after a commit discards uncommitted edits in that directory** — it
-  restores to the commit, not to what is on disk. It cost one worker a round of test edits.
-- **A test that pins a size must include something that would not fit**, or deleting the bound leaves
-  it green. Two workers built their fixtures that way deliberately after the fourth occurrence of this
-  shape.
+- **Three simulator-bound runs at once took the machine to 0.5% idle, and that voided every timing
+  number taken during them** — including the per-class table CLAUDE.md keeps asking to have re-taken,
+  which came out 5-6x inflated and had to be discarded. Pass/fail survives contention; nothing else
+  does. The cap of three in flight is about this machine, not about the plan.
+- **A full run's xcresult is evicted by the triage runs that follow it**, so pull the per-class table
+  immediately or lose it.
+- **`origin/main` is a shared ref**: any session's fetch repoints it, so `git reset --mixed
+  origin/main` staged a revert of another session's nine merged files. Reset to a sha you recorded.
+- **Two orchestrator prescriptions in briefs were wrong, and both were caught by the worker measuring
+  rather than reasoning.** The recipe was told to capture `VectorCanvas.cachedImage` at mint and fall
+  back to frozen values — which loses the memo in exactly the pen-up case the stage exists for, because
+  the commit has just nilled it. And the scratch-window snippet padded the *unexceeded* axis by half
+  its own extent, which keeps the window square from a smaller seed; skipping that axis is what makes
+  the band. **A brief's prescription is a hypothesis in the same way its numbers are.**
+- **A pin that draws through the code it is checking proves nothing.** Stage 2's parity oracle called
+  `PixelOps.rasterize`, so it passed with the defect injected. Both fixes this pass were mutation-tested
+  against a deliberately broken implementation, committed before mutating.
 
 ## Everything else open
 
-**The owner's asks**, all recorded in TODO: (31) the three large-canvas symptoms — the resolution bug
-is `affordableSize` and is stage 5, the crash is fixed, the freeze is stage 2; (32) merging a blend
-layer down does not bake the blend, lower priority; (33) select-and-duplicate produces raster from a
-vector selection; (34) imported images should arrive in a move box, a small job that reuses the Move
-code; (23) the membership control belongs to Select; (35) colour-range masks; (36) projects stored
-where the artist chooses; (37) importing brushes. (26)-(28) and (30) are the long-term features and
-each needs a design conversation before it starts.
+**The owner's asks** are in TODO. **(12) was missing entirely and is restored** — LASSO_MOVE §3 stage 4
+still lists placed-image stretch (3c), Distort (stage 5) and the `FloatingPieceOverlayView` port.
+**(21) pointed at stage 4 and now points at stage 5**, which is what the owner ruled; the width rule
+`sqrt(|det|)` has to be settled before that stage starts. **Distort is one feature reachable from two
+items** — LASSO_MOVE stage 5 and KEYFRAMES 5b. (31) holds the three large-canvas symptoms, now in three
+different states. (32)-(34) are small. (22), (24), (35)-(37) and (26)-(30) are unstarted, and the last
+group needs a design conversation each.
 
-**BUGS.md's memory audit** is twelve ranked sites, three closed this pass. Stage 7 takes the rest.
-Two are worth naming here because they bite before then: the vector render cache and the mask cache
-are bounded by entry count rather than bytes, and the evictor for the first walks every cel in the
-document and takes a lock per vector canvas **on every playback tick**.
+**Deferred by the owner, not refused:** scaling the stroke sample gate by zoom, which would fix the 8x
+dab explosion when zoomed out (352 dabs per screen inch at 2048², 2815 at 16383²). It is a permanent
+quality trade — coarser stored geometry feeds interpolation and the vector eraser — so it wants an A/B
+the owner can look at, not a number.
 
-**KEYFRAMES §8 stage 5** — the transform channel — is where (21) stopped. The owner ruled it comes
-before stage 4, and the gate that could have reversed that is already answered in the spec.
-
-**Two behaviour questions are owed**: save semantics when a project loaded with something unreadable,
-and which faces belong in the font picker's favourites strip.
+**BUGS.md's memory audit** is twelve ranked sites, all still open, plus PERFORMANCE §9's eight new ones
+from this pass's audit. The cheapest unclaimed one is two lines: a dab straddling a clamped canvas edge
+rebuilds the scratch window every time, because `windowRect.contains` can never be true there.
