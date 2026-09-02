@@ -5469,10 +5469,17 @@ final class PerfBaselineTests: XCTestCase {
                     let upBytes = FrameBakeStore.compress(up)?.count ?? up.count
                     let subBytes = FrameBakeStore.compress(sub)?.count ?? sub.count
 
-                    let filterCost = repeatedTiming(3) {
+                    // **One sample each, unlike everywhere else in this file, and deliberately.**
+                    // These two are for scale only — the verdict below is the byte counts, which are
+                    // exact — and a filter pass is a hand-written Swift loop over eight million
+                    // bytes, so under `-Onone` it is the single most expensive thing in this class.
+                    // Repeating it five times to sharpen a figure nobody rules on would put a minute
+                    // on the suite's critical path for nothing (CLAUDE.md's cost model: a class is
+                    // indivisible, so a class's seconds are the lever).
+                    let filterCost = repeatedTiming(1) {
                         _ = Self.rowFiltered(raw, bytesPerRow: rowStride, back: rowStride)
                     }
-                    let unfilterCost = repeatedTiming(3) {
+                    let unfilterCost = repeatedTiming(1) {
                         _ = Self.rowUnfiltered(up, bytesPerRow: rowStride, back: rowStride)
                     }
 
