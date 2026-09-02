@@ -488,8 +488,36 @@ the hoist they needed.
 
 A tick reads the ring, since stage 4d: `currentFrame` publishes, the canvas reconciles, and `updateSandwich` asks
 `FrameBaker.image(atFrame:)`, which is the ring then the store then a miss. If the frame is not baked the previous
-picture stays (§2.10). **The timeline's baked-frame indication is still owed** — `isBaked(atFrame:)` and
-`onFrameFinished` are the read path it wants and nothing consumes them yet.
+picture stays (§2.10).
+
+**The timeline's baked-frame indication is done, 2026-09-02 (stage 4f).** `Views/TimelineBakeBar.swift` is the
+arithmetic — unbaked runs, the bar's geometry, the string a UI test reads, and the throttle — and
+`TimelineBakeBarView` in `TimelineTrackView.swift` is the `UIColor` and the `UIRectFill`, an amber strip overlaying
+the ruler's bottom 3 pt. Four things came out differently from what this section said.
+
+- **Ink marks what is *not* baked.** KEYFRAMES §4.6 leans the other way (*"a span is either cached or not and the
+  timeline can show it"*) and the polarity was decided against ink rather than against that sentence: the steady
+  state of a document at rest is that **every** frame is baked, so marking the baked ones paints a permanent
+  full-width band that says nothing and competes with the loop band and the playhead for the same 18 pt. Marking
+  the unbaked leaves the ruler clean at rest and the mark shrinks toward nothing, which is a progress reading
+  obtained out of the polarity instead of a second mechanism. The ring is deliberately not a third state.
+- **`isBaked(atFrame:)` as this section defined it could not serve the consumer this section names.** It was one
+  recipe mint and one `stat`, which is right for the one frame the *canvas* asks about and unusable for a ruler:
+  a mint is a `LeafSnapshot` per visible leaf, so a 300-frame document is 300 × layers of freezing and
+  `makeImage()` **per redraw**, costing more than the bake it describes. It is now
+  `!bakeQueue.isPending(frame) && keyByFrame[frame] != nil` — two dictionary lookups, and the baker's own belief
+  rather than a fresh statement about the filesystem. **Both halves are load-bearing**: an edit leaves
+  `keyByFrame` in place (entries are forgotten only on failure), so the recorded key still names a real file
+  holding the picture from *before* the edit, and the dirty bit is the only thing that says so.
+- **`onFrameFinished` is a registry, not a slot.** Stage 4d gave the single closure to `CanvasView.Coordinator`
+  and the timeline is a second consumer of the same event; two named callbacks would be the peculiarity §2.15
+  rules out. `observeFrameFinished(_ owner:_:)` is keyed by owner identity and self-pruning.
+- **The bar is refreshed on its own path, not through `TimelineLayoutKey`.** That key is compared on every
+  SwiftUI pass and its own rule is *"nothing that moves faster than the layout does"*; a per-frame baked set moves
+  once per baked frame. It gets `movePlayhead`'s treatment — called from both sides of the gate — plus the
+  callback, because a bake raises no SwiftUI pass at all. **The two halves are asymmetric on purpose**: a frame
+  going *unbaked* happens in `syncDirty`, inside a pass, so `relayout` draws it in the same turn; a frame going
+  *baked* arrives on the callback and is throttled to ten a second. Alarm is immediate, reassurance settles in.
 
 ### 3.8 Full means full
 
@@ -647,9 +675,9 @@ it is the dependency order.
      with the artist's ink on screen throughout because the mid-stroke pair is what is held until it lands.
      The old path composited `full` at `.userInitiated` in the same turn, so no test had ever had to wait.
 
-   **Still owed from stage 4:** the timeline's baked-frame indication (`FrameBaker.isBaked(atFrame:)` and
-   `onFrameFinished` are the read path it wants, and nothing consumes them yet), and the device measurement of
-   the compression ratio and the decode time on the owner's "UI Test" document.
+   **Still owed from stage 4** (at 4d): the timeline's baked-frame indication, and the device measurement of
+   the compression ratio and the decode time on the owner's "UI Test" document. **4f closes the first**; see
+   below.
 
    **4e is done, 2026-09-02, on the owner's iPad in Release** — the ratio, the decode and the encode
    measured on artwork at 2048x1024, 2048² and 4096², in `PerfBaselineTests`; §3.5 above carries what it
@@ -659,6 +687,26 @@ it is the dependency order.
    **Still owed: the ratio on the owner's own "UI Test" document** — these fixtures are synthetic,
    deliberately shaped like §2.8's document but not drawn by them — and a decode measured against a frame
    the *compositor* produced at the owner's canvas rather than one drawn for the purpose.
+
+   **4f is done, 2026-09-02 — the timeline's baked-frame indication**, which was the last item on this stage's
+   own list. §3.7 above carries the four places its own text was wrong, chiefly that the `isBaked(atFrame:)` it
+   named as the read path was a recipe mint per frame and could not have served a ruler at all. Fast tier **2554
+   / 2551 passed / 0 failed / 3 skipped** against 2536 / 2533 / 0 / 3 at `4d9c346`, a delta of exactly the 18 new
+   (`TimelineBakeBarLogicTests` 14, `FrameBakerLogicTests` 21 → 25). Three mutations MEASURED red: dropping
+   `!bakeQueue.isPending(frame)` from `isBaked` reports the five frames of an edited cel as ready to play while
+   their files still hold the picture from before the edit; dropping the throttle's `guard !isScheduled` takes
+   200 landed frames from 1 refresh to 200; and dropping the trailing `if let open` in `unbakedSpans` silently
+   loses every run that reaches the last frame — a band that stops one frame short of the end.
+
+   **Two fixture findings from the UI half, both measured by instrumenting the bar inside the app rather than by
+   reading the code.** A blend-mode change is the obvious trigger (§3.6 dirties every frame) and is unusable:
+   `setBlendMode` is six XCUITest interactions and **the bake finishes inside them**, so the first query after it
+   returns sees a fully baked document. The bar was non-empty for **2.4 s in total** across one such session, in
+   bursts of a few hundred milliseconds — real, and every burst closed before a query could land. Undo is one tap
+   and the next query is inside the window. And the default document is **one cel spanning all twelve frames**
+   (MEASURED `(start: 0, length: 12)`, no second cel), so stepping the playhead forward and drawing again draws
+   into the hold: four strokes made one bake key, and a test built that way was measuring a one-composite bake.
+   That is §5's own "a document made of holds cannot count frames", reached from the UI side.
 5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.
 6. **Export** (§3.9).
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
