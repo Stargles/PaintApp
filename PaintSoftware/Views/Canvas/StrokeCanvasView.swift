@@ -623,12 +623,15 @@ final class StrokeCanvasView: UIView {
         if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
         shapeFollowingTouch = false
+        // Only for the stroke count: no dab reaches the cel until lift, so the cel's own dirty
+        // rect stays empty and the scratch's is what the undo step crops to.
         raster.beginStroke()
         // The eraser's window has to start from the cel's own pixels because `.destinationOut` can
         // only take away what is there; a paint stroke's holds its own ink and nothing else. The
-        // backdrop is the already-resident render, never a second one, and nil for a blank tier —
-        // where `renderToUIImage()` would instead mint a canvas-sized sheet of transparency and
-        // memoize it, before the first dab is even visible.
+        // backdrop is the already-resident render, never a second one, and **nil** for a tier with
+        // no bitmap — `renderToUIImage()` would answer with the shared 1×1, which is the right
+        // thing to draw and the wrong thing to seed a window from, and an erase over nothing has
+        // nothing to take away anyway.
         let scratch = StrokeScratch(canvasSize: raster.size,
                                     role: isEraser ? .replacing(backdrop: raster.renderIfNonEmpty())
                                                    : .additive)
@@ -709,9 +712,8 @@ final class StrokeCanvasView: UIView {
         raster.endStroke()
         // The rect the stroke touched, outset by a pixel so fractional dab edges aren't lost, and
         // read from the *scratch* — the cel's own dirty rect stays empty because no dab was ever
-        // stamped into it.
-        // Clamped here rather than inside the crop, because the same rect is the patches' origin
-        // when undo puts them back and an off-edge stroke would otherwise restore offset.
+        // stamped into it. Clamped here rather than inside the crop, because this same rect is the
+        // patches' origin when undo puts them back, and an off-edge stroke would restore offset.
         let dirty = scratch.dirtyRect?.insetBy(dx: -1, dy: -1).integral
             .intersection(CGRect(origin: .zero, size: raster.size))
         // Taken before the commit and after it, from the cel itself: a patch each, never a canvas.
