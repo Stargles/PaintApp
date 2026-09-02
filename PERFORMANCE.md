@@ -1988,6 +1988,11 @@ Taken 2026-09-02 at `3f6b360`, `-configuration Release`, on the owner's iPad 9 (
 idle. Medians of five repetitions (three at 4096²). Every column is milliseconds; the `·` columns are
 the split of the whole beside them.
 
+**The whole table was taken twice** — again at `a3deff6`, the branch tip — and the second run is quoted
+below as a range wherever the two disagree by more than a tenth of a millisecond. The ratios and the
+filter byte counts were **identical to the byte** across both device runs and the simulator run, which is
+what says the fixtures are deterministic and the spread below is the machine rather than the measurement.
+
 | canvas | fixture | encode whole | · BGRA convert | · LZ4 | decode whole | · warm read | · cold read (`F_NOCACHE`) | · LZ4 | · CGImage |
 |---|---|---|---|---|---|---|---|---|---|
 | 2048×1024 | cel art | 11.0 | 1.8 | 3.1 | **4.0** | 0.1 | 0.1 | 1.4 | 2.6 |
@@ -2027,24 +2032,27 @@ escape of quietly baking smaller. At the owner's own canvas the same figure is 4
 factor of ten in hand.
 
 **4. The biggest term in a decode is not the codec, it is the `CGImage` build — and it is pure copying.**
-2.6 of 4.0 ms at 2048×1024 and 21.5 of 27.4 at 4096² for cel art, against 1.4 and 13.2 for the LZ4
-itself. `FrameBakeStore.image(fromBGRA:)` does `var copy = bytes` — a whole extra canvas-sized array
-copy so the `CGContext` can own its buffer — and then `ctx.makeImage()`, which copies again. **Two
-full-frame copies where one would do**, on the path with the 41.6 ms budget. Decompressing straight into
-the buffer the context will own, or wrapping the decoded bytes in a `CGDataProvider`, would take the
-dominant term out of the decode. **This is the cheapest win on this page and it was invisible on the
-simulator** (see below).
+For cel art the `CGImage` column beat the LZ4 column in both device runs: **1.6–2.6 against 1.3–1.4 ms**
+at 2048×1024, and **17.6–21.5 against 12.9–13.2** at 4096². (At the smaller size the margin is about a
+millisecond and the two runs' splits sum to 3.0 and 4.1 against a 4.0 whole, so read it as "these two
+terms are comparable and the copy is not the small one"; at 4096² the gap is unambiguous.)
+`FrameBakeStore.image(fromBGRA:)` does `var copy = bytes` — a whole extra canvas-sized array copy so the
+`CGContext` can own its buffer — and then `ctx.makeImage()`, which copies again. **Two full-frame copies
+where one would do**, on the path with the 41.6 ms budget. Decompressing straight into the buffer the
+context will own, or wrapping the decoded bytes in a `CGDataProvider`, takes a term of the codec's own
+size out of the decode. **It was invisible on the simulator** (see below), where the same column read as
+8% of the decode against the codec's 91%.
 
-**5. The BGRA convert on the *encode* is worth much less than the simulator said, and only at large
-canvases.** `bgraBytes` is **1.8 of 11.0 ms at 2048×1024 — 16%**, not the half a Debug run implied; at
-4096² it is 13.8 of 29.6, **47%**. RENDER §3.5's `readBack`-into-`bgra8Unorm` change therefore buys
-roughly a sixth of the per-frame bake at the canvas the owner draws on and roughly half at the knob's
-maximum. Still worth having, since the change is a one-capability-check and it also deletes the
-per-stroke-lift hitch BUGS.md attributes to the same convert — but **not the ~2× this section claimed
-before the device answered.**
+**5. The BGRA convert on the *encode* is worth less than the simulator said, and mostly at large
+canvases.** `bgraBytes` is **1.8–2.4 ms of a 7.1–11.0 ms encode at 2048×1024** — between a sixth and a
+third, and the spread is the atomic file write inside the whole rather than the convert — against
+**12.7–13.8 of 25.2–29.6 at 4096², about half**. RENDER §3.5's `readBack`-into-`bgra8Unorm` change
+therefore buys a fraction of the per-frame bake at the canvas the owner draws on and roughly half at the
+knob's maximum. Still worth having, since the change is a one-capability-check and it also deletes the
+per-stroke-lift hitch BUGS.md attributes to the same convert — but **not the ~2× a Debug run implied.**
 
-**6. The whole bake is affordable at the owner's canvas.** 11 ms of store per frame on top of the
-composite; 240 frames of a ten-second shot is **2.6 s of encoding** for the whole scene, and §3.3's
+**6. The whole bake is affordable at the owner's canvas.** 7–11 ms of store per frame on top of the
+composite; 240 frames of a ten-second shot is **under 3 s of encoding** for the whole scene, and §3.3's
 content addressing means a held span pays once. The painted and noise rows are 3–7× that, so a
 gradient-heavy document is the one to watch on the bake side as well as on the disk side.
 
@@ -2107,9 +2115,9 @@ prediction error at all (PNG's Paeth *with* DEFLATE, or a real intra codec), not
 match-only coder.
 
 **And the cost side, MEASURED on the device in Release, is not a rounding error either**: the Up filter is
-**7.1 ms** on the way in and **8.9 ms** on the way out at 2048×1024 (8.8 and 9.5 at 2048²). The un-filter
-lands on the decode path, where the whole current decode is 4.0 ms — so adopting it would have **more than
-tripled** the decode in order to make the file 39% bigger.
+**4.6–7.1 ms** on the way in and **8.4–8.9 ms** on the way out at 2048×1024 (8.8–9.5 at 2048²). The
+un-filter lands on the decode path, where the whole current decode is 4.0 ms — so adopting it would have
+**more than tripled** the decode in order to make the file 39% bigger.
 
 ### 10.4 What is still owed
 

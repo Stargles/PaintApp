@@ -333,25 +333,25 @@ warning rather than as data.
   the owner's 2048x1024 it is 4.0 ms with a factor of ten in hand. So above about 2048² the ring is not
   an optimisation, it is the mechanism — play must read a frame the scheduler decoded an interval or
   more ago, because a decode on the tick eats the tick. §2.12 forbids baking smaller instead.
-- **The largest single term in a decode is not the codec, it is the `CGImage` build** — 2.6 of 4.0 ms at
-  2048x1024 and 21.5 of 27.4 at 4096², against 1.4 and 13.2 for the LZ4 itself. `image(fromBGRA:)` makes
-  **two full-frame copies where one would do**: `var copy = bytes` so the `CGContext` can own its buffer,
-  then `makeImage()`. Decompressing into the buffer the context will own, or a `CGDataProvider` over the
-  decoded bytes, takes the biggest term out of the path with the 41.6 ms budget. **It is the cheapest
-  win here and it was invisible in Debug**, where the same column read as 8% of the decode.
-- **The encode, which this section never mentions, is ~11 ms a frame at 2048x1024 and ~30 ms at 4096².**
-  The BGRA convert inside it is **1.8 of 11.0 ms — 16%** at the owner's canvas and 47% at 4096², so the
-  `readBack`-into-`bgra8Unorm` change named in the paragraph above is worth about a sixth of the bake
-  where the owner draws, not the half a Debug run implied. Still worth having; it also deletes the
-  per-stroke-lift hitch BUGS.md attributes to the same convert.
+- **The largest single term in a decode is not the codec, it is the `CGImage` build** — in both device
+  runs, **1.6-2.6 ms against the LZ4's 1.3-1.4** at 2048x1024 and **17.6-21.5 against 12.9-13.2** at
+  4096². `image(fromBGRA:)` makes **two full-frame copies where one would do**: `var copy = bytes` so
+  the `CGContext` can own its buffer, then `makeImage()`. Decompressing into the buffer the context will
+  own, or a `CGDataProvider` over the decoded bytes, takes a term of the codec's own size out of the path
+  with the 41.6 ms budget. **It was invisible in Debug**, where that column read as 8% of the decode.
+- **The encode, which this section never mentions, is 7-11 ms a frame at 2048x1024 and ~25-30 ms at
+  4096².** The BGRA convert inside it is 1.8-2.4 ms at the owner's canvas and 12.7-13.8 at 4096² — so the
+  `readBack`-into-`bgra8Unorm` change named in the paragraph above is worth a fraction of the bake where
+  the owner draws and about half at the knob's maximum, not the 2x a Debug run implied. Still worth
+  having; it also deletes the per-stroke-lift hitch BUGS.md attributes to the same convert.
 - **The last sentence of the paragraph above is refuted, not deferred.** A per-row Up filter before LZ4
   makes **every fixture bigger** — cel art +39%, a hold +28%, painted +2.5% — and a Sub filter also
   loses everywhere (+8%, +3%, +1.2%). A filter helps a coder that models smooth variation, and LZ4
   matches exact byte sequences instead: a flat region is already one long match, so differencing it to
   zeros codes to the same size, while every hard edge becomes a band of residuals that differ row by row
   where the source rows were byte-identical. The loss is largest exactly where this document has the most
-  edges. And the cost is not a rounding error either: the filter is **7.1 ms** on the way in and
-  **8.9 ms** on the way out at 2048x1024, so adopting it would have more than tripled a 4.0 ms decode in
+  edges. And the cost is not a rounding error either: the filter is **4.6-7.1 ms** on the way in and
+  **8.4-8.9 ms** on the way out at 2048x1024, so adopting it would have more than tripled a 4.0 ms decode in
   order to make the file 39% bigger. If the ratio ever does disappoint, reach for a coder that models
   prediction error at all — not a filter in front of a match-only one.
 
@@ -587,7 +587,7 @@ it is the dependency order.
    **4e is done, 2026-09-02, on the owner's iPad in Release** — the ratio, the decode and the encode
    measured on artwork at 2048x1024, 2048² and 4096², in `PerfBaselineTests`; §3.5 above carries what it
    changed and PERFORMANCE §10 the tables. The headline: **54-73x on cel art; decode 4.0 ms at the owner's
-   canvas and 39.8 ms at 4096² against a 41.6 ms budget; the `CGImage` build, not the codec, is the biggest
+   canvas and 39.3-39.8 ms at 4096² against a 41.6 ms budget; the `CGImage` build, not the codec, is the biggest
    term in a decode; and §3.5's per-row-filter fallback refuted rather than deferred.**
    **Still owed: the wiring** — the queue driving the store, the live canvas and play reading frames out of
    it, and the timeline's baked-frame indication. The ratio on the owner's own "UI Test" document is owed
