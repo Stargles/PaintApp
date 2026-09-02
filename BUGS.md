@@ -3,79 +3,132 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## Nine more candidates from the same review, in Distort and the pose channel — UNVERIFIED
+## The bake suite is green on a key that has stopped covering brush strokes
 
-The review that produced the sweep entry below reached three of its seven subsystems before it was
-stopped for budget. **None of the following has been through adversarial verification, and this repo
-has had reviewers be wrong before** — each is a specific claim with a line number, checkable in
-minutes. Verify before fixing; delete the ones that do not survive.
+**The ~230 tests RENDER stage 4 added have now been read, and this is what the reading found.** The
+question asked of each was the only one worth asking — *what would have to break for this to go red* —
+and the answer for the bake key's own completeness table is: **six of the nine fields it claims to
+cover, nothing.**
 
-**Distort's raster tier** (shipped this pass, `LASSO_MOVE` stage 5):
+`FrameBakeKeyLogicTests.swift:149`'s `testEveryDocumentFieldTheKeyCoversMovesTheDigest` opens *"one row
+per field the key claims to cover"*. `LayerContentVersion` has nine fields and `BakeKeyEncoder` writes
+all nine; the table moves three — `bakedImage`, `valueFill`, `effect`. **And no fixture in the entire
+bake suite ever stamps into `cel.raster` or adds a `VectorStroke` to a cel's `VectorCanvas`** — zero
+hits for `stampStroke`, `addStroke` or `fillImage =` across all ten files. So `rasterVersion` and
+`vectorVersion` could be deleted from the encoder and every one of those tests stays green.
 
-- `Services/PixelOps.swift:584` — **high**. The bake scales the source isotropically from the width, so
-  a non-square crop rounds into a stretch. Worth checking first: it is the only one here that would put
-  wrong pixels in a saved document rather than on screen.
-- `Views/FloatingPieceOverlayView.swift:268` — a corner drag on a distorted piece jumps the moment the
-  mode picker moves off Distort.
-- `Views/CanvasView.swift:1768` — the marching ants ignore `distortQuad`, so a distorted float shows two
-  disagreeing outlines.
-- `Views/FloatingPieceOverlayView.swift:161` — the distort outline is an implicitly-animated
-  `CAShapeLayer`, so its dashes lag the artwork during a drag.
+**Those two are the fields an ordinary brush stroke moves, and only those two.** A dab does not replace
+the cel, so `celID`, `raster`'s object identity and `bakedImage` are all unchanged; the digest would not
+move; the store would serve the pre-stroke picture from disk for a frame the artist has just drawn on.
+The file's own header names this outcome — *"a green suite and a wrong canvas"* — and the table written
+to prevent it is the thing that cannot see it. `derived`, `fillImage`, `vector` and `celID` are
+uncovered by the same omission.
 
-**The pose channel** (shipped this pass, `KEYFRAMES` stage 5):
+The table must be rows on **one cumulative fixture** (a fresh manager per row compares
+`ObjectIdentifier`s, which is how the last one of these passed with its field deleted from the encoder),
+each row stamping the tier it names: a dab through `BrushStamper.stampStroke`, a stroke into a
+`VectorCanvas`, a `fillImage`, and a recipe whose `t` moves.
 
-- `Views/CanvasView.swift:2271` — **high**. The posed derivation never reaches the live canvas on the
-  Core-Animation path. If true this is the feature not working on one of its two paths, which is exactly
-  the shape stage 3 of RENDER shipped and had to be closed later.
-- `Models/KeyframeControl.swift:523` — `addKeyframe`'s and `seedAndKeyChannel`'s neighbour search omits
-  pose keys.
-- `Models/TransformKeyframes.swift:118` — a held pose baseline survives the undo of the Move it was
-  recorded beside.
-- `Models/CanvasManager+Timeline.swift:434` — `splitCel` and `duplicateCel` drop the cel's pose channels.
-- `Engine/Deform/PoseInterpolation.swift:182` — `blend` clamps the overshoot its callers are documented
-  to rely on.
+**Five more from the same reading, each checkable in minutes:**
 
-**Four subsystems were never reviewed**: the bake key and store, striped compositing, the live-canvas
-wiring, and — the one worth running first — **the ~230 tests this pass added, read only to ask of each
-what would have to break for it to go red.** Four fixtures that measured nothing were found in this pass
-by hand; nobody has looked systematically.
+- `FrameBakeKeyLogicTests.swift:105,129` — the two byte-stability tests compare `f(x)` with `f(x)` for a
+  pure function of a value type, so the dictionary-ordering hazard `canonicalBytes` is sorted against is
+  invisible to them. `chunkingZoo()` sets exactly **one** mask, so `recipe.maskStacks` never holds two
+  entries anywhere in the suite and the `.sorted` could be deleted unseen. The right fixture is two
+  masks inserted in opposite orders by two managers, whose digests must match.
+- `FrameBakerLogicTests.swift` — `StructuralStamp`'s `paperColor`, `paperVisible`, `canvasSize`,
+  `canvasPadding` and `keyframeMarks` have no fixture at all. Deleting `paperColor` from the stamp leaves
+  everything green while a paper-colour change moves the display path's key and schedules no re-bake, so
+  every frame is permanently a miss.
+- `CelContentProviderLogicTests.swift:72` — the fixture eleven tests share guards itself with
+  `XCTSkipIf(...interpolation == nil)`, so Generate quietly ceasing to attach a recipe reports as eleven
+  **skips**. A fixture that stops working is a failure, not a skip; the banner-versus-count trap in a
+  fixture costume.
+- `BakeWiringLogicTests.swift:201` — `composites { }` over an empty block. The zero it asserts is a fact
+  about the empty closure, not about suspension.
+- `FrameRecipeLogicTests.swift:249` — asserts the rasterize cache did not grow across `resolve()`, which
+  is also true of a resolve that produced no sources at all. It needs to assert the leaves were there.
 
-## The bake's dirty sweep does not see a pose edit, and three more sites are suspected
+**And the same reading of striped compositing and the dab bake found the pass's headline feature
+untested.** `RestSpaceDabBakeLogicTests` is five tests over `BrushStamper.DabPose.applied(to:)`, which
+copies `alpha` verbatim and scales `radius` — so *every* assertion in them (alphas preserved, dab counts
+equal, step/radius ratio invariant, per-dab radius equal to `radius * scale`) is an algebraic
+consequence of that one function and true under any implementation whatever, **including one that walks
+in posed space and reintroduces the boil the stage exists to remove.** The only test that reaches the
+shipped dispatch, `testPosedInkIsDrawnAtThePosedPositionAndNotAtRest:408`, compares
+`opaqueContentBounds` at accuracy 2 — and `VectorCanvas.posing` has already posed the samples and scaled
+`size` by `sqrt(|det|)` before `stamp` chooses an arm, so reverting all three of `stamp`'s arms to the
+un-baked walk leaves the ink in the same place at the same weight and the test green. `Transform-
+ChannelLogicTests.swift:283`'s `testGrainTravelsWithTheInkUnderAPose` is blind the same way for a
+different reason: its local `dabs(_:)` helper *reimplements* `VectorCanvas.stamp`'s dispatch, so it pins
+the helper and not the one line that decides whether the shipped renderer uses the rest walk at all.
 
-`FrameBaker.syncDirty()` is the whole of RENDER §3.6's dirty marking: it diffs the cel layout against
-the layout last seen, because this model has **no push funnel that knows a frame**. The diff is
-`CelStamp`, which captures `id`, the span, a `LayerContentVersion` and `isDerived`
-(`Engine/FrameBaker.swift:693-699`).
+What both need is the dabs the shipped render path stamps for two poses of one stroke —
+`VectorCanvas.render` with a `DabTarget` interposed, or a byte-for-byte pin on two posed frames.
 
-**CONFIRMED by reading the code: `Cel.transformTracks` (`Models/Cel.swift:42`) is in none of them.**
-The keyframe transform channel and the bake's sweep were built in parallel, in separate branches, and
-the seam between them was never walked: editing or undoing a **pose keyframe** changes
-`cel.transformTracks` and moves nothing `syncDirty` compares, so the baker never marks that cel's span
-and never recomputes its key. The bake *key* does carry the pose — stage 5's `PosedCelIdentity` reaches
-it through `LayerContentVersion.derived` — which is why this is staleness rather than corruption: §3.3's
-"a stale file can never be shown as fresh" still holds at the display path, so the artist sees the
-previous picture rather than a wrong one. But nothing schedules the re-bake, so it does not self-heal
-until something else dirties that span.
+Three smaller ones from the same reading: `RestSpaceDabBakeLogicTests.swift:199` is a golden-number pin
+(`[110, 111]`) on a pre-stage-4 construction that exists only in the test file and ships nowhere;
+`DistortLogicTests.swift:285`'s "the drag is a function of its final point alone" is enforced by
+`FloatingDistortDrag` being a struct of four `let`s with a non-`mutating` accessor, so the defect it
+argues against would fail to build rather than fail the test; and the `resolvedBackend(for:) == .metal`
+premise asserted in three Metal suites is a tautology of their own `setUp`, which sets
+`Compositor.backend = .metal` — the line at `LiveHalvesStripMetalLogicTests.swift:201` claims to show a
+GPU walk and would pass on a document with no leaves. The suites' real evidence is `MetalCompositor.-
+attempt` returning `.image`, which is sound.
 
-**The fix is one line in `CelStamp.init` and a test that would have caught it** — a fixture that poses a
-cel, drains the baker, edits a pose key, and asserts the span is dirty. That test does not exist for any
-of the four sites below, which is the more interesting fact: the sweep is the one place in this design
-where "what reaches a pixel" and "what the differ compares" are two hand-maintained lists, and nothing
-holds them together.
+**Read clean**: `BakeQueueLogicTests`, `DecodedFrameRingLogicTests`, `FrameExportLogicTests`,
+`TimelineBakeBarLogicTests`, `FrameBakeStoreLogicTests`, `ChunkedCompositeLogicTests`,
+`ChunkedCompositeMetalLogicTests`, `LiveHalvesStripLogicTests`, `TransformTrackLogicTests`,
+`PoseInterpolationLogicTests`, `StripedCompositeLogicTests`. Both `CompositeProbe` uses assert per-chunk
+counts rather than treating a chunk count as a frame count, and every suite that sets
+`Compositor.backend` restores `Compositor.defaultBackend` rather than the literal. Seven striping
+fixtures do not assert their plan actually cut into more than one strip; all seven do today, so they are
+not vacuous — but the premise their siblings state explicitly is missing, and a fixture edit could make
+them one-strip silently.
 
-**Three more candidates from the same review, NOT yet verified** — each is a specific claim with a line
-number and each is checkable in minutes:
+## Eight of the review's nine candidates are real, and the one that looked worst is not
 
-- `FrameBaker.swift:518` — `finish()` marks the frame clean unconditionally, so an edit that lands
-  *during* a bake is discarded and the frame stays stale.
-- `FrameBaker.swift:741` — `StructuralStamp` stamps only **layers'** effect tracks, so an animated
-  **folder** grade is invisible to the sweep. §3.3 notes a folder's grade is carried by no
-  `LayerContentVersion`, which is what makes this plausible.
-- `FrameBaker.swift:667` — sweep tier 3 is gated on `touchedACel`, so an edit that changes only an
-  interpolation recipe reaches nothing.
+All nine have been checked against the code. **Eight confirmed, one refuted — and the refuted one is
+the one the entry below used to flag as "worth checking first", because it was the only one that would
+have put wrong pixels in a saved document.**
 
-Verify each before fixing: a claim read off the code is a hypothesis, and this repo has had reviewers
-wrong before.
+**REFUTED: `Services/PixelOps.swift:584`.** The claim was that the Distort bake scales the source
+isotropically from the width, so a non-square crop rounds into a stretch. `sourceScale` is not an aspect
+ratio, it is texels per point, and that density is the same on both axes **by construction**:
+`piece.pieceImage` comes from `PixelOps.crop`, which sizes `pixelRect` with one scalar `UIImage.scale`
+for both dimensions, and `UIImage` has no independent per-axis scale. A 200×100 crop at scale 2 is a
+400×200 bitmap and `400/200` is also `200/100`. The reviewer read a ratio of unlike quantities as a
+ratio of like ones.
+
+**Confirmed, and each is being fixed:**
+
+**Distort's raster tier** — `Views/FloatingPieceOverlayView.swift:268`, a corner drag anchored on the
+plain box rather than the still-distorted quad, so the piece snaps when the mode picker leaves Distort
+without `distortQuad` being cleared (medium: `piece.transform` is what the bake reads);
+`Views/CanvasView.swift:1768`, marching ants driven by a `CGAffineTransform` that cannot express a
+four-corner warp, so a distorted float shows two disagreeing outlines; and
+`Views/FloatingPieceOverlayView.swift:161`, a bare `CAShapeLayer` whose `path` is set outside any
+`CATransaction`, so its dashes take the default implicit animation while the artwork's own backing layer
+moves instantly.
+
+**The pose channel** — `Views/CanvasView.swift:2268` is the serious one: `updateInterpolationPreviews`
+is the only site in the app that pushes a derived image to the live canvas, and its first guard is
+`cel.interpolation != nil`, so a cel animated purely by a transform key takes the early exit and the
+canvas draws resting ink at every frame. **The feature is invisible on the live canvas and animated in
+the export**, which is the shape RENDER stage 3 shipped and had to close later.
+`Models/CanvasManager+Timeline.swift` drops `transformTracks` and `pendingPoseBaselines` on both
+`splitCel` and `duplicateCel` — the field's own doc claims it rides through both "for free" and it does
+not, and this destroys saved animation. `Models/TransformKeyframes.swift:118`'s `holdPoseBaseline`
+writes a persisted field with no undo cover, and the nudge undo it rides beside restores geometry only,
+so Move-then-Undo leaves a phantom baseline that a later keyframe press turns into an animation the
+artist undid. `Models/KeyframeControl.swift`'s `addKeyframe` and `seedAndKeyChannel` call the
+`keyframes(marks:tracks:)` overload that defaults `poseFrames` to `[]`, which is §2.28's one-accessor
+rule broken by having two spellings of the list. `Engine/Deform/PoseInterpolation.swift:182` clamps with
+`<=`/`>=` where `TransformTrack`'s own doc says twice that `blend` extrapolates, so overshoot handles
+are silently flattened.
+
+**Two subsystems are still unreviewed**: the bake key and store, and the live-canvas wiring. (The tests
+were the third and are the entry above; striped compositing was the fourth and is read.)
 
 ## A 16383² canvas draws nothing the artist can see, and the allocation is not why (2026-09-02)
 
