@@ -116,9 +116,16 @@ LAYER_TRANSFORM.md.
       Stages 1-3 shipped together, Freeform is 3a, flips are in stage 2, the box-only rotate knob is 3b
       in all three phases, and the three membership rules moved to Select as item (23). What remains:
 
-      - **Distort (stage 5)** over the shared quad. **This is the same feature as KEYFRAMES §8 stage
-        5b**, which schedules it as raster tier first, then ink through §4.2's point map, then placed
-        images *behind* Move 3c. Build it once, from whichever item reaches it first.
+      - **Distort's ink tier.** The raster tier is **merged**: a four-corner drag on the raster floating
+        piece, in both `.move` and `.duplicate`, previewed through `CATransform3D`'s perspective terms
+        so the drag rasterizes nothing, and **exact rather than bounded** — MEASURED 0.0 disagreement
+        between what the finger sees and what bakes. Ink is refused per float, in one sentence, because
+        under a homography the local scale spans 1.3x to 8.5x across one quad and the best single scalar
+        for `VectorStroke.size` is wrong by 15%-315%; **KEYFRAMES §4.2's rest-space dab bake is what
+        unblocks it**. A **placed image** is the one kind with no Distort door at all — its placement is
+        six numbers plus a mirror bit where a homography needs eight. Text already has one by its own
+        door (Text panel → Corners). KEYFRAMES §8 stage 5b is the *animated* Distort — a quad keyed
+        across frames — and is a different feature that meets this one with no migration.
       - **Port `FloatingPieceOverlayView` onto the stage 4 handle pattern** — the raster float still
         carries the older overlay.
 
