@@ -86,12 +86,9 @@ final class StrokeCanvasView: UIView {
     /// Throws the in-progress stroke away so the shape overlay can replace it, on either tier —
     /// used when the hold timer detects a smart shape part-way through a drag.
     ///
-    /// **One method for both tiers because there is nothing left to tell them apart.** The raster
-    /// half used to restore a pre-stroke snapshot of the whole cel, because a raster stroke was
-    /// stamped straight into the cel's own bitmap and had to be un-stamped; it stamps into a
-    /// `StrokeScratch` now, exactly as the vector half always did, so dropping the scratch *is* the
-    /// revert and the cel was never touched. What remains tier-specific is only the gesture
-    /// bookkeeping a vector stroke carries.
+    /// **One method for both tiers because there is nothing left to tell them apart.** Neither tier
+    /// touches the layer's own pixels before lift, so dropping the scratch *is* the revert; what
+    /// remains tier-specific is only the gesture bookkeeping a vector stroke carries.
     func discardStrokeInProgress() {
         guard scratch != nil else { return }
         endScratch()
@@ -489,10 +486,9 @@ final class StrokeCanvasView: UIView {
     /// **A `.replacing` scratch stands in for the layer's picture inside its window, so the base is
     /// punched out under it.** An erase lowers alpha, and Core Animation composites siblings
     /// source-over: left showing through, the layer's own ink would fill the punch straight back in
-    /// and the artist would drag the eraser across their line and see nothing happen. Before this
-    /// was a window, the punch was applied to a canvas-sized *copy* of the render which then
-    /// replaced the base outright — correct, and 1 GiB at 16383² for a stroke a few hundred points
-    /// long.
+    /// and the artist would drag the eraser across their line and see nothing happen. The
+    /// alternative — punching a canvas-sized copy of the render and showing that instead — is 1 GiB
+    /// at 16383² for a stroke a few hundred points long, which is the defect this window closed.
     private func showScratch(_ scratch: StrokeScratch?) {
         let image = scratch?.image
         setBaseHole(scratch.flatMap { $0.replacesBase ? $0.windowRect : nil })
@@ -518,7 +514,9 @@ final class StrokeCanvasView: UIView {
     /// than under the eraser, and it is gone at lift.
     private func setBaseHole(_ rect: CGRect?) {
         guard let rect else {
-            imageView.layer.mask = nil
+            // Guarded because this runs once per layer per SwiftUI pass with nothing to punch, and
+            // assigning a layer property is not free even when the value does not change.
+            if imageView.layer.mask != nil { imageView.layer.mask = nil }
             return
         }
         let canvas = CGRect(origin: .zero, size: vectorCanvas?.size ?? raster?.size ?? bounds.size)
@@ -629,8 +627,8 @@ final class StrokeCanvasView: UIView {
         // The eraser's window has to start from the cel's own pixels because `.destinationOut` can
         // only take away what is there; a paint stroke's holds its own ink and nothing else. The
         // backdrop is the already-resident render, never a second one, and nil for a blank tier —
-        // which is the touch-down that used to mint a canvas-sized sheet of transparency and
-        // memoize it, before the first dab was even visible.
+        // where `renderToUIImage()` would instead mint a canvas-sized sheet of transparency and
+        // memoize it, before the first dab is even visible.
         let scratch = StrokeScratch(canvasSize: raster.size,
                                     role: isEraser ? .replacing(backdrop: raster.renderIfNonEmpty())
                                                    : .additive)
@@ -703,9 +701,8 @@ final class StrokeCanvasView: UIView {
         }
         if let clipPath = selectionClipPath {
             // Drop what the stroke put outside the selection before it reaches the cel, so undo/redo
-            // only ever sees the already-clipped result. In the scratch's own window — this used to
-            // be a canvas-sized `PixelOps.maskedComposite` of the whole cel against a whole-cel
-            // pre-stroke snapshot, which is two more canvases per stroke than the clip needs.
+            // only ever sees the already-clipped result — in the scratch's own window, since the
+            // clip cannot reach anything the stroke did not touch.
             scratch.clip(to: clipPath)
         }
         let beforeCount = raster.strokeCount
@@ -818,9 +815,8 @@ final class StrokeCanvasView: UIView {
     /// ~128 MB per stroke against a 300 MB budget, i.e. two undoable strokes total. Patches replace
     /// pixels via `.copy` blend, not composite, since undo must be able to remove ink.
     ///
-    /// **There is no whole-image fallback any more, and nothing lost one.** It existed for a stroke
-    /// whose dirty rect was unavailable or whose crops failed; `commitRasterStroke` now takes both
-    /// patches from the cel itself around a rect the scratch always has, and a stroke with no dirty
+    /// **There is no whole-image fallback, and none is missing.** Both patches are cropped from the
+    /// cel around a rect the scratch always has once a dab has landed, and a stroke with no dirty
     /// rect drew nothing and has nothing to undo.
     ///
     /// Labelled `.erase` rather than `.brushStroke` when `isEraser`, matching the vector path's own

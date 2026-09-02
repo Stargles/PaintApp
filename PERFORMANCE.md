@@ -599,8 +599,10 @@ it is not being sliced up the way a whole suite is.
 (b) splits **0.107 ms geometry** (`cutPreviewEdits`: one spatial-index query, the `cutRanges` probe
 walk, `splitStroke`, the end-cap windows) and **0.333 ms stamping** (`applyPreview`: erasing the span
 and drawing the caps back) — so the dabs, not the geometry, are where it goes. Two costs are shared with Mode 1 and are **not** new
-here: `renderToUIImage` off the scratch, **0.033 ms** per refresh, and the canvas-sized scratch copy
-at touch-down, **7.7–11.2 ms once per gesture**.
+here: `renderToUIImage` off the scratch, **0.033 ms** per refresh, and the scratch's copy of the
+render at touch-down — MEASURED at **7.7–11.2 ms once per gesture** while that copy was the whole
+canvas, and a crop of the stroke's own window since `StrokeScratch`, so it scales with the stroke
+rather than with the document.
 
 *What it means.* (b) is 30× (c) and still **3.7% of a 60 Hz frame**, against item 10's ~95 ms — 220×
 cheaper than the mechanism it was competing with. (c) was measurably cheaper and is measurably wrong:
@@ -775,8 +777,10 @@ because the number they used is now history either way.
 *Risk, and how it was discharged.* This was the highest-risk item on the board and the reasoning
 stands: [BUGS.md](BUGS.md) calls this the most gesture-sensitive code in the app, and `.replacement`
 (Mode 1) and `.none` (Modes 2/3) were **already** one-operation paths where a regression is not slow
-ink but an eraser that shows nothing until lift. Neither gains an operation — both take an
-identity-guarded `showScratch(nil)`, a pointer comparison. Three things pin it: `VectorPreviewPlan`
+ink but an eraser that shows nothing until lift. Neither gained an operation here — both took an
+identity-guarded `showScratch(nil)`, a pointer comparison. (`.replacement` shows its punched window
+through the scratch layer since `StrokeScratch`, over a base with that rect masked out; `.none` still
+takes the pointer comparison.) Three things pin it: `VectorPreviewPlan`
 has **no case that can express the old composite**, so reintroducing it means changing the type;
 `VectorPreviewPlanLogicTests` walks all twelve (role × scratch × interpolation) inputs in the fast
 tier; and the full UI suite ran clean, with `VectorEraserUITests` asserting `.replacement` publishes

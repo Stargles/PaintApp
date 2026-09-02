@@ -6,14 +6,16 @@ One section per bug, newest first.
 ## Memory allocation audit — twelve sites, ranked (2026-09-01)
 
 Found while designing RENDER.md; the compositor's budget is sound and almost nothing else consults it. RENDER §5 stage
-0 takes item 2, stage 7 the rest. Canvas bytes are `w·h·4`: 8 MiB at 2048x1024, 64 MiB at 4096², 1 GiB at 16383².
+7 takes these. Canvas bytes are `w·h·4`: 8 MiB at 2048x1024, 64 MiB at 4096², 1 GiB at 16383².
 
 1. **`renderSources` holds one canvas-sized image per visible leaf, all at once, with no budget**
    (`Engine/RenderRequest.swift:884-993`). `affordableSize` bounds the canvas, never the count: 100 leaves at 2048x1024
    is 800 MiB. RENDER §3.4 is the fix.
-2. **The first stroke on a 16383² canvas allocates two full-canvas buffers before a dab is visible** — RENDER §5 stage 0.
-   Vector eraser modes 1/2 allocate two at touch-down (`Views/Canvas/StrokeCanvasView.swift:845`). Nothing on the stroke
-   path consults `hasHeadroom`, which has exactly one call site (`Engine/MetalCompositor.swift:620`).
+2. **Nothing on the live-stroke path consults `hasHeadroom`**, which has exactly one call site
+   (`Engine/MetalCompositor.swift:620`). The stroke itself no longer needs it — `Engine/StrokeScratch.swift` bounds the
+   scratch by the stroke's own dirty rect rather than by the canvas, on both tiers — but committing one still opens the
+   cel's canvas-sized `CGContext` (`RasterLayerTexture.ensureContext`), which is the artwork's own storage and is as
+   unbudgeted as everything else here.
 3. **`MetalFillSession` allocates ~34 bytes per canvas pixel with no budget and no headroom check**
    (`Engine/MetalFillEngine.swift:300-380`; 44 with a lasso and two colours) — 544 MiB at 4096². `compositeReferenceRGBA`
    (`Models/CanvasManager+Fill.swift:842-852`) adds a transient canvas-sized image and byte array.

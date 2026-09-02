@@ -309,9 +309,9 @@ vector layer still bakes, because play and export need it.
 Each stage merges alone, with a test that would fail without it. Stage 0 first because it is a crash; the order after
 it is the dependency order.
 
-0. **Stop the bleeding.** The 16k crash is the live-stroke scratch: `StrokeCanvasView.swift:843-849` allocates the
-   scratch at `vectorCanvas.size`, and `RasterLayerTexture` mints the full-canvas context on the first dab and a
-   full-canvas `makeImage()` per touch-move. Size the scratch to the stroke's dirty rect (`_strokeDirtyRect`).
+0. ~~**Stop the bleeding.** The 16k crash is the live-stroke scratch.~~ **Done 2026-09-02** —
+   `Engine/StrokeScratch.swift` is that scratch as a window over the stroke's own dirty rect, and both tiers stamp into
+   it rather than into the layer, so nothing on the stroke path scales with canvas area.
 1. ~~**Hoist the playback clock** onto `CanvasManager` (§3.7).~~ **Done 2026-09-01.**
 2. **The recipe** (§3.2): `FrameRecipe`/`LeafSnapshot`, a static leaf render from values, `renderSources` off the
    main actor, the committed cel's re-render made asynchronous with the scratch retained until the new image lands

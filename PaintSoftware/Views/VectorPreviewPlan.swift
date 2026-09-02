@@ -8,8 +8,8 @@ import Foundation
 /// Lives here rather than nested in `StrokeCanvasView` for one reason: `StrokeCanvasView.swift` is
 /// not a member of the UI-test target (it drags in `StrokeGestureRecognizer` and the rest of the
 /// touch stack), so nothing nested inside it can be asserted headlessly. The three roles behave
-/// differently and two of them are one-operation paths that must stay that way — that is a contract,
-/// and a contract wants a test that is cheaper than a 22-minute UI suite.
+/// differently and each one's behaviour is a contract, and a contract wants a test that is cheaper
+/// than a 22-minute UI suite.
 enum VectorScratchRole {
     /// A paint stroke: the scratch holds only this stroke's ink, shown *over* the canvas render. The
     /// canvas itself is untouched until lift.
@@ -50,14 +50,13 @@ enum VectorScratchRole {
 /// the scratch goes in its own slot above it. A future edit cannot reintroduce the per-dab bitmap
 /// without changing this type, which is a conspicuous thing to do.
 ///
-/// **`.replacement` reaches the screen through the scratch layer too, since 2026-09-01.** It used to
-/// win the base slot outright, because its scratch was a canvas-sized copy of the render with the
-/// stroke's holes punched in and so *was* the whole picture. The scratch is a window over the
-/// stroke's own dirty rect now (`StrokeScratch`), which cannot fill the base slot — so the base is
-/// the committed render, as it is for every other role, and the window sits above it with the base
-/// punched out underneath. `.none` is the one role that shows no second layer, and a regression
-/// there or in `.replacement` is not slow ink: it is the artist erasing and seeing nothing happen
-/// until they lift. `VectorPreviewPlanLogicTests` pins both.
+/// **`.replacement` reaches the screen through the scratch layer too, and cannot reach it any other
+/// way.** Its scratch is a window over the stroke's own dirty rect (`StrokeScratch`), so it is not a
+/// picture of the canvas and cannot fill the base slot: the base is the committed render, as it is
+/// for every other role, and the window sits above it with the base punched out underneath.
+/// `.none` is the one role that shows no second layer, and a regression there or in `.replacement`
+/// is not slow ink: it is the artist erasing and seeing nothing happen until they lift.
+/// `VectorPreviewPlanLogicTests` pins both.
 struct VectorPreviewPlan: Equatable {
 
     /// Which single image fills the base slot. Exactly one, always — never a composite of two.
@@ -78,11 +77,10 @@ struct VectorPreviewPlan: Equatable {
     ///
     /// **This is also the live-preview frame count**, i.e. it is what moves
     /// `StrokeCanvasView.livePreviewFrames` and so the second field of `lastVectorGestureTrace`.
-    /// The two were separate fields while `.replacement` published a frame through the base slot
-    /// rather than through the scratch layer; now that every role that draws draws through the
-    /// scratch layer they are the same question, and a second field that could only ever repeat this
-    /// one would be a place for them to disagree. "The scratch layer was updated repeatedly during
-    /// the drag" is the only thing about the live path an XCUITest can observe at all —
+    /// Every role that draws draws through the scratch layer, so the two are one question, and a
+    /// separate field could only ever repeat this one and give it somewhere to disagree. "The
+    /// scratch layer was updated repeatedly during the drag" is the only thing about the live path
+    /// an XCUITest can observe at all —
     /// `press(forDuration:thenDragTo:)` blocks the test thread for the gesture's whole duration, so
     /// every screenshot it can take is post-lift. `VectorEraserUITests` asserts the count for both
     /// drawing roles, and `.none` still publishes zero.
@@ -90,10 +88,10 @@ struct VectorPreviewPlan: Equatable {
 
     /// The whole of `refreshDisplay`'s vector branch, as arithmetic.
     ///
-    /// **The base slot no longer depends on the role at all**, which is what the window made
-    /// possible: an in-between frame if there is one, the committed render otherwise, for every
-    /// role including `.replacement`. `forEveryCombination` in the logic tests walks all twelve
-    /// (role × scratch × interpolation) inputs so that is checked rather than reasoned about.
+    /// **The base slot does not depend on the role at all**: an in-between frame if there is one,
+    /// the committed render otherwise, for every role including `.replacement`.
+    /// `forEveryCombination` in the logic tests walks all twelve (role × scratch × interpolation)
+    /// inputs so that is checked rather than reasoned about.
     static func forVectorLayer(role: VectorScratchRole,
                                hasScratch: Bool,
                                hasInterpolationImage: Bool) -> VectorPreviewPlan {
