@@ -1946,8 +1946,8 @@ match are present), a **hold** (three ink strokes on transparency), a **painted*
 gradient with ±3 of grain) as the honest pessimistic bound, and seeded **noise** as the theatrical one.
 
 **Two kinds of number live below and they do not have the same standing.** The byte counts are exact and
-build-independent — the same fixtures produce the same file on any machine, and the simulator and both
-device runs agreed on every one of them to the byte. The milliseconds are hardware and build: **§10.2 is
+build-independent — the same fixtures produce the same file on any machine, and the simulator and all
+three device runs agreed on every one of them to the byte. The milliseconds are hardware and build: **§10.2 is
 the owner's iPad 9 in Release**, and the Debug simulator run that preceded it is kept at the end of §10.2
 only because of what it got wrong. §1's "the device is ~1.3× the simulator" is a *compositing* figure and
 it does not survive contact with this path — **here the device was 2.5–4.9× faster, and the split of the
@@ -1956,7 +1956,7 @@ cost came out reversed**, which is how a 1.6–2.8× win nearly went unnoticed (
 ### 10.1 Compression ratio — MEASURED, exact, build-independent
 
 Taken 2026-09-02; the figures are file sizes, so nothing about the host is in them — **the simulator and
-both device runs produced identical bytes in every row, across `4e91777` and `84d2dff`**, which is what
+all three device runs produced identical bytes in every row, across `4e91777` and `84d2dff`**, which is what
 says the fixtures are deterministic and the timings' spread is the machine rather than the measurement.
 
 | canvas | fixture | raw bytes | file bytes | ratio | branch |

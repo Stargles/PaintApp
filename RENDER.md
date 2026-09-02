@@ -310,7 +310,7 @@ what stage 4c bought.** The full tables are PERFORMANCE §10; what belongs here 
 fixtures are the document §2.8 names: flat cel art (six colours in large hard-edged polygons with real
 vector ink stamped over them), a hold (three strokes on transparency), a painted gradient as the honest
 pessimistic bound, and seeded noise as the theatrical one. **Byte counts are exact and
-build-independent — the simulator and both device runs agreed to the byte. The milliseconds are the
+build-independent — the simulator and all three device runs agreed to the byte. The milliseconds are the
 owner's iPad 9 in Release**, taken on both sides of 4c's deletion, and the Debug simulator run that
 preceded them got the *split* backwards, which PERFORMANCE §10.2 keeps as a warning rather than as data.
 
