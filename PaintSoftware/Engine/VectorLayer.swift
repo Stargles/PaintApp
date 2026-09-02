@@ -2206,7 +2206,17 @@ final class VectorCanvas {
     ///  * **`stampDab`'s 0.5 pt diameter floor** and `stampApproximateSquare`'s 1 pt dab/step floors,
     ///    for the same reason at heavy shrink.
     ///  * **Pencil grain** is an absolute noise field keyed on canvas position, so it re-samples under
-    ///    any map — as it already does for a plain translation, so a scale is no regression.
+    ///    any map — as it already does for a plain translation, so a scale is no regression. **That
+    ///    sentence is true here and was wrong where it was being read**, which is the correction
+    ///    KEYFRAMES.md §4.2 names by line number. This function is a *commit*: the map is baked into
+    ///    the artist's own geometry and is over, so the stroke's rest space itself moved and one
+    ///    re-sample is exactly what a one-off Move should cost. A *pose* is a view of a stroke that
+    ///    is re-resolved on every frame, and there the same re-sample is the texture crawling across
+    ///    the ink at 24 fps. Stage 4 fixed the second and deliberately left the first — see
+    ///    `VectorCanvas.posing` and `StrokeRestWalk`. §2.16's parenthetical *"a stroke you Move keeps
+    ///    its grain"* is therefore **not** delivered, and doing so would mean persisting a
+    ///    per-dab multiplier: a derivable value at roughly eight floats per stored sample, which is
+    ///    `precise`'s own argument against a second copy of a fact the geometry already states.
     ///
     /// Under rotation the dabs are exact too, with one cosmetic caveat: per-dab rotation jitter and
     /// scatter offsets are drawn in absolute angles, so a square-tipped or scattering brush keeps its
