@@ -31,9 +31,10 @@ app, and whoever notices that should come back and say so rather than assuming i
 ## In flight
 
 - **(29) Rendering** — spec at [RENDER.md](RENDER.md), whose §2 is sixteen owner rulings and §5 the
-  build order. **Stages 0 and 1 are merged**; the live stroke no longer scales with canvas area and the
-  playback clock is the model's. **Stage 2 — the recipe — is next**, and it is what removes the pen-up
-  freeze.
+  build order. **Stages 0, 1 and 2 are merged**: the live stroke no longer scales with canvas area, the
+  playback clock is the model's, and the pen-up snapshot is a `FrameRecipe` minted on the main actor and
+  resolved off it — MEASURED 174-313 ms of main-thread work at pen-up down to **0.2 ms**. **Stage 3,
+  chunked compositing with `renderSources(subset:)`, is next.**
 
 - **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
   half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
@@ -120,34 +121,6 @@ LAYER_TRANSFORM.md.
       Everything else in this item's six asks is merged and its history is in `git log` and
       [HANDOFF.md](HANDOFF.md); KEYFRAMES §11 is the graph editor's record and §2.26-§2.28 the
       workflow's.
-### (23) Selection membership modes belong to Select, not to Move — so Recolour can use them
-
-- [ ] The owner, 2026-08-29: *"Right now the enclosed/cut/touching option for the select move is in
-      move, but i feel like it would be better in select menu because i want it to affect recolour. For
-      enclosed on recolour, it would have to split the strokes and other objects around the lasso border
-      and then recolour the ones inside. Luckly, the splitting already exists in enclosed move, so you
-      can reuse that. This task is not necessarily priority but put it in TODO.md."*
-
-      Asked again: *"right now the enclosed / cut / touching option for move is in the move menu. It is more
-      appropriate for the select menu."*
-
-      Two things the ask already settles, and they are the reason it is cheap. The **modes exist** —
-      LASSO_MOVE §5.23-24 rules how Touching and Enclosed treat text and placed images, and §5.25 rules
-      how Clear treats the loop, which is the same split-at-the-border behaviour this asks Recolour to
-      grow. And the **splitting exists**: a **Cut** move already cuts strokes and fills at the lasso
-      boundary, so Recolour-with-Cut is a new caller of a built operation rather than new geometry.
-
-      **The owner's word above is "enclosed" and the mode that splits is Cut.** `.enclosed` catches
-      whole elements or nothing and cuts nothing at all — `LassoMembership.cutsAtTheBoundary` is true
-      of `.cutting` alone. The behaviour the ask describes ("split the strokes … and then recolour the
-      ones inside") is Cut's, so read it as Cut wherever this item says Enclosed.
-
-      What it is really asking is that membership stop being a property of *the Move tool* and become a
-      property of *the selection*, which is the more honest home for it — every tool that consumes a
-      lasso then inherits it for free instead of each one growing its own copy. Whether that is a move of
-      the control or a duplicate of it is the one design question, and §5.25's precedent argues for a
-      move.
-
 ### (24) The canvas paper is its own code path — should it just be a value layer?
 
 - [ ] The owner, 2026-08-30, on being told that ink-on-paper is blended somewhere the colour work cannot
@@ -198,18 +171,34 @@ LAYER_TRANSFORM.md.
 - [ ] > "There is a resolution bug where the canvas renders at non full resolution even if the slider is set
       > to full. Happens on big canvases. If you want to check, on the iPad there is a canvas called UI Test."
 
-      RENDER §2.12 rules the knob is the truth. The known mechanism is `CompositorBudget.affordableSize`
-      (`Engine/Compositor.swift`), which scales a composite down so its textures fit `physicalMemory / 16`
-      regardless of the knob — 192 MiB on a 3 GB iPad, against 64 MiB per texture at 4096². Treat that as
-      the hypothesis until the on-device canvas confirms it.
+      RENDER §2.12 rules the knob is the truth. **Confirmed on the owner's iPad 9 in Release
+      (MEASURED 2026-09-02): the 4096² scene needs 512 MB of textures against a 183.7 MB budget, and
+      `CompositorBudget.affordableSize` caps it to 2508².** The budget is `physicalMemory / 16`, and the
+      device reports 183.7 MB where the docs had assumed 192. Fixed by RENDER §3.8's strips, stage 5.
 
 - [ ] > "A 16k by 16k canvas crashes the iPad app when you draw something. This is really odd, it should not
       > happen. I wonder if it could hint at a deeper issue where larger canvases take more memory per
       > brushstroke. Because it is vector, this should not happen. I wonder if it may be the compositor."
 
-      One canvas-sized RGBA buffer at 16384² is 1 GiB; the device has 3 GB. Whatever allocates canvas-area
-      memory on a stroke is the suspect, and whether any of it is per-stroke rather than per-frame is the
-      question the owner is really asking.
+      **The crash is fixed** (stage 0: `Engine/StrokeScratch.swift`). The canvas is still unusable, and
+      the owner's follow-up says how:
+
+      > "I tried making a 16k canvas and then drawing on it with a brush. Although it does not crash, it is
+      > broken. First off, the brushstroke disappears when you draw. Secondly, the framerate is very laggy.
+      > [...] the only thing id really be doing in a 16k canvas is idea boards where the drawings are small
+      > compared to the canvas."
+
+      **Two causes, neither the one that looks obvious.** The canvas-sized allocation *succeeds* — a
+      16383² `VectorCanvas.render()` is MEASURED at 143.5 ms on the device with the ink present, because a
+      `CGBitmapContext` is lazily committed. The stroke is drawn and never reaches the screen: no artwork
+      view sets `minificationFilter`, so a 5-point brush point-sampled to `fitScale` leaves **zero ink at
+      4096², 8192² and 12288²** — live on ordinary large canvases, not just 16k — and at 16383² the image
+      cannot be composited at all. BUGS.md carries both.
+
+      The lag is the owner's own diagnosis, confirmed: `recordSpacing` is in canvas points, so at
+      `fitScale` one screen inch is 352 dabs at 2048² and **2815 at 16383²**. Scaling the sample gate by
+      zoom is a permanent quality trade (coarser stored geometry feeds interpolation and the vector
+      eraser) and is **deferred by the owner pending an A/B they can see**, not refused.
 
 - [ ] > "Larger canvases seem to freeze the program momentarily after each brushstroke is lifted. I suspect
       > it is compositing, which is pretty bad. I want you to weigh moving the majority of the program to

@@ -183,6 +183,17 @@ before something was deleted will silently resurrect it, and the count is the on
     -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
     "${SUITES[@]}" -parallel-testing-enabled NO -derivedDataPath build/DerivedData
   ```
+  **The selectors are built from *filenames*, and that loses tests silently in two directions.** Both
+  fired on 2026-09-02, in one session, in opposite ways. A filter hand-rebuilt as
+  `"LogicTests$|CharacterizationTests$"` drops the third alternate and with it **`PerfBaselineTests`,
+  53 tests** — and that is specifically the *timing* suite, so a hand-rolled fast-tier filter is blind
+  to performance regressions by construction. In the other direction, a *class* placed in a file of
+  another name never runs at all: `-only-testing:` names the file's stem, so the class is not selected
+  and nothing says so. Both report `** TEST SUCCEEDED **` with a plausible-looking count. Use the
+  command above verbatim, keep one `XCTestCase` per file with the class named after the file, and
+  reconcile the xcresult's `totalTestCount` against a static `func test` count at your own head — the
+  arithmetic is what catches it, and nothing else will.
+
   **`-parallel-testing-enabled NO` on every run that is not the full suite.** The scheme carries
   `parallelizable = "YES"` (PaintSoftware.xcscheme:48) and that is correct — it is the whole cost
   model above — but clones only earn their keep when there are many classes to distribute across
@@ -199,6 +210,14 @@ before something was deleted will silently resurrect it, and the count is the on
   **for a finished run read `xcresulttool`, never the log.** The log counts disagreed with the
   xcresult on the very run that prompted this note (1914 against 1925) because a clone's output
   interleaves and a line can be split.
+
+- **Pull the per-class table immediately after a full run, before running anything else against that
+  `-derivedDataPath`.** Xcode keeps only a handful of recent `Test-*.xcresult` bundles per derived-data
+  path, so the five single-test triage runs that follow a full suite evict the full run's own bundle —
+  and the table this file keeps asking to be re-taken is then unrecoverable. Reconstructing it by
+  summing each test's reported seconds out of the console log is not a substitute: it is a
+  log-reconstruction of a number the xcresult owns, and on a parallel run the log's per-test lines
+  interleave and split.
 
 - **A red xcresult is evidence about a *binary*, not about your working tree** — the same trap as the
   banner, pointing the other way. `test-without-building` reuses whatever bundle was last compiled,
@@ -407,6 +426,15 @@ regardless of which worktree pushed it. **Do not use `git stash` in this repo at
 on your own `tmp/<id>` branch — a commit you amend or reset later is free, and it cannot be picked up by anyone
 else. This is the same class of hazard as the shared simulator UDID above: a tool that looks per-session and is
 actually machine-wide.
+
+### `origin/main` is a shared ref, so `git reset --hard/--mixed origin/main` is not a stable target
+
+Any session's `git fetch` updates the *repository's* `origin/main`, including sessions in other
+worktrees. An agent that reset to it mid-task on 2026-09-02 found it had moved under them and staged a
+revert of all nine files another session had just merged — caught in `git status`, nothing lost, but it
+would have been an invisible revert inside an otherwise ordinary commit. Reset to a **recorded sha**
+you took yourself, or to your own branch tip, never to a name that another process can repoint. Same
+family as the shared stash above and the shared simulator UDID.
 
 ### Two branches can mint the same pbxproj object id, and git will merge them happily
 
