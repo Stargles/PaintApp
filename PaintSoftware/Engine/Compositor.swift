@@ -175,7 +175,29 @@ enum CompositorBudget {
     /// reason: the thing under test is a decision about a device that no test host is. Without it the
     /// only way to exercise the refusal is to run on the iPad that crashes, which is the loop this
     /// whole fix exists to get out of. Tests restore it to nil in `tearDown`.
-    static var budgetOverrideBytes: Int?
+    ///
+    /// **Locked, because it is written on the test's thread and read from a compositing queue**
+    /// (BUGS.md memory audit item 12, RENDER.md §4). `textureBudgetBytes` reads it on whichever queue
+    /// `CompositorMetalEngine.attempt` is running on, and a test that arms it while a save's
+    /// thumbnail composite is in flight was a plain unsynchronised `Int?` away from undefined
+    /// behaviour. A lock rather than a snapshot into `RenderRequest`: this is the one of the four
+    /// statics in that audit item that is *not* a property of the picture — it stands in for the
+    /// device, and a request built before a test armed it must still see the armed value.
+    static var budgetOverrideBytes: Int? {
+        get {
+            overrideLock.lock()
+            defer { overrideLock.unlock() }
+            return storedBudgetOverrideBytes
+        }
+        set {
+            overrideLock.lock()
+            defer { overrideLock.unlock() }
+            storedBudgetOverrideBytes = newValue
+        }
+    }
+
+    private static let overrideLock = NSLock()
+    private static var storedBudgetOverrideBytes: Int?
 
     /// Whether the process can afford `bytes` of new allocation *right now*.
     ///
@@ -305,7 +327,34 @@ enum Compositor {
     /// and an artist has no way to tell them apart except by waiting. The user-facing performance knob
     /// added alongside this is render resolution, which changes the *picture* and is therefore a
     /// choice somebody can actually make.
-    static var backend: CompositorBackend = defaultBackend
+    /// **Locked, because it is written on main and read from every compositing queue** (BUGS.md
+    /// memory audit item 12, RENDER.md §4). `composite` switches on it from `CanvasView.sandwichQueue`
+    /// and from `ProjectStore`'s save queue, while the fifty test sites that arm it do so from the
+    /// test thread.
+    ///
+    /// **A lock and not a field on `RenderRequest`, which is what RENDER §3.3 asks for and is wrong
+    /// here.** §3.3 wants the backend in the *bake key*, so a stored frame records which
+    /// implementation drew it — that is a property of a finished picture. This is the seam that
+    /// *chooses* the implementation, and every measurement in the project composites one already-built
+    /// request through both backends in turn (`PerfBaselineTests`' CPU-versus-GPU pairs,
+    /// `CompositorParityLogicTests`' sweeps). Snapshotting the choice at request-build time would make
+    /// that impossible to express, and the parity suite is the only reason two backends still exist.
+    /// The bake key will read this accessor when it is built.
+    static var backend: CompositorBackend {
+        get {
+            backendLock.lock()
+            defer { backendLock.unlock() }
+            return storedBackend
+        }
+        set {
+            backendLock.lock()
+            defer { backendLock.unlock() }
+            storedBackend = newValue
+        }
+    }
+
+    private static let backendLock = NSLock()
+    private static var storedBackend: CompositorBackend = defaultBackend
 
     /// What `backend` is in a process nobody has reconfigured — **the value a test's `tearDown`
     /// restores, and the reason it is a named constant rather than a literal repeated in five files.**

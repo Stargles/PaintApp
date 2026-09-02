@@ -234,16 +234,55 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertTrue(manager.canUndo, "the affordance must still be live — steps remain")
     }
 
-    /// What the budget is *worth*, in the two units an artist would recognise. Reported rather than
-    /// asserted tightly: the point is that the arithmetic behind item 13's cut from 300 MiB is
-    /// written down where the next session can check it, not that these exact counts are contractual.
+    /// What the budget is *worth*, in the two units an artist would recognise — **driven through the
+    /// production path, because computing it by hand is how it stayed wrong for so long.**
+    ///
+    /// This case used to be arithmetic all the way down: it multiplied `2 * w * h * 4` itself and
+    /// divided the budget by it. Every number it printed was right and the code charged **zero**
+    /// (BUGS.md memory audit item 3). `registerUndoableCelChange` mandates that a commit path hand
+    /// its flattened result over as a `RasterLayerTexture` and pass nil for `newBaked`/`newFill`, and
+    /// the cost was computed from those four nils — so Move, Clear, Fill and Add Text each recorded a
+    /// step of size 0, `UndoHistory.trim()` (which evicts by cost) could never reach one, and a test
+    /// that never called the function could not see any of it.
+    ///
+    /// So the first assertion below is now a real `CanvasManager` doing a real whole-cel commit, and
+    /// the arithmetic that follows is measured against what `history.currentCost` says rather than
+    /// against a second copy of the formula.
+    @MainActor
     func testWhatTheBudgetHoldsInWholeCelOperationsAtTheOwnersCanvas() {
         let owners = CGSize(width: 2048, height: 1024)
-        // `CanvasManager.approximateImageCost` charges width x height x 4 per image, and a whole-cel
-        // operation (a fill, a clear, an insert, a selection bake) retains a before *and* an after.
+        // A whole-cel operation (a fill, a clear, a move commit, a text bake) retains a before *and*
+        // an after buffer at canvas size.
         let wholeCelStep = 2 * Int(owners.width) * Int(owners.height) * 4
         let budget = UndoBudget.maxCostBytes(physicalMemory: 3 << 30)
 
+        let manager = CanvasManager()
+        manager.canvasSize = owners
+        manager.addLayer()
+        let layerID = manager.layers[0].id
+        let celID = manager.layers[0].cels[0].id
+        let whole = CGRect(origin: .zero, size: owners)
+        // Both sides have pixels, which is what a commit over existing artwork looks like. A blank
+        // before-state is the other case and is charged nothing — `RasterLayerTexture.approximateCost`
+        // asks `hasContent`, not the canvas size.
+        let before = RasterLayerTexture(size: owners,
+                                        image: CanvasFixture.solidImage(.red, rect: whole, size: owners))
+        let after = RasterLayerTexture(size: owners,
+                                       image: CanvasFixture.solidImage(.blue, rect: whole, size: owners))
+        manager.layers[0].cels[0].raster = before
+        // `addLayer` is itself an undoable step, so the history is not empty by the time the fixture
+        // is standing up. Cleared rather than subtracted, so the number asserted below is the commit's
+        // own cost and not a difference that would still read right if both halves moved.
+        manager.history.removeAll()
+        XCTAssertEqual(manager.history.currentCost, 0, "Control: the commit below is the only step recorded")
+
+        manager.registerUndoableCelChange(layerID: layerID, celID: celID,
+                                          oldRaster: before, oldBaked: nil, oldFill: nil,
+                                          newRaster: after, newBaked: nil, newFill: nil,
+                                          label: .fill)
+
+        XCTAssertEqual(manager.history.currentCost, wholeCelStep,
+                       "One whole-cel commit must be charged both canvas buffers it retains — this read 0 until 2026-09-01")
         XCTAssertEqual(wholeCelStep, 16 * Self.mib)
         XCTAssertEqual(budget / wholeCelStep, 12, "192 MiB holds twelve whole-cel operations at the owner's canvas")
         XCTAssertEqual((300 * Self.mib) / wholeCelStep, 18, "the literal it replaced held eighteen")
@@ -255,5 +294,37 @@ final class MemoryBudgetLogicTests: XCTestCase {
         // about a different document, and this is the one place where the 4K case is genuinely dire.
         let stress = 2 * 4096 * 4096 * 4
         XCTAssertEqual(budget / stress, 1, "at 4096² the same budget holds a single whole-cel operation")
+    }
+
+    /// **The charge is for a bitmap, not for a canvas size**, which is what keeps the fix above from
+    /// turning every commit on an untouched cel into 16 MiB of imaginary retention.
+    ///
+    /// `RasterLayerTexture` allocates its `CGContext` on the first stamp and not before, so a cel
+    /// nobody has drawn on holds nothing whatever its `size` says. The first stroke on a fresh cel
+    /// hands `registerUndoableCelChange` exactly that pair — a blank before and a drawn after — and
+    /// charging the blank one would make an empty document read as half a budget's worth of history.
+    @MainActor
+    func testABlankRasterIsChargedNothingWhateverItsCanvasSizeSays() {
+        let owners = CGSize(width: 2048, height: 1024)
+        let blank = RasterLayerTexture(size: owners)
+        XCTAssertFalse(blank.hasContent, "Premise: a texture with no bitmap")
+        XCTAssertEqual(blank.approximateCost, 0)
+
+        let drawn = RasterLayerTexture(size: owners,
+                                       image: CanvasFixture.solidImage(.red,
+                                                                       rect: CGRect(origin: .zero, size: owners),
+                                                                       size: owners))
+        XCTAssertEqual(drawn.approximateCost, Int(owners.width) * Int(owners.height) * 4)
+
+        let manager = CanvasManager()
+        manager.canvasSize = owners
+        manager.addLayer()
+        manager.history.removeAll()   // `addLayer` records a step of its own — see the case above
+        manager.registerUndoableCelChange(layerID: manager.layers[0].id, celID: manager.layers[0].cels[0].id,
+                                          oldRaster: blank, oldBaked: nil, oldFill: nil,
+                                          newRaster: drawn, newBaked: nil, newFill: nil,
+                                          label: .fill)
+        XCTAssertEqual(manager.history.currentCost, drawn.approximateCost,
+                       "The first commit on a blank cel is charged one buffer, not two")
     }
 }

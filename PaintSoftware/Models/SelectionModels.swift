@@ -1062,7 +1062,17 @@ extension CanvasManager {
                                      undoRaster: RasterLayerTexture, undoBaked: UIImage?, undoFill: UIImage?,
                                      redoRaster: RasterLayerTexture, redoBaked: UIImage?, redoFill: UIImage?,
                                      label: HistoryActionLabel) {
-        let cost = Self.approximateImageCost(undoBaked) + Self.approximateImageCost(redoBaked)
+        // **The rasters are the payload, and leaving them out charged a whole-cel step nothing.**
+        // `registerUndoableCelChange`'s doc mandates that every commit path pass its flattened result
+        // as `newRaster` with `newBaked`/`newFill` nil, and all five call sites do — so the four
+        // images below are nil on exactly the steps that retain the most, and Move, Clear, Fill and
+        // Add Text each recorded a cost of 0 while holding two canvas-sized bitmaps. `UndoHistory
+        // .trim()` evicts by cost, so a stack of them could never be trimmed at all: 16 MiB a step at
+        // the owner's 2048x1024, 128 MiB at 4096², against a budget that thought it was empty.
+        // `RasterLayerTexture.approximateCost` is zero for a texture with no bitmap, which is what
+        // keeps a blank before-state from being charged for pixels it does not have.
+        let cost = undoRaster.approximateCost + redoRaster.approximateCost
+                 + Self.approximateImageCost(undoBaked) + Self.approximateImageCost(redoBaked)
                  + Self.approximateImageCost(undoFill) + Self.approximateImageCost(redoFill)
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.applyCelChange(layerID: layerID, celID: celID, raster: undoRaster, baked: undoBaked, fill: undoFill)

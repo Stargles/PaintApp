@@ -17,32 +17,64 @@ import Metal
 // no compositor involved at all. It is **not** the render path and must not become one; a real frame
 // uploads once and keeps the texture, where this uploads and reads back per call.
 
+/// The pixel dimensions a pool of textures is keyed by.
+///
+/// A pair rather than a `CGSize` because these are integers by the time anything allocates: the
+/// compositor rounds the request's canvas size once, at the top of `attempt`, and every texture
+/// below that point is described in pixels. Hashing a `CGSize` would let 320.0 and 320.0000001 name
+/// two pools of the same textures.
+struct TexturePixelSize: Hashable {
+    let width: Int
+    let height: Int
+
+    /// One `rgba8Unorm` texture at this size. Four bytes per pixel is the app's pixel contract
+    /// (`PixelOps`), the same one `CompositorBudget.textureBytes(for:)` states for a `CGSize`.
+    var textureBytes: Int { width * height * 4 }
+}
+
 /// The compositor-side handle: one pipeline, the scratch textures a multi-pass effect ping-pongs
 /// through, and the encoding of one effect into an existing encoder.
 ///
 /// Separate from the engine below because this is the part a wrapper needs. It holds no queue and no
 /// canvas textures, so whoever owns the walk owns those.
 ///
-/// **It does hold a device and up to two intermediates, and that is the one thing that changed when
-/// multi-pass arrived.** §5.3 is explicit that a canvas texture is 16.8 MB at 2048² and 64 MB at 4000²
-/// and that the answer is a pool reused across frames rather than an allocation per use — so the
-/// intermediates live here, at the lifetime of whatever owns the pipeline, and are reallocated only
-/// when the canvas size changes. Allocating them inside `encode` would put a 64 MB `makeTexture` on the
-/// path of every blurred frame, which is the shape of the number phase 4 measured at 1071 ms.
+/// **It does hold a device and up to two intermediates per size, and that is the one thing that
+/// changed when multi-pass arrived.** §5.3 is explicit that a canvas texture is 16.8 MB at 2048² and
+/// 64 MB at 4000² and that the answer is a pool reused across frames rather than an allocation per
+/// use — so the intermediates live here, at the lifetime of whatever owns the pipeline. Allocating
+/// them inside `encode` would put a 64 MB `makeTexture` on the path of every blurred frame, which is
+/// the shape of the number phase 4 measured at 1071 ms.
+///
+/// **Keyed by size, bounded at `residentSizeLimit`, and that replaced "discard everything on a size
+/// change".** The old rule was written when a canvas had one size at a time; it has not for as long
+/// as a second consumer has existed, because `ProjectStore`'s save thumbnail composites the same
+/// document at `thumbnailBounds` through this same object on every autosave. Under the old rule that
+/// save threw the live canvas's intermediates away — 128 MiB at 4096², reallocated on the artist's
+/// next blurred frame — and the frame after a save was cold for no reason anybody chose. The bound
+/// is what keeps the correction from being a leak: `MetalEffectEngine` below applies effects at
+/// whatever size it is handed, and an unbounded map would hold every one of them forever.
 ///
 /// Not thread-safe, deliberately: the scratch is mutable state and an encoder is a single-threaded
 /// object, so the owner that serializes one serializes the other for free.
 final class EffectPipelines {
 
+    /// How many sizes' intermediates are held at once — **the same number `CompositorMetalEngine`
+    /// bounds its pools at**, because the two maps are keyed alike and the engine drops this one's
+    /// entry whenever it evicts a pool. Keeping them equal is what makes "the engine's resident
+    /// sizes" a single set rather than two that can disagree.
+    static let residentSizeLimit = 3
+
     private let device: MTLDevice
     private let state: MTLComputePipelineState
 
-    /// **At most two, whatever the pass count.** Pass *n* reads pass *n−1*'s output, the first pass
-    /// reads the caller's `source` and the last writes the caller's `result`, so the intermediate
-    /// outputs alternate between exactly two textures however long the list is — four passes need the
-    /// same two as three.
-    private var scratch: [MTLTexture] = []
-    private var scratchSize = (width: 0, height: 0)
+    /// **At most two per size, whatever the pass count.** Pass *n* reads pass *n−1*'s output, the
+    /// first pass reads the caller's `source` and the last writes the caller's `result`, so the
+    /// intermediate outputs alternate between exactly two textures however long the list is — four
+    /// passes need the same two as three.
+    private var scratch: [TexturePixelSize: [MTLTexture]] = [:]
+    /// Least recently used first, so `first` is the eviction victim. An array rather than a
+    /// timestamp because three entries make a scan cheaper than the bookkeeping.
+    private var scratchOrder: [TexturePixelSize] = []
 
     /// Nil when the library has no `applyEffect` — the same failable contract `CompositorMetalEngine`
     /// uses, and for the same reason: the caller has `EffectReference` to fall back on.
@@ -79,7 +111,10 @@ final class EffectPipelines {
                 encoder: MTLComputeCommandEncoder) -> Bool {
         let passes = effect.passes
         guard let last = passes.indices.last else { return false }
-        guard intermediates(passes.count - 1, width: source.width, height: source.height) else { return false }
+        // Named for what it is rather than for the property it comes from: `self.scratch` is a map
+        // over sizes and this is the one size's pair, so shadowing the name would read as the map.
+        guard let pingPong = intermediates(passes.count - 1,
+                                           width: source.width, height: source.height) else { return false }
 
         let lut = effect.lookupTable
         let weights = effect.weights
@@ -103,8 +138,8 @@ final class EffectPipelines {
         for (index, pass) in passes.enumerated() {
             // Parity of the index picks the scratch slot, which is what keeps two textures enough:
             // an output can never be its own input because consecutive indices differ in parity.
-            let input = index == 0 ? source : scratch[(index - 1) % 2]
-            let output = index == last ? result : scratch[index % 2]
+            let input = index == 0 ? source : pingPong[(index - 1) % 2]
+            let output = index == last ? result : pingPong[index % 2]
             var kind = pass.kind
             var params = pass.params
             encoder.setTexture(input, index: 0)
@@ -117,45 +152,62 @@ final class EffectPipelines {
         return true
     }
 
-    /// Gives the intermediates back.
+    /// Gives every size's intermediates back.
     ///
     /// **The memory-warning valve could not reach these until this existed, and that was a hole in
-    /// it.** `CompositorMetalEngine.purge` drops its pool and its upload cache and called itself
-    /// correctness-neutral — which it is — but the two textures below are the same kind of pure
+    /// it.** `CompositorMetalEngine.purge` drops its pools and its upload cache and called itself
+    /// correctness-neutral — which it is — but the textures below are the same kind of pure
     /// memoization and were not in it, so a purge on a 4096² canvas gave back the pool's 192 MiB and
     /// went on holding 128 MiB of intermediates for an effect nobody was looking at. The next
-    /// `encode` reallocates them, exactly as it does after a canvas resize.
+    /// `encode` reallocates them.
     func releaseIntermediates() {
         scratch.removeAll(keepingCapacity: true)
-        scratchSize = (0, 0)
+        scratchOrder.removeAll(keepingCapacity: true)
     }
 
-    /// Makes sure `count` intermediates exist at this size, allocating only what is missing.
+    /// Gives one size's intermediates back — **the engine's half of keeping the two maps one set.**
+    /// Called when `CompositorMetalEngine` evicts that size's scratch pool, so the intermediates for
+    /// a size nothing composites at any more do not outlive the pool they were allocated beside.
+    func releaseIntermediates(at size: TexturePixelSize) {
+        scratch.removeValue(forKey: size)
+        scratchOrder.removeAll { $0 == size }
+    }
+
+    /// The sizes whose intermediates are resident, least recently used first. For the engine's
+    /// accounting and for the tests that pin the bound.
+    var residentIntermediateSizes: [TexturePixelSize] { scratchOrder }
+
+    /// Makes sure `count` intermediates exist at this size, allocating only what is missing, and
+    /// hands back the pair the caller ping-pongs through. Nil is an allocation this device declined.
     ///
     /// **A single-pass effect asks for zero and this returns immediately** — no allocation, no
     /// bookkeeping, nothing held. That is how the eight per-pixel effects go on costing exactly what
-    /// they cost before multi-pass existed.
-    ///
-    /// A size change discards the pool rather than keeping both sizes: a canvas has one size at a time,
-    /// and holding a stale 64 MB pair against the chance the artist resizes back is the memory §5.3
-    /// says not to spend.
-    private func intermediates(_ count: Int, width: Int, height: Int) -> Bool {
-        guard count > 0 else { return true }
-        if scratchSize != (width, height) {
-            scratch.removeAll(keepingCapacity: true)
-            scratchSize = (width, height)
-        }
-        while scratch.count < min(count, 2) {
+    /// they cost before multi-pass existed, and it is why a zero request does not touch the LRU
+    /// order: an effect that holds nothing at a size should not evict a size that does.
+    private func intermediates(_ count: Int, width: Int, height: Int) -> [MTLTexture]? {
+        guard count > 0 else { return [] }
+        let key = TexturePixelSize(width: width, height: height)
+        var textures = scratch[key] ?? []
+        while textures.count < min(count, 2) {
             // `.private`: an intermediate is written and read by the GPU and never by the CPU, so it
             // has no business in shared storage the way the engine's own byte round-trip does.
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                 pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
             descriptor.usage = [.shaderRead, .shaderWrite]
             descriptor.storageMode = .private
-            guard let texture = device.makeTexture(descriptor: descriptor) else { return false }
-            scratch.append(texture)
+            guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+            textures.append(texture)
         }
-        return true
+        scratch[key] = textures
+        scratchOrder.removeAll { $0 == key }
+        scratchOrder.append(key)
+        // Evict from the other end, and never the size just asked for — a limit of one would
+        // otherwise throw away the pair this call is about to return.
+        while scratchOrder.count > Self.residentSizeLimit, let victim = scratchOrder.first, victim != key {
+            scratch.removeValue(forKey: victim)
+            scratchOrder.removeFirst()
+        }
+        return textures
     }
 }
 

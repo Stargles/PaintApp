@@ -202,6 +202,25 @@ final class RasterLayerTexture: DabTarget {
         return context != nil
     }
 
+    /// Roughly what this texture retains, for `UndoHistory`'s byte-budgeted trimming — the
+    /// `RasterLayerTexture` counterpart of `CanvasManager.approximateImageCost`, and the reason a
+    /// whole-cel undo step stopped costing zero.
+    ///
+    /// **Zero for a blank texture, and that is the load-bearing half.** `context` is nil until the
+    /// first stamp (see `ensureContext`), so a cel that has never been drawn on genuinely retains
+    /// nothing whatever its canvas size claims — charging `pixelWidth × pixelHeight × 4` for one
+    /// would make an empty document look like it was holding the budget. `hasContent` is the same
+    /// question `makeCopy`, `flipped` and the save already ask, and it is deliberately conservative
+    /// in the direction that matters: an allocated context full of transparent pixels reports true
+    /// and is charged, which over-counts rather than losing a buffer that is really resident.
+    ///
+    /// `cachedImage` is not added on top. It is derived from `context` and dropped on every mutation,
+    /// so counting it would charge a memoization that the next edit gives back anyway — the same
+    /// reason `approximateImageCost` charges one image and not its `CGImage` plus its `UIImage`.
+    var approximateCost: Int {
+        hasContent ? pixelWidth * pixelHeight * 4 : 0
+    }
+
     /// Drops the backing bitmap if — and only if — an exact scan proves every pixel's alpha is zero,
     /// answering whether it did. Returns false without touching anything when there is no bitmap or
     /// any pixel is non-transparent.

@@ -185,4 +185,72 @@ final class MaskGuardLogicTests: XCTestCase {
         XCTAssertLessThan(AlphaMask.antialiasHalfWidth, AlphaMask.threshold)
         XCTAssertEqual(mask.coverage(forSourceAlpha: 0), 0)
     }
+
+    // MARK: - The invariant survives a reader on another thread (BUGS.md memory audit item 12)
+
+    /// **The guard can be broken by the reader as well as by the writer, and until 2026-09-01 it
+    /// was.** The two tunables were plain statics written by the tuning sliders on the main actor and
+    /// read by `coverage(forSourceAlpha:)` on whichever queue is compositing — `CanvasView
+    /// .sandwichQueue`, `ProjectStore`'s save queue, and RENDER.md §3.6's baker next. `coverage` read
+    /// them one at a time, so a write landing between the two reads handed it a pair neither the
+    /// slider nor `setTuning` ever produced: threshold 0.1 from the new value with half-width 0.5
+    /// from the old makes `low` negative, and a transparent pixel resolves to partial coverage —
+    /// which is the exact failure the rest of this file exists to prevent, reached from the other
+    /// side. `AlphaMask.Tuning` is one value under one lock, so `coverage` cannot mix two writes.
+    ///
+    /// **This is a race, so its red is probabilistic and its green is not.** With the snapshot in
+    /// place no interleaving can produce a violating pair at all, so the case cannot go flaky-red;
+    /// without it, the sweep below straddles the two extremes of the sliders' own ranges and the
+    /// window is wide (a whole smoothstep between the reads). Run under the thread sanitiser it is
+    /// definitive in both directions.
+    func testCoverageNeverObservesATornTuningWhileTheSlidersAreScrubbed() {
+        let scrubbing = expectation(description: "the tuning sliders have finished scrubbing")
+        // The two ends of the sliders' ranges, chosen because the *mixture* of them is illegal:
+        // (0.1, 0.25) is the tuning this file's header records resolving alpha 0 to 55/255.
+        let extremes: [(Float, Float)] = [(0.9, 0.25), (0.1, 0.0)]
+        DispatchQueue.global(qos: .userInitiated).async {
+            for iteration in 0..<4_000 {
+                let (threshold, halfWidth) = extremes[iteration % extremes.count]
+                AlphaMask.setTuning(threshold: threshold, antialiasHalfWidth: halfWidth)
+            }
+            scrubbing.fulfill()
+        }
+
+        var violations: [String] = []
+        for _ in 0..<20_000 {
+            let coverage = mask.coverage(forSourceAlpha: 0)
+            if coverage != 0 {
+                let seen = AlphaMask.tuning
+                violations.append("coverage \(coverage) at (\(seen.threshold), \(seen.antialiasHalfWidth))")
+            }
+            // Every snapshot must satisfy the invariant on its own, whichever write produced it.
+            let seen = AlphaMask.tuning
+            if !(seen.antialiasHalfWidth <= seen.threshold - AlphaMask.minimumTuningGap) {
+                violations.append("torn pair (\(seen.threshold), \(seen.antialiasHalfWidth))")
+            }
+        }
+        wait(for: [scrubbing], timeout: 30)
+
+        XCTAssertEqual(violations.count, 0,
+                       "A transparent pixel must resolve to no coverage even while another thread is "
+                       + "writing the tuning. First: \(violations.prefix(5).joined(separator: "; "))")
+    }
+
+    /// The three values are one snapshot and there is no second copy of them — the structural half of
+    /// the case above, which a future edit re-introducing separate storage would fail immediately
+    /// rather than probabilistically.
+    func testTheTunablesAndTheGenerationComeFromOneSnapshot() {
+        AlphaMask.setTuning(threshold: 0.4, antialiasHalfWidth: 0.05)
+        let snapshot = AlphaMask.tuning
+        XCTAssertEqual(snapshot.threshold, AlphaMask.threshold)
+        XCTAssertEqual(snapshot.antialiasHalfWidth, AlphaMask.antialiasHalfWidth)
+        XCTAssertEqual(snapshot.generation, AlphaMask.tuningGeneration)
+
+        AlphaMask.threshold = 0.6
+        let next = AlphaMask.tuning
+        XCTAssertEqual(next.generation, snapshot.generation + 1,
+                       "One write, one generation — the counter `MaskResolver.CacheKey` keys on")
+        XCTAssertEqual(next.antialiasHalfWidth, snapshot.antialiasHalfWidth,
+                       "Writing one tunable must carry the other through unchanged, and read it under the same lock")
+    }
 }

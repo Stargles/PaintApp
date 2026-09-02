@@ -119,10 +119,9 @@ extension BlendMode {
 /// shipped, so that consumer now exists**, and it answered the question in a way that made the rule
 /// smaller than expected rather than larger: the pool's occupancy is bounded by *nesting depth*, not
 /// by layer count or by anything the artist can grow without bound, so there is no per-entry
-/// eviction decision to make at all. The only lifetime question left is the canvas size, and
-/// `CompositorMetalEngine` answers it by discarding the whole pool when that changes — the same rule
-/// `EffectPipelines.intermediates` already uses for its ping-pong pair, and for the same reason: a
-/// canvas has one size at a time.
+/// eviction decision to make at all. The lifetime question left is the canvas size, and
+/// `CompositorMetalEngine` answers it by holding **one pool per size** in a bounded LRU map — see
+/// `pools` there for why the older "discard the whole pool when the size changes" rule was wrong.
 ///
 /// What the change buys is measured rather than assumed: a sandwich rebuild is three composites over
 /// one shared snapshot, so a per-composite pool re-allocated two canvas-sized textures three times
@@ -154,6 +153,17 @@ private final class ScratchTexturePool {
     /// stops being the interesting number the moment the pool outlives one frame: what a reader wants
     /// to know is whether *this* frame allocated, and a warm pool's answer is 0.
     private(set) var allocatedThisComposite = 0
+
+    /// The largest walk this pool has served, in bytes — what the upload cache's budget is subtracted
+    /// from, summed over every resident size.
+    ///
+    /// **Per pool rather than per engine, and that is not a refinement but a requirement of the map.**
+    /// One shared mark used to be reset whenever the pool was rebuilt at a new size, so it tracked
+    /// whichever size composited last. With a pool per size nothing rebuilds, so a shared mark would
+    /// have been set by the largest consumer and never lowered again — the 320² thumbnail would go on
+    /// subtracting a 4096² canvas's walk from the upload cache's budget forever. Living on the pool
+    /// makes it die with the textures it accounts for, which is what it always claimed to do.
+    var highWaterBytes = 0
 
     init(device: MTLDevice, width: Int, height: Int) {
         self.device = device
@@ -421,8 +431,8 @@ final class CompositorMetalEngine {
     /// nil), and every byte held here is re-derivable by the rebuild that retries.
     private func purgeLocked() {
         uploads.removeAll()
-        pool = nil
-        walkHighWaterBytes = 0
+        pools.removeAll()
+        poolOrder.removeAll()
         // The intermediates go too, which they did not before `releaseIntermediates` existed — see
         // that method. They are the largest single thing this engine held that a purge could not
         // reach: 128 MiB at 4096², against a memory warning the purge exists to answer.
@@ -482,12 +492,88 @@ final class CompositorMetalEngine {
     /// The cost is that two composites serialise, which they effectively did anyway: they contend for
     /// one GPU and each ends in `waitUntilCompleted`.
     private let lock = NSLock()
-    private var pool: ScratchTexturePool?
+
+    /// One scratch pool per composite size, bounded at `residentPoolSizeLimit`, least recently used
+    /// evicted first.
+    ///
+    /// **This was a single pool discarded whenever the size changed, and that rule cost the live
+    /// canvas its whole working set on every autosave.** `ProjectStore`'s save thumbnail composites
+    /// the same document at `thumbnailBounds` through this same engine (`ProjectStore.swift`, the
+    /// `fittingWithin:` request), so a save alternates two sizes — and under the old rule each one
+    /// threw the other's pool and effect intermediates away: 256 MiB of reallocation at 4096² and a
+    /// cold frame for the artist immediately after, for a 320² picture nobody was drawing on. The
+    /// upload cache had already been corrected for exactly this reason (see `UploadCache.removeAll`,
+    /// "two consumers composite the same document at two sizes"); the pool and the intermediates were
+    /// left on the old rule, and RENDER.md §4 requires them fixed before §3.6's background baker
+    /// arrives as a third consumer.
+    ///
+    /// **The map is bounded and its total respects the same budget one walk is admitted against.**
+    /// Two sizes each holding a budget's worth would be a worse bug than the one this fixes, so
+    /// `makeRoom` evicts other sizes until this walk fits alongside what is left. Three is the number
+    /// of consumers RENDER.md names — the live canvas at the artist's render resolution, the save
+    /// thumbnail, and the baker — and `EffectPipelines.residentSizeLimit` is deliberately the same,
+    /// because the engine drops that map's entry whenever it evicts a pool here.
+    private var pools: [TexturePixelSize: ScratchTexturePool] = [:]
+    /// Least recently used first, so `first` is the eviction victim.
+    private var poolOrder: [TexturePixelSize] = []
     private let uploads = UploadCache()
 
-    /// The largest walk this pool has served — what the upload cache's budget is subtracted from.
-    /// Lives and dies with the pool, because the textures it accounts for do.
-    private var walkHighWaterBytes = 0
+    /// How many sizes' scratch pools are held at once. See `pools`.
+    static let residentPoolSizeLimit = EffectPipelines.residentSizeLimit
+
+    /// The sizes whose scratch pools are resident, least recently used first. For the tests that pin
+    /// the map's bound and its survival across a second consumer's composite; nothing in the render
+    /// path reads it.
+    var residentPoolSizes: [TexturePixelSize] {
+        lock.lock()
+        defer { lock.unlock() }
+        return poolOrder
+    }
+
+    /// What every resident size's walk holds between them — the number subtracted from
+    /// `CompositorBudget.textureBudgetBytes` to give the upload cache its budget, and the number the
+    /// map's invariant is stated in. Same lock as everything else here.
+    var residentPoolHighWaterBytes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return residentPoolHighWaterBytesLocked()
+    }
+
+    private func residentPoolHighWaterBytesLocked(excluding excluded: TexturePixelSize? = nil) -> Int {
+        poolOrder.reduce(0) { total, key in
+            key == excluded ? total : total + (pools[key]?.highWaterBytes ?? 0)
+        }
+    }
+
+    /// Evicts other sizes until this walk can be admitted alongside what is left — **the whole of the
+    /// map's memory rule, in one place.**
+    ///
+    /// Two conditions, and they are different questions. The first is the map's own bound, which
+    /// keeps a long session from accumulating a pool per render resolution the artist has ever
+    /// selected. The second is the budget: `wanted` was already checked against it on its own, so a
+    /// composite that fits can always be made to fit by giving back sizes nobody is compositing at —
+    /// and that is why this evicts rather than declining. Declining a live frame because a save
+    /// thumbnail is still resident would be the size map making things worse than the rule it
+    /// replaced.
+    ///
+    /// Never evicts `size` itself: that is the pool the caller is about to use, and a limit of one
+    /// would otherwise throw it away and rebuild it every frame.
+    private func makeRoom(for size: TexturePixelSize, wanted: Int, budget: Int) {
+        while pools[size] == nil, pools.count >= Self.residentPoolSizeLimit, evictLeastRecentlyUsedPool(other: size) {}
+        while residentPoolHighWaterBytesLocked(excluding: size) + wanted > budget,
+              evictLeastRecentlyUsedPool(other: size) {}
+    }
+
+    /// Drops the least recently used pool that is not `kept`, and the effect intermediates allocated
+    /// beside it — the two maps are one set (see `EffectPipelines.residentSizeLimit`). False when
+    /// there is nothing left to give back.
+    private func evictLeastRecentlyUsedPool(other kept: TexturePixelSize) -> Bool {
+        guard let victim = poolOrder.first(where: { $0 != kept }) else { return false }
+        pools.removeValue(forKey: victim)
+        poolOrder.removeAll { $0 == victim }
+        effects?.releaseIntermediates(at: victim)
+        return true
+    }
 
     func attempt(_ request: RenderRequest) -> MetalCompositor.Attempt {
         let width = Int(request.canvasSize.width.rounded())
@@ -526,7 +612,11 @@ final class CompositorMetalEngine {
         // Cold means the pool has to be built from nothing, so the whole working set is a new
         // allocation; warm means the pool and the intermediates are already resident and the only
         // new canvas-sized thing this frame will ask for is the image `readBack` hands out.
-        let isCold = !(self.pool.map { $0.width == width && $0.height == height } ?? false)
+        //
+        // **This is one of the two things the size map buys directly**: the live canvas's next frame
+        // after a save used to be cold, because the save's own size had evicted it. It is warm now.
+        let size = TexturePixelSize(width: width, height: height)
+        let isCold = pools[size] == nil
         guard CompositorBudget.hasHeadroom(for: isCold ? wanted + canvasBytes : canvasBytes) else {
             lastAdmission = .noHeadroom(wantedBytes: wanted)
             // Give back what is held before declining. The CPU reference is about to composite this
@@ -537,6 +627,25 @@ final class CompositorMetalEngine {
             return .underPressure
         }
         lastAdmission = .admitted
+
+        // Ping-pong rather than one read_write accumulator: `access::read_write` on `rgba8Unorm`
+        // needs the GPU family's read-write texture support, and two scratch textures cost 33.6 MB at
+        // 2048² against a correctness risk on older hardware.
+        //
+        // Kept between composites and **kept per size** — see `pools` for what the old
+        // discard-on-size-change rule cost, and for why the upload cache was corrected out of it
+        // first (`UploadCache.removeAll`) while the pool and the intermediates were left behind.
+        makeRoom(for: size, wanted: wanted, budget: budget)
+        let pool: ScratchTexturePool
+        if let existing = pools[size] {
+            pool = existing
+        } else {
+            pool = ScratchTexturePool(device: device, width: width, height: height)
+            pools[size] = pool
+        }
+        poolOrder.removeAll { $0 == size }
+        poolOrder.append(size)
+
         // The cache gets what the walk does not need. It is the only part of the working set whose
         // absence costs nothing but time (see `UploadCache`), so it is the part that absorbs a tight
         // budget — at zero it simply stops hitting and every upload happens the way it did before the
@@ -547,36 +656,14 @@ final class CompositorMetalEngine {
         // bloom in it, and `below` — everything under the active layer, which can be nothing at all —
         // holds two. Sizing the cache from `below`'s own need would hand it the three textures the
         // pool and the intermediates are *still* sitting on, because neither is freed between the
-        // three. The mark resets with the pool, which is the only point at which those textures
-        // genuinely go away.
-        walkHighWaterBytes = max(walkHighWaterBytes, wanted)
-        uploads.budgetBytes = max(0, budget - walkHighWaterBytes)
-
-        // Ping-pong rather than one read_write accumulator: `access::read_write` on `rgba8Unorm`
-        // needs the GPU family's read-write texture support, and two scratch textures cost 33.6 MB at
-        // 2048² against a correctness risk on older hardware.
+        // three. The mark lives on the pool and dies with it, which is the only point at which those
+        // textures genuinely go away.
         //
-        // Kept between composites now, and discarded outright when the canvas size changes rather
-        // than kept per size: a canvas has one size at a time, so a second pool could only ever be
-        // dead weight — `EffectPipelines.intermediates` makes the same call for the same reason.
-        //
-        // **The upload cache used to be dropped with it, on the grounds that "a canvas has one size
-        // at a time". That stopped being true when `RenderResolution` shipped**, and the correction
-        // matters more than it looks: the live canvas composites at the artist's chosen scale while
-        // `ProjectStore`'s thumbnail composites at its own small, `affordableSize`-bounded size —
-        // never native, since `2f4b737` bounded it to `thumbnailBounds` — so a save landing during a
-        // drawing session alternates the two sizes and the old line wiped every entry each way. The
-        // keys carry the dimensions, so the other size's entries are merely unreachable rather than
-        // wrong — which is precisely what an LRU with a byte budget is for. `trimToBudget` in the
-        // `defer` below is what reclaims them, in the order they stopped being used.
-        let pool: ScratchTexturePool
-        if let existing = self.pool, existing.width == width, existing.height == height {
-            pool = existing
-        } else {
-            pool = ScratchTexturePool(device: device, width: width, height: height)
-            self.pool = pool
-            walkHighWaterBytes = 0
-        }
+        // **Summed over every resident size**, because every resident size is holding its textures
+        // simultaneously — that is what "the total across the map respects the budget" means at the
+        // one place the budget is spent.
+        pool.highWaterBytes = max(pool.highWaterBytes, wanted)
+        uploads.budgetBytes = max(0, budget - residentPoolHighWaterBytesLocked())
         pool.beginComposite()
         defer {
             lastScratchAllocated = pool.allocatedThisComposite

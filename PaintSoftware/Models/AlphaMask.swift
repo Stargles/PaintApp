@@ -67,8 +67,8 @@ struct AlphaMask: Hashable {
     /// `tuningGeneration` — see its doc comment for why that counter is load-bearing rather than
     /// decoration.
     static var threshold: Float {
-        get { storedThreshold }
-        set { setTuning(threshold: newValue, antialiasHalfWidth: storedAntialiasHalfWidth) }
+        get { tuning.threshold }
+        set { updateTuning { (newValue, $0.antialiasHalfWidth) } }
     }
 
     /// Half-width of the smoothstep across `threshold`, in alpha units — **antialiasing only**.
@@ -85,12 +85,41 @@ struct AlphaMask: Hashable {
     /// MASK-TUNE: same story as `threshold` above — `var` for the tuning sliders, shipping default
     /// 0.01, and **kept strictly below `threshold`** by `setTuning`.
     static var antialiasHalfWidth: Float {
-        get { storedAntialiasHalfWidth }
-        set { setTuning(threshold: storedThreshold, antialiasHalfWidth: newValue) }
+        get { tuning.antialiasHalfWidth }
+        set { updateTuning { ($0.threshold, newValue) } }
     }
 
-    private static var storedThreshold: Float = 0.1
-    private static var storedAntialiasHalfWidth: Float = 0.01
+    /// **The two tunables and their generation, read as one value under one lock.**
+    ///
+    /// These were three plain statics until 2026-09-01 (BUGS.md memory audit item 12, RENDER.md §4).
+    /// They are written on the main actor by the mask tuning sliders and read from whichever queue is
+    /// compositing — `CanvasView.sandwichQueue` for the live canvas, `ProjectStore`'s save queue for
+    /// the thumbnail, and RENDER §3.6's baker next — so the plain reads were a data race in the
+    /// language's terms whatever the hardware did with them.
+    ///
+    /// **One value rather than three accessors, because the tear was the sharper half of the bug.**
+    /// `coverage(forSourceAlpha:)` reads the threshold and the half-width to compute one ramp; two
+    /// separately-locked reads could straddle a slider write and produce a `low` above `high` — the
+    /// exact invariant `setTuning` exists to enforce, broken by the reader rather than by the writer.
+    /// Bundling the generation in as well is what lets `MaskResolver.CacheKey` name the pair it
+    /// actually resolved under rather than a counter read at a different instant.
+    struct Tuning: Equatable {
+        let threshold: Float
+        let antialiasHalfWidth: Float
+        /// See `AlphaMask.tuningGeneration`.
+        let generation: Int
+    }
+
+    /// The current tuning, as one consistent snapshot. Every reader on a render queue takes this
+    /// once and works from the value.
+    static var tuning: Tuning {
+        tuningLock.lock()
+        defer { tuningLock.unlock() }
+        return storedTuning
+    }
+
+    private static let tuningLock = NSLock()
+    private static var storedTuning = Tuning(threshold: 0.1, antialiasHalfWidth: 0.01, generation: 0)
 
     /// The gap `setTuning` keeps between the two, and the reason it is a gap rather than zero: at
     /// `antialiasHalfWidth == threshold` the ramp starts at alpha 0, which is exactly the `alpha > 0`
@@ -120,16 +149,32 @@ struct AlphaMask: Hashable {
     /// them" is then a fact of the type rather than of the order the writes happened to arrive in.
     /// `MaskGuardLogicTests` sweeps both write orders over both slider ranges.
     static func setTuning(threshold newThreshold: Float, antialiasHalfWidth newHalfWidth: Float) {
+        updateTuning { _ in (newThreshold, newHalfWidth) }
+    }
+
+    /// `setTuning`'s body, and the read-modify-write both single-value setters need.
+    ///
+    /// **The whole of it is inside one lock, including the read of what the caller did not pass.**
+    /// `threshold`'s setter asks for the current half-width and `antialiasHalfWidth`'s asks for the
+    /// current threshold, so a read outside the lock followed by a write inside it would let two
+    /// slider writes interleave into a pair neither of them asked for — which is the invariant this
+    /// function exists to hold, lost in the plumbing rather than in the arithmetic. `requested` is
+    /// handed the current value for exactly that reason.
+    private static func updateTuning(_ requested: (Tuning) -> (threshold: Float, antialiasHalfWidth: Float)) {
+        tuningLock.lock()
+        defer { tuningLock.unlock() }
+        let current = storedTuning
+        let asked = requested(current)
         // A non-finite write is a caller bug, not a tuning; keep the last good value rather than
         // poisoning every coverage byte with a NaN that traps on its way into `UInt8`.
-        let requestedThreshold = newThreshold.isFinite ? newThreshold : storedThreshold
-        let requestedHalfWidth = newHalfWidth.isFinite ? newHalfWidth : storedAntialiasHalfWidth
+        let requestedThreshold = asked.threshold.isFinite ? asked.threshold : current.threshold
+        let requestedHalfWidth = asked.antialiasHalfWidth.isFinite ? asked.antialiasHalfWidth : current.antialiasHalfWidth
         // Floored one gap above zero so there is always a legal half-width; capped at 1 because the
         // test is on an alpha and nothing above 1 is a different mask.
         let threshold = min(max(requestedThreshold, minimumTuningGap), 1)
-        storedThreshold = threshold
-        storedAntialiasHalfWidth = min(max(requestedHalfWidth, 0), threshold - minimumTuningGap)
-        tuningGeneration += 1
+        storedTuning = Tuning(threshold: threshold,
+                              antialiasHalfWidth: min(max(requestedHalfWidth, 0), threshold - minimumTuningGap),
+                              generation: current.generation + 1)
     }
 
     /// MASK-TUNE: **this is what makes the sliders' cache invalidation real rather than assumed.**
@@ -140,7 +185,7 @@ struct AlphaMask: Hashable {
     /// resolution instead of a `clearCache()` call the UI has to remember to make.
     /// `MaskParityLogicTests.testMutatingTheTuningThresholdInvalidatesTheMaskCache` is the regression
     /// this closes. Costs the shipping path nothing — it never moves off 0 there.
-    private(set) static var tuningGeneration: Int = 0
+    static var tuningGeneration: Int { tuning.generation }
 
     /// The resolved coverage for one source alpha: the threshold test, softened only across the
     /// narrow band above, then inverted if asked.
@@ -155,14 +200,17 @@ struct AlphaMask: Hashable {
     /// `0/0` at exactly `alpha == threshold` and a NaN coverage traps on its way into a byte in
     /// `MaskResolver.resolve`.
     func coverage(forSourceAlpha alpha: Float) -> Float {
-        let low = Self.threshold - Self.antialiasHalfWidth
-        let high = Self.threshold + Self.antialiasHalfWidth
+        // One snapshot, not three static reads: see `Tuning` for why a torn pair is the failure this
+        // guards against rather than a stale one.
+        let tuning = Self.tuning
+        let low = tuning.threshold - tuning.antialiasHalfWidth
+        let high = tuning.threshold + tuning.antialiasHalfWidth
         let smooth: Float
         if high > low {
             let t = min(max((alpha - low) / (high - low), 0), 1)
             smooth = t * t * (3 - 2 * t)
         } else {
-            smooth = alpha > Self.threshold ? 1 : 0
+            smooth = alpha > tuning.threshold ? 1 : 0
         }
         return invert ? 1 - smooth : smooth
     }

@@ -1810,4 +1810,196 @@ final class CompositorParityLogicTests: XCTestCase {
         XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0,
                        "Backgrounding must drop the flatten memo too — same notification, `PixelOps.RasterizeCache.init`'s new observer")
     }
+
+    // MARK: - One scratch pool per size (BUGS.md memory audit item 11, RENDER.md §4)
+
+    /// The pixel size a request will actually be composited at — the same rounding
+    /// `CompositorMetalEngine.attempt` does at its top, so a test can name the key the engine used.
+    private func poolKey(_ request: RenderRequest) -> TexturePixelSize {
+        TexturePixelSize(width: Int(request.canvasSize.width.rounded()),
+                         height: Int(request.canvasSize.height.rounded()))
+    }
+
+    private func compositeThroughMetal(_ request: RenderRequest, _ what: String) {
+        XCTAssertNotNil(Compositor.composite(request), "The GPU walk must render \(what)")
+    }
+
+    /// **A second consumer at a different size used to throw the live canvas's working set away, and
+    /// this is the case that says it does not any more.**
+    ///
+    /// The consumer is real and it runs on a timer: `ProjectStore`'s save thumbnail composites the
+    /// same document through this same engine at `thumbnailBounds` on every autosave. Under the old
+    /// rule — one pool, discarded whole on a size mismatch — that save dropped the pool *and*
+    /// `EffectPipelines`' intermediates, so the artist's next frame reallocated the lot: 256 MiB at
+    /// 4096², for a 320-pixel picture nobody was looking at.
+    ///
+    /// **The third composite is the assertion that matters.** Resident sizes could be made to look
+    /// right by a map that still rebuilt on every use; `lastScratchAllocated == 0` is the engine
+    /// saying it took every texture off a free list, which is only true if the first size's pool
+    /// survived the second size's composite intact.
+    func testASecondConsumersSizeDoesNotEvictTheLiveCanvasesScratchPool() throws {
+        try skipUnlessGPUAvailable()
+        let engine = try XCTUnwrap(CompositorMetalEngine.shared, "Skipped above if nil")
+        Compositor.backend = .metal
+        defer { Compositor.backend = Compositor.defaultBackend }
+
+        let manager = overlappingManager()
+        guard let live = manager.makeRenderRequest(atFrame: 0, includeBackground: true),
+              let thumbnail = manager.makeRenderRequest(atFrame: 0, includeBackground: true,
+                                                        fittingWithin: CGSize(width: 16, height: 16)) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        XCTAssertNotEqual(poolKey(live), poolKey(thumbnail),
+                          "Premise: the two consumers must actually composite at different sizes")
+
+        engine.purge()
+        compositeThroughMetal(live, "the live canvas")
+        XCTAssertEqual(engine.lastAdmission, .admitted,
+                       "A declined composite allocates nothing and would make every count below zero")
+        XCTAssertEqual(engine.residentPoolSizes, [poolKey(live)],
+                       "Control: one composite leaves exactly its own size resident")
+        XCTAssertGreaterThan(engine.lastScratchAllocated, 0, "Control: a cold pool allocates")
+
+        compositeThroughMetal(thumbnail, "the save thumbnail")
+        XCTAssertEqual(engine.residentPoolSizes, [poolKey(live), poolKey(thumbnail)],
+                       "The save's size must join the map rather than replace what the canvas is using")
+
+        compositeThroughMetal(live, "the live canvas again")
+        XCTAssertEqual(engine.lastScratchAllocated, 0,
+                       "The frame after a save must be warm — every texture off the pool's free list, none allocated")
+        XCTAssertEqual(engine.residentPoolSizes, [poolKey(thumbnail), poolKey(live)],
+                       "…and using a size moves it to the most-recently-used end")
+    }
+
+    /// **The map is bounded, and the bound is what stops the fix becoming a leak.**
+    ///
+    /// A pool per size with no limit would accumulate one per render resolution the artist has ever
+    /// selected — the same unbounded-cache shape BUGS.md item 8 files against two other caches. Four
+    /// sizes into a limit of three, and the one that goes is the one nothing has composited at for
+    /// longest.
+    func testTheScratchPoolMapIsBoundedAndEvictsTheLeastRecentlyUsedSize() throws {
+        try skipUnlessGPUAvailable()
+        let engine = try XCTUnwrap(CompositorMetalEngine.shared, "Skipped above if nil")
+        Compositor.backend = .metal
+        defer { Compositor.backend = Compositor.defaultBackend }
+
+        let manager = overlappingManager()
+        let bounds = [CGSize(width: 48, height: 48), CGSize(width: 32, height: 32),
+                      CGSize(width: 24, height: 24), CGSize(width: 16, height: 16)]
+        let requests = bounds.compactMap {
+            manager.makeRenderRequest(atFrame: 0, includeBackground: true, fittingWithin: $0)
+        }
+        XCTAssertEqual(requests.count, bounds.count, "Fixture needs a canvas size")
+        let keys = requests.map(poolKey)
+        XCTAssertEqual(Set(keys).count, bounds.count,
+                       "Premise: four bounds must produce four distinct composite sizes")
+        XCTAssertEqual(bounds.count, CompositorMetalEngine.residentPoolSizeLimit + 1,
+                       "Premise: one more size than the map holds, or nothing is evicted")
+
+        engine.purge()
+        for (request, bound) in zip(requests, bounds) {
+            compositeThroughMetal(request, "the walk at \(Int(bound.width))²")
+        }
+
+        XCTAssertEqual(engine.residentPoolSizes, Array(keys.dropFirst()),
+                       "Three sizes resident, in use order, and the first one composited is the one that went")
+        XCTAssertLessThanOrEqual(engine.residentPoolHighWaterBytes, CompositorBudget.textureBudgetBytes,
+                                 "What the whole map holds must fit the budget one walk is admitted against")
+    }
+
+    /// **The count bound is not the only bound, because two sizes must not each hold a budget's
+    /// worth.** `textureBudgetBytes` is the ceiling on everything this engine keeps at once
+    /// (`CompositorBudget`'s own doc), and it stays static — RENDER.md §4 — so the map is what has to
+    /// yield. A size arriving that cannot fit alongside the resident ones evicts them rather than
+    /// being declined: declining a live frame because a save thumbnail is still warm would be the map
+    /// making things worse than the rule it replaced.
+    ///
+    /// Both requests are built **before** the budget is armed, so `affordableSize` sizes them against
+    /// the device and this measures the engine's own eviction rather than a shrunk request.
+    func testTwoResidentSizesCannotEachHoldABudgetsWorth() throws {
+        try skipUnlessGPUAvailable()
+        let engine = try XCTUnwrap(CompositorMetalEngine.shared, "Skipped above if nil")
+        Compositor.backend = .metal
+        defer {
+            Compositor.backend = Compositor.defaultBackend
+            CompositorBudget.budgetOverrideBytes = nil
+        }
+
+        let manager = overlappingManager()
+        guard let large = manager.makeRenderRequest(atFrame: 0, includeBackground: true),
+              let small = manager.makeRenderRequest(atFrame: 0, includeBackground: true,
+                                                    fittingWithin: CGSize(width: 32, height: 32)) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        let largeWalk = CompositorBudget.textureBytes(for: large.canvasSize) * large.tree.peakCompositeTextures
+        let smallWalk = CompositorBudget.textureBytes(for: small.canvasSize) * small.tree.peakCompositeTextures
+        XCTAssertGreaterThan(smallWalk, 0, "Premise: the small walk must cost something")
+
+        // Room for either walk on its own and not for both — the two-consumer case at the size where
+        // the budget, rather than the entry count, is what has to decide.
+        CompositorBudget.budgetOverrideBytes = largeWalk + smallWalk - 1
+        engine.purge()
+
+        compositeThroughMetal(large, "the large walk")
+        XCTAssertEqual(engine.residentPoolSizes, [poolKey(large)], "Control: the large size is resident alone")
+
+        compositeThroughMetal(small, "the small walk")
+        XCTAssertEqual(engine.residentPoolSizes, [poolKey(small)],
+                       "The large size must be given back — the two do not fit the budget together")
+        XCTAssertLessThanOrEqual(engine.residentPoolHighWaterBytes,
+                                 CompositorBudget.budgetOverrideBytes ?? 0,
+                                 "…and what is left is inside the budget it was evicted to satisfy")
+    }
+
+    // MARK: - The two development seams are read off the render queue (BUGS.md memory audit item 12)
+
+    /// **`Compositor.backend` and `CompositorBudget.budgetOverrideBytes` are written by a test and
+    /// read by a composite that is not on the test's thread**, which is the shape RENDER.md §4 files
+    /// against them: `composite` runs on `CanvasView.sandwichQueue` and on `ProjectStore`'s save
+    /// queue, and both statics were plain stored properties until 2026-09-01.
+    ///
+    /// **What this proves and what it does not.** Every composite below must hand back a picture of
+    /// the requested size whichever backend and budget it happened to observe — a torn `Int?` or a
+    /// half-written enum would surface as a nil, a wrong size, or a crash. That is a smoke test for
+    /// the race and it is honest to say so; what makes the fix real is that both are accessors over a
+    /// lock, and what would make this case definitive is the thread sanitiser, under which the old
+    /// stored properties report on the first interleaving.
+    ///
+    /// It is also the case that would catch a deadlock in those accessors, which is the failure mode
+    /// a lock adds that a plain static does not have: `textureBudgetBytes` reads the override from
+    /// inside the engine's own lock on every admission decision.
+    func testCompositingSurvivesTheBackendAndBudgetSeamsMovingUnderIt() throws {
+        let manager = overlappingManager()
+        guard let request = manager.makeRenderRequest(atFrame: 0, includeBackground: true) else {
+            return XCTFail("Fixture needs a canvas size")
+        }
+        let expected = CGSize(width: CGFloat(Int(request.canvasSize.width.rounded())),
+                              height: CGFloat(Int(request.canvasSize.height.rounded())))
+        defer {
+            Compositor.backend = Compositor.defaultBackend
+            CompositorBudget.budgetOverrideBytes = nil
+        }
+
+        let composited = expectation(description: "the background queue has finished compositing")
+        var wrongSize = 0, missing = 0
+        DispatchQueue.global(qos: .userInitiated).async {
+            for _ in 0..<40 {
+                guard let image = Compositor.composite(request) else { missing += 1; continue }
+                if image.width != Int(expected.width) || image.height != Int(expected.height) { wrongSize += 1 }
+            }
+            composited.fulfill()
+        }
+        // The seams move the whole time, exactly as a suite that arms them from `setUp` does while
+        // another suite's save is still in flight.
+        let backends: [CompositorBackend] = [.coreGraphics, .metal, .automatic]
+        let oneWalk = CompositorBudget.textureBytes(for: request.canvasSize) * request.tree.peakCompositeTextures
+        for iteration in 0..<4_000 {
+            Compositor.backend = backends[iteration % backends.count]
+            CompositorBudget.budgetOverrideBytes = iteration.isMultiple(of: 2) ? nil : oneWalk - 1
+        }
+        wait(for: [composited], timeout: 60)
+
+        XCTAssertEqual(missing, 0, "A composite must never come back nil because a seam moved under it")
+        XCTAssertEqual(wrongSize, 0, "…nor at a size nobody asked for")
+    }
 }
