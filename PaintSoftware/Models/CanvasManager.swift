@@ -1898,8 +1898,10 @@ final class CanvasManager: ObservableObject {
         lastBakePlayhead = currentFrame
 
         baker.isSuspended = suspended
-        baker.syncDirty()
-        baker.kick()
+        // `noteDocumentChanged` rather than `syncDirty()` + `kick()`: they are the same two lines,
+        // and two spellings of one path is what §2.15 calls a peculiarity — the one the tests use
+        // has to be the one the app takes, or the suite pins a path nothing runs.
+        baker.noteDocumentChanged()
     }
 
     // MARK: - Drawing updates

@@ -222,7 +222,8 @@ final class FrameBaker {
     // MARK: - Dirty marking (RENDER §3.6)
 
     /// **The signal, and the only one.** Something in the document may have changed: work out what
-    /// that reaches and start baking.
+    /// that reaches and start baking. `CanvasManager.syncFrameBake` is the app's caller and runs it
+    /// once per canvas reconciliation pass — see there for why that is the cadence.
     ///
     /// See `syncDirty()` for what "work out" means and what it deliberately cannot see.
     func noteDocumentChanged() {
@@ -321,9 +322,9 @@ final class FrameBaker {
             }
 
             // The ring is filled from the store rather than from the `CGImage` just composited, and
-            // the re-read is deliberate: it is the *decode* path playback will take, so filling the
-            // ring any other way would leave that path unexercised until stage 4d. One LZ4 decode is
-            // single-digit milliseconds at 2048² (§3.5) and this queue is `.utility`.
+            // the re-read is deliberate: it is the *decode* path playback actually takes, so filling
+            // the ring any other way would leave that path unexercised by every bake. One LZ4 decode
+            // is single-digit milliseconds at 2048² (§3.5) and this queue is `.utility`.
             if wantsRing, outcome.isOnDisk, let decoded = store.loadDecoded(key) {
                 self?.ring.insert(decoded, for: key.fileName)
             }
