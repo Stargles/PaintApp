@@ -193,6 +193,12 @@ final class ShapeOverlayView: UIView {
         // Same reasoning as the layer hosts: native-resolution raster content should zoom blocky
         // rather than blurred, so the preview matches the stroke it turns into.
         previewView.layer.magnificationFilter = .nearest
+        // And the same reasoning in the other direction (`LayerHostView.init` carries the
+        // measurement): this preview is canvas-resolution ink, and matching the stroke it turns
+        // into means matching how that stroke is filtered when the canvas is zoomed out too — a
+        // preview that is invisible at fit zoom and then appears on lift is the worse half of the
+        // mismatch this line closes.
+        previewView.layer.minificationFilter = .trilinear
         previewView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(previewView)
         NSLayoutConstraint.activate([

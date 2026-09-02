@@ -1191,6 +1191,79 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertFalse(small.isNull)
     }
 
+    /// **A straight line gets a band, not a square.** The window used to outset *both* axes by half
+    /// its own **longer** side, so the first growth squared the box and every growth after doubled
+    /// it in both directions whatever shape the stroke was. MEASURED on the owner's iPad 9 at
+    /// 16383²: one screen inch of pen travel held an 8617×8611 window — 283.1 MB — for a stroke
+    /// whose own bounding box was 54 KB, against a 183.7 MB compositor budget (BUGS.md and
+    /// PERFORMANCE.md §9 item 1, both 2026-09-02).
+    ///
+    /// The fixture is that gesture in miniature: 1212 points of travel, 12 points thick, well inside
+    /// an 8192² canvas so the canvas clamp plays no part in the answer. Under the per-axis rule the
+    /// window is 4576×140; under the max-of-both-axes rule it is 4576×4564, and **both assertions
+    /// below fail on that number** — the first by 4564 against a bound of 268, the second by 20.9 M
+    /// pixels against 1.36 M. Reverting the expression in `StrokeScratch.window(containing:)` is
+    /// what this test is for, so it asserts the *shape* rather than an exact size: the growth
+    /// margin's arithmetic may legitimately be re-tuned, and a band that is still a band should
+    /// survive that.
+    func testAStraightStrokeGetsABandAndNotASquare() {
+        let scratch = StrokeScratch(canvasSize: CGSize(width: 8192, height: 8192), role: .additive)
+        for x in stride(from: CGFloat(3000), through: 4200, by: 4) {
+            scratch.stampCircle(at: CGPoint(x: x, y: 4000), radius: 6, color: .black,
+                                alpha: 1, hardness: 1, blendMode: .normal)
+        }
+        guard let dirty = scratch.dirtyRect else {
+            return XCTFail("Dabs were stamped, so the scratch has a dirty rect")
+        }
+        XCTAssertEqual(dirty, CGRect(x: 2994, y: 3994, width: 1212, height: 12),
+                       "The ink is a long thin band, which is the whole premise of the test")
+        XCTAssertTrue(scratch.windowRect.contains(dirty),
+                      "Every dab has to be inside the window it was stamped into")
+
+        // The axis the stroke never left keeps the extent the first dab gave it, plus at most the
+        // couple of `minimumPad` outsets a wobble at the ends could have bought.
+        XCTAssertLessThan(scratch.windowRect.height, dirty.height + 4 * 64,
+                          "The stroke never moved vertically, so the window may not have grown "
+                          + "vertically. Window is \(scratch.windowRect) round ink of \(dirty)")
+        // And the area follows the ink's own band rather than the square of the stroke's length.
+        let band = Int(dirty.width) * (Int(dirty.height) + 128)
+        XCTAssertLessThan(scratch.windowPixelCount, band * 8,
+                          "A window round a 1212×12 stroke may not cost the square of its length. "
+                          + "Window is \(scratch.windowRect) = \(scratch.windowPixelCount) px "
+                          + "against \(band) px of banded ink")
+    }
+
+    /// The case the per-axis rule has to get right and the one BUGS.md flags as the thing to check:
+    /// a stroke that runs along one axis and then turns ninety degrees. The union carries the turn,
+    /// so the second axis now grows geometrically from *its* own extent — several reallocations,
+    /// each of them asymmetric, each copying the old window into a new one that is bigger in one
+    /// direction only. That is the intended behaviour rather than a regression to the square, and
+    /// what has to be proved about it is not its size but that it loses nothing: the commit must
+    /// still be byte-for-byte what stamping into the cel would have been.
+    func testAStrokeThatTurnsThroughNinetyDegreesCommitsExactly() {
+        let size = CGSize(width: 512, height: 512)
+        let direct = RasterLayerTexture(size: size)
+        let viaScratch = RasterLayerTexture(size: size)
+        let scratch = StrokeScratch(canvasSize: size, role: .additive)
+
+        var dabs: [CGPoint] = []
+        for x in stride(from: CGFloat(100), through: 400, by: 6) { dabs.append(CGPoint(x: x, y: 150)) }
+        for y in stride(from: CGFloat(150), through: 400, by: 6) { dabs.append(CGPoint(x: 400, y: y)) }
+        for point in dabs {
+            direct.stampCircle(at: point, radius: 7, color: .black, alpha: 0.8, hardness: 0.9)
+            scratch.stampCircle(at: point, radius: 7, color: .black, alpha: 0.8, hardness: 0.9,
+                                blendMode: .normal)
+        }
+        XCTAssertGreaterThan(scratch.windowRect.height, 250,
+                            "The turn is what grows the second axis — if it did not, the fixture is "
+                            + "not exercising the case")
+        scratch.commit(into: viaScratch)
+
+        assertPixelsMatch(viaScratch, direct,
+                          "A stroke that turns must carry every dab through every asymmetric "
+                          + "reallocation the turn causes")
+    }
+
     /// **A dab that lands where the pixels cannot go is dropped, not chased.** Off-canvas ink is
     /// storable nowhere and displayable nowhere, so growing the window to reach it would be a
     /// straight loss — and on a stroke flicked past the edge it would be a large one.

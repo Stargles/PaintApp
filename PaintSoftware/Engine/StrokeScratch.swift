@@ -15,12 +15,17 @@ import CoreGraphics
 /// and grows to contain the stroke, clamped to the canvas. Nothing here is proportional to canvas
 /// area — the peak is the stroke's own bounding box plus its growth margin.
 ///
-/// **Growth is geometric, and it has to be.** Outsetting by a fixed pad would reallocate every time
-/// the pen left it, which is O(n²) copying over a long stroke; the pad is half the current window's
-/// longer side (floored at `minimumPad`), so each reallocation at least half-again enlarges the box
-/// and the total copying is O(final area). A stroke that really does cross the whole canvas ends up
-/// with a canvas-sized window, which is correct rather than a failure: that stroke's dirty rect *is*
-/// the canvas.
+/// **Growth is geometric per axis, and it has to be — on both counts.** Outsetting by a fixed pad
+/// would reallocate every time the pen left the window, which is O(n²) copying over a long stroke.
+/// So an axis the stroke has left is outset by half of *that axis's* own extent (floored at
+/// `minimumPad`): it at least doubles, the box's area at least doubles with it, and the total
+/// copying over a stroke is O(final area) rather than O(area × reallocations). An axis the stroke
+/// has **not** left is not outset at all — it needs no headroom, and the guarantee above is already
+/// paid by the axis that moved. That is what keeps a straight line's window a band as wide as the
+/// line rather than a square as big as its length: a horizontal inch of pen travel at 16383² is a
+/// window of about 4300×133 rather than 8617×8611, 2 MB rather than 283 MB. A stroke that really
+/// does cross the whole canvas ends up with a canvas-sized window, which is correct rather than a
+/// failure: that stroke's dirty rect *is* the canvas.
 ///
 /// **The two roles are the same distinction `VectorScratchRole` draws, and they decide how the
 /// window reaches the screen as well as how it commits.** `.additive` holds only this stroke's own
@@ -184,17 +189,33 @@ final class StrokeScratch: DabTarget {
                                                         height: canvasSize.height.rounded()))
         guard !rect.intersection(canvas).isNull else { return nil }
         let wanted = windowRect.isNull ? rect : windowRect.union(rect)
-        // Half the longer side, so each reallocation at least half-again enlarges the box: the
-        // copying over a whole stroke sums to O(final area) instead of O(area × reallocations).
-        let pad = max(Self.minimumPad, max(windowRect.isNull ? 0 : windowRect.width,
-                                           windowRect.isNull ? 0 : windowRect.height) / 2)
-        let next = wanted.insetBy(dx: -pad, dy: -pad).integral.intersection(canvas)
+        let held = windowRect.isNull ? CGSize.zero : windowRect.size
+        let next = wanted.insetBy(dx: -Self.pad(held: held.width, wanted: wanted.width),
+                                  dy: -Self.pad(held: held.height, wanted: wanted.height))
+            .integral.intersection(canvas)
         guard next.width >= 1, next.height >= 1 else { return nil }
         let grown = RasterLayerTexture(size: next.size, image: contents(for: next))
         carriedDirtyRect = dirtyRect
         windowRect = next
         window = grown
         return grown
+    }
+
+    /// How far one axis is outset when the window is rebuilt. `held` is what that axis measures now
+    /// (zero before the first dab), `wanted` what it has to measure to contain the union.
+    ///
+    /// **Zero for an axis the union did not exceed**, which is the whole difference between a band
+    /// and a square: a horizontal stroke never leaves the window vertically, so its height is
+    /// whatever the first dab set and stays there. Nothing is given up by that — the reallocation
+    /// was forced by the *other* axis, that axis at least doubles, so the box's area at least
+    /// doubles and the amortisation the class comment argues for is already paid.
+    ///
+    /// Half of `held` rather than of `wanted` when it does grow, so a fast pen that jumps far past
+    /// the window in one batch gets its jump plus half the old box rather than half the new one —
+    /// still at least a doubling of the axis, without paying for headroom the size of the leap.
+    private static func pad(held: CGFloat, wanted: CGFloat) -> CGFloat {
+        guard wanted > held else { return 0 }
+        return max(minimumPad, held / 2)
     }
 
     /// What a freshly grown window starts life holding: the backdrop under it, then whatever the

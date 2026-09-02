@@ -43,6 +43,20 @@ final class LayerHostView: UIView {
         fillImageView.layer.magnificationFilter = .nearest
         bakedImageView.layer.magnificationFilter = .nearest
 
+        // **Minification is the opposite problem and takes the opposite answer.** Zoomed *out* — and
+        // the canvas opens at `fitScale`, so that is where the artist starts — these views are
+        // canvas-resolution images sampled down to a few hundred points. Core Animation's default
+        // `.linear` has no mipmap chain, so past about 2:1 it degenerates to point sampling: it reads
+        // one texel per screen pixel and ink thinner than the sampling step is not faint, it is
+        // absent. MEASURED (BUGS.md, PERFORMANCE.md §9 item 2, 2026-09-02): the default 5-point brush
+        // leaves 800 pixels of ink at 2048² and **zero** at 4096², 8192² and 12288²; box-filtered it
+        // survives at every size. `.trilinear` is the mipmapped filter, so a thin line reaches the
+        // screen as a faint line instead of as nothing. It costs Core Animation a mipmap chain,
+        // about a third more texture per displayed layer, which `CompositorBudget` does not account
+        // for — see PERFORMANCE.md §9 item 5, which is that gap in general.
+        fillImageView.layer.minificationFilter = .trilinear
+        bakedImageView.layer.minificationFilter = .trilinear
+
         // `fillImageView` shows the *live* fill-tool preview (a committed fill is flattened into the
         // cel's `raster` tier), and it is **the topmost of the three**: LASSO_FILL.md §2a — a fill
         // covers everything already on the layer, earlier fills and this layer's own ink alike. The

@@ -334,6 +334,11 @@ final class StrokeCanvasView: UIView {
         imageView.isUserInteractionEnabled = false
         // Native-resolution raster content should zoom blocky, not bilinearly blurred.
         imageView.layer.magnificationFilter = .nearest
+        // And should *shrink* filtered, which is a different setting and the opposite answer — see
+        // `LayerHostView.init`, which carries the measurement. This is the view the artist's own
+        // finished ink reaches the screen through, so it is the one that decides whether a stroke
+        // on a 4096² canvas seen at fit zoom exists at all.
+        imageView.layer.minificationFilter = .trilinear
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
         // `.scaleToFill` with a frame set to the scratch's own window rect — which is integral in
@@ -350,6 +355,14 @@ final class StrokeCanvasView: UIView {
         scratchView.contentMode = .scaleToFill
         scratchView.isUserInteractionEnabled = false
         scratchView.layer.magnificationFilter = .nearest
+        // **The live stroke needs the mipmap as much as the committed one does, and it is the half
+        // the artist notices.** The scratch is canvas-resolution ink like everything else here, so
+        // un-mipmapped minification loses it identically — which is what "the brushstroke disappears
+        // when you draw" describes. Its contents change per touch-move batch, so unlike its siblings
+        // this view pays a mipmap rebuild per frame of the gesture; the chain is built over the
+        // *window*, which `StrokeScratch` bounds to the stroke's own box (a few MB, not a canvas),
+        // and it is a third on top of an upload this view was already doing every frame.
+        scratchView.layer.minificationFilter = .trilinear
         scratchView.isHidden = true
         addSubview(scratchView)
         // Identical to `scratchView` in every respect and for every one of its reasons — same sample
@@ -358,6 +371,7 @@ final class StrokeCanvasView: UIView {
         floatView.contentMode = .scaleToFill
         floatView.isUserInteractionEnabled = false
         floatView.layer.magnificationFilter = .nearest
+        floatView.layer.minificationFilter = .trilinear
         floatView.isHidden = true
         floatView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(floatView)

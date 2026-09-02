@@ -14,6 +14,7 @@
 		58B36EA2057AB4AC581C9075 /* GraphEditorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BF6162E590EAC39FAD19850 /* GraphEditorUITests.swift */; };
 		5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */; };
 		1A9F57B072F694769F0C5DD0 /* PaintSoftware/Engine/StrokeInterruption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */; };
+		8C0BF01CF73A324C8433C720 /* CanvasLayerFilterLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61971EE24E783BEF3AAAAF0F /* CanvasLayerFilterLogicTests.swift */; };
 		47F81C7C56AE76400C4BE5C5 /* CanvasPresentationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */; };
 		7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */; };
 		0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */; };
@@ -230,6 +231,7 @@
 		2BF6162E590EAC39FAD19850 /* GraphEditorUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GraphEditorUITests.swift; sourceTree = "<group>"; };
 		B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasPresentation.swift; sourceTree = "<group>"; };
 		31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeInterruption.swift; sourceTree = "<group>"; };
+		61971EE24E783BEF3AAAAF0F /* CanvasLayerFilterLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasLayerFilterLogicTests.swift; sourceTree = "<group>"; };
 		B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasPresentationLogicTests.swift; sourceTree = "<group>"; };
 		C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleCodingLogicTests.swift; sourceTree = "<group>"; };
 		CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeInterruptionLogicTests.swift; sourceTree = "<group>"; };
@@ -509,6 +511,7 @@
 				75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
 				7F1EC86AAE98AC9EBE2C6C01 /* TextBakeCharacterizationTests.swift */,
+				61971EE24E783BEF3AAAAF0F /* CanvasLayerFilterLogicTests.swift */,
 				B84E9C18BC6823B1F417C4A6 /* CanvasPresentationLogicTests.swift */,
 				C8265909A7823ABAAE589106 /* SampleCodingLogicTests.swift */,
 				CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */,
@@ -838,6 +841,7 @@
 				7F1EC86AAE98AC9EBE2C6C02 /* TextBakeCharacterizationTests.swift in Sources */,
 				5B37DD56067E721840FE9C66 /* PaintSoftware/Models/CanvasPresentation.swift in Sources */,
 				1A9F57B072F694769F0C5DD0 /* PaintSoftware/Engine/StrokeInterruption.swift in Sources */,
+				8C0BF01CF73A324C8433C720 /* CanvasLayerFilterLogicTests.swift in Sources */,
 				47F81C7C56AE76400C4BE5C5 /* CanvasPresentationLogicTests.swift in Sources */,
 				7435F6263150317A338B9515 /* SampleCodingLogicTests.swift in Sources */,
 				0FB5ABF6D334C584ADFA946E /* StrokeInterruptionLogicTests.swift in Sources */,

@@ -1112,6 +1112,13 @@ struct CanvasView: UIViewRepresentable {
             // pixels the host views keep crisp.
             view.contentMode = .scaleToFill
             view.layer.magnificationFilter = .nearest
+            // Mipmapped the other way, for the reason `LayerHostView.init` measures: at rest this
+            // view carries `composite(full)`, so it is how the *whole picture* reaches the screen
+            // and an un-mipmapped minification loses thin ink out of all of it at once. Set here
+            // rather than beside `magnificationFilter`'s reduced-composite switch in
+            // `updateSandwich` because the answer does not depend on the composite's size —
+            // `.trilinear` is right at full resolution and righter below it.
+            view.layer.minificationFilter = .trilinear
             view.isUserInteractionEnabled = false
             view.isHidden = true
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -2278,6 +2285,13 @@ struct CanvasView: UIViewRepresentable {
         static func makeOnionSkinView() -> UIImageView {
             let view = UIImageView()
             view.contentMode = .scaleAspectFit
+            // A ghost is artwork — neighbouring frames' drawings — so it loses thin ink to
+            // un-mipmapped minification exactly the way the live layers do (`LayerHostView.init`
+            // carries the measurement), and a reference the artist cannot see is not a reference.
+            // This is the one place `.trilinear` also agrees with the *magnification* choice: the
+            // ghost is deliberately left on the default bilinear there (see `makeUIView`), because
+            // a soft ghost is what is wanted at both ends of the zoom.
+            view.layer.minificationFilter = .trilinear
             view.isUserInteractionEnabled = false
             view.translatesAutoresizingMaskIntoConstraints = false
             return view

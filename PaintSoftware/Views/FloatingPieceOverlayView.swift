@@ -32,6 +32,16 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         isHidden = true
 
         pieceImageView.isUserInteractionEnabled = false
+        // The piece is the artist's own ink, lifted at canvas resolution, so it is minified onto the
+        // screen like every other artwork view and loses thin lines the same way without a mipmap
+        // chain — `LayerHostView.init` carries the measurement. Ink that vanishes while it is being
+        // dragged and comes back on commit is the sharpest form of that defect.
+        //
+        // Only the minification half. This view carries the artist's own resize drag as a
+        // `CGAffineTransform` on top of the container's zoom, so what it is magnified by is a
+        // deliberate scale of the content rather than the zoom the layer hosts' `.nearest` contract
+        // is written about — a question this line does not answer and does not need to.
+        pieceImageView.layer.minificationFilter = .trilinear
         addSubview(pieceImageView)
 
         outlineView.backgroundColor = .clear
