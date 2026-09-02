@@ -457,10 +457,12 @@ it is the dependency order.
    legitimately want one request over every leaf, and stage 4 is what moves the live canvas.
 4. **Store and scheduler** (§3.5, §3.6): the key, the LZ4 files, the ring, the queue, the live canvas and play served
    from it, the timeline's baked-frame indication. MEASURE the compression ratio and the decode time on the device.
-   **4a is done, 2026-09-02** — `FrameBakeKey` and `FrameBakeStore`, both pure and headless; §3.5 above carries the
-   three places its own text was wrong and the two ratios. Still owed by this stage: the ring, the queue, the live
-   canvas and play reading from the store, the timeline indication, and the device measurement of both the ratio and
-   the decode time.
+   **4a is done, 2026-09-02** — `Engine/FrameBakeKey.swift` and `Engine/FrameBakeStore.swift`, both pure and
+   headless; §3.5 above carries the three places its own text was wrong and the two measured ratios.
+   `Engine/BakeQueue.swift` and `Engine/DecodedFrameRing.swift` landed the same day from the other half of the
+   stage. **Still owed: the wiring** — the queue driving the store, the live canvas and play reading frames out of
+   it, the timeline's baked-frame indication, and the device measurement of both the ratio and the decode time on
+   the owner's "UI Test" document.
 5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.
 6. **Export** (§3.9).
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
