@@ -356,6 +356,39 @@ final class RasterLayerTexture: DabTarget {
         return image
     }
 
+    /// `renderToUIImage()` for the display path, which can say "no image" in a way the drawing
+    /// paths cannot — the exact twin of `VectorCanvas.renderIfNonEmpty()`, and for the same reason.
+    /// A blank tier's image view is left holding nil rather than a canvas-sized sheet of
+    /// transparency: Core Animation skips the layer's contents entirely, and — the point — the
+    /// sheet is never minted. At 16383² that sheet is 1 GiB spent to show nothing.
+    func renderIfNonEmpty() -> UIImage? {
+        hasContent ? renderToUIImage() : nil
+    }
+
+    /// A copy of the pixels in `rect` (canvas point space), or nil when the rect is degenerate or
+    /// off-canvas. A blank tier answers with a transparent patch of that size, which is what its
+    /// pixels are.
+    ///
+    /// **Deliberately not memoized, and that is the whole reason this is not
+    /// `PixelOps.copiedSubimage(of: renderToUIImage(), …)`.** `CGBitmapContextCreateImage` shares
+    /// the context's buffer copy-on-write, so a full-canvas image left alive — which is exactly
+    /// what `renderToUIImage`'s `cachedImage` memo does — makes the next stamp duplicate the whole
+    /// canvas. Here the full image lives only for the length of the draw below and is gone before
+    /// anything can write again, so the cost is the patch and nothing else.
+    func copiedPatch(in rect: CGRect) -> UIImage? {
+        let clamped = rect.integral.intersection(CGRect(origin: .zero, size: size))
+        guard clamped.width >= 1, clamped.height >= 1 else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        let format = PixelOps.transparentFormat()
+        format.preferredRange = .standard
+        return UIGraphicsImageRenderer(size: clamped.size, format: format).image { _ in
+            guard let context, let cg = context.makeImage() else { return }
+            UIImage(cgImage: cg, scale: 1, orientation: .up)
+                .draw(at: CGPoint(x: -clamped.minX, y: -clamped.minY))
+        }
+    }
+
     /// An independent duplicate: same pixels and stroke count, but its own identity, so drawing
     /// into one instance never affects the other. Needed anywhere a `Cel` used to rely on
     /// `PKDrawing`'s value semantics (duplicating/splitting a cel) — this is a class, not a struct,
@@ -492,6 +525,23 @@ final class RasterLayerTexture: DabTarget {
         // ctx is flipped to top-left, so UIImage.draw lands right-side up (same as `setContents`).
         UIGraphicsPushContext(ctx)
         patch.draw(in: rect, blendMode: .copy, alpha: 1)
+        UIGraphicsPopContext()
+        cachedImage = nil
+        version += 1
+    }
+
+    /// Composites `patch` over the region starting at `origin`, source-over, leaving what is already
+    /// there showing through the patch's transparent pixels. The twin of `restore(patch:at:)` above
+    /// and chosen by `StrokeScratch.commit(into:)`: a paint stroke's scratch holds only the stroke's
+    /// own ink, and source-over is associative, so drawing it here is pixel-identical to having
+    /// stamped every dab straight into this texture.
+    func composite(patch: UIImage, at origin: CGPoint) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = ensureContext() else { return }
+        // ctx is flipped to top-left, so UIImage.draw lands right-side up (same as `setContents`).
+        UIGraphicsPushContext(ctx)
+        patch.draw(in: CGRect(origin: origin, size: patch.size))
         UIGraphicsPopContext()
         cachedImage = nil
         version += 1

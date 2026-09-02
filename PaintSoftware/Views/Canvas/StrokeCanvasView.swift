@@ -83,26 +83,25 @@ final class StrokeCanvasView: UIView {
     /// Resolved once at touch-down and held for the whole gesture rather than re-asked at lift, so a
     /// playhead move mid-drag can't silently switch which target the stroke commits to.
     private var inBetweenCelID: UUID?
-    /// Reverts this stroke's raster changes to the pre-stroke snapshot, used when the hold timer
-    /// detects a smart shape and the partial stroke is replaced by the shape overlay.
-    func revertStrokeToSnapshot() {
-        guard let raster, let snap = strokeBeforeSnapshot else { return }
-        raster.reset(to: snap.image, strokeCount: snap.count)
+    /// Throws the in-progress stroke away so the shape overlay can replace it, on either tier —
+    /// used when the hold timer detects a smart shape part-way through a drag.
+    ///
+    /// **One method for both tiers because there is nothing left to tell them apart.** The raster
+    /// half used to restore a pre-stroke snapshot of the whole cel, because a raster stroke was
+    /// stamped straight into the cel's own bitmap and had to be un-stamped; it stamps into a
+    /// `StrokeScratch` now, exactly as the vector half always did, so dropping the scratch *is* the
+    /// revert and the cel was never touched. What remains tier-specific is only the gesture
+    /// bookkeeping a vector stroke carries.
+    func discardStrokeInProgress() {
+        guard scratch != nil else { return }
+        endScratch()
+        if vectorCanvas != nil {
+            currentVectorSamples = []
+            vectorElementsBeforeSnapshot = nil
+            inBetweenCelID = nil
+        }
         lastStampPoint = nil
         refreshDisplay()
-        strokeBeforeSnapshot = nil
-        shapeFollowingTouch = true
-    }
-
-    /// Discards the in-progress vector stroke scratch so the shape overlay replaces it.
-    func revertVectorStrokeToSnapshot() {
-        guard vectorCanvas != nil else { return }
-        endVectorScratch()
-        currentVectorSamples = []
-        lastStampPoint = nil
-        refreshDisplay()
-        vectorElementsBeforeSnapshot = nil
-        inBetweenCelID = nil
         shapeFollowingTouch = true
     }
 
@@ -147,7 +146,6 @@ final class StrokeCanvasView: UIView {
     /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
     /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
     private var eraserFootprintLayer: CAShapeLayer?
-    private var strokeBeforeSnapshot: (image: UIImage?, count: Int)?
     /// The last position actually stamped, so `stampPath(to:)` lays down evenly-spaced stamps
     /// between input samples rather than one dot per sample — otherwise a fast drag draws a gappy
     /// line that a bucket fill can leak through.
@@ -197,21 +195,25 @@ final class StrokeCanvasView: UIView {
     /// triggers a SwiftUI repaint; without this guard a baked shape or undone fill stays stale
     /// on screen until an unrelated edit happens to call `refreshDisplay()`.
     private var displayedRasterVersion: Int = -1
-    /// Live-preview raster for the in-progress vector stroke (nil except mid-stroke).
+    /// The in-progress stroke's own drawing surface, on either tier (nil except mid-stroke).
+    ///
+    /// **Windowed, not canvas-sized** — see `StrokeScratch`, which is where the 16k-canvas crash
+    /// was. Both tiers stamp into this and neither touches the layer's own pixels until lift: a
+    /// vector stroke commits as geometry, a raster stroke as one `commit(into:)` of the window.
     ///
     /// **Clearing this clears the scratch layer, and that is enforced here rather than left to
-    /// callers.** `scratchView` holds a `UIImage` rendered from this texture, so a path that dropped
-    /// the texture without also emptying the view would leave the last preview frame on screen with
+    /// callers.** `scratchView` holds a `UIImage` rendered from this scratch, so a path that dropped
+    /// it without also emptying the view would leave the last preview frame on screen with
     /// nothing left to update or remove it — a ghost stroke sitting over the committed art, immune
     /// to undo, until some unrelated edit happened to refresh the layer. Every release currently
-    /// goes through `endVectorScratch` and every one of those is followed by `refreshDisplay()`, so
+    /// goes through `endScratch` and every one of those is followed by `refreshDisplay()`, so
     /// this is belt and braces; it is here because the failure it prevents is silent, permanent, and
     /// looks to the artist like corrupted artwork rather than like a bug in a preview.
-    private var vectorScratch: RasterLayerTexture? {
-        didSet { if vectorScratch == nil { showScratch(nil) } }
+    private var scratch: StrokeScratch? {
+        didSet { if scratch == nil { showScratch(nil) } }
     }
 
-    /// How `vectorScratch` relates to the canvas's own render, which differs per tool and — for the
+    /// How `scratch` relates to the canvas's own render, which differs per tool and — for the
     /// eraser — per mode. Set once in `beginVectorStroke` and read by `refreshDisplay` through
     /// `VectorPreviewPlan`, where the three roles' behaviour and the tests that pin it live.
     private var vectorScratchRole: VectorScratchRole = .overlay
@@ -293,17 +295,21 @@ final class StrokeCanvasView: UIView {
         imageView.layer.magnificationFilter = .nearest
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
-        // Every one of these has to match `imageView`'s exactly, and each for its own reason rather
-        // than out of symmetry. `.scaleToFill` plus identical constraints put the two on the same
-        // sample grid, which is what makes "filter each, then composite" agree with "composite, then
-        // filter" under magnification. `.nearest` is the same crispness contract the rest of the
-        // canvas keeps (see `LayerHostView`) — a bilinear scratch over a nearest base would show the
-        // live stroke softening at high zoom and then snapping sharp on lift.
+        // `.scaleToFill` with a frame set to the scratch's own window rect — which is integral in
+        // canvas points, and this view's coordinates *are* canvas points — puts the window on the
+        // same sample grid as `imageView`, which is what makes "filter each, then composite" agree
+        // with "composite, then filter" under magnification. `.nearest` is the same crispness
+        // contract the rest of the canvas keeps (see `LayerHostView`) — a bilinear scratch over a
+        // nearest base would show the live stroke softening at high zoom and then snapping sharp on
+        // lift.
+        //
+        // **Frame-positioned rather than pinned to the edges like its siblings, and that is the
+        // display half of `StrokeScratch`.** The scratch is the size of the stroke, not of the
+        // canvas, so it is shown where the stroke is.
         scratchView.contentMode = .scaleToFill
         scratchView.isUserInteractionEnabled = false
         scratchView.layer.magnificationFilter = .nearest
         scratchView.isHidden = true
-        scratchView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scratchView)
         // Identical to `scratchView` in every respect and for every one of its reasons — same sample
         // grid, same crispness contract — added after it so the lifted piece floats over the hole it
@@ -322,11 +328,7 @@ final class StrokeCanvasView: UIView {
             imageView.topAnchor.constraint(equalTo: topAnchor),
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
             imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scratchView.topAnchor.constraint(equalTo: topAnchor),
-            scratchView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scratchView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scratchView.trailingAnchor.constraint(equalTo: trailingAnchor)
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
         strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
@@ -389,13 +391,16 @@ final class StrokeCanvasView: UIView {
         guard vectorFloatBase == nil else { return }
         displayedRasterVersion = raster?.version ?? -1
         guard let vectorCanvas else {
-            showScratch(nil)
-            imageView.image = raster?.renderToUIImage()
+            // `renderIfNonEmpty` rather than `renderToUIImage`: a blank tier's canvas-sized sheet of
+            // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
+            let base = raster?.renderIfNonEmpty()
+            if imageView.image !== base { imageView.image = base }
+            showScratch(scratch)
             return
         }
         displayedVectorVersion = vectorCanvas.version
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
-                                                    hasScratch: vectorScratch != nil,
+                                                    hasScratch: scratch != nil,
                                                     hasInterpolationImage: interpolationImage != nil)
         // At an in-between the cel's own canvas is empty, so the interpolated frame wins the base
         // slot — and it must, or an in-between would display as nothing now that an empty canvas
@@ -404,15 +409,14 @@ final class StrokeCanvasView: UIView {
         switch plan.base {
         case .interpolation: base = interpolationImage
         case .committedRender: base = vectorCanvas.renderIfNonEmpty()
-        case .scratch: base = vectorScratch?.renderToUIImage()
         }
         // Identity-checked because `renderIfNonEmpty()` is memoized on the canvas's `version` and an
         // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
         // hands back the *same* image, and re-assigning it would put a Core Animation contents
         // change on the frame for nothing.
         if imageView.image !== base { imageView.image = base }
-        showScratch(plan.showsScratchLayer ? vectorScratch?.renderToUIImage() : nil)
-        if plan.publishesLivePreviewFrame { livePreviewFrames += 1 }
+        showScratch(plan.showsScratchLayer ? scratch : nil)
+        if plan.showsScratchLayer { livePreviewFrames += 1 }
     }
 
     // MARK: - The lasso move's floating piece
@@ -475,16 +479,62 @@ final class StrokeCanvasView: UIView {
         refreshDisplay()
     }
 
-    /// Puts `image` in the scratch layer, or empties and hides it when nil.
+    /// Shows `scratch` over the layer at its own window rect, or empties and hides the layer when
+    /// nil.
     ///
     /// Hidden rather than merely emptied so Core Animation skips the layer outright, and
     /// identity-guarded so the overwhelmingly common call — `nil` when it is already nil, once per
-    /// layer per SwiftUI pass — is a pointer comparison. That guard is what keeps `.replacement` and
-    /// `.none` at the one canvas-sized operation they had before this layer existed.
-    private func showScratch(_ image: UIImage?) {
+    /// layer per SwiftUI pass — is a pointer comparison.
+    ///
+    /// **A `.replacing` scratch stands in for the layer's picture inside its window, so the base is
+    /// punched out under it.** An erase lowers alpha, and Core Animation composites siblings
+    /// source-over: left showing through, the layer's own ink would fill the punch straight back in
+    /// and the artist would drag the eraser across their line and see nothing happen. Before this
+    /// was a window, the punch was applied to a canvas-sized *copy* of the render which then
+    /// replaced the base outright — correct, and 1 GiB at 16383² for a stroke a few hundred points
+    /// long.
+    private func showScratch(_ scratch: StrokeScratch?) {
+        let image = scratch?.image
+        setBaseHole(scratch.flatMap { $0.replacesBase ? $0.windowRect : nil })
         guard scratchView.image !== image else { return }
+        if let scratch, image != nil { scratchView.frame = scratch.windowRect }
         scratchView.image = image
         scratchView.isHidden = image == nil
+    }
+
+    /// Cuts `rect` out of the layer's own picture, or puts it back whole when nil.
+    ///
+    /// An even-odd path over the whole canvas plus the hole is the least machinery that expresses
+    /// "everything except this rectangle" — a mask layer covers what it is given and hides the rest,
+    /// so anything smaller than the canvas would hide the artwork. The mask is only ever installed
+    /// while a `.replacing` scratch is live, which is a vector eraser in Modes 1 and 2 or a raster
+    /// eraser, and is removed the moment the stroke lifts.
+    ///
+    /// **The window's edge is a seam and it is a sub-pixel one.** The base is masked to fractional
+    /// alpha along a boundary the window then draws over at full alpha, so semi-transparent ink can
+    /// read a shade darker on the one screen pixel where they meet, at zoom levels that do not put
+    /// the boundary on a pixel edge. It is the same class of difference the two sibling layers
+    /// already accept under minification (see `scratchView`), it lives in the growth margin rather
+    /// than under the eraser, and it is gone at lift.
+    private func setBaseHole(_ rect: CGRect?) {
+        guard let rect else {
+            imageView.layer.mask = nil
+            return
+        }
+        let canvas = CGRect(origin: .zero, size: vectorCanvas?.size ?? raster?.size ?? bounds.size)
+        let path = CGMutablePath()
+        path.addRect(canvas)
+        path.addRect(rect)
+        let mask = (imageView.layer.mask as? CAShapeLayer) ?? {
+            let created = CAShapeLayer()
+            created.fillRule = .evenOdd
+            // No implicit animation: the hole must be under the eraser, not chasing it.
+            created.actions = ["path": NSNull(), "bounds": NSNull(), "position": NSNull()]
+            imageView.layer.mask = created
+            return created
+        }()
+        mask.frame = canvas
+        mask.path = path
     }
 
     /// **The retagging gesture.** While interpolate mode is on and a motion group is armed from its
@@ -575,18 +625,20 @@ final class StrokeCanvasView: UIView {
         if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
         shapeFollowingTouch = false
-        // **Nil for a tier with no bitmap, which is every cel's first stroke.** The snapshot's image
-        // is the state undo returns to, and "nothing was there" is expressed by the nil this tuple
-        // already accepts — `revertStrokeToSnapshot` and `registerWholeImageRasterUndo` both hand it
-        // to `reset(to:)`, which clears. Asking the texture instead would hand back the shared 1×1
-        // (`RasterLayerTexture.renderToUIImage()`), which is the right answer to *draw* and the wrong
-        // one to crop an undo patch out of.
-        strokeBeforeSnapshot = (raster.hasContent ? raster.renderToUIImage() : nil, raster.strokeCount)
         raster.beginStroke()
+        // The eraser's window has to start from the cel's own pixels because `.destinationOut` can
+        // only take away what is there; a paint stroke's holds its own ink and nothing else. The
+        // backdrop is the already-resident render, never a second one, and nil for a blank tier —
+        // which is the touch-down that used to mint a canvas-sized sheet of transparency and
+        // memoize it, before the first dab was even visible.
+        let scratch = StrokeScratch(canvasSize: raster.size,
+                                    role: isEraser ? .replacing(backdrop: raster.renderIfNonEmpty())
+                                                   : .additive)
+        self.scratch = scratch
         lastStampPoint = nil
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
-        stampPath(to: input.position, pressure: input.pressure, into: raster)
+        stampPath(to: input.position, pressure: input.pressure, into: scratch)
         refreshDisplay()
     }
 
@@ -604,7 +656,6 @@ final class StrokeCanvasView: UIView {
             }
             moveVectorStroke(touch, event); return
         }
-        guard let raster else { return }
         // Reverted by smart-shape detection: don't stamp, but still fan out to `onStrokeMoved`.
         if shapeFollowingTouch {
             for sample in event.coalescedTouches(for: touch) ?? [touch] {
@@ -613,10 +664,11 @@ final class StrokeCanvasView: UIView {
             }
             return
         }
+        guard let scratch else { return }
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let input = StrokeInput(touch: sample, in: self)
             let smoothed = stabilizer.update(rawPoint: input.position)
-            stampPath(to: smoothed, pressure: input.pressure, into: raster)
+            stampPath(to: smoothed, pressure: input.pressure, into: scratch)
             onStrokeMoved?(VectorSample(x: input.position.x, y: input.position.y, pressure: input.pressure), input.timestamp)
         }
         refreshDisplay()
@@ -645,22 +697,36 @@ final class StrokeCanvasView: UIView {
     ///   through. When absent, the stroke simply ends at the last sample that arrived, which is the
     ///   honest answer: nothing here can recover samples UIKit never delivered.
     private func commitRasterStroke(finalSample: (position: CGPoint, pressure: CGFloat)?) {
-        guard let raster, let before = strokeBeforeSnapshot else { return }
+        guard let raster, let scratch else { return }
         if let finalSample {
-            stampPath(to: finalSample.position, pressure: finalSample.pressure, into: raster)
+            stampPath(to: finalSample.position, pressure: finalSample.pressure, into: scratch)
         }
         if let clipPath = selectionClipPath {
-            // Revert pixels outside the selection before the undo snapshot is captured, so
-            // undo/redo only ever sees the already-clipped result.
-            let clipped = PixelOps.maskedComposite(base: before.image, overlay: raster.renderToUIImage(), insidePath: clipPath)
-            raster.reset(to: clipped, strokeCount: raster.strokeCount)
+            // Drop what the stroke put outside the selection before it reaches the cel, so undo/redo
+            // only ever sees the already-clipped result. In the scratch's own window — this used to
+            // be a canvas-sized `PixelOps.maskedComposite` of the whole cel against a whole-cel
+            // pre-stroke snapshot, which is two more canvases per stroke than the clip needs.
+            scratch.clip(to: clipPath)
         }
+        let beforeCount = raster.strokeCount
         raster.endStroke()
+        // The rect the stroke touched, outset by a pixel so fractional dab edges aren't lost, and
+        // read from the *scratch* — the cel's own dirty rect stays empty because no dab was ever
+        // stamped into it.
+        // Clamped here rather than inside the crop, because the same rect is the patches' origin
+        // when undo puts them back and an off-edge stroke would otherwise restore offset.
+        let dirty = scratch.dirtyRect?.insetBy(dx: -1, dy: -1).integral
+            .intersection(CGRect(origin: .zero, size: raster.size))
+        // Taken before the commit and after it, from the cel itself: a patch each, never a canvas.
+        let beforePatch = dirty.flatMap { raster.copiedPatch(in: $0) }
+        scratch.commit(into: raster)
+        endScratch()
         lastStampPoint = nil
         refreshDisplay()
-        let after = (raster.renderToUIImage(), raster.strokeCount)
-        registerRasterUndo(raster: raster, from: before, to: after)
-        strokeBeforeSnapshot = nil
+        if let dirty, let beforePatch, let afterPatch = raster.copiedPatch(in: dirty) {
+            registerRasterUndo(raster: raster, in: dirty, before: beforePatch, after: afterPatch,
+                               fromCount: beforeCount, toCount: raster.strokeCount)
+        }
         onStrokeEnded?()
     }
 
@@ -733,83 +799,47 @@ final class StrokeCanvasView: UIView {
                 vectorCanvas.elements = before
                 vectorCanvas.bumpVersion()
             }
-            endVectorScratch()
             currentVectorSamples = []
             vectorElementsBeforeSnapshot = nil
             vectorContentChanged = false
             // A local edit is only recorded at lift, which a cancel never reaches.
             inBetweenCelID = nil
-        } else if let raster, let snapshot = strokeBeforeSnapshot {
-            // No `endStroke()` here — that would count a stroke being thrown away.
-            raster.reset(to: snapshot.image, strokeCount: snapshot.count)
-            strokeBeforeSnapshot = nil
         }
+        // Dropping the scratch *is* the rollback on both tiers: the cel's pixels were never
+        // touched. No `endStroke()` either — that would count a stroke being thrown away.
+        endScratch()
         lastStampPoint = nil
         refreshDisplay()
         onStrokeCancelled?()
     }
 
     /// Registers one step on the global `CanvasManager.history`, storing only the region the stroke
-    /// touched (`raster.strokeDirtyRect`) rather than two whole-canvas images — on a 4000×4000
-    /// canvas that used to cost ~128 MB per stroke against a 300 MB budget, i.e. two undoable
-    /// strokes total. The rect is outset by a pixel so fractional dab edges aren't lost. Patches
-    /// replace pixels via `.copy` blend, not composite, since undo must be able to remove ink.
-    /// Falls back to whole-image snapshots if the dirty rect is unavailable.
+    /// touched rather than two whole-canvas images — on a 4000×4000 canvas that used to cost
+    /// ~128 MB per stroke against a 300 MB budget, i.e. two undoable strokes total. Patches replace
+    /// pixels via `.copy` blend, not composite, since undo must be able to remove ink.
+    ///
+    /// **There is no whole-image fallback any more, and nothing lost one.** It existed for a stroke
+    /// whose dirty rect was unavailable or whose crops failed; `commitRasterStroke` now takes both
+    /// patches from the cel itself around a rect the scratch always has, and a stroke with no dirty
+    /// rect drew nothing and has nothing to undo.
     ///
     /// Labelled `.erase` rather than `.brushStroke` when `isEraser`, matching the vector path's own
     /// `registerVectorUndo` — both are the same drag gesture through `BrushStamper`, so the raster
     /// side undoing an erase and reporting "brush stroke" would be exactly the label mismatch
     /// `HistoryActionLabel`'s doc warns a `String` parameter can't catch.
-    private func registerRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
-        guard let afterImage = to.image, let dirty = raster.strokeDirtyRect else {
-            registerWholeImageRasterUndo(raster: raster, from: from, to: to)
-            return
-        }
-        // Clamped against the *texture*, not against the before-image: the two are the same rect
-        // whenever there is a before-image, and it is the only one available when there is not.
-        let rect = dirty.insetBy(dx: -1, dy: -1).integral
-            .intersection(CGRect(origin: .zero, size: raster.size))
-        guard rect.width >= 1, rect.height >= 1 else {
-            registerWholeImageRasterUndo(raster: raster, from: from, to: to)
-            return
-        }
-        // **A nil before-image is a tier that had no bitmap at touch-down** — every cel's first
-        // stroke — and the state to return to is transparency of the patch's own shape.
-        // `restore(patch:at:)` copies rather than composites, so putting one back clears the region
-        // exactly. The alternative is the whole-image fallback below, and that would put a
-        // canvas-sized pair in the history for the *first* stroke on every new cel, which on an
-        // animation (a new cel per frame) is the whole budget.
-        let beforePatch = from.image.map { PixelOps.copiedSubimage(of: $0, in: rect) }
-            ?? PixelOps.transparentImage(size: rect.size)
-        guard let beforePatch, let afterPatch = PixelOps.copiedSubimage(of: afterImage, in: rect) else {
-            registerWholeImageRasterUndo(raster: raster, from: from, to: to)
-            return
-        }
+    private func registerRasterUndo(raster: RasterLayerTexture, in rect: CGRect,
+                                    before: UIImage, after: UIImage,
+                                    fromCount: Int, toCount: Int) {
         let origin = rect.origin
-        let beforeCount = from.count, afterCount = to.count
-        let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
+        let cost = CanvasManager.approximateImageCost(before) + CanvasManager.approximateImageCost(after)
         canvasManager?.recordUndo(label: isEraser ? .erase : .brushStroke, cost: cost, undo: { [weak self] in
-            raster.restore(patch: beforePatch, at: origin)
-            raster.setStrokeCount(beforeCount)
+            raster.restore(patch: before, at: origin)
+            raster.setStrokeCount(fromCount)
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         }, redo: { [weak self] in
-            raster.restore(patch: afterPatch, at: origin)
-            raster.setStrokeCount(afterCount)
-            self?.refreshDisplay()
-            self?.onStrokeEnded?()
-        })
-    }
-
-    /// The pre-5.5 behaviour, kept as the fallback for the cases above.
-    private func registerWholeImageRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
-        let cost = CanvasManager.approximateImageCost(from.image) + CanvasManager.approximateImageCost(to.image)
-        canvasManager?.recordUndo(label: isEraser ? .erase : .brushStroke, cost: cost, undo: { [weak self] in
-            raster.reset(to: from.image, strokeCount: from.count)
-            self?.refreshDisplay()
-            self?.onStrokeEnded?()
-        }, redo: { [weak self] in
-            raster.reset(to: to.image, strokeCount: to.count)
+            raster.restore(patch: after, at: origin)
+            raster.setStrokeCount(toCount)
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         })
@@ -825,7 +855,7 @@ final class StrokeCanvasView: UIView {
     /// samples, so there is no geometry to conserve on this path — filtering its input would buy
     /// nothing and would change the ink a raster stroke lays down, which is the one thing this work
     /// is not allowed to do. The gate belongs where samples are kept: `recordVectorSample`.
-    private func stampPath(to point: CGPoint, pressure: CGFloat, into target: RasterLayerTexture) {
+    private func stampPath(to point: CGPoint, pressure: CGFloat, into target: DabTarget) {
         guard let last = lastStampPoint else {
             BrushStamper.stampDab(into: target, at: point, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
             lastStampPoint = point
@@ -857,13 +887,16 @@ final class StrokeCanvasView: UIView {
         vectorScratchRole = Self.scratchRole(isEraser: isEraser,
                                              mode: inBetweenCelID != nil ? .erase : vectorEraserMode)
         // Mode 1 previews by punching into a copy of what's already on screen — at an in-between
-        // that's the evaluated frame, not the (empty) canvas.
-        vectorScratch = {
+        // that's the evaluated frame, not the (empty) canvas. The copy is of the window only, and
+        // the backdrop it copies from is the render already on screen (`renderIfNonEmpty`, memoized
+        // on the canvas's version) rather than a second one: this used to be two canvas-sized
+        // buffers at touch-down, 2 GiB at 16383².
+        scratch = {
             if case .replacement = vectorScratchRole {
-                return RasterLayerTexture.load(from: interpolationImage ?? vectorCanvas.render(),
-                                               size: vectorCanvas.size)
+                return StrokeScratch(canvasSize: vectorCanvas.size,
+                                     role: .replacing(backdrop: interpolationImage ?? vectorCanvas.renderIfNonEmpty()))
             }
-            return RasterLayerTexture.empty(size: vectorCanvas.size)
+            return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive)
         }()
         currentVectorSamples = []
         lastStampPoint = nil
@@ -899,7 +932,7 @@ final class StrokeCanvasView: UIView {
     }
 
     private func moveVectorStroke(_ touch: UITouch, _ event: UIEvent) {
-        guard vectorScratch != nil else { return }
+        guard scratch != nil else { return }
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let input = StrokeInput(touch: sample, in: self)
             // Smoothing is per mode, not per tool: a cut belongs exactly where the finger passed,
@@ -940,7 +973,7 @@ final class StrokeCanvasView: UIView {
             onStrokeEnded?()
             return
         }
-        guard let vectorCanvas, vectorScratch != nil else { return }
+        guard let vectorCanvas, scratch != nil else { return }
         // The lift point bypasses both the stabilizer (`handleEnd` explains why) and the sample
         // gate. Artists decelerate into the end of a stroke, so its last samples each fail the
         // travel test on their own; without this the stroke would stop short of where the pen did.
@@ -995,10 +1028,10 @@ final class StrokeCanvasView: UIView {
             }
         }
 
-        // Recorded before `endVectorScratch` resets the role and before `refreshDisplay` runs.
+        // Recorded before `endScratch` resets the role and before `refreshDisplay` runs.
         Self.lastVectorGestureTrace = "\(vectorScratchRole.traceName),\(livePreviewFrames)"
 
-        endVectorScratch()
+        endScratch()
         currentVectorSamples = []
         lastStampPoint = nil
         refreshDisplay()
@@ -1038,10 +1071,11 @@ final class StrokeCanvasView: UIView {
         canvasManager.recordLocalEdit(canvasSpaceStroke: stroke, forCel: celID, inLayer: layerID)
     }
 
-    /// Releases the live-preview scratch. Mode 1's is a full canvas-sized copy of the layer's
-    /// render, so dropping it keeps that allocation per-stroke rather than per-layer.
-    private func endVectorScratch() {
-        vectorScratch = nil
+    /// Releases the stroke's scratch and everything else that only exists while a gesture is in
+    /// flight. Called on every exit from a stroke — lift, interruption, cancel, and the smart-shape
+    /// revert — so the window's pixels live no longer than the stroke that needed them.
+    private func endScratch() {
+        scratch = nil
         vectorScratchRole = .overlay
         lastPreviewSample = nil
         previewCuts = [:]
@@ -1126,7 +1160,7 @@ final class StrokeCanvasView: UIView {
         // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) a
         // `.destinationOut` punch into a copy of the layer, or (Mode 2) the doomed spans punched out
         // of that same copy. Mode 3 has no scratch content — it has already cut for real.
-        guard let scratch = vectorScratch, !isNoScratchRole else { return }
+        guard let scratch, !isNoScratchRole else { return }
         if isEraser, vectorEraserMode == .cutPoints, inBetweenCelID == nil, let vectorCanvas {
             previewCutSpans(to: point, pressure: pressure, in: vectorCanvas, into: scratch)
         } else {
@@ -1158,7 +1192,7 @@ final class StrokeCanvasView: UIView {
     /// segment erases only when both its ends are inside. A sample that is the first inside one
     /// after an excluded stretch starts a new run, and previews as the lone dab that run will be.
     private func previewCutSpans(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
-                                 into scratch: RasterLayerTexture) {
+                                 into scratch: StrokeScratch) {
         let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
         let previous = lastPreviewSample
         lastPreviewSample = sample

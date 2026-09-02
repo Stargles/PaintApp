@@ -2578,11 +2578,7 @@ struct CanvasView: UIViewRepresentable {
             guard let shape else { return }
 
             // Revert the partial stroke painted during the hold period.
-            if host.strokeView.vectorCanvas != nil {
-                host.strokeView.revertVectorStrokeToSnapshot()
-            } else {
-                host.strokeView.revertStrokeToSnapshot()
-            }
+            host.strokeView.discardStrokeInProgress()
 
             canvasManager.beginInteractiveShape(shape, samples: samples)
             updateShapeOverlay()

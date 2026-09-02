@@ -91,6 +91,7 @@
 		DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */; };
 		DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */; };
 		DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */; };
+		F0E93626C7BE622D801362A5 /* PaintSoftware/Engine/StrokeScratch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */; };
 		DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */; };
 		DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */; };
 		DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */; };
@@ -305,6 +306,7 @@
 		DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushStamper.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/MetalFillEngine.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterLayerTexture.swift; sourceTree = "<group>"; };
+		10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeScratch.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeInput.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VectorLayer.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CanvasManager.swift; sourceTree = "<group>"; };
@@ -622,6 +624,7 @@
 				5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */,
 				EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */,
 				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
+				10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */,
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
@@ -907,6 +910,7 @@
 				DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */,
 				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,
 				DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */,
+				F0E93626C7BE622D801362A5 /* PaintSoftware/Engine/StrokeScratch.swift in Sources */,
 				DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */,
 				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,
 				DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */,

@@ -14,13 +14,13 @@ enum VectorScratchRole {
     /// A paint stroke: the scratch holds only this stroke's ink, shown *over* the canvas render. The
     /// canvas itself is untouched until lift.
     case overlay
-    /// Mode 1: the scratch starts as a copy of the canvas render and dabs punch `.destinationOut`
-    /// into it, replacing the canvas render for the stroke's duration — the raster eraser's own code
-    /// path applied to the vector layer's pixels.
+    /// Modes 1 and 2: the scratch starts as a copy of the canvas render *inside its own window* and
+    /// dabs punch `.destinationOut` into it, standing in for the canvas render over that window for
+    /// the stroke's duration — the raster eraser's own code path applied to the vector layer's
+    /// pixels. `StrokeCanvasView.showScratch` punches the base out under it; see `StrokeScratch`.
     case replacement
-    /// Modes 2 and 3: nothing is drawn into the scratch. Mode 3 commits during the drag and Mode 2
-    /// on lift, so the canvas render alone is truth, and skipping the scratch avoids a canvas-sized
-    /// allocation/composite per touch sample.
+    /// Mode 3: nothing is drawn into the scratch. It commits during the drag, so the canvas render
+    /// alone is truth and a scratch would show what is already on screen.
     case none
 
     /// Name used in `StrokeCanvasView.lastVectorGestureTrace`.
@@ -50,11 +50,14 @@ enum VectorScratchRole {
 /// the scratch goes in its own slot above it. A future edit cannot reintroduce the per-dab bitmap
 /// without changing this type, which is a conspicuous thing to do.
 ///
-/// **The two one-operation roles are the risk, not the win.** `.replacement` and `.none` were
-/// already paying one canvas-sized render per refresh and neither may pay more now. They are pinned
-/// by `showsScratchLayer == false` here and by `VectorPreviewPlanLogicTests`, because a regression
-/// there is not slow ink — it is Mode 1 previewing something other than the punched copy, which is
-/// the artist erasing and seeing nothing until they lift.
+/// **`.replacement` reaches the screen through the scratch layer too, since 2026-09-01.** It used to
+/// win the base slot outright, because its scratch was a canvas-sized copy of the render with the
+/// stroke's holes punched in and so *was* the whole picture. The scratch is a window over the
+/// stroke's own dirty rect now (`StrokeScratch`), which cannot fill the base slot — so the base is
+/// the committed render, as it is for every other role, and the window sits above it with the base
+/// punched out underneath. `.none` is the one role that shows no second layer, and a regression
+/// there or in `.replacement` is not slow ink: it is the artist erasing and seeing nothing happen
+/// until they lift. `VectorPreviewPlanLogicTests` pins both.
 struct VectorPreviewPlan: Equatable {
 
     /// Which single image fills the base slot. Exactly one, always — never a composite of two.
@@ -65,9 +68,6 @@ struct VectorPreviewPlan: Equatable {
         /// `VectorCanvas.renderIfNonEmpty()` — the committed content, memoized on the canvas's
         /// `version` and therefore free to re-read across a stroke that has not committed yet.
         case committedRender
-        /// `.replacement` only: the scratch already holds a copy of the render with this stroke's
-        /// holes punched in, and it *is* the display.
-        case scratch
     }
 
     var base: Base
@@ -75,47 +75,30 @@ struct VectorPreviewPlan: Equatable {
     /// Whether the scratch is handed to its own layer above the base for Core Animation to
     /// composite. False means the scratch contributes nothing to this refresh — **not** that it is
     /// flattened into the base, which is no longer a thing this type can say.
-    var showsScratchLayer: Bool
-
-    /// Whether this refresh published a live-preview frame, i.e. whether it moves
-    /// `StrokeCanvasView.livePreviewFrames` and so the second field of `lastVectorGestureTrace`.
     ///
-    /// **`.overlay` counts as of 2026-08-20 and did not before.** It was excluded when the counter
-    /// was for proving Mode 1's punched copy reached the screen during a drag, and an overlay had no
-    /// equivalent claim to prove. It does now: the overlay's ink reaches the screen through a
-    /// *second layer* rather than through the base image, and "the scratch layer was updated
-    /// repeatedly during the drag" is the only thing about that path an XCUITest can observe at all
-    /// — `press(forDuration:thenDragTo:)` blocks the test thread for the gesture's whole duration,
-    /// so every screenshot it can take is post-lift. `VectorEraserUITests` asserts the count for
-    /// both roles, and `.none` still publishes zero.
-    var publishesLivePreviewFrame: Bool
+    /// **This is also the live-preview frame count**, i.e. it is what moves
+    /// `StrokeCanvasView.livePreviewFrames` and so the second field of `lastVectorGestureTrace`.
+    /// The two were separate fields while `.replacement` published a frame through the base slot
+    /// rather than through the scratch layer; now that every role that draws draws through the
+    /// scratch layer they are the same question, and a second field that could only ever repeat this
+    /// one would be a place for them to disagree. "The scratch layer was updated repeatedly during
+    /// the drag" is the only thing about the live path an XCUITest can observe at all —
+    /// `press(forDuration:thenDragTo:)` blocks the test thread for the gesture's whole duration, so
+    /// every screenshot it can take is post-lift. `VectorEraserUITests` asserts the count for both
+    /// drawing roles, and `.none` still publishes zero.
+    var showsScratchLayer: Bool
 
     /// The whole of `refreshDisplay`'s vector branch, as arithmetic.
     ///
-    /// `hasInterpolationImage && !hasScratch` used to be an early return of its own. It is folded in
-    /// here deliberately, not dropped: the `base` it produced was `interpolation`, which is exactly
-    /// what the general case below produces for the same inputs, since a non-nil interpolation image
-    /// always wins the base slot and a nil scratch always fails the overlay test. `forEveryCombination`
-    /// in the logic tests walks all twelve (role × scratch × interpolation) inputs so the claim is
-    /// checked rather than reasoned about.
+    /// **The base slot no longer depends on the role at all**, which is what the window made
+    /// possible: an in-between frame if there is one, the committed render otherwise, for every
+    /// role including `.replacement`. `forEveryCombination` in the logic tests walks all twelve
+    /// (role × scratch × interpolation) inputs so that is checked rather than reasoned about.
     static func forVectorLayer(role: VectorScratchRole,
                                hasScratch: Bool,
                                hasInterpolationImage: Bool) -> VectorPreviewPlan {
-        // Mode 1: the punched copy replaces the display outright. Checked before the base is chosen
-        // because it is the one role whose base is neither the canvas nor the in-between.
-        if role == .replacement, hasScratch {
-            return VectorPreviewPlan(base: .scratch,
-                                     showsScratchLayer: false,
-                                     publishesLivePreviewFrame: true)
-        }
         let base: Base = hasInterpolationImage ? .interpolation : .committedRender
-        guard role == .overlay, hasScratch else {
-            return VectorPreviewPlan(base: base,
-                                     showsScratchLayer: false,
-                                     publishesLivePreviewFrame: false)
-        }
-        return VectorPreviewPlan(base: base,
-                                 showsScratchLayer: true,
-                                 publishesLivePreviewFrame: true)
+        // Every role that draws draws into the scratch layer; `.none` is the one that does not draw.
+        return VectorPreviewPlan(base: base, showsScratchLayer: hasScratch && role != .none)
     }
 }
