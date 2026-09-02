@@ -184,13 +184,22 @@ final class StrokeScratch: DabTarget {
     /// canvas — off-canvas pixels are storable nowhere and displayable nowhere, so a dab there is
     /// dropped rather than growing the box to reach it.
     private func window(containing rect: CGRect) -> RasterLayerTexture? {
-        if let window, windowRect.contains(rect) { return window }
         // Rounded the way `RasterLayerTexture` rounds its own size, so the window's pixel grid is
         // the cel's pixel grid: an integral origin is what makes a dab land on exactly the pixels it
         // would have landed on stamped straight into the cel, sub-pixel phase included.
         let canvas = CGRect(origin: .zero, size: CGSize(width: canvasSize.width.rounded(),
                                                         height: canvasSize.height.rounded()))
-        guard !rect.intersection(canvas).isNull else { return nil }
+        // `rect` itself is never clamped — a dab pressed against the edge has a circle that pokes
+        // past it — but `windowRect` always is (`next` below is `.intersection(canvas)`), and
+        // nothing off-canvas is storable or displayable. So the containment test has to compare
+        // against the part of `rect` that could ever land in the window, or a dab straddling any
+        // edge would fail `contains` forever and rebuild on every single one of them.
+        let onCanvas = rect.intersection(canvas)
+        // Checked before the fast path rather than after: `CGRect.contains(.null)` is true, so a
+        // dab that has drifted entirely off-canvas would otherwise pass containment against
+        // whatever window already exists instead of being dropped.
+        guard !onCanvas.isNull else { return nil }
+        if let window, windowRect.contains(onCanvas) { return window }
         let wanted = windowRect.isNull ? rect : windowRect.union(rect)
         let held = windowRect.isNull ? CGSize.zero : windowRect.size
         let next = wanted.insetBy(dx: -Self.pad(held: held.width, wanted: wanted.width),

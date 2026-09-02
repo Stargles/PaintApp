@@ -101,22 +101,6 @@ editor on the iPad 9", or thirty seconds of the owner's own time.
 3. **A brush size expressed in canvas points is a trap at any large canvas.** Not a bug on its own — see
    PERFORMANCE §9 item 3 — but the reason (a) was invisible to whoever picks the default.
 
-## A stroke dab straddling a canvas edge rebuilds the scratch window on every dab (2026-09-02)
-
-`StrokeScratch.window(containing:)` returns the existing window only when `windowRect.contains(rect)`.
-Once the window has been clamped to the canvas by `.intersection(canvas)`, a dab that straddles that
-edge is never contained — so every such dab takes the reallocation path, recomputes an **identical**
-rect, and pays a full `contents(for:)` copy of the window to produce the buffer it already had.
-
-Pre-existing, and unchanged by the band fix (PERFORMANCE §9 item 1): that change makes each copy much
-cheaper without making them fewer. It bites hardest exactly where the artist draws along an edge, and
-on a large canvas where the window is biggest.
-
-The fix is to return the existing window when the recomputed rect equals `windowRect`, before
-allocating. Two lines. Left out of the band change deliberately, as a second behavioural change to one
-function that the pin for the first would not have covered.
-
-
 ## Memory allocation audit — twelve sites, ranked (2026-09-01)
 
 Found while designing RENDER.md; the compositor's budget is sound and almost nothing else consults it. RENDER §5 stage

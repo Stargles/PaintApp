@@ -1275,6 +1275,29 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertNil(scratch.image)
     }
 
+    /// **A dab pressed against a clamped canvas edge must not force the window to keep regrowing.**
+    /// `window(containing:)`'s fast path tested `windowRect.contains(rect)` against the dab's *raw*
+    /// bounding box, but `windowRect` is always clamped to the canvas — so a dab whose circle pokes
+    /// past the edge (even though everything it can actually paint is already inside the window)
+    /// could never satisfy that test, and every such dab took the rebuild path instead of reusing
+    /// the window it already had. The rebuild path is worse than merely wasteful here: it still uses
+    /// the unclamped `rect` to compute `wanted`, so `wanted` also pokes past the canvas on every
+    /// call, `pad` keeps seeing `wanted > held`, and the window creeps wider and wider — from tens of
+    /// points to the whole canvas — purely from dabs that never put ink anywhere the window didn't
+    /// already cover.
+    func testADabStraddlingAClampedEdgeDoesNotRegrowTheWindowForever() {
+        let scratch = StrokeScratch(canvasSize: CGSize(width: 512, height: 512), role: .additive)
+        // Pressed against the left edge: the dab's own circle (x in [-4, 8]) pokes past x = 0, but
+        // everything it can actually paint (x in [0, 8]) is on-canvas from the very first dab on.
+        for _ in 0..<20 {
+            scratch.stampCircle(at: CGPoint(x: 2, y: 256), radius: 6, color: .black, alpha: 1,
+                                hardness: 1, blendMode: .normal)
+        }
+        XCTAssertLessThan(scratch.windowRect.width, 256,
+                          "Twenty dabs at the same point must not regrow a window whose ink never "
+                          + "moved past x = 8. Window is \(scratch.windowRect)")
+    }
+
     /// **The window's pixels have to be the cel's pixels.** A paint stroke stamped into an
     /// `.additive` scratch and committed must land byte-for-byte where the same dabs stamped
     /// straight into the texture would have — that equality is the whole licence for the live stroke
