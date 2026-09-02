@@ -42,19 +42,18 @@ app, and whoever notices that should come back and say so rather than assuming i
   reads Full and the canvas is full on the "UI Test" canvas they reported it on, and the compression
   ratio measured against that same document rather than against the synthetic fixtures.
 
-- **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
-  half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
-  channel list, `56b0479` + `bccbfc2` the gestures and the marquee.
+- **(21) Keyframes — stages 0 through 3b and stage 5 merged**, spec at [KEYFRAMES.md](KEYFRAMES.md).
+  Stage 5 is the transform channel: a cel or an animation group carries a track of quad poses, ink is
+  posed through `mapping(_:throughStretch:)`'s `sqrt(|det|)` width rule, and the blend is factored so
+  the endpoints come back bit-exact. **Three things it does not have** — Move is refused at a frame
+  whose pose is not resting, a pose channel has no graph-editor band, and animation groups have no UI.
 
-  **The next stage is 5, the transform channel — not 4.** The owner ruled the order on 2026-08-30
-  (§8): stage 4's rest-space dab bake fixes a shimmer they looked at and disregarded, while stage 5 is
-  where the feature becomes something an artist can use.
-
-  **Stage 4 is not a prerequisite, and §8 now carries the measurement.** The width rule LASSO_MOVE §5.17
-  settles — `sqrt(|det|)` — is what `mapping(_:throughStretch:)` already computes, and it is exact rather
-  than approximate for both poses stage 5 stores: an affine's area root does not vary with position, so
-  the one scalar `VectorStroke.size` carries is the right width at every dab. The projective case is the
-  one with no scalar answer, so the bake is a prerequisite of **5b**, Distort.
+  **Stage 4, the rest-space dab bake, is what the rest waits on.** Its artefact is already pinned by a
+  test written to go red when the stage lands
+  (`testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves`), and it is the prerequisite of
+  **5b**, animated Distort — the projective case is the one where no single scalar is the right width,
+  wrong by 15% to 315% across one quad. Which of 4, 5b and the three gaps above goes first is an owner
+  question, not a settled order.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
@@ -104,17 +103,15 @@ LAYER_TRANSFORM.md.
       is under it."*
 
       **[KEYFRAMES.md](KEYFRAMES.md) is the specification.** Designed 2026-08-28 in the
-      conversation that file names as each item's entry condition. **§2 carries twenty-five rulings — read
+      conversation that file names as each item's entry condition. **§2 carries twenty-eight rulings — read
       it rather than re-deriving them**, and §8 is the build order. The three that shape everything else:
       a transform key stores a **quad** from day one, so Distort lands later with no migration; posed ink
       is drawn by **baking the dab walk in rest space** and mapping dab centres, which removes the
       shimmer *and* the per-sample-width problem at once; and **bake is an authoring feature, never a
       performance instruction** — smooth playback comes from a cache.
 
-      Stage 0 is `renderTree(atFrame:)` and is behaviour-neutral. §8 also names one prerequisite that is
-      not part of this feature and is worth doing first anyway: VECTOR_INTERPOLATION item 18's
-      `ContentProvider` seam, which is what makes any derived content visible to thumbnails, onion skin
-      and export — and which (29) is blocked on.
+      **What remains is stages 4, 5b, 6, 7, 8 and 10.** Stage 6b is not among them: §4.6's playback cache
+      is delivered by (29)'s frame store, and that row is a cross-reference now rather than work.
 
 ### (12) Lasso move — the follow-ups its spec still lists as unbuilt
 

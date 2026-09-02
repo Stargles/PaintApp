@@ -825,13 +825,13 @@ Each stage is mergeable and leaves the app working.
 | **2b** ✅ | **The same channel on the other grade home: `LayerFolder.effect`** — §2.21. `effectTracks` on the folder, `resolvedEffect(atFrame:)` filled in, `setEffectParameterTrack(folderID:…)`, the optional `FolderManifest` key. Nothing in it is new machinery; the whole stage is the one arm §2.21 costs. | It also closed a **pre-existing** defect §4.1 had recorded as a KNOWN GAP: `MaskResolver`'s cache key is per-*layer* content versions and a folder is not a leaf, so a mask naming a graded folder served coverage resolved under the old grade. A hand edit hit it once; a track hits it every frame, which is what forced it. The key now carries the mask stacks' node grades. |
 | **3a** ✅ | **The effect-parameter channel end to end, from the artist's side** — the settings bar reading the value **resolved at the playhead**, the keyframe writer that keys many channels as one undo step, and `KeyframeTarget` making §2.21's two grade homes one path. | Two findings the plan did not have. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored grades side by side. And **a routing rule that a view holds is a rule the fast tier cannot see**, which is why the whole edit path is a `CanvasManager` method rather than a `switch` in a callback. This stage also shipped Animate mode, which §2.26 withdrew the same day; §2.1 carries what that cost and what it taught. |
 | **3b** ✅ | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27, and §11's D1 through D4. The **model** half: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes` in `KeyframeControl.swift`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is the **union** of marks and curve keys, with a bare mark drawn hollow and a mixed run drawn landed. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. **The drawer** is `TimelineGraphBand`, drawn by `TimelineTrackView`'s coordinator inside the scroll content (§11.1) and sized through `CanvasManager.graphBandExpansion` in the layout key — not a presentation of any kind. **The channel panel** is `TimelineGraphChannelList`, raised from `timeline.graphChannelsButton` and presented as `CanvasPresentation.graphChannelList`; §11.5 is why it is a filter rather than a navigator. §2.22's keyframe button became the graph-editor button, which is why the marks are placed from the cel menu. |
-| **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. |
-| **5** | **The transform channel** | Quad keys, animation groups, §2.5's write-at-commit, §4.3's factored interpolation. Uniform + Freeform. |
-| **5b** | **Real Distort** | §2.13. **Moved here from the end of this table on 2026-08-29.** Raster tier first (the gesture is `TextFrameDrag.distortedFrame` and the bake is `ImageWarp`), then ink through §4.2's point map, then placed images behind Move stage 3c. |
+| **4** | **The rest-space dab bake + grain** | §4.2 and §2.16. Engine-only, testable in the fast tier, and `Engine/Deform` compiles standalone with `swiftc` in ~5 s. **The grain artefact §4.2 predicts is confirmed and pinned** by `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` (`TransformChannelLogicTests`), which asserts the defect is *present* and is written to go red the day this stage lands. `PoseInterpolation`'s linearised fallback and `SelectionModels`' Distort refusal both name this stage as what unblocks them. |
+| **5** ✅ | **The transform channel** — merged `4e18b7a` and the test commits after it. | Quad keys (`PoseQuad`, box plus four corners, which stage 5 only ever writes as parallelograms), animation groups, §2.5's write-at-commit — `commitVectorFloatIfNeeded` and not the nudge — and §4.3's factored blend in `Engine/Deform/PoseInterpolation.swift`. Ink is posed through `mapping(_:throughStretch:)`, the `sqrt(|det|)` arm. §2.10's `step`, §2.27's held baselines, §2.28's keyframe union, §3.5's `_anim.json` sidecar and §4.5's cache trap all land with it, the last pinned by mutation. **Three things it does not have**: Move is refused at a frame whose pose is not resting, there is no graph-editor band for a pose channel, and animation groups have no UI — names and tag colours are generated. |
+| **5b** | **Real Distort** — the *animated* one, a projective quad keyed across frames | §2.13. **Not to be confused with the Move-box Distort that shipped** (LASSO_MOVE §3 stage 5): that is a raster floating piece reshaped by a live gesture, and nothing keys a projective quad over time — `TransformKeyframes` only ever writes a `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` treats a projective pose as something only a document *this* stage wrote could contain. Ink through §4.2's point map, then placed images behind Move stage 3c. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with TODO (29). |
-| **6b** | **The playback cache** | §4.6. Only stage 8 actually needs it — per-object animation fits the budget without it — so it lands beside the transformation layer, not before it. |
-| **7** | **Live recording + editable fps** | §5. Needs the playback clock hoisted onto the model first. |
-| **8** | **The transformation layer** | §4.4. Late because §4.6's cache is its real cost, and because it is the only stage that needs one. |
+| **6b** | **The playback cache** | **Delivered by TODO (29) instead**, and this row is a cross-reference rather than work: §4.6's store is RENDER.md §3.5-3.7, whose stages 4 and 5 are merged, so playback is served from LZ4 frames on disk today. What it is *not* is §2.20's span-scoped unit — it is a per-frame content-addressed store with playhead-distance eviction. Read RENDER §3.5-3.7 before planning anything on this row. |
+| **7** | **Live recording + editable fps** | §5. Its one prerequisite is met: the playback clock is on the model (`Engine/PlaybackClock.swift`, RENDER stage 1). Nothing else of it exists — `fps` is fixed at 24 and only load and save write it. |
+| **8** | **The transformation layer** | §4.4. Late because §4.6's cache is its real cost — which RENDER §3.5-3.7 has now paid, so what remains here is the layer itself. |
 | **10** | **The timing recorder** | §7. Small, sits on 7. |
 
 **Stage 5 comes before stage 4, ruled by the owner 2026-08-30.** Asked whether the effort should go to
@@ -897,14 +897,17 @@ invisible to `PixelOps.rasterize(cel:)`, so thumbnails, ordinary onion skin and 
 walks saw an animated cel as **empty** (VECTOR_INTERPOLATION item 18). `PixelOps.rasterize` now takes a
 `DerivedCelContent`, resolved from a passed-in `CelContentProvider` — not a back-reference from `Cel`.
 
-**What stage 5 inherits, and what it still owes.** The provider is **frame-aware** already
-(`CelContentProvider.frame`, rebindable with `at(_:)`), so a pose channel adds a derivation source and
-touches no call site a second time. §4.5's trap is closed for both keys it names: `PixelOps.RasterizeKey`
-and `LayerContentVersion` each carry `DerivedCelContent.identity`, and `CelContentProviderLogicTests`
-pins both — the second by mutation. What stage 5 owes is the *identity*: a derivation builds its own,
-beside the closure it belongs to, and a pose one must include the frame (interpolation's does not,
-deliberately, because interpolation does not read it and a spurious frame field would mint a second
-cache entry per frame of a held cel).
+**What stage 5 inherited.** The provider is **frame-aware** already (`CelContentProvider.frame`,
+rebindable with `at(_:)`), so a pose channel adds a derivation source and touches no call site a second
+time. §4.5's trap is closed for both keys it names: `PixelOps.RasterizeKey` and `LayerContentVersion`
+each carry `DerivedCelContent.identity`, and `CelContentProviderLogicTests` pins both — the second by
+mutation.
+
+**A pose identity carries the resolved maps, not the frame**, which is the opposite of what this section
+prescribed and is strictly tighter (`Models/TransformChannel.swift`, `PosedCelIdentity`). What an
+identity owes is whatever `render` reads: two frames that resolve to the same pose *are* the same
+picture, so keying on the maps dedupes a hold for free where a frame field would mint an entry per
+frame of it — the same argument interpolation's identity already makes for omitting the frame.
 
 ---
 
