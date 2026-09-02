@@ -10,7 +10,9 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## State
 
-`main` is clean at `0b90718`, no worktrees, no branches, no stray simulators.
+`main` is clean, no worktrees, no branches, no stray simulators. **The last code change is
+`0b90718`**; the commits after it are this file and the session log, so a `git log` tip that is not
+`0b90718` does not mean the tree has moved under you.
 
 **Fast tier: 2316 declared, 2316 executed, 2313 passed, 0 failed, 3 skipped.** Count it statically at
 your own base before trusting any number in a brief, including this one.
