@@ -214,6 +214,7 @@
 		A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */; };
 		0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */; };
 		4970E029C1941A9DE297A5F7 /* PaintSoftware/Engine/BakeQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */; };
+		1FE665D13B8F254480571944 /* PaintSoftware/Engine/FrameExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0552F6F6668E6D35F417619 /* PaintSoftware/Engine/FrameExport.swift */; };
 		570B5769358A417C9445BA8D /* PaintSoftware/Engine/DecodedFrameRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */; };
 		761838C1269614EE92EC33E3 /* BakeQueueLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */; };
 		35920CC67FD055702411F872 /* DecodedFrameRingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */; };
@@ -224,6 +225,7 @@
 		057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */; };
 		04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */; };
 		DEDD07AB03769DB26412A980 /* FrameBakeStoreLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */; };
+		14D62219BD6C5D17FBAAD904 /* FrameExportLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2887B873408CD4A7D9A818 /* FrameExportLogicTests.swift */; };
 		3D49C50C541F55012CB1F244 /* FrameBakerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBA3CAB30EC28C0993A2DB14 /* FrameBakerLogicTests.swift */; };
 		A29DF3EC3DE1FA83FE150175 /* BakeWiringUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90302E0E787F2180502FE06 /* BakeWiringUITests.swift */; };
 		B71F3CE6117398D88191036A /* BakeWiringLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B74659D143FC7C1FFDFE07D /* BakeWiringLogicTests.swift */; };
@@ -467,6 +469,7 @@
 		C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameRecipe.swift; sourceTree = "<group>"; };
 		5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ChunkedComposite.swift; sourceTree = "<group>"; };
 		845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BakeQueue.swift; sourceTree = "<group>"; };
+		D0552F6F6668E6D35F417619 /* PaintSoftware/Engine/FrameExport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameExport.swift; sourceTree = "<group>"; };
 		8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/DecodedFrameRing.swift; sourceTree = "<group>"; };
 		57085C9FFB469158552A0FAB /* BakeQueueLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeQueueLogicTests.swift; sourceTree = "<group>"; };
 		58758B5253CE4D8AF95D8311 /* DecodedFrameRingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DecodedFrameRingLogicTests.swift; sourceTree = "<group>"; };
@@ -477,6 +480,7 @@
 		A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBaker.swift; sourceTree = "<group>"; };
 		1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeKeyLogicTests.swift; sourceTree = "<group>"; };
 		D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeStoreLogicTests.swift; sourceTree = "<group>"; };
+		DB2887B873408CD4A7D9A818 /* FrameExportLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameExportLogicTests.swift; sourceTree = "<group>"; };
 		FBA3CAB30EC28C0993A2DB14 /* FrameBakerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakerLogicTests.swift; sourceTree = "<group>"; };
 		B90302E0E787F2180502FE06 /* BakeWiringUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeWiringUITests.swift; sourceTree = "<group>"; };
 		5B74659D143FC7C1FFDFE07D /* BakeWiringLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeWiringLogicTests.swift; sourceTree = "<group>"; };
@@ -616,6 +620,7 @@
 				98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */,
 				1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */,
 				D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */,
+				DB2887B873408CD4A7D9A818 /* FrameExportLogicTests.swift */,
 				FBA3CAB30EC28C0993A2DB14 /* FrameBakerLogicTests.swift */,
 				B90302E0E787F2180502FE06 /* BakeWiringUITests.swift */,
 				5B74659D143FC7C1FFDFE07D /* BakeWiringLogicTests.swift */,
@@ -705,6 +710,7 @@
 				C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */,
 				5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */,
 				845A10394C2429EE2FBF6C22 /* PaintSoftware/Engine/BakeQueue.swift */,
+				D0552F6F6668E6D35F417619 /* PaintSoftware/Engine/FrameExport.swift */,
 				8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */,
 				3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */,
 				924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */,
@@ -1012,6 +1018,7 @@
 				08016CC169DF5A38F13E1D19 /* LiveHalvesStripMetalLogicTests.swift in Sources */,
 				6BE6D2226D92F608F83D411F /* StripedCompositeMetalLogicTests.swift in Sources */,
 				4970E029C1941A9DE297A5F7 /* PaintSoftware/Engine/BakeQueue.swift in Sources */,
+				1FE665D13B8F254480571944 /* PaintSoftware/Engine/FrameExport.swift in Sources */,
 				570B5769358A417C9445BA8D /* PaintSoftware/Engine/DecodedFrameRing.swift in Sources */,
 				761838C1269614EE92EC33E3 /* BakeQueueLogicTests.swift in Sources */,
 				35920CC67FD055702411F872 /* DecodedFrameRingLogicTests.swift in Sources */,
@@ -1022,6 +1029,7 @@
 				057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */,
 				04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */,
 				DEDD07AB03769DB26412A980 /* FrameBakeStoreLogicTests.swift in Sources */,
+				14D62219BD6C5D17FBAAD904 /* FrameExportLogicTests.swift in Sources */,
 				3D49C50C541F55012CB1F244 /* FrameBakerLogicTests.swift in Sources */,
 				A29DF3EC3DE1FA83FE150175 /* BakeWiringUITests.swift in Sources */,
 				B71F3CE6117398D88191036A /* BakeWiringLogicTests.swift in Sources */,
