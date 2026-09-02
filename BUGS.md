@@ -3,54 +3,23 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## The bake suite is green on a key that has stopped covering brush strokes
+## The bake key is covered now; the pass's headline feature still is not
 
-**The ~230 tests RENDER stage 4 added have now been read, and this is what the reading found.** The
-question asked of each was the only one worth asking — *what would have to break for this to go red* —
-and the answer for the bake key's own completeness table is: **six of the nine fields it claims to
-cover, nothing.**
+**The ~230 tests RENDER stage 4 added have been read, and the reading found two families.** The first
+— the bake key's own completeness table, the `.sorted` over `maskStacks`, `StructuralStamp`'s
+untouched fields, and three assertions whose two operands were not the two things claimed — **is
+closed**, and every test written for it was proven red by deleting the production line it names.
+Seven fields of `LayerContentVersion` had no row at all (`rasterVersion` and `vectorVersion` are the
+two an ordinary brush stroke moves, and the only two), and each now has a row that moves it and
+nothing else, so a deleted encoder line collapses exactly the row that names it. `FrameBaker`'s
+`StructuralStamp` has one test per field. `CelContentProviderLogicTests`' shared fixture asserts
+itself instead of skipping, which is worth one measured number: with Generate stopped from attaching
+a recipe, the old spelling reported **13 skips and a green banner** and the new one reports 13
+failures.
 
-`FrameBakeKeyLogicTests.swift:149`'s `testEveryDocumentFieldTheKeyCoversMovesTheDigest` opens *"one row
-per field the key claims to cover"*. `LayerContentVersion` has nine fields and `BakeKeyEncoder` writes
-all nine; the table moves three — `bakedImage`, `valueFill`, `effect`. **And no fixture in the entire
-bake suite ever stamps into `cel.raster` or adds a `VectorStroke` to a cel's `VectorCanvas`** — zero
-hits for `stampStroke`, `addStroke` or `fillImage =` across all ten files. So `rasterVersion` and
-`vectorVersion` could be deleted from the encoder and every one of those tests stays green.
-
-**Those two are the fields an ordinary brush stroke moves, and only those two.** A dab does not replace
-the cel, so `celID`, `raster`'s object identity and `bakedImage` are all unchanged; the digest would not
-move; the store would serve the pre-stroke picture from disk for a frame the artist has just drawn on.
-The file's own header names this outcome — *"a green suite and a wrong canvas"* — and the table written
-to prevent it is the thing that cannot see it. `derived`, `fillImage`, `vector` and `celID` are
-uncovered by the same omission.
-
-The table must be rows on **one cumulative fixture** (a fresh manager per row compares
-`ObjectIdentifier`s, which is how the last one of these passed with its field deleted from the encoder),
-each row stamping the tier it names: a dab through `BrushStamper.stampStroke`, a stroke into a
-`VectorCanvas`, a `fillImage`, and a recipe whose `t` moves.
-
-**Five more from the same reading, each checkable in minutes:**
-
-- `FrameBakeKeyLogicTests.swift:105,129` — the two byte-stability tests compare `f(x)` with `f(x)` for a
-  pure function of a value type, so the dictionary-ordering hazard `canonicalBytes` is sorted against is
-  invisible to them. `chunkingZoo()` sets exactly **one** mask, so `recipe.maskStacks` never holds two
-  entries anywhere in the suite and the `.sorted` could be deleted unseen. The right fixture is two
-  masks inserted in opposite orders by two managers, whose digests must match.
-- `FrameBakerLogicTests.swift` — `StructuralStamp`'s `paperColor`, `paperVisible`, `canvasSize`,
-  `canvasPadding` and `keyframeMarks` have no fixture at all. Deleting `paperColor` from the stamp leaves
-  everything green while a paper-colour change moves the display path's key and schedules no re-bake, so
-  every frame is permanently a miss.
-- `CelContentProviderLogicTests.swift:72` — the fixture eleven tests share guards itself with
-  `XCTSkipIf(...interpolation == nil)`, so Generate quietly ceasing to attach a recipe reports as eleven
-  **skips**. A fixture that stops working is a failure, not a skip; the banner-versus-count trap in a
-  fixture costume.
-- `BakeWiringLogicTests.swift:201` — `composites { }` over an empty block. The zero it asserts is a fact
-  about the empty closure, not about suspension.
-- `FrameRecipeLogicTests.swift:249` — asserts the rasterize cache did not grow across `resolve()`, which
-  is also true of a resolve that produced no sources at all. It needs to assert the leaves were there.
-
-**And the same reading of striped compositing and the dab bake found the pass's headline feature
-untested.** `RestSpaceDabBakeLogicTests` is five tests over `BrushStamper.DabPose.applied(to:)`, which
+**The second family is the expensive one, because it is the stage's own feature rather than its
+bookkeeping — and none of it is fixed.** The same reading of striped compositing and the dab bake
+found the pass's headline feature untested. `RestSpaceDabBakeLogicTests` is five tests over `BrushStamper.DabPose.applied(to:)`, which
 copies `alpha` verbatim and scales `radius` — so *every* assertion in them (alphas preserved, dab counts
 equal, step/radius ratio invariant, per-dab radius equal to `radius * scale`) is an algebraic
 consequence of that one function and true under any implementation whatever, **including one that walks
