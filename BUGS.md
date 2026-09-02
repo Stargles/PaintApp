@@ -3,6 +3,43 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Nine more candidates from the same review, in Distort and the pose channel — UNVERIFIED
+
+The review that produced the sweep entry below reached three of its seven subsystems before it was
+stopped for budget. **None of the following has been through adversarial verification, and this repo
+has had reviewers be wrong before** — each is a specific claim with a line number, checkable in
+minutes. Verify before fixing; delete the ones that do not survive.
+
+**Distort's raster tier** (shipped this pass, `LASSO_MOVE` stage 5):
+
+- `Services/PixelOps.swift:584` — **high**. The bake scales the source isotropically from the width, so
+  a non-square crop rounds into a stretch. Worth checking first: it is the only one here that would put
+  wrong pixels in a saved document rather than on screen.
+- `Views/FloatingPieceOverlayView.swift:268` — a corner drag on a distorted piece jumps the moment the
+  mode picker moves off Distort.
+- `Views/CanvasView.swift:1768` — the marching ants ignore `distortQuad`, so a distorted float shows two
+  disagreeing outlines.
+- `Views/FloatingPieceOverlayView.swift:161` — the distort outline is an implicitly-animated
+  `CAShapeLayer`, so its dashes lag the artwork during a drag.
+
+**The pose channel** (shipped this pass, `KEYFRAMES` stage 5):
+
+- `Views/CanvasView.swift:2271` — **high**. The posed derivation never reaches the live canvas on the
+  Core-Animation path. If true this is the feature not working on one of its two paths, which is exactly
+  the shape stage 3 of RENDER shipped and had to be closed later.
+- `Models/KeyframeControl.swift:523` — `addKeyframe`'s and `seedAndKeyChannel`'s neighbour search omits
+  pose keys.
+- `Models/TransformKeyframes.swift:118` — a held pose baseline survives the undo of the Move it was
+  recorded beside.
+- `Models/CanvasManager+Timeline.swift:434` — `splitCel` and `duplicateCel` drop the cel's pose channels.
+- `Engine/Deform/PoseInterpolation.swift:182` — `blend` clamps the overshoot its callers are documented
+  to rely on.
+
+**Four subsystems were never reviewed**: the bake key and store, striped compositing, the live-canvas
+wiring, and — the one worth running first — **the ~230 tests this pass added, read only to ask of each
+what would have to break for it to go red.** Four fixtures that measured nothing were found in this pass
+by hand; nobody has looked systematically.
+
 ## The bake's dirty sweep does not see a pose edit, and three more sites are suspected
 
 `FrameBaker.syncDirty()` is the whole of RENDER §3.6's dirty marking: it diffs the cel layout against
