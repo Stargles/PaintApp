@@ -89,6 +89,60 @@ final class FrameBaker {
     /// kind of half-live mechanism §2.15 rules out.
     var isSuspended = false
 
+    // MARK: - The export's virtual playhead (RENDER §3.9, stage 6)
+
+    /// Which frame an export is standing on, and the range it is walking.
+    ///
+    /// See `exportFocus` for why this is one field rather than a second queue.
+    struct ExportFocus: Equatable {
+        var frame: Int
+        var range: ClosedRange<Int>
+    }
+
+    /// **While this is set the loop orders frames around it instead of around the artist's
+    /// playhead**, and that is the whole of what stage 6 needed from the scheduler.
+    ///
+    /// An export walks 1..N; `BakeQueue`'s order is *"the frame the artist is on, then ahead in the
+    /// play direction, then outward"*. Those look like different orders and are the same one seen
+    /// from a different place to stand — which `BakeQueue` already anticipates, because `next` is a
+    /// pure function of the playhead it is handed and *"an artist scrubbing the timeline therefore
+    /// reorders the whole queue at no cost"*. **An export is a scrub.** So it substitutes its own
+    /// cursor here and band 1 gives it the frame it is blocked on while band 2 prebakes the frames
+    /// it is about to ask for.
+    ///
+    /// Two things follow for free rather than being built:
+    ///
+    ///  - The same local `playhead` is what `kick` hands to `FrameBakeStore.store(…, playhead:)`,
+    ///    whose eviction policy is *"the files farthest from the playhead go first"* — so a long
+    ///    export drops what it has already written rather than what it is about to read.
+    ///  - `fillRingAhead` warms the decoded ring ahead of the cursor, not ahead of the artist.
+    ///
+    /// **Nothing about the interactive path changes**: this is nil unless an export is live, and it
+    /// is `endExport`'s job to make sure that stays true even when one fails. The `range` also
+    /// replaces the loop markers in band 2, because playback's range and the export's are different
+    /// questions — an artist can export a document whose loop markers cover four frames of it.
+    var exportFocus: ExportFocus?
+
+    /// Points the loop at `frame` and marks it, for an export blocked on it.
+    ///
+    /// `frameCount` first, and that ordering is load-bearing: `BakeQueue.markDirty` clamps into
+    /// `0..<frameCount`, so marking before the count is set on a baker that has never kicked drops
+    /// the request silently and the export waits for a frame nothing will ever bake.
+    func requestExport(frame: Int, within range: ClosedRange<Int>) {
+        guard let manager else { return }
+        bakeQueue.frameCount = manager.sceneFrameCount
+        exportFocus = ExportFocus(frame: frame, range: range)
+        bakeQueue.markDirty(frame: frame)
+        kick()
+    }
+
+    /// Hands the loop back to the artist's playhead. Safe to call when no export is running.
+    func endExport() {
+        guard exportFocus != nil else { return }
+        exportFocus = nil
+        kick()
+    }
+
     // MARK: - Scheduling state
 
     /// The dirty set. `private(set)` so a test can read `pendingCount` without being able to mark.
@@ -343,11 +397,18 @@ final class FrameBaker {
         guard !isBaking, !isSuspended, let manager else { return }
         bakeQueue.frameCount = manager.sceneFrameCount
 
-        let playhead = manager.currentFrame
+        // **The one substitution stage 6 makes.** With no export running this is the artist's
+        // playhead and the document's loop markers, exactly as stages 4c–4f left it; with one
+        // running it is the export's cursor and the export's range, and every band, the eviction
+        // policy and the ring lookahead follow it without a second code path. See `exportFocus`.
+        let playhead = exportFocus?.frame ?? manager.currentFrame
+        let direction: BakeQueue.Direction = exportFocus == nil ? playbackDirection : .forward
         guard let frame = bakeQueue.next(playhead: playhead,
-                                         direction: playbackDirection,
-                                         playbackRange: Self.playbackRange(of: manager),
-                                         looping: manager.isLoopEnabled) else {
+                                         direction: direction,
+                                         playbackRange: exportFocus?.range ?? Self.playbackRange(of: manager),
+                                         // An export walks its range once and stops. Looping band 2
+                                         // would send it back to the start, which is behind it.
+                                         looping: exportFocus == nil && manager.isLoopEnabled) else {
             // Nothing left to composite. The frames ahead of the playhead may still be cold in the
             // ring, though — see `fillRingAhead`, which is the other half of §3.5's promise that
             // play never decodes on the display thread.
@@ -368,7 +429,7 @@ final class FrameBaker {
         let resolution = manager.renderResolution
         let budget = budgetBytes
         let wantsRing = Self.isWithin(ringLookahead, of: playhead, frame: frame,
-                                      direction: playbackDirection)
+                                      direction: direction)
         let frames = framesByDigest
 
         isBaking = true
