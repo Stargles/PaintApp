@@ -45,14 +45,12 @@ suspect first, both new:
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**Three branches were in flight when this pass ran out of budget.** Each was told to commit before it
+**Two branches were in flight when this pass ran out of budget.** Each was told to commit before it
 died, which this repo does because a background agent does not survive a limit and its committed work
 does. **None has been reviewed or merged. Harvest their commits; do not trust their working trees** — a
 worker's tree legitimately holds deliberate poison from mutation testing, and this repo shipped that to
 `main` once.
 
-- **`tmp/live-halves-strips`** — a **regression stage 5 introduced**, described in full below. This is
-  the one to pick up first if it did not land.
 - **`tmp/render-export`** — RENDER stage 6, export. Two commits. **The design question the stage turns
   on is answered**: *an export is a scrub*, so the playhead-ordered scheduler needed one field and no
   second queue — an export walking 1..N is the same shape as an artist dragging the playhead, which the
@@ -65,25 +63,27 @@ worker's tree legitimately holds deliberate poison from mutation testing, and th
 blind — and note that `tmp/live-halves-strips` may have nothing on it at all, in which case the
 regression below is unstarted and its premise is still unconfirmed.
 
-### The regression, which matters more than anything else in flight
+### The regression stage 5 introduced is fixed, and its lesson outlives it
 
-Stage 5 deleted `CompositorBudget.affordableSize` — correct, and owner ruling §2.12 — and routed the
-*whole frame* through strips. **The two mid-stroke sandwich halves were not routed with it**, and they
-are now the only composite path strips do not cover. `CanvasView.Coordinator.startSandwichRebuild`
-composites `requests.below`/`above` whole; `CanvasManager.liveCompositeSize` is the knob's size alone;
-so on a document over the budget both reach `MetalCompositor.attempt`'s `guard wanted <= budget`, come
-back `.unavailable`, and fall to `CoreGraphicsCompositor` **for the duration of every stroke** — the CPU
-reference, where a grading document is MEASURED at **203.3 ms**.
+Stage 5 deleted `affordableSize` and striped the whole frame, but **the two mid-stroke sandwich halves
+were not routed with it**, so a document over the budget fell to CoreGraphics for the length of every
+stroke — 203 ms where striping costs 84. Fixed and merged; the halves go through the same striped path,
+and `assemble` now holds frame + one strip rather than frame + every strip (`CGImage.cropping` retains
+the buffer it cropped, so `pieces` was holding whole strips, not cores).
 
-So on exactly the large documents §3.8 exists to serve, drawing is now *worse* than before stage 5: it
-used to composite a shrunk frame on the GPU and now composites a full-size one on the CPU. That
-violates §2.13, whose bar is that the artist can move the canvas and lay the next stroke.
+**The lesson is about the tests, not the fix.** Reverting it reds **exactly one of the twelve** new
+tests. Every byte-for-byte test stays green, because the defect was never a wrong picture — it is the
+same pixels down a path that costs two and a half times as much. **A suite built on stage 5's own
+template — byte-identity at several strip heights, on both backends — would have been completely green
+against the regression that stage shipped.** The load-bearing test asserts the budget *inequality*
+through `CompositeProbe` and `CompositorMetalEngine.lastAdmission`, not a strip count and not a pixel.
+When the property you care about is *which path ran*, no amount of comparing outputs will see it.
 
-**The premise was read off the code, not measured.** Confirm it first — force a document over the
-budget with `CompositorBudget.budgetOverrideBytes`, take the composite through `MetalCompositor.attempt`,
-and assert it returns `.unavailable` today. That check is the test the fix needs anyway.
-
-**Fast tier: 2581 total / 2578 passed / 0 failed / 3 skipped.** It was 2351 at the start of the pass.
+Two things that fix found which nothing had named: **`MetalCompositor.attempt`'s guard counts
+`peakCompositeTextures`, not sources** — 2 for a flat stack of any length — so a hundred-leaf flat
+document is admitted while holding 840 MB of sources the guard never sees; and the halves now resolve
+only the leaves each half reads, which is *less* rasterization than the shared whole-document resolve
+they had.
 
 ## RENDER (29): stages 0 through 5 are merged, and export is what is left
 
