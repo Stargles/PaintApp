@@ -85,6 +85,13 @@ vs. simulator, same test, same 4096² canvas: 1.19, 1.31, 1.31, 1.28, 1.29, 1.30
 to every simulator number in this repo that anyone plans to reason from, and it is stated here
 because §4 is where a future session will look for it.
 
+**And it applies to *compositing*, which is narrower than "every simulator number" makes it sound.**
+§10.2 measured the bake store's codec both ways on 2026-09-02 and the device came out **2.5–4.9× faster**,
+not 1.3× slower — a Debug simulator against a Release device is a different comparison from the paired
+one above, and on that path the two halves of the cost did not merely scale, they **swapped places**.
+Before extrapolating this factor onto anything that is not a composite, read §10.2's last subsection:
+it is the case where the ratio was not the problem and the *split* was.
+
 ---
 
 ## 2. What the artist actually feels
