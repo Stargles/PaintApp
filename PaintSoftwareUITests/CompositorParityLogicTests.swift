@@ -1846,7 +1846,7 @@ final class CompositorParityLogicTests: XCTestCase {
         let manager = overlappingManager()
         guard let live = manager.makeRenderRequest(atFrame: 0, includeBackground: true),
               let thumbnail = manager.makeRenderRequest(atFrame: 0, includeBackground: true,
-                                                        fittingWithin: CGSize(width: 16, height: 16)) else {
+                                                        sizing: .fitting(CGSize(width: 16, height: 16))) else {
             return XCTFail("Fixture needs a canvas size")
         }
         XCTAssertNotEqual(poolKey(live), poolKey(thumbnail),
@@ -1887,7 +1887,7 @@ final class CompositorParityLogicTests: XCTestCase {
         let bounds = [CGSize(width: 48, height: 48), CGSize(width: 32, height: 32),
                       CGSize(width: 24, height: 24), CGSize(width: 16, height: 16)]
         let requests = bounds.compactMap {
-            manager.makeRenderRequest(atFrame: 0, includeBackground: true, fittingWithin: $0)
+            manager.makeRenderRequest(atFrame: 0, includeBackground: true, sizing: .fitting($0))
         }
         XCTAssertEqual(requests.count, bounds.count, "Fixture needs a canvas size")
         let keys = requests.map(poolKey)
@@ -1928,7 +1928,7 @@ final class CompositorParityLogicTests: XCTestCase {
         let manager = overlappingManager()
         guard let large = manager.makeRenderRequest(atFrame: 0, includeBackground: true),
               let small = manager.makeRenderRequest(atFrame: 0, includeBackground: true,
-                                                    fittingWithin: CGSize(width: 32, height: 32)) else {
+                                                    sizing: .fitting(CGSize(width: 32, height: 32))) else {
             return XCTFail("Fixture needs a canvas size")
         }
         let largeWalk = CompositorBudget.textureBytes(for: large.canvasSize) * large.tree.peakCompositeTextures
