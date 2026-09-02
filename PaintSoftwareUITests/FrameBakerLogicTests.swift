@@ -482,7 +482,14 @@ final class FrameBakerLogicTests: XCTestCase {
             guard let image = baker.image(atFrame: frame) else {
                 return XCTFail("Frame \(frame) is on disk and must come back.")
             }
-            XCTAssertEqual(CGSize(width: image.width, height: image.height), CanvasFixture.canvasSize)
+            // **The live canvas's size, not the canvas's** — stage 4d mints the bake at
+            // `.liveComposite` so the bake and the two mid-stroke halves share one
+            // `PixelOps.rasterize` memo (`FrameBaker.recipe`). The two agree on any document the
+            // knob has not been moved on, which is every fixture here; derived rather than written
+            // out so that this states the coupling instead of hiding it behind a coincidence.
+            XCTAssertEqual(CGSize(width: image.width, height: image.height),
+                           manager.liveCompositeSize(of: manager.renderTree(atFrame: frame),
+                                                     canvasSize: CanvasFixture.canvasSize))
         }
     }
 
@@ -552,7 +559,9 @@ final class FrameBakerLogicTests: XCTestCase {
         drain(baker)
 
         XCTAssertEqual(baker.ring.count, 1, "Nine frames, one digest, one resident frame.")
-        XCTAssertEqual(baker.ring.byteCount, Int(CanvasFixture.canvasSize.width * CanvasFixture.canvasSize.height) * 4)
+        let composited = manager.liveCompositeSize(of: manager.renderTree(atFrame: 0),
+                                                   canvasSize: CanvasFixture.canvasSize)
+        XCTAssertEqual(baker.ring.byteCount, Int(composited.width * composited.height) * 4)
     }
 
     // MARK: - Bookkeeping
