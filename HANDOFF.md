@@ -8,106 +8,173 @@ what is true now and what is next. -->
 Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you pick up.
 [TODO.md](TODO.md) is the owner's asks; [BUGS.md](BUGS.md) is what we find.
 
-## State
+## Do this first
 
-**`main` is `533b79d`.** `git fetch` before trusting any of this — `origin/main` is a shared ref.
-
-**One branch was still in flight when this pass ended at a usage limit**, and it was told to commit
-before it died — which this repo does because a background agent does not survive a 429 and its
-committed work does. Check it first:
+**Run the full suite.** It is owed and nothing else should start before it. The last one was at
+`35c0db6`; since then the compositor gained striped rendering, the live canvas and playback moved onto
+an on-disk bake, and `CanvasView`'s sandwich path was substantially rewritten — so the suite is
+measuring a genuinely different program and no result from before it transfers.
 
 ```bash
-git worktree list && git branch -a
+pgrep -x xcodebuild                          # nobody else on the machine?
+top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1     # idle, or the numbers are void
+xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03
+tools/simlock.sh xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+  -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
+  -derivedDataPath build/DerivedData
 ```
 
-- **`tmp/keyframe-transform`** — KEYFRAMES stage 5, the transform channel. `PoseInterpolation.swift`,
-  `AnimationGroup.swift`, `TransformChannel.swift` plus edits to `TextObject.swift`,
-  `VectorLayer.swift`, `Cel.swift`. Mid-build at `983390d`, whose own message says the pose
-  geometry's tests are *"written and not yet compiled"*. Its base predates the Distort merge.
+**Pull the per-class table immediately afterwards**, before running anything else against that derived
+data path — the triage runs that follow a full suite evict its own bundle, and CLAUDE.md's cost model
+is asking to be re-taken. Two XCUITest classes are new since the last table (`BakeWiringUITests`,
+`TimelineBakeIndicationUITests`, `DistortUITests`) and one class was deleted from `PerfBaselineTests`.
 
-**It has not been reviewed or merged. Harvest its commits, do not trust its working tree** — a
-worker's tree legitimately holds deliberate poison from mutation testing, and this repo shipped that
-to `main` once.
+**Expect some red, and triage it before believing it.** An isolated re-run is thirty seconds and the
+answer is usually environmental; CLAUDE.md's triage section is exact about how. Two specific things to
+suspect first, both new:
 
-**Fast tier at `533b79d`: 2490 total / 2487 passed / 0 failed / 3 skipped.** Up from 2351 at the
-start of the pass. **No full suite was run**, and the sandwich path changed structurally, so **the
-next session owes one** — on an idle machine, after the branch above is resolved.
+- **"Rest" is an eventual state now** — MEASURED 0.40 s after a stroke, 0.024 s after a frame step.
+  Any test asserting the canvas has settled *immediately* is racing. `PaintUITestCase.waitForSandwichState`
+  is the helper; `"off"` is deliberately not waited for, because disengaging is synchronous.
+- **A background program, not the suite, has been the cause three times running.** Adobe's daemons at
+  ~250% across 8 cores with no Adobe app open; then `StocksWidget` at 76.7%, which took the machine
+  from 52.7% idle to **0.0%**. Read the real number, kill the offender (standing permission), re-measure.
 
-## RENDER (29) stage 4 is merged and the app runs on it
+## State
+
+**`main` is `bf5ba7d`.** No worktrees, no `tmp/*` branches, nothing uncommitted. `git fetch` before
+trusting any of this — `origin/main` is a shared ref.
+
+**Fast tier: 2581 total / 2578 passed / 0 failed / 3 skipped.** It was 2351 at the start of the pass.
+
+## RENDER (29): stages 0 through 5 are merged, and export is what is left
 
 [RENDER.md](RENDER.md) is the specification. **§2 is sixteen owner rulings; read them rather than
 re-deriving them.** §5 is the build order.
 
-Stages 0 through 4 are merged. `Engine/FrameBakeKey.swift`, `FrameBakeStore.swift`, `BakeQueue.swift`,
-`DecodedFrameRing.swift` and `FrameBaker.swift` are the store and the scheduler, and **the live canvas
-at rest and playback are served from the bake**. What stage 4 still owes is small:
+The app now runs on the bake. `Engine/FrameBakeKey.swift`, `FrameBakeStore.swift`, `BakeQueue.swift`,
+`DecodedFrameRing.swift`, `FrameBaker.swift` and `StripedComposite.swift` are the machinery; the live
+canvas at rest and playback are served from LZ4 files on disk, and the timeline shows which frames are
+not yet ready to play.
 
-- **The timeline's baked-frame indication.** `FrameBaker.isBaked(atFrame:)` and `onFrameFinished` are
-  its read path and nothing consumes them yet. `TimelineRulerView.draw` (`TimelineTrackView.swift`)
-  is the only per-frame drawing loop in the timeline and is document-wide rather than per-layer, so it
-  is the natural home. Mind `TimelineLayoutKey`: a per-frame baked set changing on every bake would
-  move a key compared on every layout — give the ruler its own `setNeedsDisplay()` path the way
-  `movePlayhead` does.
+**Stage 6 is export (§3.9) and it is next.** Video is `AVAssetWriter` over the store in frame order,
+H.264 in `.mp4` at the document's fps and the knob's resolution; a frame is the baked frame as PNG.
+**Both re-render nothing** — that is §2.1 and it is the whole reason the store exists. Delivery is the
+system share sheet. §3.9 says nothing so far forces a second renderer; if something does, say so and
+proceed.
+
+Then **stage 7, the rest of the memory audit** (BUGS.md's ranked sites plus PERFORMANCE §9): the
+fill-session budget, blanked hosts, count-only caches moved to byte budgets, a `MemoryPressure` seam so
+Android and Windows can signal eviction, undo cost for whole-cel raster steps, and `SaveSnapshot` off
+the main actor.
+
+**Small things stage 4 left behind**, each a few minutes:
+
 - `FrameBaker.reset()` and `markEverythingDirty()` have tests but **no app caller**, because a re-root
-  discards the whole baker. Either wire them or delete them.
+  discards the whole baker. Wire them or delete them.
 - The compression ratio on the owner's own **"UI Test"** document, and a decode against a frame the
   *compositor* produced rather than one drawn for the purpose. PERFORMANCE §10.4 records both as owed.
-
-**Stage 5 is next: strips (§3.8), then remove `affordableSize` from the live path.** It is now the
-only thing between the app and §2.12's "the knob is the truth" — and stage 4d put the bake and the
-live halves on one buffer size, so removing `affordableSize` from `liveCompositeSize` moves both
-together. Then §3.9, export, which reads the bake and re-renders nothing.
+- **Nobody has looked at the timeline's amber strip on a screen.** Its tests assert the encoded
+  accessibility value, not pixels. Granting simulator access from the panel's "Let Claude use it" link
+  makes this a two-minute check.
+- Stage 5 is simulator-only. **The owner reported the resolution bug on their iPad, on a canvas called
+  "UI Test", and should confirm the fix there.**
 
 ## What this pass established, and would otherwise be re-derived
 
+**On the store and the key**
+
 - **A content-addressed disk store cannot be built out of this app's `Hashable` conformances.**
-  `LayerContentVersion.hash(into:)` deliberately omits `effect` and is right to — every in-memory
-  cache here compares `==` after the bucket lookup, so a collision costs one compare. A store whose
-  filename *is* the digest has no second chance. `FrameBakeKey` is a hand-written canonical byte
-  encoder: a discriminator per enum case, a length prefix per collection, floats by `bitPattern`, and
-  **no `default:` clause anywhere**, so a fourteenth `Effect` case is a compile error rather than a
-  silent collision on disk.
-- **`COMPRESSION_LZ4` is not portable** and §3.5 named it for portability. Apple's constant wraps the
-  stream in `bv41` block framing no other LZ4 decoder reads. It is `COMPRESSION_LZ4_RAW`.
-- **The per-row Up filter §3.5 held in reserve loses.** MEASURED: it makes every fixture *bigger*
-  (cel art +39%, hold +28%) and costs 4.3–8.9 ms each way against a 1.5 ms decode. Refuted, not
-  deferred.
-- **Decode tracks pixels, not file size.** A hold is a quarter of cel art's file and decodes *slower*
-  at every size. A ring budget must therefore mean *decoded* bytes.
-- **The simulator inverts this measurement.** Between Debug/simulator and Release/device the two halves
-  of the decode moved in opposite directions — LZ4 8.9 → 1.4 ms, `CGImage` build 0.8 → 2.6 ms. Debug
-  reads as "the codec is 91% of the decode"; the device reads as the reverse. PERFORMANCE §1's
-  "device is ~1.3x the simulator" is a *compositing* rule and does not generalise.
+  `LayerContentVersion.hash(into:)` deliberately omits `effect` and is right to — every in-memory cache
+  here compares `==` after the bucket lookup, so a collision costs one compare. A store whose filename
+  *is* the digest has no second chance. `FrameBakeKey` is a hand-written canonical byte encoder: a
+  discriminator per enum case, a length prefix per collection, floats by `bitPattern`, and **no
+  `default:` clause anywhere**, so a fourteenth `Effect` case is a compile error rather than a silent
+  collision on disk.
+- **`COMPRESSION_LZ4` is not portable** and §3.5 chose it *for* portability. Apple's constant wraps the
+  stream in `bv41` framing no other LZ4 decoder reads. It is `COMPRESSION_LZ4_RAW`.
+- **The per-row Up filter §3.5 held in reserve loses.** MEASURED: it makes every fixture *bigger* (cel
+  art +39%, hold +28%) and costs 4.3–8.9 ms each way against a 1.5 ms decode.
+- **Decode tracks pixels, not file size.** A hold is a quarter of cel art's file and decodes *slower* at
+  every size, so a ring budget must mean *decoded* bytes.
+- **Measured on the owner's iPad 9 in Release**: cel art 54.4x–73.2x, holds 135x–151x, painted 1.49x,
+  noise 1.00x (the raw-store branch). Decode 1.5–3.1 ms at the owner's canvas against a 41.6 ms frame;
+  4096² worst case 24.6 ms, still inside a frame at 1.70x.
+- **The simulator inverts that measurement.** Between Debug/simulator and Release/device the two halves
+  of the decode moved in *opposite* directions — LZ4 8.9 → 1.4 ms, `CGImage` build 0.8 → 2.6 ms. Debug
+  reads as "the codec is 91% of the decode"; the device reads as the reverse. PERFORMANCE §1's "device
+  is ~1.3x the simulator" is a *compositing* rule and does not generalise.
+
+**On the scheduler and the canvas**
+
 - **There is no push funnel in this model that knows a frame.** `beginCanvasEdit()` runs *before* an
   edit; `recordUndo`'s stored closures bypass it on replay; and a dab lands in `VectorCanvas` /
-  `RasterLayerTexture`, which are classes, so `@Published var layers` is never written. Dirty marking
-  is a **sweep** — `FrameBaker.syncDirty()` diffs the cel layout against the layout last seen, once
-  per `reconcileLayers` pass, which is an identity rather than an estimate: the passes that publish
+  `RasterLayerTexture`, which are classes, so `@Published var layers` is never written. Dirty marking is
+  a **sweep** — `syncDirty()` diffs the cel layout against the layout last seen, once per
+  `reconcileLayers` pass. That cadence is an identity rather than an estimate: the passes that publish
   are exactly the ones that used to move `SandwichKey`.
-- **§3.6's claim that `isSandwichRebuilding` is a drop-if-busy was wrong.** `finishSandwichRebuild`
-  ends in `reconcileLayers()`, which re-derives the key and starts the rebuild the guard declined — it
-  always was coalesce-and-retry. Deleting it hands a two-second scrub ~120 serial jobs. §3.6 now says
-  so.
-- **§3.6's "same worker and same memo" is bought by the buffer size, not the queue.**
-  `PixelOps.rasterize` and `MaskResolver.CacheKey` are keyed on width and height, so the bake mints at
-  `.liveComposite` rather than `.native` and the halves stayed on `sandwichQueue`.
-- **"Rest" is an eventual state now** — MEASURED 0.40 s after a stroke, 0.024 s after a frame step.
-  Every instant assertion on it is a race; `PaintUITestCase.waitForSandwichState` is the helper.
-  `"off"` is deliberately not waited for, because disengaging is synchronous.
-- **`CanvasManager.renderResolution` writes through to `UserDefaults`**, so it is process-wide *and
-  persists in the simulator container*. A suite that left it on `.half` produced 15 reds in a *later*
-  fast tier, across `EffectLayerLogicTests` and `PerfBaselineTests`, all of them half-resolution
-  artifacts of a previous run. Pin it in `setUp`, restore in `tearDown`, exactly as with
-  `Compositor.backend`.
-- **A ring top-up needs an outward-only marker or it does not terminate.** The ring is routinely
-  narrower than the lookahead, so a plain rescan fills a far frame, evicts a near one, finds the near
-  one missing, and never converges — while leaving the far end resident, which is backwards.
+- **§3.6's claim that `isSandwichRebuilding` is a drop-if-busy was wrong.** `finishSandwichRebuild` ends
+  in `reconcileLayers()`, which re-derives the key and starts the rebuild the guard declined — it always
+  was coalesce-and-retry. Deleting it hands a two-second scrub ~120 serial jobs.
+- **§3.6's "same worker and same memo" is bought by the buffer size, not the queue.** `PixelOps.rasterize`
+  and `MaskResolver.CacheKey` are keyed on width and height, so the bake mints at `.liveComposite`.
+- **A ring top-up needs an outward-only marker or it does not terminate.** The ring is routinely narrower
+  than the lookahead, so a plain rescan fills a far frame, evicts a near one, finds the near one missing,
+  and never converges — while leaving the far end resident, which is backwards.
+- **`isBaked(atFrame:)` could not serve the consumer §3.7 names it for.** It was a full recipe mint plus
+  a `stat` — correct for one frame, and 300 × layers of it per redraw for a ruler. It is two dictionary
+  lookups now, and **both halves are load-bearing**: an edit leaves `keyByFrame` in place, so the recorded
+  key names a real file holding the picture from *before* the edit.
+
+**On strips**
+
+- **Strips nest outside chunks, and the nesting is forced rather than chosen.** A chunk hands its
+  accumulator to the next chunk *in the same buffer*, so a chunk cannot span two strips. A strip is a
+  whole self-contained composite of the entire tree over fewer rows. One budget account:
+  `affordableRows` is `chunkSources` solved for height, and a strip that still does not fit is chunked
+  with no special case.
+- **§3.4's rule 3 does not generalise to strips.** It is dangerous for a *chunk* because a chunk discards
+  sources; a strip discards none — it windows every one — so the `.ink` re-walk inside a strip is the
+  window of the whole frame's, and the apron covers the kernel's reach past the band.
+- **Two effects read absolute position and no apron can pay for them**: `noiseValue` hashes `gid`,
+  `screenValue` indexes a Bayer cell by `gid.y & 3`. Both take a frame origin now.
+- **Three memos are keyed on buffer size and collide across equal-height strips**, repeating one band
+  down the canvas on an ordinary drawing with no effect, mask or blend. `MetalCompositor.UploadCache.Key`
+  **has no CoreGraphics counterpart**, so the CPU suite was green on every fixture in the file while the
+  GPU repeated a band.
+
+**On poses**
+
+- **KEYFRAMES §8's prescription that a pose identity "must include the frame" is wrong.** What an
+  identity owes is what `render` *reads*, and this render reads the resolved per-channel affines — the
+  frame is what it reads them *through*. Carrying the maps is sufficient and **strictly tighter**: a
+  frame field would mint a second cache entry for every frame of a `step: 2` hold and of the
+  constant-hold tail, which is the cost §8's own parenthesis warns about, by the other door.
+- **A pose channel needs no "stored base" field.** A value channel needs one because `Layer.effect` holds
+  what a slider writes when nothing is keyed; a pose channel's base *is* the cel's geometry.
+- **Grain boils under a pose** — `BrushGrain.noiseValue` is read in absolute canvas coordinates at the
+  *posed* stamp point, so the texture crawls across the ink instead of travelling with it. §4.2's
+  prediction, confirmed. Fixed by KEYFRAMES stage 4's rest-space dab bake, not before; the test is
+  written to go **red when stage 4 lands**.
+
+**On Distort**
+
+- **Preview and bake are exact, not bounded** — one accessor feeds both, and `CATransform3D`'s `m14`/`m24`
+  perform the same projective divide the bake does. MEASURED 0.0 disagreement over the box interior
+  across ±3 rad and both mirrors. Strictly better than §5.17's Freeform latch, and there is no latch.
+- **A projective `CATransform3D` draws correctly and hit-tests unreliably.** On an outline view it left a
+  distorted piece reshapeable and then undraggable, with the corner grips still working. Only a UI test
+  could have said so.
+- **Distort reaches the raster floating piece only.** Placed images and text are lassoable solely through
+  the vector float, whose map is a `CGAffineTransform`. Text already has a real Distort by its own door
+  (Text panel → Corners). A **placed image** is the one kind with no door: six numbers plus a mirror bit
+  where a homography needs eight.
 
 ## Standing instructions from the owner about how you work
 
 1. **Conserve tokens, and state the size of a multi-agent run before launching it.** Delegate building
    and test runs. Do not delegate thinking you can do. The cap is **3 opus or 6 sonnet at once**
-   (1 opus = 2 sonnet), raised 2026-09-02.
+   (1 opus = 2 sonnet).
 2. **Documents say what is true. `git log` says how it got that way.** No dates on decisions, no
    "at the owner's instruction", no "this used to be", no narrating which premise an investigation
    overturned.
@@ -119,57 +186,44 @@ together. Then §3.9, export, which reads the bake and re-renders nothing.
 
 ## Traps this pass paid for
 
-- **A test table that builds a fresh fixture per row compares allocation addresses.**
-  `LayerContentVersion` names a cel's tiers by `ObjectIdentifier`, so two `CanvasManager`s differ in
-  every leaf before anything is mutated — a per-field digest table built that way passed with the
-  field under test **deleted from the encoder**. Mutate one fixture cumulatively.
-- **`Layer.layerEffect` is `kind == .value ? effect : nil`** and the whole render path reads that
-  accessor, so `layers[0].effect = …` on a raster layer is inert. Forty test rows were setting
-  nothing. `Layer.valueFill` is gated the same way. **Before trusting a green assertion, check that
-  its two operands are the two things you meant to compare.**
-- **The obvious fixture for §2.16 measures nothing.** A cel spanning frames 2–6 *is* a hold, so those
-  five frames are one key and one composite — the §3.3 dedupe eats the very thing the test counts.
-  Every frame needs its own picture before "five frames re-rendered" is expressible.
-- **`CompositeProbe` counts calls to `Compositor.composite`, which is chunks, not frames.** Pin
-  "one small frame is one composite" separately rather than assuming it inside another test.
-- **A brief's prescription is a hypothesis.** Ten were refuted this pass by the workers holding the
-  code, and three of those were errors in a specification rather than in a brief. Invite the
+- **A brief's prescription is a hypothesis.** Fourteen were refuted this pass by the workers holding the
+  code, and **five of those were errors in a specification** rather than in a brief. Invite the
   refutation explicitly; it is the cheapest review in the project.
-- **A projective `CATransform3D` draws correctly and hit-tests unreliably.** Putting one on an outline
-  view left a distorted piece reshapeable and then undraggable — the move band silently stopped taking
-  touches while the corner grips kept working. Only a UI test could have said so.
+- **A green assertion is only as good as its two operands**, and CLAUDE.md now has a section on it.
+  Four fixtures measured nothing in one day: a per-field table that built a fresh `CanvasManager` per row
+  and so compared `ObjectIdentifier` allocation addresses (it passed with the field under test **deleted
+  from the encoder**); forty rows setting `layers[0].effect` on a raster layer when the render path reads
+  `layerEffect(atFrame:)`, which is `kind == .value ? effect : nil`; a §2.16 fixture eaten by the very
+  dedupe it was counting, because a cel spanning frames 2–6 *is* a hold and those five frames are one
+  key; and a UI probe that matched the black letterbox because it tested *not-white* instead of *dark*.
+- **Which pbxproj group a file goes in decides how its `path` resolves.** A test file placed in
+  `App sources shared with PaintSoftwareUITests` — whose entries carry a full path from the project root
+  — makes a bare filename resolve to `/Name.swift`. This surfaced as a missing *file*; the same misfiling
+  one level down surfaces as a missing *symbol*.
+- **The near-miss CLAUDE.md describes actually happened.** Two branches appended a test entry after the
+  same anchor in `project.pbxproj`. Nothing had to be renumbered **only because both derived their ids
+  from the file name** rather than counting off a neighbour.
 - **`canvas.host` is itself an accessibility element**, so no descendant of the canvas can be addressed
   by identifier. Adding handle identifiers produces a dead affordance, not a testable one.
 - **`xcodebuild` waits on "Unlock Kevin's iPad to Continue" rather than failing** — one run sat twelve
   minutes and then completed by itself. PERFORMANCE §9 had given up at that same wall.
-- **Three agents at once take this machine to 4% idle**, which is the band CLAUDE.md records as
-  returning wrong answers rather than slow ones — and `PerfBaselineTests`' timing assertions are in the
-  fast tier. `simlock`'s two slots throttle `xcodebuild` but not compiles. Check idle before treating a
-  timing red as a finding.
+- **Reading an xcresult chosen by `ls -dt` is not reliably reading the run you mean.** It cost one wrong
+  "six tests are missing" diagnosis. Reconcile executed against a static `func test` count instead.
 
 ## Everything else open
 
-**The owner's asks** are in TODO. **(21) keyframes stage 5 is the branch above.** **(12) LASSO_MOVE
-stage 5 is merged** — Distort's raster tier, exact rather than bounded, reaching the raster floating
-piece in both `.move` and `.duplicate`. Its vector-ink tier is still refused, per float and in one
-sentence, with KEYFRAMES §4.2's rest-space dab bake named as the unblocker: under a homography the
-local scale spans 1.3x to 8.5x across one quad and the best single scalar for `VectorStroke.size` is
-wrong by 15%-315%. A **placed image** is the one kind with no Distort door at all — its placement is
-six numbers plus a mirror bit where a homography needs eight. Text already has one by its own door
-(Text panel → Corners).
+**The owner's asks** are in TODO. (21) keyframes stage 5 and (12) LASSO_MOVE stage 5 both merged this
+pass; what remains of each is written in their entries. KEYFRAMES §8's **5b is *animated* Distort** — a
+quad keyed across frames — and is a different feature from the Move-box Distort that shipped; §2.13 makes
+a pose a quad so the two meet with no migration.
 
-KEYFRAMES §8's **5b is *animated* Distort** — a quad keyed across frames, needing the transform
-channel — while what merged is the one-off Move-box Distort; they are two different features, and
-§2.13 makes a pose a quad so that they meet later with no migration.
+**(31) is now one symptom, not three.** The resolution bug is fixed by strips and the `minificationFilter`
+half is fixed; what remains is that **16383² cannot be composited at all** and needs a downscaled display
+proxy.
 
-(31) holds the large-canvas symptoms; its `minificationFilter` half is **fixed** (`4f85759`), and what
-remains is that **16383² cannot be composited at all** and needs a downscaled display proxy. (32)-(34)
-are small. (22), (24), (35)-(37) and (26)-(30) are unstarted, and the last group needs a design
+(32)-(34) are small. (22), (24), (35)-(37) and (26)-(30) are unstarted, and the last group needs a design
 conversation each.
 
-**Deferred by the owner, not refused:** scaling the stroke sample gate by zoom, which would fix the 8x
-dab explosion when zoomed out. It is a permanent quality trade, so it wants an A/B the owner can look
-at, not a number.
-
-**BUGS.md's memory audit** is the remaining ranked sites plus PERFORMANCE §9's. RENDER §5 stage 7 is
-where they land.
+**Deferred by the owner, not refused:** scaling the stroke sample gate by zoom, which would fix the 8x dab
+explosion when zoomed out. It is a permanent quality trade, so it wants an A/B the owner can look at, not
+a number.
