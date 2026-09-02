@@ -204,6 +204,7 @@
 		6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */; };
 		A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */; };
 		4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */; };
+		885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */; };
 		72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */; };
 		7F7DD44DF253A841FA517F3C /* PaintSoftware/Models/TimelineRowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */; };
 		5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */; };
@@ -421,6 +422,7 @@
 		1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/VectorPreviewPlan.swift; sourceTree = "<group>"; };
 		C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameRecipe.swift; sourceTree = "<group>"; };
 		5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameRecipeLogicTests.swift; sourceTree = "<group>"; };
+		62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeferredVectorRenderLogicTests.swift; sourceTree = "<group>"; };
 		79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineLayoutKeyLogicTests.swift; sourceTree = "<group>"; };
 		DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineRowLayout.swift; sourceTree = "<group>"; };
 		59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRowLayoutLogicTests.swift; sourceTree = "<group>"; };
@@ -529,6 +531,7 @@
 				7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */,
 				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
 				5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */,
+				62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
@@ -893,6 +896,7 @@
 				6192452399C8B499E8D6F824 /* PaintSoftware/Views/VectorPreviewPlan.swift in Sources */,
 				A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */,
 				4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */,
+				885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */,
 				1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */,
 				D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */,
 				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,

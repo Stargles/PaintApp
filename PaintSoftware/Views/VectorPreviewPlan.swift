@@ -64,7 +64,7 @@ struct VectorPreviewPlan: Equatable {
         /// The derived in-between frame, which replaces the cel's own content outright. At an
         /// in-between the cel's own canvas is empty, so this wins wherever it exists.
         case interpolation
-        /// `VectorCanvas.renderIfNonEmpty()` — the committed content, memoized on the canvas's
+        /// The committed content — `VectorCanvas.cachedRender()`, memoized on the canvas's
         /// `version` and therefore free to re-read across a stroke that has not committed yet.
         case committedRender
     }
