@@ -1761,3 +1761,141 @@ script written for an attempt that was abandoned under CPU contention survive in
 (`attrib_test_body.swift`, `attrib_test2.swift`, `relperf_run.sh`), so this is a re-run rather than a
 rebuild. **Every figure from that attempt is void** — taken between 0% and 34.8% idle, which CLAUDE.md
 says returns wrong answers rather than slow ones.
+
+---
+
+## 9. The memory audit, measured on the device (2026-09-02)
+
+The owner's ask, verbatim: *"is memory being allocated nicely? is there any things that are taking much
+more memory than they should if they were made smarter? could there be performance gains by doing things
+a smarter way?"* [BUGS.md](BUGS.md)'s twelve-site audit is the census; this is what the device says about
+it, plus what it misses. Every row below is MEASURED on the **owner's iPad 9 (3 GB, A13), Release**, on
+2026-09-02, at `41eafa9` unless another commit is named.
+
+**The device's own numbers, so nothing here has to assume them.** `physicalMemory` 2939 MB;
+`os_proc_available_memory()` at rest 1837 MB; `CompositorBudget.textureBudgetBytes` **183.7 MB** — the
+docs' habit of writing 192 is the `3 << 30 / 16` arithmetic rather than the number the device produces;
+`UIScreen` 768×1024 pt at 2×, i.e. 132 points to the inch.
+
+**The figures were taken at `41eafa9` — the commit the owner's build 1.0.43 is — and they carry to
+`9c9d435` because the code they measure did not move.** `git diff 41eafa9 9c9d435 -- Engine/StrokeScratch.swift`
+is empty, and `VectorCanvas.render`'s body is byte-identical, lifted into `renderLocked(quality:)` so that
+`render(quality:ifStillAtVersion:)` can share it. What stage 2 changed is *where* that body runs, not what
+it does. That is stated here rather than assumed, because a figure attributed to the wrong binary is this
+repo's most expensive recurring mistake.
+
+**Still open from the twelve at `9c9d435`**: all of them. Two line references have moved and one premise
+has: item 1's `renderSources` is now `FrameRecipe.resolveSources` (`Engine/FrameRecipe.swift:88-115`) and
+runs off the main actor after stage 2 — **it is still one canvas-sized image per visible leaf, all live at
+once, with no budget**, so the site is unchanged and only its thread moved. Item 5's evictor still runs
+from `SelectionModels.swift:249` on every `currentFrame` write (`CanvasManager.swift:747`).
+
+### Ranked: what to do, what it costs now, what it would cost smarter
+
+**1. The live-stroke window pads both axes by the longer one.** See BUGS.md's entry of the same date.
+MEASURED: one screen inch of pen travel at fit zoom holds **283.1 MB** at 16383² and 4.4 MB at 2048²,
+against a stroke bounding box of 0.054 MB and 0.007 MB. Smarter: pad each axis by half of *that axis's*
+extent — INFERRED ~2.2 MB at 16383², and the 535.9 ms of stamping is mostly reallocation copying, so it
+falls with it. **One expression, and it is the best value in this list.** Risk: low; `StrokeScratch`'s own
+logic tests pin `windowPixelCount`, so the change has to re-take those numbers deliberately.
+
+**2. Core Animation minifies every artwork layer with no mipmaps.** MEASURED: a line of the default
+5-point brush width, minified to fit zoom by point sampling, leaves **zero** ink at 4096², 8192² and
+12288², and 800 pixels at 2048²; box-filtered it survives at every size. Every view that shows artwork sets
+`magnificationFilter` and none of them sets `minificationFilter`, so they all run CA's default `.linear`
+with no mipmap chain. Smarter: `.trilinear` on the artwork layers — one property per view, independent of
+`magnificationFilter`, which stays `.nearest` so zoomed-in pixels stay crisp. Cost: a mipmap chain is about
+a third more texture per displayed layer, which nothing in the app budgets (item 5 below). **This is the
+artist-visible one**: it is the whole of "the brushstroke disappears when you draw" and it is not confined
+to 16k.
+
+**3. The sample gate and the dab spacing are in canvas points, so zooming out multiplies both.** The
+owner's own theory of the lag, and it is right. `BrushStamper.stampSpacing = max(brushSize × spacingFraction, 1)`
+and `recordSpacing` is half of it, both in canvas points; the artist works at `fitScale`, so one screen
+inch is `132 / fitScale` canvas points. MEASURED at the default brush (Soft Round, size 5 → 1.0 pt stamp
+spacing, 0.5 pt record spacing):
+
+| canvas | fit | canvas pt per screen inch | dabs per screen inch | stored samples per screen inch |
+|---|---|---|---|---|
+| 2048² | 0.375 | 352 | 352 | 704 |
+| 4096² | 0.188 | 704 | 704 | 1408 |
+| 8192² | 0.094 | 1408 | 1408 | 2816 |
+| 12288² | 0.063 | 2112 | 2112 | 4224 |
+| 16383² | 0.047 | 2815 | **2815** | **5631** |
+
+Eight times the dabs and eight times the stored geometry at 16383² for the same gesture, and the stroke is
+sub-pixel while it happens (item 2). Smarter: derive `minimumTravel` from the live canvas scale at
+`StrokeCanvasView.swift:906`, which already runs once per stroke — one multiplication. The dab *spacing*
+must stay in canvas points or the ink itself changes. **Cost the owner should weigh rather than a free
+win**: a stroke laid down zoomed out is then stored coarser and stays coarser when zoomed in, and
+interpolation registration and the vector eraser's capsule chain read the same samples. The owner has
+already said a 16k fix is optional (*"the only thing id really be doing in a 16k canvas is idea boards
+where the drawings are small compared to the canvas"*), and this is the item that ruling is about.
+
+**4. Vector element undo charges 512 flat bytes for a payload that varies by two orders of magnitude.**
+Audit item 8, quantified. `registerVectorElementsUndo` (`Models/CanvasManager+Text.swift:415`) charges
+`(old.count + new.count) * 512` while a single `VectorStroke` holds `samples.count × 24` bytes: MEASURED
+sample counts above make one screen inch of stroke **16,896 bytes** at 2048² and **135,144 bytes** at
+16383² — 33× and 264× the 512 charged for it. `UndoBudget`'s ceiling is therefore not a ceiling on the one element kind whose size is
+unbounded. Smarter: charge the strokes' sample bytes and the `.image` elements' pixels. Risk: none
+behaviourally — the history gets shorter exactly where it was silently over budget.
+
+**5. Nothing counts what Core Animation holds, and it is up to five canvases per displayed layer.**
+MEASURED: displaying one canvas-sized image in a `UIImageView` inside a fit-scaled container walked
+`os_proc_available_memory()` down 1841 → 1822 → 1772 → 1579 → 1259 MB across 2048², 4096², 8192² and
+12288² — marginal costs of 19, 50, 193 and 320 MB against nominal textures of 16, 64, 268 and 604 MB, so
+the same order as the texture and paid *on top of* the `UIImage` the app is holding. (At 16383² the figure
+went back **up**, to 1835 MB, because nothing was displayed at all — see BUGS.md's entry of the same
+date.) A `LayerHostView` presents
+`bakedImageView`, `strokeView` and `fillImageView`, and `StrokeCanvasView` adds its `scratchView` and
+`floatView`. `CompositorBudget` bounds the compositor's scratch and the two CPU memos and is silent about
+all of it. Audit item 4 (blanked hosts keep every byte) is this seen from one side. Smarter: nil the
+contents of views that are blanked or empty rather than masking them, and count what remains against the
+same budget. Risk: `setBlanked`'s doc comment records why `isHidden`/`alpha` are wrong there — a nil
+`contents` is not, but the hit-testing note has to survive the change.
+
+**6. The flatten memo will hold a gigabyte indefinitely at 16383².** `PixelOps.RasterizeCache.store`
+never evicts the entry it just stored, "however far over budget one image on its own puts this"
+(`Services/PixelOps.swift:365-370`). That is right at every canvas anyone has measured and wrong at this
+one: 1.00 GiB resident against a 183.7 MB budget, dropped only on backgrounding or on the memory warning
+§3 item 12 records as never arriving on this device. Smarter: do not memoize an entry that exceeds the
+budget on its own — the caller returns it either way, which is the doc comment's own argument, and it is
+the *retention* that is wrong rather than the return. Risk: none; it costs a cache miss on a canvas where
+the memo could never have held two entries anyway.
+
+**7. The committed re-render is O(canvas area) where a paint stroke's change is O(window).** MEASURED,
+one dab on an empty cel: `VectorCanvas.render()` is 3.7 ms at 2048², 5.1 at 4096², 17.4 at 8192², 43.7 at
+12288² and **143.5 ms at 16383²**; a bare canvas-sized fill is 4.8 ms and 489.5 ms at the ends. Stage 2
+(`7ada46f`) moved this off the main thread, which is the right first move and does not make it smaller —
+every stroke, undo, redo and element edit pays it again. Smarter: hold the vector memo as a persistent
+`RasterLayerTexture` and composite the finished scratch window into it (`composite(patch:at:)` is already
+O(window)), falling back to the full walk when the display list changes in a way source-over cannot
+express: an eraser, a non-`.normal` blend run, an element removed, reordered or transformed. Risk:
+**medium, and the highest here** — that predicate has to agree with `renderLocalContent`'s three isolation
+rules, and disagreeing shows as stale ink on screen while every test stays green.
+
+**8. A canvas-sized `CGBitmapContext` is lazily committed; a Metal shared buffer is not.** MEASURED
+sideways rather than head-on: `RasterLayerTexture` stamping one dab into a 16383² tier and reading it back
+is **0.9 ms** at every size from 2048² up, because the pages a dab never touches are never faulted in,
+while filling the same buffer edge to edge is 489.5 ms. `MetalFillSession` (audit item 3) is the opposite:
+~34 bytes per canvas pixel of `.storageModeShared` `MTLBuffer`s (`Engine/MetalFillEngine.swift:300-318`),
+resident the moment they are made — 544 MB at 4096² and 9.1 GB at 16383², where `makeBuffer` returns nil
+and the session's `guard` turns it into a silent `return nil`. **So the audit's `w·h·4` column overstates
+every CoreGraphics site and understates this one**, and a byte budget that treats them alike will budget
+the wrong thing.
+
+**What this pass could not measure, and what would.** Residency. `os_proc_available_memory()` did not move
+when a fully-written 16383² image was held, which contradicts item 5's display measurement on the same
+run; the probe's own timings say the fill had by then stopped happening under accumulated pressure, so
+that number is void rather than surprising. Any claim about bytes-resident for the CoreGraphics sites in
+the audit should be taken with `task_vm_info.phys_footprint`, not with `os_proc_available_memory()`, and
+this section deliberately makes none.
+
+**Three device measurements are owed and the harness for them exists.** A run built against `9c9d435`
+was queued and never started: the iPad locked, `xcodebuild` sat on *"Unlock Kevin's iPad to Continue"*, and
+nothing on this Mac fixes that. What it would have taken: the committed-render cost with a *realistic* dab
+count rather than one dab (item 7's table is the floor, not the figure an artist pays); an isolated
+identification of which call in the minify path kills the process at 16383², since the round-2 probe only
+established that one of two `CGContext.draw` calls did; and a confirmation, which is only a formality given
+the empty diff above, that stage 2's `render(quality:ifStillAtVersion:)` produces the same pixels off the
+render queue. None of them changes a conclusion here; all three would sharpen one.

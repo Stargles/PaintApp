@@ -312,6 +312,12 @@ it is the dependency order.
 0. ~~**Stop the bleeding.** The 16k crash is the live-stroke scratch.~~ **Done 2026-09-02** —
    `Engine/StrokeScratch.swift` is that scratch as a window over the stroke's own dirty rect, and both tiers stamp into
    it rather than into the layer, so nothing on the stroke path scales with canvas area.
+   **That last clause is true of the code and false of the gesture, and the device says so.** The artist works at
+   `fitScale`, so one screen inch of pen travel is `132 / fitScale` canvas points and grows in direct proportion to the
+   canvas — and the window's pad outsets *both* axes by half the *longer* one, which squares the box up. MEASURED on the
+   owner's iPad 9 in Release: one screen inch at fit zoom holds 4.4 MB at 2048² and **283.1 MB at 16383²**, for a stroke
+   whose own box is 0.054 MB. BUGS.md's entry of 2026-09-02 carries the table and the one-expression fix; the stage is
+   not reopened by it, but the claim above should not be read as settled.
 1. ~~**Hoist the playback clock** onto `CanvasManager` (§3.7).~~ **Done 2026-09-01.**
 2. ~~**The recipe** (§3.2)~~ **Done 2026-09-02.** `Engine/FrameRecipe.swift` is `FrameRecipe`,
    `SandwichRecipe` and `LeafSnapshot`; `renderSources` is cut at the seam it already had, into

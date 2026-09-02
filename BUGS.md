@@ -3,6 +3,162 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A 16383² canvas draws nothing the artist can see, and the allocation is not why (2026-09-02)
+
+The owner, on their own iPad 9 (3 GB, A13), **Release build 1.0.43 of `41eafa9`**, on a canvas created at
+the size picker's maximum: *"Although it does not crash, it is broken. First off, the brushstroke
+disappears when you draw. Secondly, the framerate is very laggy."*
+
+**The obvious diagnosis is wrong, and half of this entry exists to say so.** It was that
+`VectorCanvas.render()` opens a `UIGraphicsImageRenderer` at canvas size, that 16383×16383×4 is 1.00 GiB
+against roughly 1.4 GiB of headroom, that the allocation therefore fails, and that neither
+`UIGraphicsImageRenderer` nor `CGContext(...)` traps on failure — so the committed stroke would be drawn
+into nothing while the live scratch, bounded by RENDER stage 0, went on showing. The last step is true and
+irrelevant; **the load-bearing one is false, because the allocation succeeds.** MEASURED on the owner's
+device, Release, at `41eafa9`, one dab on an otherwise empty cel:
+
+| canvas | `VectorCanvas.render()` | bare canvas-sized fill | `RasterLayerTexture` stamp + read | image produced | ink present |
+|---|---|---|---|---|---|
+| 2048² | 3.7 ms | 4.8 ms | 14.2 ms | 2048×2048 | yes |
+| 4096² | 5.1 ms | 36.4 ms | 0.6 ms | 4096×4096 | yes |
+| 8192² | 17.4 ms | 138.6 ms | 1.1 ms | 8192×8192 | yes |
+| 12288² | 43.7 ms | 312.7 ms | 0.6 ms | 12288×12288 | yes |
+| **16383²** | **143.5 ms** | **489.5 ms** | **0.9 ms** | **16383×16383** | **yes** |
+
+A canvas-sized `CGBitmapContext` is lazily committed, which is why the raster column barely moves: the
+pages a dab never touches are never faulted in. The 1 GiB buffer is not the problem, it is not even
+expensive to *hold*; it is expensive to *clear and walk*, which is the second complaint, not the first.
+
+**What the artist actually cannot see has two measured causes, and neither is an allocation.**
+
+**(a) Every artwork layer is minified by Core Animation's default `.linear` filter with no mipmaps, and
+a default stroke is thinner than one screen pixel.** Every view that shows artwork sets
+`magnificationFilter` and none of them sets `minificationFilter` — `LayerHostView.swift:43-44`,
+`StrokeCanvasView.swift:336,352,360`, `CanvasView.swift:1114,1226-1228,2337` — so they all run Core
+Animation's default `.linear` minification, which has no mipmap chain. The only `minificationFilter` in the
+app is on `SelectionOverlayView`'s collar, which is chrome. `CanvasManager.brushSize`
+defaults to **5 canvas points** (`CanvasManager.swift:497`) and the canvas opens at `fitScale`
+(`CanvasView.swift:2607`). MEASURED — a 5-point line drawn into a canvas-sized image and minified to a
+400-point viewport, point-sampled (what an un-mipmapped `.linear` degenerates to at these ratios) against
+box-filtered:
+
+| canvas | fit scale | stroke width on screen | point-sampled ink | box-filtered ink |
+|---|---|---|---|---|
+| 2048² | 0.195 | 0.98 pt | 800 px | 800 px |
+| 4096² | 0.098 | 0.49 pt | **0** | 800 px |
+| 8192² | 0.049 | 0.24 pt | **0** | 800 px |
+| 12288² | 0.033 | 0.16 pt | **0** | 800 px |
+
+**From 4096² up, a default stroke seen at fit zoom is not faint — it is gone**, and it is gone identically
+in the live scratch and in the committed render, because both are canvas-resolution images under the same
+transform. It is enough on its own to produce "the brushstroke disappears when you draw", it needs no
+16k-specific mechanism, and it is live on 4096² documents today.
+
+**(b) At 16383² the image cannot be put on screen at all.** Same run: a `UIImageView` holding a
+canvas-sized image inside a container at `fitScale`, read back through `CALayer.render(in:)`, showed the
+band at 2048², 4096², 8192² and 12288² and showed **nothing** at 16383². And drawing that same 16383²
+`CGImage` into a 400×400 `CGContext` — which is what any downscale of it is — **killed the test runner
+process**; the run restarted and finished the remaining cases. (`drawHierarchy(afterScreenUpdates:)` was
+also tried and returned false at every size, because the probe's window had no scene: that half is void
+and the render-server behaviour is still unmeasured.)
+
+So the pixels exist and nothing reaches the screen — the opposite failure from the one hypothesised, and
+one no budget check on the allocation would have caught.
+
+**And (b) reproduces the owner's sentence more exactly than (a) does, which is why both are here.** The
+live scratch is its own small image at `windowRect`, not the canvas: on a one-inch drag at 16383² that
+window measures 8617×8611 (see the next entry), which is between the 12288² that displayed and the 16383²
+that did not. INFERRED, not measured: **the scratch is displayable and the committed 1 GiB render is not,
+so ink appears under the pen and vanishes at lift** — which is what "the brushstroke disappears when you
+draw" says. (a) is the more general defect and reaches 4096² documents the owner has not complained about
+yet; (b) is the one that fits this report.
+
+**What stage 2 changed and what it did not.** On today's `9c9d435` the committed re-render is deferred to
+`StrokeCanvasView.renderQueue` and the finished stroke's scratch is held until it lands
+(`refreshDisplay(waitingForTheRender:)`, RENDER §2.13). That is correct and it removes 143.5 ms from the
+main thread at pen-up — but it changes neither cause above: the render still allocates and walks the same
+canvas, and the image it produces still has to be minified onto the screen by the same filter. **The
+numbers above carry to `9c9d435` unchanged because the code they measure did not move**:
+`git diff 41eafa9 9c9d435 -- Engine/StrokeScratch.swift` is empty, and `VectorCanvas.render`'s body is
+byte-identical, lifted into `renderLocked(quality:)` so `render(quality:ifStillAtVersion:)` can share it.
+Expect the same symptom with a different shape: the scratch stays up longer rather than the layer going
+blank. **That last sentence is INFERRED and is the one thing here nobody has watched** — it needs an
+XCUITest that reaches the editor on this device, which is the open entry "XCUITests cannot launch into the
+editor on the iPad 9", or thirty seconds of the owner's own time.
+
+**Recommended fix, cheapest first.**
+
+1. **Set `minificationFilter = .trilinear` on the artwork layers.** It is one property per view, it is
+   independent of `magnificationFilter` (which stays `.nearest`, so zoomed-in pixels stay crisp), and it
+   is what makes a zoomed-out canvas legible at *any* size — 4096² documents are affected today. It costs
+   Core Animation a mipmap chain, about a third more texture memory per displayed layer, which
+   `CompositorBudget` does not currently account for.
+2. **Bound the canvas the display can actually show.** 16383² is past what this device will composite
+   whatever the filter says. Either cap `maxCanvasExtent` at a size the display path is measured to
+   survive, or give the layer views a tiled/downsampled presentation image instead of the native one.
+   BUGS' "Raising the canvas maximum reaches a raster-storage cost `CompositorBudget` never bounds"
+   (2026-08-27) flagged the storage half of this; the display half was not known.
+3. **A brush size expressed in canvas points is a trap at any large canvas.** Not a bug on its own — see
+   PERFORMANCE §9 item 3 — but the reason (a) is invisible to whoever picks the default.
+
+**Not fixed here.** This entry is a diagnosis; nothing in it is a patch, and the two other sessions live in
+`StrokeScratch`/`RenderRequest`/`CanvasView` while it was written.
+
+## The live-stroke window pads both axes by the longer one, so a straight line gets a square (2026-09-02)
+
+`StrokeScratch` exists so the live stroke costs its own bounding box rather than the canvas
+(`Engine/StrokeScratch.swift`, RENDER §5 stage 0, `3ad312a`). It does bound the stroke — but the growth
+rule outsets **both** axes by half the current window's **longer** side:
+
+```swift
+let pad = max(Self.minimumPad, max(windowRect.width, windowRect.height) / 2)
+let next = wanted.insetBy(dx: -pad, dy: -pad).integral.intersection(canvas)
+```
+
+So the box is square from the first growth on (the 64-point `minimumPad` makes the first one 133×133) and
+doubles in both directions thereafter, whatever shape the stroke is. A horizontal line five points thick
+ends up in a square of side about 3× its length. MEASURED on the owner's iPad 9, Release, at `41eafa9` —
+one screen inch of pen travel at each canvas's fit zoom, which is the gesture the artist actually makes:
+
+| canvas | travel (canvas pt) | dabs | window | window bytes | stroke's own box | stamp time |
+|---|---|---|---|---|---|---|
+| 2048² | 352 | 352 | 1079×1078 | 4.4 MB | 0.007 MB | 11.2 ms |
+| 4096² | 704 | 704 | 2159×2158 | 17.8 MB | 0.014 MB | 22.0 ms |
+| 8192² | 1408 | 1408 | 4319×4318 | 71.1 MB | 0.027 MB | 148.2 ms |
+| 12288² | 2112 | 2112 | 4319×4318 | 71.1 MB | 0.040 MB | 81.3 ms |
+| **16383²** | **2816** | **2816** | **8617×8611** | **283.1 MB** | **0.054 MB** | **535.9 ms** |
+
+283 MB held for a stroke that covers 54 KB of pixels, against a 183.7 MB compositor budget on the same
+device (MEASURED 2026-09-02). The copying is what the time goes into: the window is reallocated about
+seven times on that stroke and each reallocation copies the whole previous box, so per-dab cost rises from
+0.032 ms at 2048² to 0.190 ms at 16383² for identical dabs.
+
+**Why it bites hardest exactly where the class was written to help.** The travel column is not incidental:
+the artist works at `fitScale`, so one screen inch is `132 / fitScale` canvas points and therefore grows
+in direct proportion to the canvas. A window bounded by the stroke is only bounded by the *canvas* when
+the stroke is a fixed fraction of the screen — which it is. RENDER §5 stage 0's closing line, *"nothing on
+the stroke path scales with canvas area"*, is true of the code as written and false of the gesture as
+made.
+
+**The fix is one expression: pad each axis by half of that axis's own extent in the union**, floored at
+`minimumPad` —
+
+```swift
+let padX = max(Self.minimumPad, wanted.width / 2)
+let padY = max(Self.minimumPad, wanted.height / 2)
+```
+
+— which keeps the per-axis geometric-growth guarantee the doc comment argues for (each axis at least
+half-again per reallocation, so total copying stays O(final area)) while letting the final area be the
+stroke's box rather than its square. INFERRED from the measured rows: the 16383² window becomes roughly
+4300×133, about **2.2 MB instead of 283.1 MB**.
+
+Risk is low and local — `StrokeScratchLogicTests` already asserts `windowPixelCount`, so the numbers it
+pins have to be re-taken deliberately rather than drifting. The one thing to check is a stroke drawn
+almost entirely along one axis then turned 90°: the union carries the turn, so the second axis grows
+geometrically from its own extent at that moment, which is the intended behaviour and not a regression to
+the square.
+
 ## Memory allocation audit — twelve sites, ranked (2026-09-01)
 
 Found while designing RENDER.md; the compositor's budget is sound and almost nothing else consults it. RENDER §5 stage
@@ -57,6 +213,14 @@ Found while designing RENDER.md; the compositor's budget is sound and almost not
 The five declared budgets sum to 656 MiB at 2048x1024 and are pinned to; add the undeclared ones above and one live
 rebuild reaches 850-950 MiB before a single cel of the document, against the ~1.4 GiB the repo cites as pre-jetsam
 (`Compositor.swift:102`). At 4096² the two count-bounded caches alone push the sum past that ceiling.
+
+**All twelve are still open at `9c9d435`, and the device has now been asked about them — see
+[PERFORMANCE.md](PERFORMANCE.md) §9, which ranks them against three sites this list misses and corrects two
+things stated here.** Item 1's site is now `FrameRecipe.resolveSources` (`Engine/FrameRecipe.swift:88-115`):
+stage 2 moved it off the main actor and left it exactly as unbudgeted, so only the thread changed. And the
+`w·h·4` column above is the *nominal* size, not the resident one — a CoreGraphics canvas buffer is lazily
+committed and a Metal `.storageModeShared` buffer is not, which is a factor this ranking does not carry and
+§9 item 8 measures.
 
 ## A 250 pt timeline cannot hold four layers plus an open band (2026-08-30) — LEFT, deliberately
 
