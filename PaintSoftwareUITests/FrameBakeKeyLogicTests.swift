@@ -12,8 +12,8 @@ import SwiftUI
 /// 2. **Everything that reaches a pixel moves the digest.** A content-addressed store has no second
 ///    chance: the filename *is* the key, there is nothing to compare against after the lookup, so a
 ///    field missing from the digest is a wrong picture served with no error. The table below is one
-///    row per field, and `testTheEffectOnALeafMovesTheDigest` is the row that would have been
-///    silently wrong if this had been built out of `Hashable`.
+///    row per field, and the "leaf effect" and "folder grade" rows are the ones that would have
+///    been silently wrong if this had been built out of `Hashable`.
 ///
 /// **`LayerContentVersion.hash(into:)` omits `effect` on purpose and is right to.** Its doc comment
 /// says so: *"Hashing is allowed to collide; equality is what decides a cache hit."* Every in-memory
@@ -137,14 +137,27 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     // here; the row is what says the field is really in the digest rather than merely mentioned in
     // a doc comment.
 
-    /// Every mutation below must move the digest, and the mutations must not collide with each
-    /// other either — so this asserts all of them are pairwise distinct rather than merely each
-    /// different from the baseline.
+    /// **Cumulative on one manager, and that is the load-bearing detail.** An earlier draft built a
+    /// fresh `CanvasManager` per row and compared the digests across them — which passes for a reason
+    /// that has nothing to do with the fields: `LayerContentVersion` names a cel's tiers by
+    /// `ObjectIdentifier`, so two managers differ in every leaf before anything is mutated. The test
+    /// was measuring allocation addresses. One manager, mutated in place, is what makes each row's
+    /// difference attributable to the field it names.
+    ///
+    /// Pairwise distinct rather than merely consecutive: a field could otherwise move the digest back
+    /// onto an earlier row's value and nothing would say so.
     func testEveryDocumentFieldTheKeyCoversMovesTheDigest() {
+        let manager = CanvasFixture.chunkingZoo()
+        // A flat-colour value layer, which the zoo has none of — its two `.value` layers are in the
+        // *other* mode (`layerEffect`), and `Layer.valueFill` is nil for those by construction.
+        manager.addValueLayer(color: PaletteColor(hex: "445566"))
+        guard let effectLayer = manager.layers.firstIndex(where: { $0.layerEffect != nil }),
+              let fillLayer = manager.layers.firstIndex(where: { $0.valueFill != nil }) else {
+            return XCTFail("The fixture must carry one layer in each `.value` mode.")
+        }
         var digests: [String: String] = [:]
 
         func row(_ name: String, _ mutate: (CanvasManager) -> Void) {
-            let manager = CanvasFixture.chunkingZoo()
             mutate(manager)
             digests[name] = key(manager)
         }
@@ -154,11 +167,19 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         row("leaf visibility") { $0.layers[0].isVisible = false }
         row("leaf blend mode") { $0.layers[0].blendMode = .multiply }
         // **The row that would have been silently wrong.** `LayerContentVersion.hash(into:)` skips
-        // `effect`, and `RenderNode.effect` is not in any in-memory cache key either except through
-        // whole-tree `Equatable`. A digest built out of either would put this document and the
-        // baseline in one file.
-        row("leaf effect") { $0.layers[0].effect = .posterize(Effect.Posterize(levels: 5)) }
+        // `effect`, so a digest taken from that hash would put this document and the one before it in
+        // one file — the same grade slider that visibly changes the canvas would change nothing on
+        // disk, and the store would keep serving the ungraded frame.
+        //
+        // On an *effect* layer, because `Layer.layerEffect` is `kind == .value ? effect : nil` and
+        // the whole render path reads that accessor rather than the field. An earlier draft set
+        // `layers[0].effect` on a raster layer, which reaches neither the tree nor the version — an
+        // inert mutation that a green row would have reported as coverage.
+        row("leaf effect") { $0.layers[effectLayer].effect = .posterize(Effect.Posterize(levels: 5)) }
         row("folder opacity") { m in m.folders.first.map { m.setFolderOpacity($0.id, to: 0.31) } }
+        // A folder's grade reaches **only** the tree — no `LayerContentVersion` carries it, and
+        // nothing indexed by layer could — which is §3.3's reason for putting the resolved tree in
+        // the key at all.
         row("folder grade") { m in
             m.folders.first.map { m.setNodeEffect($0.id, to: .hsvShift(Effect.HSVShift(hueDegrees: 40))) }
         }
@@ -166,25 +187,23 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             m.folders.last.map { m.setFolderIsolated($0.id, isIsolated: false) }
         }
         row("folder visibility") { m in
-            guard let id = m.folders.first?.id, let i = m.folders.firstIndex(where: { $0.id == id }) else { return }
+            guard let i = m.folders.indices.first else { return }
             m.folders[i].isVisible = false
         }
         row("mask source") { $0.layers[6].alphaMask = AlphaMask(sources: [.layer($0.layers[0].id)]) }
         row("mask disabled") { $0.layers[6].alphaMask?.isEnabled = false }
-        row("mask inverted") { $0.layers[6].alphaMask?.invert = true }
+        row("mask re-enabled and inverted") { m in
+            m.layers[6].alphaMask?.isEnabled = true
+            m.layers[6].alphaMask?.invert = true
+        }
         row("leaf content version") { m in
             CanvasFixture.setBakedContent(m, layerIndex: 0,
                                           CanvasFixture.solidImage(.magenta, rect: CGRect(x: 1, y: 1, width: 5, height: 5)))
         }
-        row("value layer colour") { m in
-            guard let i = m.layers.firstIndex(where: { $0.fill != nil }) else {
-                return XCTFail("The zoo is supposed to carry value layers.")
-            }
-            m.layers[i].fill?.color = PaletteColor(hex: "112233")
-        }
+        row("value layer colour") { $0.layers[fillLayer].fill?.color = PaletteColor(hex: "112233") }
         row("paper colour") { $0.canvasBackgroundColor = .red }
-        row("paper hidden") { $0.isCanvasBackgroundVisible = false }
         row("canvas padding") { $0.canvasPadding = 6 }
+        row("paper hidden") { $0.isCanvasBackgroundVisible = false }
 
         let unique = Set(digests.values)
         XCTAssertEqual(unique.count, digests.count,
@@ -324,10 +343,18 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("outline threshold", .outline(Effect.Outline(threshold: 0.7))),
         ]
 
+        // One manager for all of them — see `testEveryDocumentFieldTheKeyCoversMovesTheDigest` for
+        // what comparing across fresh managers was really measuring — and an **effect layer**,
+        // because `Layer.layerEffect` is `kind == .value ? effect : nil` and a grade parked on a
+        // raster layer reaches no pixel and no key.
+        let manager = CanvasFixture.manager(layerCount: 2)
+        manager.addValueLayer(effect: .sobel(Effect.Sobel()))
+        guard let graded = manager.layers.firstIndex(where: { $0.layerEffect != nil }) else {
+            return XCTFail("`addValueLayer(effect:)` must produce a layer in effect mode.")
+        }
         var digests: [String: String] = [:]
         for (name, effect) in effects {
-            let manager = CanvasFixture.manager(layerCount: 2)
-            manager.layers[0].effect = effect
+            manager.layers[graded].effect = effect
             digests[name] = key(manager)
         }
         XCTAssertEqual(Set(digests.values).count, digests.count,
@@ -346,11 +373,11 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("posterize", .posterize(Effect.Posterize(levels: 3))),
             ("sobel", .sobel(Effect.Sobel())),
         ]
+        let manager = CanvasFixture.manager(layerCount: 2)
+        let folder = manager.addFolder(name: "Graded")
+        manager.layers[0].parentFolderID = folder
+        manager.layers[1].parentFolderID = folder
         for (name, grade) in grades {
-            let manager = CanvasFixture.manager(layerCount: 2)
-            let folder = manager.addFolder(name: "Graded")
-            manager.layers[0].parentFolderID = folder
-            manager.layers[1].parentFolderID = folder
             manager.setNodeEffect(folder, to: grade)
             digests[name] = key(manager)
         }
