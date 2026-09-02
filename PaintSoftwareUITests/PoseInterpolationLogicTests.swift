@@ -21,15 +21,6 @@ final class PoseInterpolationLogicTests: XCTestCase {
 
     private var centre: CGPoint { CGPoint(x: box.midX, y: box.midY) }
 
-    /// A map about the box's own centre, which is how every Move the artist makes is expressed.
-    private func about(_ inner: CGAffineTransform) -> CGAffineTransform {
-        CGAffineTransform(translationX: centre.x, y: centre.y)
-            .concatenating(.identity)
-            .concatenating(CGAffineTransform.identity)
-            .concatenating(CGAffineTransform(translationX: -centre.x, y: -centre.y))
-            .concatenating(inner)
-    }
-
     private func rotation(_ degrees: CGFloat) -> CGAffineTransform {
         CGAffineTransform(translationX: centre.x, y: centre.y)
             .rotated(by: degrees * .pi / 180)
@@ -165,8 +156,10 @@ final class PoseInterpolationLogicTests: XCTestCase {
         let turned = PoseQuad(box: box, mappedBy: rotation(190))
         let mid = try XCTUnwrap(PoseInterpolation.blend(rest, turned, t: 0.5))
         let map = try XCTUnwrap(mid.affineOrLinearised)
-        // −95°, not +95°: cos is the same either way, so the sign of `b` is what tells them apart.
-        XCTAssertEqual(atan2(map.b, map.a) * 180 / .pi, -95, accuracy: 1e-6)
+        // 190° reads as −170° through `atan2`, so the midpoint is **−85°** rather than +95°. Written
+        // out as the arithmetic rather than as a number, because the number on its own reads like a
+        // typo for +95 and is the whole point of the test.
+        XCTAssertEqual(atan2(map.b, map.a) * 180 / .pi, -170 / 2, accuracy: 1e-6)
     }
 
     /// A translation blends as a translation, and the *box centre* is what carries it — which is why
@@ -185,16 +178,27 @@ final class PoseInterpolationLogicTests: XCTestCase {
     /// degenerate — `Matrix2x2.polar` says so — so the blend runs through a squash, and a squashed
     /// quad fails `Homography.isValidQuad`'s area floor. The answer is the nearer authored key rather
     /// than a quad the renderer cannot use.
+    ///
+    /// **The invalid band is narrower than it looks and the first draft of this test was wrong about
+    /// it.** `Matrix2x2.polar` of `diag(-1, 1)` is `(I, diag(-1, 1))`, so the blended linear part is
+    /// `diag(1 - 2t, 1)` — singular at exactly `t = 0.5` and a perfectly drawable narrow quad either
+    /// side of it. So the assertion worth making is not "the middle of the span is clamped" but
+    /// **every sample is drawable**, with the one degenerate `t` answering with an authored key.
     func testAnInvalidInBetweenClampsToTheNearerKeyRatherThanDrawingSomethingBroken() throws {
         let rest = PoseQuad(restingIn: box)
         let mirrored = PoseQuad(box: box, mappedBy: scale(x: -1, y: 1))
-        let mid = try XCTUnwrap(PoseInterpolation.blend(rest, mirrored, t: 0.5))
-        XCTAssertTrue(mid.isValid, "Whatever comes back is drawable, which is the whole of the clamp")
 
-        let early = try XCTUnwrap(PoseInterpolation.blend(rest, mirrored, t: 0.45))
-        let late = try XCTUnwrap(PoseInterpolation.blend(rest, mirrored, t: 0.55))
-        XCTAssertEqual(early, rest, "Below the midpoint the clamp holds the key it left")
-        XCTAssertEqual(late, mirrored, "Above it, the key it is heading for")
+        for step in 0...20 {
+            let t = CGFloat(step) / 20
+            let pose = try XCTUnwrap(PoseInterpolation.blend(rest, mirrored, t: t),
+                                     "t = \(t) must answer with something")
+            XCTAssertTrue(pose.isValid, "t = \(t) must be drawable")
+        }
+        XCTAssertEqual(PoseInterpolation.blend(rest, mirrored, t: 0.5), mirrored,
+                       "The one t whose blend is singular answers with the key it is heading for")
+        let nearby = try XCTUnwrap(PoseInterpolation.blend(rest, mirrored, t: 0.4))
+        XCTAssertNotEqual(nearby, rest)
+        XCTAssertNotEqual(nearby, mirrored, "Either side of it the blend is a real in-between")
     }
 
     /// A degenerate key has no map, so the blend has nothing to work from and says so rather than

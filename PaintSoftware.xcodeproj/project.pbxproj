@@ -234,6 +234,7 @@
 		375499CA02B7EBD027F502C3 /* PaintSoftware/Models/AnimationGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */; };
 		A79E1BFD1757C573AC905B73 /* PaintSoftware/Models/TransformChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */; };
 		E410A79CDD501AF413ABC03D /* PaintSoftware/Models/TransformKeyframes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */; };
+		D2644D6EFA5281BB5DB35C3D /* PoseInterpolationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -476,6 +477,7 @@
 		53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AnimationGroup.swift; sourceTree = "<group>"; };
 		EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformChannel.swift; sourceTree = "<group>"; };
 		636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformKeyframes.swift; sourceTree = "<group>"; };
+		D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseInterpolationLogicTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -555,6 +557,7 @@
 				060C2996A6C8F5F6FBFBC201 /* HomographyLogicTests.swift */,
 				1ACD68660078E6C48908F501 /* DistortUITests.swift */,
 				688B5A8A98B9171F59DFDF01 /* DistortLogicTests.swift */,
+				D866C6F41451162E01B37988 /* PoseInterpolationLogicTests.swift */,
 				26A9C3CB17EDDB6D1B679901 /* WarpAgreementCharacterizationTests.swift */,
 				75CBE473A285415901A09832 /* ObjectTransformLogicTests.swift */,
 				0997C0EA936D7E159238B001 /* FontResolveLogicTests.swift */,
@@ -898,6 +901,7 @@
 				060C2996A6C8F5F6FBFBC202 /* HomographyLogicTests.swift in Sources */,
 				1ACD68660078E6C48908F502 /* DistortUITests.swift in Sources */,
 				688B5A8A98B9171F59DFDF02 /* DistortLogicTests.swift in Sources */,
+				D2644D6EFA5281BB5DB35C3D /* PoseInterpolationLogicTests.swift in Sources */,
 				26A9C3CB17EDDB6D1B679902 /* WarpAgreementCharacterizationTests.swift in Sources */,
 				55AD836D577F389E88B68F02 /* PaintSoftware/Engine/TextLayout.swift in Sources */,
 				9503DF989F335799429B8002 /* PaintSoftware/Engine/FontLibrary.swift in Sources */,
