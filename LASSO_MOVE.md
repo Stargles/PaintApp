@@ -140,7 +140,7 @@ perspective text box and are general by construction.
 | the one map both the preview and the bake read | `FloatingPiece.homography`, over `canvasQuad` — which is also what the outline, the four grips and `transformedBounds` are drawn from, so nothing on screen can disagree about where the piece is |
 | the live drag, rasterizing nothing | `Homography.catransform3D` on the piece's image layer (`FloatingPieceOverlayView.layoutFromPiece`), anchor point and position zero so the matrix is the layer's whole map. §4 rule 2 holds: a 60 Hz drag assigns a transform |
 | the bake | `PixelOps.render(floatingPiece:into:)`'s distort arm → `ImageWarp.warpedImage`, destination clipped to the canvas, capped at `PixelOps.maximumFloatingWarpTexels` |
-| one corner, dragged | `FloatingDistortDrag` — `TextFrameDrag.distortedFrame`'s three rules, sharing `Homography.isValidQuad` with it and nothing else, because that function writes six `TextFrame` fields a bitmap has none of |
+| one corner, dragged | `FloatingDistortDrag` — `TextFrameDrag.distortedFrame`'s three rules (the corner goes where the finger is, the other three do not move, an undrawable quad is refused rather than clamped), sharing `Homography.isValidQuad` with it and nothing else: that function is built from a `TextFrame` and writes `corners`, `autoSize` and a derived `mode` back, none of which a bitmap has |
 | Reset | `resetFloating` clears the quad with the transform; `canResetFloating` gains it as a second term, so a pulled corner alone makes the button live (§5.16) |
 
 **The preview and the bake are exact, not bounded, and that is the difference from §5.17.** A Freeform
@@ -175,6 +175,14 @@ would ship a visible width error on every line in the selection. The prerequisit
 homography** — a `TextFrame` is four free corners already, and stage 3c gave an image a stored shape —
 but a float carrying one almost always carries ink beside it, and a per-kind refusal is exactly what
 stage 3c deleted, so the refusal is per float and costs one sentence.
+
+**And text is not actually waiting on this.** A text box has had a real Distort since ADD_TEXT.md
+stage 5, through its own control: the Text panel's **Corners** picker (`TextCornerMode.distort`,
+`TextSettingsPanel.cornerModePicker`), dragging `TextFrame.corners` through `TextFrameDrag` and
+baking through the same `ImageWarp`. What a lassoed text box lacks is Distort *from the Move box* —
+which is the vector-float path above, not a missing capability. A **placed image** is the one kind
+with no door at all: it stores six numbers plus a mirror bit, and a homography needs eight, so it
+would want a stored quad of its own before this could reach it.
 
 **Nothing is persisted.** A floating piece is transient by construction, so Distort owes no
 file-format change at all — the same position stage 3a reached for `aspect`.
