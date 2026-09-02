@@ -57,7 +57,7 @@ final class TimelineBakeIndicationUITests: PaintUITestCase {
         // the compositor — and therefore the bake — on the canvas at all.
         setBlendMode(app, layerIndex: 0, to: "multiply")
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
-        waitForSandwichState(app, "rest", 30,
+        waitForSandwichState(app, "rest", timeout: 30,
                              "Setup: the canvas has to reach the baked picture before the bar can be blank.")
 
         XCTAssertNotNil(waitForBakeBar(app, timeout: 20) { $0.isEmpty },
@@ -94,7 +94,7 @@ final class TimelineBakeIndicationUITests: PaintUITestCase {
             if index > 0 { step.tap() }
             let y = 0.30 + 0.12 * Double(index)
             drawLine(on: canvas, from: CGVector(dx: 0.3, dy: y), to: CGVector(dx: 0.6, dy: y))
-            waitForSandwichState(app, "rest", 30, "Setup: frame \(index) has to bake before the next one.")
+            waitForSandwichState(app, "rest", timeout: 30, "Setup: frame \(index) has to bake before the next one.")
         }
         XCTAssertEqual(readFrameLabel(app)?.total, 4, "Setup: four frames of scene.")
         XCTAssertNotNil(waitForBakeBar(app, timeout: 20) { $0.isEmpty },
@@ -117,6 +117,6 @@ final class TimelineBakeIndicationUITests: PaintUITestCase {
         XCTAssertNotNil(waitForBakeBar(app, timeout: 40) { $0.isEmpty },
                         "…and it has to clear again once the baker catches up. A bar stuck marked is "
                         + "`onFrameFinished` not arriving — most likely on a baker nothing re-adopted.")
-        waitForSandwichState(app, "rest", 30, "And the canvas got there too, on the same bake.")
+        waitForSandwichState(app, "rest", timeout: 30, "And the canvas got there too, on the same bake.")
     }
 }

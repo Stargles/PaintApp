@@ -557,6 +557,8 @@
 			isa = PBXGroup;
 			children = (
 				8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */,
+				73D8EE9913434A089208146B /* TimelineBakeBarLogicTests.swift */,
+				0DFF68BC4CC5FA51DAA2F130 /* TimelineBakeIndicationUITests.swift */,
 				057762C046FB4E93924750D2 /* TimelineGraphChannelListLogicTests.swift */,
 				2BF6162E590EAC39FAD19850 /* GraphEditorUITests.swift */,
 				6323A1DC0C883394F7DB1C01 /* TextLayoutLogicTests.swift */,
@@ -689,8 +691,6 @@
 				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
 				9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */,
 				CAB2314E50FF4A5681DF648F /* PaintSoftware/Views/TimelineBakeBar.swift */,
-				73D8EE9913434A089208146B /* TimelineBakeBarLogicTests.swift */,
-				0DFF68BC4CC5FA51DAA2F130 /* TimelineBakeIndicationUITests.swift */,
 				1E0FCA68D211C8E1B87AEEAB /* PaintSoftware/Views/VectorPreviewPlan.swift */,
 				C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */,
 				5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */,
