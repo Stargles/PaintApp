@@ -1844,6 +1844,13 @@ final class CanvasManager: ObservableObject {
     /// 2048×1024 and five at 2048², against a `ringLookahead` of 24 — so the ring is expected to be
     /// the binding constraint on the lookahead rather than the other way round, which is what
     /// `FrameBaker.fillRingAhead`'s walk is written to cope with.
+    ///
+    /// **Decoded bytes, which is the only budget that means anything here**, and `DecodedFrameRing`
+    /// already sums exactly that (`DecodedFrame.byteCount` is the decompressed BGRA). Stage 4e
+    /// MEASURED why the file size would have been the wrong quantity: decode time tracks *pixels*
+    /// rather than bytes, so a hold — a quarter of cel art's file — decodes **slower**, 24.6 ms
+    /// against 9.9 ms at 4096². A ring budgeted in file bytes would hold the most compressible
+    /// frames, which are the expensive ones to bring back.
     static let frameRingByteBudget = 96 * 1024 * 1024
 
     @MainActor

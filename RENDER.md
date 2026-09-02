@@ -419,9 +419,18 @@ by the active leaf, transient, never stored — stay on `CanvasView`'s own `sand
 between two finished pictures. **This paragraph asked for one worker and wanted one memo, and stage 4d found the
 memo is bought by the *size*:** `PixelOps.rasterize` and `MaskResolver.CacheKey` are keyed on the buffer, so the
 bake mints at `.liveComposite` and the three share their flattens across two queues. That also lets the halves keep
-`.userInitiated` while the bake keeps `.utility`, which is what §2 asks for. **`isSandwichRebuilding` is mutual
-exclusion, not a discard** — `finishSandwichRebuild` re-derives the key and starts the rebuild it declined, the same
-contract `FrameBaker.isBaking` has. The queue reorders, it never discards; that was already true on both sides.
+`.userInitiated` while the bake keeps `.utility`, which is what §2 asks for. 
+**This section said the single-slot drop-if-busy behaviour of `isSandwichRebuilding` "is not inherited", and that
+sentence was wrong about the thing it was declining to inherit.** `isSandwichRebuilding` is not a drop. It is
+mutual exclusion with a retry: `finishSandwichRebuild` ends in `reconcileLayers()`, which re-derives the key from
+the model and starts the rebuild the guard declined — the same "waits one iteration rather than evaporating"
+contract `FrameBaker.isBaking` was written to provide, reached by coalescing on the latest key instead of by a
+queue. So the queue reorders and never discards on *both* sides, and always did.
+
+The flag therefore stays, and deleting it is not available. `sandwichQueue` is **serial**: without the guard every
+SwiftUI pass that moves the key queues a rebuild, so a two-second scrub at display rate queues ~120 jobs — each a
+`resolve()` plus two composites, roughly 20 s of `.userInitiated` work for pictures nobody will ever see, starving
+the bake behind it. What was actually wrong was the *claim*, and it is corrected here rather than worked around.
 
 **Built 2026-09-02 (stage 4c): `Engine/FrameBaker.swift`.** `CanvasView.startSandwichRebuild`'s idiom — a
 `@MainActor` owner, a serial `DispatchQueue` at `.utility`, a hop back — with `isBaking` as mutual exclusion
