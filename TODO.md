@@ -133,10 +133,14 @@ LAYER_TRANSFORM.md.
 
       Two things the ask already settles, and they are the reason it is cheap. The **modes exist** —
       LASSO_MOVE §5.23-24 rules how Touching and Enclosed treat text and placed images, and §5.25 rules
-      that Clear cuts at the loop rather than deleting every element it touches, which is the same
-      split-at-the-border behaviour this asks Recolour to grow. And the **splitting exists**: Enclosed
-      move already cuts strokes and fills at the lasso boundary, so Recolour-with-Enclosed is a new
-      caller of a built operation rather than new geometry.
+      how Clear treats the loop, which is the same split-at-the-border behaviour this asks Recolour to
+      grow. And the **splitting exists**: a **Cut** move already cuts strokes and fills at the lasso
+      boundary, so Recolour-with-Cut is a new caller of a built operation rather than new geometry.
+
+      **The owner's word above is "enclosed" and the mode that splits is Cut.** `.enclosed` catches
+      whole elements or nothing and cuts nothing at all — `LassoMembership.cutsAtTheBoundary` is true
+      of `.cutting` alone. The behaviour the ask describes ("split the strokes … and then recolour the
+      ones inside") is Cut's, so read it as Cut wherever this item says Enclosed.
 
       What it is really asking is that membership stop being a property of *the Move tool* and become a
       property of *the selection*, which is the more honest home for it — every tool that consumes a

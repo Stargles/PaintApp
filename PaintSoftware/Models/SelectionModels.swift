@@ -756,11 +756,12 @@ extension CanvasManager {
         }
     }
 
-    /// **Everything inside the loop goes, and a stroke that hangs outside is cut at the boundary
-    /// rather than deleted whole** (owner, 2026-08-28).
+    /// **Everything the loop catches goes, under the rule the artist picked in the Select panel**
+    /// (LASSO_MOVE.md §5.26) — Enclosed, Cut or Touching, the same three `beginVectorLassoMove` and
+    /// `recolorSelection` read, with no exception for this button.
     ///
     /// > *"clear does not work (in the selection menu). It should clear all the stuff in the
-    /// > selection."*
+    /// > selection."* — owner, 2026-08-28.
     ///
     /// It did not, on a vector layer, and the reason was that the walk this replaced only ever looked
     /// at `element.fill` and `continue`d past every stroke, text object and placed image. An artist
@@ -768,18 +769,23 @@ extension CanvasManager {
     /// tests named `testClear…` in `LassoMoveLogicTests` were watched failing on the old code before
     /// this was written.
     ///
-    /// **Cutting at the boundary is the consistent answer three ways**, which is why the owner picked
-    /// it over deleting whole caught strokes: it is what the raster arm below does, it is what an
-    /// eraser does, and it is already what the old walk did to *fills*.
+    /// **Under Cut a stroke hanging outside the loop is bisected and only the inside half goes**, and
+    /// that is the consistent answer three ways: it is what the raster arm below does, it is what an
+    /// eraser does, and it is what the old walk already did to *fills*. **Under Touching the whole
+    /// stroke goes, ink outside the loop included, and under Enclosed it does not go at all.** That is
+    /// the picker doing what it says, and it is the owner's ruling of 2026-09-02 taken with the
+    /// consequence in front of them — one rule for every tool beats a Clear that quietly answers to a
+    /// rule of its own.
     ///
     /// **So this is `splitForLassoMove`, with the inside thrown away instead of lifted.** Calling that
     /// function and deleting the ids it reports was chosen over a sibling beside it or a third
     /// parameter on it, because a Clear needs the whole of what it already computes and none of what
     /// it already refuses to do:
     ///
-    ///   * the split is the deliverable — Cut's per-kind rules, the stroke bisection, the fill
-    ///     boolean, the broad phase and `lassoFillRule` — and `insideIDs` is *exactly* the delete
-    ///     list, so the two answers a Clear needs are the two the function returns;
+    ///   * the split is the deliverable — the per-kind rules, the stroke bisection under Cut, the
+    ///     fill boolean, the broad phase and `lassoFillRule` — and `insideIDs` is *exactly* the
+    ///     delete list under all three rules, so the two answers a Clear needs are the two the
+    ///     function returns;
     ///   * nothing about a float lives inside it. Fresh id minting and `DabLattice` re-keying happen
     ///     in `piece(of:)`, where they are as right for a survivor as for a traveller: the outside
     ///     half of a cut stroke keeps drawing on its parent's lattice, so clearing one end of a
@@ -792,17 +798,21 @@ extension CanvasManager {
     /// the function is for; a sibling would have duplicated the five things TODO item (20) already
     /// gave one home.
     ///
-    /// **Nil means nothing to delete**, and for a Clear that is a silent no-op with no undo step —
-    /// not the error it would be for a lift. It is also "nothing was cut": `splitForLassoMove` cuts a
-    /// stroke or a fill only when a piece of it lands inside, so an empty `insideIDs` guarantees the
-    /// list it built is element-for-element the one it was given.
+    /// **Nil means nothing to delete**, and for a Clear that is still no undo step — not the error it
+    /// would be for a lift. It is no longer *silent* in one case: an Enclosed rule that excluded a
+    /// loop full of ink raises §5.24's notice, exactly as a lift and a recolour do, because there the
+    /// artist's own choice is what emptied the answer. Bare paper says nothing, as §5.9 rules. Nil is
+    /// also "nothing was cut": `splitForLassoMove` cuts a stroke or a fill only when a piece of it
+    /// lands inside, so an empty `insideIDs` guarantees the list it built is element-for-element the
+    /// one it was given.
     ///
-    /// **Text and placed images cannot be cut, so a Clear deletes one whose *centre* the loop
-    /// contains and leaves one whose corner it merely clips.** Not a new rule — it is Cut's rule for
-    /// the two kinds that have no spine (LASSO_MOVE.md §5.3 and :431-434, `caught(_:by:bounds:using:
-    /// membership:)`), the cut rule rounded to the nearest whole object, and the same answer Change
-    /// Colour gives. Inventing a different one here would mean the same loop caught a text box for
-    /// Move and not for Clear.
+    /// **Text and placed images cannot be cut, so under Cut a Clear deletes one whose *centre* the
+    /// loop contains and leaves one whose corner it merely clips.** Not a new rule — it is Cut's rule
+    /// for the two kinds that have no spine (LASSO_MOVE.md §5.3 and §5.23,
+    /// `caught(_:by:bounds:using:membership:)`), the cut rule rounded to the nearest whole object.
+    /// Under Enclosed and Touching those two kinds answer by their **own quad** instead (§5.23), which
+    /// is the same answer a lift and a recolour now give: inventing a different one here would mean
+    /// the same loop caught a text box for Move and not for Clear.
     ///
     /// **An eraser mark is an ordinary element**, as it is for a move (owner, 2026-08-22): a punch
     /// inside the loop is deleted with the ink around it. LASSO_MOVE.md §5.4's centre-line rule has a
@@ -835,7 +845,18 @@ extension CanvasManager {
             let loop = vectorCanvas.localPath(fromCanvas: selection.path)
                                    .normalized(using: VectorCanvas.lassoFillRule)
             let elementsBefore = vectorCanvas.elements
-            guard let split = vectorCanvas.splitForLassoMove(insideLocalPath: loop) else { return }
+            // **The rule the artist picked, with no exception** (LASSO_MOVE.md §5.26). Under Cut this
+            // is the same call it has always been and cuts at the loop; under Enclosed and Touching
+            // `splitForLassoMove` returns the display list verbatim and `insideIDs` is the caught set,
+            // so the filter below deletes whole elements and cuts nothing.
+            guard let split = vectorCanvas.splitForLassoMove(insideLocalPath: loop,
+                                                             membership: selectionMembership) else {
+                // Same exception, same reason as a lift and a recolour: an Enclosed rule that excluded
+                // a loop full of ink is the artist's own choice doing it, and a Clear that deletes
+                // nothing and says nothing reads as a broken button (§5.24). Bare paper stays silent.
+                noteALassoThatCaughtNothing(vector: vectorCanvas, loop: loop)
+                return
+            }
             // **Filtered, in the order the split produced.** Both halves of a cut stroke replace their
             // parent *at the parent's index*, outside first, so dropping the inside ids leaves every
             // survivor's z-position exactly where it was. Gathering the survivors by kind, or

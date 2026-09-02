@@ -105,10 +105,11 @@ i.e. the toggle's other half.
 `Enclosed · Cut · Touching`, ordered by how much the loop takes with the shipped rule in the middle
 and selected until the artist touches the picker. §5.23, §5.24 and §5.26 are the rulings.
 
-**They belong to the *selection*, not to Move** (§5.26, TODO item (23)). The picker was on the Move
-bar from 2026-08-28 to 2026-09-02 and is now in the Select panel, and `CanvasManager` calls the
-setting `selectionMembership` rather than `lassoMoveMembership` for that reason. Both `Move` and
-`Recolour` read it; **`Clear` deliberately does not** — see §5.26.
+**They belong to the *selection*, not to Move** (§5.26, TODO item (23)). The picker is in the Select
+panel and `CanvasManager` calls the setting `selectionMembership` for that reason. **Every tool that
+consumes a lasso reads it, with no exception: Move, Recolour and Clear.** Fill and Duplicate do not
+appear on that list because neither catches an existing element — Fill paints the loop's own area,
+and Duplicate is the pixel cut.
 
 | what | where |
 |---|---|
@@ -118,8 +119,9 @@ setting `selectionMembership` rather than `lassoMoveMembership` for that reason.
 | text and a placed image under the two new rules | their own quad — `VectorCanvas.quad(of:)`, two overloads — through the same two `CGPath` booleans the fill arm uses. A corners-only test would be wrong: four corners inside a crescent does not mean the rectangle is |
 | the picker | `SelectPanel.membershipPicker`, above the action row it governs. Live with no selection at all — the rule is what the *next* loop answers with; **disabled with a reason on a pixel layer** (`CanvasManager.selectionMembershipUnavailableReason`), where every consumer cuts at the selection and can do nothing else |
 | which rule a **recolour** follows | `CanvasManager.recolorSelection` — the one branch the three rules cost. `.cutting` takes `splitForLassoMove` and recolours `insideIDs`; the other two take `elementIDs(insideLocalPath:membership:)` and recolour whole. §5.26 |
+| which rule a **Clear** follows | `CanvasManager.clearSelectionPixels` — the same `splitForLassoMove` call with `insideIDs` **deleted** rather than lifted, so all three rules arrive through one line. §5.25 is what Cut means there; §5.26 is what puts it on the picker |
 | changing the rule mid-float | `CanvasManager.setSelectionMembership(_:)` — `cancelVectorFloat()` **then** `beginVectorLassoMove()`, in that order, because the latter's first statement bakes the float. No control reaches this any more (the Select panel is suppressed while anything floats, §5.13); it is the setter's invariant, not a picker's behaviour |
-| Enclosed catching nothing | `CanvasNotice.Kind.nothingWhollyInside`, raised only when a laxer rule *would* have caught something — §5.24, and the one deliberate exception to §5.9 |
+| Enclosed catching nothing | `CanvasNotice.Kind.nothingWhollyInside`, raised only when a laxer rule *would* have caught something — §5.24, and the one deliberate exception to §5.9. One call, `CanvasManager.noteALassoThatCaughtNothing`, reached from all three consumers |
 | the setting | `CanvasManager.selectionMembership`, **not persisted** — per-drawing intent, the line `preserveMovePrecision` already draws |
 
 **The two new rules are cheaper and safer than the one that ships**, which inverts the usual
@@ -1387,22 +1389,24 @@ about the box, and the first is the one that makes the three rules say one sente
     vehicle is a `CanvasNotice` and not the Move bar's caption slot, because the bar is raised on
     `isAnyPieceFloating` and this is precisely the path where nothing floats.
 
-25. **Clear cuts at the loop, exactly as Cut does.** In this file because Clear is now the same
-    engine seam, and here rather than in a document of its own so that a session changing the split's
-    membership rules can see who else it moves. The owner's report, 2026-08-28: *"clear does not work
-    (in the selection menu). It should clear all the stuff in the selection."* It did not — the vector
-    arm only ever looked at fills — and the ruling on the fix is that **only what is inside the loop
-    vanishes; the part of a stroke hanging outside survives**, chosen over deleting whole caught
-    strokes because it is the consistent answer three ways: it is what Clear already did to *fills*,
-    it is what the raster arm does, and it is what an eraser does.
+25. **Clear cuts at the loop under Cut.** *(Its second sentence — that Clear is fixed on `.cutting`
+    — is superseded by §5.26, which puts Clear on the picker. Everything else here stands and is what
+    Cut still means.)* In this file because Clear is the same engine seam, and here rather than in a
+    document of its own so that a session changing the split's membership rules can see who else it
+    moves. The owner's report, 2026-08-28: *"clear does not work (in the selection menu). It should
+    clear all the stuff in the selection."* It did not — the vector arm only ever looked at fills —
+    and the ruling on the fix is that under Cut **only what is inside the loop vanishes; the part of a
+    stroke hanging outside survives**, chosen over deleting whole caught strokes because it is the
+    consistent answer three ways: it is what Clear already did to *fills*, it is what the raster arm
+    does, and it is what an eraser does.
 
-    So Clear is `splitForLassoMove` under `.cutting` with the reported ids **deleted** instead of
-    lifted — which settles the two kinds that cannot be parted without a new decision, since §5.3 and
-    §5.23 already answer them: a text box or a photo whose **centre** the loop contains is cleared
-    whole, and one whose corner it merely clips is left alone. `.erase` is an ordinary element (§5.7),
-    so a punch inside the loop is cleared with the ink around it. **A Clear that catches nothing is a
-    silent no-op with no undo step** — the nil `splitForLassoMove` already returns, read as "nothing
-    to delete" rather than as the failure a lift reads it as.
+    So Clear is `splitForLassoMove` with the reported ids **deleted** instead of lifted — which
+    settles the two kinds that cannot be parted without a new decision, since §5.3 and §5.23 already
+    answer them: under Cut a text box or a photo whose **centre** the loop contains is cleared whole,
+    and one whose corner it merely clips is left alone. `.erase` is an ordinary element (§5.7), so a
+    punch inside the loop is cleared with the ink around it. **A Clear that catches nothing costs no
+    undo step** — the nil `splitForLassoMove` already returns, read as "nothing to delete" rather than
+    as the failure a lift reads it as. It is silent except in §5.24's case, which §5.26 gives it.
 
 ---
 
@@ -1443,11 +1447,27 @@ about *where the three rules live* rather than about what they do.
     outside the selection"* (2026-08-28); the 2026-08-29 ask supersedes that, and Touching — one tap
     away, in the same panel as the button — is where the old behaviour lives now.
 
-    **`Clear` deliberately does not inherit the rule.** §5.25 rules it *"`splitForLassoMove` under
-    `.cutting`"* in those words, and putting Clear on the picker would mean Touching deleting whole
-    strokes the loop merely brushes — the outcome §5.25 explicitly chose against. The owner's ask
-    names Recolour and only Recolour. **This is the one place "every tool that consumes a lasso
-    inherits it" stops, and it is left for the owner rather than assumed either way.**
+    **Clear follows the picker too, and there is no exception.** It reads the same property through
+    the same `splitForLassoMove` call: under Cut it bisects at the loop exactly as §5.25 describes,
+    under Touching a stroke the loop merely grazes is deleted whole, and under Enclosed it is not
+    deleted at all. **This replaces §5.25's fixing of Clear on `.cutting`**, which is the one sentence
+    of that ruling this supersedes; the rest of §5.25 is what Cut still means. The owner was shown the
+    consequence — Touching deleting whole strokes the loop barely touches is precisely the outcome
+    §5.25 weighed and declined — and chose one rule with no exceptions over a Clear that answers to a
+    rule of its own.
+
+    **So the three tools that consume a lasso all read `selectionMembership`: Move, Recolour, Clear.**
+    Two neighbours do not, and neither is an exception: **Fill** paints the loop's own area and
+    catches no existing element, so there is nothing for a membership rule to be about; and
+    **Duplicate** is `PixelOps.maskedPiece` on a flattened cel, which is the pixel cut — its
+    rasterizing of a vector layer is a defect filed in [BUGS.md](BUGS.md) and is where that would be
+    fixed, not here.
+
+    **Enclosed catching nothing says so for all three** (§5.24). The ruling is written about a lift
+    and its argument names no tool: what separates it from §5.9's silent empty lasso is whether the
+    artist can see the reason, and a loop full of ink that the rule they just picked excluded is the
+    case where they cannot. `CanvasManager.noteALassoThatCaughtNothing` is the one call, and bare
+    paper stays silent through all three doors.
 
 
 ## 6. Open risks

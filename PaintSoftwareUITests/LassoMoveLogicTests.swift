@@ -3956,10 +3956,15 @@ final class LassoMoveLogicTests: XCTestCase {
     // drawing untouched. **The first two tests here were watched failing before the fix was written**;
     // they are the reproduction, not a regression net bolted on afterwards.
     //
-    // The ruling is that Clear **cuts at the loop**: only what is inside vanishes and the part of a
-    // stroke hanging outside survives. So Clear is `splitForLassoMove` with the inside thrown away
-    // rather than lifted, and these live next to the move's own tests because the two must give the
-    // same answer to "what is inside" — a session that changes one has to look at the other.
+    // The ruling is that Clear **follows the picker, with no exception** (§5.26): under Cut only what
+    // is inside vanishes and the part of a stroke hanging outside survives, under Touching a stroke
+    // the loop merely grazes goes whole, and under Enclosed it does not go at all. So Clear is
+    // `splitForLassoMove` under `selectionMembership` with the inside thrown away rather than lifted,
+    // and these live next to the move's own tests because the two must give the same answer to "what
+    // did the loop catch" — a session that changes one has to look at the other.
+    //
+    // **The tests below that set no membership are asserting Cut**, which is the default and is what
+    // §5.25 rules Clear means there; the three named `testUnder…Clear…` are the other two rules.
 
     /// **A stroke wholly inside the loop is cleared.** The owner's sentence as an assertion, and the
     /// first of the two that were red on the old code: the walk it replaced skipped `.stroke`
@@ -4199,6 +4204,93 @@ final class LassoMoveLogicTests: XCTestCase {
 
         XCTAssertEqual(vector.elements.map(\.id), before, "the display list is untouched")
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and nothing is recorded")
+    }
+
+    /// **Under Touching a Clear deletes a straddling stroke whole**, ink outside the loop included.
+    ///
+    /// This is the consequence the owner was shown before ruling and chose anyway (LASSO_MOVE.md
+    /// §5.26): §5.25 weighed "delete whole caught strokes" and declined it *as the fixed rule*, and
+    /// putting Clear on the picker makes it one of the three the artist can ask for. One rule for
+    /// every tool beat a Clear that answered to a rule of its own.
+    func testUnderTouchingAClearDeletesAStraddlingStrokeWhole() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.setSelectionMembership(.touching)
+        let baseline = manager.history.undoStack.count
+        manager.clearSelectionPixels()
+
+        XCTAssertTrue(vector.elements.isEmpty, "the whole stroke went, not just the inside half")
+        XCTAssertEqual(stepsSince(baseline, manager), 1, "in one step")
+
+        manager.undo()
+        XCTAssertEqual(vector.elements.count, 1, "and one press gives it back")
+    }
+
+    /// **Under Enclosed a Clear leaves a straddling stroke and takes the one wholly inside.** The
+    /// same sentence Enclosed says for a lift and for a recolour, said for Clear — which is what
+    /// "no exception" means (§5.26).
+    func testUnderEnclosedAClearTakesOnlyWhatLiesWhollyInsideTheLoop() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        vector.addStroke(stroke(from: CGPoint(x: 36, y: 40), to: CGPoint(x: 52, y: 40), size: 6))
+        let straddling = vector.elements[0].id
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        manager.setSelectionMembership(.enclosed)
+        manager.clearSelectionPixels()
+
+        XCTAssertEqual(vector.elements.map(\.id), [straddling],
+                       "the enclosed stroke went whole and the straddling one was not even cut")
+    }
+
+    /// **An Enclosed Clear that catches nothing says so, and bare paper still stays silent** —
+    /// §5.24 reached through the third door. The ruling names no tool: a loop full of ink that the
+    /// rule the artist just picked excluded is the case where they cannot see the reason.
+    func testAnEnclosedClearThatCatchesNothingSaysSoAndBarePaperStaysSilent() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        manager.setSelectionMembership(.enclosed)
+
+        select(manager, layerIndex, loop(CGRect(x: 30, y: 2, width: 30, height: 60)))
+        let baseline = manager.history.undoStack.count
+        manager.clearSelectionPixels()
+        XCTAssertEqual(vector.elements.count, 1, "no stroke lies completely inside the loop")
+        XCTAssertEqual(stepsSince(baseline, manager), 0, "so nothing was deleted and nothing recorded")
+        XCTAssertEqual(manager.notice?.code, "nothingWhollyInside", "and the artist is told why")
+
+        manager.notice = nil
+        select(manager, layerIndex, loop(CGRect(x: 4, y: 44, width: 16, height: 16)))
+        manager.clearSelectionPixels()
+        XCTAssertNil(manager.notice,
+                     "but bare paper says nothing — §5.9, where the artist can see the reason")
+    }
+
+    /// **One rule, read by all three consumers.** The core claim of §5.26 stated where it can fail:
+    /// one manager, one `setSelectionMembership` call, and the same loop answered identically by a
+    /// recolour, a lift and a Clear. Three fixtures each setting their own value would still pass if
+    /// the three tools read three properties.
+    func testTheSameRuleGovernsARecolourALiftAndAClear() {
+        let (manager, layerIndex, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 20), to: CGPoint(x: 58, y: 20), size: 6))
+        let originalID = vector.elements[0].id
+        let rect = CGRect(x: 30, y: 2, width: 30, height: 60)
+        select(manager, layerIndex, loop(rect))
+        manager.setSelectionMembership(.touching)
+
+        manager.brushColor = picked(1, 0, 0)
+        manager.recolorSelection()
+        XCTAssertEqual(vector.elements.map(\.id), [originalID], "Touching recoloured it whole")
+
+        select(manager, layerIndex, loop(rect))
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(manager.vectorFloat?.insideIDs, [originalID], "and lifts it whole")
+        manager.cancelVectorFloat()
+
+        select(manager, layerIndex, loop(rect))
+        manager.clearSelectionPixels()
+        XCTAssertTrue(vector.elements.isEmpty,
+                      "and deletes it whole — one property, three consumers, no exception")
     }
 
     /// **The clear is visible through `PixelOps.rasterize`, which is what proves `bumpVersion()` ran.**
