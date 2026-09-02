@@ -5075,4 +5075,458 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertEqual(canvas.rasterizations, rasterizations,
                        "A second recipe over an unchanged cel must rasterize nothing at all")
     }
+
+    // MARK: - The bake store's ratio and codec cost (RENDER.md §5 stage 4e)
+
+    /// **`FrameBakeStore` measured on artwork rather than on a rect.** RENDER §3.5 asks for one of
+    /// these numbers and asserts the other two without ever taking them: it says to *measure* the
+    /// ratio ("MEASURE it on the owner's document before trusting a number"), it *claims* the decode
+    /// is "single-digit milliseconds on the device" for an 8 MiB frame, and it does not mention the
+    /// **encode** at all — which the baker pays once per frame and which therefore comes straight out
+    /// of the bake budget. Stage 4a measured a 512² synthetic rect on the simulator; that is the
+    /// extreme case at a toy size on the wrong hardware.
+    ///
+    /// **What decides the design is one comparison: does a frame come off disk inside 41.6 ms?**
+    /// That is 1/24 s, and play is served from this store (§3.5's decoded ring reads what these
+    /// numbers describe). Every figure below is printed rather than asserted, per this file's house
+    /// rule — the assertions are structural.
+    ///
+    /// The fixtures are the document §2.8 names, not a rect:
+    ///
+    /// | fixture | what it is | why it is here |
+    /// |---|---|---|
+    /// | `celArt` | six flat colours in large hard-edged regions with real vector ink over them | the anime cel the owner draws |
+    /// | `hold` | three ink strokes on transparency | a hold, which is most of a scene's frames |
+    /// | `painted` | a smooth two-axis gradient with fine grain | the realistic pessimistic bound — a painted background |
+    /// | `noise` | seeded per-pixel noise | the absolute bound, and the input that takes the raw branch |
+    ///
+    /// **`noise` and `painted` are not run at 4096²** and that is deliberate rather than shy: their
+    /// ratio is a property of the pixels and not of the count of them, so a fourth and fifth 67 MB
+    /// incompressible buffer at that size would buy no information while risking a jetsam on a 3 GB
+    /// iPad — which would read as a test failure and be an environment.
+    private enum BakeFixture: String, CaseIterable {
+        case celArt, hold, painted, noise
+    }
+
+    private static let bakeMatrix: [(name: String, size: CGSize, fixtures: [BakeFixture])] = [
+        ("2048x1024", CGSize(width: 2048, height: 1024), BakeFixture.allCases),
+        ("2048x2048", CGSize(width: 2048, height: 2048), BakeFixture.allCases),
+        ("4096x4096", CGSize(width: 4096, height: 4096), [.celArt, .hold]),
+    ]
+
+    /// The frame budget at 24 fps, in seconds. The number the decode has to fit inside.
+    private static let playbackFrameBudget = 1.0 / 24.0
+
+    // MARK: Fixtures
+
+    /// A character's line work: long contours with pressure falling off at both ends, drawn through
+    /// the app's own `BrushStamper` rather than with `CGContext.stroke`, so the ink has the
+    /// antialiased dab edges a real cel has. Antialiasing is the half of a cel that LZ4 cannot match,
+    /// so leaving it out would flatter the ratio.
+    private static func celInkStrokes(size: CGSize) -> [VectorStroke] {
+        let w = size.width, h = size.height
+        let ink = CodableColor(red: 0.09, green: 0.08, blue: 0.11, alpha: 1)
+        let width = Swift.max(4, w / 340)
+        var strokes: [VectorStroke] = []
+        for contour in 0..<9 {
+            let phase = CGFloat(contour) * 0.7
+            let y0 = h * (0.08 + 0.095 * CGFloat(contour))
+            let samples = (0..<110).map { step -> VectorSample in
+                let t = CGFloat(step) / 109
+                return VectorSample(x: w * (0.06 + 0.88 * t),
+                                    y: y0 + h * 0.045 * sin(t * .pi * 2 + phase),
+                                    pressure: 0.3 + 0.7 * sin(t * .pi))
+            }
+            strokes.append(VectorStroke(brush: BrushLibrary.hardRound, color: ink,
+                                        size: width, opacity: 1, samples: samples))
+        }
+        return strokes
+    }
+
+    /// Flat colour under ink: what a paint-bucket pass leaves behind. Six colours, large polygons,
+    /// hard edges, and no gradient anywhere — §2.8's "a lot of flat colors".
+    private static func celArtFrame(size: CGSize) -> CGImage {
+        let inkImage = VectorCanvas(size: size, strokes: celInkStrokes(size: size)).render()
+        let w = size.width, h = size.height
+        let palette: [UIColor] = [
+            UIColor(red: 0.96, green: 0.95, blue: 0.91, alpha: 1),   // paper / sky
+            UIColor(red: 0.99, green: 0.87, blue: 0.79, alpha: 1),   // skin
+            UIColor(red: 0.90, green: 0.74, blue: 0.66, alpha: 1),   // skin shadow
+            UIColor(red: 0.20, green: 0.24, blue: 0.36, alpha: 1),   // hair
+            UIColor(red: 0.78, green: 0.29, blue: 0.31, alpha: 1),   // cloth
+            UIColor(red: 0.55, green: 0.68, blue: 0.55, alpha: 1),   // ground
+        ]
+        let regions: [(colour: Int, points: [(CGFloat, CGFloat)])] = [
+            (5, [(0, 0.62), (1, 0.55), (1, 1), (0, 1)]),
+            (3, [(0.28, 0.10), (0.62, 0.08), (0.70, 0.34), (0.56, 0.46), (0.32, 0.42), (0.24, 0.24)]),
+            (1, [(0.34, 0.30), (0.60, 0.30), (0.62, 0.58), (0.46, 0.68), (0.33, 0.55)]),
+            (2, [(0.46, 0.36), (0.60, 0.34), (0.61, 0.56), (0.49, 0.62)]),
+            (4, [(0.26, 0.60), (0.66, 0.58), (0.74, 0.96), (0.20, 0.96)]),
+            (5, [(0.70, 0.20), (0.94, 0.16), (0.96, 0.50), (0.72, 0.52)]),
+        ]
+        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            palette[0].setFill()
+            ctx.cgContext.fill(CGRect(origin: .zero, size: size))
+            for region in regions {
+                palette[region.colour].setFill()
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: region.points[0].0 * w, y: region.points[0].1 * h))
+                for point in region.points.dropFirst() {
+                    path.addLine(to: CGPoint(x: point.0 * w, y: point.1 * h))
+                }
+                path.close()
+                path.fill()
+            }
+            inkImage.draw(in: CGRect(origin: .zero, size: size))
+        }.cgImage!
+    }
+
+    /// A hold: three strokes and nothing else, on transparency. Most frames of an animated scene are
+    /// this, and a content-addressed store keeps one file for the whole span (§3.3) — so this is what
+    /// the *disk* mostly holds.
+    private static func holdFrame(size: CGSize) -> CGImage {
+        VectorCanvas(size: size, strokes: Array(celInkStrokes(size: size).prefix(3))).render().cgImage!
+    }
+
+    /// A painted background: two-axis gradient plus ±3 of grain. Gradients have no exact byte repeat
+    /// to match, so this is the honest pessimistic case rather than the theatrical one below it.
+    private static func paintedFrame(size: CGSize) -> CGImage {
+        let w = Int(size.width), h = Int(size.height)
+        var state: UInt64 = 0x2545F4914F6CDD1D
+        func next() -> Int {
+            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            return Int(truncatingIfNeeded: state >> 24) & 7
+        }
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        for y in 0..<h {
+            let v = Double(y) / Double(h)
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                let u = Double(x) / Double(w)
+                let base = 40 + 170 * (0.5 + 0.5 * sin(u * 5.0 + v * 2.5))
+                let grain = Double(next()) - 3
+                bytes[i]     = UInt8(clamping: Int(base * 0.55 + grain))   // B
+                bytes[i + 1] = UInt8(clamping: Int(base * 0.78 + grain))   // G
+                bytes[i + 2] = UInt8(clamping: Int(base + grain))          // R
+                bytes[i + 3] = 255                                          // A, last under 32-little
+            }
+        }
+        return FrameBakeStore.image(fromBGRA: bytes, width: w, height: h, bytesPerRow: w * 4)!
+    }
+
+    /// Incompressible, seeded so the ratio is reproducible. Opaque alpha, because a premultiplied
+    /// buffer cannot hold a colour byte above its own alpha.
+    private static func noiseFrame(size: CGSize) -> CGImage {
+        let w = Int(size.width), h = Int(size.height)
+        var state: UInt64 = 0x9E3779B97F4A7C15
+        func next() -> UInt8 {
+            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            return UInt8(truncatingIfNeeded: state >> 24)
+        }
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        for i in stride(from: 0, to: bytes.count, by: 4) {
+            bytes[i] = next(); bytes[i + 1] = next(); bytes[i + 2] = next(); bytes[i + 3] = 255
+        }
+        return FrameBakeStore.image(fromBGRA: bytes, width: w, height: h, bytesPerRow: w * 4)!
+    }
+
+    private static func bakeFixture(_ kind: BakeFixture, size: CGSize) -> CGImage {
+        switch kind {
+        case .celArt:   return celArtFrame(size: size)
+        case .hold:     return holdFrame(size: size)
+        case .painted:  return paintedFrame(size: size)
+        case .noise:    return noiseFrame(size: size)
+        }
+    }
+
+    // MARK: Timing and header plumbing
+
+    /// Wall clock for one call with **no memory sampler attached** — `measuringPeakMemory` starts a
+    /// thread that polls every 2 ms, which costs more than several of the figures below are worth.
+    private func elapsed(_ body: () -> Void) -> Double {
+        let start = CFAbsoluteTimeGetCurrent()
+        body()
+        return CFAbsoluteTimeGetCurrent() - start
+    }
+
+    /// Best and median of `count` runs. **Both, deliberately.** The best is the codec's own cost with
+    /// the machine's other work subtracted; the median is what play would actually see, and play is
+    /// the question. Reporting only the best would flatter a budget comparison.
+    private func repeatedTiming(_ count: Int, _ body: () -> Void) -> (best: Double, median: Double) {
+        var samples: [Double] = []
+        for _ in 0..<count { samples.append(elapsed(body)) }
+        samples.sort()
+        return (samples[0], samples[samples.count / 2])
+    }
+
+    /// A read that does not come out of the unified buffer cache. `F_NOCACHE` turns data caching off
+    /// for this descriptor, so the bytes come from storage rather than from the page the write just
+    /// left warm — which is the read the scheduler does for a frame the decoded ring has not reached
+    /// yet, and therefore the one that decides whether play can be served from disk.
+    private static func uncachedRead(_ url: URL) -> Data? {
+        let fd = open(url.path, O_RDONLY)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        _ = fcntl(fd, F_NOCACHE, 1)
+        var status = stat()
+        guard fstat(fd, &status) == 0, status.st_size > 0 else { return nil }
+        let total = Int(status.st_size)
+        var bytes = [UInt8](repeating: 0, count: total)
+        var got = 0
+        while got < total {
+            let chunk = bytes.withUnsafeMutableBytes { buffer -> Int in
+                Darwin.read(fd, buffer.baseAddress!.advanced(by: got), total - got)
+            }
+            if chunk <= 0 { break }
+            got += chunk
+        }
+        return got == total ? Data(bytes) : nil
+    }
+
+    /// The header `FrameBakeStore` writes, read back by hand. Parsing it here rather than reaching
+    /// into the store is what lets the decode be *split* — the store's `load` does the read, the
+    /// decompress and the `CGImage` build in one call, and which of the three dominates is the
+    /// finding.
+    private static func bakeHeader(_ file: Data) -> (flags: UInt16, width: Int, height: Int,
+                                                     bytesPerRow: Int, rawBytes: Int, payloadBytes: Int)? {
+        guard file.count >= FrameBakeStore.headerBytes else { return nil }
+        func byte(_ offset: Int) -> Int { Int(file[file.startIndex + offset]) }
+        func u16(_ offset: Int) -> UInt16 { UInt16(byte(offset)) | (UInt16(byte(offset + 1)) << 8) }
+        func u32(_ offset: Int) -> Int {
+            var value = 0
+            for i in 0..<4 { value |= byte(offset + i) << (8 * i) }
+            return value
+        }
+        return (u16(6), u32(8), u32(12), u32(16), u32(20), u32(24))
+    }
+
+    /// Any 32 bytes that differ per fixture. The store only needs a well-formed digest here; what a
+    /// *real* digest has to contain is `FrameBakeKeyLogicTests`' subject, not this file's.
+    private static func syntheticBakeDigest(_ seed: String) -> Data {
+        var bytes = [UInt8](repeating: 0x5A, count: 32)
+        for (index, byte) in Array(seed.utf8).enumerated() {
+            bytes[index % 32] = bytes[index % 32] &+ byte &+ UInt8(truncatingIfNeeded: index)
+        }
+        return Data(bytes)
+    }
+
+    // MARK: The measurement
+
+    /// Ratio, encode and decode for every fixture at every canvas size, each split into the pieces
+    /// that a design decision could actually move.
+    func testWhatOneBakedFrameCostsToCompressStoreAndDecode() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BakeCodec-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // A ceiling no fixture can reach, so eviction never runs inside a timing.
+        let store = FrameBakeStore(root: root, byteCeiling: 2_048 * 1024 * 1024)
+
+        var celArtRatios: [String: Double] = [:]
+        var noiseTookRawBranch = false
+        var worstMedianDecode = 0.0
+        var worstDecodeLabel = ""
+
+        for row in Self.bakeMatrix {
+            for fixture in row.fixtures {
+                autoreleasepool {
+                    let label = "\(row.name) \(fixture.rawValue)"
+                    let pixels = Int(row.size.width * row.size.height)
+                    let reps = pixels >= 4096 * 4096 ? 3 : 5
+                    let key = FrameBakeKey(rawDigest: Self.syntheticBakeDigest(label))
+                    let image = Self.bakeFixture(fixture, size: row.size)
+
+                    guard let bgra = FrameBakeStore.bgraBytes(image) else {
+                        return XCTFail("\(label): the fixture must be readable as BGRA")
+                    }
+                    let rawBytes = bgra.bytes.count
+
+                    // --- Encode, split into what `store` actually does ---
+                    let convert = repeatedTiming(reps) { _ = FrameBakeStore.bgraBytes(image) }
+                    let compress = repeatedTiming(reps) { _ = FrameBakeStore.compress(bgra.bytes) }
+                    let wholeStore = repeatedTiming(reps) { _ = store.store(image, for: key) }
+
+                    let url = store.url(for: key)
+                    let fileBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                    guard fileBytes > 0, let file = try? Data(contentsOf: url),
+                          let header = Self.bakeHeader(file) else {
+                        return XCTFail("\(label): the store must have written a readable file")
+                    }
+                    let compressed = header.flags & FrameBakeStore.flagCompressed != 0
+                    let payloadRange = FrameBakeStore.headerBytes..<(FrameBakeStore.headerBytes + header.payloadBytes)
+                    let payload = file.subdata(in: payloadRange)
+
+                    // --- Decode, split the same way ---
+                    let warmRead = repeatedTiming(reps) { _ = try? Data(contentsOf: url) }
+                    let coldRead = repeatedTiming(reps) { _ = Self.uncachedRead(url) }
+                    let decompress = compressed
+                        ? repeatedTiming(reps) { _ = FrameBakeStore.decompress(payload, to: header.rawBytes) }
+                        : (best: 0.0, median: 0.0)
+                    let decodedBytes = compressed
+                        ? (FrameBakeStore.decompress(payload, to: header.rawBytes) ?? [])
+                        : [UInt8](payload)
+                    let buildImage = repeatedTiming(reps) {
+                        _ = FrameBakeStore.image(fromBGRA: decodedBytes, width: header.width,
+                                                 height: header.height, bytesPerRow: header.bytesPerRow)
+                    }
+                    let wholeLoad = repeatedTiming(reps) { _ = store.load(key) }
+
+                    let ratio = Double(rawBytes) / Double(fileBytes)
+                    report("bake store — \(label)", [
+                        ("rawBytes", "\(rawBytes)"),
+                        ("fileBytes", "\(fileBytes)"),
+                        ("ratio", String(format: "%.2fx", ratio)),
+                        ("branch", compressed ? "lz4" : "raw"),
+                        ("encodeWhole", milliseconds(wholeStore.median)),
+                        ("encodeConvertToBGRA", milliseconds(convert.median)),
+                        ("encodeLZ4", milliseconds(compress.median)),
+                        ("decodeWhole", milliseconds(wholeLoad.median)),
+                        ("decodeWholeBest", milliseconds(wholeLoad.best)),
+                        ("decodeWarmFileRead", milliseconds(warmRead.median)),
+                        ("decodeColdFileRead", milliseconds(coldRead.median)),
+                        ("decodeLZ4", milliseconds(decompress.median)),
+                        ("decodeBuildCGImage", milliseconds(buildImage.median)),
+                        ("budget24fps", milliseconds(Self.playbackFrameBudget)),
+                        ("fitsIn24fps", wholeLoad.median < Self.playbackFrameBudget ? "yes" : "NO"),
+                    ])
+
+                    if fixture == .celArt { celArtRatios[row.name] = ratio }
+                    if fixture == .noise { noiseTookRawBranch = !compressed }
+                    if wholeLoad.median > worstMedianDecode {
+                        worstMedianDecode = wholeLoad.median
+                        worstDecodeLabel = label
+                    }
+
+                    // The round trip, at every size — a ratio measured off a file nobody could read
+                    // back would be a measurement of nothing.
+                    guard let restored = store.load(key) else {
+                        return XCTFail("\(label): the store must read back what it wrote")
+                    }
+                    XCTAssertEqual(restored.width, Int(row.size.width))
+                    XCTAssertEqual(restored.height, Int(row.size.height))
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+        }
+
+        report("bake store — worst decode against the play budget", [
+            ("worstFixture", worstDecodeLabel),
+            ("worstMedianDecode", milliseconds(worstMedianDecode)),
+            ("budget24fps", milliseconds(Self.playbackFrameBudget)),
+            ("headroom", String(format: "%.2fx", Self.playbackFrameBudget / Swift.max(worstMedianDecode, 1e-9))),
+        ])
+
+        // **Structure, not timing** — this file's house rule. What is asserted is that flat cel art
+        // compresses at all at every size, which is the premise §2.8 rests the whole store on, and
+        // that incompressible input still reaches the raw branch so a file is never bigger than its
+        // pixels. The milliseconds are the machine's business and live in the report lines.
+        for row in Self.bakeMatrix {
+            guard let ratio = celArtRatios[row.name] else {
+                return XCTFail("\(row.name): the cel-art fixture must have been measured")
+            }
+            XCTAssertGreaterThan(ratio, 2.0,
+                                 "\(row.name): flat cel art that does not even halve is §2.8's premise failing, not slowness")
+        }
+        XCTAssertTrue(noiseTookRawBranch,
+                      "Incompressible pixels must store raw, so a file is never larger than the frame plus one header")
+    }
+
+    // MARK: - §3.5's named next step, evaluated before anyone builds it
+
+    /// §3.5 ends with a contingency: *"If the ratio on real documents disappoints, the next step is a
+    /// per-row Up filter before LZ4, not a video codec."* This measures that step rather than
+    /// arguing about it — PNG's Up filter (each byte minus the byte one row above) and, for contrast,
+    /// its Sub filter (minus the byte one pixel to the left), both followed by the same LZ4.
+    ///
+    /// **What a filter can and cannot do here.** LZ4 finds *exact* repeated byte sequences, so a flat
+    /// region is already a single long match and a filter cannot improve it. What a filter changes is
+    /// input with smooth *variation* — a gradient, an antialiased edge — where consecutive rows are
+    /// near-identical but not identical, and a subtraction turns "near" into a run of zeros LZ4 can
+    /// match. So the interesting fixture is `painted`, and the honest expectation is that `celArt`
+    /// moves little and `hold` moves not at all.
+    ///
+    /// The cost side is measured too, because it is not free: the filter is a full pass over the
+    /// frame on the way in and the un-filter is another on the way out, and the un-filter lands on
+    /// the **decode** path, which is the one with a 41.6 ms budget.
+    func testWhetherAPerRowFilterBeforeLZ4WouldBuyAnything() {
+        let sizes: [(String, CGSize)] = [("2048x1024", CGSize(width: 2048, height: 1024)),
+                                         ("2048x2048", CGSize(width: 2048, height: 2048))]
+        var anyMeasured = false
+
+        for (sizeName, size) in sizes {
+            for fixture in [BakeFixture.celArt, .hold, .painted] {
+                autoreleasepool {
+                    let label = "\(sizeName) \(fixture.rawValue)"
+                    let image = Self.bakeFixture(fixture, size: size)
+                    guard let bgra = FrameBakeStore.bgraBytes(image) else {
+                        return XCTFail("\(label): the fixture must be readable as BGRA")
+                    }
+                    let raw = bgra.bytes
+                    let rowStride = bgra.width * 4
+
+                    let plain = FrameBakeStore.compress(raw)?.count ?? raw.count
+                    let up = Self.rowFiltered(raw, bytesPerRow: rowStride, back: rowStride)
+                    let sub = Self.rowFiltered(raw, bytesPerRow: rowStride, back: 4)
+                    let upBytes = FrameBakeStore.compress(up)?.count ?? up.count
+                    let subBytes = FrameBakeStore.compress(sub)?.count ?? sub.count
+
+                    let filterCost = repeatedTiming(3) {
+                        _ = Self.rowFiltered(raw, bytesPerRow: rowStride, back: rowStride)
+                    }
+                    let unfilterCost = repeatedTiming(3) {
+                        _ = Self.rowUnfiltered(up, bytesPerRow: rowStride, back: rowStride)
+                    }
+
+                    report("bake store — per-row filter before LZ4, \(label)", [
+                        ("rawBytes", "\(raw.count)"),
+                        ("lz4Bytes", "\(plain)"),
+                        ("lz4Ratio", String(format: "%.2fx", Double(raw.count) / Double(plain))),
+                        ("upThenLz4Bytes", "\(upBytes)"),
+                        ("upThenLz4Ratio", String(format: "%.2fx", Double(raw.count) / Double(upBytes))),
+                        ("upVsPlain", String(format: "%.3fx", Double(plain) / Double(upBytes))),
+                        ("subThenLz4Bytes", "\(subBytes)"),
+                        ("subThenLz4Ratio", String(format: "%.2fx", Double(raw.count) / Double(subBytes))),
+                        ("subVsPlain", String(format: "%.3fx", Double(plain) / Double(subBytes))),
+                        ("filterCostOnEncode", milliseconds(filterCost.median)),
+                        ("unfilterCostOnDecode", milliseconds(unfilterCost.median)),
+                    ])
+
+                    // The one thing worth asserting: the filter is **exactly** reversible, because a
+                    // lossy one would be a different feature. If a later session adopts it, this is
+                    // the line that says the arithmetic below is the arithmetic that was measured.
+                    XCTAssertEqual(Self.rowUnfiltered(up, bytesPerRow: rowStride, back: rowStride), raw,
+                                   "\(label): the Up filter must round-trip byte for byte")
+                    XCTAssertEqual(Self.rowUnfiltered(sub, bytesPerRow: rowStride, back: 4), raw,
+                                   "\(label): the Sub filter must round-trip byte for byte")
+                    anyMeasured = true
+                }
+            }
+        }
+        XCTAssertTrue(anyMeasured, "The filter comparison must have run on something")
+    }
+
+    /// PNG's Up (`back == bytesPerRow`) and Sub (`back == 4`) filters, over the same code. The first
+    /// `back` bytes are left alone because they have no predecessor, which is what makes the inverse
+    /// below able to start.
+    private static func rowFiltered(_ raw: [UInt8], bytesPerRow: Int, back: Int) -> [UInt8] {
+        guard raw.count > back else { return raw }
+        var out = [UInt8](repeating: 0, count: raw.count)
+        raw.withUnsafeBufferPointer { source in
+            out.withUnsafeMutableBufferPointer { destination in
+                for i in 0..<back { destination[i] = source[i] }
+                for i in back..<raw.count { destination[i] = source[i] &- source[i - back] }
+            }
+        }
+        return out
+    }
+
+    /// The inverse, in place and forwards — each byte needs the *restored* predecessor, not the
+    /// filtered one, so the direction is load-bearing.
+    private static func rowUnfiltered(_ filtered: [UInt8], bytesPerRow: Int, back: Int) -> [UInt8] {
+        guard filtered.count > back else { return filtered }
+        var out = filtered
+        out.withUnsafeMutableBufferPointer { buffer in
+            for i in back..<buffer.count { buffer[i] = buffer[i] &+ buffer[i - back] }
+        }
+        return out
+    }
 }
