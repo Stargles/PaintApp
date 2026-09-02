@@ -31,10 +31,11 @@ app, and whoever notices that should come back and say so rather than assuming i
 ## In flight
 
 - **(29) Rendering** — spec at [RENDER.md](RENDER.md), whose §2 is sixteen owner rulings and §5 the
-  build order. **Stages 0, 1 and 2 are merged**: the live stroke no longer scales with canvas area, the
-  playback clock is the model's, and the pen-up snapshot is a `FrameRecipe` minted on the main actor and
-  resolved off it — MEASURED 174-313 ms of main-thread work at pen-up down to **0.2 ms**. **Stage 3,
-  chunked compositing with `renderSources(subset:)`, is next.**
+  build order. **Stages 0 through 3 are merged**: the live stroke no longer scales with canvas area, the
+  playback clock is the model's, the pen-up snapshot is a `FrameRecipe` minted on the main actor and
+  resolved off it — MEASURED 174-313 ms of main-thread work at pen-up down to **0.2 ms** — and a frame
+  composites one chunk at a time under a memory ceiling, byte-exact on both backends. **Stage 4, the
+  store and the scheduler, is next.**
 
 - **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
   half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
@@ -210,12 +211,14 @@ LAYER_TRANSFORM.md.
       > [...] the only thing id really be doing in a 16k canvas is idea boards where the drawings are small
       > compared to the canvas."
 
-      **Two causes, neither the one that looks obvious.** The canvas-sized allocation *succeeds* — a
-      16383² `VectorCanvas.render()` is MEASURED at 143.5 ms on the device with the ink present, because a
-      `CGBitmapContext` is lazily committed. The stroke is drawn and never reaches the screen: no artwork
-      view sets `minificationFilter`, so a 5-point brush point-sampled to `fitScale` leaves **zero ink at
-      4096², 8192² and 12288²** — live on ordinary large canvases, not just 16k — and at 16383² the image
-      cannot be composited at all. BUGS.md carries both.
+      **Two causes, neither the one that looks obvious, and the first is fixed.** The canvas-sized
+      allocation *succeeds* — a 16383² `VectorCanvas.render()` is MEASURED at 143.5 ms on the device with
+      the ink present, because a `CGBitmapContext` is lazily committed. The stroke was drawn and never
+      reached the screen for two reasons. **No artwork view set `minificationFilter`**, so a 5-point brush
+      point-sampled to `fitScale` left **zero ink at 4096², 8192² and 12288²** — live on ordinary large
+      canvases, not just 16k. That is fixed: the nine artwork layers ask for `.trilinear`. **What remains
+      is that at 16383² the image cannot be composited at all**, which needs a downscaled display proxy.
+      BUGS.md carries both, and marks the first FIXED.
 
       The lag is the owner's own diagnosis, confirmed: `recordSpacing` is in canvas points, so at
       `fitScale` one screen inch is 352 dabs at 2048² and **2815 at 16383²**. Scaling the sample gate by
