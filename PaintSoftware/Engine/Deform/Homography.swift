@@ -318,6 +318,53 @@ struct Homography: Equatable {
         return homography.weightsAtBoxCorners(boxSize).allSatisfy { $0 > 0 }
     }
 
+    // MARK: - Paths
+
+    #if canImport(CoreGraphics)
+    /// `path` with every one of its points carried through this map, or nil when any of them lands
+    /// on the vanishing line where it has no image.
+    ///
+    /// **Point-wise, because a `CALayer` transform cannot do this one.** A projective
+    /// `CATransform3D` is how the piece itself and the text box carry their warp, for free, on the
+    /// GPU — but that needs a layer whose `bounds` *is* the source box (`catransform3D`'s stated
+    /// contract), and the marching-ants layers are zero-bounds sublayers whose `path` is already in
+    /// canvas coordinates. Re-mapping the points is a few hundred multiplies on a lasso outline,
+    /// against a per-delta budget that already holds a `UIView.transform` and five layer writes.
+    ///
+    /// **Curves are approximated by mapping their control points, and for this caller there are
+    /// none.** A projective image of a cubic is not a cubic, so mapping the controls is only exact
+    /// for straight segments — which is every segment a lasso, a rectangle or a wand trace produces.
+    /// A future caller with real curves wants a flatten first, not this.
+    func mapped(_ path: CGPath) -> CGPath? {
+        let out = CGMutablePath()
+        var escaped = false
+        path.applyWithBlock { raw in
+            guard !escaped else { return }
+            let element = raw.pointee
+            func at(_ index: Int) -> CGPoint? { map(element.points[index]) }
+            switch element.type {
+            case .moveToPoint:
+                guard let p = at(0) else { escaped = true; return }
+                out.move(to: p)
+            case .addLineToPoint:
+                guard let p = at(0) else { escaped = true; return }
+                out.addLine(to: p)
+            case .addQuadCurveToPoint:
+                guard let c = at(0), let p = at(1) else { escaped = true; return }
+                out.addQuadCurve(to: p, control: c)
+            case .addCurveToPoint:
+                guard let c1 = at(0), let c2 = at(1), let p = at(2) else { escaped = true; return }
+                out.addCurve(to: p, control1: c1, control2: c2)
+            case .closeSubpath:
+                out.closeSubpath()
+            @unknown default:
+                escaped = true
+            }
+        }
+        return escaped ? nil : out
+    }
+    #endif
+
     // MARK: - Core Animation
 
     #if canImport(QuartzCore)

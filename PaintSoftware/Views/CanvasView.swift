@@ -1772,10 +1772,14 @@ struct CanvasView: UIViewRepresentable {
         /// The raster Move's version of travelling ants. Its piece writes its transform to the model
         /// on every delta already (`updateFloatingPose`), so unlike the vector float this needs
         /// no live latch of its own — it is the same one transform on the outline, read off the piece.
-        private func rasterFloatAntsTransform() -> CGAffineTransform {
-            guard let piece = canvasManager.floatingPiece, piece.kind == .move else { return .identity }
-            return piece.liftTransform.affineTransform.inverted()
-                .concatenating(piece.transform.affineTransform)
+        private func rasterFloatAntsTransform() -> FloatingAntsMap {
+            guard let piece = canvasManager.floatingPiece, piece.kind == .move else {
+                return .affine(.identity)
+            }
+            // `antsMap`, not the affine composition this used to spell inline: a distorted piece's
+            // map is projective and a `CGAffineTransform` cannot hold one, so the ants were drawn
+            // as an un-warped rectangle beside the overlay's correctly foreshortened dashes.
+            return piece.antsMap
         }
 
         /// One delta's worth of display: a `UIView.transform` on the latched piece, and one
@@ -1793,7 +1797,7 @@ struct CanvasView: UIViewRepresentable {
             let written = VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
                                               stretchAxis: float.frame.stretchAxis,
                                               pivot: float.pivot)
-            selectionOverlay?.setLiveSelectionTransform(written.inverted().concatenating(placement))
+            selectionOverlay?.setLiveSelectionTransform(.affine(written.inverted().concatenating(placement)))
         }
 
         func beginObjectTransformDrag(_ handle: ObjectTransformFrame.Handle, at point: CGPoint) {
@@ -2275,36 +2279,36 @@ struct CanvasView: UIViewRepresentable {
                     continue
                 }
                 let cel = layer.cels[celIndex]
-                guard cel.interpolation != nil else {
-                    // No recipe here, so this cel is a keyframe or ordinary drawing; the same seam
-                    // carries the tinted motion-group overlay for it instead. Asked of the recipe
-                    // rather than of the derivation below, which also answers nil for a document with
-                    // no canvas size — that is a cel with nothing to *render*, not a cel with nothing
-                    // to *derive*, and it must not be handed to the overlay arm.
+                // **The whole per-layer decision is `LiveCelPreview`, and none of it is left here** —
+                // read that type for why. What this loop used to do instead was ask
+                // `cel.interpolation != nil` first, which is a test for *one* of the two derivation
+                // sources, so a cel animated purely by a transform key took the no-recipe exit and
+                // the canvas drew its resting ink at every frame of a move the export was animating.
+                switch canvasManager.livePreview(forCel: cel, atFrame: canvasManager.currentFrame) {
+                case .derived(let derived):
+                    // **The derivation is resolved before the key, and it is what the key is made
+                    // of** — see `InterpolationPreviewKey`. That covers a pose with no extra work:
+                    // `PosedCelIdentity` carries the resolved maps, so scrubbing to a frame the
+                    // pose resolves differently at is a different key and a repaint, and holding on
+                    // one it resolves equal at is the same key and free.
+                    let key = InterpolationPreviewKey(identity: derived.identity,
+                                                      preview: canvasManager.isScrubbingInterpolation)
+                    guard interpolationPreviewKeys[layer.id] != key else { continue }
+                    interpolationPreviewKeys[layer.id] = key
+                    // The derivation already in hand, rather than `interpolatedImage(forCel:inLayer:)`,
+                    // which would resolve a second one from the ids. Same pixels — that function is a
+                    // thin call through `derivedCelContent` — and one resolve instead of two on the
+                    // path that runs every SwiftUI pass.
+                    host.strokeView.setInterpolationImage(derived.render(key.preview ? .preview : .full))
+                case .motionGroupTint:
                     updateMotionGroupOverlay(layer: layer, celIndex: celIndex, host: host)
-                    continue
-                }
-                // **The derivation is resolved before the key, and it is what the key is made of** —
-                // see `InterpolationPreviewKey`.
-                guard let derived = canvasManager.derivedCelContent(for: cel,
-                                                                    atFrame: canvasManager.currentFrame) else {
-                    // `interpolatedImage` answered nil here too, and the seam's contract is that nil
-                    // means "not yet" rather than "empty" — a recipe can be malformed while a
-                    // reference is being re-picked — so the cel falls back to what it stores rather
-                    // than keeping a stale in-between on screen.
+                case .cleared:
+                    // The seam's contract is that nil means "not yet" rather than "empty" — a recipe
+                    // can be malformed while a reference is being re-picked — so the cel falls back
+                    // to what it stores rather than keeping a stale in-between on screen.
                     interpolationPreviewKeys.removeValue(forKey: layer.id)
                     host.strokeView.setInterpolationImage(nil)
-                    continue
                 }
-                let key = InterpolationPreviewKey(identity: derived.identity,
-                                                  preview: canvasManager.isScrubbingInterpolation)
-                guard interpolationPreviewKeys[layer.id] != key else { continue }
-                interpolationPreviewKeys[layer.id] = key
-                // The derivation already in hand, rather than `interpolatedImage(forCel:inLayer:)`,
-                // which would resolve a second one from the ids. Same pixels — that function is a thin
-                // call through `derivedCelContent` — and one resolve instead of two on the path that
-                // runs every SwiftUI pass.
-                host.strokeView.setInterpolationImage(derived.render(key.preview ? .preview : .full))
             }
         }
 

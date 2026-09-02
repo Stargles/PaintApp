@@ -253,6 +253,40 @@ struct FloatingPiece {
     /// undistorted piece: the same four local corners through the same `affineTransform`, min and max
     /// being blind to the order they arrive in.
     var transformedBounds: CGRect { canvasQuad.boundingBox }
+
+    /// **Where the marching ants have travelled to**: the canvas-space map from where this piece's
+    /// outline was lifted onto where the piece is now.
+    ///
+    /// **`.warped` exists because a `CGAffineTransform` cannot express a 4-corner projective warp at
+    /// all**, and the ants were being handed one anyway —
+    /// `liftTransform.affineTransform.inverted().concatenating(transform.affineTransform)`, which
+    /// never read `distortQuad`. `FloatingPieceOverlayView`'s dashed outline is drawn from
+    /// `canvasQuad`, so a distorted piece showed the artist a correct foreshortened box and an
+    /// un-warped rectangle of ants over the same ink, and the disagreement reads as a bug in the
+    /// warp rather than in the outline that is wrong.
+    ///
+    /// **The affine arm is kept rather than folded into the projective one**, and not only for the
+    /// free `CALayer` transform. The two arms are equal to about 1e-13 and that is not good enough
+    /// here: `setLiveSelectionTransform` decides whether to show the exterior hatch by asking
+    /// whether the map `isIdentity`, so a piece resting at its lift has to produce **exactly** the
+    /// identity or the hatch never comes back.
+    var antsMap: FloatingAntsMap {
+        let lift = liftTransform.affineTransform
+        guard distortQuad != nil,
+              abs(lift.a * lift.d - lift.b * lift.c) > Quad.epsilon,
+              // The projective residue on its own, in local space: `localBox` onto `localQuad`.
+              let residue = Homography(rect: localBox, to: localQuad) else {
+            return .affine(lift.inverted().concatenating(transform.affineTransform))
+        }
+        return .warped(Homography(transform.affineTransform) * residue * Homography(lift.inverted()))
+    }
+}
+
+/// See `FloatingPiece.antsMap`. Two cases rather than one `Homography`, because the affine one has
+/// to be exact.
+enum FloatingAntsMap: Equatable {
+    case affine(CGAffineTransform)
+    case warped(Homography)
 }
 
 // MARK: - One corner of a distorted box, dragged
@@ -330,6 +364,147 @@ struct FloatingDistortDrag: Equatable {
         moved[corner] = canvasPoint.applying(canvasToLocal)
         guard Homography.isValidQuad(moved, boxSize: boxSize) else { return nil }
         return moved
+    }
+}
+
+// MARK: - One corner or edge of a floating piece, scaled
+
+/// A Uniform/Freeform resize drag in flight — the **affine** arm of the same grips
+/// `FloatingDistortDrag` serves in Distort, latched at touch-down for the same reason and pure for
+/// the same one.
+///
+/// **It works from the piece's own four corners (`localQuad`), not from its box, and that is the
+/// defect it exists to fix.** `distortQuad` is cleared only by Reset — `setTransformMode` writes
+/// `mode` and leaves the corners alone, deliberately: `layoutFromPiece` hides the *edge* grips for
+/// a distorted piece in Freeform rather than un-distorting it, so a distorted piece under a
+/// non-Distort mode is a state the overlay is written to support. The corner grips are drawn on
+/// `canvasQuad` in every mode. But the anchor was latched from `Quad.rect(localBox)`, so in that
+/// state the drag measured from a corner of the **plain box** while the artist's finger was on a
+/// corner of the **distorted quad**, and `resizeFromAnchor` re-derived the scale from that mismatch
+/// on the first delta: the piece snapped the instant the drag began, by exactly the amount the
+/// corner had been distorted.
+///
+/// ## Why the fix is here and not a `distortQuad = nil` in `setTransformMode`
+///
+/// Clearing the corners on a mode switch would fix the jump by deleting the artist's work: tapping
+/// Uniform to nudge a scale would silently flatten a distort with no undo step to take it back
+/// (a raster Move puts one step on the stack, at the bake — see `resetFloating`). It would also
+/// contradict the `showEdgeHandles` line, which is already written for exactly this mixed state.
+/// Reset is the one thing that takes a distort back, and it says so where it does it.
+///
+/// ## The arithmetic, and why it is a generalisation rather than a change
+///
+/// The old code read: scale magnitudes are `|anchor→finger|` over the **box** extents, and the new
+/// centre is the midpoint of anchor and finger. Written against `u = movingLocal - anchorLocal` —
+/// the quad's own diagonal, or the box's own opposite-edge span — both become one expression, and
+/// for `distortQuad == nil` that expression reduces to the old one **exactly**, sign for sign,
+/// including the crossover case where the finger passes the anchor and the piece changes side
+/// without mirroring. `FloatingResizeDragLogicTests` pins that reduction across corners, edges,
+/// rotations, flips and both modes rather than leaving it as this paragraph's claim.
+struct FloatingResizeDrag: Equatable {
+
+    /// The pose when the finger went down. Everything is measured from here, so driving one delta
+    /// or sixty gives the same answer for the same final point.
+    let start: FloatingTransform
+    /// The point the finger is dragging, in the piece's own local space: a quad corner for a corner
+    /// drag, a box edge midpoint for an edge drag.
+    let movingLocal: CGPoint
+    /// The point the drag is anchored on, in the piece's own local space — the corner or edge
+    /// opposite `movingLocal`.
+    let anchorLocal: CGPoint
+    /// `anchorLocal` in canvas space, latched at touch-down.
+    let anchor: CGPoint
+    /// Both axes scale together (Uniform) rather than independently (a Freeform corner).
+    let uniform: Bool
+    /// Which single axis a Freeform **edge** drag writes — true horizontal, false vertical. Nil for
+    /// a corner drag, which writes both.
+    let axisIsHorizontal: Bool?
+
+    /// A corner drag. `index` is `Quad`'s own order: 0 top-left, 1 top-right, 2 bottom-right,
+    /// 3 bottom-left — the same order the grips are laid out in.
+    init?(piece: FloatingPiece, corner index: Int) {
+        guard (0...3).contains(index) else { return nil }
+        let quad = piece.localQuad
+        self.init(piece: piece, movingLocal: quad[index], anchorLocal: quad[(index + 2) % 4],
+                  uniform: piece.mode != .freeform, axisIsHorizontal: nil)
+    }
+
+    /// An edge drag: 0 top, 1 right, 2 bottom, 3 left. Freeform only, and only for an undistorted
+    /// piece — a distorted box's edges have no single axis to move along, which is why
+    /// `layoutFromPiece` hides these grips — so the box is the right source for both points here.
+    init?(piece: FloatingPiece, edge index: Int) {
+        guard (0...3).contains(index) else { return nil }
+        let hw = piece.baseSize.width / 2, hh = piece.baseSize.height / 2
+        let local = [CGPoint(x: 0, y: -hh), CGPoint(x: hw, y: 0),
+                     CGPoint(x: 0, y: hh), CGPoint(x: -hw, y: 0)]
+        self.init(piece: piece, movingLocal: local[index], anchorLocal: local[(index + 2) % 4],
+                  uniform: false, axisIsHorizontal: index == 1 || index == 3)
+    }
+
+    private init(piece: FloatingPiece, movingLocal: CGPoint, anchorLocal: CGPoint,
+                 uniform: Bool, axisIsHorizontal: Bool?) {
+        self.start = piece.transform
+        self.movingLocal = movingLocal
+        self.anchorLocal = anchorLocal
+        // Through `affineTransform`, which is `OverlayTransformProjecting.projected` to the bit and
+        // is reachable from the test target, where that protocol's file is not.
+        self.anchor = anchorLocal.applying(piece.transform.affineTransform)
+        self.uniform = uniform
+        self.axisIsHorizontal = axisIsHorizontal
+    }
+
+    /// The lower bound on either scale. The drag clamps rather than refusing — unlike
+    /// `FloatingDistortDrag`, which has a quad to invalidate; a scale has only a floor.
+    static let minimumScale: CGFloat = 0.02
+
+    /// The pose this drag produces with the finger at `canvasPoint`.
+    func transform(draggedTo canvasPoint: CGPoint) -> FloatingTransform {
+        let r = start.rotation
+        let dx = canvasPoint.x - anchor.x, dy = canvasPoint.y - anchor.y
+        // The anchor→touch vector, un-rotated into the piece's own axes.
+        let localW = dx * cos(-r) - dy * sin(-r)
+        let localH = dx * sin(-r) + dy * cos(-r)
+
+        // The span the drag is measured against: the quad's own diagonal for a corner, the box's own
+        // opposite-edge span for an edge. `±baseWidth`/`±baseHeight` for an undistorted piece, which
+        // is what makes this a generalisation of the box arithmetic rather than a replacement.
+        let spanX = movingLocal.x - anchorLocal.x
+        let spanY = movingLocal.y - anchorLocal.y
+
+        // An axis is written when this drag writes it *and* the span along it is non-degenerate. A
+        // degenerate span is the edge drag's own other axis by construction; on a distorted quad it
+        // is a diagonal that happens to run straight up the local y axis, and there the handle
+        // simply keeps the scale it had — `FloatingDistortDrag`'s "the handle feels like it sticks",
+        // for the one axis rather than for the whole quad.
+        let writesX = axisIsHorizontal != false && abs(spanX) > Quad.epsilon
+        let writesY = axisIsHorizontal != true && abs(spanY) > Quad.epsilon
+        let rawX = writesX ? localW / spanX : start.scaleX
+        let rawY = writesY ? localH / spanY : start.scaleY
+
+        var updated = start
+        var magnitudeX = max(abs(rawX), Self.minimumScale)
+        var magnitudeY = max(abs(rawY), Self.minimumScale)
+        if uniform {
+            let s = max(magnitudeX, magnitudeY)
+            magnitudeX = s; magnitudeY = s
+        }
+        if writesX { updated.scaleX = magnitudeX }
+        if writesY { updated.scaleY = magnitudeY }
+
+        // **The centre, placed so the anchor stays under the anchor.** `-signed · anchorLocal` is
+        // the old `(localW >= 0 ? 1 : -1) * scaleX * baseW / 2` with the box substituted out: the
+        // sign of the raw ratio carries both which corner is being dragged and whether the finger
+        // has crossed the anchor, which is what the old expression's `sign(localW)` was doing for
+        // the one corner arrangement it could see. The flip flags are deliberately **not** folded in
+        // here, exactly as they were not before — `affineTransform` applies them to the piece and
+        // this term is the piece's centre, not one of its corners.
+        let signedX = (rawX < 0 ? -1 : 1) * magnitudeX
+        let signedY = (rawY < 0 ? -1 : 1) * magnitudeY
+        let localHalfW = -signedX * anchorLocal.x
+        let localHalfH = -signedY * anchorLocal.y
+        updated.position = CGPoint(x: anchor.x + localHalfW * cos(r) - localHalfH * sin(r),
+                                   y: anchor.y + localHalfW * sin(r) + localHalfH * cos(r))
+        return updated
     }
 }
 

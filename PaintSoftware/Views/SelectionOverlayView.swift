@@ -252,12 +252,26 @@ final class SelectionOverlayView: UIView {
     ///   restricted.
     func updateSelection(_ selection: Selection?, allowsOutsideInteraction: Bool) {
         currentSelectionPath = selection?.path
-        antsShadowLayer.path = selection?.path
         antsShadowLayer.isHidden = selection == nil
-        antsLayer.path = selection?.path
         antsLayer.isHidden = selection == nil
+        refreshAntsPath()
         hatchIsEnabled = selection != nil && !allowsOutsideInteraction
         refreshHatchPath()
+    }
+
+    /// The live projective warp, or nil while the map is affine — see `refreshAntsPath`.
+    private var liveWarp: Homography?
+
+    /// The path in the two ants layers: the selection's own, or its image under `liveWarp`.
+    ///
+    /// **Only the projective case pays this.** An affine map rides the layers' own transform for
+    /// free and this leaves the stored path alone, which is what the two-case
+    /// `FloatingPiece.antsMap` is for.
+    private func refreshAntsPath() {
+        let path = liveWarp.flatMap { warp in currentSelectionPath.flatMap { warp.mapped($0) } }
+            ?? currentSelectionPath
+        antsShadowLayer.path = path
+        antsLayer.path = path
     }
 
     /// **The ants travel with a floating piece** (LASSO_MOVE.md §5.6 and its prior art: Photoshop and
@@ -274,12 +288,29 @@ final class SelectionOverlayView: UIView {
     /// The exterior hatch is hidden rather than transformed: it is "the view's bounds minus the
     /// selection", so moving it would drag its own outer edge into the canvas and leave an unhatched
     /// margin. It comes back, correct, when the moved path is written.
-    func setLiveSelectionTransform(_ transform: CGAffineTransform) {
-        let isIdentity = transform.isIdentity
+    /// **A distorted raster piece takes the `.warped` arm**, where there is no layer transform to
+    /// ride: the path itself is re-mapped (`Homography.mapped`) and the layers are left at the
+    /// identity. That arm cannot be an affine, which is the whole reason `antsMap` has two cases —
+    /// see it for what the ants used to do instead.
+    func setLiveSelectionTransform(_ map: FloatingAntsMap) {
+        var isIdentity = false
+        var warp: Homography?
+        var affine = CGAffineTransform.identity
+        switch map {
+        case .affine(let transform):
+            affine = transform
+            isIdentity = transform.isIdentity
+        case .warped(let homography):
+            warp = homography
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        antsLayer.setAffineTransform(transform)
-        antsShadowLayer.setAffineTransform(transform)
+        if liveWarp != warp {
+            liveWarp = warp
+            refreshAntsPath()
+        }
+        antsLayer.setAffineTransform(affine)
+        antsShadowLayer.setAffineTransform(affine)
         hatchLayer.isHidden = !isIdentity || !hatchIsEnabled || hatchLayer.path == nil
         CATransaction.commit()
     }

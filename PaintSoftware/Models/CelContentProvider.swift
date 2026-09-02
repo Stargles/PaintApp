@@ -117,3 +117,39 @@ struct CelContentProvider {
     /// of the two it meant.
     static let none = CelContentProvider(frame: 0) { _, _ in nil }
 }
+
+/// **What the live canvas puts in one layer host's derived-image slot at one frame** — the whole of
+/// `CanvasView.Coordinator.updateInterpolationPreviews`'s per-layer decision, as a value.
+///
+/// It exists because that decision was wrong for a year of this feature's life and nothing could
+/// say so. `updateInterpolationPreviews` is the only call site in the app that pushes a derived
+/// image onto the live `strokeView`, it lives in `CanvasView.swift`, and that file is not a member
+/// of the UI-test target — so the choice it makes was assertable only through a 22-minute suite,
+/// and it was made by asking `cel.interpolation != nil` rather than by asking the derivation. A cel
+/// animated purely by a transform key took the no-recipe exit and the canvas drew its **resting**
+/// ink at every frame, while an export of the same range moved, because the bake path
+/// (`leafSnapshots`) asks `derivedCelContent` correctly. Two paths, two answers, no test between
+/// them.
+///
+/// So the decision moved to `CanvasManager.livePreview(forCel:atFrame:)` beside the derivation it
+/// is about, and the view is a `switch` with nothing left to get wrong. This is the same move
+/// `VectorPreviewPlan` made out of `StrokeCanvasView` and for the same stated reason.
+enum LiveCelPreview {
+
+    /// Show this picture **in place of** the cel's own display list —
+    /// `StrokeCanvasView.setInterpolationImage`, which `VectorPreviewPlan.Base.interpolation`
+    /// puts in the base slot outright rather than over it.
+    case derived(DerivedCelContent)
+
+    /// No derivation here, so the same seam carries the tinted motion-group overlay instead. The
+    /// tint has its own gates (Interpolate mode, the toggle) and may still resolve to nothing.
+    case motionGroupTint
+
+    /// Clear the slot: the cel's own ink is the truth.
+    ///
+    /// **Distinct from `.motionGroupTint` and that is the point of having three cases.** A cel that
+    /// *has* a recipe whose derivation answered nil — a malformed recipe mid-repick, or a document
+    /// with no canvas size — is a cel with nothing to *render*, not a cel with nothing to *derive*,
+    /// and handing it to the tint arm would show a motion-group overlay on an in-between.
+    case cleared
+}

@@ -506,4 +506,67 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertEqual(cel.pendingPoseBaselines["cel"], slide(-7))
         XCTAssertEqual(reloaded.animationGroups, [group])
     }
+
+    // MARK: - What the live canvas shows
+
+    /// **The live canvas showed a posed cel its *resting* ink, and this is the seam that says so.**
+    ///
+    /// `CanvasView.Coordinator.updateInterpolationPreviews` is the only call site in the app that
+    /// pushes a derived image onto the live `strokeView`, and it decided which cels get one by
+    /// asking `cel.interpolation != nil` — a test for *one* of the two derivation sources. A cel
+    /// animated purely by a transform key took the no-recipe exit, so this file's whole feature was
+    /// invisible while scrubbing even though every export of the same frames moved: the bake path
+    /// (`leafSnapshots`) asks `derivedCelContent`, and the two paths disagreed with nothing between
+    /// them. `CanvasView.swift` is not in this target, so the decision moved to `livePreview` where
+    /// it can be asserted; the view is a `switch` over these three cases and nothing else.
+    ///
+    /// The assertion is on the **picture**, not on the case label: `.derived` carrying the resting
+    /// image would satisfy a label check and is exactly the failure being pinned.
+    func testTheLiveCanvasShowsAPoseOnlyCelItsPosedPicture() throws {
+        let (manager, layerID, celID) = fixture()
+        animate(manager, layerID: layerID, celID: celID)
+        let cel = manager.layers[1].cels[0]
+        XCTAssertNil(cel.interpolation, "The premise: this cel is animated by a pose and nothing else")
+
+        guard case .derived(let derived) = manager.livePreview(forCel: cel, atFrame: 8) else {
+            return XCTFail("A pose-only cel has to reach the live canvas as a derived picture. "
+                           + "Anything else is the canvas drawing the cel's resting ink at every "
+                           + "frame of a move the export animates.")
+        }
+        let posed = try XCTUnwrap(derived.render(.full))
+        let resting = try XCTUnwrap(cel.vector?.render(quality: .full))
+        let posedBounds = try XCTUnwrap(inkBounds(posed))
+        let restingBounds = try XCTUnwrap(inkBounds(resting))
+        XCTAssertEqual(posedBounds.minX - restingBounds.minX, 24, accuracy: 1.5,
+                       "Frame 8 holds the slid key, so the live picture is the drawing 24pt right "
+                       + "of where the cel stores it")
+    }
+
+    /// The other direction, and it is what stops the test above passing for the wrong reason: an
+    /// ordinary cel must still leave the slot to the tinted motion-group overlay, which shares it.
+    /// "Always derive" would satisfy the test above and blank the tint.
+    func testAnOrdinaryCelLeavesTheLiveSlotToTheMotionGroupTint() {
+        let (manager, _, _) = fixture()
+        guard case .motionGroupTint = manager.livePreview(forCel: manager.layers[1].cels[0],
+                                                          atFrame: 4) else {
+            return XCTFail("A cel with neither a recipe nor a pose derives nothing, and the same "
+                           + "seam carries the motion-group tint for it")
+        }
+    }
+
+    /// **The property the old recipe-first guard was written to protect, kept and now pinned.** A
+    /// cel that *has* a recipe and derives nothing — here because the document has no canvas size —
+    /// is a cel with nothing to *render*, not a cel with nothing to *derive*, so it clears the slot
+    /// rather than being handed to the tint arm. Asking the derivation first only works because
+    /// this case is sorted out afterwards.
+    func testACelWhoseRecipeDerivesNothingClearsTheSlotRatherThanTintingIt() {
+        let (manager, layerID, celID) = fixture()
+        manager.layers[1].cels[0].interpolation =
+            InterpolationRecipe(references: [InterpolationReference(layerID: layerID, celID: celID)],
+                                t: 0.5)
+        manager.canvasSize = nil
+        guard case .cleared = manager.livePreview(forCel: manager.layers[1].cels[0], atFrame: 4) else {
+            return XCTFail("A recipe that derives nothing must not reach the motion-group tint arm")
+        }
+    }
 }

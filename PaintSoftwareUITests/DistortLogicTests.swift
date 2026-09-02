@@ -497,4 +497,210 @@ final class DistortLogicTests: XCTestCase {
         XCTAssertLessThan(top, bottom - 6,
                           "and the committed cel holds the foreshortened shape — top \(top) px, bottom \(bottom) px")
     }
+
+    // MARK: - The mixed state: distorted corners under a non-Distort mode
+
+    /// **A corner drag on a distorted piece jumped the instant it began, and this is the moment it
+    /// jumped in.**
+    ///
+    /// `setTransformMode` writes `mode` and leaves `distortQuad` alone — deliberately: Reset is the
+    /// only thing that takes a distort back. So "distorted, in Uniform" is a reachable state, the
+    /// grips are drawn on `canvasQuad` in every mode, and the anchor used to be latched from
+    /// `Quad.rect(localBox)`. The finger was therefore on a corner of the quad while the arithmetic
+    /// measured from a corner of the box, and `resizeFromAnchor` re-derived the pose from that
+    /// mismatch on the first delta.
+    ///
+    /// **The assertion is that a drag which has not moved yet changes nothing** — press the grip,
+    /// drag it to where it already is, and the piece must be exactly where it was. It is the one
+    /// statement about this gesture that is true of every correct implementation and false of the
+    /// shipped one, at every mode, corner and pose.
+    func testACornerDragOnADistortedPieceInUniformDoesNotJumpAtTouchDown() throws {
+        for mode in [TransformMode.uniform, .freeform] {
+            for corner in 0..<4 {
+                var subject = piece(mode: .distort)
+                subject.distortQuad = trapezoid(subject)
+                // What the Move bar's picker does: the mode changes, the corners stay.
+                subject.mode = mode
+
+                let grip = subject.canvasQuad[corner]
+                let drag = try XCTUnwrap(FloatingResizeDrag(piece: subject, corner: corner))
+                let unmoved = drag.transform(draggedTo: grip)
+
+                XCTAssertEqual(unmoved.position.x, subject.transform.position.x, accuracy: 0.001,
+                               "\(mode) corner \(corner): a drag to the grip's own position is a "
+                               + "drag of zero, and must leave the piece where it is")
+                XCTAssertEqual(unmoved.position.y, subject.transform.position.y, accuracy: 0.001,
+                               "\(mode) corner \(corner): same, in y")
+                XCTAssertEqual(unmoved.scaleX, subject.transform.scaleX, accuracy: 0.001,
+                               "\(mode) corner \(corner): and must not rescale it")
+                XCTAssertEqual(unmoved.scaleY, subject.transform.scaleY, accuracy: 0.001,
+                               "\(mode) corner \(corner): same, in y")
+            }
+        }
+    }
+
+    /// And the grip **opposite** the one being dragged stays under the artist's finger-memory of it
+    /// — the contract the anchor is named for, stated against the quad the grips are actually drawn
+    /// from. A box-corner anchor satisfies this only for an undistorted piece.
+    /// **Corner 2 is dragged and corner 0 is the anchor, and that pairing is the whole test.** The
+    /// trapezoid moves the two *top* corners, so a drag of corner 0 or 1 is anchored on a corner the
+    /// distort left alone and the box answer and the quad answer coincide — green under the defect.
+    /// The finger also has to stay on the anchor's own side of it: crossing over is the one case
+    /// where this arm deliberately moves the anchor, dropping the piece on the finger's side instead
+    /// of mirroring it, exactly as the box arithmetic always did.
+    func testTheOppositeGripStaysPutThroughACornerDragOnADistortedPiece() throws {
+        var subject = piece(mode: .distort)
+        subject.distortQuad = trapezoid(subject, topInset: 12)
+        subject.mode = .freeform
+
+        let anchorGrip = subject.canvasQuad[0]
+        let drag = try XCTUnwrap(FloatingResizeDrag(piece: subject, corner: 2))
+        subject.transform = drag.transform(draggedTo: CGPoint(x: 56, y: 52))
+
+        let moved = subject.canvasQuad[0]
+        XCTAssertEqual(moved.x, anchorGrip.x, accuracy: 0.001, "the anchored corner does not travel")
+        XCTAssertEqual(moved.y, anchorGrip.y, accuracy: 0.001, "the anchored corner does not travel")
+    }
+
+    /// **The generalisation costs the undistorted piece nothing, and this is the proof rather than
+    /// the claim.** `FloatingResizeDrag` measures against `movingLocal - anchorLocal`; for a piece
+    /// with no `distortQuad` that span is `±baseWidth`/`±baseHeight`, so the whole expression has to
+    /// reduce to the box arithmetic it replaced — including the crossover case, where the finger
+    /// passes the anchor and the piece changes side without mirroring.
+    ///
+    /// The old expression is written out here rather than called, for
+    /// `coreAnimationMap`'s reason: checking a formula against itself proves nothing.
+    func testAnUndistortedResizeIsTheBoxArithmeticItReplaced() throws {
+        let poses: [FloatingTransform] = [
+            FloatingTransform(position: CGPoint(x: 32, y: 32), scaleX: 1, scaleY: 1, rotation: 0),
+            FloatingTransform(position: CGPoint(x: 20, y: 44), scaleX: 1.7, scaleY: 0.6, rotation: 0.9),
+            FloatingTransform(position: CGPoint(x: 40, y: 18), scaleX: 0.8, scaleY: 2.2,
+                              rotation: -2.1, flipH: true, flipV: true),
+        ]
+        // Two of these land on the far side of the anchor, which is the crossover arm.
+        let targets = [CGPoint(x: 4, y: 6), CGPoint(x: 60, y: 58), CGPoint(x: 33, y: 31),
+                       CGPoint(x: -12, y: 70)]
+
+        for pose in poses {
+            for mode in [TransformMode.uniform, .freeform] {
+                for corner in 0..<4 {
+                    var subject = piece(mode: mode)
+                    subject.transform = pose
+                    let drag = try XCTUnwrap(FloatingResizeDrag(piece: subject, corner: corner))
+                    for target in targets {
+                        let now = drag.transform(draggedTo: target)
+                        let then = Self.boxResize(subject, corner: corner, to: target)
+                        XCTAssertEqual(now.scaleX, then.scaleX, accuracy: 1e-9)
+                        XCTAssertEqual(now.scaleY, then.scaleY, accuracy: 1e-9)
+                        XCTAssertEqual(now.position.x, then.position.x, accuracy: 1e-9)
+                        XCTAssertEqual(now.position.y, then.position.y, accuracy: 1e-9)
+                    }
+                }
+            }
+        }
+    }
+
+    /// `FloatingPieceOverlayView.resizeFromAnchor` as it stood before `FloatingResizeDrag`, box
+    /// anchor and all — the operand `testAnUndistortedResizeIsTheBoxArithmeticItReplaced` compares
+    /// against. Correct for an undistorted piece, which is the only kind it is asked about here.
+    private static func boxResize(_ piece: FloatingPiece, corner: Int, to current: CGPoint)
+        -> FloatingTransform {
+        let start = piece.transform
+        let anchor = Quad.rect(piece.localBox)[(corner + 2) % 4].applying(start.affineTransform)
+        let r = start.rotation
+        let dx = current.x - anchor.x, dy = current.y - anchor.y
+        let localW = dx * cos(-r) - dy * sin(-r)
+        let localH = dx * sin(-r) + dy * cos(-r)
+        let baseW = max(piece.baseSize.width, 1), baseH = max(piece.baseSize.height, 1)
+        var updated = start
+        var scaleX = max(abs(localW) / baseW, 0.02)
+        var scaleY = max(abs(localH) / baseH, 0.02)
+        if piece.mode != .freeform {
+            let s = max(scaleX, scaleY)
+            scaleX = s; scaleY = s
+        }
+        updated.scaleX = scaleX
+        updated.scaleY = scaleY
+        let localHalfW = (localW >= 0 ? 1 : -1) * scaleX * baseW / 2
+        let localHalfH = (localH >= 0 ? 1 : -1) * scaleY * baseH / 2
+        updated.position = CGPoint(x: anchor.x + localHalfW * cos(r) - localHalfH * sin(r),
+                                   y: anchor.y + localHalfW * sin(r) + localHalfH * cos(r))
+        return updated
+    }
+
+    // MARK: - The marching ants
+
+    /// **The ants were handed a `CGAffineTransform`, which cannot express a four-corner warp at
+    /// all.** `rasterFloatAntsTransform` composed the lift's inverse with the current pose and never
+    /// read `distortQuad`, so a distorted piece showed the artist the overlay's correctly
+    /// foreshortened dashes and an un-warped rectangle of ants over the same ink at once.
+    ///
+    /// Asserted where it can go wrong rather than by asking for the `.warped` label: the map has to
+    /// carry each corner of the **lifted** box onto the corresponding corner of `canvasQuad`, which
+    /// is the one thing the affine could not do.
+    func testTheAntsMapOfADistortedPieceCarriesTheLiftBoxOntoTheDistortedQuad() throws {
+        var subject = piece()
+        subject.distortQuad = trapezoid(subject)
+
+        guard case .warped(let map) = subject.antsMap else {
+            return XCTFail("A distorted piece's ants map is projective; an affine cannot hold it")
+        }
+        XCTAssertNil(map.affine(), "and it is genuinely projective, not an affine wearing the case")
+
+        let lifted = Quad.rect(subject.localBox).mapped(by: subject.liftTransform.affineTransform)
+        for corner in 0..<4 {
+            let landed = try XCTUnwrap(map.map(lifted[corner]))
+            XCTAssertEqual(landed.x, subject.canvasQuad[corner].x, accuracy: 1e-6,
+                           "corner \(corner) of the lifted outline lands on corner \(corner) of the quad")
+            XCTAssertEqual(landed.y, subject.canvasQuad[corner].y, accuracy: 1e-6,
+                           "corner \(corner), in y")
+        }
+    }
+
+    /// **A piece nobody has distorted keeps the exact affine, and "exact" is load-bearing.**
+    /// `setLiveSelectionTransform` decides whether to show the exterior hatch by asking whether the
+    /// map `isIdentity`, so a piece resting at its lift has to produce the identity to the bit — the
+    /// projective composition agrees to about 1e-13, which would hide the hatch forever.
+    func testAnUndistortedPieceAtItsLiftGivesTheExactIdentity() {
+        let subject = piece(mode: .uniform)
+        guard case .affine(let map) = subject.antsMap else {
+            return XCTFail("An undistorted piece's ants map has to stay affine")
+        }
+        XCTAssertTrue(map.isIdentity,
+                      "and exactly the identity at the lift, or the exterior hatch never comes back")
+    }
+
+    /// The ants path itself, through the same map — the step `CALayer` cannot take for a zero-bounds
+    /// shape layer, and the reason `Homography.mapped` exists.
+    func testTheAntsPathIsCarriedThroughTheWarp() throws {
+        var subject = piece()
+        subject.distortQuad = trapezoid(subject)
+        guard case .warped(let map) = subject.antsMap else { return XCTFail("projective") }
+
+        let lifted = Quad.rect(subject.localBox).mapped(by: subject.liftTransform.affineTransform)
+        let outline = CGMutablePath()
+        outline.addLines(between: lifted.points)
+        outline.closeSubpath()
+
+        let warped = try XCTUnwrap(map.mapped(outline))
+        var points: [CGPoint] = []
+        warped.applyWithBlock { element in
+            switch element.pointee.type {
+            case .moveToPoint, .addLineToPoint: points.append(element.pointee.points[0])
+            default: break
+            }
+        }
+        // **Corner by corner, not by bounding box.** A trapezoid inset symmetrically has the same
+        // bounding box as the rectangle it came from, so a box comparison here would be green under
+        // the identity — the exact shape of fixture that measures nothing.
+        XCTAssertEqual(points.count, 4, "four corners, and the close is not one of them")
+        for (index, point) in points.enumerated() {
+            XCTAssertEqual(point.x, subject.canvasQuad[index].x, accuracy: 1e-6,
+                           "outline corner \(index) lands on quad corner \(index)")
+            XCTAssertEqual(point.y, subject.canvasQuad[index].y, accuracy: 1e-6,
+                           "outline corner \(index), in y")
+        }
+        XCTAssertNotEqual(points[0].x, lifted.p0.x, accuracy: 1e-6,
+                          "and the path really moved — the source outline is the plain lifted box")
+    }
 }

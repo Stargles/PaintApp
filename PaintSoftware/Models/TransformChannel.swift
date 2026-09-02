@@ -182,7 +182,6 @@ extension CanvasManager {
                                           : vector.elements.filter { !suppressed.contains($0.id) }
         let carried = vector.transform
         let version = vector.version
-        let posed = Self.posed(elements, through: mappings)
 
         let identity = PosedCelIdentity(
             celID: cel.id,
@@ -201,7 +200,18 @@ extension CanvasManager {
             // reach — `VectorCanvas.Frozen.render`'s detached-canvas branch, which is the atomicity
             // guarantee this seam is for. The carried transform rides along so a document written by
             // a build that still stored one is posed rather than un-posed.
-            VectorCanvas(size: canvasSize, elements: posed, transform: carried).render(quality: quality)
+            //
+            // **`posed` is inside the thunk and not beside the identity, which is the one place this
+            // derivation differs in shape from interpolation's.** That one resolves its references
+            // eagerly because it must — they are read off `layers`, which a worker thread may not
+            // touch — and the resolve is a retain per reference. This one's eager work would be a
+            // walk of every element and every sample in the cel, and it depends on nothing but the
+            // two values captured here, so hoisting it out of the thunk would pay that walk on
+            // **every SwiftUI pass** of a posed document and throw it away on the memo hit that
+            // follows. `livePreview` asks on every pass, which is what makes the difference visible.
+            VectorCanvas(size: canvasSize,
+                         elements: Self.posed(elements, through: mappings),
+                         transform: carried).render(quality: quality)
         }
     }
 }

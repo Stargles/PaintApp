@@ -1354,6 +1354,30 @@ extension CanvasManager {
         }
     }
 
+    /// **What the live canvas shows for one cel at one frame** — see `LiveCelPreview` for why this
+    /// decision is here rather than in the view that consumes it.
+    ///
+    /// **The derivation is asked first and the recipe only sorts out the nil case**, which is the
+    /// inversion that fixes the defect. Asking `cel.interpolation != nil` first — what the view did
+    /// — is a test for *one* of the two derivation sources, so the other one, a pose track, was
+    /// never reached from the live canvas at all: `derivedCelContent` falls through to
+    /// `posedCelContent` precisely when there is no recipe, and that branch had no live caller.
+    ///
+    /// The property that guard was protecting is kept in full, and asking the derivation first is
+    /// what makes it cheap to keep: a cel that *has* a recipe and derives nothing goes to
+    /// `.cleared`, never to the tint arm. Both `nil` arms of `derivedCelContent` are covered by one
+    /// question about the recipe, asked once, after the answer that matters.
+    ///
+    /// Cheap on every pass by construction. The interpolation arm retains reference display lists
+    /// rather than copying them, and the pose arm answers on one `transformTracks.isEmpty` for
+    /// every cel of a document that was never keyframed — while a document that *was* pays one
+    /// `poseMappings` and an identity, the display-list walk having moved inside the thunk where a
+    /// memo hit skips it.
+    func livePreview(forCel cel: Cel, atFrame frame: Int) -> LiveCelPreview {
+        if let derived = derivedCelContent(for: cel, atFrame: frame) { return .derived(derived) }
+        return cel.interpolation == nil ? .motionGroupTint : .cleared
+    }
+
     // MARK: - Guides
 
     /// The guides `recipe` references, deduplicated and in a stable order.

@@ -24,9 +24,10 @@ final class FloatingPieceOverlayView: TransformOverlayView {
 
     private var dragStartTransform: FloatingTransform = .identity
     private var dragStartTouch: CGPoint = .zero
-    /// The opposite corner/edge (in canvas space), captured at the start of a resize drag and held
-    /// fixed for its duration so the resize anchors there instead of at the piece's center.
-    private var dragAnchor: CGPoint = .zero
+    /// The Uniform/Freeform corner or edge drag in flight, latched at touch-down so the resize
+    /// anchors on the opposite corner/edge instead of on the piece's centre. Nil for every other
+    /// gesture, and nil for a corner drag in Distort — see `FloatingResizeDrag`.
+    private var resizeDrag: FloatingResizeDrag?
     /// The Distort corner drag in flight, latched at touch-down. Nil for every other gesture, and
     /// nil for a corner drag in Uniform or Freeform — the mode is read once, at `.began`, so
     /// switching the picker under a finger already down cannot change what that finger means
@@ -118,6 +119,21 @@ final class FloatingPieceOverlayView: TransformOverlayView {
 
     private func layoutFromPiece() {
         guard let piece else { return }
+        // **`outlineDashLayer` is a bare `CAShapeLayer`, not a view's backing layer, so it gets no
+        // automatic action suppression and `path`/`frame` are both animatable.** Set outside a
+        // transaction they picked up Core Animation's default 0.25 s implicit animation while
+        // `pieceImageView.layer.transform` — a backing layer, where UIKit returns a null action
+        // outside an animation block — moved on the same frame the finger did. The artwork tracked
+        // the drag and the dashes swam after it, worst under Distort where the path changes shape
+        // on every delta rather than merely translating. `SelectionOverlayView` already does this
+        // around its own ants layers and says why; nothing in this file did until now.
+        //
+        // Around the whole body rather than the two assignments: every layer this function touches
+        // is being placed to match a pose that is already on screen, and none of it is ever meant to
+        // animate.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         pieceImageView.image = piece.pieceImage
         let t = piece.transform
         let quad = piece.canvasQuad
@@ -258,14 +274,13 @@ final class FloatingPieceOverlayView: TransformOverlayView {
             // Latched at touch-down with everything else on this gesture, so flipping the Move bar's
             // picker mid-drag cannot change what the finger already down means.
             distortDrag = piece.mode == .distort ? FloatingDistortDrag(piece: piece, corner: index) : nil
-            // **The anchor stays the *box's* opposite corner, not the quad's**, and that is not the
-            // conservative choice — it is the only self-consistent one. `resizeFromAnchor` derives
-            // the new position as `anchor + half a scaled box extent`, so an anchor that is not a box
-            // corner puts the centre in the wrong place and the piece jumps by the difference the
-            // moment it is distorted. Feeding it the box corner keeps the arithmetic closed: the
-            // affine scales, and the quad rides it, so the whole distorted shape grows about that
-            // corner. For an undistorted piece it is the value this line always had, to the bit.
-            dragAnchor = dragStartTransform.projected(Quad.rect(piece.localBox)[(index + 2) % 4])
+            // **The anchor is the *quad's* opposite corner, not the box's** — see
+            // `FloatingResizeDrag`, which is where the whole of this arm's arithmetic now lives and
+            // where the reduction to the old box expression is pinned. Latching the box corner is
+            // what made a distorted piece jump the instant a Uniform or Freeform corner drag began,
+            // because the grip the finger was on is drawn from `canvasQuad` in every mode and
+            // `distortQuad` outlives a mode switch.
+            resizeDrag = FloatingResizeDrag(piece: piece, corner: index)
         case .changed:
             if let distortDrag {
                 // A delta that would make an undrawable quad is refused rather than clamped, so the
@@ -274,9 +289,11 @@ final class FloatingPieceOverlayView: TransformOverlayView {
                 apply(dragStartTransform, distortQuad: quad)
                 return
             }
-            resizeFromAnchor(current: recognizer.location(in: self), uniform: piece.mode != .freeform, axisIsHorizontal: nil)
+            guard let resizeDrag else { return }
+            apply(resizeDrag.transform(draggedTo: recognizer.location(in: self)))
         default:
             distortDrag = nil
+            resizeDrag = nil
         }
     }
 
@@ -289,64 +306,13 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         switch recognizer.state {
         case .began:
             dragStartTransform = piece.transform
-            dragAnchor = dragStartTransform.projected(oppositeEdgeLocal(index, size: piece.baseSize))
+            resizeDrag = FloatingResizeDrag(piece: piece, edge: index)
         case .changed:
-            resizeFromAnchor(current: recognizer.location(in: self), uniform: false, axisIsHorizontal: (index == 1 || index == 3))
+            guard let resizeDrag else { return }
+            apply(resizeDrag.transform(draggedTo: recognizer.location(in: self)))
         default:
-            break
+            resizeDrag = nil
         }
-    }
-
-    private func oppositeEdgeLocal(_ index: Int, size: CGSize) -> CGPoint {
-        let hw = size.width / 2, hh = size.height / 2
-        switch index {
-        case 0: return CGPoint(x: 0, y: hh)    // dragging top -> anchor bottom
-        case 1: return CGPoint(x: -hw, y: 0)   // dragging right -> anchor left
-        case 2: return CGPoint(x: 0, y: -hh)   // dragging bottom -> anchor top
-        default: return CGPoint(x: hw, y: 0)   // dragging left -> anchor right
-        }
-    }
-
-    /// Un-rotates the anchor→touch vector into the piece's local (unrotated) axes to derive new
-    /// scale(s), then re-derives `position` from the fixed anchor so it visually stays put.
-    /// `axisIsHorizontal` nil means both axes move together (corner drag); non-nil restricts the
-    /// change to one axis (edge drag).
-    private func resizeFromAnchor(current: CGPoint, uniform: Bool, axisIsHorizontal: Bool?) {
-        guard let piece else { return }
-        let r = dragStartTransform.rotation
-        let dx = current.x - dragAnchor.x, dy = current.y - dragAnchor.y
-        let localW = dx * cos(-r) - dy * sin(-r)
-        let localH = dx * sin(-r) + dy * cos(-r)
-
-        let baseW = max(piece.baseSize.width, 1), baseH = max(piece.baseSize.height, 1)
-        var updated = dragStartTransform
-        var localHalfW: CGFloat = 0
-        var localHalfH: CGFloat = 0
-
-        switch axisIsHorizontal {
-        case true:
-            updated.scaleX = max(abs(localW) / baseW, 0.02)
-            localHalfW = (localW >= 0 ? 1 : -1) * updated.scaleX * baseW / 2
-        case false:
-            updated.scaleY = max(abs(localH) / baseH, 0.02)
-            localHalfH = (localH >= 0 ? 1 : -1) * updated.scaleY * baseH / 2
-        case nil:
-            var scaleX = max(abs(localW) / baseW, 0.02)
-            var scaleY = max(abs(localH) / baseH, 0.02)
-            if uniform {
-                let s = max(scaleX, scaleY)
-                scaleX = s; scaleY = s
-            }
-            updated.scaleX = scaleX
-            updated.scaleY = scaleY
-            localHalfW = (localW >= 0 ? 1 : -1) * scaleX * baseW / 2
-            localHalfH = (localH >= 0 ? 1 : -1) * scaleY * baseH / 2
-        }
-
-        let rotatedX = localHalfW * cos(r) - localHalfH * sin(r)
-        let rotatedY = localHalfW * sin(r) + localHalfH * cos(r)
-        updated.position = CGPoint(x: dragAnchor.x + rotatedX, y: dragAnchor.y + rotatedY)
-        apply(updated)
     }
 
     // MARK: - Commit (tap outside the box)

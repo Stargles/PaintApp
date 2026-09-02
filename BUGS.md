@@ -89,8 +89,8 @@ them one-strip silently.
 ## Eight of the review's nine candidates are real, and the one that looked worst is not
 
 All nine have been checked against the code. **Eight confirmed, one refuted — and the refuted one is
-the one the entry below used to flag as "worth checking first", because it was the only one that would
-have put wrong pixels in a saved document.**
+the one this entry used to flag as "worth checking first", because it was the only one that would have
+put wrong pixels in a saved document.**
 
 **REFUTED: `Services/PixelOps.swift:584`.** The claim was that the Distort bake scales the source
 isotropically from the width, so a non-square crop rounds into a stretch. `sourceScale` is not an aspect
@@ -100,32 +100,26 @@ for both dimensions, and `UIImage` has no independent per-axis scale. A 200×100
 400×200 bitmap and `400/200` is also `200/100`. The reviewer read a ratio of unlike quantities as a
 ratio of like ones.
 
-**Confirmed, and each is being fixed:**
+**Distort's three and the pose channel's live-canvas one are fixed.** What that left behind is worth
+keeping: the Distort corner-drag fix was **not** the one the review sketched. Latching the drag anchor
+from `localQuad` still jumped, because `resizeFromAnchor` measured the *span* from `baseSize` as well;
+both had to become `movingLocal - anchorLocal`, which reduces to `±baseSize` for an undistorted piece.
+And `distortQuad` is deliberately **not** cleared when the mode picker leaves Distort — the mixed state
+is supported by design, and clearing it would delete the artist's distort with no undo step.
 
-**Distort's raster tier** — `Views/FloatingPieceOverlayView.swift:268`, a corner drag anchored on the
-plain box rather than the still-distorted quad, so the piece snaps when the mode picker leaves Distort
-without `distortQuad` being cleared (medium: `piece.transform` is what the bake reads);
-`Views/CanvasView.swift:1768`, marching ants driven by a `CGAffineTransform` that cannot express a
-four-corner warp, so a distorted float shows two disagreeing outlines; and
-`Views/FloatingPieceOverlayView.swift:161`, a bare `CAShapeLayer` whose `path` is set outside any
-`CATransaction`, so its dashes take the default implicit animation while the artwork's own backing layer
-moves instantly.
+**Still open, all in the pose channel:**
 
-**The pose channel** — `Views/CanvasView.swift:2268` is the serious one: `updateInterpolationPreviews`
-is the only site in the app that pushes a derived image to the live canvas, and its first guard is
-`cel.interpolation != nil`, so a cel animated purely by a transform key takes the early exit and the
-canvas draws resting ink at every frame. **The feature is invisible on the live canvas and animated in
-the export**, which is the shape RENDER stage 3 shipped and had to close later.
-`Models/CanvasManager+Timeline.swift` drops `transformTracks` and `pendingPoseBaselines` on both
-`splitCel` and `duplicateCel` — the field's own doc claims it rides through both "for free" and it does
-not, and this destroys saved animation. `Models/TransformKeyframes.swift:118`'s `holdPoseBaseline`
-writes a persisted field with no undo cover, and the nudge undo it rides beside restores geometry only,
-so Move-then-Undo leaves a phantom baseline that a later keyframe press turns into an animation the
-artist undid. `Models/KeyframeControl.swift`'s `addKeyframe` and `seedAndKeyChannel` call the
-`keyframes(marks:tracks:)` overload that defaults `poseFrames` to `[]`, which is §2.28's one-accessor
-rule broken by having two spellings of the list. `Engine/Deform/PoseInterpolation.swift:182` clamps with
-`<=`/`>=` where `TransformTrack`'s own doc says twice that `blend` extrapolates, so overshoot handles
-are silently flattened.
+- `Models/CanvasManager+Timeline.swift` — `splitCel` and `duplicateCel` drop `transformTracks` and
+  `pendingPoseBaselines`. The field's own doc claims it rides through both "for free" and it does not,
+  so both destroy saved animation.
+- `Models/TransformKeyframes.swift:118` — `holdPoseBaseline` writes a persisted field with no undo
+  cover, and the nudge undo it rides beside restores geometry only. Move, then Undo, leaves a phantom
+  baseline that a later keyframe press turns into an animation the artist undid.
+- `Models/KeyframeControl.swift` — `addKeyframe` and `seedAndKeyChannel` call the
+  `keyframes(marks:tracks:)` overload that defaults `poseFrames` to `[]`, which is §2.28's
+  one-accessor rule broken by having two spellings of the list.
+- `Engine/Deform/PoseInterpolation.swift:182` — `blend` clamps with `<=`/`>=` where `TransformTrack`'s
+  own doc says twice that it extrapolates, so an overshoot handle is silently flattened.
 
 **Two subsystems are still unreviewed**: the bake key and store, and the live-canvas wiring. (The tests
 were the third and are the entry above; striped compositing was the fourth and is read.)
