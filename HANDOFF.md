@@ -70,8 +70,13 @@ the main actor.
 
 **Small things stage 4 left behind**, each a few minutes:
 
-- `FrameBaker.reset()` and `markEverythingDirty()` have tests but **no app caller**, because a re-root
-  discards the whole baker. Wire them or delete them.
+- `FrameBaker.reset()` and `markEverythingDirty()` have tests and **no app caller** — confirmed, the
+  only callers are `FrameBakerLogicTests`. `markEverythingDirty` is redundant by its own doc comment
+  (the structural sweep already carries `maskTuningGeneration` and `backend`, its two named inputs), so
+  it is a straight delete. **`reset()` is the one to think about rather than delete reflexively**: it
+  covers document close and a store purged underneath, and it is dead only because a re-root discards
+  the whole baker. Whether that discard is the right lifecycle is the actual question — answer it, then
+  wire or delete.
 - The compression ratio on the owner's own **"UI Test"** document, and a decode against a frame the
   *compositor* produced rather than one drawn for the purpose. PERFORMANCE §10.4 records both as owed.
 - **Nobody has looked at the timeline's amber strip on a screen.** Its tests assert the encoded
@@ -79,6 +84,16 @@ the main actor.
   makes this a two-minute check.
 - Stage 5 is simulator-only. **The owner reported the resolution bug on their iPad, on a canvas called
   "UI Test", and should confirm the fix there.**
+- **`StripedCompositor.assemble` bounds the walk but not the destination**: it holds every strip's core
+  in `pieces` and then draws them into one full-frame renderer, so the peak is about two frames with no
+  budget consulted — roughly a gigabyte at 16383². Whether that is worth fixing on its own or belongs
+  with the "16383² cannot be composited at all" item is an open call.
+- **Nobody has measured playback end to end since stages 4 and 5 merged.** The decode figures are in
+  PERFORMANCE §10; what is unmeasured is whether the baker keeps up with a scrub on the device, and that
+  is the measurement that would reopen PERFORMANCE §8's 24 fps ruling.
+- **PERFORMANCE §9's "still open from the twelve at `9c9d435`: all of them" wants re-taking.** Chunking
+  closed part of audit item 1; the other eleven were not re-audited. The sentence names a commit so it is
+  not false as written, but it is no longer a census.
 
 ## What this pass established, and would otherwise be re-derived
 
