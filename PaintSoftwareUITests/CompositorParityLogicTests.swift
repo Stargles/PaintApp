@@ -1914,8 +1914,8 @@ final class CompositorParityLogicTests: XCTestCase {
     /// being declined: declining a live frame because a save thumbnail is still warm would be the map
     /// making things worse than the rule it replaced.
     ///
-    /// Both requests are built **before** the budget is armed, so `affordableSize` sizes them against
-    /// the device and this measures the engine's own eviction rather than a shrunk request.
+    /// Both requests are built **before** the budget is armed, so each carries the size it asked for
+    /// and this measures the engine's own eviction rather than a request that arrived already small.
     func testTwoResidentSizesCannotEachHoldABudgetsWorth() throws {
         try skipUnlessGPUAvailable()
         let engine = try XCTUnwrap(CompositorMetalEngine.shared, "Skipped above if nil")
