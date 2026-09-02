@@ -184,7 +184,12 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
     /// Four translucent overlapping leaves at width 2 give exactly that: two chunks of two, and the
     /// second inherits the first's mid-walk accumulator.
     ///
-    /// MEASURED by mutation — the failure text is recorded on the branch that added this file.
+    /// **MEASURED by mutation** (2026-09-02), with the `fill(front, with: .zero, …)` deleted:
+    /// `Composites differ at (0, 0) channel R: got 192, expected 128. Pixel got RGBA(192, 0, 0, 192),
+    /// expected RGBA(128, 0, 0, 128)` — which is the arithmetic above, exactly: 128 is the ink's own
+    /// 0.5, 192 is 0.75, and 0.75 is what 0.5 composited over a stale 0.5 comes to. Two other tests
+    /// in this file went red on the same mutation and the six with paper on did not, which is the
+    /// measurement behind the "no paper" premise rather than an assumption about it.
     func testAContinuationClearsTheScratchTextureItInheritsFromTheChunkBefore() throws {
         try skipUnlessGPUAvailable()
         let manager = CanvasFixture.manager(layerCount: 4)
@@ -214,13 +219,27 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
                                        + "own accumulator; without the clear it composites onto it")
     }
 
-    /// The same hazard reached by the other door, and the one that reaches it **with the paper on**:
-    /// a padded canvas's margin is not paper (`RenderBackground.rect`), so the accumulator is
-    /// transparent there while the rest of it is opaque. A stale texture shows in the margin.
+    /// A padded canvas composited in chunks — **and an honest label, because this test does *not*
+    /// catch the missing clear and the obvious reasoning says it should.**
     ///
-    /// Worth its own test because the padded case is the one a real document hits — every project
-    /// with a canvas inset has this margin, and the no-paper case above is mostly a test fixture.
-    func testAContinuationClearsTheMarginOfAPaddedCanvasToo() throws {
+    /// The argument that fails: a padded canvas's margin is not paper (`RenderBackground.rect`), so
+    /// the accumulator is transparent there while the rest of it is opaque, and a stale texture ought
+    /// to show through in the margin. MEASURED by mutation with the clear deleted: this test **passes
+    /// anyway**. The reason is that the inherited texture is transparent in the margin *too* — it is
+    /// a previous accumulator of the same frame, nothing ever draws in the margin, so every state the
+    /// pool could hand back is zero exactly where the test hoped to catch a non-zero.
+    ///
+    /// **What that generalises to**: the stale content is always an earlier accumulator of this same
+    /// frame, so its coverage is a subset of the current one's. Wherever the accumulator is
+    /// transparent the stale texture is transparent as well, and wherever the accumulator is opaque
+    /// source-over hides the stale texture exactly. The defect is therefore visible in exactly one
+    /// band — where the accumulator is **partially** transparent — which is why the pin above needs
+    /// translucent ink and not merely an absent paper.
+    ///
+    /// It stays as a test because chunking a *padded* canvas is worth pinning on its own: the paper
+    /// rect is inset from the buffer, chunk 0 fills it and later chunks do not, and nothing else here
+    /// composites that shape in more than one piece.
+    func testAPaddedCanvasCompositesTheSameInChunksOnTheGPU() throws {
         try skipUnlessGPUAvailable()
         let manager = CanvasFixture.manager(layerCount: 4)
         for (index, colour) in [red, green, blue, white].enumerated() {
@@ -251,10 +270,14 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
     /// so over an accumulator with the paper filled into it that is true everywhere and there is no
     /// silhouette left to trace — the outline vanishes into a whole-canvas no-op.
     ///
-    /// The CoreGraphics suite pins the same rule at `Compositor.swift:842`. This one pins the copy at
-    /// `MetalCompositor.swift:755`, which is a separate line of code that no test reached.
+    /// The CoreGraphics suite pins the same rule at `Compositor.swift:842`. This one pins the copy in
+    /// `MetalCompositor.encode`, which is a separate line of code that no test reached.
     ///
-    /// MEASURED by mutation — the failure text is recorded on the branch that added this file.
+    /// **MEASURED by mutation** (2026-09-02), with `.substitutingChunkAccumulator(of: request)`
+    /// dropped from the `.ink` fork: `Composites differ at (6, 4) channel R: got 255, expected 0.
+    /// Pixel got RGBA(255, 255, 255, 255), expected RGBA(0, 0, 0, 255)` — paper white where the black
+    /// outline belongs, which is the silhouette disappearing rather than a shifted number. Eight test
+    /// cases in this file went red on that mutation.
     func testAnInkEffectInALaterMetalChunkGradesThePaperFreeAccumulator() throws {
         try skipUnlessGPUAvailable()
         let manager = CanvasFixture.manager(layerCount: 3)

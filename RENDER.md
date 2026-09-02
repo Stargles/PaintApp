@@ -223,6 +223,41 @@ backend gained.
   property of the device rather than of where the boundary fell, and it is the same fallback every
   composite in the app has always had.
 
+**Stage 3 shipped verified on CoreGraphics only; the Metal half was closed 2026-09-02 and the two
+Metal-specific lines are now pinned.** `ChunkedCompositeLogicTests` forces `.coreGraphics` on every
+run, so neither the continuation's texture clear nor Metal's own copy of `substitutingChunkAccumulator`
+had a test on it. `ChunkedCompositeMetalLogicTests` is the same shape with the backend forced the other
+way — MEASURED, 11 tests, **0 skipped**, on the iOS 26.5 simulator.
+
+- **Metal-chunked is byte-identical to Metal-unchunked, with no tolerance.** The channel-step tolerance
+  `CompositorParityLogicTests` carries is about the two *backends* disagreeing and is not this claim:
+  same backend on both sides means same rounding and same blend arithmetic, so the only variable is
+  where the walk was cut and the gate is exact. It held on the zoo at widths 1, 2, 3, 5, 8 and 40, with
+  and without paper, padded and unpadded.
+- **The reference must go through `MetalCompositor.attempt`, not `Compositor.composite`.**
+  `resolving: .metal` falls back to CoreGraphics *silently* when there is no metallib, so a suite that
+  merely forced `.metal` would agree with itself perfectly while measuring nothing — the banner-versus-count
+  trap with a backend in place of a test count. `attempt` returns `.unavailable` instead, and the suite
+  asserts it did not.
+- **The missing-clear defect is visible in one band only, which is why a test for it has to be built
+  rather than assumed.** The stale texture a continuation inherits is an *earlier accumulator of the same
+  frame*, so its coverage is a subset of the current one's: where the accumulator is opaque, source-over
+  hides the stale pixels exactly, and where it is transparent the stale pixels are transparent too. Only
+  **partial** alpha shows the difference. So a fixture reaches it only with no paper (or translucent
+  paper), **translucent ink**, and **at least two draws in the chunk before the cut** — `over` writes into
+  `back` and swaps, and `attempt` releases `front` then `back`, so the next chunk's `acquire` pops the
+  accumulator one draw before the end; one draw per chunk leaves that texture holding the pre-composite
+  clear, which is zero. MEASURED with the clear deleted: three tests red, `RGBA(192, 0, 0, 192)` against
+  `RGBA(128, 0, 0, 128)` — 0.5 ink composited over a stale 0.5 is 0.75. The six tests with paper on stayed
+  green, and so did the padded-canvas one: a padded margin is transparent in *every* accumulator state,
+  so there is nothing stale there to show.
+- **Rule 3's Metal copy is pinned by the same fixtures as the CPU's.** MEASURED with
+  `.substitutingChunkAccumulator(of: request)` dropped from the `.ink` fork: eight test cases red, the
+  legible one being `RGBA(255, 255, 255, 255)` where `RGBA(0, 0, 0, 255)` belongs — paper white in place
+  of the black outline, i.e. the silhouette gone rather than a number shifted.
+
+Nothing was found that the chunking gets wrong on Metal but right on CoreGraphics.
+
 The compositor's own intermediates were never the problem: `peakCompositeTextures` (`RenderTree.swift:543-552`) is
 2 for a flat stack of any length and grows with depth. The problem is `sources`, one canvas per visible leaf, all
 live at once — 840 MB for 100 leaves at 2048x1024 against a 192 MiB budget. Chunking the snapshot is the whole win.
