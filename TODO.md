@@ -198,13 +198,19 @@ LAYER_TRANSFORM.md.
 
 ### (31) Large canvases: three symptoms of the compositor's sizing and threading
 
-- [ ] > "There is a resolution bug where the canvas renders at non full resolution even if the slider is set
+- [x] > "There is a resolution bug where the canvas renders at non full resolution even if the slider is set
       > to full. Happens on big canvases. If you want to check, on the iPad there is a canvas called UI Test."
 
       RENDER §2.12 rules the knob is the truth. **Confirmed on the owner's iPad 9 in Release
-      (MEASURED 2026-09-02): the 4096² scene needs 512 MB of textures against a 183.7 MB budget, and
-      `CompositorBudget.affordableSize` caps it to 2508².** The budget is `physicalMemory / 16`, and the
-      device reports 183.7 MB where the docs had assumed 192. Fixed by RENDER §3.8's strips, stage 5.
+      (MEASURED 2026-09-02): the 4096² scene needed 512 MB of textures against a 183.7 MB budget, and
+      `CompositorBudget.affordableSize` capped it to 2508².** The budget is `physicalMemory / 16`, and the
+      device reports 183.7 MB where the docs had assumed 192.
+
+      **Done 2026-09-02 (RENDER §3.8, stage 5).** `affordableSize` is deleted, and a frame whose textures
+      do not fit is composited in horizontal strips at the size the artist asked for —
+      `Engine/StripedComposite.swift`. **Still owed: the owner's own confirmation on the iPad, against
+      the "UI Test" canvas they reported it on.** The fix is pinned byte-for-byte on both backends in the
+      simulator; nobody has yet watched the slider say Full and the canvas be full on the device.
 
 - [ ] > "A 16k by 16k canvas crashes the iPad app when you draw something. This is really odd, it should not
       > happen. I wonder if it could hint at a deeper issue where larger canvases take more memory per

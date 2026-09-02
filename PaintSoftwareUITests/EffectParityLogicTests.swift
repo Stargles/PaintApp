@@ -441,24 +441,25 @@ final class EffectParityLogicTests: XCTestCase {
                        "Levels and Curves are one kernel by design — both resolve to the same table")
     }
 
-    /// **The Swift half of the layout contract with `Composite.metal`.** Twenty 4-byte scalars, no
+    /// **The Swift half of the layout contract with `Composite.metal`.** Twenty-two 4-byte scalars, no
     /// padding: if a future parameter is added as a `SIMD2` or a `Bool` this fails here, before it
     /// fails as a shifted field and a wrong picture. The Metal half is pinned by the parity sweep,
     /// which is what a mismatch would show up as.
     ///
     /// The number is fourteen plus the three phase 9's multi-pass half added (`threshold`, `intensity`,
     /// `taps`), plus the three phase 9c appended for Outline's stroke colour (`colorR`, `colorG`,
-    /// `colorB`) — appended at the end specifically so the twenty fields before this one keep the exact
-    /// byte offsets every effect shipping before phase 9c already relies on. A count worth updating
+    /// `colorB`), plus the two RENDER.md §3.8's strips appended for the buffer's origin in the frame
+    /// (`originX`, `originY`) — each group appended at the *end* specifically so every field before it
+    /// keeps the byte offset the effects shipping before it already rely on. A count worth updating
     /// rather than relaxing, since "did anyone add a field to one declaration and not the other" is the
     /// whole question it answers.
     ///
     /// **It was twenty-one for a few hours on 2026-08-27**, when Sobel's alpha rule needed a
     /// `preserveAlpha` scalar to choose between two modes. The owner deleted the mode; one rule needs no
-    /// flag, so the field went with it and the block is back to what it was.
-    func testTheParameterBlockIsTwentyPackedScalars() {
-        XCTAssertEqual(MemoryLayout<EffectParams>.size, 80)
-        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 80)
+    /// flag, so the field went with it.
+    func testTheParameterBlockIsTwentyTwoPackedScalars() {
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 88)
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 88)
     }
 
     /// The table is 256 RGBA entries, and an unused one is the identity — so an effect that does not

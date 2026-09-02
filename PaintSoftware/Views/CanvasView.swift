@@ -1416,7 +1416,8 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// **`RenderSizing.liveComposite` is the other half of that claim, and without it the
         /// sentence above was true only at Full.** `MaskResolver.CacheKey` carries width and height,
-        /// so a native-size resolve here and a reduced one in `makeSandwichRecipe` are two entries — two `ResolvedMask`s over two
+        /// so a native-size resolve here and a reduced one in `makeSandwichRecipe` are two entries —
+        /// two `ResolvedMask`s over two
         /// disjoint sets of canvas-sized `PixelOps.rasterize` flattens, evicting each other inside one
         /// budget, on exactly the documents that have masks to resolve.
         ///

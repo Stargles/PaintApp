@@ -521,12 +521,59 @@ the ruler's bottom 3 pt. Four things came out differently from what this section
 
 ### 3.8 Full means full
 
-`affordableSize` (`Compositor.swift:227-236`) stops sizing the live composite. When the native texture set exceeds
-the budget the baker composites in **horizontal strips**, each with an apron equal to the summed kernel radius of the
-effects in the tree, and writes the strips into one frame. Sources are cropped to the strip plus apron, so the peak
-is a strip's worth of textures, and the budget chooses the strip height instead of the resolution. Until strips
-land, the picker must at least tell the truth: `CompositorSizeGate.pressure` (`Models/CanvasManager+Document.swift:328-340`)
-already computes the effective size and the Resize sheet already shows it; the picker does not.
+`affordableSize` stops sizing the live composite. When the native texture set exceeds the budget the baker
+composites in **horizontal strips**, each with an apron equal to the summed kernel radius of the effects in the tree,
+and writes the strips into one frame. Sources are cropped to the strip plus apron, so the peak is a strip's worth of
+textures, and the budget chooses the strip height instead of the resolution.
+
+**Built 2026-09-02 (stage 5). `Engine/StripedComposite.swift` is the driver, and five things came out differently
+from the paragraph above.**
+
+- **Strips and chunks nest, strips outside, and the nesting is forced rather than chosen.** A chunk (§3.4) cuts by
+  *node* and hands its accumulator to the next chunk **in the same buffer**, so a chunk cannot span two strips. A
+  strip cuts by *space* and is a whole self-contained composite of the entire tree over fewer rows. So the strip loop
+  is outer and each strip is composited by `ChunkedCompositor` exactly as a whole frame is.
+- **There is one budget account and the strip planner does not own it.**
+  `ChunkedCompositor.affordableRows(width:tree:budgetBytes:)` is `chunkSources` solved for the height instead of for
+  the leaf count, and it lives beside it. The target is *"one leaf still fits"*, not *"every leaf fits"*: the node cut
+  is free and the space cut costs an apron in every strip, so the plan takes the **tallest** strip whose buffer still
+  affords one leaf and lets chunking absorb the rest. A strip that still does not fit is therefore chunked by the
+  existing formula with no special case anywhere.
+- **An ink-input effect needs nothing at a strip boundary but the apron, and §3.4 rule 3 does not generalise.** Rule 3
+  is dangerous for a chunk because a chunk *discards sources* and the `.ink` re-walk of `tree.split(atLeaf:).below`
+  cannot be rebuilt from what the chunk holds. **A strip discards no sources at all** — it windows every one of them
+  and hands the whole tree to every strip — so the re-walk inside a strip is the window of the whole frame's re-walk,
+  and the apron covers the kernel's own reach past the band. Rule 3's chunk machinery keeps working *inside* a strip
+  unchanged, because a chunk boundary is still a chunk boundary there.
+- **Two effects read absolute position rather than a neighbourhood, and no apron can pay for them.** `noiseValue`
+  hashes the pixel's coordinate and `screenValue` indexes a 4x4 dither screen by `gid.y & 3`, so a strip would
+  restart the grain and jump the screen's phase at every seam — a wrong picture with no error. `EffectParams` gained
+  `originX`/`originY` (appended at the end, the one position the all-scalar layout rule makes safe), both backends
+  stamp it through one `Effect.passes(inFrameAt:)`, and `applyEffect` passes `gid + origin` to the two branches that
+  want it while every neighbourhood kernel keeps the local `gid`. `Effect.readsAbsolutePosition` is the list a test
+  holds them to.
+- **Three memos are keyed on the buffer's *size* and would collide across strips.** A plan's strips are all the same
+  size but the last, so `PixelOps.RasterizeKey`, `MaskResolver.CacheKey` and `MetalCompositor`'s `UploadCache.Key`
+  each hand strips 1..N whatever strip 0 put there — one band of the drawing repeated down the canvas, on an
+  ordinary document with no effect, mask or blend in it. All three carry the window now. **The third was found by
+  running the pin on the second backend**: the upload cache has no CoreGraphics counterpart, so
+  `StripedCompositeLogicTests` was green on every fixture in the file while the GPU repeated a band.
+  `StripedCompositeMetalLogicTests` reds five of its eleven tests without it.
+
+Everything else a strip needs is already spelled "the buffer is smaller", which both backends understood before
+strips existed: `canvasSize` is the band, `RenderBackground.rect` is the paper translated into it and clamped by the
+fill each backend already does, the sources are the leaves drawn through a translated CTM (`PixelOps.rasterize`
+gained a `window`), and masks resolve from those. **Neither backend gained a code path; they gained one uniform.**
+
+**A frame that fits takes the unstripped path verbatim** — `plan` answers one strip covering everything, and
+`composite` hands the unwindowed recipe straight to `ChunkedCompositor` with no window, no apron, no crop and no
+reassembly. That is a property of the code rather than of the output, and `testAFrameThatFitsIsCompositedWithNoWindowAtAll`
+asserts it through the window rather than through the pixels.
+
+`CompositorSizeGate` and the Resize sheet's warning built on it are **deleted** (§2.15). Both halves of what it said
+were consequences of `affordableSize`: the canvas no longer softens at any size, and the eyedropper's native
+composite is stripped rather than dropped to the CPU reference. A picker that "tells the truth" has nothing left to
+tell.
 
 ### 3.9 Export
 
@@ -707,7 +754,27 @@ it is the dependency order.
    (MEASURED `(start: 0, length: 12)`, no second cel), so stepping the playhead forward and drawing again draws
    into the hold: four strokes made one bake key, and a test built that way was measuring a one-composite bake.
    That is §5's own "a document made of holds cannot count frames", reached from the UI side.
-5. **Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas does.
+5. ~~**Strips** (§3.8), then remove `affordableSize` from the live path and make the picker read as the canvas
+   does.~~ **Done 2026-09-02.** `Engine/StripedComposite.swift` is the driver and §3.8 above carries the five places
+   its own text was wrong. `affordableSize` is gone from `CompositorBudget` outright, along with
+   `CanvasManager.budgetTextures`, `CompositorSizeGate`, `CanvasManager.compositorSizeGate` and the Resize sheet's
+   `compositorWarning` — the picker has nothing left to tell, because the canvas no longer composites below the
+   knob. MEASURED on a dedicated iOS 26.5 simulator: `StripedCompositeLogicTests` **17 tests**,
+   `StripedCompositeMetalLogicTests` **12 tests, 0 skipped**, static `func test` counts reconciled at 17 and 12; fast
+   tier **2581 / 2578 passed / 0 failed / 3 skipped**, taken after rebasing onto 4f, against 2554 / 2551 / 0 / 3 at
+   `4847123` — a delta of +29 new and −2 deleted, and the two deleted are `CanvasResizeLogicTests`' pair on
+   `CompositorSizeGate`.
+
+   **Five mutations MEASURED red**, each restored after: the apron forced to 0 reds six of the CPU suite's
+   seventeen (a blur at a seam reading its own clamped edge, 255 against 254, and an Outline at 128 against 0);
+   `Effect.passes(inFrameAt:)` returning `passes` unstamped reds five (noise at 29 against 158 — row 16 showing row
+   0's grain); `RasterizeKey.window` forced nil reds eight (the top band's bar repeated, 255 against 0);
+   `MaskResolver.CacheKey.window` forced nil reds **exactly one**, which is the tell that only its own fixture has a
+   mask on a stripped frame; and `UploadCache.Key.window` forced nil reds six of the Metal suite's twelve and **none
+   of the CPU suite's seventeen**.
+
+   **Still owed: the owner's confirmation on the device.** The knob-versus-canvas symptom is TODO (31)'s first
+   report, taken on the "UI Test" canvas on their iPad 9, and nothing here has been run on that.
 6. **Export** (§3.9).
 7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
    budgets, a `MemoryPressure` seam so Android and Windows can signal eviction, undo cost for whole-cel raster steps,
