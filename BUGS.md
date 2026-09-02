@@ -3,6 +3,19 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The Render Resolution knob's reassurance copy becomes false the day export ships
+
+`ActionsMenu.renderResolutionControl` (`Views/ActionsMenu.swift:253`) tells the artist: *"Your artwork,
+exports and thumbnails are always saved at full size."* Two of those three are true and the third is a
+promise the next stage breaks. RENDER §2.8 is an owner ruling that **export resolution is this knob's
+value**, and §3.9's export reads the baked frames, which are minted at the knob's size — so a document
+rendered at half will export at half.
+
+The copy is what makes the setting feel safe to leave turned down, which is exactly why it cannot be
+left to go quietly false. It is one string plus the doc comment above it that leans on the same claim.
+**Fix it in the same change that lands export**, not before: until then it is true, and a warning about
+a behaviour that does not exist yet is its own defect.
+
 ## A 16383² canvas draws nothing the artist can see, and the allocation is not why (2026-09-02)
 
 The owner, on their own iPad 9 (3 GB, A13), **Release build 1.0.43 of `41eafa9`**, on a canvas created at
