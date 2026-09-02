@@ -474,6 +474,16 @@ nonisolated enum ProjectBackupManager {
             var fillImageFileName: String?
             var bakedImageFileName: String?
             var vectorFileName: String?
+            /// Mirrors `CelManifest.animationFileName` — KEYFRAMES.md §3.5's *"add it to the
+            /// validator on day one"*.
+            ///
+            /// **`interpolationFileName` is still not here, and that is the gap this key exists not
+            /// to inherit.** §3.5 records it as real and existing: a cel whose recipe sidecar is
+            /// missing validates today and the atomic save proceeds over it. Fixing that is a change
+            /// to what the validator *rejects* on documents that already exist, which is not this
+            /// stage's to make; adding this one costs nothing, because no package in the world yet
+            /// names an animation file.
+            var animationFileName: String?
         }
     }
 
@@ -512,6 +522,8 @@ nonisolated enum ProjectBackupManager {
                 if let fill = cel.fillImageFileName, !fileIntact(fill, isPNG: true) { return false }
                 if let baked = cel.bakedImageFileName, !fileIntact(baked, isPNG: true) { return false }
                 if let vector = cel.vectorFileName, !fileIntact(vector, isPNG: false) { return false }
+                if let animation = cel.animationFileName,
+                   !fileIntact(animation, isPNG: false) { return false }
             }
         }
         return true

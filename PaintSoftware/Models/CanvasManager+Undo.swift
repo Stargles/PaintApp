@@ -37,13 +37,18 @@ extension CanvasManager {
         /// almost-nothing the rest of this snapshot does.
         var motionGroups: [MotionGroup]
         var guideStrokes: [GuideStroke]
+        /// The keyframe feature's own registry, here for the identical reason: deleting an animation
+        /// group has to clear the tag off every element carrying it, and one snapshot is what makes
+        /// that one undo step.
+        var animationGroups: [AnimationGroup]
     }
 
     private func captureStructure() -> StructureSnapshot {
         StructureSnapshot(layers: layers, folders: folders, viewPresets: viewPresets,
                           activeViewPresetIndex: activeViewPresetIndex,
                           currentLayerIndex: currentLayerIndex, sceneFrameCount: sceneFrameCount,
-                          motionGroups: motionGroups, guideStrokes: guideStrokes)
+                          motionGroups: motionGroups, guideStrokes: guideStrokes,
+                          animationGroups: animationGroups)
     }
 
     private func restoreStructure(_ snapshot: StructureSnapshot) {
@@ -60,6 +65,7 @@ extension CanvasManager {
         currentFrame = min(currentFrame, max(sceneFrameCount - 1, 0))
         motionGroups = snapshot.motionGroups
         guideStrokes = snapshot.guideStrokes
+        animationGroups = snapshot.animationGroups
     }
 
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the

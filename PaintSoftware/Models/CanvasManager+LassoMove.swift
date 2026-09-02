@@ -855,8 +855,51 @@ extension CanvasManager {
             vector.suppressedElementIDs = []
             celContentChangedOutsideStroke(layerID: float.layerID, celID: float.celID)
         }
+        // **KEYFRAMES.md §2.5's write-at-commit, and the whole of the transform channel's authoring
+        // path.** *"As soon as it starts moving, it should save a state of the unmoved item at
+        // keyframe A, then when the move 'bakes' — as in the box disappears — keyframe B receives the
+        // second position."* This is where the box disappears.
+        //
+        // **Here rather than in `applyToVectorFloat`, which is the ruling and not a convenience**: a
+        // nudge writes no key. The gesture is one artist decision however many `.changed` ticks it
+        // took, and keying per tick would put a handle on the graph editor for every sample of a drag.
+        //
+        // Everything about routing lives in `commitTransformPose`; a document with no keyframes in it
+        // takes the `.storedValue` arm, which does nothing at all, so the ordinary Move is byte-for-byte
+        // what it was.
+        commitPoseFromFloat(float)
         refreshUndoRedoState()
         return true
+    }
+
+    /// The committed float, read as a pose. Nil-safe on every field it needs, because the arms below
+    /// it treat "no answer" as "this was an ordinary Move".
+    private func commitPoseFromFloat(_ float: VectorFloat) {
+        guard float.nudges > 0 else { return }
+        // The same expression `applyToVectorFloat` builds, at the pose the box finished on — so the
+        // key holds exactly the map the geometry was baked through and the two cannot disagree.
+        let map = float.mirror.concatenating(
+            VectorCanvas.affine(from: float.frame.transform, aspect: float.frame.aspect,
+                                stretchAxis: float.frame.stretchAxis, pivot: float.pivot)
+                .concatenating(float.baseTransform.inverted()))
+        guard !map.isIdentity else { return }
+        // **Ask before creating anything.** The route is a function of the *existing* channel, and on a
+        // document with no keyframes it is `.storedValue` — so minting a group here would tag ink and
+        // add a registry entry on every ordinary Move ever made. Only once the route says a key is
+        // going to be written is a group minted for a partial selection.
+        let existing = existingAnimationChannel(forMovedElementIDs: float.insideIDs,
+                                                layerID: float.layerID, celID: float.celID)
+        guard transformWrite(layerID: float.layerID, celID: float.celID, channel: existing,
+                             atFrame: currentFrame) != .storedValue else { return }
+        guard let channel = existing ?? mintAnimationChannel(forMovedElementIDs: float.insideIDs,
+                                                            layerID: float.layerID,
+                                                            celID: float.celID) else { return }
+        let restBox = CGRect(x: float.pivot.x - float.contentSize.width / 2,
+                             y: float.pivot.y - float.contentSize.height / 2,
+                             width: float.contentSize.width, height: float.contentSize.height)
+        commitTransformPose(layerID: float.layerID, celID: float.celID, channel: channel,
+                            restBox: restBox, map: map, restElements: float.elementsBeforeLift,
+                            atFrame: currentFrame)
     }
 
     /// Un-does the lift itself, verbatim — the pre-split display list, the loop back on screen, and
@@ -940,6 +983,16 @@ extension CanvasManager {
         guard layers.indices.contains(currentLayerIndex), layers[currentLayerIndex].kind == .vector,
               !activeCelIsInBetween,
               let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              // **KEYFRAMES.md stage 5, and it is the in-between refusal one line up wearing a second
+              // costume.** The Move box is measured on the cel's *stored* ink
+              // (`MoveBoxInk(of: lift.elements)`), and a cel whose pose channel resolves to anything
+              // but the identity here is showing a derived picture somewhere else — so the artist
+              // would be dragging a box that is not around the drawing they can see, and every nudge
+              // would write geometry the pose then moves again. A frame whose pose *is* resting has no
+              // such gap, which is every frame of an unkeyframed document and every frame at or after
+              // a key holding the rest pose. Posing the float itself is what would lift this, and it
+              // is named as the next stage's work rather than half-built.
+              celPoseIsResting(layerIndex: currentLayerIndex, celIndex: celIndex, atFrame: currentFrame),
               let vector = layers[currentLayerIndex].cels[celIndex].vector else { return nil }
         return (layers[currentLayerIndex].id, layers[currentLayerIndex].cels[celIndex].id, vector)
     }

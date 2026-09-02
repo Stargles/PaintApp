@@ -1161,14 +1161,24 @@ struct VectorTextElement: Codable, Equatable, Identifiable {
     /// on a `VectorElement` accessor, and Stage 6 is where that is promoted.
     var motionGroupID: UUID?
 
-    init(id: UUID = UUID(), recipe: TextRecipe, frame: TextFrame, motionGroupID: UUID? = nil) {
+    /// The animation group this text belongs to — KEYFRAMES.md §2.11 and §3.4. See
+    /// `VectorStroke.animationGroupID`, which carries the argument; §3.4 rules it onto every element
+    /// kind rather than only strokes, and doing it once serves the interpolation feature's own items
+    /// 11/41 as well.
+    var animationGroupID: UUID?
+
+    init(id: UUID = UUID(), recipe: TextRecipe, frame: TextFrame, motionGroupID: UUID? = nil,
+         animationGroupID: UUID? = nil) {
         self.id = id
         self.recipe = recipe
         self.frame = frame
         self.motionGroupID = motionGroupID
+        self.animationGroupID = animationGroupID
     }
 
-    private enum CodingKeys: String, CodingKey { case id, recipe, frame, motionGroupID }
+    private enum CodingKeys: String, CodingKey {
+        case id, recipe, frame, motionGroupID, animationGroupID
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1176,5 +1186,6 @@ struct VectorTextElement: Codable, Equatable, Identifiable {
         recipe = try c.decodeIfPresent(TextRecipe.self, forKey: .recipe) ?? TextRecipe()
         frame = try c.decodeIfPresent(TextFrame.self, forKey: .frame) ?? TextFrame(origin: .zero, size: .zero)
         motionGroupID = try c.decodeIfPresent(UUID.self, forKey: .motionGroupID)
+        animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
     }
 }

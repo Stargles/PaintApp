@@ -94,6 +94,17 @@ final class CanvasManager: ObservableObject {
     /// nothing for a project that never interpolates.
     @Published var motionGroups: [MotionGroup] = []
 
+    /// Every animation group in the document, in creation order — KEYFRAMES.md §2.11 and §3.4.
+    /// Elements reference these by id (`VectorElement.animationGroupID`); a cel's `transformTracks`
+    /// hold the geometry, keyed by `TransformChannelID`.
+    ///
+    /// **Beside `motionGroups` rather than merged with it**, §2.8: a motion group says which strokes
+    /// the *in-betweener* warps together and an animation group says which elements a *keyframed
+    /// transform* moves together, and an artist who answered one has said nothing about the other.
+    /// Document-level for `motionGroups`' reason, and empty until the artist keyframes a Move, so it
+    /// costs a project that never animates nothing.
+    @Published var animationGroups: [AnimationGroup] = []
+
     /// Every guide stroke in the document. Document-level for the same reason, and because a guide
     /// is meant to be *referenced* by several intervals rather than copied into each, which only
     /// works if it has one home and a stable id.

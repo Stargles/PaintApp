@@ -58,6 +58,19 @@ struct VectorStroke: Identifiable, Codable {
     /// piece keeps its parent's tag. Independent of `color` — see `MotionGroup.tagColor`.
     var motionGroupID: UUID? = nil
 
+    /// The **animation** group this stroke belongs to — KEYFRAMES.md §2.11 and §3.4, and a different
+    /// question from `motionGroupID` above. That one says which strokes an *interpolation* between two
+    /// reference cels warps together; this one says which elements a *pose channel* moves together
+    /// over the frames one cel spans. §2.8 is why the two features keep separate vocabularies rather
+    /// than sharing one tag: an artist who groups a character's arm for in-betweening has said nothing
+    /// about what should move under a keyframed transform.
+    ///
+    /// **A field rather than a list of ids on the track, and §3.4 makes that structural rather than
+    /// tidy**: element ids do not survive a lasso lift — the split mints fresh UUIDs on both pieces —
+    /// and an image's id is re-minted on every load (`VectorCanvasData.localElements`). A channel
+    /// keyed to raw ids would be orphaned the moment the artist re-lassoed or reopened the document.
+    var animationGroupID: UUID? = nil
+
     /// The interpolation parameter below which this stroke is not drawn — the τ threshold. Set on a
     /// stroke that appears at an in-between or exists at only one keyframe. Nil means always visible.
     var visibilityThreshold: CGFloat? = nil
@@ -76,7 +89,7 @@ struct VectorStroke: Identifiable, Codable {
     /// memberwise initialiser every construction site here uses.
     enum CodingKeys: String, CodingKey {
         case id, brush, color, size, opacity, samples, composite, lattice
-        case motionGroupID, visibilityThreshold, sampleVisibilityThresholds
+        case motionGroupID, animationGroupID, visibilityThreshold, sampleVisibilityThresholds
     }
 }
 
@@ -186,6 +199,7 @@ extension VectorStroke {
         // Absent is the normal case; only a stroke cut out of another one carries a lattice.
         lattice = try c.decodeIfPresent(DabLattice.self, forKey: .lattice)
         motionGroupID = try c.decodeIfPresent(UUID.self, forKey: .motionGroupID)
+        animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
         visibilityThreshold = try c.decodeIfPresent(CGFloat.self, forKey: .visibilityThreshold)
         sampleVisibilityThresholds = try c.decodeIfPresent([Int: CGFloat].self,
                                                            forKey: .sampleVisibilityThresholds)
@@ -224,6 +238,7 @@ extension VectorStroke {
         // Written only when present, so an ordinary stroke's payload stays byte-for-byte unchanged.
         try c.encodeIfPresent(lattice, forKey: .lattice)
         try c.encodeIfPresent(motionGroupID, forKey: .motionGroupID)
+        try c.encodeIfPresent(animationGroupID, forKey: .animationGroupID)
         try c.encodeIfPresent(visibilityThreshold, forKey: .visibilityThreshold)
         try c.encodeIfPresent(sampleVisibilityThresholds, forKey: .sampleVisibilityThresholds)
     }
@@ -241,6 +256,12 @@ struct VectorFillElement: Identifiable, Codable {
     var opacity: Double
     /// When true the path is rendered with the even-odd fill rule (used for clear-selection holes).
     var evenOddFill: Bool = false
+
+    /// The animation group this element belongs to — KEYFRAMES.md §2.11 and §3.4. See
+    /// `VectorStroke.animationGroupID`, which carries the argument; §3.4 rules it onto **every**
+    /// element kind rather than only strokes, since a fill or a placed image is as movable as a line.
+    /// Optional, so the synthesized decoder reads a file written before it existed.
+    var animationGroupID: UUID? = nil
 
     init(path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
         let bezier = UIBezierPath(cgPath: path)
@@ -303,6 +324,13 @@ struct VectorImageElement: Identifiable {
 
     /// Set once the element has been persisted, so save can reuse the same file.
     var fileName: String?
+
+    /// The animation group this element belongs to — KEYFRAMES.md §2.11 and §3.4. See
+    /// `VectorStroke.animationGroupID`, which carries the argument; §3.4 rules it onto **every**
+    /// element kind rather than only strokes, since a fill or a placed image is as movable as a line.
+    /// Optional, so the synthesized decoder reads a file written before it existed.
+    var animationGroupID: UUID? = nil
+
 
     /// **The one place the four fields become a matrix**, so the render, the membership quad and the
     /// lasso's own map cannot come to disagree about where the picture is. It maps the image's
@@ -3447,6 +3475,10 @@ struct VectorCanvasData: Codable {
         var stretchAxis: Double?
         /// Absent means false — `VectorImageElement.mirrored`.
         var mirrored: Bool?
+        /// Absent means untagged — `VectorImageElement.animationGroupID`. **The one element kind
+        /// whose membership needs a key of its own**, because a placed image's persisted form is this
+        /// DTO rather than the element itself; the other three ride their own `Codable`.
+        var animationGroupID: UUID?
     }
 
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
@@ -3667,7 +3699,8 @@ struct VectorCanvasData: Codable {
                                        scale: el.transform.scale, rotation: el.transform.rotation,
                                        aspect: el.aspect == 1 ? nil : Double(el.aspect),
                                        stretchAxis: el.stretchAxis == 0 ? nil : Double(el.stretchAxis),
-                                       mirrored: el.mirrored ? true : nil))
+                                       mirrored: el.mirrored ? true : nil,
+                                       animationGroupID: el.animationGroupID))
             }
         }
         transform = []
@@ -3771,7 +3804,8 @@ struct VectorCanvasData: Codable {
                                                  aspect: CGFloat(ref.aspect ?? 1),
                                                  stretchAxis: CGFloat(ref.stretchAxis ?? 0),
                                                  mirrored: ref.mirrored ?? false,
-                                                 fileName: ref.fileName))
+                                                 fileName: ref.fileName,
+                                                 animationGroupID: ref.animationGroupID))
             }
         }
     }

@@ -1293,7 +1293,19 @@ extension CanvasManager {
     /// part of the identity, so two positions of the slider are two cache entries and never one.
     func derivedCelContent(for cel: Cel, atFrame frame: Int,
                            overridingT overrideT: CGFloat? = nil) -> DerivedCelContent? {
-        guard let recipe = cel.interpolation, let canvasSize else { return nil }
+        // **Two derivation sources, and they are alternatives rather than a composition** —
+        // KEYFRAMES.md §2.18. *"A derived in-between carries no object channels"*: its display list is
+        // computed, so it has no stable elements to key, and Move is already refused outright on one
+        // in two places. So a cel with a recipe takes the interpolation arm and its pose tracks are
+        // ignored, which is the same answer `commitTransformPose` gives at the writer — refusing at
+        // both ends is what stops the app reaching storage that renders nothing.
+        //
+        // The pose arm is tried second and answers nil on one `isEmpty` for every cel of every
+        // rasterize in a document that has never been keyframed, which is the contract this whole
+        // function is written to.
+        guard let recipe = cel.interpolation, let canvasSize else {
+            return cel.interpolation == nil ? posedCelContent(for: cel, atFrame: frame) : nil
+        }
 
         let t = overrideT ?? recipe.t
         let options = interpolationOptions

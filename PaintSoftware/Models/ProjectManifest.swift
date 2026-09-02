@@ -34,6 +34,9 @@ struct ProjectManifest: Codable {
     /// read nothing, unlike the per-cel recipes, which get their own files.
     var motionGroups: [MotionGroup] = []
     var guideStrokes: [GuideStroke] = []
+    /// The keyframe feature's own group registry — KEYFRAMES.md §2.11. Beside `motionGroups` and
+    /// written only when non-empty, the same absence-is-the-migration idiom every field here follows.
+    var animationGroups: [AnimationGroup] = []
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
          layers: [LayerManifest], modifiedAt: Date,
@@ -41,7 +44,8 @@ struct ProjectManifest: Codable {
          selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = [],
          vectorEraserMode: VectorEraserMode = .erase,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
-         motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = []) {
+         motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
+         animationGroups: [AnimationGroup] = []) {
         self.id = id
         self.name = name
         self.canvasWidth = canvasWidth
@@ -60,6 +64,7 @@ struct ProjectManifest: Codable {
         self.viewPresets = viewPresets
         self.motionGroups = motionGroups
         self.guideStrokes = guideStrokes
+        self.animationGroups = animationGroups
     }
 
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
@@ -88,6 +93,8 @@ struct ProjectManifest: Codable {
         // registry is not written).
         motionGroups = try container.decodeIfPresent([MotionGroup].self, forKey: .motionGroups) ?? []
         guideStrokes = try container.decodeIfPresent([GuideStroke].self, forKey: .guideStrokes) ?? []
+        animationGroups = try container.decodeIfPresent([AnimationGroup].self,
+                                                        forKey: .animationGroups) ?? []
     }
 
     /// Written explicitly so the two interpolation registries can be *omitted* when empty — a
@@ -112,12 +119,14 @@ struct ProjectManifest: Codable {
         try container.encode(viewPresets, forKey: .viewPresets)
         if !motionGroups.isEmpty { try container.encode(motionGroups, forKey: .motionGroups) }
         if !guideStrokes.isEmpty { try container.encode(guideStrokes, forKey: .guideStrokes) }
+        if !animationGroups.isEmpty { try container.encode(animationGroups, forKey: .animationGroups) }
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, fps, sceneFrameCount, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
-             vectorEraserMode, folders, viewPresets, motionGroups, guideStrokes
+             vectorEraserMode, folders, viewPresets, motionGroups, guideStrokes,
+             animationGroups
     }
 }
 
@@ -444,4 +453,17 @@ struct CelManifest: Codable {
     /// than inline in the manifest because a recipe carries lattices (vertex arrays per motion
     /// group per keyframe) and `manifest.json` is read in full for every gallery tile.
     var interpolationFileName: String? = nil
+    /// JSON file holding this cel's pose channels (`Cel.transformTracks` and
+    /// `Cel.pendingPoseBaselines`), when it has any — KEYFRAMES.md §3.5.
+    ///
+    /// **Its own sidecar for `interpolationFileName`'s reason verbatim**: a pose track is unbounded
+    /// (a recorded shake is dozens of keys a channel, and a channel per group), and `manifest.json`
+    /// is read in full for every gallery tile. A missing or unreadable sidecar costs the *animation*,
+    /// not the drawing — the cel loads with its ink where it stores it.
+    ///
+    /// **In `ProjectBackupManager.ManifestSkeleton.Cel` from day one**, unlike
+    /// `interpolationFileName`, which §3.5 records as a real existing gap: a cel whose recipe sidecar
+    /// is missing still validates and the atomic save proceeds. Not inheriting that is the whole of
+    /// what "add it to the validator on day one" asks.
+    var animationFileName: String? = nil
 }

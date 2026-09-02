@@ -229,6 +229,11 @@
 		5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */; };
 		98709D5A765375DE901906E7 /* PaintSoftware/Views/TimelineKeyMarkers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */; };
 		AF2241D8EDE8331362C8AA0A /* TimelineKeyMarkersLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1AE268F10AC383B43589B23 /* TimelineKeyMarkersLogicTests.swift */; };
+		744DEF6FCE41C5843269CB69 /* PaintSoftware/Engine/Deform/PoseInterpolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */; };
+		A0AAFEC106A5B72078BC315E /* PaintSoftware/Models/TransformTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10641AA46CDB443CAAC35CF1 /* PaintSoftware/Models/TransformTrack.swift */; };
+		375499CA02B7EBD027F502C3 /* PaintSoftware/Models/AnimationGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */; };
+		A79E1BFD1757C573AC905B73 /* PaintSoftware/Models/TransformChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */; };
+		E410A79CDD501AF413ABC03D /* PaintSoftware/Models/TransformKeyframes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -466,6 +471,11 @@
 		59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRowLayoutLogicTests.swift; sourceTree = "<group>"; };
 		9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineKeyMarkers.swift; sourceTree = "<group>"; };
 		D1AE268F10AC383B43589B23 /* TimelineKeyMarkersLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineKeyMarkersLogicTests.swift; sourceTree = "<group>"; };
+		2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Deform/PoseInterpolation.swift; sourceTree = "<group>"; };
+		10641AA46CDB443CAAC35CF1 /* PaintSoftware/Models/TransformTrack.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformTrack.swift; sourceTree = "<group>"; };
+		53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/AnimationGroup.swift; sourceTree = "<group>"; };
+		EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformChannel.swift; sourceTree = "<group>"; };
+		636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TransformKeyframes.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -694,6 +704,11 @@
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
+				636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */,
+				EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */,
+				53D9B03CD14DB94C68F52B22 /* PaintSoftware/Models/AnimationGroup.swift */,
+				10641AA46CDB443CAAC35CF1 /* PaintSoftware/Models/TransformTrack.swift */,
+				2A18258CDC733B7955400BBF /* PaintSoftware/Engine/Deform/PoseInterpolation.swift */,
 				DEC0DECA0000000000000001 /* PaintSoftware/Models/CanvasNotice.swift */,
 				EA7DE14C7938681941884757 /* PaintSoftware/Models/HistoryActionLabel.swift */,
 				DEC0DEAC0000000000000001 /* PaintSoftware/Debug/ActionRecorder.swift */,
@@ -1002,6 +1017,11 @@
 				DEC0DE000000000000000012 /* PaintSoftware/Engine/StrokeInput.swift in Sources */,
 				DEC0DE000000000000000014 /* PaintSoftware/Engine/VectorLayer.swift in Sources */,
 				DEC0DE000000000000000016 /* PaintSoftware/Models/CanvasManager.swift in Sources */,
+				E410A79CDD501AF413ABC03D /* PaintSoftware/Models/TransformKeyframes.swift in Sources */,
+				A79E1BFD1757C573AC905B73 /* PaintSoftware/Models/TransformChannel.swift in Sources */,
+				375499CA02B7EBD027F502C3 /* PaintSoftware/Models/AnimationGroup.swift in Sources */,
+				A0AAFEC106A5B72078BC315E /* PaintSoftware/Models/TransformTrack.swift in Sources */,
+				744DEF6FCE41C5843269CB69 /* PaintSoftware/Engine/Deform/PoseInterpolation.swift in Sources */,
 				DEC0DECA0000000000000002 /* PaintSoftware/Models/CanvasNotice.swift in Sources */,
 				523C74C125B8B2A8EAC5EEA6 /* PaintSoftware/Models/HistoryActionLabel.swift in Sources */,
 				DEC0DEAC0000000000000002 /* PaintSoftware/Debug/ActionRecorder.swift in Sources */,

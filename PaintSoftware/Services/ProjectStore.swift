@@ -155,6 +155,10 @@ enum ProjectStore {
             /// The cel's interpolation recipe, if it is a derived cel. A value type all the way
             /// down, so unlike `vector` it needs no defensive copy.
             let interpolation: InterpolationRecipe?
+            /// The cel's pose channels and any held baseline — KEYFRAMES.md §3.5. Value types all
+            /// the way down, so like `interpolation` they need no defensive copy.
+            let transformTracks: [String: TransformTrack]
+            let pendingPoseBaselines: [String: PoseQuad]
         }
 
         struct LayerContent {
@@ -206,6 +210,7 @@ enum ProjectStore {
         let folders: [FolderManifest]
         let viewPresets: [ViewPresetManifest]
         let motionGroups: [MotionGroup]
+        let animationGroups: [AnimationGroup]
         let guideStrokes: [GuideStroke]
         let layers: [LayerContent]
         let thumbnail: UIImage?
@@ -265,6 +270,7 @@ enum ProjectStore {
                 return ViewPresetManifest(id: preset.id, name: preset.name, layerVisibility: vis, folderVisibility: folderVis)
             }
             motionGroups = canvasManager.motionGroups
+            animationGroups = canvasManager.animationGroups
             guideStrokes = canvasManager.guideStrokes
             layers = canvasManager.layers.map { layer in
                 LayerContent(id: layer.id, name: layer.name, hasCustomName: layer.hasCustomName,
@@ -282,7 +288,9 @@ enum ProjectStore {
                                rasterImage: cel.raster.hasContent ? cel.raster.renderToUIImage() : nil,
                                fillImage: cel.fillImage, bakedImage: cel.bakedImage,
                                vector: cel.vector?.makeCopy(),
-                               interpolation: cel.interpolation)
+                               interpolation: cel.interpolation,
+                               transformTracks: cel.transformTracks,
+                               pendingPoseBaselines: cel.pendingPoseBaselines)
                 })
             }
 
@@ -736,7 +744,8 @@ enum ProjectStore {
             folders: snapshot.folders,
             viewPresets: snapshot.viewPresets,
             motionGroups: snapshot.motionGroups,
-            guideStrokes: snapshot.guideStrokes
+            guideStrokes: snapshot.guideStrokes,
+            animationGroups: snapshot.animationGroups
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
@@ -873,6 +882,19 @@ enum ProjectStore {
             interpolationFileName = name
         }
 
+        // The pose channels, when this cel has any — KEYFRAMES.md §3.5, and its own JSON file for
+        // the two reasons above: unbounded size, and a manifest the gallery reads in full.
+        // §2.27's held baseline rides in the same file, because it is the state *between* two
+        // keyframes and that gap can span exactly this save.
+        var animationFileName: String?
+        if !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty,
+           let data = json(CelAnimationData(tracks: cel.transformTracks,
+                                            baselines: cel.pendingPoseBaselines)) {
+            let name = "\(cel.id.uuidString)_anim.json"
+            write(data, name)
+            animationFileName = name
+        }
+
         tally.record(encodeSeconds: encodeSeconds, writeSeconds: writeSeconds,
                      pngsEncoded: encoded, pngsReused: 0, bytesWritten: bytes)
 
@@ -881,7 +903,8 @@ enum ProjectStore {
                            fillImageFileName: fillFileName,
                            bakedImageFileName: bakedFileName,
                            vectorFileName: vectorFileName,
-                           interpolationFileName: interpolationFileName)
+                           interpolationFileName: interpolationFileName,
+                           animationFileName: animationFileName)
     }
 
     // MARK: - Loading
@@ -1261,10 +1284,22 @@ enum ProjectStore {
             interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)
         }
 
+        // The pose channels. A cel whose animation file is missing or unreadable loads with its ink
+        // where it stores it rather than failing the project — the same "the link, not the drawing"
+        // rule the recipe above follows, and the reason both are sidecars.
+        var animation = CelAnimationData()
+        if let animationFileName = celManifest.animationFileName,
+           let data = try? Data(contentsOf: imagesDir.appendingPathComponent(animationFileName)),
+           let decoded = try? JSONDecoder().decode(CelAnimationData.self, from: data) {
+            animation = decoded
+        }
+
         return DecodedCel(
             cel: Cel(id: celManifest.id, startFrame: celManifest.startFrame, frameCount: celManifest.frameCount,
                      raster: raster, fillImage: fillImage, bakedImage: bakedImage, vector: vector,
-                     interpolation: interpolation),
+                     interpolation: interpolation,
+                     transformTracks: animation.tracks,
+                     pendingPoseBaselines: animation.baselines),
             damage: damage)
     }
 
@@ -1307,6 +1342,7 @@ enum ProjectStore {
         // Document-level interpolation state. Both default to empty for every project that predates
         // the feature or simply never used it.
         manager.motionGroups = manifest.motionGroups
+        manager.animationGroups = manifest.animationGroups
         manager.guideStrokes = manifest.guideStrokes
 
         // Restore folders.

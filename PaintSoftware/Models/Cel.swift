@@ -23,6 +23,32 @@ struct Cel: Identifiable {
     /// no new machinery. A `.reproject` recipe coexists with `vector` content (the artist's own
     /// drawing, re-posed); a `.generate` recipe normally sits on a cel with none.
     var interpolation: InterpolationRecipe? = nil
+    /// **The pose channels animating this cel's content** — KEYFRAMES.md stage 5, keyed by
+    /// `TransformChannelID.id` (`"cel"`, or `"group.<uuid>"`).
+    ///
+    /// **On the cel and in cel-local frames**, which is §3.1's first row: the channel rides the cel
+    /// through move, split, duplicate and paste for free, exactly as `interpolation` above does and
+    /// for the same reason. Effect-parameter channels are the other row — they live on the *layer* in
+    /// absolute document frames (§2.4), because their target has no cel to ride.
+    ///
+    /// Empty is the overwhelmingly common case and every reader tests it first: a document that has
+    /// never been keyframed must cost one `isEmpty` on the paths that ask, which is every rasterize of
+    /// every cel.
+    ///
+    /// **A cel carrying an `interpolation` recipe ignores these, by §2.18** — a derived in-between has
+    /// no stable elements to key, its display list is computed, and `CanvasManager.derivedCelContent`
+    /// takes the interpolation arm. The writer refuses to create one there rather than leaving storage
+    /// that renders nothing.
+    var transformTracks: [String: TransformTrack] = [:]
+    /// **§2.27's held pose, per channel id** — *"keyframe A is added, nothing is saved. A slider is
+    /// then adjusted. The previous value is held. Then keyframe B is added"*, with a Move in place of
+    /// the slider.
+    ///
+    /// **Persisted, and it is the field that looks like a transient and is not** (§3.5): it is the
+    /// state *between* keyframe A and keyframe B, and that gap can span a save. Lose it across a
+    /// reopen and placing B writes two identical poses, produces no animation, and puts nothing on
+    /// screen to explain why.
+    var pendingPoseBaselines: [String: PoseQuad] = [:]
     var thumbnail: UIImage? = nil
 
     var endFrame: Int { startFrame + frameCount }
