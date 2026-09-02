@@ -226,9 +226,10 @@ final class FrameBaker {
     ///
     /// The knob is inside `liveCompositeSize`, which is also what §2.8 wants of an export that reads
     /// these files, and what makes `FrameBakeStore.defaultRoot`'s per-resolution directory name
-    /// something other than three copies of one picture. `CompositorBudget.affordableSize` is inside
-    /// it as well and is §2.12's known defect; it is removed from *that one function* in stage 5,
-    /// which is what keeps the two sizes moving together rather than drifting apart here.
+    /// something other than three copies of one picture. **And the knob is all that is inside it**
+    /// (§2.12): the bake and the live halves share one size and neither composites below what the
+    /// artist asked for. A frame too big for the budget is stripped, not shrunk —
+    /// `StripedCompositor`.
     @MainActor
     private static func recipe(_ manager: CanvasManager, atFrame frame: Int) -> FrameRecipe? {
         manager.makeFrameRecipe(atFrame: frame, includeBackground: true, sizing: .liveComposite)

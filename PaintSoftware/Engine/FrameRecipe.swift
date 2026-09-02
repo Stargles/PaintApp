@@ -69,6 +69,17 @@ struct FrameRecipe {
     let background: RenderBackground?
     let quality: RenderQuality
 
+    /// **Nil for a whole frame, and set for one horizontal strip of one** — RENDER.md §3.8, and the
+    /// only field that makes `canvasSize` mean something other than "the frame".
+    ///
+    /// Every recipe anything but `StripedCompositor` mints leaves this nil, so it is the identity
+    /// for the live canvas, the bake, the thumbnail and the eyedropper alike. When it is set,
+    /// `canvasSize` is the strip's own buffer and this says where that buffer sits in the frame —
+    /// which is what `resolveSources` needs to draw a cel through a translated CTM, what both memo
+    /// keys need so two strips of equal height cannot collide, and what the effect kernels need so a
+    /// noise field does not restart at the seam.
+    var window: StripWindow? = nil
+
     /// The frame's pixels. Pure, and safe on any thread: every value it reads was frozen at mint.
     ///
     /// **Every leaf at once, which is the thing RENDER.md §3.4 is about.** One canvas-sized image per
@@ -77,10 +88,39 @@ struct FrameRecipe {
     /// anything that wants an image rather than a request. It stays because `SandwichRecipe` and
     /// `liveMaskRequest` legitimately want one request over every leaf.
     func resolve() -> RenderRequest {
-        let resolved = FrameRecipe.resolveSources(leaves, canvasSize: canvasSize, quality: quality)
+        let resolved = FrameRecipe.resolveSources(leaves, canvasSize: canvasSize, quality: quality,
+                                                  window: window)
         return RenderRequest(tree: tree, sources: resolved.sources, contentVersions: resolved.versions,
                              maskStacks: maskStacks, frame: frame, canvasSize: canvasSize,
-                             background: background, quality: quality)
+                             background: background, quality: quality, window: window)
+    }
+
+    /// **This recipe restricted to one horizontal band of its own frame** — RENDER.md §3.8's strip,
+    /// and the only place a `StripWindow` is ever minted.
+    ///
+    /// The same tree, the same leaves, the same mask stacks: a strip is not a *subset* of the
+    /// document the way a chunk is, it is the whole document over fewer rows. That is why an
+    /// ink-input effect needs nothing special at a strip boundary and everything special at a chunk
+    /// boundary (§3.4 rule 3) — a chunk discards sources, a strip only windows them.
+    ///
+    /// Two things move. `canvasSize` becomes the band, so both backends allocate a band; and the
+    /// paper's rect is **translated into the band's own coordinates**, where it may start above the
+    /// buffer or end below it. Both backends already clamp it to the texture they are filling
+    /// (`MetalCompositor.fillBackground`'s four `min`/`max`es, and `UIRectFill`'s own clipping), so a
+    /// rect that hangs off the band fills exactly the intersection — which is the right answer and
+    /// the reason this needs no clipping of its own.
+    ///
+    /// `rect` must be whole pixels inside the frame; `StripedCompositor.plan` is what guarantees it.
+    func windowed(to rect: CGRect) -> FrameRecipe {
+        FrameRecipe(
+            tree: tree, leaves: leaves, maskStacks: maskStacks, frame: frame,
+            canvasSize: rect.size,
+            background: background.map {
+                RenderBackground(color: $0.color,
+                                 rect: $0.rect.offsetBy(dx: -rect.origin.x, dy: -rect.origin.y))
+            },
+            quality: quality,
+            window: StripWindow(frameSize: canvasSize, origin: rect.origin))
     }
 
     /// **This frame as an image, under a memory ceiling** — RENDER.md §3.4, and the way a whole frame
@@ -90,7 +130,7 @@ struct FrameRecipe {
     /// Identical output, byte for byte — `ChunkedCompositeLogicTests` is the pin — so a caller that
     /// only wants the picture has no reason to take the other path.
     func composite(budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> CGImage? {
-        ChunkedCompositor.composite(self, budgetBytes: budgetBytes)
+        StripedCompositor.composite(self, budgetBytes: budgetBytes)
     }
 
     /// Pass 2, unchanged in everything but where it runs: the survivors rasterized across every core
@@ -113,7 +153,7 @@ struct FrameRecipe {
     /// two chunks clipped by one mask would hold two `ResolvedMask` objects where the design says they
     /// share one. A version is eight bytes of identity; the pixels are what the subset is about.
     static func resolveSources(_ leaves: [LeafSnapshot?], canvasSize: CGSize, quality: RenderQuality,
-                               subset: Set<Int>? = nil)
+                               subset: Set<Int>? = nil, window: StripWindow? = nil)
     -> (sources: [LayerRenderSource?], versions: [LayerContentVersion?]) {
         var sources = [LayerRenderSource?](repeating: nil, count: leaves.count)
         var versions = [LayerContentVersion?](repeating: nil, count: leaves.count)
@@ -126,6 +166,10 @@ struct FrameRecipe {
             case nil:
                 continue
             case .solid(let color):
+                // **A value layer needs no window**, and that is worth stating rather than leaving
+                // to be noticed: it is a memset of one colour over the whole buffer, so a band of it
+                // is the same bytes as the band of the whole-frame fill it stands for. §4.5's layer
+                // is the one leaf a strip costs nothing at all.
                 if let image = LayerRenderSource.solid(color, canvasSize: canvasSize) {
                     sources[index] = LayerRenderSource(image: image)
                 }
@@ -134,7 +178,8 @@ struct FrameRecipe {
             }
         }
         let images = PixelOps.parallelMap(rasterJobs.count) { job in
-            PixelOps.rasterize(rasterJobs[job].cel, canvasSize: canvasSize, quality: quality).cgImage
+            PixelOps.rasterize(rasterJobs[job].cel, canvasSize: canvasSize, quality: quality,
+                               window: window).cgImage
         }
         for (job, image) in zip(rasterJobs, images) {
             guard let image else { continue }
@@ -173,6 +218,9 @@ struct SandwichRecipe {
     /// The three requests. Pure, and safe on any thread — `CanvasView.startSandwichRebuild` calls it
     /// inside `sandwichQueue.async`, which is the whole point of the type.
     func resolve() -> SandwichRequests {
+        // No window: the sandwich is the live canvas's own pair and is never stripped. It is a
+        // different product from the bake — cut at the active leaf, wanted inside the artist's own
+        // gesture — and RENDER.md §5 stage 4d records that boundary.
         let resolved = FrameRecipe.resolveSources(leaves, canvasSize: canvasSize, quality: quality)
         func request(_ tree: [RenderNode], background: RenderBackground?) -> RenderRequest {
             RenderRequest(tree: tree, sources: resolved.sources, contentVersions: resolved.versions,

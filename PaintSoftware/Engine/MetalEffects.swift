@@ -107,9 +107,14 @@ final class EffectPipelines {
     /// can fall back to `EffectReference` the way `Compositor.composite` falls back to
     /// `CoreGraphicsCompositor`, rather than being handed a half-run effect.
     @discardableResult
+    /// `origin` is where the buffer being graded sits in the frame — RENDER.md §3.8's strip, and
+    /// `(0, 0)` for every whole-frame composite. It reaches the kernel inside `EffectParams`, through
+    /// the same `Effect.passes(inFrameAt:)` the CPU reference calls, so the two cannot stamp it
+    /// differently.
     func encode(_ effect: Effect, source: MTLTexture, into result: MTLTexture,
-                encoder: MTLComputeCommandEncoder) -> Bool {
-        let passes = effect.passes
+                encoder: MTLComputeCommandEncoder,
+                origin: (x: UInt32, y: UInt32) = (0, 0)) -> Bool {
+        let passes = effect.passes(inFrameAt: origin)
         guard let last = passes.indices.last else { return false }
         // Named for what it is rather than for the property it comes from: `self.scratch` is a map
         // over sizes and this is the one size's pair, so shadowing the name would read as the map.

@@ -145,7 +145,7 @@ enum PixelOps {
             return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived, quality: quality),
                                      canvasSize: canvasSize, quality: quality)
         }
-        let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality)
+        let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality, window: nil)
         if let hit = rasterizeCache.value(for: key) { return hit }
         // Frozen only after the memo has missed, so a hit never touches either tier — the tiers'
         // own memos are not free to fill (`RasterLayerTexture.renderToUIImage` pins the context's
@@ -164,10 +164,16 @@ enum PixelOps {
     /// or an unchanged cel is flattened twice. `FrozenCel.Identity` is what makes that literal —
     /// there is one key type and one field list, built either from a live `Cel` or from the frozen
     /// copy of the same fields.
-    static func rasterize(_ frozen: FrozenCel, canvasSize: CGSize, quality: RenderQuality) -> UIImage {
-        let key = RasterizeKey(cel: frozen.identity, canvasSize: canvasSize, quality: quality)
+    /// **`window` is RENDER.md §3.8's strip.** Nil is a whole frame and every caller but the strip
+    /// driver passes nil, so this is the identity everywhere it always was. Non-nil renders the same
+    /// cel at the same *frame* scale into a `canvasSize` buffer that is a band of it — a translated
+    /// CTM, not a smaller drawing, so a strip of a cel is byte-identical to that band of the whole.
+    static func rasterize(_ frozen: FrozenCel, canvasSize: CGSize, quality: RenderQuality,
+                          window: StripWindow? = nil) -> UIImage {
+        let key = RasterizeKey(cel: frozen.identity, canvasSize: canvasSize, quality: quality,
+                               window: window)
         if let hit = rasterizeCache.value(for: key) { return hit }
-        let image = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality)
+        let image = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality, window: window)
         rasterizeCache.store(image, for: key)
         return image
     }
@@ -277,12 +283,24 @@ enum PixelOps {
         let width: Int
         let height: Int
         let quality: RenderQuality
+        /// **Where in the frame this flatten is a band of** — nil for the whole frame, which is
+        /// every entry anything but RENDER.md §3.8's strip driver mints.
+        ///
+        /// **Without it two strips of equal height collide on one entry.** The rest of this key is
+        /// the cel's identity and the buffer's *size*, and a plan's strips are all the same size but
+        /// the last — so the second strip of a frame would be served the first strip's pixels, and
+        /// the picture would be one band repeated down the canvas with no error anywhere. That is
+        /// the same family as the memo trap KEYFRAMES §4.5 names (a pose key the memo cannot see),
+        /// reached through the one field nobody thought a flatten needed.
+        let window: StripWindow?
 
-        init(cel: FrozenCel.Identity, canvasSize: CGSize, quality: RenderQuality) {
+        init(cel: FrozenCel.Identity, canvasSize: CGSize, quality: RenderQuality,
+             window: StripWindow?) {
             self.cel = cel
             width = Int(canvasSize.width.rounded())
             height = Int(canvasSize.height.rounded())
             self.quality = quality
+            self.window = window
         }
     }
 
@@ -389,8 +407,17 @@ enum PixelOps {
     static var rasterizeCacheBytes: Int { rasterizeCache.bytesResident }
 
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
-                                          quality: RenderQuality) -> UIImage {
+                                          quality: RenderQuality,
+                                          window: StripWindow? = nil) -> UIImage {
         let bounds = CGRect(origin: .zero, size: canvasSize)
+        // **The rect every tier is drawn into.** Without a window it is the buffer, which is what
+        // this function has always done. With one it is the *frame*, shifted so that the window's
+        // top-left lands at the buffer's — the same drawing at the same scale, seen through a hole.
+        // CoreGraphics clips it to the context, so nothing outside the band is rasterized and the
+        // strip costs a strip's memory rather than a frame's.
+        let content = window.map {
+            CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
+        } ?? bounds
         // **The raster tier is skipped outright when it holds no bitmap**, rather than drawn as a
         // sheet of transparency. Every vector cel has an empty raster tier, so this is the common
         // case and not the odd one, and the draw it removes is a full-canvas blit of nothing. The
@@ -411,9 +438,9 @@ enum PixelOps {
         let vectorImage = cel.derived?.render(quality) ?? cel.vector?.render(quality: quality)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { _ in
-            cel.bakedImage?.draw(in: bounds)
-            cel.strokesImage?.draw(in: bounds)
-            vectorImage?.draw(in: bounds)
+            cel.bakedImage?.draw(in: content)
+            cel.strokesImage?.draw(in: content)
+            vectorImage?.draw(in: content)
             // **`fillImage` is last, and that is the whole of LASSO_FILL.md §2a on the preview side.**
             // A fill covers everything already on the cel, so the live preview has to stack the way
             // the commit will (`commitInteractiveFill` composites the preview over the raster tier) or
@@ -427,7 +454,7 @@ enum PixelOps {
             // It also settles a disagreement that predates the fill ruling: `LayerHostView` has stacked
             // `fillImageView` above `bakedImageView` since the fill preview became a recolour preview,
             // while this drew it below. The two now agree, in the one order the commit produces.
-            cel.fillImage?.draw(in: bounds)
+            cel.fillImage?.draw(in: content)
         }
     }
 

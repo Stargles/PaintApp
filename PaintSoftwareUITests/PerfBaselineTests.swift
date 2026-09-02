@@ -2452,9 +2452,9 @@ final class PerfBaselineTests: XCTestCase {
     /// this is the arithmetic that hides there and does not hide on a device.
     ///
     /// The count is asserted rather than merely reported because it is the input to
-    /// `CompositorBudget.affordableSize`, and a walk that starts holding one more texture than this
-    /// says would size every composite too generously — silently, since the only symptom is a crash on
-    /// hardware nobody runs the tests on.
+    /// `ChunkedCompositor.affordableRows`, and a walk that starts holding one more texture than this
+    /// says would cut strips too tall — silently, since the only symptom is a crash on hardware
+    /// nobody runs the tests on.
     ///
     /// **The upload cache was the obvious suspect and is not the cause**, which is the finding worth
     /// leaving behind: two of the three layers are grading layers, and `renderSources` elides those
@@ -2481,7 +2481,8 @@ final class PerfBaselineTests: XCTestCase {
             ("walkBytes", megabytes(UInt64(walk * perTexture))),
             ("totalBytes", megabytes(UInt64((walk + uploads) * perTexture))),
             ("budget3GB", megabytes(UInt64(iPad9))),
-            ("cappedTo", "\(CompositorBudget.affordableSize(for: canvas, textures: walk + uploads, budgetBytes: iPad9))"),
+            ("stripRows", "\(ChunkedCompositor.affordableRows(width: canvas.width, tree: tree, budgetBytes: iPad9))"),
+            ("strips", "\(StripedCompositor.plan(tree: tree, maskStacks: scene.maskSourceStacks(of: tree), canvasSize: canvas, budgetBytes: iPad9).count)"),
         ])
 
         // Two accumulators, the re-walk's own pair, one grade scratch, two bloom intermediates. The
@@ -2585,34 +2586,73 @@ final class PerfBaselineTests: XCTestCase {
                        64 * 1024 * 1024, "Floored rather than one sixteenth")
     }
 
-    /// **What the cap does and, as importantly, where it does nothing.**
+    /// **What the budget does with a canvas that does not fit, and — as importantly — where it does
+    /// nothing.**
     ///
-    /// A canvas that already fits comes back unchanged — byte for byte the same `CGSize` — which is
-    /// what makes this safe to put on the sandwich's path: every document the branch was measured on
-    /// composites at exactly the size it did before.
-    func testTheBudgetShrinksOnlyTheCanvasesThatDoNotFit() {
+    /// RENDER.md §2.12: *"If the user slides the slider to full, then the canvas should be set to
+    /// full."* So the answer to a 4096² scene on a 3 GB iPad is **more strips**, never fewer pixels,
+    /// and this is that stated against the owner's own scene at the owner's own budget. A canvas that
+    /// already fits comes back as **one strip covering the whole frame**, which is the unstripped
+    /// path taken verbatim — every document the compositor was measured on still composites the way
+    /// it did.
+    ///
+    /// Pixel-free: `plan` takes a tree and a size, so this asks what an iPad 9 would do without
+    /// allocating a single 64 MiB texture on this Mac. Same seam as
+    /// `textureBudgetBytes(physicalMemory:)`.
+    @MainActor
+    func testTheBudgetChoosesAStripHeightRatherThanASmallerCanvas() {
+        let scene = compositorManager(layerCount: 1)
+        scene.addValueLayer(effect: .bloom(Effect.Bloom(threshold: 0.6, radius: 12, intensity: 1)))
+        scene.addValueLayer(effect: .blur(Effect.Blur(radius: 8)))
+        let tree = scene.renderTree(atFrame: 0)
+        let stacks = scene.maskSourceStacks(of: tree)
         let iPad9 = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024)
-        let textures = 8  // the owner's scene: seven for the walk, one uploadable leaf
 
         let ordinary = CGSize(width: 2048, height: 2048)
-        XCTAssertEqual(CompositorBudget.affordableSize(for: ordinary, textures: textures, budgetBytes: iPad9),
-                       ordinary, "A 2048² canvas fits eight textures in 192 MB and must not be touched")
+        let fits = StripedCompositor.plan(tree: tree, maskStacks: stacks, canvasSize: ordinary,
+                                          budgetBytes: iPad9)
+        XCTAssertEqual(fits.count, 1, "A 2048² canvas fits this walk in 192 MB and must not be cut")
+        XCTAssertEqual(fits.first?.core, CGRect(origin: .zero, size: ordinary),
+                       "One strip must be the whole frame, or the unstripped path is not taken")
+        XCTAssertEqual(fits.first?.buffer, fits.first?.core,
+                       "A one-strip plan pays no apron: there is no neighbour to read from")
 
         let big = CGSize(width: 4096, height: 4096)
-        let capped = CompositorBudget.affordableSize(for: big, textures: textures, budgetBytes: iPad9)
-        XCTAssertLessThan(capped.width, big.width, "A 4096² canvas does not fit and must be reduced")
-        XCTAssertLessThanOrEqual(CompositorBudget.textureBytes(for: capped) * textures, iPad9,
-                                 "The reduced size is only useful if it actually fits the budget")
-        // Aspect ratio preserved, or the composite would not line up with the canvas it is stretched
-        // back over. Whole pixels, for `RenderResolution.renderSize`'s reason.
-        XCTAssertEqual(capped.width, capped.height, "A square canvas must stay square")
-        XCTAssertEqual(capped.width, capped.width.rounded(.down), "Whole pixels only")
+        let strips = StripedCompositor.plan(tree: tree, maskStacks: stacks, canvasSize: big,
+                                            budgetBytes: iPad9)
+        XCTAssertGreaterThan(strips.count, 1, "A 4096² canvas does not fit and must be cut into strips")
 
-        report("budget cap at 3 GB, eight canvas-sized textures", [
+        // **Every core is the full width and the union of the cores is the frame**, which is the
+        // property that makes the assembly a tiling rather than a composite.
+        XCTAssertEqual(strips.map(\.core.height).reduce(0, +), big.height, "The cores must tile the frame")
+        for (index, strip) in strips.enumerated() {
+            XCTAssertEqual(strip.core.width, big.width, "Strip \(index) must span the canvas")
+            if index > 0 {
+                XCTAssertEqual(strip.core.minY, strips[index - 1].core.maxY,
+                               "Strip \(index) must abut the one before it — no gap and no overlap")
+            }
+        }
+
+        // And the point of the exercise: a strip's own buffer fits the budget the whole frame did not.
+        let apron = StripedCompositor.apron(of: tree, maskStacks: stacks)
+        let tallest = strips.map(\.buffer.height).max() ?? 0
+        XCTAssertGreaterThanOrEqual(
+            ChunkedCompositor.chunkSources(for: tree,
+                                           canvasSize: CGSize(width: big.width, height: tallest),
+                                           budgetBytes: iPad9), 1,
+            "A strip that still cannot afford one leaf is a strip the plan cut too tall")
+
+        report("strip plan at 3 GB, the owner's crash scene", [
             ("canvas", "\(Int(big.width))x\(Int(big.height))"),
-            ("capped", "\(Int(capped.width))x\(Int(capped.height))"),
-            ("scale", String(format: "%.3f", capped.width / big.width)),
-            ("footprintMB", megabytes(UInt64(CompositorBudget.textureBytes(for: capped) * textures))),
+            ("apronRows", "\(apron)"),
+            ("strips", "\(strips.count)"),
+            ("coreRows", "\(Int(strips[0].core.height))"),
+            ("bufferRows", "\(Int(tallest))"),
+            ("stripFootprintMB", megabytes(UInt64(CompositorBudget.textureBytes(
+                for: CGSize(width: big.width, height: tallest)) * (tree.peakCompositeTextures + 1)))),
+            ("wholeFrameFootprintMB", megabytes(UInt64(CompositorBudget.textureBytes(for: big)
+                * (tree.peakCompositeTextures + 1)))),
+            ("budgetMB", megabytes(UInt64(iPad9))),
         ])
     }
 

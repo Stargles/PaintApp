@@ -121,9 +121,9 @@ enum CompositorBackend {
 ///   It has to be static because two callers must agree about it: `makeSandwichRecipe` picks a
 ///   composite size on the main thread and `CompositorMetalEngine` decides whether to accept that
 ///   size on a background queue a moment later. A budget derived from free memory would let the
-///   second answer differ from the first, and the sandwich would ask for a size the engine then
-///   refuses — a silent whole-frame drop to a CPU path that at 4K with a bloom on it is not a frame
-///   at all (see `affordableSize` for the arithmetic).
+///   second answer differ from the first, and the strip planner would cut a frame into bands the
+///   engine then refuses one at a time — a silent whole-frame drop to a CPU path that at 4K with a
+///   bloom on it is not a frame at all.
 /// - **`hasHeadroom(for:)` is dynamic and reads `os_proc_available_memory()`.** That is the number
 ///   jetsam actually acts on, and it moves for reasons this app does not control: another app coming
 ///   to the foreground takes memory away without the canvas changing at all. So it is a *valve*, not
@@ -217,46 +217,6 @@ enum CompositorBudget {
         let available = os_proc_available_memory()
         guard available > 0 else { return true }
         return available > bytes * 2
-    }
-
-    /// The largest size no bigger than `size`, in the same aspect ratio, at which `textures`
-    /// canvas-sized textures fit `textureBudgetBytes`.
-    ///
-    /// **This is the lever that keeps the GPU path on a device that cannot hold a 4K composite**, and
-    /// it is a better trade than the two alternatives.
-    ///
-    /// Falling back to CoreGraphics is not "slower", it is a different order of thing. The measured
-    /// point is a *single-pass* grade over 4.2M pixels: 7047 ms on the CPU reference against Metal's
-    /// 18.8 ms (`PerfBaselineTests.testEffectCompositeCostOnBothBackends`, Debug). The owner's scene
-    /// is 4x the pixels and, at radius 12, roughly fifty times the per-pixel work — bloom is four
-    /// passes and two of them gather 25 samples each. Release is faster than Debug by a factor
-    /// nobody here has measured for this path, and it does not need measuring: two orders of
-    /// magnitude above seven seconds is not a frame, whatever the constant is.
-    ///
-    /// Refusing to composite at all loses the picture. Compositing fewer pixels loses *sharpness*, on
-    /// an image the artist is already told is a preview (`RenderResolution`), and it is the only one
-    /// of the three the artist can look at.
-    ///
-    /// Returns `size` unchanged when it already fits, which is every canvas the branch was measured
-    /// on and every canvas on a device with room — so this is inert exactly where there was no
-    /// problem.
-    static func affordableSize(for size: CGSize, textures: Int) -> CGSize {
-        affordableSize(for: size, textures: textures, budgetBytes: textureBudgetBytes)
-    }
-
-    /// `affordableSize(for:textures:)` against a stated budget rather than the running device's — the
-    /// half a test can pin, for `textureBudgetBytes(physicalMemory:)`'s reason.
-    static func affordableSize(for size: CGSize, textures: Int, budgetBytes budget: Int) -> CGSize {
-        guard textures > 0, size.width > 0, size.height > 0 else { return size }
-        let wanted = textureBytes(for: size) * textures
-        guard wanted > budget else { return size }
-        // Area scales as the square, so the linear scale is the square root of the byte ratio. Floored
-        // to whole pixels for `RenderResolution.renderSize`'s reason — the backends and
-        // `PixelOps.rasterize` do not round in the same place, and a source one pixel wider than the
-        // composite reading it is a garbage frame on the GPU rather than a soft one.
-        let scale = (Double(budget) / Double(wanted)).squareRoot()
-        return CGSize(width: max(1, (size.width * scale).rounded(.down)),
-                      height: max(1, (size.height * scale).rounded(.down)))
     }
 }
 
@@ -1018,7 +978,8 @@ enum CoreGraphicsCompositor {
             // The one call both §4.4 wrappers make, given the one texture their input-resolution
             // rules differ about. Nothing here looks inside the `Effect`; `Effect.swift` resolved it
             // once.
-            graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
+            graded = EffectReference.apply(effect, to: backdrop, width: width, height: height,
+                                           origin: request.effectOrigin)
         }
         mixBack(graded, over: backdrop, by: node, of: request, in: bounds,
                 context: context, width: width, height: height)
@@ -1112,15 +1073,21 @@ enum CoreGraphicsCompositor {
         // The same sources, the same masks, the same frame — only the tree is cut and the background
         // is dropped. `composite` re-enters this file's own walk, so the sub-walk is the walk: there
         // is no second implementation of grouping, blending or masking to keep in step.
+        // **`window` carries, and it is rule 3 of RENDER.md §3.8 that says so.** The re-walk is a
+        // whole composite of the cut, in this request's own buffer — so under a strip it is the
+        // strip's buffer, and a `.noise` or dithered layer inside the cut has to grade at the same
+        // frame coordinate the outer walk does. Dropping it here would put a second, unshifted grain
+        // under the graded ink of every stripped frame.
         let inkRequest = RenderRequest(tree: below, sources: request.sources,
                                        contentVersions: request.contentVersions,
                                        maskStacks: request.maskStacks, frame: request.frame,
                                        canvasSize: request.canvasSize, background: nil,
-                                       quality: request.quality)
+                                       quality: request.quality, window: request.window)
         guard let inkImage = composite(inkRequest),
               let ink = premultipliedBytes(inkImage, width: width, height: height) else { return nil }
 
-        let gradedInk = EffectReference.apply(effect, to: ink, width: width, height: height)
+        let gradedInk = EffectReference.apply(effect, to: ink, width: width, height: height,
+                                              origin: request.effectOrigin)
         guard let gradedInkImage = makeImage(fromPremultiplied: gradedInk, width: width, height: height)
         else { return nil }
         // `fillBackground` rather than a second spelling of the fill, and the renderer starts

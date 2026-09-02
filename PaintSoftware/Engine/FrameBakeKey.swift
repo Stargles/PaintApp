@@ -227,8 +227,8 @@ struct FrameBakeKey: Hashable {
         // twice over: `CanvasManager.canvasSize` includes the margin, and the margin's only reach
         // into any pixel is `RenderBackground.rect`, encoded below. `renderResolution` is *not*
         // implied by it, which is why it is a parameter: `.native` sizing ignores the knob outright,
-        // and under `.liveComposite` two different knob positions can land on one size after
-        // `CompositorBudget.affordableSize` clamps them.
+        // and under `.liveComposite` two different knob positions can round to one size on a small
+        // enough canvas.
         e.size(recipe.canvasSize)
         e.tag(renderResolution.bakeKeyTag)
         e.tag(recipe.quality.bakeKeyTag)

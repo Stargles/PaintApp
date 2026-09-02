@@ -517,13 +517,16 @@ final class EffectParameterTrackLogicTests: XCTestCase {
                          "frame \(frame): and a raster layer never acquires one")
         }
 
-        manager.currentFrame = 0
-        let atZero = manager.compositorSizeGate
+        // The two numbers the compositor's memory arithmetic is built from — `chunkSources`'
+        // divisor and `affordableRows`' — read `node.effect != nil` for *presence* and never a
+        // parameter out of it. So they must be the same at every frame, or a chunk width and a strip
+        // height would become functions of where the playhead happens to be sitting.
+        let atZero = manager.renderTree(atFrame: 0)
         for frame in [1, 5, 10, 11] {
-            manager.currentFrame = frame
-            XCTAssertEqual(manager.compositorSizeGate.nativeTextures, atZero.nativeTextures,
-                           "The resize dialog's admission gate must not become a function of the playhead")
-            XCTAssertEqual(manager.compositorSizeGate.sandwichTextures, atZero.sandwichTextures)
+            let tree = manager.renderTree(atFrame: frame)
+            XCTAssertEqual(tree.peakCompositeTextures, atZero.peakCompositeTextures,
+                           "frame \(frame): the walk's texture peak must not become a function of the playhead")
+            XCTAssertEqual(tree.uploadableLeafCount, atZero.uploadableLeafCount, "frame \(frame)")
         }
     }
 
@@ -786,13 +789,16 @@ final class EffectParameterTrackLogicTests: XCTestCase {
                             "frame \(frame): a value of zero is a grade that does something, not an absent grade")
         }
 
-        manager.currentFrame = 0
-        let atZero = manager.compositorSizeGate
+        // The two numbers the compositor's memory arithmetic is built from — `chunkSources`'
+        // divisor and `affordableRows`' — read `node.effect != nil` for *presence* and never a
+        // parameter out of it. So they must be the same at every frame, or a chunk width and a strip
+        // height would become functions of where the playhead happens to be sitting.
+        let atZero = manager.renderTree(atFrame: 0)
         for frame in [1, 5, 10, 11] {
-            manager.currentFrame = frame
-            XCTAssertEqual(manager.compositorSizeGate.nativeTextures, atZero.nativeTextures,
-                           "The resize dialog's admission gate must not become a function of the playhead")
-            XCTAssertEqual(manager.compositorSizeGate.sandwichTextures, atZero.sandwichTextures)
+            let tree = manager.renderTree(atFrame: frame)
+            XCTAssertEqual(tree.peakCompositeTextures, atZero.peakCompositeTextures,
+                           "frame \(frame): the walk's texture peak must not become a function of the playhead")
+            XCTAssertEqual(tree.uploadableLeafCount, atZero.uploadableLeafCount, "frame \(frame)")
         }
     }
 

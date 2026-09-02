@@ -86,7 +86,8 @@ enum MaskResolver {
         let height = Int(request.canvasSize.height.rounded())
         guard width > 0, height > 0 else { return nil }
 
-        let key = CacheKey(masks: masks, width: width, height: height, quality: request.quality,
+        let key = CacheKey(masks: masks, width: width, height: height, window: request.window,
+                           quality: request.quality,
                            versions: contentVersions(readBy: masks, of: request),
                            nodeEffects: nodeEffects(readBy: masks, of: request),
                            tuningGeneration: AlphaMask.tuningGeneration)
@@ -179,11 +180,15 @@ enum MaskResolver {
             // A source naming something that is not in the document contributes no alpha rather than
             // failing the mask — §6.6's "a deleted source is dropped", seen from the render side.
             guard let stack = request.maskStacks[source] else { continue }
+            // `window` carries: under RENDER.md §3.8 a mask resolves over the strip's own band, out
+            // of the same windowed sources the walk composites from, and a graded node inside the
+            // stack has to know where that band sits for the same reason the outer walk does.
             let sourceRequest = RenderRequest(tree: stack, sources: request.sources,
                                               contentVersions: request.contentVersions,
                                               maskStacks: request.maskStacks,
                                               frame: request.frame, canvasSize: request.canvasSize,
-                                              background: nil, quality: request.quality)
+                                              background: nil, quality: request.quality,
+                                              window: request.window)
             // Always the CPU reference, whichever backend asked — see this file's header.
             guard let composite = CoreGraphicsCompositor.composite(sourceRequest),
                   let bytes = CoreGraphicsCompositor.premultipliedBytes(composite, width: width, height: height)
@@ -295,6 +300,11 @@ enum MaskResolver {
         let masks: [AlphaMask]
         let width: Int
         let height: Int
+        /// **Which band of the frame this coverage is** — nil for a whole frame, and RENDER.md
+        /// §3.8's strip otherwise. `PixelOps.RasterizeKey.window` carries the argument at length and
+        /// it is the same one: a plan's strips are all the same size but the last, so a key holding
+        /// only the size would serve the second strip the first strip's coverage.
+        let window: StripWindow?
         let quality: RenderQuality
         let versions: [LayerContentVersion?]
         /// The grades on the node forms inside the mask sources' stacks — see `nodeEffects(readBy:of:)`.
@@ -314,6 +324,7 @@ enum MaskResolver {
             hasher.combine(masks)
             hasher.combine(width)
             hasher.combine(height)
+            hasher.combine(window)
             hasher.combine(quality)
             hasher.combine(versions)
             hasher.combine(nodeEffects.count)

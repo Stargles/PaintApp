@@ -89,7 +89,7 @@ final class FrameBakeStore {
 
     /// §3.5's default root. The resolution is a path component rather than a key field alone so that
     /// switching the knob does not have to walk every file to decide what is stale — though the key
-    /// carries it too, because `affordableSize` can land two knob positions on one buffer.
+    /// carries it too, because two knob positions can round to one buffer on a small canvas.
     static func defaultRoot(projectID: UUID, renderResolution: RenderResolution) -> URL {
         bakesRootDirectory
             .appendingPathComponent(projectID.uuidString, isDirectory: true)

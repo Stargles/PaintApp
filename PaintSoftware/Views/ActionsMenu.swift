@@ -383,7 +383,6 @@ struct CanvasResizeSheet: View {
     @State private var fillsNewShape = false
     /// Both taken once, at `onAppear` — see the type doc comments for why they are not recomputed.
     @State private var floorSurvey = SpacingFloorSurvey(thresholds: [])
-    @State private var compositorGate = CompositorSizeGate(nativeTextures: 0, sandwichTextures: 0)
     @FocusState private var focusedField: Field?
 
     private enum Field { case width, height }
@@ -469,13 +468,6 @@ struct CanvasResizeSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("resizeCanvas.brushFloorNotice")
                 }
-
-                if let warning = compositorWarning {
-                    Text(warning)
-                        .font(.caption).foregroundColor(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("resizeCanvas.compositorWarning")
-                }
             }
 
             HStack {
@@ -509,7 +501,6 @@ struct CanvasResizeSheet: View {
             heightText = String(Int(current.height.rounded()))
             focusedField = .width
             floorSurvey = canvasManager.spacingFloorSurvey
-            compositorGate = canvasManager.compositorSizeGate
         }
     }
 
@@ -538,25 +529,6 @@ struct CanvasResizeSheet: View {
         return "Your artwork is scaled to fit inside the new size and stays centred. If the shape "
              + "changes, the leftover is empty canvas — nothing is stretched and no bars are "
              + "painted." + undo
-    }
-
-    /// §5 rule 14's warning, in the two halves §6 Q5 settled. Nil when the document fits, which is
-    /// every canvas the artist is likely to type.
-    private var compositorWarning: String? {
-        guard let map = previewMap else { return nil }
-        let pressure = compositorGate.pressure(atBufferSize: map.newSize)
-        guard !pressure.isClear else { return nil }
-        var parts: [String] = []
-        if pressure.canvasSoftens {
-            parts.append("At this size the canvas is composited at a reduced resolution while you "
-                         + "work, so it will look slightly softer than what you save.")
-        }
-        if pressure.nativeCompositeFallsToCPU {
-            parts.append("Picking a colour, or starting a stroke on a masked layer, may pause "
-                         + "briefly.")
-        }
-        parts.append("Saving and exporting are unaffected. You can go ahead.")
-        return parts.joined(separator: " ")
     }
 
     private func dimensionField(_ title: String, text: Binding<String>, field: Field) -> some View {

@@ -90,6 +90,32 @@ enum ChunkedCompositor {
         return max(1, budgetBytes / bytes - carriedTextures - tree.peakCompositeTextures)
     }
 
+    /// **`chunkSources` solved for the height instead of for the leaf count** — RENDER.md §3.8's
+    /// *"the budget chooses the strip height instead of the resolution"*, and the reason the strip
+    /// driver has no arithmetic of its own.
+    ///
+    /// The tallest buffer at `width` for which `chunkSources` would answer at least one **without
+    /// taking its floor**. That is the whole target: one leaf is the least a chunk can hold, so a
+    /// buffer at which even one leaf does not fit is a buffer the *space* cut has to make shorter,
+    /// and any buffer above that is one chunking can finish on its own. Rearranging
+    ///
+    /// ```
+    /// budget / (width · rows · 4) − carried − peak ≥ 1
+    /// ```
+    ///
+    /// for `rows` is the expression below, term for term. `StripedCompositeLogicTests` asserts the
+    /// two against each other in both directions rather than trusting the rearrangement, because a
+    /// second copy of a budget formula that has drifted is exactly the defect §3.4 warns of one
+    /// dimension over.
+    ///
+    /// Zero for a degenerate width, and zero for a budget too small to hold even one row — both of
+    /// which the caller reads as "shorter than the frame" and floors at a single row of its own.
+    static func affordableRows(width: CGFloat, tree: [RenderNode], budgetBytes: Int) -> Int {
+        let rowBytes = CompositorBudget.textureBytes(for: CGSize(width: width, height: 1))
+        guard rowBytes > 0, budgetBytes > 0 else { return 0 }
+        return max(0, budgetBytes / (rowBytes * (1 + carriedTextures + tree.peakCompositeTextures)))
+    }
+
     /// **`.automatic` answered once, for the whole frame.** See `Compositor.composite(_:resolving:)`,
     /// which carries the argument: a chunk's tree is not the frame's, and the two backends agree only
     /// to within a channel step on the blend modes.
@@ -383,7 +409,8 @@ enum ChunkedCompositor {
                              continuation: RenderRequest.ChunkContinuation?,
                              subset: Set<Int>) -> RenderRequest {
             let resolved = FrameRecipe.resolveSources(recipe.leaves, canvasSize: recipe.canvasSize,
-                                                     quality: recipe.quality, subset: subset)
+                                                     quality: recipe.quality, subset: subset,
+                                                     window: recipe.window)
             var sources = resolved.sources
             var versions = resolved.versions
             for image in extras {
@@ -397,7 +424,8 @@ enum ChunkedCompositor {
             return RenderRequest(tree: tree, sources: sources, contentVersions: versions,
                                  maskStacks: recipe.maskStacks, frame: recipe.frame,
                                  canvasSize: recipe.canvasSize, background: background,
-                                 quality: recipe.quality, continuation: continuation)
+                                 quality: recipe.quality, continuation: continuation,
+                                 window: recipe.window)
         }
 
         /// The accumulator, or an assembled atom, as something the compositor cannot tell from a

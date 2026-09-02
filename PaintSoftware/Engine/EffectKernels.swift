@@ -46,13 +46,18 @@ enum EffectReference {
     /// Fully transparent pixels come out fully transparent, with colour zeroed, matching the kernel's
     /// early-out. Unpremultiplying at `a == 0` has no answer, and the two backends have to give the
     /// same non-answer.
-    static func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int) -> [UInt8] {
+    /// **`origin` is where this buffer's top-left sits in the frame** — RENDER.md §3.8's strip, and
+    /// `(0, 0)` for every whole-frame composite, which is every caller but the strip driver. It is
+    /// stamped into every pass rather than read separately so that `EffectPass` stays a kind and a
+    /// parameter block, and so that this and `EffectPipelines.encode` read one field between them.
+    static func apply(_ effect: Effect, to bytes: [UInt8], width: Int, height: Int,
+                      origin: (x: UInt32, y: UInt32) = (0, 0)) -> [UInt8] {
         guard width > 0, height > 0, bytes.count >= width * height * 4 else { return bytes }
         let lut = effect.lookupTable
         let weights = effect.weights
 
         var current = bytes
-        for pass in effect.passes {
+        for pass in effect.passes(inFrameAt: origin) {
             current = apply(pass, to: current, original: bytes, lut: lut, weights: weights,
                             width: width, height: height)
         }
@@ -101,7 +106,14 @@ enum EffectReference {
                                           Float(bytes[pixel + 1]) / 255,
                                           Float(bytes[pixel + 2]) / 255)
                 let colour = clamp(source / alpha)
-                let graded = clamp(transform(kind, params, lut, colour, x: x, y: y))
+                // **The frame coordinate, not this buffer's** — `applyEffect`'s
+                // `gid + uint2(originX, originY)`, transcribed. A strip is a window onto the frame
+                // (RENDER.md §3.8), and noise and a dithered posterize are functions of absolute
+                // position, so passing the local `x, y` would restart the grain at every seam.
+                // `originX/originY` are 0 for every whole-frame composite, which is what keeps this
+                // the identity everywhere else.
+                let graded = clamp(transform(kind, params, lut, colour,
+                                             x: x + Int(params.originX), y: y + Int(params.originY)))
                 for channel in 0..<3 {
                     result[pixel + channel] = quantize(graded[channel] * alpha)
                 }

@@ -405,6 +405,11 @@ struct EffectParams {
     float colorR;
     float colorG;
     float colorB;
+    // Where this buffer's top-left sits in the frame — RENDER.md §3.8's strips, 0 for a whole frame.
+    // Read only by `noiseValue` and `screenValue`, the two kernels that index by absolute position;
+    // every neighbourhood kernel keeps using the local `gid`, which is what the apron pays for.
+    uint  originX;
+    uint  originY;
 };
 
 /// One entry of the resolved transfer table.
@@ -497,8 +502,14 @@ static inline float3 hsbToRGB(float3 hsb) {
 
 /// The per-pixel colour transform, unpremultiplied in and out — the same contract `blendChannels` has,
 /// and the shape `EffectReference.transform` mirrors line for line.
+///
+/// **`position` is the pixel's coordinate in the *frame*, not in this dispatch's buffer** — `gid`
+/// plus `params.originX/originY`, which is zero for every whole-frame composite and a strip's
+/// top-left under RENDER.md §3.8. Only the two branches below that index by absolute position read
+/// it; a neighbourhood kernel is passed the local `gid` and must keep being, or its taps would run
+/// off the texture.
 static inline float3 effectChannels(uint kind, constant EffectParams &params, constant uchar4 *lut,
-                                    float3 c, uint2 gid) {
+                                    float3 c, uint2 position) {
     switch (kind) {
         case kEffectLookupTable:
             // Each channel indexes the table with its own value, which is what makes per-channel
@@ -526,18 +537,18 @@ static inline float3 effectChannels(uint kind, constant EffectParams &params, co
 
         case kEffectPosterize: {
             float steps = max(params.levels - 1.0f, 1.0f);
-            float dither = 0.5f + params.screenStrength * (screenValue(params.screen, gid) - 0.5f);
+            float dither = 0.5f + params.screenStrength * (screenValue(params.screen, position) - 0.5f);
             return floor(c * steps + dither) / steps;
         }
 
         case kEffectNoise: {
             float3 deviation;
             if (params.isMonochrome != 0u) {
-                deviation = float3((noiseValue(gid, params.seed, 0u) - 0.5f) * 2.0f * params.amount);
+                deviation = float3((noiseValue(position, params.seed, 0u) - 0.5f) * 2.0f * params.amount);
             } else {
-                deviation = float3((noiseValue(gid, params.seed, 0u) - 0.5f) * 2.0f * params.amount,
-                                   (noiseValue(gid, params.seed, 1u) - 0.5f) * 2.0f * params.amount,
-                                   (noiseValue(gid, params.seed, 2u) - 0.5f) * 2.0f * params.amount);
+                deviation = float3((noiseValue(position, params.seed, 0u) - 0.5f) * 2.0f * params.amount,
+                                   (noiseValue(position, params.seed, 1u) - 0.5f) * 2.0f * params.amount,
+                                   (noiseValue(position, params.seed, 2u) - 0.5f) * 2.0f * params.amount);
             }
             return c + deviation;
         }
@@ -796,7 +807,11 @@ kernel void applyEffect(texture2d<float, access::read>  source   [[texture(0)]],
     if (!(alpha > 0.0f)) { result.write(float4(0.0f), gid); return; }
 
     float3 colour = saturate(src.rgb / alpha);
-    float3 graded = saturate(effectChannels(kind, params, lut, colour, gid));
+    // **The frame coordinate, not this buffer's.** A strip is a window onto the frame (RENDER.md
+    // §3.8) and `originX/originY` is where it sits; noise and a dithered posterize are functions of
+    // absolute position, so a strip that passed `gid` would restart its grain at every seam.
+    float3 graded = saturate(effectChannels(kind, params, lut, colour,
+                                            gid + uint2(params.originX, params.originY)));
     result.write(float4(graded * alpha, alpha), gid);
 }
 

@@ -289,56 +289,6 @@ struct SpacingFloorSurvey: Equatable {
     }
 }
 
-/// What `MetalCompositor`'s size-based admission gate would say about **this document's layer
-/// structure** at a canvas size it does not have yet — CANVAS_RESIZE.md §5 rule 14, so the dialog can
-/// warn before the artist commits rather than leaving them to notice.
-///
-/// **The gate is about memory, not speed, and it is checked against
-/// `peakCompositeTextures × canvasBytes`** — so the size a document tips over at is a property of its
-/// layer and effect stack as much as of the canvas. Both texture counts come from the same tree and
-/// are held here so the size-dependent half is pure arithmetic: the walk is O(layers × folders) and
-/// belongs at sheet-open, not at every keystroke.
-///
-/// **Two counts because there are two consumers and they reach the gate differently** (§6 Q5).
-/// `sandwichTextures` is what `makeSandwichRecipe` asks for, and the live canvas never *fails*
-/// there — `CompositorBudget.affordableSize` shrinks the request first, so past this threshold the
-/// canvas composites fewer pixels and looks **softer** while the artist works. `nativeTextures` is a
-/// request built at `RenderSizing.native`: the eyedropper composites at native size on purpose, and
-/// it is the only live consumer that does, so past *that* threshold one colour pick genuinely falls
-/// to `CoreGraphicsCompositor`. (The live-mask preview is on the CPU reference unconditionally and
-/// reaches this gate in neither direction; it is sized with the sandwich, so it softens where the
-/// canvas does rather than growing without bound. Saving and the project thumbnail are bounded to a
-/// 320×320 box and are unaffected at any canvas size.)
-///
-/// Neither is a refusal: §5 rule 14 is *warn and proceed*, and there is nothing here to fall back
-/// from silently.
-struct CompositorSizeGate: Equatable {
-
-    let nativeTextures: Int
-    let sandwichTextures: Int
-
-    struct Pressure: Equatable {
-        /// The live canvas composites at reduced resolution past this size — softer, not slower.
-        var canvasSoftens: Bool
-        /// A native-size composite is refused the GPU: the eyedropper's colour pick pays the CPU
-        /// reference for that one pick.
-        var nativeCompositeFallsToCPU: Bool
-        var isClear: Bool { !canvasSoftens && !nativeCompositeFallsToCPU }
-    }
-
-    /// `affordableSize` for both, rather than one call and one hand-written `w·h·4 × n > budget`:
-    /// it returns its argument verbatim on anything that already fits, so "did it shrink" *is* the
-    /// gate's own predicate, expressed once.
-    func pressure(atBufferSize size: CGSize,
-                  budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> Pressure {
-        Pressure(
-            canvasSoftens: CompositorBudget.affordableSize(
-                for: size, textures: sandwichTextures, budgetBytes: budgetBytes) != size,
-            nativeCompositeFallsToCPU: CompositorBudget.affordableSize(
-                for: size, textures: nativeTextures, budgetBytes: budgetBytes) != size)
-    }
-}
-
 /// What a canvas resize refused to carry — CANVAS_RESIZE.md §5 rule 11, in the artist's terms.
 ///
 /// **A refusal, not a report of damage already done.** The rule is *never a partial resize*: a
@@ -535,37 +485,6 @@ extension CanvasManager {
             }
         }
         return SpacingFloorSurvey(thresholds: thresholds)
-    }
-
-    /// What the compositor's admission gate would say about this document at `bufferSize` — the two
-    /// halves of §5 rule 14's warning, taken from the *structure* of the layer stack so the dialog
-    /// can ask before the artist commits.
-    ///
-    /// The tree walk is O(layers × folders), the same cost as laying out the layer panel, so it is
-    /// taken once when the sheet opens; the size-dependent half is pure arithmetic
-    /// (`CompositorSizeGate`).
-    ///
-    /// **Derived at `currentFrame`, which is safe today for a reason that has an expiry date.** The
-    /// dialog's question is about the whole document — "will a resize to this size admit?" — and the
-    /// answer must not depend on where the playhead happens to be sitting when the sheet opens. It
-    /// does not, because the two things read off the tree here (`peakCompositeTextures` and
-    /// `uploadableLeafCount`) test `node.effect != nil` for *presence* and never read a parameter out
-    /// of it, and no other frame-varying quantity reaches them. So every frame's tree gives this
-    /// gate the same two numbers, and `currentFrame` is simply the frame that is cheapest to name.
-    ///
-    /// **It stops being safe the moment a keyframe track can turn an effect on or off at a frame.**
-    /// Presence is what these counts read, so an effect that exists at frame 40 and not at frame 0
-    /// would make the admission gate a function of the playhead: the sheet would answer for one frame
-    /// about a document that dies on another, and the artist would be told a resize is fine and then
-    /// watch it fall back to the CoreGraphics reference — or fail — the moment they scrub. When that
-    /// day comes this must take the worst frame in the document, not the current one, which means a
-    /// max over the frames a track has keys on rather than a single derivation. Animating an effect's
-    /// *parameters* changes nothing here; only its presence does.
-    var compositorSizeGate: CompositorSizeGate {
-        let tree = renderTree(atFrame: currentFrame)
-        return CompositorSizeGate(nativeTextures: tree.peakCompositeTextures,
-                                  sandwichTextures: tree.peakCompositeTextures
-                                      + min(tree.uploadableLeafCount, 4))
     }
 
     /// Resizes the whole document to an arbitrary artwork rectangle — the Actions menu's "Resize

@@ -52,9 +52,10 @@ extension CanvasManager {
     /// rediscovered. **Nothing tests this in either direction.**
     ///
     /// `quality: .full` and `RenderSizing.native` — the default, and **this is now the only live
-    /// consumer that takes it**. `renderResolution` and `CompositorBudget.affordableSize` are both
-    /// skipped here on purpose, so an artist running a reduced live preview still samples the true
-    /// colour rather than a downscaled approximation of it. The live mask resolve used to share that
+    /// consumer that takes it**. `renderResolution` is skipped here on purpose, so an artist running
+    /// a reduced live preview still samples the true colour rather than a downscaled approximation
+    /// of it. Nothing else is skipped: since RENDER.md §3.8 there is no size cap anywhere to skip,
+    /// and a native composite too big for the budget is stripped rather than shrunk. The live mask resolve used to share that
     /// exemption by accident and no longer does (`RenderSizing.liveComposite`).
     ///
     /// The thumbnail's bounding box is likewise not passed here, and must not be: a sampled colour is

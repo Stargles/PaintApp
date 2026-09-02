@@ -392,6 +392,34 @@ struct RenderRequest {
     /// frame** (RENDER.md §3.4). It changes exactly two things about the walk and nothing else.
     let continuation: ChunkContinuation?
 
+    /// **Nil for a whole frame; set when this request is one horizontal strip of one** (RENDER.md
+    /// §3.8). It changes exactly *one* thing about the walk, and it is not a code path.
+    ///
+    /// Every other consequence of a strip is already expressed as "the buffer is smaller", which
+    /// both backends understood before strips existed: `canvasSize` is the band, `background.rect` is
+    /// the paper translated into it and clamped by the fill, `sources` are the leaves drawn through a
+    /// translated CTM, and masks resolve from those. The one thing a smaller buffer cannot say is
+    /// **where it is**, and two effect kernels need to know: `noiseValue` hashes the pixel's
+    /// coordinate and `screenValue` indexes a dither screen by `gid.y & 3`. Both read
+    /// `EffectParams.originX/originY`, which is this — see `effectOrigin`.
+    ///
+    /// It is also in `MaskResolver.CacheKey`, for `PixelOps.RasterizeKey`'s reason: a key that
+    /// carries only the buffer's size lets two equal-height strips collide on one entry.
+    let window: StripWindow?
+
+    /// **Where this request's buffer sits in the frame, as the effect kernels want it** — zero for
+    /// every whole-frame composite, which is all of them but a strip.
+    ///
+    /// Stamped into every pass rather than bound separately so that a pass stays a kind and a
+    /// parameter block (`EffectPass`), and so that the two backends read one field instead of each
+    /// inventing a binding. Rounded and clamped at zero because it indexes an unsigned coordinate:
+    /// `StripedCompositor.plan` only ever produces whole, non-negative origins, and a value that
+    /// somehow is not should shift a grain rather than wrap a `UInt32`.
+    var effectOrigin: (x: UInt32, y: UInt32) {
+        guard let window else { return (0, 0) }
+        return (UInt32(max(0, window.origin.x.rounded())), UInt32(max(0, window.origin.y.rounded())))
+    }
+
     /// One chunk's link to the chunks before it.
     ///
     /// The accumulator crosses a chunk boundary as a **synthetic leaf** appended past the end of the
@@ -430,7 +458,7 @@ struct RenderRequest {
     init(tree: [RenderNode], sources: [LayerRenderSource?], contentVersions: [LayerContentVersion?],
          maskStacks: [MaskSource: [RenderNode]], frame: Int, canvasSize: CGSize,
          background: RenderBackground?, quality: RenderQuality,
-         continuation: ChunkContinuation? = nil) {
+         continuation: ChunkContinuation? = nil, window: StripWindow? = nil) {
         self.tree = tree
         self.sources = sources
         self.contentVersions = contentVersions
@@ -440,6 +468,7 @@ struct RenderRequest {
         self.background = background
         self.quality = quality
         self.continuation = continuation
+        self.window = window
     }
 
     /// The canvas size a composite should use to fill a `bound`-sized box, aspect preserved and
@@ -552,8 +581,8 @@ enum RenderSizing {
     ///
     /// The eyedropper is what this is for: a sampled colour is the artist's answer to "what colour is
     /// *that* pixel", and a reduced composite would blend the neighbours into it. Every parity test
-    /// composites here too, because `affordableSize` promises no identity on a 4096² document with a
-    /// deep stack and those tests compare down the byte.
+    /// composites here too, because it is the one sizing with no `RenderResolution` in it and those
+    /// tests compare down the byte.
     case native
 
     /// Exactly what `makeSandwichRecipe` composites the live canvas at.
@@ -565,7 +594,7 @@ enum RenderSizing {
     /// least afford it.
     case liveComposite
 
-    /// Fitted inside a bounding box, then capped by what the device can hold.
+    /// Fitted inside a bounding box.
     ///
     /// **Why this exists.** The project thumbnail composited the entire canvas to make a 320×320
     /// gallery tile: 2,097,152 pixels rendered to fill 51,200 at the owner's 2048×1024, and 16.8M at
@@ -574,35 +603,29 @@ enum RenderSizing {
     /// since the live preview grew a resolution setting; this is that pattern at a second call site.
     ///
     /// A box rather than a size: `RenderRequest.renderSize(fitting:within:)` fits the canvas's aspect
-    /// inside it and refuses to go above native. The cap is inert at any thumbnail-sized box and is
-    /// applied anyway, so a future caller asking for something large is bounded by the same rule the
-    /// live canvas is.
+    /// inside it and refuses to go above native. A caller asking for something large is bounded by
+    /// the same thing every other consumer now is — `StripedCompositor` cuts the frame into strips
+    /// rather than the picture into fewer pixels (RENDER.md §2.12, §3.8).
     case fitting(CGSize)
 }
 
 extension CanvasManager {
 
-    /// **The size the live canvas composites at**: the artist's `RenderResolution`, then
-    /// `CompositorBudget.affordableSize` for what this tree's walk holds, then whole pixels.
+    /// **The size the live canvas composites at**: the artist's `RenderResolution`, in whole pixels.
+    ///
+    /// **The knob, and nothing else — RENDER.md §2.12.** *"If the user slides the slider to full,
+    /// then the canvas should be set to full."* Nothing here may answer smaller than the artist
+    /// asked for; a frame whose textures do not fit the device's budget is composited in horizontal
+    /// strips at full size (`StripedCompositor`, §3.8), never at a reduced one.
     ///
     /// One function rather than two copies, because two callers have to agree on it *exactly* and one
     /// pixel of drift is a cache miss rather than a soft picture — see `RenderSizing.liveComposite`.
     ///
-    /// Whole pixels last, after the cap: `affordableSize` returns its argument verbatim on any
-    /// document that already fits, so it passes a fractional canvas straight through — see
-    /// `RenderRequest.wholePixels` for the 80.2-is-80-or-81 measurement this closes.
+    /// `wholePixels` because the backends round in different places — see `RenderRequest.wholePixels`
+    /// for the 80.2-is-80-or-81 measurement it closes.
     @MainActor
     func liveCompositeSize(of tree: [RenderNode], canvasSize: CGSize) -> CGSize {
-        RenderRequest.wholePixels(
-            CompositorBudget.affordableSize(for: renderResolution.renderSize(for: canvasSize),
-                                            textures: Self.budgetTextures(of: tree)))
-    }
-
-    /// What `CompositorBudget` sizes a composite against: the walk's peak plus the leaves the upload
-    /// cache would hold, capped at four. Both halves of that are argued at the call site in
-    /// `makeSandwichRecipe`; it is a function here so the two sizing paths cannot count differently.
-    static func budgetTextures(of tree: [RenderNode]) -> Int {
-        tree.peakCompositeTextures + min(tree.uploadableLeafCount, 4)
+        RenderRequest.wholePixels(renderResolution.renderSize(for: canvasSize))
     }
 
     /// The request `CanvasView.Coordinator.resolveLiveMask` resolves its coverage against.
@@ -658,9 +681,12 @@ extension CanvasManager {
         case .liveComposite:
             renderSize = liveCompositeSize(of: tree, canvasSize: canvasSize)
         case .fitting(let bound):
-            let wanted = RenderRequest.renderSize(fitting: canvasSize, within: bound)
-            renderSize = RenderRequest.wholePixels(
-                CompositorBudget.affordableSize(for: wanted, textures: Self.budgetTextures(of: tree)))
+            // The box, and no cap. `renderSize(fitting:within:)` never goes above native and the
+            // only caller asks for a 320x320 gallery tile, so the cap this used to take was inert at
+            // every size it has ever been called with — and §2.12 rules it out at the sizes it was
+            // not. A box larger than the budget is `StripedCompositor`'s problem now, exactly as a
+            // native composite is.
+            renderSize = RenderRequest.wholePixels(RenderRequest.renderSize(fitting: canvasSize, within: bound))
         }
 
         let maskStacks = maskSourceStacks(of: tree)
@@ -799,42 +825,9 @@ extension CanvasManager {
         // at rest as well as mid-stroke, and making it otherwise is a change to how the leaves are
         // frozen rather than a change to this line.
         //
-        // **And then capped by what this device can actually hold, which is the other half.** The
-        // artist's setting is a preference; `CompositorBudget.affordableSize` is a limit, and the two
-        // compose in the only order that is safe — a preference may ask for less than the device
-        // allows and never for more. The cap is inert on every canvas that already fits (see the
-        // budget type), so this line changes nothing for the documents the sandwich was measured on.
-        //
-        // **It is applied here rather than left to the engine to refuse, and that is the whole point
-        // of doing it on this side.** `CompositorMetalEngine` declines a request it cannot afford,
-        // and `Compositor.composite` answers a decline by rendering the whole frame through the
-        // CoreGraphics reference — which for the scene that prompted this (4096², bloom and blur) is
-        // four passes gathering a blur kernel per pixel over 16.8M pixels in scalar Swift. A correct
-        // frame rendered slowly beats no frame, but a *smaller* frame on the GPU beats both, and
-        // the artist is already looking at a preview here: the sandwich views stretch this back over
-        // the canvas and `updateSandwich` picks linear filtering the moment it is not full size.
-        //
-        // The count comes from the tree rather than from a constant because it is the tree that
-        // decides it: two grading layers cost three more textures than two ordinary ones, and a
-        // document with no effects at all pays nothing.
-        //
-        // **`uploadableLeafCount` is in the count, capped at four, and both halves of that are a
-        // judgement.** In it, because a cache that cannot hold one composite's leaves does not
-        // "degrade" — it thrashes to a zero hit rate (see `UploadCache`), and at 4096² that is 64 MiB
-        // of staging buffer and upload per leaf, three times per rebuild. Buying the walk room by
-        // starving the thing that makes the walk fast is not a saving. Capped, because past a few
-        // layers no size makes them all fit and shrinking further would trade real sharpness for a
-        // cache that was going to thrash anyway; four is where that knee sits on the 3 GB device this
-        // was sized against. Nothing here is reached by a document Core Animation can still draw
-        // flat — `isSandwichEngaged` means a blend, a mask, an effect or a node is already present.
-        //
-        // **Applied whichever backend the tree prefers, and that is deliberate rather than an
-        // oversight.** The count above is GPU textures, but the CPU reference is not cheap at this
-        // size either: six layers at 2048² peaked at 381.3 MB through CoreGraphics on the owner's iPad
-        // (`testCompositeCostAndMemoryAtCanvasResolution`), and it is per-layer-linear in time — 32.0
-        // ms a composite there, so roughly 128 ms at 4096², times three for a rebuild. Gating the cap
-        // on `prefersGPUCompositing` would leave the CPU path uncapped at exactly the canvas size
-        // where it is most expensive, to preserve sharpness on the frames least able to afford it.
+        // **And it is capped by nothing — RENDER.md §2.12.** The knob is the truth, so a document
+        // whose textures do not fit the device gets cut in space rather than in resolution:
+        // `StripedCompositor` composites it in horizontal bands at the size that was asked for.
         //
         // **The arithmetic itself lives in `liveCompositeSize`**, because the live mask resolve has to
         // land on the same number down to the pixel — see `RenderSizing.liveComposite`.

@@ -780,7 +780,8 @@ final class CompositorMetalEngine {
                         // backdrop path below: `graded` still holds whatever the pool last left in
                         // it, and mixing that in would put a previous frame on screen.
                         guard effects.encode(effect, source: inkFront, into: graded,
-                                             encoder: encoder) else { return false }
+                                             encoder: encoder,
+                                             origin: request.effectOrigin) else { return false }
                         // `inkFront` is dead the moment the grade has read it and `inkBack` holds a
                         // stale intermediate, so the paper-plus-graded picture is built in the pair
                         // already held rather than in a fourth texture — the same observation the
@@ -819,7 +820,8 @@ final class CompositorMetalEngine {
                     // the contract the rest of this file already runs on — the caller falls back to
                     // `CoreGraphicsCompositor`, which has no allocation to decline and computes the
                     // grade correctly, just slower.
-                    guard effects.encode(effect, source: front, into: scratch, encoder: encoder) else {
+                    guard effects.encode(effect, source: front, into: scratch, encoder: encoder,
+                                         origin: request.effectOrigin) else {
                         pool.release(scratch)
                         return false
                     }
@@ -896,7 +898,8 @@ final class CompositorMetalEngine {
                 var assembled = groupFront
                 if let effect = node.effect {
                     guard let effects, let scratch = pool.acquire() else { return false }
-                    guard effects.encode(effect, source: groupFront, into: scratch, encoder: encoder) else {
+                    guard effects.encode(effect, source: groupFront, into: scratch, encoder: encoder,
+                                         origin: request.effectOrigin) else {
                         pool.release(scratch)
                         return false
                     }

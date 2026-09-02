@@ -886,50 +886,6 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(guide.samples[1].time, 0.25, accuracy: 1e-12, "time is unit-free")
     }
 
-    // MARK: - Stage 2, part 6: the compositor gate the dialog warns about
-
-    /// §5 rule 14's predicate: **silent below the budget, and it names two different thresholds
-    /// above it**, because the live canvas and the eyedropper reach the gate by different routes.
-    ///
-    /// Against a stated budget rather than the running device's, for
-    /// `CompositorBudget.textureBudgetBytes(physicalMemory:)`'s reason — the real one is a property
-    /// of whatever Mac or iPad this runs on and would make the assertion a measurement.
-    func testTheCompositorGateIsSilentBelowTheBudgetAndWarnsAboveIt() {
-        // 5 textures for the walk, 7 for the sandwich — an ordinary stack with a couple of uploads.
-        let gate = CompositorSizeGate(nativeTextures: 5, sandwichTextures: 7)
-        let budget = 192 * 1024 * 1024   // the owner's iPad 9
-
-        // 2048×1024 is 8 MiB a texture: 40 MiB for the walk, 56 for the sandwich. Both fit.
-        let clear = gate.pressure(atBufferSize: CGSize(width: 2048, height: 1024), budgetBytes: budget)
-        XCTAssertTrue(clear.isClear, "an ordinary canvas must not raise a warning")
-
-        // 4096×2048 is 32 MiB a texture: 160 for the walk, 224 for the sandwich. The canvas softens;
-        // a native composite still fits, so the eyedropper is unaffected. That asymmetry is the
-        // reason there are two counts and not one.
-        let softens = gate.pressure(atBufferSize: CGSize(width: 4096, height: 2048), budgetBytes: budget)
-        XCTAssertTrue(softens.canvasSoftens)
-        XCTAssertFalse(softens.nativeCompositeFallsToCPU)
-
-        // 8192×4096 is 128 MiB a texture. Both.
-        let both = gate.pressure(atBufferSize: CGSize(width: 8192, height: 4096), budgetBytes: budget)
-        XCTAssertTrue(both.canvasSoftens)
-        XCTAssertTrue(both.nativeCompositeFallsToCPU)
-        XCTAssertFalse(both.isClear)
-    }
-
-    /// The gate the dialog actually asks is built from the live layer stack, so it moves when the
-    /// document's structure does — which is the half a hand-written count could get wrong.
-    func testTheGateComesFromTheDocumentsOwnLayerStack() {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        let one = manager.compositorSizeGate
-        XCTAssertGreaterThan(one.nativeTextures, 0, "even a single layer needs the accumulator pair")
-        XCTAssertGreaterThanOrEqual(one.sandwichTextures, one.nativeTextures,
-                                    "the sandwich asks for the walk's textures plus its uploads")
-        for _ in 0..<4 { manager.addLayer() }
-        XCTAssertGreaterThanOrEqual(manager.compositorSizeGate.sandwichTextures, one.sandwichTextures,
-                                    "adding layers cannot make the walk cheaper")
-    }
-
     // MARK: - 5. Stage 3 — undoable, told, and safe
 
     /// **Undo of a crop/expand restores the geometry exactly**, and the whole document with it: every

@@ -537,6 +537,20 @@ struct EffectParams: Equatable {
     var colorR: Float = 0
     var colorG: Float = 0
     var colorB: Float = 0
+    /// **Where this buffer's top-left sits in the frame** — RENDER.md §3.8's strips, and 0 for every
+    /// whole-frame composite, which is what every consumer but the strip driver mints.
+    ///
+    /// Read by exactly the two kernels that index by absolute position rather than by neighbourhood:
+    /// `noiseValue` hashes the coordinate, and `screenValue` indexes a 4x4 screen by `gid & 3`. A
+    /// strip is a *window* onto the frame, so without this its grain restarts and its dither screen
+    /// jumps phase at every seam — a wrong picture with no error, and one no apron can pay for
+    /// because it is not a neighbourhood read. Every other kernel keeps using the local `gid`, which
+    /// is what makes the apron work at all.
+    ///
+    /// Appended at the end for the reason the colour triple above was: the all-scalar layout rule
+    /// makes the end of the block the one position where adding fields cannot shift an existing one.
+    var originX: UInt32 = 0
+    var originY: UInt32 = 0
 }
 
 /// One dispatch of `applyEffect` — **the unit both backends iterate, and the whole of what "multi-pass"
@@ -717,6 +731,22 @@ extension Effect {
         }
     }
 
+    /// **`passes`, with every pass told where this buffer sits in the frame** — RENDER.md §3.8.
+    ///
+    /// One place rather than two, because both backends need the same stamp and a pass built with a
+    /// different origin on the GPU than on the CPU is a divergence a parity sweep would report as an
+    /// effect bug. The identity at the origin, so a whole-frame composite allocates and copies
+    /// nothing extra and `passes` itself is unchanged for every existing caller.
+    func passes(inFrameAt origin: (x: UInt32, y: UInt32)) -> [EffectPass] {
+        guard origin.x != 0 || origin.y != 0 else { return passes }
+        return passes.map {
+            var stamped = $0
+            stamped.params.originX = origin.x
+            stamped.params.originY = origin.y
+            return stamped
+        }
+    }
+
     /// The half-kernel weights a blur pass convolves with — `weights[0]` at the centre and
     /// `weights[i]` at `±i` steps, **normalized in `Double` so the full kernel sums to 1** before it is
     /// narrowed to `Float`.
@@ -748,6 +778,64 @@ extension Effect {
     /// pixel here rather than 257. Chosen far more conservatively for that reason: at the ceiling this
     /// is still ~2,401 reads/pixel, already two orders of magnitude past a same-radius blur.
     static let maxOutlineRadius = 24.0
+
+    /// **How many rows above and below a pixel this effect's kernels reach** — the number RENDER.md
+    /// §3.8's strip apron is summed from.
+    ///
+    /// Here rather than in the strip driver for this file's own stated rule: an effect's
+    /// *interpretation* — which knob means what, how a radius becomes a set of taps — happens exactly
+    /// once, in Swift, and both backends consume the result. A radius re-derived by the driver is a
+    /// second reading of the same knob, and the way that fails is a strip whose apron is one row too
+    /// short: a seam a few pixels wide, in one band of the picture, with no error anywhere.
+    ///
+    /// **Rows, not pixels, because a strip is cut horizontally.** A Gaussian blur's horizontal pass
+    /// reaches sideways and a strip is full width, so only the vertical pass costs an apron.
+    ///
+    /// - `blur`, `bloom` and `sharpen` are `taps` — the same `tapCount` their weights are built from,
+    ///   and the loop in `blur1D` steps `1...taps` along `(0, 1)`. A **directional** blur's single
+    ///   pass steps along its own angle, whose vertical component is at most 1, so `taps` bounds it
+    ///   too rather than needing its own trigonometry.
+    /// - `sobel` is 1: a 3x3 gather.
+    /// - `outline` is the ceiling of its clamped Euclidean search radius, which is what
+    ///   `int searchRadius = int(ceil(radius))` in the kernel walks.
+    /// - `chromaticAberration` is the ceiling of its vertical displacement **plus one**, because the
+    ///   tap is bilinear: a sample at y + 2.5 reads rows 2 and 3 away.
+    /// - Every per-pixel grade is 0. `noise` and a screened `posterize` are 0 *here* and are not
+    ///   therefore free under a strip — they read absolute position rather than a neighbourhood, so
+    ///   no apron can carry them and `EffectParams.originX/originY` is what does.
+    var verticalKernelRadius: Int {
+        switch self {
+        case .blur(let blur): return Self.tapCount(forRadius: blur.radius)
+        case .bloom(let bloom): return Self.tapCount(forRadius: bloom.radius)
+        case .sharpen(let sharpen): return Self.tapCount(forRadius: sharpen.radius)
+        case .sobel: return 1
+        case .outline(let outline):
+            return Int(min(max(outline.width, 0), Self.maxOutlineRadius).rounded(.up))
+        case .chromaticAberration(let aberration):
+            guard aberration.offsetY.isFinite else { return 0 }
+            return Int(abs(aberration.offsetY).rounded(.up)) + 1
+        case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .posterize, .noise:
+            return 0
+        }
+    }
+
+    /// **Whether this effect's pixels depend on where in the frame they are**, rather than only on
+    /// what is around them — the property no apron can pay for.
+    ///
+    /// `noiseValue(gid, …)` hashes the pixel's coordinates and `screenValue(kind, gid)` indexes a 4x4
+    /// screen by `gid.y & 3`, so a buffer that is a *window* onto the frame reads a shifted field
+    /// unless it is told where its window sits. `EffectParams.originX/originY` is what tells it, and
+    /// this is the predicate a test asserts the two lists against so a fourteenth effect that reads
+    /// `gid` cannot be added without one.
+    var readsAbsolutePosition: Bool {
+        switch self {
+        case .noise: return true
+        case .posterize(let posterize): return posterize.screen != .none
+        case .levels, .curves, .brightnessContrast, .hsvShift, .gradientMap, .chromaticAberration,
+             .blur, .bloom, .sobel, .sharpen, .outline:
+            return false
+        }
+    }
 
     private static func tapCount(forRadius radius: Double) -> Int {
         guard radius.isFinite, radius > 0 else { return 0 }
