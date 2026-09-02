@@ -91,6 +91,14 @@ the build order.
     that interval.
 14. **Memory correctness is in scope.** *"I want to see if there are any previous memory allocation things in
     this program which are not built correctly."*
+15. **The baker replaces, it does not sit beside.** *"I want the code architecture to be very clean and
+    non-redundant, with no peculiarities, and no legacy code left by the previous functionality."* When a stage
+    lands, the path it supersedes is deleted in the same change — no vestigial parameter, no half-live control, no
+    comment describing what used to be here.
+16. **"Only the frames which matter" means exactly the frames a change reaches.** *"If I had frame 1 through 10
+    and I edited something inside a cel which spanned frames 2 to 6, then only frames 2 to 6 would need to get
+    re-rendered. Same with effects, blend modes, and everything related to compositing."* §3.3 and §3.6 are the
+    mechanism; §3.3's key is the proof, because a frame the change does not reach has the same key it had.
 
 ## 3. Design
 
@@ -212,6 +220,12 @@ what Core Animation wants, so the convert that costs a hitch per stroke-lift tod
 time — which also means `CompositorMetalEngine.readBack` should render into `bgra8Unorm` (BUGS.md already scopes
 that as a one-capability-check change). If the ratio on real documents disappoints, the next step is a per-row Up
 filter before LZ4, not a video codec.
+
+**A kept bake needs a stable stamp.** The process-lifetime key uses object identity and in-memory version counters
+(`RasterLayerTexture.version`, `VectorCanvas.version`), which restart at every open. A bake the artist keeps beside
+the project must key on something the document persists — a per-cel content stamp saved in the manifest and bumped
+on every edit, or a hash of the cel's encoded tiers. Stage 6 decides which; stage 4 does not need it because the
+default store dies with the process.
 
 A small **decoded ring** holds the frames just ahead of the playhead, under a byte budget rather than a count. Play
 never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from it.

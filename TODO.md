@@ -400,6 +400,39 @@ once; and (29) was blocked on derived content being invisible to the render walk
       frame, a cel, or a free position on a time ruler that does not exist yet; and is lipsync automatic
       (analyse the audio, pick a mouth shape) or a manual chart — those are completely different features.
 
+### (35) Advanced masks — colour-range masks and a colour-reassign blend mode
+
+- [ ] > "right now we have alpha masks. I like the idea of more advanced masks. This includes the ability to mask
+      > specific sets of colours (with a deviation threshold range), and a new special blend mode called colour
+      > reassign, where you can select colours and reassign them to other colours of your choosing (you can recolour
+      > your drawings). You dont have to get this done this session."
+
+      Low priority. A colour-range mask is a second `AlphaMask` source kind whose coverage is a distance in colour
+      space against a threshold; colour reassign is a per-pixel lookup grade rather than a blend in the
+      `blendOver` sense, so it likely lands as an `Effect` with a palette parameter. Both read the accumulator
+      only, so RENDER §3.4's chunking rules already cover them.
+
+### (36) Store projects in a folder the artist chooses, outside the app container
+
+- [ ] > "Right now, the app has a big drawback that if it is inexplicably deleted, then all the saves are deleted
+      > with it. Make it so it stores the files in an outside folder that you can assign, sort of like blender.
+      > Medium priority; arrange this so that if you think a feature would benefit from this feature being made as
+      > a pre-requisite, then thats when you should probably make this."
+
+      Medium priority. Every path the app writes derives from `.documentDirectory`
+      (`Services/ProjectBackupManager.swift:55-69`); the project package is a plain directory written atomically
+      through a same-volume rename (`Services/ProjectStore.swift:545-634`), which a security-scoped folder on iCloud
+      Drive or an external volume may not honour — that is the design question. RENDER §3.5's "keep the bake beside
+      the project" and §3.9's export destination both want a chosen folder, so this is a prerequisite of RENDER
+      stage 6 and should land before it.
+
+### (37) Import paintbrushes, and possibly change the brush engine
+
+- [ ] > "the ability to import paintbrushes would be nice. There is an md document which describes it, but don't
+      > read it this session as this is a low priority task and can wait."
+
+      Low priority. BRUSH_ENGINE_EXTENSIBILITY.md is the document; unread this pass by instruction.
+
 ### (30) Video editor — requires (29)
 
 - [ ] > "video editor: (requires #5) right now each animation is viewed in the gallery. This would be the
