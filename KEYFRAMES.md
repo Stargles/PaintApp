@@ -409,20 +409,23 @@ recursing at `:832`). The effect is read at `:784` (`layer.layerEffect`) and `:8
 **where the frame is not in scope** — so §2.4 forces the tree to become a function of the frame. That is
 the whole cost, and it is six production call sites, five of which already hold a frame.
 
-**Invalidation is free.** `SandwichKey` (`Views/CanvasView.swift:1398-1421`) and `SandwichFullKey`
-(`Engine/RenderRequest.swift:462-494`) each already carry the resolved `[RenderNode]` **and** the frame,
-`RenderNode` is `Equatable`, and its `effect` field is compared verbatim. A per-frame-resolved effect
-moves the key with no new plumbing.
+**Invalidation is free.** `SandwichKey` (`Views/CanvasView.swift`) already carries the resolved
+`[RenderNode]` **and** the frame, and `FrameBakeKey` (`Engine/FrameBakeKey.swift`) encodes the same tree
+field by field with no frame at all. `RenderNode` is `Equatable` and its `effect` field is compared
+verbatim, so a per-frame-resolved effect moves both with no new plumbing.
 
 **The template already exists and says so.** `ValueFill.resolvedColor(atFrame:)`
 (`Models/Layer.swift:203`) is `{ color }` today, and its doc comment cut this seam deliberately:
 *"a keyframe phase would then have to cut this seam under a deadline instead of finding it already
 cut."* `Effect.resolved(atFrame:)` is the same shape one level over.
 
-**The cache that actually moves is not the one it looks like.** `SandwichKey` and `SandwichFullKey`
-both carry `frame` outright, so two keys at two frames differ *whatever* the tree says — a test that
-compares them across frames passes on unmodified `main` and proves nothing. Pin it by holding `frame`
-**equal** and deriving the tree at two different frames. And the cache where staleness would actually
+**The cache that actually moves is not the one it looks like.** `SandwichKey` carries `frame`
+outright, so two keys at two frames differ *whatever* the tree says — a test that compares them across
+frames passes on unmodified `main` and proves nothing. Pin it by holding `frame` **equal** and deriving
+the tree at two different frames. `FrameBakeKey` has the opposite shape and needs no such care: it
+carries no frame at all, deliberately, so the resolved tree is the *only* thing that can separate two
+frames — which is what makes a hold one file on disk and what makes the frame-resolved effect
+load-bearing there. And the cache where staleness would actually
 bite is **`MaskResolver`'s**, which is keyed on `LayerContentVersion` and carries neither the frame nor
 the tree: it moves only because stage 0 put the frame-resolved effect *into* the version. Do not remove
 that, or a grade that reshapes alpha will serve stale coverage. (Note `LayerContentVersion.hash(into:)`
@@ -438,10 +441,11 @@ instead of once per edit. The key now also carries the node grades in the mask s
 **One thing §2.4 did not cover, now ruled and built, and one nobody has.** `LayerFolder.effect`
 (`Models/LayerFolder.swift:73`) is a second effect home reached at `RenderTree.swift:891`, and §2.21
 gives it the same track a layer's effect gets — stage 2b. And
-`CanvasManager.compositorSizeGate` (`CanvasManager+Document.swift:546-550`) is frame-invariant **only
-for as long as a key cannot turn an effect on or off**; it counts `effect != nil`, so the day a track
-can add one, the resize dialog's admission gate becomes a function of the playhead and will answer for
-one frame about a document that dies on another.
+`RenderTree.peakCompositeTextures` (`Models/RenderTree.swift:543`) is frame-invariant **only for as
+long as a key cannot turn an effect on or off**; it branches on `node.effect != nil`, and the strip
+planner, the chunk planner and `MetalCompositor`'s admission gate all spend its answer — so the day a
+track can add a grade, how a frame is cut up becomes a function of the playhead, and a document
+measured at one frame is sized for another.
 
 ### 4.2 Posed ink: bake the dab walk in rest space
 
@@ -551,7 +555,7 @@ beneath it inside its own container"*. A transform layer uses the same rule.
 
 **Where the pose is applied.** `renderNodes(atFrame:inContainer:)` accumulates a `Homography` down each
 container using the same `below` / `containerIsNode` scope machinery it already has, and emits
-`[layerIndex: Homography]` alongside the tree; `renderSources` maps the cel's elements through it and
+`[layerIndex: Homography]` alongside the tree; `FrameRecipe.resolveSources` maps the cel's elements through it and
 hands the posed display list to `renderLocalContent(elements:)`. **Ink is stamped at the posed position
 — it is never resampled afterwards.** Injecting at `VectorCanvas.render()`'s existing
 `ctx.concatenate(_transform)` (`VectorLayer.swift:2916-2919`) is the one-line change any reader will
@@ -640,13 +644,15 @@ PERFORMANCE.md's "six canvas-sized textures are 48 MiB at 2048×1024" gives **8 
 owner's own working size**. At the 50% Render Resolution the app already ships that is **2 MiB a frame**.
 So a 48-frame span is **384 MiB full-res and 96 MiB at half**.
 
-**And it must key on `RenderResolution`.** `SandwichKey` and `SandwichFullKey` already do
-(`Views/CanvasView.swift:1410`, `Engine/RenderRequest.swift:467`) and their comments say why in the words
-to reuse: otherwise the setting becomes *"a control that visibly does nothing when you use it"*. Note
-also what that setting actually reaches — **only `makeSandwichRequests`, the on-screen live composite**
-(`RenderRequest.swift:195-199`). It does not scale the flatten, the thumbnail, the saved package or a
-future export, and the Actions menu promises the artist exactly that. A preview-resolution span cache is
-therefore consistent with what the control already means; a full-resolution one is a different tier.
+**And it must key on `RenderResolution`.** `SandwichKey` and `FrameBakeKey` already do
+(`Views/CanvasView.swift`, `Engine/FrameBakeKey.swift`) and their comments say why in the words to
+reuse: otherwise the setting becomes *"a control that visibly does nothing when you use it"*. Note what
+that setting reaches — the on-screen live composite **and the on-disk bake**, which mint at one size
+(`liveCompositeSize`, `RenderSizing.liveComposite`) so that they share one flatten memo, with a
+directory per resolution under the bake root. It does not scale the flatten, the thumbnail or the saved
+package, and RENDER §2.8 rules that export resolution *is* this knob's value. A preview-resolution span
+cache is therefore consistent with what the control already means; a full-resolution one is a different
+tier.
 
 **Amendment 3 — "stored" must mean outside the `.paintproj`.** Three reasons and the first is decisive:
 the save path re-encodes **every** cel on **every** save with no skip-unchanged path, at a MEASURED

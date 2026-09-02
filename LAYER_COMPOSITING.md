@@ -325,7 +325,7 @@ the honest answer to "why use a node at all": `Mix(folder-of-drawings, grey 50%,
 the folder as a unit and *then* halves it, which a flat stack cannot express. It also blends with what
 is beneath it like any other leaf, which is the flat-background and tint case.
 
-**The fill resolves in `renderSources(atFrame:)`, and that placement is the design.** A value layer
+**The fill resolves in `CanvasManager.leafSnapshots(atFrame:…)`, and that placement is the design.** A value layer
 becomes an ordinary `LayerRenderSource` at the frame-aware boundary, so the compositor never learns
 value layers exist and neither backend has a case for one. **Keyframed values are wanted eventually
 and are deliberately not built** — the seam is what that phase bought: a later phase puts a track

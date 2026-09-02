@@ -79,10 +79,15 @@ for itself on the *first* new tool.
 and any of the 91 `@Published` writes triggers it — 31 views hold `@ObservedObject var canvasManager`.
 This is affordable only because each pass is memoized behind a key it invents for itself:
 `SandwichKey` (`:1269`), `InterpolationPreviewKey` (`:1859`), `OnionSkinKey` (`:2018`),
-`RenderKey` (`TextOverlayView.swift:106`), `SandwichFullKey` (`RenderRequest.swift:385`),
+`RenderKey` (`TextOverlayView.swift:106`), `FrameBakeKey` (`FrameBakeKey.swift:184`),
 `FillKey` (`CanvasManager+Fill.swift:42`), `RasterizeKey` (`PixelOps.swift:133`),
 `CacheKey` (`MaskResolver.swift:242`), plus `Key` in `MetalCompositor.swift:233`,
 `RasterLayerTexture.swift:58` and `OnionSkinSource.swift:850`.
+
+`FrameBakeKey` is the one that is not a memo at all — it is the **filename** of a baked frame on disk,
+so a field it cannot see is the wrong picture served with no error and no second chance, where every
+key above it costs one `==` compare after the bucket lookup. It is a hand-written canonical byte
+encoder with no `default:` clause for that reason (RENDER.md §3.5).
 
 **A key that cannot see an input serves a stale picture, intermittently.** That is a live bug:
 [BUGS.md:566](BUGS.md) — a mask sourced from a *graded group* can be stale, because `MaskResolver`'s
