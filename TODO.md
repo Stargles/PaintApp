@@ -38,10 +38,18 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 - **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
   half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
-  channel list, `56b0479` + `bccbfc2` the gestures and the marquee. **§8's next unbuilt stage is 4**,
-  the rest-space dab bake — and **Distort is 5b now**, not last. Fast tier **2227 / 2224 / 0 / 3**;
-  the full suite has not been run since two heavy classes were split, so CLAUDE.md's 22.3 min is stale
-  in the optimistic direction.
+  channel list, `56b0479` + `bccbfc2` the gestures and the marquee.
+
+  **The next stage is 5, the transform channel — not 4.** The owner ruled the order on 2026-08-30
+  (§8): stage 4's rest-space dab bake fixes a shimmer they looked at and disregarded, while stage 5 is
+  where the feature becomes something an artist can use. §8's 3b row still lists "the channel panel and
+  the drawer" as outstanding; the graph-editor work has landed since it was written, so **check that row
+  against the code before planning from it**.
+
+  **One thing to establish before stage 5 starts, INFERRED and load-bearing** (§8): what stage 5 owes
+  without stage 4 is the *width* rule — LASSO_MOVE §5.17's `sqrt(|det|)`. If ink cannot be posed
+  correctly without the rest-space bake, then stage 4 is a real prerequisite after all and the order has
+  to change back.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
@@ -101,6 +109,23 @@ LAYER_TRANSFORM.md.
       not part of this feature and is worth doing first anyway: VECTOR_INTERPOLATION item 18's
       `ContentProvider` seam, which is what makes any derived content visible to thumbnails, onion skin
       and export — and which (29) is blocked on.
+
+### (12) Lasso move — the follow-ups its spec still lists as unbuilt
+
+- [ ] Spec at [LASSO_MOVE.md](LASSO_MOVE.md); **§0 is what shipped and §3's stage 4 is what did not.**
+      Stages 1-3 shipped together, Freeform is 3a, flips are in stage 2, the box-only rotate knob is 3b
+      in all three phases, and the three membership rules moved to Select as item (23). What remains:
+
+      - **Placed images holding a stretched shape (3c)** — the stored field a non-uniform scale on an
+        image needs. It gates part of Distort.
+      - **Distort (stage 5)** over the shared quad. **This is the same feature as KEYFRAMES §8 stage
+        5b**, which schedules it as raster tier first, then ink through §4.2's point map, then placed
+        images *behind* Move 3c. Build it once, from whichever item reaches it first.
+      - **Port `FloatingPieceOverlayView` onto the stage 4 handle pattern** — the raster float still
+        carries the older overlay.
+
+      `beginDuplicate()`'s rasterize-on-a-vector-layer is **not** part of this; it is item (33) and a
+      BUGS.md defect.
 
 ### (22) Select multiple cels at once — the half of ask 6 the owner put in the future
 
