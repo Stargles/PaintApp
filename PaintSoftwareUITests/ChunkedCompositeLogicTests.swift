@@ -84,78 +84,13 @@ final class ChunkedCompositeLogicTests: XCTestCase {
 
     // MARK: - The zoo, and the parity pin over it
 
-    /// **Every shape §5 stage 3 names, in one document**: a graded folder at 60% opacity, a mask whose
-    /// source is a layer *above* the masked layer, an Outline effect at root, a Bloom with `.ink`
-    /// input, a hue-blend leaf, and an isolated folder over a blend.
+    /// **Every shape §5 stage 3 names, in one document** — `CanvasFixture.chunkingZoo()`, which
+    /// carries the table of what each layer is for.
     ///
-    /// Bottom to top, by `layers` index:
-    ///
-    /// | | what | which rule it exercises |
-    /// |---|---|---|
-    /// | 0 | a plain red floor | the accumulator that crosses every cut |
-    /// | 1 | a green rectangle set to Hue | a blending leaf, which reads the backdrop |
-    /// | 2, 3 | inside a folder graded at 60% opacity | rule 1: an atom that must not be cut |
-    /// | 4, 5 | inside an isolated folder, 5 set to Multiply | rule 1 again, by the isolation clause |
-    /// | 6 | clipped by a mask whose source is layer 7 | rule 4: the source is in a later chunk |
-    /// | 7 | the mask source, and ordinary ink besides | |
-    /// | 8 | a Bloom layer, `.ink` input | rule 3 |
-    /// | 9 | an Outline layer (`.ink`, fixed) | rule 3, and it is the last chunk |
-    ///
-    /// The rectangles overlap deliberately: two layers that do not touch composite to the same bytes
-    /// in either order, and a fixture that cannot tell order apart cannot tell a chunking bug apart
-    /// either.
-    private func zoo() -> CanvasManager {
-        let manager = CanvasFixture.manager(layerCount: 8)
-
-        CanvasFixture.setBakedContent(manager, layerIndex: 0,
-                                      CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 48, height: 48)))
-        CanvasFixture.setBakedContent(manager, layerIndex: 1,
-                                      CanvasFixture.solidImage(green, rect: CGRect(x: 12, y: 8, width: 40, height: 30)))
-        manager.layers[1].blendMode = .hue
-
-        CanvasFixture.setBakedContent(manager, layerIndex: 2,
-                                      CanvasFixture.solidImage(blue, rect: CGRect(x: 4, y: 20, width: 36, height: 26)))
-        CanvasFixture.setBakedContent(manager, layerIndex: 3,
-                                      CanvasFixture.solidImage(white.withAlphaComponent(0.7),
-                                                               rect: CGRect(x: 20, y: 10, width: 30, height: 40)))
-        CanvasFixture.setBakedContent(manager, layerIndex: 4,
-                                      CanvasFixture.solidImage(green.withAlphaComponent(0.8),
-                                                               rect: CGRect(x: 8, y: 34, width: 44, height: 20)))
-        CanvasFixture.setBakedContent(manager, layerIndex: 5,
-                                      CanvasFixture.solidImage(blue, rect: CGRect(x: 26, y: 26, width: 30, height: 30)))
-        manager.layers[5].blendMode = .multiply
-
-        CanvasFixture.setBakedContent(manager, layerIndex: 6,
-                                      CanvasFixture.solidImage(red.withAlphaComponent(0.6),
-                                                               rect: CGRect(x: 2, y: 2, width: 60, height: 24)))
-        CanvasFixture.setBakedContent(manager, layerIndex: 7,
-                                      CanvasFixture.solidImage(white, rect: CGRect(x: 30, y: 0, width: 34, height: 64)))
-        // §6.2's mask, whose source is the layer directly *above* the one it clips — the case
-        // `maskStacks` exists for, and the one a chunk that resolved only its own leaves would break.
-        manager.layers[6].alphaMask = AlphaMask(sources: [.layer(manager.layers[7].id)])
-
-        // The two folders. `parentFolderID` set by hand, as `CompositorParityLogicTests` does: the
-        // contiguous-span invariant holds because these are adjacent indices, and
-        // `assertFolderSpansAreContiguous` in the test below says so rather than assuming it.
-        let graded = manager.addFolder(name: "Graded 60%")
-        manager.layers[2].parentFolderID = graded
-        manager.layers[3].parentFolderID = graded
-        manager.setFolderOpacity(graded, to: 0.6)
-        manager.setNodeEffect(graded, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.3)))
-
-        let isolated = manager.addFolder(name: "Isolated over a blend")
-        manager.layers[4].parentFolderID = isolated
-        manager.layers[5].parentFolderID = isolated
-        manager.setFolderIsolated(isolated, isIsolated: true)
-
-        // Two root-level `.ink` effects. Outline's input is fixed `.ink`; Bloom's defaults to it.
-        manager.addValueLayer(effect: .bloom(Effect.Bloom(threshold: 0.4, radius: 4, intensity: 0.8,
-                                                          input: .ink)))
-        manager.addValueLayer(effect: .outline(Effect.Outline(width: 2,
-                                                              color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                                              threshold: 0.4)))
-        return manager
-    }
+    /// It moved to the shared support file when `ChunkedCompositeMetalLogicTests` arrived to hold the
+    /// *shipped* backend to the same document. Two copies of a fixture this specific would drift, and
+    /// a drifted copy would leave the Metal walk pinned against a document nobody had reasoned about.
+    private func zoo() -> CanvasManager { CanvasFixture.chunkingZoo() }
 
     /// **The pin.** Byte for byte, on the zoo, at a width that genuinely cuts it into several chunks.
     func testChunkedCompositingIsByteIdenticalToTheWholeFrameWalk() {

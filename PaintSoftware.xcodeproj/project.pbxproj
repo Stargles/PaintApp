@@ -207,6 +207,7 @@
 		A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */; };
 		0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */; };
 		DFDC16BB1BE8C70A41A45C65 /* ChunkedCompositeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */; };
+		F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */; };
 		4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */; };
 		885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */; };
 		72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */; };
@@ -429,6 +430,7 @@
 		C83D6080B1DC157CC328F569 /* PaintSoftware/Engine/FrameRecipe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameRecipe.swift; sourceTree = "<group>"; };
 		5D1197B7A58D18CA01448080 /* PaintSoftware/Engine/ChunkedComposite.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ChunkedComposite.swift; sourceTree = "<group>"; };
 		3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeLogicTests.swift; sourceTree = "<group>"; };
+		98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeMetalLogicTests.swift; sourceTree = "<group>"; };
 		5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameRecipeLogicTests.swift; sourceTree = "<group>"; };
 		62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeferredVectorRenderLogicTests.swift; sourceTree = "<group>"; };
 		79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineLayoutKeyLogicTests.swift; sourceTree = "<group>"; };
@@ -542,6 +544,7 @@
 				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
 				5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */,
 				3074BFF127F31CF1231C9D4D /* ChunkedCompositeLogicTests.swift */,
+				98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */,
 				62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
@@ -911,6 +914,7 @@
 				A086A36A10C6D313FB611B01 /* PaintSoftware/Engine/FrameRecipe.swift in Sources */,
 				0B59D5498F4E2ED58128F7D7 /* PaintSoftware/Engine/ChunkedComposite.swift in Sources */,
 				DFDC16BB1BE8C70A41A45C65 /* ChunkedCompositeLogicTests.swift in Sources */,
+				F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */,
 				4D0B02D7D60E7AD29E95D4BF /* FrameRecipeLogicTests.swift in Sources */,
 				885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */,
 				1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */,
