@@ -10,30 +10,28 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## State
 
-**`main` is `5152c55`.** `git fetch` before trusting any of this — `origin/main` is a shared ref.
+**`main` is `533b79d`.** `git fetch` before trusting any of this — `origin/main` is a shared ref.
 
-**Two branches were in flight when this pass ended at a usage limit** and both were told to commit
-before they died, which this repo has learned to do because a background agent does not survive a 429
-and its committed work does. Check them first:
+**One branch was still in flight when this pass ended at a usage limit**, and it was told to commit
+before it died — which this repo does because a background agent does not survive a 429 and its
+committed work does. Check it first:
 
 ```bash
 git worktree list && git branch -a
 ```
 
-- **`tmp/distort-raster`** — LASSO_MOVE stage 5, Distort's raster tier. Two commits at last look
-  (`0bcc0c7`, `bff05f5`), rebasing onto `c1ca875`. It touches `Views/CanvasView.swift`, which stage
-  4d rewrote, so its conflict there is real and must be resolved by understanding both sides.
 - **`tmp/keyframe-transform`** — KEYFRAMES stage 5, the transform channel. `PoseInterpolation.swift`,
   `AnimationGroup.swift`, `TransformChannel.swift` plus edits to `TextObject.swift`,
-  `VectorLayer.swift`, `Cel.swift`. It was mid-build.
+  `VectorLayer.swift`, `Cel.swift`. Mid-build at `983390d`, whose own message says the pose
+  geometry's tests are *"written and not yet compiled"*. Its base predates the Distort merge.
 
-**Neither has been reviewed or merged. Harvest their commits, do not trust their working trees** — a
+**It has not been reviewed or merged. Harvest its commits, do not trust its working tree** — a
 worker's tree legitimately holds deliberate poison from mutation testing, and this repo shipped that
 to `main` once.
 
-**Fast tier at `c1ca875`: 2476 total / 2473 passed / 0 failed / 3 skipped.** Up from 2351 at the
+**Fast tier at `533b79d`: 2490 total / 2487 passed / 0 failed / 3 skipped.** Up from 2351 at the
 start of the pass. **No full suite was run**, and the sandwich path changed structurally, so **the
-next session owes one** — on an idle machine, after the two branches above are resolved.
+next session owes one** — on an idle machine, after the branch above is resolved.
 
 ## RENDER (29) stage 4 is merged and the app runs on it
 
@@ -134,9 +132,14 @@ together. Then §3.9, export, which reads the bake and re-renders nothing.
   Every frame needs its own picture before "five frames re-rendered" is expressible.
 - **`CompositeProbe` counts calls to `Compositor.composite`, which is chunks, not frames.** Pin
   "one small frame is one composite" separately rather than assuming it inside another test.
-- **A brief's prescription is a hypothesis.** Six were refuted this pass by the workers holding the
-  code, and two of those were errors in the specification rather than in the brief. Invite the
+- **A brief's prescription is a hypothesis.** Ten were refuted this pass by the workers holding the
+  code, and three of those were errors in a specification rather than in a brief. Invite the
   refutation explicitly; it is the cheapest review in the project.
+- **A projective `CATransform3D` draws correctly and hit-tests unreliably.** Putting one on an outline
+  view left a distorted piece reshapeable and then undraggable — the move band silently stopped taking
+  touches while the corner grips kept working. Only a UI test could have said so.
+- **`canvas.host` is itself an accessibility element**, so no descendant of the canvas can be addressed
+  by identifier. Adding handle identifiers produces a dead affordance, not a testable one.
 - **`xcodebuild` waits on "Unlock Kevin's iPad to Continue" rather than failing** — one run sat twelve
   minutes and then completed by itself. PERFORMANCE §9 had given up at that same wall.
 - **Three agents at once take this machine to 4% idle**, which is the band CLAUDE.md records as
@@ -146,10 +149,18 @@ together. Then §3.9, export, which reads the bake and re-renders nothing.
 
 ## Everything else open
 
-**The owner's asks** are in TODO. **(21) keyframes stage 5 and (12) LASSO_MOVE stage 5 are the two
-branches above.** KEYFRAMES §8's **5b is *animated* Distort** — a quad keyed across frames, needing
-the transform channel — while LASSO_MOVE stage 5 is the one-off Move-box Distort; they are two
-different features and §2.13 makes a pose a quad so that they meet later with no migration.
+**The owner's asks** are in TODO. **(21) keyframes stage 5 is the branch above.** **(12) LASSO_MOVE
+stage 5 is merged** — Distort's raster tier, exact rather than bounded, reaching the raster floating
+piece in both `.move` and `.duplicate`. Its vector-ink tier is still refused, per float and in one
+sentence, with KEYFRAMES §4.2's rest-space dab bake named as the unblocker: under a homography the
+local scale spans 1.3x to 8.5x across one quad and the best single scalar for `VectorStroke.size` is
+wrong by 15%-315%. A **placed image** is the one kind with no Distort door at all — its placement is
+six numbers plus a mirror bit where a homography needs eight. Text already has one by its own door
+(Text panel → Corners).
+
+KEYFRAMES §8's **5b is *animated* Distort** — a quad keyed across frames, needing the transform
+channel — while what merged is the one-off Move-box Distort; they are two different features, and
+§2.13 makes a pose a quad so that they meet later with no migration.
 
 (31) holds the large-canvas symptoms; its `minificationFilter` half is **fixed** (`4f85759`), and what
 remains is that **16383² cannot be composited at all** and needs a downscaled display proxy. (32)-(34)
