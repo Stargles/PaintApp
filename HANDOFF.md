@@ -42,8 +42,38 @@ suspect first, both new:
 
 ## State
 
-**`main` is `bf5ba7d`.** No worktrees, no `tmp/*` branches, nothing uncommitted. `git fetch` before
-trusting any of this — `origin/main` is a shared ref.
+**Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
+`origin/main` is a shared ref.
+
+**Three branches were in flight when this pass ran out of budget.** Each was told to commit before it
+died, which this repo does because a background agent does not survive a limit and its committed work
+does. **None has been reviewed or merged. Harvest their commits; do not trust their working trees** — a
+worker's tree legitimately holds deliberate poison from mutation testing, and this repo shipped that to
+`main` once.
+
+- **`tmp/live-halves-strips`** — a **regression stage 5 introduced**, described in full below. This is
+  the one to pick up first if it did not land.
+- **`tmp/render-export`** — RENDER stage 6, export. Checkpointed as *"the pure half, does not build"*.
+- **`tmp/dab-bake`** — KEYFRAMES stage 4, the rest-space dab bake. Checkpointed as *"engine and render
+  seam, does not build yet"*.
+
+### The regression, which matters more than anything else in flight
+
+Stage 5 deleted `CompositorBudget.affordableSize` — correct, and owner ruling §2.12 — and routed the
+*whole frame* through strips. **The two mid-stroke sandwich halves were not routed with it**, and they
+are now the only composite path strips do not cover. `CanvasView.Coordinator.startSandwichRebuild`
+composites `requests.below`/`above` whole; `CanvasManager.liveCompositeSize` is the knob's size alone;
+so on a document over the budget both reach `MetalCompositor.attempt`'s `guard wanted <= budget`, come
+back `.unavailable`, and fall to `CoreGraphicsCompositor` **for the duration of every stroke** — the CPU
+reference, where a grading document is MEASURED at **203.3 ms**.
+
+So on exactly the large documents §3.8 exists to serve, drawing is now *worse* than before stage 5: it
+used to composite a shrunk frame on the GPU and now composites a full-size one on the CPU. That
+violates §2.13, whose bar is that the artist can move the canvas and lay the next stroke.
+
+**The premise was read off the code, not measured.** Confirm it first — force a document over the
+budget with `CompositorBudget.budgetOverrideBytes`, take the composite through `MetalCompositor.attempt`,
+and assert it returns `.unavailable` today. That check is the test the fix needs anyway.
 
 **Fast tier: 2581 total / 2578 passed / 0 failed / 3 skipped.** It was 2351 at the start of the pass.
 
