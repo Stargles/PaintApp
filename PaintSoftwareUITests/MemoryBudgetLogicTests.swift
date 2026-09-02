@@ -10,7 +10,13 @@ import UIKit
 /// edits one of the five constants. `PerfBaselineTests.testTheOwnersCrashSceneCostsMoreTextureThanA3GBDeviceCanHold`
 /// is the precedent — a table in a comment, asserted rather than recited.
 ///
-/// Headless: every case here is arithmetic over pure-logic types, plus one that posts a notification.
+/// **The second half of the file is the audit rather than the table** — BUGS.md's memory-allocation
+/// audit names sites that cost bytes nothing declares and nothing evicts, and the ones stage 0 of
+/// RENDER.md §5 closes are pinned here: what an undrawn tier renders to, what a thumbnail leaves in
+/// the flatten memo, and which caches a backgrounded app actually drops.
+///
+/// Headless throughout: arithmetic over pure-logic types, plus the cases that post a notification or
+/// build a fixture cel and read what it left resident.
 final class MemoryBudgetLogicTests: XCTestCase {
 
     private static let mib = 1024 * 1024
@@ -326,5 +332,135 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                           label: .fill)
         XCTAssertEqual(manager.history.currentCost, drawn.approximateCost,
                        "The first commit on a blank cel is charged one buffer, not two")
+    }
+
+    // MARK: - The audit (BUGS.md "Memory allocation audit", RENDER.md §5 stage 0)
+
+    /// **A tier with no bitmap renders to one shared pixel, not to a canvas of nothing.**
+    ///
+    /// Every vector cel carries an empty `RasterLayerTexture`, and `renderToUIImage()` used to answer
+    /// one with a freshly minted canvas-sized transparent `UIImage` *and memoise it on the texture* —
+    /// a memo with no budget, no eviction and no pressure hook. 300 vector cels at the owner's canvas
+    /// is 2.4 GB of nothing, and it is not hypothetical residency: `startThumbnailBackfill` walks
+    /// every cel in the document the moment a project is opened.
+    ///
+    /// **Identity across two different textures is the assertion, not size**, because size alone does
+    /// not distinguish "small" from "shared": a 1×1 minted per cel would pass a size check and still
+    /// be a per-cel retention of exactly the kind this is about.
+    func testABlankRasterTierRendersToOneSharedPixelRatherThanACanvasOfNothing() {
+        let canvas = CGSize(width: 2048, height: 1024)
+        let blank = RasterLayerTexture.empty(size: canvas)
+        XCTAssertFalse(blank.hasContent, "control: an untouched tier has no bitmap")
+
+        XCTAssertEqual(blank.renderToUIImage().size, CGSize(width: 1, height: 1),
+                       "a tier with no bitmap must not render to a canvas-sized sheet of transparency")
+
+        let second = RasterLayerTexture.empty(size: canvas)
+        XCTAssertTrue(blank.renderToUIImage() === second.renderToUIImage(),
+                      "and it has to be *shared* — one image for every blank tier in the document, not one each")
+        XCTAssertFalse(blank.hasContent, "asking must not have allocated the bitmap either")
+    }
+
+    /// The same claim through `PixelOps.rasterize`, which is the caller the 2.4 GB went through.
+    ///
+    /// A cel's flatten reads all four tiers, and on a vector cel the raster one is empty — so it is
+    /// skipped rather than stretched over the canvas, and the flatten leaves the texture exactly as it
+    /// found it. The flatten's own size is asserted first: bounding the tier must not shrink the
+    /// picture the cel actually has.
+    func testFlatteningAVectorCelLeavesNothingMemoisedOnItsEmptyRasterTier() {
+        let canvas = CGSize(width: 512, height: 256)
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
+        cel.vector = VectorCanvas(
+            size: canvas,
+            fills: [VectorFillElement(path: CGPath(ellipseIn: CGRect(x: 16, y: 16, width: 64, height: 64),
+                                                   transform: nil),
+                                      color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))])
+
+        let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvas, memoize: false)
+        XCTAssertEqual(flattened.size, canvas, "control: the flatten is canvas-sized — this cel has content")
+
+        XCTAssertFalse(cel.raster.hasContent, "flattening must not allocate the empty tier's bitmap")
+        XCTAssertEqual(cel.raster.renderToUIImage().size, CGSize(width: 1, height: 1),
+                       "and must not leave a canvas-sized image memoised on it — that memo is the 2.4 GB")
+    }
+
+    /// **A 120 pt tile must not mint a native-size entry in the flatten memo.**
+    ///
+    /// `PixelOps.RasterizeKey` carries width and height, so a thumbnail flattened at canvas size is a
+    /// *different* entry from the one the sandwich holds for the same cel at its clamped render size.
+    /// Both are canvas-sized: 64 MiB apiece at 4096², where six layers of sandwich already want
+    /// 201 MiB against a 192 MiB budget, so the two working sets evicted each other and every rebuild
+    /// ran cold. At 2048×1024 the same pair is 48 MiB and nothing showed — which is why the freeze
+    /// RENDER.md §3.1 describes is a large-canvas symptom.
+    ///
+    /// The tile's own geometry is asserted alongside, because bounding the flatten must not move it.
+    func testACelThumbnailFlattensIntoItsOwnBoundRatherThanTheWholeCanvas() {
+        let canvas = CGSize(width: 1024, height: 512)
+        let canvasEntryBytes = Int(canvas.width) * Int(canvas.height) * 4
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: canvas))
+        cel.bakedImage = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 400, height: 200),
+                                                  size: canvas)
+
+        PixelOps.clearRasterizeCache()
+        defer { PixelOps.clearRasterizeCache() }
+        let tile = CanvasManager.celThumbnailImage(for: cel, canvasSize: canvas)
+
+        XCTAssertEqual(tile.size, CGSize(width: 120, height: 60),
+                       "the tile itself must not move — only what it is flattened from")
+        XCTAssertGreaterThan(PixelOps.rasterizeCacheBytes, 0,
+                             "control: the thumbnail path goes through the memo, or the bound below proves nothing")
+        XCTAssertLessThan(PixelOps.rasterizeCacheBytes, canvasEntryBytes / 2,
+                          "a tile must not leave a canvas-sized entry behind — that is what evicts the sandwich's")
+    }
+
+    /// **Both caches that dropped only on a memory warning now drop on backgrounding too.**
+    ///
+    /// PERFORMANCE.md item 12 records that the warning never fires on the owner's device, so a cache
+    /// wired to it alone sits at its high-water mark for as long as the artist is in another app.
+    /// `PixelOps` and the Metal engine already take both events — `CompositorParityLogicTests`
+    /// `testEnteringBackgroundPurgesTheUploadCacheAndTheRasterizeCache` is that pair — and these two
+    /// are the pair the audit's item 9 names.
+    ///
+    /// Both halves are populated first and asserted non-empty, so a cache that had never held anything
+    /// could not pass by being empty all along.
+    @MainActor
+    func testEnteringBackgroundDropsTheMaskCacheAndTheOnionSkinCache() {
+        MaskResolver.clearCache()
+        OnionSkinRasterCache.removeAll()
+        defer {
+            MaskResolver.clearCache()
+            OnionSkinRasterCache.removeAll()
+        }
+
+        let manager = CanvasFixture.manager(layerCount: 2)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
+        CanvasFixture.setBakedContent(manager, layerIndex: 1,
+                                      CanvasFixture.solidImage(.blue,
+                                                               rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+
+        guard let mask = manager.layers[1].alphaMask,
+              let request = manager.makeRenderRequest(atFrame: 0, includeBackground: false),
+              MaskResolver.coverage(for: [mask], of: request) != nil else {
+            return XCTFail("The mask must resolve")
+        }
+        // A *reduced* size, or the onion skin hands back the compositor's own memo and stores nothing
+        // of its own — see `OnionSkinRasterCache.image(for:canvasSize:at:)`.
+        _ = OnionSkinRasterCache.image(for: manager.layers[1].cels[0],
+                                       canvasSize: CanvasFixture.canvasSize,
+                                       at: CGSize(width: 32, height: 32))
+
+        XCTAssertGreaterThan(MaskResolver.cacheEntryCount, 0,
+                             "control: the mask cache must be warm, or the purge below proves nothing")
+        XCTAssertGreaterThan(OnionSkinRasterCache.residentBytes, 0,
+                             "control: the onion skin cache must be warm too")
+
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+        XCTAssertEqual(MaskResolver.cacheEntryCount, 0,
+                       "Backgrounding must drop resolved masks — the memory warning is the event that never arrives")
+        XCTAssertEqual(OnionSkinRasterCache.residentBytes, 0,
+                       "and the onion skin's reduced flattens with them")
     }
 }

@@ -575,7 +575,13 @@ final class StrokeCanvasView: UIView {
         if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
         shapeFollowingTouch = false
-        strokeBeforeSnapshot = (raster.renderToUIImage(), raster.strokeCount)
+        // **Nil for a tier with no bitmap, which is every cel's first stroke.** The snapshot's image
+        // is the state undo returns to, and "nothing was there" is expressed by the nil this tuple
+        // already accepts — `revertStrokeToSnapshot` and `registerWholeImageRasterUndo` both hand it
+        // to `reset(to:)`, which clears. Asking the texture instead would hand back the shared 1×1
+        // (`RasterLayerTexture.renderToUIImage()`), which is the right answer to *draw* and the wrong
+        // one to crop an undo patch out of.
+        strokeBeforeSnapshot = (raster.hasContent ? raster.renderToUIImage() : nil, raster.strokeCount)
         raster.beginStroke()
         lastStampPoint = nil
         let input = StrokeInput(touch: touch, in: self)
@@ -755,19 +761,31 @@ final class StrokeCanvasView: UIView {
     /// side undoing an erase and reporting "brush stroke" would be exactly the label mismatch
     /// `HistoryActionLabel`'s doc warns a `String` parameter can't catch.
     private func registerRasterUndo(raster: RasterLayerTexture, from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
-        guard let beforeImage = from.image, let afterImage = to.image,
-              let dirty = raster.strokeDirtyRect else {
+        guard let afterImage = to.image, let dirty = raster.strokeDirtyRect else {
             registerWholeImageRasterUndo(raster: raster, from: from, to: to)
             return
         }
+        // Clamped against the *texture*, not against the before-image: the two are the same rect
+        // whenever there is a before-image, and it is the only one available when there is not.
         let rect = dirty.insetBy(dx: -1, dy: -1).integral
-        guard let beforePatch = PixelOps.copiedSubimage(of: beforeImage, in: rect),
-              let afterPatch = PixelOps.copiedSubimage(of: afterImage, in: rect) else {
+            .intersection(CGRect(origin: .zero, size: raster.size))
+        guard rect.width >= 1, rect.height >= 1 else {
             registerWholeImageRasterUndo(raster: raster, from: from, to: to)
             return
         }
-        // Clamped rect the crops actually came from, or an off-edge stroke restores offset.
-        let origin = rect.intersection(CGRect(origin: .zero, size: beforeImage.size)).origin
+        // **A nil before-image is a tier that had no bitmap at touch-down** — every cel's first
+        // stroke — and the state to return to is transparency of the patch's own shape.
+        // `restore(patch:at:)` copies rather than composites, so putting one back clears the region
+        // exactly. The alternative is the whole-image fallback below, and that would put a
+        // canvas-sized pair in the history for the *first* stroke on every new cel, which on an
+        // animation (a new cel per frame) is the whole budget.
+        let beforePatch = from.image.map { PixelOps.copiedSubimage(of: $0, in: rect) }
+            ?? PixelOps.transparentImage(size: rect.size)
+        guard let beforePatch, let afterPatch = PixelOps.copiedSubimage(of: afterImage, in: rect) else {
+            registerWholeImageRasterUndo(raster: raster, from: from, to: to)
+            return
+        }
+        let origin = rect.origin
         let beforeCount = from.count, afterCount = to.count
         let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
         canvasManager?.recordUndo(label: isEraser ? .erase : .brushStroke, cost: cost, undo: { [weak self] in

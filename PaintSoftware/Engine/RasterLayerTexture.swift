@@ -330,10 +330,7 @@ final class RasterLayerTexture: DabTarget {
 
     /// What a tier with no bitmap renders to instead of a canvas-sized sheet of transparent pixels —
     /// `VectorCanvas.transparentPixel`'s pattern, one tier down, and for the same arithmetic.
-    private static let transparentPixel: UIImage = {
-        UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1),
-                                format: PixelOps.transparentFormat()).image { _ in }
-    }()
+    private static let transparentPixel = PixelOps.transparentImage(size: CGSize(width: 1, height: 1))
 
     /// The current pixel content, or a shared 1×1 transparent image when there is no bitmap. Always
     /// at native resolution (scale 1) — callers that need a smaller render (thumbnails) downscale

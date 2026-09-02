@@ -798,6 +798,47 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertTrue(byCompositor === byLiveStroke, "Not an equal coverage — the same one")
     }
 
+    /// **And it resolves at the size the sandwich composites at, which is what makes the identity
+    /// above hold anywhere but Full on a device with room to spare.**
+    ///
+    /// `MaskResolver.CacheKey` carries width and height, so a live resolve at native size and a
+    /// sandwich clamped by `CompositorBudget.affordableSize` are two entries — two `ResolvedMask`s
+    /// built over two disjoint sets of canvas-sized `PixelOps.rasterize` flattens, evicting each other
+    /// inside one budget, on precisely the documents (masked ones) that can least afford it. The test
+    /// above cannot see that: it builds both sides from the same request.
+    ///
+    /// **The budget override is what makes this fixture non-vacuous.** Without a clamp the two sizes
+    /// agree by accident and the pin proves nothing, so the native request is asserted to *differ*
+    /// first and the native resolve to be a second entry after.
+    func testTheLiveMaskResolvesAtTheSizeTheSandwichComposites() {
+        let manager = clippedManager()
+        let original = CompositorBudget.budgetOverrideBytes
+        defer { CompositorBudget.budgetOverrideBytes = original }
+        // Two textures' worth at this canvas, against a walk that wants more — see `affordableSize`.
+        CompositorBudget.budgetOverrideBytes = 32 * 1024
+
+        guard let sandwich = manager.makeSandwichRequests(atFrame: 0, activeLayerIndex: 1),
+              let live = manager.liveMaskRequest(atFrame: 0),
+              let native = manager.makeRenderRequest(atFrame: 0, includeBackground: false) else {
+            return XCTFail("All three requests must build")
+        }
+        XCTAssertNotEqual(native.canvasSize, sandwich.full.canvasSize,
+                          "Fixture premise: the budget has to actually clamp, or every sizing rule agrees here "
+                          + "and this test passes without asserting anything")
+        XCTAssertEqual(live.canvasSize, sandwich.full.canvasSize,
+                       "The live mask must be built at the size the composite it clips is built at")
+
+        guard let masks = RenderNode.masksClipping(leafAt: 1, in: manager.renderTree(atFrame: 0)),
+              let byLiveStroke = MaskResolver.coverage(for: masks, of: live),
+              let byCompositor = MaskResolver.coverage(for: masks, of: sandwich.full),
+              let atNative = MaskResolver.coverage(for: masks, of: native) else {
+            return XCTFail("All three must resolve")
+        }
+        XCTAssertTrue(byLiveStroke === byCompositor, "Not an equal coverage — the same one")
+        XCTAssertFalse(atNative === byCompositor,
+                       "Control: it is the *size* that separates them, so a native resolve is a second entry")
+    }
+
     /// An enclosing group's mask is in the live chain, and it has to be.
     ///
     /// The compositor applies a group's mask to the group's assembled buffer, which mid-stroke does

@@ -406,13 +406,13 @@ final class PerfBaselineTests: XCTestCase {
                 let x = 64 + CGFloat(i / 30) * 400
                 let samples = [BrushStamper.Sample(point: CGPoint(x: x, y: y), pressure: 0.8),
                                BrushStamper.Sample(point: CGPoint(x: x + 60, y: y), pressure: 0.8)]
-                let before = (image: raster.renderToUIImage(), count: raster.strokeCount)
+                let before = strokeSnapshot(raster)
                 raster.beginStroke()
                 BrushStamper.stampStroke(into: raster, samples: samples, brush: manager.selectedBrush,
                                          color: .black, brushSize: brushSize,
                                          brushOpacity: manager.brushOpacity)
                 raster.endStroke()
-                let after = (image: raster.renderToUIImage(), count: raster.strokeCount)
+                let after = strokeSnapshot(raster)
                 recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
             }
         }
@@ -446,13 +446,13 @@ final class PerfBaselineTests: XCTestCase {
         // The other end of the range, reported so the win isn't overstated: cropping helps in
         // proportion to how *localised* a stroke is, and a single sweep across the whole canvas has a
         // canvas-sized bounding box, so its step still costs roughly what every step used to.
-        let sweepBefore = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let sweepBefore = strokeSnapshot(raster)
         raster.beginStroke()
         BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: Self.sampleCount),
                                  brush: manager.selectedBrush, color: .black,
                                  brushSize: brushSize, brushOpacity: manager.brushOpacity)
         raster.endStroke()
-        let sweepAfter = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let sweepAfter = strokeSnapshot(raster)
         recordCroppedStrokeUndo(manager: manager, raster: raster, from: sweepBefore, to: sweepAfter)
         let sweepCost = manager.history.undoStack.last?.cost ?? 0
 
@@ -497,7 +497,7 @@ final class PerfBaselineTests: XCTestCase {
         let reference = alphaFingerprint(raster)
 
         // Second stroke, recorded the way 5.5 records one.
-        let before = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let before = strokeSnapshot(raster)
         raster.beginStroke()
         BrushStamper.stampStroke(into: raster,
                                  samples: [BrushStamper.Sample(point: CGPoint(x: 900, y: 700), pressure: 1),
@@ -505,7 +505,7 @@ final class PerfBaselineTests: XCTestCase {
                                  brush: manager.selectedBrush, color: .black,
                                  brushSize: 30, brushOpacity: 1)
         raster.endStroke()
-        let after = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let after = strokeSnapshot(raster)
         let painted = alphaFingerprint(raster)
         XCTAssertNotEqual(painted, reference, "The second stroke should actually have changed the canvas")
 
@@ -528,7 +528,7 @@ final class PerfBaselineTests: XCTestCase {
         let raster = manager.layers[0].cels[0].raster
         let reference = alphaFingerprint(raster)
 
-        let before = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let before = strokeSnapshot(raster)
         raster.beginStroke()
         // Starts off the top-left corner and runs inward, so the dab bounds go negative.
         BrushStamper.stampStroke(into: raster,
@@ -537,7 +537,7 @@ final class PerfBaselineTests: XCTestCase {
                                  brush: manager.selectedBrush, color: .black,
                                  brushSize: 40, brushOpacity: 1)
         raster.endStroke()
-        let after = (image: raster.renderToUIImage(), count: raster.strokeCount)
+        let after = strokeSnapshot(raster)
         XCTAssertNotEqual(alphaFingerprint(raster), reference, "The edge stroke should have marked the canvas")
 
         recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
@@ -546,21 +546,38 @@ final class PerfBaselineTests: XCTestCase {
                        "Undo of a stroke crossing the canvas edge must still restore exactly — a patch written at the unclamped origin would land offset")
     }
 
+    /// `handleBegin`'s snapshot, mirrored for `recordCroppedStrokeUndo`'s reason: **nil for a tier
+    /// with no bitmap**, which is every cel's first stroke. The image is the state undo returns to,
+    /// and "nothing was there" is the nil rather than a canvas of transparent pixels.
+    private func strokeSnapshot(_ raster: RasterLayerTexture) -> (image: UIImage?, count: Int) {
+        (raster.hasContent ? raster.renderToUIImage() : nil, raster.strokeCount)
+    }
+
     /// Mirrors `StrokeCanvasView.registerRasterUndo`'s cropped representation. `StrokeCanvasView` is a
     /// `UIView` driven by real touches, so it can't be exercised headlessly; this reproduces the same
     /// three steps (crop to the dirty rect, clamp the origin, restore with `.copy`) against the same
     /// engine API, so the engine support and the byte accounting are what's under test.
     private func recordCroppedStrokeUndo(manager: CanvasManager, raster: RasterLayerTexture,
-                                         from: (image: UIImage, count: Int), to: (image: UIImage, count: Int)) {
+                                         from: (image: UIImage?, count: Int), to: (image: UIImage?, count: Int)) {
         guard let dirty = raster.strokeDirtyRect else {
             return XCTFail("A stroke that stamped dabs must report a dirty rect")
         }
+        // Clamped against the texture and not against the before-image, and a nil before-image
+        // yielding transparency of the patch's own shape — both mirroring `registerRasterUndo`, where
+        // both exist because a tier with no bitmap renders to a shared 1×1 rather than to a
+        // canvas-sized sheet of transparency (`RasterLayerTexture.renderToUIImage()`).
         let rect = dirty.insetBy(dx: -1, dy: -1).integral
-        guard let beforePatch = PixelOps.copiedSubimage(of: from.image, in: rect),
-              let afterPatch = PixelOps.copiedSubimage(of: to.image, in: rect) else {
+            .intersection(CGRect(origin: .zero, size: raster.size))
+        guard rect.width >= 1, rect.height >= 1 else {
+            return XCTFail("The stroke's dirty rect must overlap the canvas")
+        }
+        let beforeCrop = from.image.map { PixelOps.copiedSubimage(of: $0, in: rect) }
+            ?? PixelOps.transparentImage(size: rect.size)
+        guard let beforePatch = beforeCrop, let afterImage = to.image,
+              let afterPatch = PixelOps.copiedSubimage(of: afterImage, in: rect) else {
             return XCTFail("Cropping the stroke's region should succeed")
         }
-        let origin = rect.intersection(CGRect(origin: .zero, size: from.image.size)).origin
+        let origin = rect.origin
         let beforeCount = from.count, afterCount = to.count
         let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
         manager.recordUndo(label: .brushStroke, cost: cost, undo: {
@@ -577,8 +594,12 @@ final class PerfBaselineTests: XCTestCase {
     /// second full copy of the canvas to diff against.
     private func alphaFingerprint(_ raster: RasterLayerTexture) -> [Int] {
         autoreleasepool {
-            guard let cg = raster.renderToUIImage().cgImage else { return [] }
-            let width = cg.width, height = cg.height
+            // **The texture's own dimensions, not the returned image's.** A tier with no bitmap
+            // renders to a shared 1×1 (`RasterLayerTexture.renderToUIImage()`), so a fingerprint
+            // taken from the image would be one row long for a blank tier and canvas-tall for one
+            // cleared back to blank — the same picture, compared unequal.
+            let width = raster.pixelWidth, height = raster.pixelHeight
+            guard width > 0, height > 0, let cg = raster.renderToUIImage().cgImage else { return [] }
             var bytes = [UInt8](repeating: 0, count: width * height * 4)
             let ok = bytes.withUnsafeMutableBytes { raw -> Bool in
                 guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,

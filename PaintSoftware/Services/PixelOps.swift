@@ -14,6 +14,16 @@ enum PixelOps {
         return format
     }
 
+    /// A fully transparent image of `size`, at scale 1.
+    ///
+    /// One spelling for what several call sites were writing as a bare renderer with an empty body,
+    /// and the app's answer to "the pixels that were not there": a blank
+    /// `RasterLayerTexture.renderToUIImage()` hands back a 1×1 of this, and an undo patch for a
+    /// region of a tier that had no bitmap is one of these at the patch's own size.
+    static func transparentImage(size: CGSize) -> UIImage {
+        UIGraphicsImageRenderer(size: size, format: transparentFormat()).image { _ in }
+    }
+
     static let deviceRGBColorSpace = CGColorSpaceCreateDeviceRGB()
 
     /// `transform` applied to `0..<count` across every core, results in index order.
