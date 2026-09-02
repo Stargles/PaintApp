@@ -251,12 +251,20 @@ still sits between two finished pictures. **The single-slot drop-if-busy behavio
 
 ### 3.7 Playback
 
-The clock moves onto the model: `CanvasManager` owns `isPlaying` and a wall-clock-driven tick that derives the frame
-from elapsed time, so a late tick skips rather than slows, and a view can no longer stall it — today's `Timer` is
-`@State` on `AnimationTimeline` (`Views/AnimationTimeline.swift:12-14`, timer `:1004-1008`), runs in the default
-run-loop mode so it pauses during any scroll, captures `1.0/fps` once, and has no wall clock. TODO (28) and
-KEYFRAMES §5 need the same hoist. A tick reads the ring. If the frame is not baked the previous picture stays
-(§2.10). The timeline shows which frames are baked, the way KEYFRAMES §4.6 wanted for spans.
+**Done, 2026-09-01 (stage 1).** `CanvasManager` owns `isPlaying` (published), a `PlaybackClock`
+(`Engine/PlaybackClock.swift`) and the tick source; `AnimationTimeline` holds no playback state at all and only
+calls `togglePlayback()` / `stopPlayback()` and reads `isPlaying`. The frame is derived from elapsed wall time and
+spent through `advancePlayback(by:)`, so a late tick skips rather than slows and the clock does not drift; `fps` is
+read at derivation time and its `didSet` re-bases the epoch, so a mid-play rate change takes effect without moving
+the playhead; the `Timer` runs in `.common` modes, so a scroll or drag no longer stalls playback. Playback stops
+from `canvasInteractionBegan()` (a touch about to become an edit), the timeline's `onDisappear`, and any
+`scenePhase` away from `.active` — the last is required by the wall clock rather than optional, since a
+backgrounded app would otherwise return owing every frame of the time it was away. TODO (28) and KEYFRAMES §5 get
+the hoist they needed.
+
+What this stage did **not** build, and stage 4 still owes: a tick reads the ring. If the frame is not baked the
+previous picture stays (§2.10). The timeline shows which frames are baked, the way KEYFRAMES §4.6 wanted for
+spans.
 
 ### 3.8 Full means full
 
@@ -304,7 +312,7 @@ it is the dependency order.
 0. **Stop the bleeding.** The 16k crash is the live-stroke scratch: `StrokeCanvasView.swift:843-849` allocates the
    scratch at `vectorCanvas.size`, and `RasterLayerTexture` mints the full-canvas context on the first dab and a
    full-canvas `makeImage()` per touch-move. Size the scratch to the stroke's dirty rect (`_strokeDirtyRect`).
-1. **Hoist the playback clock** onto `CanvasManager` (§3.7).
+1. ~~**Hoist the playback clock** onto `CanvasManager` (§3.7).~~ **Done 2026-09-01.**
 2. **The recipe** (§3.2): `FrameRecipe`/`LeafSnapshot`, a static leaf render from values, `renderSources` off the
    main actor, the committed cel's re-render made asynchronous with the scratch retained until the new image lands
    (§2.13). Pin: a logic test that the recipe's pixels equal the live snapshot's; a perf baseline for main-thread time

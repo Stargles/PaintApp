@@ -731,7 +731,15 @@ final class CanvasManager: ObservableObject {
     @Published var canvasBackgroundColor: Color = .white
     @Published var isCanvasBackgroundVisible: Bool = true
 
-    @Published var fps: Int = 24
+    @Published var fps: Int = 24 {
+        didSet {
+            guard fps != oldValue else { return }
+            // Playback derives the playhead from elapsed time at the *current* rate, so a change
+            // here is live. Re-basing is what keeps it from being retroactive: without it the whole
+            // elapsed span would be re-divided by the new rate and the playhead would jump.
+            rebasePlaybackClock()
+        }
+    }
     @Published var sceneFrameCount: Int = 12
     @Published var currentFrame: Int = 0 {
         didSet {
@@ -841,6 +849,15 @@ final class CanvasManager: ObservableObject {
     /// against this comment counted four, found four, and stopped. `handleMoveBoxCommit` is the
     /// sixth, added 2026-08-22 and correct from the start.
     func canvasInteractionBegan() {
+        // A touch that is about to become an edit ends playback. The playhead moving under the
+        // artist's hand is the whole hazard: a tick lands mid-gesture, `currentFrame`'s `didSet`
+        // commits the float and clears the selection through `handleActiveContextChanged`, and the
+        // gesture finishes against a different cel than it started on.
+        //
+        // Here rather than in `beginCanvasEdit`, which would be the tempting chokepoint and is a
+        // recursion: `handleActiveContextChanged` calls `beginCanvasEdit`, and it runs on every
+        // playback tick, so playback would stop itself on its first frame.
+        stopPlayback()
         dismissPresentationsOverLiveCanvas()
         interactionBegan.send()
     }
@@ -1655,18 +1672,143 @@ final class CanvasManager: ObservableObject {
         (currentFrame < playbackStartFrame || currentFrame >= playbackEndFrame) ? playbackStartFrame : currentFrame
     }
 
-    /// Advances the playhead one frame of playback. Returns false when playback has run off the end
-    /// and should stop — which only ever happens with looping off.
+    /// Advances the playhead `count` frames of playback. Returns false when playback has run off the
+    /// end and should stop — which only ever happens with looping off.
+    ///
+    /// `count` is a number of *frames of elapsed time*, not a number of ticks — see `PlaybackClock`.
+    /// A tick that arrives two frame intervals late passes 2 and the animation skips a frame, which
+    /// is the point: the alternative is playing back in slow motion whenever the main thread is busy.
+    /// A refused advance still leaves the playhead on the end frame it reached, and `count` frames
+    /// cost **one** write to `currentFrame` — whose `didSet` runs `handleActiveContextChanged`, which
+    /// is not free — rather than one per frame stepped over.
+    ///
+    /// The walk is the single-frame rule applied `count` times and deliberately not a second,
+    /// parallel account of where playback wraps and stops;
+    /// `testAdvancingByNIsExactlyNSingleAdvances` pins that against the characterizations above.
     @discardableResult
-    func advancePlayback() -> Bool {
+    func advancePlayback(by count: Int = 1) -> Bool {
+        // Hoisted: `playbackEndFrame` walks every cel of every layer, and neither bound depends on
+        // where the playhead is.
+        let start = playbackStartFrame
         let end = playbackEndFrame
-        guard currentFrame < end else {
-            guard isLoopEnabled else { return false }
-            currentFrame = playbackStartFrame
-            return true
+        let looping = isLoopEnabled
+        var remaining = max(count, 0)
+        var frame = currentFrame
+        var taken = 0
+        var ranOff = false
+        while taken < remaining {
+            // Inside the loop range the walk is periodic, so an arbitrarily long catch-up folds to
+            // at most one cycle of real work. Outside it the walk is not yet periodic — parked
+            // before the start it plays *forward* into the range, and past the end it snaps in on
+            // the first step — but reaching the range costs at most the scene's length in steps.
+            if looping, frame >= start, frame <= end {
+                remaining = taken + (remaining - taken) % (end - start + 1)
+                if taken >= remaining { break }
+            }
+            guard frame < end else {
+                guard looping else {
+                    ranOff = true
+                    break
+                }
+                frame = start
+                taken += 1
+                continue
+            }
+            frame += 1
+            taken += 1
         }
-        currentFrame += 1
-        return true
+        if frame != currentFrame { currentFrame = frame }
+        return !ranOff
+    }
+
+    // MARK: - The playback clock
+    //
+    // The clock lives here and not on `AnimationTimeline`, which owned it as two `@State`s and a
+    // `Timer` until 2026-09-01. Four defects came with that and all four are structural rather than
+    // fixable in place: the timer ran in the default run-loop mode, so playback stalled during any
+    // scroll or drag; `1.0 / fps` was captured into the timer's interval when play was pressed, so
+    // a rate change mid-play did nothing; there was no wall clock, so a late tick *stretched* time
+    // instead of skipping and the clock drifted; and nothing outside that one view could see that
+    // playback was running. The last is the one that blocked work rather than merely being wrong —
+    // a background baker cannot prebake ahead of a playhead it cannot observe (RENDER §3.6-3.7),
+    // and audio (TODO 28) and keyframe scrubbing (KEYFRAMES §5) need the same hoist.
+
+    /// Whether the animation is playing. Observable, so anything in the app can ask — which is the
+    /// half of this that the view could not provide at all.
+    @Published private(set) var isPlaying: Bool = false
+
+    /// The wall clock playback derives its position from, injectable so a logic test can hand it
+    /// numbers rather than sleeping through real frames.
+    ///
+    /// Foundation only. RENDER §2.6 rules out anything one OS can signal and another cannot, which
+    /// is why this is not `CACurrentMediaTime` or a `CADisplayLink`.
+    var playbackNow: () -> TimeInterval = { Date.timeIntervalSinceReferenceDate }
+
+    private var playbackClock: PlaybackClock?
+    private var playbackTimer: Timer?
+
+    /// How much faster than the frame rate the tick source asks. The tick only sets the *resolution*
+    /// of the answer — `PlaybackClock` decides how many frames are actually due — but a tick source
+    /// running at exactly `1/fps` lands 0 frames on one fire and 2 on the next as the two clocks
+    /// beat against each other, which reads as judder. Oversampling costs a handful of integer
+    /// comparisons a second and removes the beat.
+    private static let playbackTickOversample: Double = 3
+
+    /// Play, from `playbackEntryFrame()`.
+    func play() {
+        guard !isPlaying else { return }
+        currentFrame = playbackEntryFrame()
+        playbackClock = PlaybackClock(startedAt: playbackNow())
+        isPlaying = true
+        schedulePlaybackTimer()
+    }
+
+    /// Stop, from wherever. Idempotent — `@Published` fires on every write, equal or not, so the
+    /// guard is what keeps a stop from a view that is merely disappearing off the invalidation path.
+    func stopPlayback() {
+        guard isPlaying else { return }
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+        playbackClock = nil
+        isPlaying = false
+    }
+
+    func togglePlayback() {
+        if isPlaying { stopPlayback() } else { play() }
+    }
+
+    /// Hands the playhead whatever frames the wall clock says are due, and stops playback if that
+    /// ran off the end. Called by the tick source, and directly by tests driving `playbackNow`.
+    func tickPlayback() {
+        guard isPlaying, var clock = playbackClock else { return }
+        let due = clock.take(at: playbackNow(), fps: fps)
+        playbackClock = clock
+        guard due > 0 else { return }
+        if !advancePlayback(by: due) { stopPlayback() }
+    }
+
+    private func schedulePlaybackTimer() {
+        playbackTimer?.invalidate()
+        let interval = 1.0 / (Double(max(fps, 1)) * Self.playbackTickOversample)
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            self.tickPlayback()
+        }
+        // `.common`, not the default mode: a timer in the default mode does not fire while a scroll
+        // view or a drag gesture is tracking, so playback used to freeze for as long as the artist
+        // held a finger on the timeline.
+        RunLoop.main.add(timer, forMode: .common)
+        playbackTimer = timer
+    }
+
+    private func rebasePlaybackClock() {
+        guard isPlaying else { return }
+        playbackClock?.rebase(at: playbackNow())
+        // The tick source's interval is derived from the rate, so it is re-cut with it.
+        schedulePlaybackTimer()
     }
 
     // MARK: - Drawing updates

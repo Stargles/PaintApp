@@ -10,9 +10,6 @@ struct AnimationTimeline: View {
     /// rather than accumulating rounding from each `onChanged`.
     @State private var resizeStartHeight: CGFloat?
 
-    @State private var isPlaying: Bool = false
-    @State private var playbackTimer: Timer?
-
     /// Height available to the timeline's container, supplied by the parent so the maximum size
     /// respects Split View instead of assuming the whole screen.
     var availableHeight: CGFloat = 1024
@@ -155,7 +152,7 @@ struct AnimationTimeline: View {
         // three popovers below, `CanvasManager.dismissPresentationsOverLiveCanvas()` closes them
         // from one place, and `StrokeGiveUp.interrupted` is what makes a mid-sequence teardown cost
         // the artist nothing worse than a short stroke they can undo.
-        .onDisappear { stopPlayback() }
+        .onDisappear { canvasManager.stopPlayback() }
     }
 
     /// Height of the grab handle plus whichever bar is showing — the fixed chrome above the tracks.
@@ -453,8 +450,8 @@ struct AnimationTimeline: View {
             }
             .accessibilityIdentifier("timeline.stepBackButton")
 
-            Button(action: togglePlayback) {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            Button(action: canvasManager.togglePlayback) {
+                Image(systemName: canvasManager.isPlaying ? "pause.fill" : "play.fill")
             }
             .accessibilityIdentifier("timeline.playButton")
 
@@ -985,32 +982,5 @@ struct AnimationTimeline: View {
             let below = reordered.indices.contains(newIndex + 1) ? reordered[newIndex + 1] : nil
             canvasManager.restackLayer(moved.id, above: anchor(below), parentFolderID: parentFolderID)
         }
-    }
-
-    // MARK: - Playback
-
-    /// Play/pause. Where playback stops or wraps is `CanvasManager`'s call (`advancePlayback`), which
-    /// treats a missing loop marker as the first/last frame: looping on wraps at the end back to the
-    /// start, looping off runs to the end and stops there instead of sitting on the last frame with
-    /// the timer still ticking.
-    private func togglePlayback() {
-        if isPlaying {
-            stopPlayback()
-            return
-        }
-        canvasManager.goToFrame(canvasManager.playbackEntryFrame())
-        isPlaying = true
-        let interval = 1.0 / Double(max(canvasManager.fps, 1))
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            DispatchQueue.main.async {
-                if !canvasManager.advancePlayback() { stopPlayback() }
-            }
-        }
-    }
-
-    private func stopPlayback() {
-        playbackTimer?.invalidate()
-        playbackTimer = nil
-        isPlaying = false
     }
 }

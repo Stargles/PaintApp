@@ -74,6 +74,14 @@ struct ContentView: View {
         // so testing `newPhase` alone saved three times per app switch and stalled the return leg.
         // `ScenePhaseSaveGate` carries the reasoning and the transition matrix.
         .onChange(of: scenePhase) { oldPhase, newPhase in
+            // Playback ends when the app leaves the foreground, and this is not politeness — the
+            // playhead is derived from elapsed *wall* time (see `CanvasManager.play()`), so an
+            // animation left playing through a two-minute phone call would come back having
+            // "played" three thousand frames the artist never saw, and would pay for them on the
+            // first tick after the return.
+            if newPhase != .active {
+                canvasManager.stopPlayback()
+            }
             if ScenePhaseSaveGate.shouldSave(from: oldPhase, to: newPhase) {
                 // `.automatic`: this save must never stop to ask. There may be no screen to present
                 // on and no time to present it in, and on a damaged, unanswered document it writes to
