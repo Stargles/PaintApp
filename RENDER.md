@@ -388,7 +388,10 @@ on every edit, or a hash of the cel's encoded tiers. Stage 6 decides which; stag
 default store dies with the process.
 
 A small **decoded ring** holds the frames just ahead of the playhead, under a byte budget rather than a count. Play
-never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from it.
+never decodes on the display thread: the scheduler decodes ahead into the ring and the tick reads from it. **The
+bake loop alone cannot do that** — it only rings frames it visits, and playback dirties nothing — so
+`FrameBaker.fillRingAhead` (stage 4d) tops the window up from `keyByFrame` when the queue drains, walking outward
+only, because the ring is routinely narrower than the lookahead and a rescan would churn forever.
 
 **The read path is `store.loadDecoded(key) -> DecodedFrame?` → `ring.insert` → `.makeImage()`, and there is no
 second spelling beside it (stage 4c).** `load(_:) -> CGImage?` and `FrameBakeStore.image(fromBGRA:)` are
@@ -411,10 +414,14 @@ on the main actor — a cel edit dirties `[startFrame, endFrame)` of that cel's 
 mask, blend, effect track) dirties every frame. The exact test is the key (§3.3): a dirty frame whose recomputed
 key already has a file costs nothing, which is how a scrub through a hold is free.
 
-The baker also produces the three sandwich halves for the current frame (`full` keyed as above; `below` and `above`
-additionally by the active leaf), so the live canvas is served by the same worker and the same memo, and the stroke
-still sits between two finished pictures. **The single-slot drop-if-busy behaviour of `isSandwichRebuilding`
-(`CanvasView.swift:1490`) is not inherited**: the queue reorders, it never discards.
+The baker produces `full`, which is what the live canvas shows at rest; `below` and `above` — keyed additionally
+by the active leaf, transient, never stored — stay on `CanvasView`'s own `sandwichQueue`, so the stroke still sits
+between two finished pictures. **This paragraph asked for one worker and wanted one memo, and stage 4d found the
+memo is bought by the *size*:** `PixelOps.rasterize` and `MaskResolver.CacheKey` are keyed on the buffer, so the
+bake mints at `.liveComposite` and the three share their flattens across two queues. That also lets the halves keep
+`.userInitiated` while the bake keeps `.utility`, which is what §2 asks for. **`isSandwichRebuilding` is mutual
+exclusion, not a discard** — `finishSandwichRebuild` re-derives the key and starts the rebuild it declined, the same
+contract `FrameBaker.isBaking` has. The queue reorders, it never discards; that was already true on both sides.
 
 **Built 2026-09-02 (stage 4c): `Engine/FrameBaker.swift`.** `CanvasView.startSandwichRebuild`'s idiom — a
 `@MainActor` owner, a serial `DispatchQueue` at `.utility`, a hop back — with `isBaking` as mutual exclusion
@@ -470,9 +477,10 @@ from `canvasInteractionBegan()` (a touch about to become an edit), the timeline'
 backgrounded app would otherwise return owing every frame of the time it was away. TODO (28) and KEYFRAMES §5 get
 the hoist they needed.
 
-What this stage did **not** build, and stage 4 still owes: a tick reads the ring. If the frame is not baked the
-previous picture stays (§2.10). The timeline shows which frames are baked, the way KEYFRAMES §4.6 wanted for
-spans.
+A tick reads the ring, since stage 4d: `currentFrame` publishes, the canvas reconciles, and `updateSandwich` asks
+`FrameBaker.image(atFrame:)`, which is the ring then the store then a miss. If the frame is not baked the previous
+picture stays (§2.10). **The timeline's baked-frame indication is still owed** — `isBaked(atFrame:)` and
+`onFrameFinished` are the read path it wants and nothing consumes them yet.
 
 ### 3.8 Full means full
 
@@ -569,9 +577,7 @@ it is the dependency order.
    `Engine/BakeQueue.swift` and `Engine/DecodedFrameRing.swift` landed the same day from the other half of the
    stage. **4c is done, 2026-09-02** — `Engine/FrameBaker.swift` is the serial loop that joins all five, plus
    the read path (`loadDecoded` → ring → `makeImage`) and the digest→frames map nothing else could own; §3.6
-   above carries the dirty-marking finding and §3.5 the deletion. **Still owed (4d): the wiring** — the live
-   canvas and play reading frames out of the baker, the timeline's baked-frame indication, and the device
-   measurement of both the ratio and the decode time on the owner's "UI Test" document.
+   above carries the dirty-marking finding and §3.5 the deletion. **4d is done** — see below.
 
    MEASURED on a dedicated iOS 26.5 simulator: `FrameBakerLogicTests`, **21 tests, 0 failed, 0 skipped**,
    static `func test` count reconciled at 21; fast tier **2468 / 2465 passed / 0 failed / 3 skipped** against
@@ -589,6 +595,52 @@ it is the dependency order.
    `Compositor.composite`, which is once per *chunk*: every count in that suite rests on a 64² canvas planning
    as one chunk, which is why `testABakeOfOneFrameIsExactlyOneComposite` exists as its own test rather than as
    an assumption inside five others.
+
+   **4d is done, 2026-09-02 — the wiring.** `CanvasManager` owns the baker (`syncFrameBake`), the app purges
+   the whole bake root at launch (§2.11), and `CanvasView.updateSandwich` reads the rest picture out of it
+   instead of compositing it. `startSandwichRebuild` produces **two** halves now; `SandwichFullKey` and the
+   layer-tap reuse rule it existed for are deleted, because a key with no field for the active leaf makes a
+   layer tap a ring hit rather than a composite worth skipping. Fast tier **2474 / 2471 passed / 0 failed /
+   3 skipped** against 2468 / 2465 / 0 / 3 at `84d2dff`, a delta of +7 new and −1 deleted.
+
+   Four things came out differently from what this section and §3.6 said.
+
+   - **The bake mints at `.liveComposite`, not `.native`, and §3.6's *"served by the same worker and the
+     same memo"* is bought by the size rather than by the queue.** `PixelOps.rasterize`'s memo is keyed on
+     cel version **and size**, and so is `MaskResolver.CacheKey`. A bake at `.native` beside halves at
+     `liveCompositeSize` flattens every cel twice at two sizes into one byte-budgeted memo, and the two
+     working sets evict each other — §11's 276 ms flatten doubled, on the knob position the artist chose to
+     make things cheaper. So the mid-stroke halves **stay on `sandwichQueue`** and that is a documented
+     boundary rather than an omission: they are a different product (cut at the active leaf, wanted *now* on
+     the artist's own gesture, never stored) and they want `.userInitiated` where the bake wants `.utility`.
+     Sharing the size is what §3.6 actually needed. The knob is now inside the bake, which is also what §2.8
+     wants of an export that reads these files and what makes `defaultRoot`'s per-resolution directory
+     something other than three copies of one picture; `affordableSize` is inside it too and stays §2.12's
+     known defect until stage 5 removes it from that one function, which keeps the two sizes moving together.
+   - **`isSandwichRebuilding` is not a discard, and §3.6's claim that its behaviour "is not inherited" was
+     already satisfied.** `finishSandwichRebuild` ends in `reconcileLayers()`, which re-derives the key from
+     the model and starts the rebuild the guard declined — the same "waits one iteration" contract
+     `FrameBaker.isBaking` has. Deleting the guard is not available: the halves run on a **serial** queue, so
+     one rebuild per SwiftUI pass would hand a two-second scrub a backlog of ~120 jobs, ~20 s of
+     `.userInitiated` work for pictures nobody will see. The flag stays; the comment claiming the declined
+     request is "simply lost" is what was wrong and is gone.
+   - **The loop cannot fill the ring on its own.** A bake job rings the frame it wrote, so the ring is warm
+     for whatever the pass that *dirtied* the document reached — and playback dirties nothing. On the second
+     lap every frame is clean, `BakeQueue.next` answers nil, and every tick past the surviving handful would
+     decode on the display thread, which is exactly what §3.5 rules out. `FrameBaker.fillRingAhead` closes it
+     from `keyByFrame`, one frame per iteration under the same `isBaking` exclusion. **It needs an outward-only
+     marker or it does not terminate**: the ring is routinely narrower than the lookahead (24 frames at 8.4 MB
+     is 200 MB against a 96 MiB budget), so a plain rescan fills a far frame, evicts a near one, finds the near
+     one missing, and never converges — while leaving the *far* end of the window resident, which is backwards.
+   - **"Rest" is now an eventual state in the UI tests**, and every instant `XCTAssertEqual(sandwichState,
+     "rest")` had to become `waitForSandwichState`. MEASURED on the iOS 26.5 simulator at the app's default
+     2048² canvas: **0.40 s to rest after a stroke, 0.024 s after a frame step** — §2.13's "split second",
+     with the artist's ink on screen throughout because the mid-stroke pair is what is held until it lands.
+     The old path composited `full` at `.userInitiated` in the same turn, so no test had ever had to wait.
+
+   **Still owed from stage 4:** the timeline's baked-frame indication (`FrameBaker.isBaked(atFrame:)` and
+   `onFrameFinished` are the read path it wants, and nothing consumes them yet), and the device measurement of
+   the compression ratio and the decode time on the owner's "UI Test" document.
 
    **4e is done, 2026-09-02, on the owner's iPad in Release** — the ratio, the decode and the encode
    measured on artwork at 2048x1024, 2048² and 4096², in `PerfBaselineTests`; §3.5 above carries what it

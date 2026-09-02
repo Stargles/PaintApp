@@ -28,6 +28,37 @@ class PaintUITestCase: XCTestCase {
         return String(first.dropFirst("sandwich:".count))
     }
 
+    /// Waits until the canvas reports `state`, and asserts it got there.
+    ///
+    /// **Every assertion that the canvas is at "rest" is a wait since RENDER.md stage 4d**, and the
+    /// reason is the same one `waitForPixel` already gives for pixels: the picture at rest is now the
+    /// **baked** frame, produced by `FrameBaker` on a `.utility` queue and read back off disk, so
+    /// lift no longer snaps the canvas back inside the same turn. §2.13 rules that acceptable in the
+    /// owner's own words — *"a canvas that shows the previous composite for a split second after
+    /// pen-up is acceptable, provided the main thread never freezes"* — and MEASURED on the iOS 26.5
+    /// simulator at the app's default 2048² canvas it is **0.40 s after a stroke and 0.024 s after a
+    /// frame step**. An instant `XCTAssertEqual` against "rest" is therefore a race that reads as a
+    /// broken renderer; it fails with "stroke", which is exactly what a bake that never arrived also
+    /// looks like.
+    ///
+    /// **"off" is not waited for and must not be**: disengaging is synchronous (it is a branch in
+    /// `updateSandwich`, not a composite), so a wait there would hide a canvas that took a moment to
+    /// give up the compositor.
+    @discardableResult
+    func waitForSandwichState(_ app: XCUIApplication, _ state: String,
+                              timeout: TimeInterval = 20,
+                              _ message: String = "",
+                              file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if sandwichState(app) == state { return true }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTFail("The canvas never reached \"\(state)\" (it is \"\(sandwichState(app))\"). \(message)",
+                file: file, line: line)
+        return false
+    }
+
     /// Sets the active layer's blend mode through the options panel, leaving the panel closed.
     ///
     /// Shared for `sandwichState`'s reason: a blending leaf is the cheapest document Core Animation

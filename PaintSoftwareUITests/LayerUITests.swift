@@ -1120,8 +1120,8 @@ final class SandwichCompositingUITests: PaintUITestCase {
 
         setBlendMode(app, layerIndex: 0, to: "multiply")
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 0)?.strokes, 0, "Setup: nothing drawn yet")
-        XCTAssertEqual(sandwichState(app), "rest",
-                       "A blending leaf is exactly the document Core Animation cannot draw, so the compositor should have taken over")
+        waitForSandwichState(app, "rest",
+                             "A blending leaf is exactly the document Core Animation cannot draw, so the compositor should have taken over")
 
         setBrushColor(app, hex: "00FFFF")
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.5), to: CGVector(dx: 0.55, dy: 0.5))
@@ -1161,7 +1161,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         setBlendMode(app, layerIndex: 0, to: "multiply")
-        XCTAssertEqual(sandwichState(app), "rest", "Setup: a blending leaf puts the canvas on the compositor")
+        waitForSandwichState(app, "rest", "Setup: a blending leaf puts the canvas on the compositor")
         XCTAssertEqual(midStrokeEntries(app), 0, "Setup: nothing drawn, so the mid-stroke picture has never been shown")
         setBrushColor(app, hex: "00FFFF")
 
@@ -1174,7 +1174,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
         // Let the 400 ms thumbnail-regen debounce land before the stroke under test, so its publish
         // cannot supply the SwiftUI pass whose absence is the whole subject.
         Thread.sleep(forTimeInterval: 1.5)
-        XCTAssertEqual(sandwichState(app), "rest", "Setup: settled back to rest, so every host is blanked again")
+        waitForSandwichState(app, "rest", "Setup: settled back to rest, so every host is blanked again")
 
         // Stroke two, on fresh paper. The cel already exists, so nothing publishes at touch-down.
         let second = CGVector(dx: 0.45, dy: 0.65)
@@ -1187,7 +1187,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
                        "The second stroke has to show the artist their ink too. A count still at 1 means the mid-stroke picture was never put up for it — the active host stayed blanked by §5.2 for the whole gesture and the stroke only appeared on lift")
 
         XCTAssertNotNil(waitForPixel(canvas, at: second) { !isWhitish($0) }, "The stroke survives the lift")
-        XCTAssertEqual(sandwichState(app), "rest", "…and the canvas goes back to `composite(full)`")
+        waitForSandwichState(app, "rest", "…and the canvas goes back to the baked frame")
     }
 
     /// **§11's done-criterion for phase 5b: a Multiply layer looks multiplied on the canvas the
@@ -1210,7 +1210,7 @@ final class SandwichCompositingUITests: PaintUITestCase {
 
         setBlendMode(app, layerIndex: 1, to: "multiply")
 
-        XCTAssertEqual(sandwichState(app), "rest")
+        waitForSandwichState(app, "rest")
         guard let multiplied = waitForPixel(canvas, at: crossing, matches: { $0.r < 80 }) else {
             return XCTFail("The canvas never showed the multiply")
         }

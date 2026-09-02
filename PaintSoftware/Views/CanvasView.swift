@@ -42,8 +42,8 @@ struct CanvasView: UIViewRepresentable {
         paper.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paper)
 
-        // §5.2's sandwich: two views, three cached images. At rest the lower one carries
-        // `composite(full)` and the upper one is empty; mid-stroke they carry `below` and `above`
+        // §5.2's sandwich: two views, three images from two producers. At rest the lower one carries
+        // the **baked frame** and the upper one is empty; mid-stroke they carry `below` and `above`
         // with the active layer's own host between them. Added here so the *disengaged* z-order is
         // already `below < onionSkin < above < chrome`; `reconcileLayers` is what lifts `above` over
         // the layer hosts once the sandwich engages. See `updateSandwich`.
@@ -1009,7 +1009,10 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.sandwichEngagesOnCanvas(tree: tree)
         }
 
-        /// Which of the three cached images the canvas is showing right now.
+        /// Which picture the canvas is showing right now — and, since RENDER.md stage 4d, whether the
+        /// bake for this frame has landed: `rest` is reached only when `sandwichFullKey` names the
+        /// frame the artist is on (`updateSandwich`'s trap 2), so an XCUITest reading "stroke" long
+        /// after lift is reading a bake that never arrived.
         ///
         /// Published on `canvas.host` for the same reason `LayerStackCell` carries its markers: which
         /// of two rendering paths the canvas is on is not otherwise visible to an XCUITest, and "the
@@ -1151,7 +1154,7 @@ struct CanvasView: UIViewRepresentable {
             view.contentMode = .scaleToFill
             view.layer.magnificationFilter = .nearest
             // Mipmapped the other way, for the reason `LayerHostView.init` measures: at rest this
-            // view carries `composite(full)`, so it is how the *whole picture* reaches the screen
+            // view carries the baked frame, so it is how the *whole picture* reaches the screen
             // and an un-mipmapped minification loses thin ink out of all of it at once. Set here
             // rather than beside `magnificationFilter`'s reduced-composite switch in
             // `updateSandwich` because the answer does not depend on the composite's size —
@@ -1445,7 +1448,7 @@ struct CanvasView: UIViewRepresentable {
         // `MaskResolver`'s cache turned out to need exactly the same answer; the request carries it
         // for both. Its doc comment carries the reasoning this key exists at all.
 
-        /// What §5.2's three cached composites depend on — everything *except* the live stroke.
+        /// What §5.2's cached composites depend on — everything *except* the live stroke.
         ///
         /// The same rule governs what may be in it as governs `InterpolationPreviewKey` above: every
         /// evaluation input, and nothing that moves per dab. **It is no longer *modelled* on that key,
