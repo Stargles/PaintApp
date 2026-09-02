@@ -30,7 +30,10 @@ app, and whoever notices that should come back and say so rather than assuming i
 
 ## In flight
 
-- **(29) Rendering** — design stage, spec at [RENDER.md](RENDER.md). Its §2 is fourteen owner rulings.
+- **(29) Rendering** — spec at [RENDER.md](RENDER.md), whose §2 is sixteen owner rulings and §5 the
+  build order. **Stages 0 and 1 are merged**; the live stroke no longer scales with canvas area and the
+  playback clock is the model's. **Stage 2 — the recipe — is next**, and it is what removes the pen-up
+  freeze.
 
 - **(21) Keyframes — stages 0 through 3b merged**, spec at [KEYFRAMES.md](KEYFRAMES.md). 3b's last
   half was the graph editor, D1 through D4: `4329e3d` row geometry, `931b859` the band, `bf423f0` the
