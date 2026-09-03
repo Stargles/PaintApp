@@ -193,6 +193,26 @@ enum TimelineKeyMarkers {
 
     // MARK: - Geometry
 
+    /// **The leading edge of a frame's column — where a gridline segmenting the timeline is drawn,
+    /// and the x every column-aligned rect already used before this had a name for it**: the
+    /// playhead (`TimelineTrackView.movePlayhead`), a cel's slot (`TimelineRowView.update`) and the
+    /// ruler's own tick (`TimelineRulerView.draw`) all place their column at this x — TODO (38)(a).
+    ///
+    /// **Not `centerX`.** A gridline marks the boundary *between* two frames, the way a spreadsheet's
+    /// column rule does; a key marker sits *inside* one, at its middle, which is `centerX`'s reason
+    /// for existing. The two are exactly half a column apart for every `(frame, pixelsPerFrame)` —
+    /// `testAGridlineSitsHalfAColumnBeforeItsFramesMarker` pins the relationship rather than the
+    /// number, so a marker on frame N is provably framed by the gridlines at N and N+1.
+    static func columnX(frame: Int, pixelsPerFrame: CGFloat) -> CGFloat {
+        CGFloat(frame) * pixelsPerFrame
+    }
+
+    /// How wide a gridline is drawn. A geometry value rather than a colour, so it lives here beside
+    /// `columnX` rather than on `TimelineGridlinesView` — the one thing about the line a headless
+    /// test can reason about without the view file that draws it, e.g. that it stays well inside the
+    /// gap between two adjacent columns at the pinch's most zoomed-out step.
+    static let gridlineWidth: CGFloat = 1
+
     /// The centre of a frame's column. Markers are centred **in** the column rather than sitting on
     /// its leading edge, which is what puts a key at the middle of the frame the playhead highlights
     /// — the playhead is a column of the same width, not a hairline, so an edge-aligned marker would

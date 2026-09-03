@@ -250,7 +250,8 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
         for zoom in [floorZoom, defaultZoom] {
             for frame in [0, 1, 37] {
                 let center = TimelineKeyMarkers.centerX(frame: frame, pixelsPerFrame: zoom)
-                let column = CGRect(x: CGFloat(frame) * zoom, y: 0, width: zoom, height: 1)
+                let column = CGRect(x: TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: zoom),
+                                    y: 0, width: zoom, height: 1)
                 XCTAssertGreaterThan(center, column.minX)
                 XCTAssertLessThan(center, column.maxX)
                 XCTAssertEqual(center, column.midX, accuracy: 0.0001)
@@ -295,6 +296,69 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
                            + TimelineKeyMarkers.markerWidth / 2,
                        accuracy: 0.0001,
                        "The capping diamonds are inside the rect, so the bar between them is exactly centre-to-centre")
+    }
+
+    // MARK: - Gridlines (TODO 38a): the timeline and the graph editor share one column x
+
+    /// **The load-bearing relationship, and the reason `columnX` is not just `centerX` minus a
+    /// constant re-typed here.** A gridline (`columnX`) marks the boundary between two frames; a key
+    /// marker (`centerX`) sits at the middle of one. If a gridline for frame N and the marker for
+    /// frame N are the same feature reading off two different formulas, this is the one algebraic
+    /// fact that has to hold for every zoom: the marker sits exactly half a column to the right of
+    /// its own frame's line, for any `(frame, pixelsPerFrame)` — not just the pair this test happens
+    /// to pick. Break either function's offset (drop the `+ 0.5`, or add one to `columnX`) and this
+    /// goes red; it does not go red for a bug that leaves both conventions internally self-consistent
+    /// but wrong in the same direction, which is the one thing an equality against a re-typed number
+    /// would not catch either.
+    func testAGridlineSitsHalfAColumnBeforeItsFramesMarker() {
+        for zoom in [floorZoom, defaultZoom, TimelineKeyMarkers.pixelsPerFrameRange.upperBound] {
+            for frame in [0, 1, 37, 250] {
+                let line = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: zoom)
+                let marker = TimelineKeyMarkers.centerX(frame: frame, pixelsPerFrame: zoom)
+                XCTAssertEqual(marker - line, zoom / 2, accuracy: 0.0001)
+            }
+        }
+    }
+
+    /// **Gridlines segment the timeline — they have to tile with no gap and no overlap.** The line
+    /// for frame N+1 is exactly one column-width to the right of frame N's, at every zoom in the
+    /// pinch range, which is what makes the space between two consecutive lines legible as "frame N"
+    /// with nothing left over and nothing double-covered.
+    func testConsecutiveGridlinesAreExactlyOneColumnApart() {
+        for zoom in [floorZoom, defaultZoom, TimelineKeyMarkers.pixelsPerFrameRange.upperBound] {
+            for frame in [0, 1, 37, 250] {
+                let here = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: zoom)
+                let next = TimelineKeyMarkers.columnX(frame: frame + 1, pixelsPerFrame: zoom)
+                XCTAssertEqual(next - here, zoom, accuracy: 0.0001)
+            }
+        }
+    }
+
+    /// A point sitting exactly on a gridline belongs to the frame the line opens — the same inverse
+    /// `centerX`'s own round-trip test uses, now checked at the boundary rather than at the middle.
+    /// `TimelineGraphBand.frameDelta` and the ruler's own scrub both resolve a touch through this
+    /// function, so this is what makes a tap that lands exactly on a drawn line resolve to the frame
+    /// on its right rather than the one it closes.
+    func testAPointOnAGridlineMapsToTheFrameItOpens() {
+        for zoom in [floorZoom, defaultZoom] {
+            for frame in [0, 1, 37, 250] {
+                let line = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: zoom)
+                XCTAssertEqual(TimelineKeyMarkers.frame(atX: line, pixelsPerFrame: zoom), frame)
+            }
+        }
+    }
+
+    /// **Density needed no decision beyond the one the pinch already makes.** A gridline is a 1 pt
+    /// hairline; `minimumSeparation` (12 pt) is the distance a 9 pt marker *diamond* needs to keep
+    /// from its neighbour before the pair reads as one serrated shape. Pinning that the floor of the
+    /// zoom range still leaves several hairline-widths of daylight between two adjacent columns is
+    /// what backs "every frame, at every zoom, no thinning" rather than that being an assertion
+    /// about a screenshot nobody re-checks when the pinch range moves.
+    func testTheZoomFloorLeavesRoomForAGridlineOnEveryFrame() {
+        let apart = TimelineKeyMarkers.columnX(frame: 1, pixelsPerFrame: floorZoom)
+            - TimelineKeyMarkers.columnX(frame: 0, pixelsPerFrame: floorZoom)
+        XCTAssertGreaterThan(apart, TimelineKeyMarkers.gridlineWidth * 5,
+                             "Adjacent gridlines at the most zoomed-out pinch step still clear five line-widths of daylight")
     }
 
     // MARK: - What a UI test can read

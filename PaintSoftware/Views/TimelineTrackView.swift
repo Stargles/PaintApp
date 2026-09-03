@@ -115,6 +115,9 @@ struct TimelineTrackView: UIViewRepresentable {
         private var pinchAnchorLocationInScrollView: CGFloat = 0
 
         private let rulerView = TimelineRulerView()
+        /// TODO (38)(a)'s frame gridlines. `contentView`'s first subview — see its own doc for why
+        /// that ordering is the point.
+        private let gridlinesView = TimelineGridlinesView()
         /// RENDER §3.7's baked-frame indication, hung over the ruler's bottom edge.
         private let bakeBarView = TimelineBakeBarView()
         private var rowViews: [TimelineRowView] = []
@@ -260,6 +263,18 @@ struct TimelineTrackView: UIViewRepresentable {
             if scrollView.contentSize != contentView.frame.size {
                 scrollView.contentSize = contentView.frame.size
             }
+
+            // **Inserted at index 0, ahead of every other subview added below**, so it is the one
+            // thing every one of them — the ruler, the bake bar, every row, the graph band — is
+            // drawn over rather than under. See the view's own doc for why it spans the ruler as
+            // well as the rows.
+            if gridlinesView.superview == nil {
+                contentView.insertSubview(gridlinesView, at: 0)
+            }
+            gridlinesView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
+            gridlinesView.frameCount = sceneFrameCount
+            gridlinesView.pixelsPerFrame = pixelsPerFrame
+            gridlinesView.setNeedsDisplay()
 
             if rulerView.superview == nil {
                 rulerView.isAccessibilityElement = true
@@ -853,7 +868,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
             rulerView.currentFrame = canvasManager.currentFrame
             playheadView.frame = CGRect(
-                x: CGFloat(canvasManager.currentFrame) * pixelsPerFrame,
+                x: TimelineKeyMarkers.columnX(frame: canvasManager.currentFrame, pixelsPerFrame: pixelsPerFrame),
                 y: 0,
                 width: pixelsPerFrame,
                 height: totalHeight - 8
@@ -1246,7 +1261,7 @@ private final class TimelineRulerView: UIView {
     /// The tapped frame's column, in window coordinates — the anchor the loop menu hangs off, so it
     /// appears over that column rather than centred on the timeline panel.
     private func columnRectInWindow(frame: Int) -> CGRect {
-        let rect = CGRect(x: CGFloat(frame) * pixelsPerFrame, y: 0, width: pixelsPerFrame, height: bounds.height)
+        let rect = CGRect(x: TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame), y: 0, width: pixelsPerFrame, height: bounds.height)
         return convert(rect, to: nil)
     }
 
@@ -1281,9 +1296,65 @@ private final class TimelineRulerView: UIView {
             .foregroundColor: UIColor.gray
         ]
         for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame, frameCount: frameCount) {
-            let x = CGFloat(frame) * pixelsPerFrame + 2
+            let x = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame) + 2
             let text = "\(frame + 1)" as NSString
             text.draw(at: CGPoint(x: x, y: 2), withAttributes: attrs)
+        }
+    }
+}
+
+/// **Frame gridlines — TODO (38)(a): "add vertical grey lines to segment the timeline so that I can
+/// see which frame is which."**
+///
+/// A sibling spanning the whole content height rather than something the ruler or each row draws
+/// for itself, because the ask covers the ruler strip *and* the track beneath it: one rule for the
+/// full height reads as one thing, where a rule drawn separately at ruler height and at row height
+/// would seam at the boundary between them. Inserted as `contentView`'s **first** subview — behind
+/// the ruler, the bake bar, every row and the graph band, all of which are added after it — so a
+/// line never sits on top of a cel's picture, only behind it.
+///
+/// **Every frame, at every zoom — density needed no decision beyond the one the pinch already
+/// makes.** `TimelineKeyMarkers.pixelsPerFrameRange` floors `pixelsPerFrame` at 10.5 pt — the same
+/// floor `minimumSeparation` (12 pt) is measured against to decide when two 9 pt *marker* diamonds
+/// start to crowd. A gridline is a 1 pt hairline, not a 9 pt diamond, so at that same floor it still
+/// has ~9.5 pt of daylight either side and never approaches a wash. Below the pinch floor there is
+/// no reachable zoom to thin lines *at*, so an every-Nth-frame rule would be answering a question
+/// this geometry does not ask — unlike the marker collapse, which exists because diamonds really do
+/// touch at that floor.
+///
+/// **The graph editor draws its own copy of this rather than being drawn on by this view.** The band
+/// sits above this view in `contentView`'s z-order and paints its own near-opaque backdrop
+/// (`TimelineGraphBand.backgroundWhite`) over it, so a line only this view drew would be washed out
+/// exactly where the ask most wants it kept — "Same with the graph editor." `TimelineGraphBandView.draw`
+/// draws the identical line, at the identical x, behind its curves instead.
+private final class TimelineGridlinesView: UIView {
+    /// Shared with `TimelineGraphBandView`, so the timeline and the graph editor rule off the same
+    /// grey — the TODO heading's "should read as one thing" made literal for this one property.
+    /// Width is `TimelineKeyMarkers.gridlineWidth`, not a second constant here — see its own doc for
+    /// why it lives on the geometry side of the split instead.
+    static let lineColor = UIColor.gray.withAlphaComponent(0.22)
+
+    var frameCount: Int = 0
+    var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Clipped to `rect` by `TimelineRulerClip`, for the reason its own doc gives: partial
+    /// invalidation should cost what is redrawn, not the whole scene.
+    override func draw(_ rect: CGRect) {
+        guard pixelsPerFrame > 0, frameCount > 0 else { return }
+        Self.lineColor.setFill()
+        for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame, frameCount: frameCount) {
+            let x = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame)
+            UIRectFill(CGRect(x: x, y: 0, width: TimelineKeyMarkers.gridlineWidth, height: bounds.height))
         }
     }
 }
@@ -1715,6 +1786,23 @@ private final class TimelineGraphBandView: UIView {
                                                         frameCount: content.frameCount)
         else { return }
 
+        // TODO (38)(a): "Same with the graph editor." The identical line at the identical x
+        // (`TimelineKeyMarkers.columnX`, `TimelineGridlinesView.lineColor`), drawn here rather than
+        // relying on `TimelineGridlinesView` showing through from behind — this view paints its own
+        // near-opaque backdrop (`TimelineGraphBand.backgroundWhite`) over that view in `contentView`'s
+        // z-order, which would wash a line drawn only there out to nothing. Drawn first, so it sits
+        // behind every curve below. Spans the full row width the backdrop already covers rather than
+        // stopping at the document's `content.frameCount` — `sampling` stops there because a curve has
+        // nothing to say past the document's end, but the ruled panel underneath continues exactly as
+        // far as `TimelineGridlinesView` does on the rows beside it.
+        let displayedFrameCount = max(content.frameCount, Int((bounds.width / pixelsPerFrame).rounded(.up)))
+        TimelineGridlinesView.lineColor.setFill()
+        for frame in TimelineRulerClip.frames(in: rect, pixelsPerFrame: pixelsPerFrame,
+                                              frameCount: displayedFrameCount) {
+            let x = TimelineKeyMarkers.columnX(frame: frame, pixelsPerFrame: pixelsPerFrame)
+            UIRectFill(CGRect(x: x, y: 0, width: TimelineKeyMarkers.gridlineWidth, height: bounds.height))
+        }
+
         for channel in content.channels {
             let range = TimelineGraphBand.range(uiRange: channel.uiRange,
                                                 keyValues: channel.curve.keys.map(\.value))
@@ -1979,7 +2067,7 @@ private final class TimelineRowView: UIView {
                 return v
             }()
             let displacedFrames = displacements[cel.id] ?? 0
-            let slotX = CGFloat(segment.start + displacedFrames) * pixelsPerFrame
+            let slotX = TimelineKeyMarkers.columnX(frame: segment.start + displacedFrames, pixelsPerFrame: pixelsPerFrame)
             let slotWidth = CGFloat(segment.length) * pixelsPerFrame
             let isReference = coordinator.map {
                 $0.canvasManager.isInterpolateMode
