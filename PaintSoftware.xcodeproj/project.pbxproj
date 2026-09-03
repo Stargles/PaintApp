@@ -159,6 +159,7 @@
 		742A6AF0182ABF3DB2BC4AA8 /* PaintSoftware/Services/SaveDamageGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B1C5C838033EF8F6B37B71 /* PaintSoftware/Services/SaveDamageGate.swift */; };
 		304C1E5B36D4B205473F5BFE /* SaveDamageGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */; };
 		0F09EFC688D4B043164F8D1B /* VideoElementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */; };
+		1961C894DDCEDCBF18F91E02 /* VideoCropLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */; };
 		61654E07969B40E6097E1887 /* VideoImportLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */; };
 		4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */; };
 		163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */; };
@@ -437,6 +438,7 @@
 		A0B1C5C838033EF8F6B37B71 /* PaintSoftware/Services/SaveDamageGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/SaveDamageGate.swift; sourceTree = "<group>"; };
 		E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SaveDamageGateLogicTests.swift; sourceTree = "<group>"; };
 		4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoElementLogicTests.swift; sourceTree = "<group>"; };
+		6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoCropLogicTests.swift; sourceTree = "<group>"; };
 		3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoImportLogicTests.swift; sourceTree = "<group>"; };
 		BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameMap.swift; sourceTree = "<group>"; };
 		372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameReader.swift; sourceTree = "<group>"; };
@@ -663,6 +665,7 @@
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */,
 				4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */,
+				6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */,
 				3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */,
 				AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */,
 				201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */,
@@ -1215,6 +1218,7 @@
 				742A6AF0182ABF3DB2BC4AA8 /* PaintSoftware/Services/SaveDamageGate.swift in Sources */,
 				304C1E5B36D4B205473F5BFE /* SaveDamageGateLogicTests.swift in Sources */,
 				0F09EFC688D4B043164F8D1B /* VideoElementLogicTests.swift in Sources */,
+				1961C894DDCEDCBF18F91E02 /* VideoCropLogicTests.swift in Sources */,
 				61654E07969B40E6097E1887 /* VideoImportLogicTests.swift in Sources */,
 				4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */,
 				163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */,

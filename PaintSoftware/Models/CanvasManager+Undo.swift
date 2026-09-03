@@ -41,6 +41,19 @@ extension CanvasManager {
         /// group has to clear the tag off every element carrying it, and one snapshot is what makes
         /// that one undo step.
         var animationGroups: [AnimationGroup]
+        /// **Every video element's crop and speed** — VIDEO.md §2.2 and §2.5, and the one part of a
+        /// structural edit that this snapshot cannot reach through `layers`.
+        ///
+        /// `layers` is copied by value and `Cel.vector` is a **class**, so the snapshot shares the
+        /// live `VectorCanvas`: restoring it puts a cel's `startFrame` and `frameCount` back and
+        /// leaves whatever the drag wrote *inside* that canvas exactly where the drag left it. No
+        /// other structural verb has that problem, because none of them mutates a vector canvas in
+        /// place — `splitCel` mints copies. A crop drag is the first that does, and an undo that
+        /// gave the block back its length while keeping the new crop would be a retime nobody asked
+        /// for.
+        ///
+        /// Keyed by element id, so it survives a cel being reordered or the array being rebuilt.
+        var videoCrops: [UUID: VideoCrop]
     }
 
     private func captureStructure() -> StructureSnapshot {
@@ -48,7 +61,49 @@ extension CanvasManager {
                           activeViewPresetIndex: activeViewPresetIndex,
                           currentLayerIndex: currentLayerIndex, sceneFrameCount: sceneFrameCount,
                           motionGroups: motionGroups, guideStrokes: guideStrokes,
-                          animationGroups: animationGroups)
+                          animationGroups: animationGroups, videoCrops: captureVideoCrops())
+    }
+
+    /// Every video element's crop, by id — see `StructureSnapshot.videoCrops`.
+    ///
+    /// **Gated on `layer.kind == .vector` and then on `VectorCanvas.holdsVideo`**, which is a
+    /// memoized flag rather than a walk, so a document that has never imported a video pays one
+    /// enum comparison per vector layer per structural edit and nothing else.
+    private func captureVideoCrops() -> [UUID: VideoCrop] {
+        var crops: [UUID: VideoCrop] = [:]
+        for layer in layers where layer.kind == .vector {
+            for cel in layer.cels {
+                guard let vector = cel.vector, vector.holdsVideo else { continue }
+                for video in vector.videos { crops[video.id] = VideoCrop(of: video) }
+            }
+        }
+        return crops
+    }
+
+    /// Puts those crops back, touching only the elements whose three fields actually differ — so an
+    /// undo of a structural edit that never went near a video bumps no version and re-renders
+    /// nothing.
+    private func restoreVideoCrops(_ crops: [UUID: VideoCrop]) {
+        guard !crops.isEmpty else { return }
+        for layer in layers where layer.kind == .vector {
+            for cel in layer.cels {
+                guard let vector = cel.vector, vector.holdsVideo else { continue }
+                var elements = vector.elements
+                var changed = false
+                for index in elements.indices {
+                    guard case .video(var video) = elements[index],
+                          let crop = crops[video.id], VideoCrop(of: video) != crop else { continue }
+                    video.sourceStart = crop.start
+                    video.sourceEnd = crop.end
+                    video.speed = crop.speed
+                    elements[index] = .video(video)
+                    changed = true
+                }
+                guard changed else { continue }
+                vector.elements = elements
+                vector.bumpVersion()
+            }
+        }
     }
 
     private func restoreStructure(_ snapshot: StructureSnapshot) {
@@ -66,6 +121,8 @@ extension CanvasManager {
         motionGroups = snapshot.motionGroups
         guideStrokes = snapshot.guideStrokes
         animationGroups = snapshot.animationGroups
+        // After `layers`, because it writes through the canvases the restored cels name.
+        restoreVideoCrops(snapshot.videoCrops)
     }
 
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the

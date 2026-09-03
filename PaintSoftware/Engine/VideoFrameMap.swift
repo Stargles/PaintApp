@@ -55,8 +55,9 @@ extension SourceTime: Comparable {
 /// it. A 30 fps clip in a 24 fps document is asked for the instant 1/24 s later on each document
 /// frame and answers with whichever source frame is nearest, so it lasts the same number of seconds
 /// it always did and shows 30 of its frames for every 24 the document draws. **§2.3's frame-for-frame
-/// arm is `speed = sourceFPS / documentFPS`**, which is why it is a setting of Adjust Speed rather
-/// than a mode of its own: the two are one control and one of them has a name.
+/// arm is a *speed*** — `documentFPS / sourceFPS`, see `frameForFrameSpeed`, where VIDEO.md's own
+/// formula is corrected — which is why it is a setting of Adjust Speed rather than a mode of its
+/// own: the two are one control and one of them has a name.
 ///
 /// **Pure, and every member is a free function over values** — no asset, no decoder, no document. It
 /// is arithmetic, so it is tested as arithmetic.
@@ -216,6 +217,46 @@ struct VideoCut: Hashable {
     }
 
     var sourceTime: SourceTime { SourceTime(value: value, timescale: timescale) }
+}
+
+/// **One video element's crop and speed, as a value** — the three fields VIDEO.md §2.2 and §2.5
+/// write, snapshotted so a structure undo can put them back.
+///
+/// It exists because `CanvasManager.StructureSnapshot` copies `[Layer]` **by value** and `Cel.vector`
+/// is a **class** reference, so a snapshot shares the live `VectorCanvas` and restoring it restores
+/// a cel's `startFrame` and `frameCount` while leaving whatever the drag wrote inside that canvas
+/// exactly where it was. Every other structural verb is safe from that because none of them mutates
+/// a vector canvas in place — `splitCel` mints copies — and the crop is the first that does.
+/// `Equatable` and not `Hashable`, because `SourceTime` is only the former: nothing keys a
+/// dictionary on a crop, and conforming `SourceTime` to buy that would be a conformance with no
+/// caller.
+struct VideoCrop: Equatable {
+    let start: SourceTime
+    let end: SourceTime
+    let speed: Double
+
+    init(of element: VectorVideoElement) {
+        start = element.sourceStart
+        end = element.sourceEnd
+        speed = element.speed
+    }
+}
+
+/// Which end of the crop a block-edge drag holds still — VIDEO.md §2.2, *"adjusting the length of
+/// the block from both ends will have the effect of cropping the video"*.
+///
+/// **Each arm anchors on the field its own verb never writes**, and that is what makes the crop
+/// drift-free without a baseline. `resizeCelRightEdge` keeps `startFrame` fixed, so the head of the
+/// crop cannot move and `sourceEnd` is a pure function of the block's new length;
+/// `resizeCelLeftEdge` keeps `endFrame` fixed, so the tail cannot move and `sourceStart` is. Both
+/// recompute from scratch on every `.changed` of a drag, so an out-and-back gesture lands exactly
+/// where it began — which is the same drift those two verbs already solve for *neighbours* with
+/// `gestureSnapshot`, solved here by arithmetic instead because the snapshot shares this canvas.
+enum VideoCropAnchor {
+    /// The head is fixed and the tail follows the block — a right-edge drag.
+    case head
+    /// The tail is fixed and the head follows the block — a left-edge drag, which crops the head.
+    case tail
 }
 
 /// The identity of one **video** frame — `DerivedCelContent.identity` for a cel holding a video, and

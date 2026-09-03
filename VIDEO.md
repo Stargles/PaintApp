@@ -342,7 +342,21 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    `preferredTransform` becomes the placement's rotation and mirror rather than a resample**, which
    is what `naturalSize` being the decoded size and `placement` being a general affine already
    bought.
-5. **Crop.** Teach `resizeCelLeftEdge` / `resizeCelRightEdge` to write `sourceStart` / `sourceEnd`. §2.2.
+5. ~~**Crop.**~~ **Built.** `resizeCelLeftEdge` and `resizeCelRightEdge` call `writeVideoCrop`, which
+   anchors the end its own verb never writes and derives the other from `frameCount · speed /
+   documentFPS`. §2.2's *"not a retime and not a stretch"* falls out of that: the footage plays at the
+   same speed and the same instants, and only how much of it there is changes. `VideoCropLogicTests`.
+   **The crop needs no gesture baseline and could not have used one.** Those two verbs recompute
+   neighbour pushes from `gestureSnapshot` because reading the live model mid-drag ratchets — but
+   `StructureSnapshot` copies `[Layer]` **by value** and `Cel.vector` is a **class**, so the snapshot
+   shares the live canvas and a "baseline crop" read through it *is* whatever the last tick wrote.
+   Anchoring makes the crop a pure function of the block's length instead, which cannot ratchet.
+   **The same fact has a second consequence and it is the one that would have shipped broken**: an
+   undo restores the block's length and leaves the crop the drag wrote, i.e. invents a retime out of
+   an undo. `StructureSnapshot.videoCrops` is the fix — every video's `sourceStart`, `sourceEnd` and
+   `speed`, captured behind `layer.kind == .vector` and the memoized `VectorCanvas.holdsVideo`, so a
+   document with no video pays one enum comparison per vector layer. No other structural verb has
+   this problem, because none of them mutates a vector canvas in place; `splitCel` mints copies.
 6. **Adjust Speed.** A menu row and §4.3's inverse. §2.5, including the frame-for-frame setting §2.3 names.
 7. **Split Drawing on video cels.** §7's second row — trivial once 2 and 5 exist, which is why it is not
    stage 1's problem.

@@ -459,6 +459,10 @@ extension CanvasManager {
             layers[layerIndex].cels[index].startFrame = predecessor.startFrame
             layers[layerIndex].cels[index].frameCount = predecessor.frameCount
         }
+        // VIDEO.md §2.2, and this edge crops the **head**: the block's end never moves, so neither
+        // does the tail of the crop. The pushed predecessors keep their own lengths and therefore
+        // their own crops, which is right — being shoved along the timeline is not being cropped.
+        writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .tail)
     }
 
     /// Drag the block's right edge: keeps the left edge fixed, changes frameCount only. Also used
@@ -533,6 +537,71 @@ extension CanvasManager {
         }
 
         sceneFrameCount = max(sceneFrameCount, cursor)
+        // VIDEO.md §2.2's other edge. The block's start never moves, so the head of the crop is
+        // fixed and the tail follows the new length — up to the clip's own duration, past which
+        // there is no more footage to reveal and the last frame holds (§4.3's clamp).
+        writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
+    }
+
+    /// **Makes a video's crop say what its block's length says** — VIDEO.md §2.2, and the whole of
+    /// stage 5. A no-op, on one memoized `Bool`, for every cel that does not hold a video.
+    ///
+    /// **It is not a retime and not a stretch** (§2.2): the footage inside the block is untouched and
+    /// plays at the same speed, and what changes is how much of it there is. That falls out of
+    /// anchoring the crop's fixed end and deriving the other from `frameCount · speed / documentFPS`,
+    /// which is §4.3's map read as a length.
+    ///
+    /// **No baseline, and it does not need one.** `resizeCelLeftEdge` and `resizeCelRightEdge` both
+    /// recompute neighbour pushes from `gestureSnapshot` because reading the live model mid-drag
+    /// ratchets; this cannot ratchet, because each anchor is the field its own verb never writes, so
+    /// the answer is a pure function of the block's current length. That matters more here than
+    /// there: the snapshot copies `[Layer]` by value and `Cel.vector` is a class, so a baseline read
+    /// through it would have been the *live* crop anyway. `StructureSnapshot.videoCrops` is the other
+    /// half of that same fact.
+    ///
+    /// **Clamped at both ends, and each clamp is a real state.** The head cannot go before the start
+    /// of the file; the tail cannot go past the clip's duration, which is §2.4's *"up to the full
+    /// duration"* — a block dragged out further than there is footage holds its end frame rather than
+    /// showing nothing, which is §4.3's clamp doing the work. The duration comes from
+    /// `VideoFrameSource`, whose readers are kept open per asset, so a drag asks a dictionary rather
+    /// than the file system per tick; an asset that will not open imposes no ceiling, which is the
+    /// same "degrade, do not refuse" the missing-asset path already takes.
+    func writeVideoCrop(layerIndex: Int, celIndex: Int, anchoredAt anchor: VideoCropAnchor) {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return }
+        let cel = layers[layerIndex].cels[celIndex]
+        guard let vector = cel.vector, vector.holdsVideo else { return }
+        let length = max(cel.frameCount, 1)
+        var elements = vector.elements
+        var changed = false
+        for index in elements.indices {
+            guard case .video(var video) = elements[index] else { continue }
+            switch anchor {
+            case .head:
+                var end = VideoFrameMap.unclampedSourceTime(sourceStart: video.sourceStart,
+                                                            elapsedDocumentFrames: length,
+                                                            speed: video.speed, documentFPS: fps)
+                if let duration = VideoFrameSource.shared.info(for: video.assetURL)?.duration,
+                   duration < end {
+                    end = duration
+                }
+                guard video.sourceStart < end, end != video.sourceEnd else { continue }
+                video.sourceEnd = end
+            case .tail:
+                var start = VideoFrameMap.unclampedSourceTime(sourceStart: video.sourceEnd,
+                                                              elapsedDocumentFrames: -length,
+                                                              speed: video.speed, documentFPS: fps)
+                if start < .zero { start = .zero }
+                guard start < video.sourceEnd, start != video.sourceStart else { continue }
+                video.sourceStart = start
+            }
+            elements[index] = .video(video)
+            changed = true
+        }
+        guard changed else { return }
+        vector.elements = elements
+        vector.bumpVersion()
+        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
     /// Drag the block body: repositions it (startFrame changes, length unchanged), clamped to not
