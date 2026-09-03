@@ -174,7 +174,7 @@ a later session reinstating it by rediscovering the argument that produced it.
     behaviour survives inside `addKeyframe`** and is the whole of its step 3: every channel that already
     carries a curve takes a key at the new mark holding the value it *resolves* to there, or placing a
     mark lets every other animated channel drift straight through it. The dimming rule is void — nothing
-    is refused now, because a bare mark is a legal thing to place on an untouched layer.
+    is refused now, because a mark with no channel is a legal thing to place on an untouched layer.
 25. **The live per-frame cost of a *derived* frame is not held to the 24 fps budget. The prebake is what
     must play at 24 fps.** 2026-08-29, and it is the widest-reaching of these rulings because it decides
     how every future measurement on this path is read. Shown that engaging the compositor on an
@@ -199,7 +199,9 @@ a later session reinstating it by rediscovering the argument that produced it.
     > removing the current keyframe mode UI. This means that animations will be added to the list when
     > two keyframes are placed, and something changes in one keyframe which from the other."
 
-    **A keyframe is therefore a bare mark in time that acquires channels lazily** — `keyframeMarks` on
+    **A keyframe is therefore a mark in time that acquires channels lazily** — and the mark is dropped
+    the moment a channel takes that frame, so the two never both hold it (§2.28's superseded rule is
+    what used to let them). `keyframeMarks` on
     the layer and on the folder, sorted, unique, absolute document frames, beside `effectTracks` and in
     §2.4's time base. A mark with no channel is legal and is the point. It cannot be derived from the
     curves in either direction: a curve carries keys the artist never marked (an auto-key, a seeded
@@ -267,14 +269,41 @@ a later session reinstating it by rediscovering the argument that produced it.
     frames the artist marked *explicitly*, which is what makes §2.27's "keyframe A is added, nothing is
     saved" storable at all; it just stops being the whole answer. `CanvasManager.keyframes(of:)` is the
     one accessor, and `TimelineKeyMarkers` no longer computes a union of its own — it is handed the
-    frames and told which carry a key, which is all it ever needed to draw bare against landed.
+    frames, and there is one form of marker.
 
-    **Two consequences worth keeping.** A grade that is not in force contributes no curves — a track
+    **One consequence worth keeping.** A grade that is not in force contributes no curves — a track
     left on a layer by a kind change is storage, so it draws no diamond and offers no Remove Keyframe,
-    while its marks stand, because a mark is a point in time rather than a property of an effect. And
-    `addKeyframe` still records the explicit mark on a frame a channel already keys: a key is a value
-    some channel holds and a mark is the artist saying *this frame is a keyframe*, and the two come
-    apart the moment that key is dragged or deleted in the graph editor.
+    while its marks stand, because a mark is a point in time rather than a property of an effect.
+
+    **SUPERSEDED, 2026-09-03 — this section's own closing rule was the divergence it exists to
+    prevent, reached by the other door.** It said `addKeyframe` still records an explicit mark on a
+    frame a channel already keys, and that *"the two come apart the moment that key is dragged or
+    deleted in the graph editor"*. They did, and the graph editor could not repair it:
+    `writeGraphBandCurves` reaches `setEffectParameterTrack`, which writes `effectTracks` and nothing
+    else, so dragging the node at frame 10 to 14 left a mark at 10 beside a key at 14 — an indicator
+    with no node, drawn hollow. **A green test asserted that as a feature**, band string `"(0)|4|10"`
+    captioned *"the frame it left keeps its explicit mark, now hollow"*, pinned end to end by an
+    XCUITest twin.
+
+    **The replacement ruling, the owner 2026-09-03**: *"if a node exists on the graph editor, it
+    should also exist on the cel as an indicator and vice versa."* A mark that a key lands on is
+    **dropped**, so `keyframeMarks` holds exactly the keyframes no channel keys and
+    `keyframeFrames(of:)` is their union. The rule is applied by `marks(_:droppingKeyed:)` at the two
+    funnels every writer reaches — `commitKeyframeState` and `setEffectParameterTrack` — asked against
+    the keys *either side* of the write, which is what makes a key dragged off a marked frame take the
+    mark with it and what heals a document saved under the old rule on first touch.
+
+    **`keyframeMarks` itself cannot be deleted, and that is the load-bearing correction.** It is the
+    only storage for §2.26/§2.27's first step: `KeyframeControl.write` counts keyframes to route, and
+    with none, a slider edit takes the `.storedValue` arm, holds no baseline, and the owner's own
+    canonical A-then-B workflow produces no animation at all. What is deleted is the *overlap*, not
+    the list.
+
+    **The biconditional has two residues and neither is a defect.** A mark no channel keys is an
+    indicator with no node — that is §2.26's first step and deleting it would delete the workflow.
+    And **pose keys draw indicators while a pose channel has no graph-editor band at all** (TODO
+    (21)'s stage-5 gap), so every pose keyframe is an indicator with no possible node until that band
+    exists.
 
 ---
 
@@ -867,7 +896,7 @@ Each stage is mergeable and leaves the app working.
 | **2** ✅ | **One channel end to end: a layer effect parameter** — merged `4d55aae`. Continuous scalars only; the six stepped fields, the two array ones and `outline.color` are refused at the writer as well as the resolver, so the app cannot reach a track that stores and renders nothing. | `Effect.resolved(atFrame:)`, keys on the layer, absolute frames. Proves storage, evaluation, invalidation, undo, save/load. No new geometry. |
 | **2b** ✅ | **The same channel on the other grade home: `LayerFolder.effect`** — §2.21. `effectTracks` on the folder, `resolvedEffect(atFrame:)` filled in, `setEffectParameterTrack(folderID:…)`, the optional `FolderManifest` key. Nothing in it is new machinery; the whole stage is the one arm §2.21 costs. | It also closed a **pre-existing** defect §4.1 had recorded as a KNOWN GAP: `MaskResolver`'s cache key is per-*layer* content versions and a folder is not a leaf, so a mask naming a graded folder served coverage resolved under the old grade. A hand edit hit it once; a track hits it every frame, which is what forced it. The key now carries the mask stacks' node grades. |
 | **3a** ✅ | **The effect-parameter channel end to end, from the artist's side** — the settings bar reading the value **resolved at the playhead**, the keyframe writer that keys many channels as one undo step, and `KeyframeTarget` making §2.21's two grade homes one path. | Two findings the plan did not have. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored grades side by side. And **a routing rule that a view holds is a rule the fast tier cannot see**, which is why the whole edit path is a `CanvasManager` method rather than a `switch` in a callback. This stage also shipped Animate mode, which §2.26 withdrew the same day; §2.1 carries what that cost and what it taught. |
-| **3b** ✅ | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27, and §11's D1 through D4. The **model** half: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes` in `KeyframeControl.swift`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is the **union** of marks and curve keys, with a bare mark drawn hollow and a mixed run drawn landed. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. **The drawer** is `TimelineGraphBand`, drawn by `TimelineTrackView`'s coordinator inside the scroll content (§11.1) and sized through `CanvasManager.graphBandExpansion` in the layout key — not a presentation of any kind. **The channel panel** is `TimelineGraphChannelList`, raised from `timeline.graphChannelsButton` and presented as `CanvasPresentation.graphChannelList`; §11.5 is why it is a filter rather than a navigator. §2.22's keyframe button became the graph-editor button, which is why the marks are placed from the cel menu. |
+| **3b** ✅ | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27, and §11's D1 through D4. The **model** half: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes` in `KeyframeControl.swift`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is the **union** of marks and curve keys, and there is one form of marker: §2.28's closing rule, which let a mark and a key both live at one frame, is superseded. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. **The drawer** is `TimelineGraphBand`, drawn by `TimelineTrackView`'s coordinator inside the scroll content (§11.1) and sized through `CanvasManager.graphBandExpansion` in the layout key — not a presentation of any kind. **The channel panel** is `TimelineGraphChannelList`, raised from `timeline.graphChannelsButton` and presented as `CanvasPresentation.graphChannelList`; §11.5 is why it is a filter rather than a navigator. §2.22's keyframe button became the graph-editor button, which is why the marks are placed from the cel menu. |
 | **4** ✅ | **The rest-space dab bake + grain** — built 2026-09-02. | §4.2 and §2.16, and §4.2 now carries the four of its own claims that contact with the code refuted. Engine-only, as predicted; every number in it was taken on the standalone `swiftc` loop at ~4 s a cycle. **The test written to go red did not go red, and could not have** — `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` compared `grainAlphaMultiplier` at a stroke's rest samples against its *posed* samples, which is the position-dependence of a noise field rather than any behaviour of the ink; the posed display list still carries posed samples after this stage, because §4.2 requires it to. It is rewritten as `testGrainTravelsWithTheInkUnderAPose` and compares the **dab alphas** two poses of one stroke actually stamp. `RestSpaceDabBakeLogicTests` is the engine half. **What this unblocks is real**: `DabPose` answers `localScale` per dab, so stage 5b's projective ink has per-dab width. |
 | **5** ✅ | **The transform channel** — merged `4e18b7a` and the test commits after it. | Quad keys (`PoseQuad`, box plus four corners, which stage 5 only ever writes as parallelograms), animation groups, §2.5's write-at-commit — `commitVectorFloatIfNeeded` and not the nudge — and §4.3's factored blend in `Engine/Deform/PoseInterpolation.swift`. Ink is posed through `mapping(_:throughStretch:)`, the `sqrt(|det|)` arm. §2.10's `step`, §2.27's held baselines, §2.28's keyframe union, §3.5's `_anim.json` sidecar and §4.5's cache trap all land with it, the last pinned by mutation. **Three things it does not have**: Move is refused at a frame whose pose is not resting, there is no graph-editor band for a pose channel, and animation groups have no UI — names and tag colours are generated. |
 | **5b** | **Real Distort** — the *animated* one, a projective quad keyed across frames | §2.13. **Not to be confused with the Move-box Distort that shipped** (LASSO_MOVE §3 stage 5): that is a raster floating piece reshaped by a live gesture, and nothing keys a projective quad over time — `TransformKeyframes` only ever writes a `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` treats a projective pose as something only a document *this* stage wrote could contain. Ink through §4.2's point map, then placed images behind Move stage 3c. |
@@ -1133,7 +1162,7 @@ workflow ask 3 described — and that was **half true and shipped as if it were 
 on the `.block` arm of `timelineMenuContent` only. §2.4 and §2.26 put marks on the *layer*, in
 absolute document frames, and `TimelineLayoutKey.trackMarkers` says in as many words that they "exist
 perfectly well at frames the layer has no cel at" — which is why the marker band spans the whole
-track. So a layer whose one block covered frames 0–9 could not be given a bare mark at frame 20 by
+track. So a layer whose one block covered frames 0–9 could not be given a mark at frame 20 by
 any gesture in the app: a region of the model's own address space had lost its only UI, and the
 sentence asserting otherwise is what stopped anyone looking. **The `.gap` arm now carries the same
 section**, and Clear is scoped there to `gapFrameRange(layerIndex:containing:)`, the run of empty
@@ -1438,7 +1467,7 @@ case where the neighbour clamp is silent — the interior of a rigid group never
 
 **§2.28's union follows for free, and that was verified rather than assumed** — end to end, by a real
 finger. `GraphEditorGestureUITests.testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows` drags the key at
-frame 0 and asserts the marker band a row up goes from `0|6` to `(0)|N|6`: the diamond moved with the
+frame 0 and asserts the marker band a row up goes from `0|6` to `N|6`: the diamond moved with the
 key, and the frame it left kept the artist's explicit mark and went **hollow**, which is exactly the
 two-kinds distinction §2.26 exists for. Nothing writes a mark; the accessor computes the union, which
 is the whole point of it.

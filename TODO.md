@@ -47,6 +47,8 @@ app, and whoever notices that should come back and say so rather than assuming i
   posed through `mapping(_:throughStretch:)`'s `sqrt(|det|)` width rule, and the blend is factored so
   the endpoints come back bit-exact. **Three things it does not have** — Move is refused at a frame
   whose pose is not resting, a pose channel has no graph-editor band, and animation groups have no UI.
+  **The missing pose band is now also what stops (38)(c)'s rule being exactly true**: a pose key draws an
+  indicator on the cel and there is no band for it to have a node in.
 
   **Stage 4, the rest-space dab bake, is what the rest waits on.** Its artefact is already pinned by a
   test written to go red when the stage lands
@@ -268,11 +270,14 @@ LAYER_TRANSFORM.md.
 
 ### (38) The timeline and the graph editor should read as one thing
 
-Four asks from the owner, 2026-09-03, on one surface. **(c) is the one to do first and the other three
-sit on top of it**, because it changes what a node *is* rather than how one is drawn.
+Four asks from the owner, 2026-09-03, on one surface. **(a) and (c) are merged**; (b) and (d) remain,
+and both sit on the model (c) settled.
 
-- [ ] **(a) Frame gridlines.** > "add vertical grey lines to segment the timeline so that I can see
-      which frame is which. Same with the graph editor."
+**What (c) turned out to be, because it changes what (b) is building on.** §2.28 was fully built and
+neither surface bypassed its accessor — the divergence was one level below, in §2.28's own closing rule
+that let an explicit mark and a curve key both live at one frame. The graph editor could not repair it,
+so dragging a node left its mark behind as an indicator with no node. That rule is superseded: a mark a
+key lands on is now dropped. **A key and a node are the same thing.**
 
 - [ ] **(b) The graph is bezier, and a node's tap opens its curve rather than deleting it.**
       > "The graph should be bezier curved. Right now clicking on a node in it deletes it. Instead, when
@@ -283,23 +288,6 @@ sit on top of it**, because it changes what a node *is* rather than how one is d
       A single tap currently deletes, which is a destructive default; the ask makes single-tap open the
       handle editor and double-tap the menu that carries Delete, matching what a double-tap on a cel
       already does.
-
-- [ ] **(c) A key and a keyframe are the same thing, and the code should say so once.**
-      > "Right now I really dont like the disparity between keyframes and keys etc. It should be a simple
-      > rule: if a node exists on the graph editor, it should also exist on the cel as an indicator and
-      > vice versa. Right now keyframes show up as greyed out when the nodes are moved away from the
-      > frame on the graph. They should be the same to avoid confusion. This simplification probably
-      > cleans up architecture, so be sure to simplify architecture and remove code cleanly as if it were
-      > never there."
-
-      **This is the third report of one divergence, and [KEYFRAMES.md](KEYFRAMES.md) §2.28 already rules
-      on it**: a keyframe is the **union** of the explicit marks and every frame a channel keys on,
-      computed by one accessor and never stored twice — and §2.28 exists *because* two earlier device bug
-      reports were the same divergence between those two lists. So the first question is not what to
-      build but **why §2.28's single accessor is not what both surfaces read**, and the greyed-out state
-      is the tell: something still holds the two lists apart. Answer that before designing anything, and
-      the "remove code cleanly as if it were never there" the owner asks for is then the natural shape of
-      the fix rather than an extra instruction.
 
 - [ ] **(d) A dragged node shows its value.** > "There should be a numerical indicator whenever a node is
       dragged up or down for the value that the node is controlling in the graph editor."
