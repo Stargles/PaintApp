@@ -318,4 +318,33 @@ final class BakeWiringLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(baker.ring.count, 2, "The ring holds what it can hold and no more")
         XCTAssertLessThanOrEqual(baker.ring.byteCount, 2 * Self.frameBytes)
     }
+
+    // MARK: - 5. The document closing
+
+    /// **`FrameBaker.reset()`'s real caller, added when BUGS.md's reading of it found none.**
+    /// `CanvasManager.closeFrameBaker()` is what `ContentView.returnToGallery` calls on the way back
+    /// to the gallery — the document is off screen, but `ContentView` keeps the manager in `@State`
+    /// rather than discarding it, so without this the baker's bookkeeping and ring would sit resident
+    /// for a document nobody is looking at.
+    ///
+    /// **MEASURED red** by deleting the `frameBaker.reset()` call from `closeFrameBaker` (making it a
+    /// no-op): `keyByFrame` and the ring both stay populated and the two assertions below fail.
+    func testClosingTheFrameBakerForgetsItsBookkeepingAndRingButNotTheBaker() {
+        let manager = perFrameDocument(frames: 4)
+        let baker = manager.frameBaker
+        manager.syncFrameBake(suspended: false)
+        drain(baker)
+        XCTAssertEqual(baker.bakedCount, 4, "Setup: everything is baked")
+        XCTAssertGreaterThan(baker.ring.count, 0, "Setup: the bake that just ran left the ring warm")
+
+        manager.closeFrameBaker()
+
+        XCTAssertTrue(baker.keyByFrame.isEmpty,
+                      "The bookkeeping a document no longer on screen has no use for is gone")
+        XCTAssertEqual(baker.ring.count, 0, "…and so is the decoded-frame ring it was holding idle")
+        XCTAssertTrue(manager.frameBaker === baker,
+                      "Closing forgets what the baker believes; it does not replace the baker — a "
+                      + "swap here would leave whatever installed itself as the old instance's "
+                      + "`onFrameFinished` never told the new one's frames landed")
+    }
 }

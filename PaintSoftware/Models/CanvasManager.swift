@@ -1872,6 +1872,23 @@ final class CanvasManager: ObservableObject {
                    ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget))
     }
 
+    /// **`FrameBaker.reset()`'s real caller.** `ContentView.returnToGallery` calls this on the way
+    /// back to the gallery: the canvas is off screen, but `ContentView` keeps this `CanvasManager` in
+    /// `@State` rather than discarding it, so `frameBaker` would otherwise sit idle holding its
+    /// bookkeeping and its decoded-frame ring — up to `Self.frameRingByteBudget` bytes — for a
+    /// document nobody is looking at, until a different project replaces it. `reset()` drops both and
+    /// leaves the on-disk store alone, exactly as its own doc comment says a document closing should.
+    ///
+    /// **Unguarded on purpose.** `frameBaker` is lazy so a manager whose canvas was never shown never
+    /// pays for a `FrameBakeStore` (and the cache directory its `init` creates) — see the doc comment
+    /// on `frameBaker` itself. That guard would be needed here too if this could run before the
+    /// canvas ever appeared, but it cannot: `returnToGallery` is reachable only from `DrawingView`,
+    /// and showing that view is what makes `syncFrameBake` — and so `frameBaker` — run at least once.
+    @MainActor
+    func closeFrameBaker() {
+        frameBaker.reset()
+    }
+
     /// Where the playhead was the last time `syncFrameBake` ran, so a scrub can be given a direction.
     private var lastBakePlayhead = 0
 

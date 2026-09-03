@@ -109,7 +109,13 @@ struct ContentView: View {
     private func returnToGallery() {
         // `.artist`: there is a person watching, waiting, who can be asked a question — the one save
         // in this app that a prompt is acceptable in front of.
-        saveIfNeeded(intent: .artist) { screen = .gallery }
+        saveIfNeeded(intent: .artist) {
+            // The document is leaving the screen, and `canvasManager` may go on being held a while
+            // yet — see `CanvasManager.closeFrameBaker`'s own doc comment for why that means its
+            // frame baker's bookkeeping and ring, not the project itself, are what get dropped here.
+            canvasManager.closeFrameBaker()
+            screen = .gallery
+        }
     }
 
     private func saveIfNeeded(intent: SaveIntent, completion: (@MainActor () -> Void)? = nil) {
