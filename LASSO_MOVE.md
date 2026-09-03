@@ -261,10 +261,10 @@ between drags is always the truth. It re-arms on the next touch.
 **Move with no selection is unchanged**: it still transforms the whole cel, which is the owner's
 *"This is currently correct, nothing needs to change"*, honoured literally.
 
-**A second, separate defect found while scoping and still open.** `SelectPanel`'s Duplicate button
-calls `beginDuplicate()`, which has no vector branch and always rasterizes onto a brand-new raster
-layer. Lasso a region on a vector layer, tap Duplicate, and the copy is pixels. Filed in
-[BUGS.md](BUGS.md); not part of this feature.
+**A second, separate defect found while scoping, and since fixed as TODO item (33).**
+`SelectPanel`'s Duplicate button calls `beginDuplicate()`, which had no vector branch and always
+rasterized onto a brand-new raster layer. It takes `beginVectorLassoDuplicate` on a vector layer
+now — this file's own split, with the source left alone — and never falls through to the raster arm.
 
 ---
 
@@ -823,7 +823,8 @@ diff and it would work on the first try. It also destroys the layer: `beginMove`
 `PixelOps.rasterize` and `commitFloatingPieceIfNeeded` lands the result in `Cel.raster`
 (`SelectionModels.swift:225-254`, `:333-345`), so the artist's vector strokes become pixels on a
 layer still labelled `.vector`. The owner's whole complaint is that a vector layer is not behaving
-like one. This is also not hypothetical — it is what `beginDuplicate()` does today (§0).
+like one. This was also not hypothetical — it is what `beginDuplicate()` did until item (33) gave
+it a vector arm (§0).
 
 **Build the whole thing on `CGPath` booleans, strokes included.** Attractive: one algorithm for
 both kinds. It fails because a `VectorStroke` is not a region — it is a centreline plus a brush, and
@@ -1066,8 +1067,6 @@ about makes the pair a *general affine* and still not a homography.
   step's undo **re-creating the float** at its last transform, which is a second feature: it changes
   what a raster Move retains in history from one canvas-sized pair of images to two, on a stack whose
   budget is already device-derived. It wants its own branch and its own measurement.
-- **Fix `beginDuplicate()`'s rasterize-on-a-vector-layer** (§0) — a bug, not a stage of this. Filed
-  in [BUGS.md](BUGS.md) so it does not live only inside a spec.
 - **Port `FloatingPieceOverlayView` onto the Stage 4 handle pattern**, the other half of
   [BUGS.md](BUGS.md)'s duplicated-overlay cleanup entry. A branch is doing
   `ObjectTransformOverlayView` now; this one follows it.
@@ -1667,6 +1666,3 @@ the loop is asked in rather than about which rule it is asked under.
   part of this feature's regression surface rather than a bystander (`ADD_TEXT.md` §4 rule 5's
   `isTextEditLive` reads it). It stays correct because a text session and a lasso move cannot be open
   at once: `beginVectorLassoMove` calls `commitAllInteractiveState()` first.
-- **`beginDuplicate()` rasterizes a vector layer** (§0). Not caused by this work and not fixed by
-  it, but the same lasso reaches it, so an artist exercising stage 1 is one button away from it.
-  Filed in [BUGS.md](BUGS.md) rather than left inside this document.

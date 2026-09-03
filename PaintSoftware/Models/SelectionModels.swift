@@ -701,7 +701,23 @@ extension CanvasManager {
     /// Copies the current selection onto a brand-new layer above the current one, immediately
     /// entering the same interactive move/resize/rotate state as `beginMove()`. The source layer is
     /// left untouched — this is a copy, not a cut.
+    ///
+    /// **A vector layer takes the vector arm and never falls through to the raster one** — TODO item
+    /// (33). This method had no kind check, so a lassoed drawing came back as pixels on a `.raster`
+    /// layer, silently; `beginVectorLassoDuplicate` copies the lassoed *elements* onto a new vector
+    /// layer instead. It is the same shape `fillSelection` and `clearSelectionPixels` already have
+    /// two screens down.
+    ///
+    /// **`return` rather than `||`**, and that is the load-bearing half: the vector arm refuses on an
+    /// empty loop, on a loop the membership rule caught nothing with, and on a derived in-between,
+    /// and falling through on any of those would rasterize the artist's drawing at exactly the
+    /// moments they are least expecting it. A refusal on a vector layer is a Duplicate that did
+    /// nothing, which is `beginVectorLassoMove`'s own rule for the same loop.
     func beginDuplicate() {
+        if activeLayerKind == .vector {
+            beginVectorLassoDuplicate()
+            return
+        }
         guard let selection, let canvasSize,
               layers.indices.contains(currentLayerIndex) else { return }
         // Same reasoning as `beginMove`: the copy is taken from flattened content, so bake first.

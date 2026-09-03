@@ -183,9 +183,6 @@ LAYER_TRANSFORM.md.
       - **Port `FloatingPieceOverlayView` onto the stage 4 handle pattern** — the raster float still
         carries the older overlay.
 
-      `beginDuplicate()`'s rasterize-on-a-vector-layer is **not** part of this; it is item (33) and a
-      BUGS.md defect.
-
 ### (22) Select multiple cels at once — the half of ask 6 the owner put in the future
 
 - [ ] The owner, 2026-08-29: *"for the graph editor, the ability to use the select tool on it to select
@@ -304,13 +301,6 @@ LAYER_TRANSFORM.md.
 - [ ] > "I tried having 2 layers: a vector layer and a value layer above it set to HSV. Then I merged those two
       > layers. The expected outcome is that the HSV gets baked into the vector layer (colors get
       > transformed). Right now it does nothing. This may be an issue other blend modes. Lower priority."
-
-### (33) Select and duplicate produces a raster layer from a vector selection
-
-- [ ] > "When I select and duplicate, it does not support vector (the duplicated selection is a raster layer
-      > not a vector)."
-
-      BUGS.md already carries this as "Duplicate rasterizes a vector layer, silently"; the entry names the path.
 
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 

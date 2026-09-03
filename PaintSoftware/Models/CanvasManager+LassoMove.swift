@@ -472,6 +472,83 @@ extension CanvasManager {
         return true
     }
 
+    /// **Duplicate on a vector layer copies the lassoed *elements* onto a new vector layer** — TODO
+    /// item (33), the owner's *"When I select and duplicate, it does not support vector (the
+    /// duplicated selection is a raster layer not a vector)."*
+    ///
+    /// `beginDuplicate()` had no layer-kind check at all: it rasterized the cel, masked the pixels
+    /// and inserted a `.raster` layer, so a lassoed drawing came back as a bitmap with no notice and
+    /// nothing on screen saying so — the original stayed vector, and the artist found out when they
+    /// tried to erase or re-cut the copy. Its two neighbours in `SelectionModels.swift`,
+    /// `fillSelection` and `clearSelectionPixels`, have branched on the kind for a long time; this is
+    /// the third.
+    ///
+    /// **The copy is `beginVectorLassoMove`'s split with the source left alone**, which is the whole
+    /// of the difference between Move and Duplicate here. `splitForLassoMove` builds a new display
+    /// list and assigns nothing, so taking the inside of it and never writing it back to `source` is
+    /// literally a copy: the ink the artist lassoed, cut at the loop under `Cut` and whole under the
+    /// other two (§5.26 — membership belongs to the selection, and Duplicate is one more consumer of
+    /// it, not a rule of its own).
+    ///
+    /// **The copies keep their ids, and that is `duplicateLayer`'s existing choice rather than a new
+    /// one**: it copies a whole layer through `VectorCanvas.makeCopy()`, which carries every element
+    /// id onto the new canvas. Ids are resolved per cel everywhere that matters —
+    /// `celPoseMaps(_:layerID:celID:)` takes both — so two cels holding one id is a state the
+    /// document already reaches.
+    ///
+    /// **The layer insertion is its own undo step, recorded at the lift.** The raster arm defers its
+    /// insertion step to the commit because until then it has no pixels to record; this arm has the
+    /// geometry from the start, and recording it now is what makes the float's own first-nudge undo
+    /// (`registerVectorFloatNudgeUndo`, `endsFloat`) sit on top of a step that removes the layer
+    /// rather than under one. So: one press puts the box away, a second takes the copy back.
+    ///
+    /// **It refuses on a derived in-between**, through `activeVectorMoveTarget()`'s own guard and its
+    /// banner. The stored geometry there is at rest and what the artist lassoed is the posed picture,
+    /// so a copy taken from it would be of ink that is not where they drew the loop.
+    ///
+    /// - Returns: whether a copy was lifted. False leaves the document and the loop exactly as they
+    ///   were — nothing here mutates before the last refusal.
+    @discardableResult
+    func beginVectorLassoDuplicate() -> Bool {
+        commitAllInteractiveState()
+        guard let selection, let target = activeVectorMoveTarget(),
+              selection.layerID == target.layerID, selection.celID == target.celID else { return false }
+        let source = target.vector
+        // The lasso arm's two lines, for its two reasons: the loop is canvas space and storage is
+        // local, and a loop built from raw touch samples self-intersects the moment it crosses itself.
+        let drawn = source.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
+        let loops = Self.lassoLoops(drawn, posedBy: target.poses)
+        guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
+            noteALassoThatCaughtNothing(vector: source, loops: loops)
+            return false
+        }
+        let copies = split.elements.filter { split.insideIDs.contains($0.id) }
+        guard !copies.isEmpty else { return false }
+        let copiedIDs = Set(copies.map(\.id))
+
+        let sourceIndex = currentLayerIndex
+        let size = source.size
+        withStructureUndo(label: .duplicatePiece) {
+            // **The source canvas's own `transform`**, so the copy sits exactly over the ink it was
+            // taken from: the elements are in the source's local space and would land somewhere else
+            // under an identity.
+            let canvas = VectorCanvas(size: size, elements: copies, transform: source.transform)
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
+                          raster: .empty(size: canvasSize ?? size), vector: canvas)
+            let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
+                              isVisible: true, kind: .vector,
+                              parentFolderID: layers[sourceIndex].parentFolderID, cels: [cel])
+            layers.insert(layer, at: sourceIndex + 1)
+            currentLayerIndex = sourceIndex + 1
+        }
+        // §5.6's stated exception, in the raster arm's own words: "a copy is not a region the artist
+        // is still holding", so Duplicate clears its ants at the lift where Move keeps them to the
+        // bake. Cleared before the lift so `selectionBeforeLift` is nil and a cancel does not put a
+        // loop back over a layer the loop was never drawn on.
+        self.selection = nil
+        return beginVectorMove(ofElementIDs: copiedIDs)
+    }
+
     /// **A lift that caught nothing says so under `Enclosed`, and stays silent otherwise** — the
     /// owner's ruling of 2026-08-28, and it is a deliberate exception to LASSO_MOVE.md §5.9 rather
     /// than a reversal of it.

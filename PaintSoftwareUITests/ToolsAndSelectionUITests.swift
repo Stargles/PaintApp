@@ -504,21 +504,33 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "Filling the selection should register as raster content, so the eraser can reach it")
     }
 
-    /// Rectangle-select, Duplicate: a new layer should appear immediately (holding the floating
-    /// piece), and the Move bottom bar's Done button should commit it into that new layer's raster
-    /// tier, without touching the source layer.
-    func testDuplicateSelectionCreatesNewLayerAndCommits() throws {
+    /// Draw a stroke, rectangle-select it, Duplicate: a new **vector** layer should appear
+    /// immediately (holding the floating copy), and the Move bottom bar's Done button should commit
+    /// it there as geometry, without touching the source layer.
+    ///
+    /// **This test used to duplicate blank paper and assert the copy was raster** — TODO item (33),
+    /// the owner's *"When I select and duplicate, it does not support vector (the duplicated
+    /// selection is a raster layer not a vector)."* It was pinning the defect: a new canvas opens on
+    /// a vector layer (PLAN §8), `beginDuplicate()` had no kind check, and so the copy arrived as
+    /// pixels. It draws a stroke first now because there is nothing to duplicate on blank paper —
+    /// the vector arm refuses an empty loop exactly as `beginVectorLassoMove` does.
+    ///
+    /// `readVectorMarker` is what tells a vector copy from a rasterized one; the images are identical
+    /// at the size the copy was taken, which is the whole reason this bug lived for as long as it did.
+    func testDuplicateSelectionCreatesNewVectorLayerAndCommits() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+
+        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
 
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
 
-        // Draw in the upper portion of the canvas, clear of the Select menu's bottom-docked bar (see
-        // the fill test).
-        dragOnCanvas(app, from: CGVector(dx: 0.55, dy: 0.25), to: CGVector(dx: 0.78, dy: 0.42))
+        // Around the whole stroke, in the upper portion of the canvas and clear of the Select menu's
+        // bottom-docked bar (see the fill test).
+        dragOnCanvas(app, from: CGVector(dx: 0.15, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.38))
 
         let duplicateButton = app.buttons["selectPanel.duplicateButton"]
         XCTAssertTrue(duplicateButton.waitForExistence(timeout: 5))
@@ -530,8 +542,11 @@ final class SelectionAndMoveUITests: PaintUITestCase {
 
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5), "Duplicate should have inserted a second layer")
-        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "Committing should land the duplicated piece in the raster tier, not a separate baked-image tier")
-        XCTAssertEqual(readLayerStrokeCount(app, layerIndex: 1), 1, "The duplicated piece should register as raster content on the new layer")
+        let copy = readVectorMarker(app, layerIndex: 1)
+        XCTAssertEqual(copy?.isVector, true, "A copy taken from a vector layer is itself a vector layer")
+        XCTAssertEqual(copy?.strokes, 1, "and carries the lassoed stroke as geometry, not as pixels")
+        XCTAssertEqual(readHasBakedImage(app, layerIndex: 1), false, "Nothing lands in the copy's raster tiers")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "Duplicate must not modify the source layer")
         XCTAssertEqual(readHasBakedImage(app, layerIndex: 0), false, "Duplicate must not modify the source layer")
     }
 
