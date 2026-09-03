@@ -78,6 +78,19 @@ struct CanvasNotice: Identifiable, Equatable {
         /// Named for the rule rather than for the tool because that is what the artist has to change:
         /// the fix is one tap on the picker that is already on screen, or a wider loop.
         case nothingWhollyInside
+        /// Move was tapped on an **interpolated in-between** — a frame whose picture is derived from
+        /// the two cels either side of it rather than stored.
+        ///
+        /// It has always been refused, in two places, and until 2026-09-03 it was refused **in
+        /// silence**: `activeVectorMoveTarget` returned nil and `beginVectorLassoMove` returned false,
+        /// so the artist tapped Move and the app did nothing and said nothing. That is the same
+        /// "reads as a broken button" case §5.24 ruled on for `nothingWhollyInside`, and it arrived
+        /// through the owner's report of a *different* silent refusal beside it — Move at a posed
+        /// frame, which is no longer refused at all.
+        ///
+        /// The fix is to move to one of the drawn cels either side, which is a decision the artist
+        /// makes at the timeline rather than a button this banner could press.
+        case cannotMoveDerivedFrame
         /// `ProjectStore.writeAtomically` could not stage a valid package — the pre-save validation,
         /// the live-package stash, or the final rename failed. Until ARCHITECTURE_REVIEW.md finding 3,
         /// all three returns were silent: `completion` ran regardless, so the gallery appeared exactly
@@ -123,6 +136,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .historyRedo(let label):  return "Redid \(label.phrase)."
         case .nothingToPick:    return "Nothing to pick up there."
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
+        case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
         case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
         case .resizeRefused(let refusal):
@@ -159,6 +173,9 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, and for the neighbouring reason: the fix is a choice between three rules the
         // artist is already looking at, or a loop only they can redraw.
         case .nothingWhollyInside: return nil
+        // Nor this one, and for the same reason once more: the fix is to scrub to a drawn cel, which
+        // is a move on the timeline the artist can already see.
+        case .cannotMoveDerivedFrame: return nil
         // Nor this one: the artist's next stroke or the next backgrounding will retry the save on its
         // own, and there is no button here that would do anything a retry doesn't already do.
         case .saveFailed:       return nil
@@ -183,6 +200,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingToPick:    return "nothingToPick"
         case .nothingEnclosed:  return "nothingEnclosed"
         case .nothingWhollyInside: return "nothingWhollyInside"
+        case .cannotMoveDerivedFrame: return "cannotMoveDerivedFrame"
         case .saveFailed:       return "saveFailed"
         case .resizeRefused:    return "resizeRefused"
         case .resizeResampled:  return "resizeResampled"

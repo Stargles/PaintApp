@@ -37,29 +37,23 @@ import Foundation
 ///    one drawing in its rest position and the keys hold the poses (§2.5). The rest display list is
 ///    restored and the map is keyed at the playhead, as one undo step.
 ///
-/// ## Why `.key` is only ever reached at a frame whose pose is the identity
+/// ## `.key` at a frame that is already posed, and what `map` has to be by the time it arrives
 ///
-/// The Move box is measured on the cel's **stored** ink (`MoveBoxInk(of: lift.elements)`), while a
-/// posed cel shows a derived picture. Where the two disagree the artist would be dragging a box that
-/// is not around the drawing they can see — which is the same mismatch that already makes Move refuse
-/// an interpolated cel outright, in two places. So `activeVectorMoveTarget` refuses a Move at a frame
-/// whose pose is not resting, and `.key`'s write is therefore composing the new map with the identity
-/// rather than with an arbitrary pose. Posing the float itself — which is what would lift that
-/// refusal — is named as the next stage's work rather than half-built here.
+/// Until 2026-09-03 `activeVectorMoveTarget` refused a Move at any frame whose pose was not resting,
+/// so this arm only ever composed the new map with the identity. That refusal is gone — it was the
+/// owner's *"try to select it in an inbetween, it does not let you"* — and `.key` is now reached at
+/// frames where the channel is mapping the drawing somewhere.
+///
+/// **Nothing in this file changed for it, and that is deliberate.** A Move's `map` is a delta in the
+/// space the artist was looking at, and a key is a map out of rest space; the two differ by the
+/// channel's own current pose and by whatever is applied *after* it. `commitPoseFromFloat` does that
+/// composition (`M · O · D · O⁻¹`) and hands the result in, so this file keeps taking one affine and
+/// keeps meaning one thing by it — and the inverse it takes for a held baseline or a seeded neighbour
+/// comes out right for free, because those arms are only reached when the channel has no curve and
+/// `M` is therefore the identity.
 extension CanvasManager {
 
     // MARK: - Reading
-
-    /// **Whether this cel shows its ink where it stores it at `frame`** — the predicate the Move
-    /// refusal and the `.key` arm both lean on. True for every cel in a document with no pose
-    /// channels, which is the fast path every caller takes.
-    func celPoseIsResting(layerIndex: Int, celIndex: Int, atFrame frame: Int) -> Bool {
-        guard layers.indices.contains(layerIndex),
-              layers[layerIndex].cels.indices.contains(celIndex) else { return true }
-        let cel = layers[layerIndex].cels[celIndex]
-        guard !cel.transformTracks.isEmpty else { return true }
-        return Self.poseIsResting(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
-    }
 
     /// **The frames a layer's pose channels hold keys on, in absolute document frames** — what
     /// §2.28's union folds in beside the layer's marks and its grade's curve keys.
@@ -443,11 +437,6 @@ extension CanvasManager {
     /// answering nil here routes the commit to `.storedValue` and leaves the bake alone rather than
     /// writing a key that says nothing.
     private func invertedIfPossible(_ map: CGAffineTransform) -> CGAffineTransform? {
-        let determinant = map.a * map.d - map.b * map.c
-        guard determinant.isFinite, abs(determinant) > Quad.epsilon else { return nil }
-        let inverse = map.inverted()
-        guard inverse.a.isFinite, inverse.b.isFinite, inverse.c.isFinite,
-              inverse.d.isFinite, inverse.tx.isFinite, inverse.ty.isFinite else { return nil }
-        return inverse
+        Self.invertedAffine(map)
     }
 }

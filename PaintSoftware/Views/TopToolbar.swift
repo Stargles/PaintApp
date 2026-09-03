@@ -137,10 +137,11 @@ struct TopToolbar: View {
         // On a vector layer, Move lifts geometry into a float and drags it with the on-canvas box —
         // no raster floating piece, and, since 2026-08-27, no whole-layer `_transform` either.
         if canvasManager.activeLayerIsVector {
-            // ...but not on an interpolated cel, whose frame is derived rather than stored: the
-            // transform would be written onto a `VectorCanvas` the displayed image does not come
-            // from. See `CanvasManager.activeCelIsInBetween`.
-            guard !canvasManager.activeCelIsInBetween else { return }
+            // **The interpolated-cel refusal used to be spelled again here, and it is not any more.**
+            // It is `CanvasManager.activeVectorMoveTarget`'s, which both lifts go through, and it
+            // raises `CanvasNotice.cannotMoveDerivedFrame` rather than returning in silence. A rule a
+            // view holds is a rule the fast tier cannot see (KEYFRAMES.md stage 3a's own finding), and
+            // this copy of it is what made the refusal invisible from a logic test.
             // With a loop drawn, Move is about the region inside it (LASSO_MOVE.md §5.1). Note the
             // unconditional return: a lasso that caught nothing does **nothing**, and deliberately
             // does not fall through to moving the artist's whole drawing — that is the destructive

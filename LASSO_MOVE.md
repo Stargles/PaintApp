@@ -202,6 +202,7 @@ and Duplicate is the pixel cut.
 |---|---|
 | the three rules, and the ordering | `LassoMembership` |
 | which rule a lift follows | a **parameter** on `VectorCanvas.splitForLassoMove(insideLocalPath:membership:)`, defaulted to `.cutting`. A sibling would have duplicated the broad phase, `lassoFillRule`, the linear scan for the three kinds the stroke index does not hold, the empty-set contract and the `mayDiverge` call |
+| which **space** the loop is asked in | `LassoLoops`, built by `CanvasManager.lassoLoops(_:posedBy:)` — one path on an ordinary cel, and the loop pulled back through each element's own pose on a cel a transform channel is carrying. All three consumers build it. §5.27 |
 | the one place a per-kind rule is decided | `VectorCanvas.caught(_:by:bounds:using:membership:)`, shared with `elementIDs(insideLocalPath:membership:)` — item (19)'s predicate, reused rather than re-derived. **Touching for a stroke or a fill is that predicate exactly** |
 | text and a placed image under the two new rules | their own quad — `VectorCanvas.quad(of:)`, two overloads — through the same two `CGPath` booleans the fill arm uses. A corners-only test would be wrong: four corners inside a crescent does not mean the rectangle is |
 | the picker | `SelectPanel.membershipPicker`, above the action row it governs. Live with no selection at all — the rule is what the *next* loop answers with; **disabled with a reason on a pixel layer** (`CanvasManager.selectionMembershipUnavailableReason`), where every consumer cuts at the selection and can do nothing else |
@@ -1569,6 +1570,49 @@ about *where the three rules live* rather than about what they do.
     artist can see the reason, and a loop full of ink that the rule they just picked excluded is the
     case where they cannot. `CanvasManager.noteALassoThatCaughtNothing` is the one call, and bare
     paper stays silent through all three doors.
+
+---
+
+A twenty-seventh was settled on **2026-09-03**, out of a device report, and it is about *which space*
+the loop is asked in rather than about which rule it is asked under.
+
+27. **A lasso means what it means on screen, on every frame — including one where a pose channel is
+    showing the drawing somewhere other than where it is stored.** The owner: *"There seems to be a
+    bug when trying to move an object from A to B, then try to select it in an inbetween, it does not
+    let you. If it is a keyframe, then reselecting that object and moving it [works]."*
+
+    **The refusal was deliberate and its argument was right; the answer is still not to refuse.**
+    `activeVectorMoveTarget` guarded on `celPoseIsResting` because the Move box was measured on
+    `vector.elements`, which is the drawing at **rest**, while a posed cel shows
+    `CanvasManager.posed(_:through:)`'s derived list — so the artist would have been dragging a box
+    that is not around their drawing. What the guard could not do is *say* so: both lifts turned it
+    into a bare `return false`, and every in-between of an animated object is such a frame, so Move
+    was a dead button on most of an animation. §5.24's rule applies unchanged — a tool that does
+    nothing and says nothing reads as broken.
+
+    **And the loop underneath it was blind in the same way, which is why the two had to land
+    together.** `VectorCanvas.localPath(fromCanvas:)` maps a canvas-space loop through `_transform`
+    and nothing else, and `splitForLassoMove` tests `elements`, which are at rest. Relaxing the
+    refusal alone would have traded a silent no-op for a **silently wrong selection**: the loop the
+    artist drew around their drawing catches nothing and a loop drawn over blank paper lifts it. That
+    is strictly worse, and `PosedLassoMoveLogicTests` pins both halves as one pair.
+
+    **So the loop is pulled back into each element's own stored space** (`LassoLoops`), which is exact
+    rather than an approximation: `CGPath.contains`, `intersection` and `subtracting` all commute with
+    an invertible affine, so testing `posed(e)` against the loop and testing `e` against `loop·P⁻¹`
+    are the same question. Doing it on the loop rather than on the ink is what lets the **split** stay
+    on stored geometry — a stroke cut in posed space would have to be mapped back sample by sample,
+    and its fill's cut path with it. The box is measured on the posed ink, and every nudge is
+    conjugated `P·D·P⁻¹` so a screen delta lands as a screen delta.
+
+    **All three consumers move together, §5.26's "no exception" applied to the space rather than to
+    the rule.** Move, Recolour and Clear build the same `LassoLoops`; a selection cannot mean one
+    thing to one tool and another to the next.
+
+    **What a committed Move at an in-between *means* is [KEYFRAMES.md](KEYFRAMES.md) §2.27 and is not
+    re-decided here**: an object moved A→B is an animated channel, so the drag writes a pose key at
+    the frame it happened on rather than editing the rest geometry — the `.key` arm, which the
+    refusal had made unreachable at every frame where a pose was doing anything.
 
 
 ## 6. Open risks

@@ -1153,19 +1153,27 @@ extension CanvasManager {
             // untransformed layer and silently wrong on every layer Move has already touched; and
             // Core Graphics leaves `intersection`/`subtracting` **undefined** on the self-intersecting
             // path a lasso becomes the moment the artist loops back over their own line.
-            let loop = vectorCanvas.localPath(fromCanvas: selection.path)
-                                   .normalized(using: VectorCanvas.lassoFillRule)
+            let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
+                                    .normalized(using: VectorCanvas.lassoFillRule)
+            // **And pulled back per element**, for the reason `beginVectorLassoMove` gives: on a cel a
+            // pose channel is carrying, the loop was drawn around ink that is not where it is stored.
+            // §5.26 rules that all three consumers of a selection obey one answer with no exception,
+            // so Clear asks in the same space Move does. Empty overrides on an ordinary cel.
+            let loops = CanvasManager.lassoLoops(
+                drawn, posedBy: celPoseMaps(vectorCanvas.elements,
+                                            layerID: layers[currentLayerIndex].id, celID: cel.id,
+                                            atFrame: currentFrame))
             let elementsBefore = vectorCanvas.elements
             // **The rule the artist picked, with no exception** (LASSO_MOVE.md §5.26). Under Cut this
             // is the same call it has always been and cuts at the loop; under Enclosed and Touching
             // `splitForLassoMove` returns the display list verbatim and `insideIDs` is the caught set,
             // so the filter below deletes whole elements and cuts nothing.
-            guard let split = vectorCanvas.splitForLassoMove(insideLocalPath: loop,
+            guard let split = vectorCanvas.splitForLassoMove(insideLoops: loops,
                                                              membership: selectionMembership) else {
                 // Same exception, same reason as a lift and a recolour: an Enclosed rule that excluded
                 // a loop full of ink is the artist's own choice doing it, and a Clear that deletes
                 // nothing and says nothing reads as a broken button (§5.24). Bare paper stays silent.
-                noteALassoThatCaughtNothing(vector: vectorCanvas, loop: loop)
+                noteALassoThatCaughtNothing(vector: vectorCanvas, loops: loops)
                 return
             }
             // **Filtered, in the order the split produced.** Both halves of a cut stroke replace their
@@ -1323,8 +1331,15 @@ extension CanvasManager {
         // is canvas space and stored geometry is local, and Core Graphics leaves the boolean ops
         // undefined on the self-intersecting path a lasso becomes the moment the artist loops back
         // over their own line.
-        let loop = vectorCanvas.localPath(fromCanvas: selection.path)
-                               .normalized(using: VectorCanvas.lassoFillRule)
+        let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
+                                .normalized(using: VectorCanvas.lassoFillRule)
+        // Pulled back per element, §5.26's "no exception" applied to the space rather than to the
+        // rule — see `CanvasManager.beginVectorLassoMove`. Empty overrides on an ordinary cel.
+        let loops = CanvasManager.lassoLoops(
+            drawn, posedBy: celPoseMaps(vectorCanvas.elements,
+                                        layerID: layers[currentLayerIndex].id,
+                                        celID: layers[currentLayerIndex].cels[celIndex].id,
+                                        atFrame: currentFrame))
 
         // **The one branch the three rules cost.** Cut is the only rule that changes geometry, which
         // is `LassoMembership.cutsAtTheBoundary`'s whole job — so it takes `splitForLassoMove`, whose
@@ -1338,7 +1353,7 @@ extension CanvasManager {
         if membership.cutsAtTheBoundary {
             // Nil is "the loop caught nothing", and for a recolour that is a silent no-op with no
             // undo step — `clearSelectionPixels` reads the same nil the same way.
-            guard let split = vectorCanvas.splitForLassoMove(insideLocalPath: loop,
+            guard let split = vectorCanvas.splitForLassoMove(insideLoops: loops,
                                                              membership: membership) else { return }
             // Cut cannot reach §5.24's case — it catches everything Touching does for strokes and
             // fills — so a nil here really is bare paper and stays silent, exactly as a lift's does.
@@ -1346,14 +1361,14 @@ extension CanvasManager {
             caught = split.insideIDs
         } else {
             working = elementsBefore
-            caught = vectorCanvas.elementIDs(insideLocalPath: loop, membership: membership)
+            caught = vectorCanvas.elementIDs(insideLoops: loops, membership: membership)
             guard !caught.isEmpty else {
                 // **Enclosed catching nothing says so here too** (LASSO_MOVE.md §5.24). The ruling is
                 // written about a lift, but its argument names no tool: a loop full of ink, a rule the
                 // artist has just picked, and a button that does nothing and says nothing reads as
                 // broken. A recolour reaches that state through the same property since item (23), so
                 // it raises the same notice through the same call.
-                noteALassoThatCaughtNothing(vector: vectorCanvas, loop: loop)
+                noteALassoThatCaughtNothing(vector: vectorCanvas, loops: loops)
                 return
             }
         }

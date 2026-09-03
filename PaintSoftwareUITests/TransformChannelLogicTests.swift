@@ -415,19 +415,29 @@ final class TransformChannelLogicTests: XCTestCase {
         XCTAssertTrue(track.keys[1].pose.isIdentity)
     }
 
-    /// **The Move refusal, and it is the in-between refusal wearing a second costume.** At a frame the
-    /// cel is not resting at, the box would be measured on stored ink the canvas is not showing.
-    func testMoveIsRefusedAtAFrameThePoseDoesNotRestAt() {
+    /// **A Move is allowed at a frame the cel is not resting at**, which reverses what this test
+    /// asserted until 2026-09-03.
+    ///
+    /// It used to read *"the Move refusal, and it is the in-between refusal wearing a second
+    /// costume"*, and it pinned the owner's bug as a feature: at every in-between of an animated
+    /// object `beginVectorWholeCelMove` returned false and the app said nothing. The refusal's own
+    /// argument was that the box would be measured on stored ink the canvas is not showing, which was
+    /// true — so the box is measured on the posed ink now, along with the loop and the gesture.
+    /// `PosedLassoMoveLogicTests` is where that is pinned; this is the direct inverse of the assertion
+    /// that stood here, kept in place so the reversal is visible in one diff.
+    func testMoveIsAllowedAtAFrameThePoseDoesNotRestAt() {
         let (manager, layerID, celID) = fixture()
         animate(manager, layerID: layerID, celID: celID)
         manager.currentLayerIndex = 1
-        XCTAssertTrue(manager.celPoseIsResting(layerIndex: 1, celIndex: 0, atFrame: 0))
-        XCTAssertFalse(manager.celPoseIsResting(layerIndex: 1, celIndex: 0, atFrame: 6))
 
         manager.currentFrame = 6
-        XCTAssertFalse(manager.beginVectorWholeCelMove(), "Refused where the box would be out of register")
+        XCTAssertTrue(manager.beginVectorWholeCelMove(), "the in-between of a pose is a frame like any other")
+        XCTAssertFalse(manager.vectorFloat?.poses.isEmpty ?? true,
+                       "and the float knows it is posed, which is what makes the box and the drag land")
+        manager.cancelVectorFloat()
         manager.currentFrame = 0
-        XCTAssertTrue(manager.beginVectorWholeCelMove(), "and allowed where it is in register")
+        XCTAssertTrue(manager.beginVectorWholeCelMove(), "as is a frame that rests")
+        XCTAssertTrue(manager.vectorFloat?.poses.isEmpty ?? false, "…carrying nothing, there")
         manager.cancelVectorFloat()
     }
 

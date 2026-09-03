@@ -73,6 +73,9 @@ struct CanvasNoticeBanner: View {
         // The same glyph for the same reason: the artist's loop, and the rule they picked for it, are
         // what the message is about.
         case .nothingWhollyInside: return "lasso"
+        // The timeline's own glyph: the message is about which frame the artist is standing on, and
+        // the fix is a scrub rather than anything on the canvas.
+        case .cannotMoveDerivedFrame: return "film"
         // The two cases in this switch where something genuinely has gone wrong — a save that did not
         // land, and a resize that found an element it could not read — so they get the warning
         // triangle none of the others use.

@@ -45,8 +45,10 @@ app, and whoever notices that should come back and say so rather than assuming i
 - **(21) Keyframes — stages 0 through 3b and stage 5 merged**, spec at [KEYFRAMES.md](KEYFRAMES.md).
   Stage 5 is the transform channel: a cel or an animation group carries a track of quad poses, ink is
   posed through `mapping(_:throughStretch:)`'s `sqrt(|det|)` width rule, and the blend is factored so
-  the endpoints come back bit-exact. **Three things it does not have** — Move is refused at a frame
-  whose pose is not resting, a pose channel has no graph-editor band, and animation groups have no UI.
+  the endpoints come back bit-exact. **Two things it does not have** — a pose channel has no
+  graph-editor band, and animation groups have no UI. **A Move at a posed in-between works**: it measures
+  its box, its loop and its drag in the space the artist is looking at, and commits by conjugating the
+  delta onto the channel, which is §2.27's `.key` arm.
   **The missing pose band is now also what stops (38)(c)'s rule being exactly true**: a pose key draws an
   indicator on the cel and there is no band for it to have a node in.
 

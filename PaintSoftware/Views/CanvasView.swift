@@ -1757,7 +1757,11 @@ struct CanvasView: UIViewRepresentable {
                 // between gestures and re-arms against geometry that has since moved, so the bitmap
                 // and the base it is measured from have to describe the same moment.
                 host.strokeView.beginVectorFloat(
-                    image: vector.renderIsolated(ids: float.insideIDs),
+                    // **`posedBy`, or the piece is drawn at rest while the hole it came out of is
+                    // posed.** The float's geometry is stored at rest like all the rest of the cel;
+                    // the layer's own render poses what it draws and this bitmap bypasses it, so it
+                    // applies the same map itself. Empty on every unkeyframed document.
+                    image: vector.renderIsolated(ids: float.insideIDs, posedBy: float.poses),
                     base: VectorCanvas.affine(from: float.latchedFrameTransform,
                                               aspect: float.latchedAspect,
                                               stretchAxis: float.latchedStretchAxis,

@@ -230,6 +230,27 @@ struct VectorFloat {
     /// is what lets the undo step be a plain whole-array swap.
     let liftedInside: [UUID: VectorElement]
 
+    /// **The pose each lifted element is *displayed* through at the frame it was lifted on** —
+    /// KEYFRAMES.md stage 5's transform channels resolved at `currentFrame`, keyed by the ids the
+    /// split produced. Empty for every cel that shows its drawing where it stores it, which is every
+    /// frame of a document nobody has keyframed and every frame at or after a key holding the rest
+    /// pose.
+    ///
+    /// **It is what makes a Move at an in-between mean anything at all.** Stored geometry is at rest
+    /// and the artist is looking at `CanvasManager.posed(_:through:)`'s derived list, so all three of
+    /// the float's spaces have to be told apart: the box is measured on ink mapped by this
+    /// (`MoveBoxInk`, so the handles are around the drawing they can see), every nudge is conjugated
+    /// by it (`CanvasManager.restDelta`, so a screen delta lands as a screen delta), and the latched
+    /// bitmap is rendered through it (`VectorCanvas.renderIsolated(ids:posedBy:)`, so the piece is
+    /// drawn where the hole it came out of is). Until 2026-09-03 there was no such field and Move
+    /// simply refused a posed frame, in silence — the owner's *"try to select it in an inbetween, it
+    /// does not let you"*.
+    ///
+    /// **Frozen at the lift, like `liftedInside` and `baseTransform`.** The playhead cannot move while
+    /// a float is up without settling it (`handleActiveContextChanged`), and re-reading the pose per
+    /// nudge would make a scrub silently re-interpret gestures already on the undo stack.
+    let poses: [UUID: CGAffineTransform]
+
     /// The centre of the lifted content's local bounding box — the fixed point the box's transform is
     /// expressed about. `contentSize` is that box's size. The convention `updateTransformOverlay`
     /// already feeds the overlay for a whole-layer transform.
@@ -369,10 +390,15 @@ extension CanvasManager {
         // `intersection`/`subtracting` **undefined** for a non-simple path, and a lasso built from
         // raw touch samples self-intersects the moment the artist loops back over their own line.
         // `handleLassoPan` appends one point per sample with no decimation and no simplification.
-        let loop = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
-        guard let split = vector.splitForLassoMove(insideLocalPath: loop,
+        let drawn = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
+        // **And the loop pulled back into each element's own stored space**, which is the other half
+        // of "map the canvas-space loop into local space" for a cel a pose channel is carrying: the
+        // artist drew around ink they can see, and the display list this is about to test is at rest.
+        // Empty overrides on an ordinary cel, so this is the same one path it has always been.
+        let loops = Self.lassoLoops(drawn, posedBy: target.poses)
+        guard let split = vector.splitForLassoMove(insideLoops: loops,
                                                    membership: selectionMembership) else {
-            noteALassoThatCaughtNothing(vector: vector, loop: loop)
+            noteALassoThatCaughtNothing(vector: vector, loops: loops)
             return false
         }
 
@@ -384,7 +410,18 @@ extension CanvasManager {
         // deliberately does not invalidate, and callers follow with a bump.
         vector.suppressedElementIDs = split.insideIDs
 
-        let ink = MoveBoxInk(of: Array(lifted.values))
+        // **Re-taken against the split list, not `target.poses`.** A cut mints fresh ids for both
+        // halves, so the dictionary the membership test was built from cannot answer for the pieces
+        // the float is carrying. It can be rebuilt because membership is a *field*: `piece(of:)`
+        // copies the parent whole and `splitForLassoMove` now carries a fill's group onto both halves.
+        let poses = celPoseMaps(split.elements, layerID: target.layerID, celID: target.celID,
+                                atFrame: currentFrame)
+            .filter { split.insideIDs.contains($0.key) }
+
+        // **The box is measured on the ink where it is *shown*.** `MoveBoxInk` of the stored pieces
+        // would put the handles around the rest position — the exact mismatch the old refusal existed
+        // to avoid, arriving one line later.
+        let ink = MoveBoxInk(of: Self.posed(Array(lifted.values), by: poses))
         guard let bounds = ink.bounds() else {
             // Nothing measurable to put a box around. Put the list back rather than leaving a
             // suppression nothing will ever clear.
@@ -406,7 +443,7 @@ extension CanvasManager {
         let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
                                          contentSize: bounds.size)
         vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
-                                  insideIDs: split.insideIDs, liftedInside: lifted,
+                                  insideIDs: split.insideIDs, liftedInside: lifted, poses: poses,
                                   pivot: pivot, contentSize: bounds.size, ink: ink,
                                   baseTransform: vector.transform, frame: frame,
                                   liftFrameTransform: frame.transform, mirror: .identity,
@@ -451,9 +488,9 @@ extension CanvasManager {
     /// picks the same rule out of the same property and can fail for the same reason — a loop full of
     /// ink that Enclosed excluded — and §5.24's argument does not mention Move: it is about a rule the
     /// artist just picked being the thing that made a button do nothing.
-    func noteALassoThatCaughtNothing(vector: VectorCanvas, loop: CGPath) {
+    func noteALassoThatCaughtNothing(vector: VectorCanvas, loops: LassoLoops) {
         guard selectionMembership == .enclosed,
-              !vector.elementIDs(insideLocalPath: loop, membership: .touching).isEmpty else { return }
+              !vector.elementIDs(insideLoops: loops, membership: .touching).isEmpty else { return }
         raise(.nothingWhollyInside)
     }
 
@@ -576,7 +613,11 @@ extension CanvasManager {
         // exactly as it is on the lasso arm.
         vector.suppressedElementIDs = lift.insideIDs
 
-        let ink = MoveBoxInk(of: lift.elements)
+        // No re-take here, unlike the lasso arm: nothing was cut, so no id changed and
+        // `target.poses` already describes exactly these elements.
+        let poses = target.poses
+        // Measured on the ink where it is *shown* — `VectorFloat.poses`, and the lasso arm's reason.
+        let ink = MoveBoxInk(of: Self.posed(lift.elements, by: poses))
         guard let bounds = ink.bounds() else {
             // A cel whose every element is degenerate — nothing measurable to put a box around.
             // Clear rather than leave a suppression nothing will ever come back for.
@@ -588,7 +629,7 @@ extension CanvasManager {
         let frame = ObjectTransformFrame(transform: vector.layerTransform(pivot: pivot),
                                          contentSize: bounds.size)
         vectorFloat = VectorFloat(layerID: target.layerID, celID: target.celID,
-                                  insideIDs: lift.insideIDs, liftedInside: lifted,
+                                  insideIDs: lift.insideIDs, liftedInside: lifted, poses: poses,
                                   pivot: pivot, contentSize: bounds.size, ink: ink,
                                   baseTransform: vector.transform, frame: frame,
                                   liftFrameTransform: frame.transform, mirror: .identity,
@@ -755,12 +796,26 @@ extension CanvasManager {
         // an omission: at `aspect == 1` the map is a similarity *whatever* the stretch axis is, since
         // a scalar commutes with a rotation. `affine` states that as a branch, so the matrix handed
         // to the similarity arm at `aspect == 1` is bit-for-bit the one it received before phase 2.
-        let isStretched = aspect != 1
+        //
+        // **A posed float takes the stretch arm whatever its aspect is**, and that is arithmetic
+        // rather than caution. What each element is mapped by is not `localDelta` but its conjugate
+        // `P·D·P⁻¹` (`CanvasManager.restDelta`), and conjugating a similarity by a *stretched* pose is
+        // not a similarity — so routing on `aspect` alone would hand `mapping(_:throughSimilarity:)` a
+        // matrix its shape assert refuses, on a path the artist reaches by scrubbing to an in-between
+        // and dragging. The two arms agree wherever they overlap (the paragraph above is the whole
+        // argument), so a posed float that happens to be un-stretched gets the same document either
+        // way. An unposed one is bit-for-bit untouched, because `poses` is empty.
+        let isStretched = aspect != 1 || !float.poses.isEmpty
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
             guard let lifted = float.liftedInside[element.id] else { return element }
-            let moved = isStretched ? VectorCanvas.mapping(lifted, throughStretch: localDelta)
-                                    : VectorCanvas.mapping(lifted, throughSimilarity: localDelta)
+            // **The delta the artist made, expressed in the space this element is stored in.** The
+            // box, the finger and the latched bitmap are all in the *posed* space; `vector.elements`
+            // is at rest, and the layer's own render poses what it draws — so storing the raw delta
+            // would move the piece by `D` and then have the pose move it again.
+            let delta = Self.restDelta(localDelta, pose: float.poses[element.id])
+            let moved = isStretched ? VectorCanvas.mapping(lifted, throughStretch: delta)
+                                    : VectorCanvas.mapping(lifted, throughSimilarity: delta)
             // **TODO item (14): the Move marks what it wrote, here and nowhere else.** This is the
             // one function a vector Move writes geometry from — both arms lift into the same float
             // and every nudge, Rotate press, Mirror and Reset comes back through it — so one line
@@ -897,8 +952,29 @@ extension CanvasManager {
         let restBox = CGRect(x: float.pivot.x - float.contentSize.width / 2,
                              y: float.pivot.y - float.contentSize.height / 2,
                              width: float.contentSize.width, height: float.contentSize.height)
+        // **The delta the artist made is in the space they were looking at, and a key is a map out of
+        // rest space — so it is conjugated onto the channel rather than written raw.**
+        //
+        // `posed(_:through:)` shows a group's members at `rest·G·C` and everything else at `rest·C`,
+        // groups first and the cel last. A drag by `D` in the space the artist sees wants
+        // `rest·G·C·D`, so the cel channel takes `C·D` and a group takes `G·C·D·C⁻¹`: one expression,
+        // `M · O · D · O⁻¹`, for the channel's own current map `M` and the map of whatever is applied
+        // *after* it. Both are the identity on a document with no pose channels, so `keyed` is `map`
+        // to the bit and every ordinary Move writes exactly what it wrote before.
+        //
+        // **Passing the conjugate in rather than teaching `commitTransformPose` about it is what keeps
+        // the other three arms right for free**: that function inverts this same map to get "where the
+        // drawing was" for a held baseline and for a seeded neighbour, and `(M·O·D·O⁻¹)⁻¹` with
+        // `M` the identity — which every non-`.key` arm requires, since they are only reached when the
+        // channel has no curve — is `O·D⁻¹·O⁻¹`, the pose that puts the piece back.
+        let outer = outerPoseMap(layerID: float.layerID, celID: float.celID, channel: channel,
+                                 atFrame: currentFrame)
+        let current = resolvedPoseMap(layerID: float.layerID, celID: float.celID, channel: channel,
+                                      atFrame: currentFrame)
+        guard let outerInverse = Self.invertedAffine(outer) else { return }
+        let keyed = current.concatenating(outer).concatenating(map).concatenating(outerInverse)
         commitTransformPose(layerID: float.layerID, celID: float.celID, channel: channel,
-                            restBox: restBox, map: map, restElements: float.elementsBeforeLift,
+                            restBox: restBox, map: keyed, restElements: float.elementsBeforeLift,
                             atFrame: currentFrame)
     }
 
@@ -976,25 +1052,40 @@ extension CanvasManager {
 
     // MARK: - Internals
 
-    /// The active vector cel a lasso move can act on. An interpolated in-between is refused for
-    /// `TopToolbar.toggleMove`'s reason: a derived cel has no display list of its own to split, and
-    /// the transform would be written onto a `VectorCanvas` the displayed image does not come from.
-    private func activeVectorMoveTarget() -> (layerID: UUID, celID: UUID, vector: VectorCanvas)? {
-        guard layers.indices.contains(currentLayerIndex), layers[currentLayerIndex].kind == .vector,
-              !activeCelIsInBetween,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              // **KEYFRAMES.md stage 5, and it is the in-between refusal one line up wearing a second
-              // costume.** The Move box is measured on the cel's *stored* ink
-              // (`MoveBoxInk(of: lift.elements)`), and a cel whose pose channel resolves to anything
-              // but the identity here is showing a derived picture somewhere else — so the artist
-              // would be dragging a box that is not around the drawing they can see, and every nudge
-              // would write geometry the pose then moves again. A frame whose pose *is* resting has no
-              // such gap, which is every frame of an unkeyframed document and every frame at or after
-              // a key holding the rest pose. Posing the float itself is what would lift this, and it
-              // is named as the next stage's work rather than half-built.
-              celPoseIsResting(layerIndex: currentLayerIndex, celIndex: celIndex, atFrame: currentFrame),
+    /// **The active vector cel a lasso move can act on, and the pose each of its elements is being
+    /// shown through.**
+    ///
+    /// **An interpolated in-between is still refused, and it now says so.** A derived cel has no
+    /// display list of its own to split, and the transform would be written onto a `VectorCanvas` the
+    /// displayed image does not come from. Until 2026-09-03 both this and the duplicate guard in
+    /// `TopToolbar.toggleMove` returned in silence; the guard is gone (a rule the fast tier cannot see
+    /// is a rule nothing pins) and the refusal raises `CanvasNotice.cannotMoveDerivedFrame`.
+    ///
+    /// **A *posed* frame is no longer refused, which is the whole of this change and the defect the
+    /// owner reported**: *"trying to move an object from A to B, then try to select it in an
+    /// inbetween, it does not let you. If it is a keyframe, then reselecting that object and moving it
+    /// works."* The old guard here was `celPoseIsResting`, and its argument was sound as far as it
+    /// went — the Move box was measured on the cel's *stored* ink while a posed cel shows a derived
+    /// picture, so the artist would have been dragging a box that is not around their drawing. The
+    /// answer is to measure the box, the loop and the nudge in the space the artist is looking at
+    /// rather than to refuse; `VectorFloat.poses` is that space, and this is where it is read.
+    ///
+    /// **The maps are taken against the pre-split display list**, which is what the lasso's membership
+    /// test needs. A lift re-takes them against the post-split one, because a cut mints fresh ids.
+    private func activeVectorMoveTarget() -> (layerID: UUID, celID: UUID, vector: VectorCanvas,
+                                              poses: [UUID: CGAffineTransform])? {
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].kind == .vector else { return nil }
+        guard !activeCelIsInBetween else {
+            raise(.cannotMoveDerivedFrame)
+            return nil
+        }
+        guard let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               let vector = layers[currentLayerIndex].cels[celIndex].vector else { return nil }
-        return (layers[currentLayerIndex].id, layers[currentLayerIndex].cels[celIndex].id, vector)
+        let layerID = layers[currentLayerIndex].id
+        let celID = layers[currentLayerIndex].cels[celIndex].id
+        return (layerID, celID, vector,
+                celPoseMaps(vector.elements, layerID: layerID, celID: celID, atFrame: currentFrame))
     }
 
     /// The canvas a float was taken from, resolved by id every time — the layer it lives on can have

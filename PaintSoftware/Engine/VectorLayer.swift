@@ -1857,12 +1857,12 @@ final class VectorCanvas {
         }
     }
 
-    /// Every element `loop` catches under `membership`, **cutting nothing**. Caller must hold `lock`.
+    /// Every element `loops` catches under `membership`, **cutting nothing**. Caller must hold `lock`.
     ///
     /// The shared body of `elementIDs(insideLocalPath:membership:)` and of `splitForLassoMove`'s two
     /// non-cutting arms, so the picker's Touching cannot drift from the recolour's answer for the
     /// kinds where the two agree.
-    private func caughtIDs(insideLocalPath loop: CGPath, bounds loopBounds: CGRect,
+    private func caughtIDs(insideLoops loops: LassoLoops,
                            strokeCandidates: Set<Int>, membership: LassoMembership) -> Set<UUID> {
         let rule = Self.lassoFillRule
         var insideIDs: Set<UUID> = []
@@ -1871,7 +1871,9 @@ final class VectorCanvas {
             // against their own bounds inside `caught` — the same limitation, and the same shape, as
             // `splitForLassoMove`'s cutting arm.
             if element.stroke != nil, !strokeCandidates.contains(index) { continue }
-            if Self.caught(element, by: loop, bounds: loopBounds, using: rule, membership: membership) {
+            let loop = loops.path(for: element.id)
+            if Self.caught(element, by: loop, bounds: loops.bounds(for: element.id),
+                           using: rule, membership: membership) {
                 insideIDs.insert(element.id)
             }
         }
@@ -1919,20 +1921,33 @@ final class VectorCanvas {
     /// teardown. `mayDiverge` is still asked and is still needed — under `.enclosed` it fires *more*
     /// often rather than less, because fewer moved ids means more unmoved punches sitting above the
     /// lowest moved index.
+    /// The same, for a cel whose ink is stored where it is shown — one loop for every element.
+    ///
+    /// **Kept as the plain spelling rather than folded into the caller**, because it is the honest
+    /// signature for every path that is not posed: the fill tool, the recolour, Clear, and every test
+    /// written before a cel could show its drawing somewhere other than where it stores it.
     func splitForLassoMove(insideLocalPath loop: CGPath, membership: LassoMembership = .cutting)
+        -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
+        splitForLassoMove(insideLoops: LassoLoops(loop), membership: membership)
+    }
+
+    func splitForLassoMove(insideLoops loops: LassoLoops, membership: LassoMembership = .cutting)
         -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
         lock.lock()
         defer { lock.unlock() }
         guard !_elements.isEmpty else { return nil }
-        let box = loop.boundingBoxOfPath
+        let box = loops.searchBounds
         guard !box.isNull, !box.isEmpty else { return nil }
         // The same broad phase `cutAlongFootprint` uses, and with the same limitation: the index holds
         // strokes only, so fills, images and text take a linear scan against their own bounds below.
+        // **The union box, not the drawn loop's** — a posed element is tested against its own pulled-back
+        // loop, and rejecting it here against a box that loop does not sit in would lose it before it
+        // was asked (`LassoLoops`).
         let strokeCandidates = Set(strokeIndex().segments(near: box).map(\.elementIndex))
         let rule = Self.lassoFillRule
 
         guard membership.cutsAtTheBoundary else {
-            let insideIDs = caughtIDs(insideLocalPath: loop, bounds: box,
+            let insideIDs = caughtIDs(insideLoops: loops,
                                       strokeCandidates: strokeCandidates, membership: membership)
             guard !insideIDs.isEmpty else { return nil }
             return (_elements, insideIDs, Self.mayDiverge(_elements, movedIDs: insideIDs))
@@ -1943,6 +1958,10 @@ final class VectorCanvas {
         var insideIDs: Set<UUID> = []
 
         for (index, element) in _elements.enumerated() {
+            // The loop in *this* element's own stored space — the drawn one for every element of an
+            // ordinary cel, and the pulled-back one for ink a pose channel is showing elsewhere.
+            let loop = loops.path(for: element.id)
+            let box = loops.bounds(for: element.id)
             switch element {
             case .stroke(let stroke):
                 guard strokeCandidates.contains(index), !stroke.samples.isEmpty else {
@@ -1994,10 +2013,17 @@ final class VectorCanvas {
                 // Both halves mint fresh ids, exactly as a split stroke's do: keeping the parent's on
                 // one of them would make "which is the original" a coin flip the first time a lasso
                 // cuts one fill into three.
-                let insideFill = VectorFillElement(path: insidePart, color: fill.color,
+                var insideFill = VectorFillElement(path: insidePart, color: fill.color,
                                                    opacity: fill.opacity, evenOddFill: fill.evenOddFill)
-                let outsideFill = VectorFillElement(path: outsidePart, color: fill.color,
+                var outsideFill = VectorFillElement(path: outsidePart, color: fill.color,
                                                     opacity: fill.opacity, evenOddFill: fill.evenOddFill)
+                // **Both halves keep the parent's animation group**, which the ids deliberately do not
+                // (§3.4: membership is a field on the element, and a fresh id is what tells the two
+                // halves apart). `piece(of:)` carries it for a stroke by copying the whole value; a
+                // fill is rebuilt from four fields, so it has to be said. Without this a cut fill drops
+                // out of the channel that was moving it and stops animating, silently.
+                insideFill.animationGroupID = fill.animationGroupID
+                outsideFill.animationGroupID = fill.animationGroupID
                 insideIDs.insert(insideFill.id)
                 result.append(.fill(outsideFill))
                 result.append(.fill(insideFill))
@@ -2074,17 +2100,23 @@ final class VectorCanvas {
     /// this: it asserts an eraser and a photo inside the loop come back in the set, so moving the
     /// recolour's skip down into this function fails a test *today* rather than at the moment Move
     /// reuses it.
+    /// The same, on a cel whose ink is stored where it is shown.
     func elementIDs(insideLocalPath loop: CGPath,
+                    membership: LassoMembership = .cutting) -> Set<UUID> {
+        elementIDs(insideLoops: LassoLoops(loop), membership: membership)
+    }
+
+    func elementIDs(insideLoops loops: LassoLoops,
                     membership: LassoMembership = .cutting) -> Set<UUID> {
         lock.lock()
         defer { lock.unlock() }
         guard !_elements.isEmpty else { return [] }
-        let box = loop.boundingBoxOfPath
+        let box = loops.searchBounds
         guard !box.isNull, !box.isEmpty else { return [] }
         // `strokeIndex()` holds centrelines only, so fills, images and text take a linear scan
         // against their own bounds — the same limitation, and the same shape, as `splitForLassoMove`.
         let strokeCandidates = Set(strokeIndex().segments(near: box).map(\.elementIndex))
-        return caughtIDs(insideLocalPath: loop, bounds: box,
+        return caughtIDs(insideLoops: loops,
                          strokeCandidates: strokeCandidates, membership: membership)
     }
 
@@ -3237,10 +3269,23 @@ final class VectorCanvas {
     /// **Deliberately not memoized**, for `render()`'s own stated reason: it is called once per latch,
     /// and caching it would make `hasCachedImage` report a claim on memory the canvas is not making,
     /// so eviction would spend its budget on an image nothing is holding.
-    func renderIsolated(ids: Set<UUID>) -> UIImage? {
+    /// **`posedBy` is the pose each id is *shown* through**, empty for an ordinary cel and non-empty
+    /// only while a float has been lifted from a cel a transform channel is carrying (KEYFRAMES.md
+    /// stage 5). The float's own geometry is stored at rest like everything else — `applyToVectorFloat`
+    /// writes `rest · P·D·P⁻¹` so that the layer's *own* render, which poses what it draws, lands the
+    /// piece where the artist dropped it. This bitmap bypasses that render, so it has to apply the same
+    /// pose itself or the latched piece would be drawn at the rest position while the hole it came out
+    /// of is at the posed one.
+    func renderIsolated(ids: Set<UUID>, posedBy: [UUID: CGAffineTransform] = [:]) -> UIImage? {
         lock.lock()
         defer { lock.unlock() }
-        let isolated = _elements.filter { ids.contains($0.id) }
+        var isolated = _elements.filter { ids.contains($0.id) }
+        if !posedBy.isEmpty {
+            isolated = isolated.map { element in
+                guard let pose = posedBy[element.id], !pose.isIdentity else { return element }
+                return Self.posing(element, through: pose)
+            }
+        }
         guard !isolated.isEmpty else { return nil }
         rasterizations += 1
         let content = renderLocalContent(elements: isolated)
@@ -3914,4 +3959,87 @@ struct VectorCanvasData: Codable {
         return CGAffineTransform(a: CGFloat(transform[0]), b: CGFloat(transform[1]), c: CGFloat(transform[2]),
                                  d: CGFloat(transform[3]), tx: CGFloat(transform[4]), ty: CGFloat(transform[5]))
     }
+}
+
+// MARK: - The lasso loop, per element
+
+/// **The lasso loop expressed in the space each element is actually *stored* in.**
+///
+/// A lasso is drawn over what the artist can see. On an ordinary cel that is also where the ink is
+/// stored, so one path answers for every element and this type is a wrapper around it that costs
+/// nothing. On a cel a pose channel is carrying (KEYFRAMES.md stage 5), the two spaces come apart:
+/// `VectorCanvas.elements` holds the drawing at **rest** and the artist is looking at
+/// `CanvasManager.posed(_:through:)`'s derived display list, so a loop tested against the stored
+/// geometry answers about ink that is somewhere else on screen. That was silently-wrong selection —
+/// see `CanvasManager.lassoLoops(for:atFrame:from:)`, which is the only thing that builds a
+/// non-empty `perElement`.
+///
+/// **Pulling the loop back per element is exactly equivalent to testing the posed geometry, and it
+/// is that rather than an approximation.** Every containment and boolean test this feeds —
+/// `CGPath.contains`, `intersection`, `subtracting` — commutes with an invertible affine, so
+/// `posed(e) ∩ loop` is non-empty exactly when `e ∩ loop·P⁻¹` is. Doing it on the loop is what keeps
+/// the split working on stored geometry: a stroke cut in posed space would have to be mapped back
+/// sample by sample, and a fill's cut path with it.
+///
+/// **The bounds are per element too, and the search bounds are the union.** `caught` uses a loop's
+/// bounding box as a cheap reject and `splitForLassoMove` uses one to pick stroke candidates out of
+/// the index; both have to be the box of the loop that element is actually tested against, and the
+/// broad phase has to be a superset of all of them or a posed element would be rejected before it was
+/// ever asked.
+struct LassoLoops {
+
+    /// The loop as drawn, mapped into the canvas's local space — what every element not named in
+    /// `paths` is tested against, which on a resting cel is all of them.
+    let loop: CGPath
+
+    /// The union of every distinct loop's bounding box. The broad phase's box, and equal to
+    /// `loop.boundingBoxOfPath` when nothing is posed.
+    let searchBounds: CGRect
+
+    private let paths: [UUID: CGPath]
+    private let boundsByID: [UUID: CGRect]
+
+    /// The base loop's own box, kept apart from `searchBounds` so an un-posed element on a posed cel
+    /// is rejected against the loop it is actually tested with rather than against the union.
+    private let loopBounds: CGRect
+
+    /// `perElement` names only the elements whose stored space differs from the drawn one; an empty
+    /// dictionary is the ordinary cel and makes every accessor below a dictionary miss.
+    init(_ loop: CGPath, perElement: [UUID: CGPath] = [:]) {
+        self.loop = loop
+        self.paths = perElement
+        let base = loop.boundingBoxOfPath
+        self.loopBounds = base
+        guard !perElement.isEmpty else {
+            self.boundsByID = [:]
+            self.searchBounds = base
+            return
+        }
+        // Memoized on the *path object*, because `CanvasManager.lassoLoops` shares one `CGPath`
+        // between every element carried by the same pose — so a five-hundred-element cel under one
+        // cel channel measures one bounding box rather than five hundred.
+        var memo: [ObjectIdentifier: CGRect] = [:]
+        var byID: [UUID: CGRect] = [:]
+        var union = base
+        for (id, path) in perElement {
+            let key = ObjectIdentifier(path)
+            let box: CGRect
+            if let cached = memo[key] {
+                box = cached
+            } else {
+                box = path.boundingBoxOfPath
+                memo[key] = box
+            }
+            byID[id] = box
+            union = union.isNull ? box : (box.isNull ? union : union.union(box))
+        }
+        self.boundsByID = byID
+        self.searchBounds = union
+    }
+
+    /// The loop `id` is tested against.
+    func path(for id: UUID) -> CGPath { paths[id] ?? loop }
+
+    /// That loop's bounding box.
+    func bounds(for id: UUID) -> CGRect { boundsByID[id] ?? loopBounds }
 }

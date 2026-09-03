@@ -126,6 +126,156 @@ extension CanvasManager {
         }
     }
 
+    /// **The affine each element is *shown* through, kept rather than applied** — `posed(_:through:)`
+    /// with the map handed back instead of the mapped element.
+    ///
+    /// This is what a Move at a posed frame needs and what stage 5 did not have, in three places at
+    /// once: the lasso loop has to be pulled back through it before membership means anything
+    /// (`LassoLoops`), the float's box has to be measured on ink mapped by it or the artist drags a
+    /// box that is not around their drawing, and every nudge has to be conjugated by it so a screen
+    /// delta lands as a screen delta. The old answer to all three was `activeVectorMoveTarget`
+    /// refusing outright — silently, which is the defect the owner reported as *"try to select it in
+    /// an inbetween, it does not let you"*.
+    ///
+    /// **Only the elements that are actually carried appear**, so an ordinary cel gets an empty
+    /// dictionary and every consumer's fast path is one `isEmpty`.
+    ///
+    /// **A composed map that cannot be inverted is left out rather than carried**, and that is a
+    /// reading rather than a guard. Every consumer inverts: the loop pull-back, the nudge's
+    /// conjugation, the commit's outer map. A singular pose has collapsed that element to a line at
+    /// this frame, so there is nothing on screen to lasso and nothing a delta could be measured
+    /// against; leaving it at rest keeps the arithmetic finite and keeps the element out of the
+    /// float. `TransformTrack.mapping` already drops a channel whose quad is degenerate, so this is
+    /// reachable only through a *composition* of two channels that is singular without either being
+    /// so.
+    static func poseMaps(_ elements: [VectorElement],
+                         through mappings: [(TransformChannelID, CGAffineTransform)])
+        -> [UUID: CGAffineTransform] {
+        guard !mappings.isEmpty else { return [:] }
+        var maps: [UUID: CGAffineTransform] = [:]
+        for element in elements {
+            var composed = CGAffineTransform.identity
+            var carried = false
+            for (channel, map) in mappings where element.isMoved(by: channel) {
+                composed = composed.concatenating(map)
+                carried = true
+            }
+            guard carried, !composed.isIdentity, Self.invertedAffine(composed) != nil else { continue }
+            maps[element.id] = composed
+        }
+        return maps
+    }
+
+    /// The same, for one cel of the document at an **absolute** frame — the conversion in one place,
+    /// `resolvedPose`'s rule.
+    ///
+    /// `elements` is a parameter rather than read off the cel because the two callers want different
+    /// lists: a lift asks against the **pre-split** display list to decide what the loop caught, and
+    /// then against the **post-split** one to give the float the poses of the pieces it is actually
+    /// carrying. A cut mints fresh ids, so a dictionary built before the split cannot answer for the
+    /// halves — but `piece(of:)` copies the parent whole and `splitForLassoMove` carries a fill's
+    /// group onto both halves, so a map built after it can.
+    func celPoseMaps(_ elements: [VectorElement], layerID: UUID, celID: UUID,
+                     atFrame frame: Int) -> [UUID: CGAffineTransform] {
+        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return [:] }
+        let cel = layers[at.layer].cels[at.cel]
+        guard !cel.transformTracks.isEmpty else { return [:] }
+        return Self.poseMaps(elements, through: Self.poseMappings(cel.transformTracks,
+                                                                  atCelLocalFrame: frame - cel.startFrame))
+    }
+
+    /// `elements` with each one carried by its own pose — `posed(_:through:)`'s answer, addressed by
+    /// id instead of by channel. What the Move box is measured on at a posed frame, and what the
+    /// float's latched bitmap is rendered from.
+    static func posed(_ elements: [VectorElement],
+                      by poses: [UUID: CGAffineTransform]) -> [VectorElement] {
+        guard !poses.isEmpty else { return elements }
+        return elements.map { element in
+            guard let pose = poses[element.id], !pose.isIdentity else { return element }
+            return VectorCanvas.posing(element, through: pose)
+        }
+    }
+
+    /// **A delta the artist made in the space they are looking at, expressed in the space the ink is
+    /// stored in** — `P · D · P⁻¹`, the conjugation that makes a nudge on a posed cel land where the
+    /// finger went.
+    ///
+    /// Rest geometry `r` is shown at `r·P`. Dropping it at `r·P·D` means storing `r' = r·P·D·P⁻¹`,
+    /// because `r'·P = r·P·D`. With no pose it is `D` unchanged, which is why an unkeyframed document
+    /// takes exactly the map it always did.
+    static func restDelta(_ delta: CGAffineTransform, pose: CGAffineTransform?) -> CGAffineTransform {
+        guard let pose, !pose.isIdentity, let inverse = invertedAffine(pose) else { return delta }
+        return pose.concatenating(delta).concatenating(inverse)
+    }
+
+    /// **The loop as drawn, plus the loop as each posed element has to be asked about it.**
+    ///
+    /// One `CGPath` per *distinct* pose rather than one per element — a cel channel carries every
+    /// element through the same map, so the common posed cel maps the loop once however much ink is
+    /// on it, and `LassoLoops` memoizes its bounding boxes on the same object identity.
+    static func lassoLoops(_ loop: CGPath, posedBy poses: [UUID: CGAffineTransform]) -> LassoLoops {
+        guard !poses.isEmpty else { return LassoLoops(loop) }
+        var byMap: [[CGFloat]: CGPath] = [:]
+        var perElement: [UUID: CGPath] = [:]
+        for (id, pose) in poses {
+            let key = [pose.a, pose.b, pose.c, pose.d, pose.tx, pose.ty]
+            if let cached = byMap[key] {
+                perElement[id] = cached
+                continue
+            }
+            guard let inverse = invertedAffine(pose) else { continue }
+            var map = inverse
+            guard let pulled = loop.copy(using: &map) else { continue }
+            byMap[key] = pulled
+            perElement[id] = pulled
+        }
+        return LassoLoops(loop, perElement: perElement)
+    }
+
+    /// **The affine the channels applied *after* `channel` carry its members through at `frame`.**
+    ///
+    /// `posed(_:through:)` composes groups first and the cel last — a group moves *within* the drawing
+    /// and the cel moves the drawing — so a group's members are shown at `rest·G·C` and everything
+    /// else at `rest·C`. A Move at a posed frame is a delta `D` in the space the artist is looking at,
+    /// which is *after* `C`, so keying it onto a channel means conjugating: the cel channel takes
+    /// `C·D` and a group takes `G·C·D·C⁻¹`, and both are `M·O·D·O⁻¹` for this function's `O`.
+    ///
+    /// Identity for `.cel`, which has nothing outside it, and identity for a group on a cel with no
+    /// cel channel — so on a document nobody has keyframed the whole expression reduces to `D` and the
+    /// commit is byte-for-byte what it was.
+    func outerPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
+                      atFrame frame: Int) -> CGAffineTransform {
+        switch channel {
+        case .cel: return .identity
+        case .group:
+            guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
+            let cel = layers[at.layer].cels[at.cel]
+            return cel.transformTracks[TransformChannelID.cel.id]?
+                .mapping(atCelLocalFrame: frame - cel.startFrame) ?? .identity
+        }
+    }
+
+    /// The affine one channel maps its members through at an absolute frame, or the identity when it
+    /// has no track — the loose reading every commit-side caller wants.
+    func resolvedPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
+                         atFrame frame: Int) -> CGAffineTransform {
+        guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
+        let cel = layers[at.layer].cels[at.cel]
+        return cel.transformTracks[channel.id]?.mapping(atCelLocalFrame: frame - cel.startFrame)
+            ?? .identity
+    }
+
+    /// `t` inverted, or nil for a singular or non-finite one. One spelling, because three call sites
+    /// on this path each need it and a second one would be a second threshold.
+    static func invertedAffine(_ t: CGAffineTransform) -> CGAffineTransform? {
+        let determinant = t.a * t.d - t.b * t.c
+        guard determinant.isFinite, abs(determinant) > Quad.epsilon else { return nil }
+        let inverse = t.inverted()
+        guard inverse.a.isFinite, inverse.b.isFinite, inverse.c.isFinite,
+              inverse.d.isFinite, inverse.tx.isFinite, inverse.ty.isFinite else { return nil }
+        return inverse
+    }
+
     /// The pose one channel of one cel resolves to at an **absolute** document frame — the
     /// cel-local conversion in one place so no caller subtracts `startFrame` by hand.
     func resolvedPose(layerID: UUID, celID: UUID, channel: TransformChannelID,
@@ -133,12 +283,6 @@ extension CanvasManager {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return nil }
         let cel = layers[at.layer].cels[at.cel]
         return cel.transformTracks[channel.id]?.pose(atCelLocalFrame: frame - cel.startFrame)
-    }
-
-    /// **Whether this cel shows its ink anywhere other than where it stores it, at `frame`.** The
-    /// predicate the Move tool's refusal asks — see `celPoseIsRestingAtFrame`.
-    static func poseIsResting(_ tracks: [String: TransformTrack], atCelLocalFrame frame: Int) -> Bool {
-        poseMappings(tracks, atCelLocalFrame: frame).isEmpty
     }
 
     // MARK: - The derivation

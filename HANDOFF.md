@@ -57,9 +57,9 @@ with KEYFRAMES 5b, together, both unblocked by stage 4 and sharing `DabPose.loca
 small defects (32), (33), (34); (3) (31)'s last symptom — 16383² cannot be composited at all — with
 `StripedCompositor.assemble`'s unbudgeted two-frame peak, same code; (4) (29) stage 7, the memory audit,
 after PERFORMANCE §9's census is re-taken. The competing claim on (1) is the three gaps stage 5 left,
-which are more visible to the artist day to day: Move is refused at a frame whose pose is not resting, a
-pose channel has no graph-editor band, and animation groups have no UI. **That missing pose band is also
-what stops (38)(c)'s rule being exactly true**, so it now has two reasons.
+which are more visible to the artist day to day — now two, since Move at a posed frame landed on
+2026-09-03: a pose channel has no graph-editor band, and animation groups have no UI. **That missing
+pose band is also what stops (38)(c)'s rule being exactly true**, so it now has two reasons.
 
 ## State
 
