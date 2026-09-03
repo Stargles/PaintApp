@@ -156,6 +156,9 @@ LAYER_TRANSFORM.md.
       the standing delete-what-is-unused rule.
       **KEYFRAMES §2.16 is discharged rather than implemented**: the declined grain-on-Move ruling stops
       existing along with grain.
+      **§2.14 is the standing no-legacy rule scoped to this item**, and §9 is its ledger: every stage
+      deletes its predecessor in the change that replaces it, because there is no cleanup pass scheduled.
+      Nothing on the device needs to survive, so the format changes rather than migrating.
 
 ### (12) Lasso move — the follow-ups its spec still lists as unbuilt
 

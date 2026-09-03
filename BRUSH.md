@@ -6,7 +6,7 @@ artist-facing brush editor that makes every parameter sensor-driven.
 [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the assessment that preceded this and
 is still accurate about the seams; where the two differ, this document is the specification and that one
 is the survey. Its ordering — image primitive, then tip enum, then grouping, then parsers — survives
-into §10 with one stage added in front of it.
+into §11 with one stage added in front of it.
 
 ---
 
@@ -105,7 +105,13 @@ fixed low geometric tolerance, not a per-brush parameter.
 a sequential stream.** §4 in full. This is the ruling that answers the brief's split-stroke constraint,
 and it answers three more the brief did not raise.
 
-**2.14 Rotation and scale are never stored per point or per dab.** They are derived. Storing them would
+**2.14 Nothing of the old engine survives beside the new one.** Owner: *"keep architecture clean with no
+legacy code. Everything currently on the ipad is expendable, so we don't need backwards compatibility, and
+no traces should remain from the previous version of the brush engine. If by any chance future
+modifications to the brush engine are to be added, the architecture should be easily flexible as it is
+clean."* §9 is what this means concretely, and it governs every stage of §11.
+
+**2.15 Rotation and scale are never stored per point or per dab.** They are derived. Storing them would
 freeze the brush into the stroke, which contradicts §2.10's apply-to-existing verb and the whole reason
 a vector layer is worth having.
 
@@ -357,7 +363,52 @@ effect, a different feature that shares a word. Four test suites reference it.
 
 ---
 
-## 9. What the current engine already gives this for free
+## 9. The deletion ledger, and what makes the result flexible
+
+§2.14. **Every stage of §11 deletes its predecessor in the same change that replaces it.** A removal
+deferred to a cleanup pass is exactly how legacy accumulates, and there is no cleanup pass scheduled.
+
+### 9.1 What must not exist afterwards
+
+| gone | replaced by | stage |
+|---|---|---|
+| `StrokeSampleGate` | the refit — §3.3, §5.3 | 0 |
+| `DiscardedDabTarget` | hashed randomness has no stream to keep in phase — §4 | 1 |
+| `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §8 | 2 |
+| `stampApproximateSquare` | `stampImage`; `.square` becomes a texture — §3.5 | 3 |
+| `PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag | the channel set, which absorbs the width choice — §5.5 | 4 |
+| `BrushShape` + `customTextureFileName` as a separable pair | `BrushTip`, one payload-carrying enum — §6 | 5 |
+| `VectorStroke`'s by-value `Brush` | a table index — §5.4 | 6 |
+| `BrushDynamics.sizeFraction` / `.opacityFraction`, the two hardcoded linear pressure blends | the modulation matrix — §6 | 7 |
+| `Brush`'s flat scalars | grouped sub-structs with defaulted decode — §6 | 7 |
+
+**No decode defaults for fields that stopped existing, no format version, no migration, no compatibility
+shim, and no "this used to be" comments.** Documents on the device are expendable, so the format simply
+changes. The one place history is kept is this document and `git log`.
+
+**`BrushDynamics`' two blends are the trap on that list**, because they are correct and cheap and there
+will be a reason to keep them as a fast path beside the general one. Two ways to compute a dab's size is
+two ways for it to be wrong, and the parity test compares tiers rather than paths, so it would not catch
+the divergence.
+
+### 9.2 What makes it flexible, which is a property of the same decisions
+
+Flexibility here is not an extra layer. It is what falls out of §2.14 being obeyed:
+
+- **One evaluation funnel** (§5.5) means a new sensor is one case in one switch with a defined neutral,
+  not a thread through every parameter.
+- **The modulation matrix** (§6) means a new *parameter* is data rather than code — a row in a table, not
+  a branch in the stamper.
+- **The channel set** (§5.5) means a new per-point channel is two bits and no format version.
+- **Payload-carrying enums** (`BrushTip`) make illegal states unrepresentable and keep `stampDab`'s switch
+  exhaustive, so adding a tip kind is a compile-error-guided change rather than a search.
+- **Nested settings with defaulted decode** (§6) mean a new setting is one field, not a
+  decode-compatibility question — which is what `Brush`'s synthesized `Codable` makes every flat key today.
+
+Each of those is a deletion doing double duty. None of them is speculative generality, and none should be
+built beyond what §11's stages need.
+
+## 10. What the current engine already gives this for free
 
 Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) argues each at length.
 
@@ -375,7 +426,7 @@ Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md
 
 ---
 
-## 10. Build order
+## 11. Build order
 
 Stages 1–4 are worth doing on their own merits with no file format involved, which is the test of whether
 the ordering is honest.
@@ -404,7 +455,7 @@ the ordering is honest.
 
 ---
 
-## 11. Open
+## 12. Open
 
 - **Where the brush table lives** — the project package beside `brushes/`, or inside the document — is
   unsettled, and interacts with §2.10's minting and with a brush imported into one document and used in
