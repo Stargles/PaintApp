@@ -36,7 +36,7 @@ app, and whoever notices that should come back and say so rather than assuming i
   resolved off it — MEASURED 174-313 ms of main-thread work at pen-up down to **0.2 ms** — a frame
   composites one chunk at a time under a memory ceiling, byte-exact on both backends, the canvas at rest
   and playback are served from LZ4 frames on disk, and a frame whose textures do not fit the budget is
-  composited in horizontal strips at the size the artist asked for. **Stage 6, export, is next.**
+  composited in horizontal strips at the size the artist asked for. **Stage 6, export, is merged and tested; stage 7, the rest of the memory audit, is what is left.**
 
   **Two things stage 5 still owes**, both on the device: the owner's own confirmation that the slider
   reads Full and the canvas is full on the "UI Test" canvas they reported it on, and the compression
@@ -50,12 +50,11 @@ app, and whoever notices that should come back and say so rather than assuming i
   **The missing pose band is now also what stops (38)(c)'s rule being exactly true**: a pose key draws an
   indicator on the cel and there is no band for it to have a node in.
 
-  **Stage 4, the rest-space dab bake, is what the rest waits on.** Its artefact is already pinned by a
-  test written to go red when the stage lands
-  (`testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves`), and it is the prerequisite of
-  **5b**, animated Distort — the projective case is the one where no single scalar is the right width,
-  wrong by 15% to 315% across one quad. Which of 4, 5b and the three gaps above goes first is an owner
-  question, not a settled order.
+  **Stage 4, the rest-space dab bake, is merged**, and its tests reach the shipped dispatch now rather
+  than an algebraic consequence of `DabPose.applied(to:)`. That unblocks **5b**, animated Distort — the
+  projective case where no single scalar is the right width, wrong by 15% to 315% across one quad —
+  because `DabPose` answers `localScale` per dab. **What remains is stages 5b, 6, 7, 8 and 10, plus the
+  three gaps above**, and which goes first is an owner question rather than a settled order.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 

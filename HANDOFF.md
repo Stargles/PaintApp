@@ -8,29 +8,58 @@ what is true now and what is next. -->
 Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you pick up.
 [TODO.md](TODO.md) is the owner's asks; [BUGS.md](BUGS.md) is what we find.
 
-## Do this first
+## Do this first — you are about to be given a design briefing, not a build task
 
-**Nothing is owed before you start.** The fast tier is **2698 / 2695 passed / 0 failed / 3 skipped**,
-taken at `c7e843d`; it was 2657 at the start of this pass and TODO (38)'s four asks are the last +20. The last full run was at `04099a9` — 2759
-tests, one environmental failure clean in isolation — and it now predates two passes that changed the
-compositing sweep, the export driver and the cel-copy verbs, so **a full run is the first thing worth
-twenty-two minutes** if you are about to close a phase. It is not owed before ordinary work.
+**The owner is briefing you on TODO (26) import videos and TODO (37) import paintbrushes / brush engine
+overhaul.** That conversation is the work. Read both entries and both "ask first" lists *before* it
+starts, so you spend the owner's attention on decisions rather than on orientation.
 
-**The owner's ordering, given 2026-09-03 and not yet acted on past step 2.** Steps 1 and 2 are done —
-the test debt and the in-between flatten. What is next:
+**Do not start building from either TODO entry.** Every item under TODO's "Later" heading carries the
+same entry condition, in the owner's words: *"When you get to these, prompt me to explain to you in more
+detail how they work."* **An item built from its entry alone was built wrong** — that sentence is in TODO
+because it happened. Your deliverable from the briefing is a specification document per item, the way
+[KEYFRAMES.md](KEYFRAMES.md) exists for (21) and [RENDER.md](RENDER.md) for (29): the ask in full, then a
+numbered section of the owner's rulings in their own words, then the design, then a build order. Those
+`§2`-style ruling lists are the highest-value thing in this repo — four separate documents now say "read
+these rather than re-deriving them", and passes have been lost to re-litigating a settled call.
 
-1. **Distort's ink tier and KEYFRAMES 5b, together.** Both were blocked on §4.2's rest-space dab bake,
-   which has landed: `DabPose` answers `localScale` per dab, which is exactly the per-dab width a
-   homography needs. They are the same machinery, so building them apart builds it twice.
-2. **(32), (33), (34)** — three small independent defects, one worker each.
-3. **(31)'s last symptom** — 16383² cannot be composited at all and needs a downscaled display proxy —
-   with `StripedCompositor.assemble`'s unbudgeted two-frame peak, which is the same code.
-4. **(29) stage 7**, the rest of the memory audit. PERFORMANCE §9's census wants re-taking before it is
-   plannable.
+**Read [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) before the (37) conversation.** Its
+TODO entry says "unread this pass by instruction" — that instruction was scoped to the session that
+received it, and the briefing lifts it.
 
-Everything else needs a design conversation. **The competing claim on step 1 is the three gaps stage 5
-left** — Move is refused at a frame whose pose is not resting, a pose channel has no graph-editor band,
-and animation groups have no UI — which are more visible to the artist day to day than Distort is.
+**What (26) already has settled, so you do not spend the conversation on it.** Its dependency on (21) is
+satisfied: it needs content that varies across the frames one cel spans, and stage 5's transform channel
+introduced exactly that. It is the head of a chain — **(27) screen recording, which the owner calls "the
+big feature", requires (26)** — so briefing it first is what unblocks the most. Two things to carry in:
+`"video"` is currently the **sentinel** for "a layer kind nothing implements" in the forward-compatibility
+tests, so implementing it takes that sentinel away and those tests need a new one; and a video element
+inherits what Move stage 3c decided about `VectorImageElement` — a `LayerTransform` plus a stored
+`aspect`/`stretchAxis`/`mirrored`, read back through `VectorImageElement.placement`.
+
+**What (37) already has settled.** KEYFRAMES §2.16's declined half is this item's inheritance rather than
+an open defect: a stroke you Move re-samples its grain, and the owner ruled on 2026-09-03 that it stays
+that way until the overhaul, because grain is expected to change when brushes become importable. Do not
+re-open it as a bug; fold it into the design.
+
+**The four questions (26) cannot be built without**, all in its TODO entry: what "a specific length" means
+when the cel's `frameCount` and the video's duration disagree — resize, retime, or refuse; whether
+cropping trims or retimes; one video per *layer* or per *cel*; and at what rate a 30 fps source plays in
+a 24 fps document.
+
+**Nothing is owed before you start.** The fast tier is **2698 / 2695 passed / 0 failed / 3 skipped** at
+`608386e`. The last full suite was at `04099a9` and now predates three passes that changed the
+compositing sweep, the export driver, the cel-copy verbs and the whole keyframe marker model, so **a full
+run is owed at the next phase boundary** — twenty-two minutes, and CLAUDE.md's triage section is what to
+read before believing any red it produces.
+
+**If the briefing does not happen and you need code work instead**, the order is: (1) Distort's ink tier
+with KEYFRAMES 5b, together, both unblocked by stage 4 and sharing `DabPose.localScale`; (2) the three
+small defects (32), (33), (34); (3) (31)'s last symptom — 16383² cannot be composited at all — with
+`StripedCompositor.assemble`'s unbudgeted two-frame peak, same code; (4) (29) stage 7, the memory audit,
+after PERFORMANCE §9's census is re-taken. The competing claim on (1) is the three gaps stage 5 left,
+which are more visible to the artist day to day: Move is refused at a frame whose pose is not resting, a
+pose channel has no graph-editor band, and animation groups have no UI. **That missing pose band is also
+what stops (38)(c)'s rule being exactly true**, so it now has two reasons.
 
 ## State
 
@@ -81,11 +110,9 @@ hash, because a manifest stamp bumped from edit sites inherits every hole the sw
 in a *persistent* content-addressed store a missed site is a wrong picture with no error. §3.9a carries
 the reasoning and the two things beyond the stamp that a kept store needs.
 
- Video is `AVAssetWriter` over the store in frame order,
-H.264 in `.mp4` at the document's fps and the knob's resolution; a frame is the baked frame as PNG.
-**Both re-render nothing** — that is §2.1 and it is the whole reason the store exists. Delivery is the
-system share sheet. §3.9 says nothing so far forces a second renderer; if something does, say so and
-proceed.
+Video is `AVAssetWriter` over the store in frame order, H.264 in `.mp4` at the document's fps and the
+knob's resolution; a frame is the baked frame as PNG. **Both re-render nothing** — §2.1, and the whole
+reason the store exists. Delivery is the system share sheet.
 
 Then **stage 7, the rest of the memory audit** (BUGS.md's ranked sites plus PERFORMANCE §9): the
 fill-session budget, blanked hosts, count-only caches moved to byte budgets, a `MemoryPressure` seam so
@@ -105,11 +132,11 @@ the main actor.
   triggering either for real forces a genuine recompute rather than the dedupe that test measures.
 - The compression ratio on the owner's own **"UI Test"** document, and a decode against a frame the
   *compositor* produced rather than one drawn for the purpose. PERFORMANCE §10.4 records both as owed.
-- **Nobody has looked at the timeline's amber strip on a screen.** Its tests assert the encoded
-  accessibility value, not pixels. Granting simulator access from the panel's "Let Claude use it" link
-  makes this a two-minute check.
-- Stage 5 is simulator-only. **The owner reported the resolution bug on their iPad, on a canvas called
-  "UI Test", and should confirm the fix there.**
+- **The whole of this pass is on the owner's iPad** — a Release build of `608386e` was installed
+  2026-09-03. What is owed is their *confirmation*, not another deploy: that the resolution slider reads
+  Full and the canvas is full on the "UI Test" canvas they reported it on; that export produces a video
+  and a PNG on the device, where nothing has ever run; and that the timeline's amber bake strip and the
+  new frame gridlines read at their working zoom.
 - **`StripedCompositor.assemble` bounds the walk but not the destination**: it holds every strip's core
   in `pieces` and then draws them into one full-frame renderer, so the peak is about two frames with no
   budget consulted — roughly a gigabyte at 16383². Whether that is worth fixing on its own or belongs
