@@ -250,6 +250,16 @@ struct AnimationTimeline: View {
                     menuButton("Extend to End", icon: "arrow.right.to.line") {
                         canvasManager.extendCelToEnd(layerIndex: layerIndex, celIndex: celIndex)
                     }
+                    // VIDEO.md §8 stage 1. Always shown, never hidden — the only reason the row is
+                    // ever unavailable is a cut at the edge (a one-frame cel included, which has no
+                    // interior frame at all), so a disabled row always means the same thing. A
+                    // keyframe-animated cel is not excluded — `canSplitCel`'s own doc names the proof
+                    // that rests on. `canSplitCel` is the one place the rule is written; nothing here
+                    // re-derives it.
+                    menuButton("Split Drawing", icon: "square.split.2x1") {
+                        canvasManager.splitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame)
+                    }
+                    .disabled(!canvasManager.canSplitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame))
                     menuButton("Clear", icon: "eraser") {
                         canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
                     }

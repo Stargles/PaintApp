@@ -547,6 +547,33 @@ extension CanvasManager {
         sceneFrameCount = max(sceneFrameCount, clampedStart + cel.frameCount)
     }
 
+    /// Whether `splitCel(layerIndex:celIndex:atFrame:)` would do anything at `atFrame` — the cel
+    /// menu's Split Drawing row and its tests both ask this rather than duplicating the rule inline,
+    /// per VIDEO.md §8 stage 1: "a rule a view holds is a rule the fast tier cannot see."
+    ///
+    /// One condition: `atFrame` must be strictly inside the cel. An edge cut produces an empty cel,
+    /// which `splitCel` already refuses silently — this makes the refusal visible *before* the
+    /// attempt, so the row can be disabled rather than offered and then doing nothing. A one-frame
+    /// cel has no interior frame at all, so it falls out of this the same way, with no separate
+    /// check.
+    ///
+    /// **Not gated: `transformTracks` or `interpolation`.** VIDEO.md §2.8 reads, on the owner's own
+    /// words, as a scope fence rather than a safety claim — *"For now I don't think it will be used
+    /// much for keyframe animated cels, so you dont need to add that functionality in"* says the
+    /// verb wasn't worth building for that case, not that splitting one is wrong. It didn't need
+    /// building because it was already correct: `splitCel` runs
+    /// `TransformTrack.split(atCelLocalFrame:)` on every channel regardless of what gates the menu
+    /// (§3.1), and `SplitDrawingLogicTests.testSplittingAKeyframedCelKeepsEveryFrameShowingThePoseItShowed`
+    /// is the direct proof this rests on — a track with a key that lands on neither side of the cut,
+    /// split mid-segment, and every frame's resolved pose, boundary included, comes back unchanged.
+    /// An in-between was never a question either way: `splitCel` carries the recipe to both halves
+    /// on purpose (VIDEO.md §7).
+    func canSplitCel(layerIndex: Int, celIndex: Int, atFrame: Int) -> Bool {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return false }
+        let cel = layers[layerIndex].cels[celIndex]
+        return atFrame > cel.startFrame && atFrame < cel.endFrame
+    }
+
     /// Splits a cel into two at `atFrame` (strictly inside the cel); both halves keep the original drawing.
     ///
     /// **And both halves keep the pose animation** — KEYFRAMES.md §3.1, which gives `splitCel` a rule

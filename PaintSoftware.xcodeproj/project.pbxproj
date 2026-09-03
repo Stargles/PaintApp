@@ -53,6 +53,7 @@
 		1989A975A4272ED4D7FF9935 /* PaintSoftware/Models/CelContentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */; };
 		13B7864D0D2FF536BB86130E /* CelContentProviderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */; };
 		9A0B40D4DF051ECB5B0636F7 /* InterpolatedCelCopyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0BC0D17597D128DC90F633 /* InterpolatedCelCopyLogicTests.swift */; };
+		060C252BD6B4F88F1BA60B2B /* SplitDrawingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */; };
 		7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */; };
 		4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */; };
 		A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */; };
@@ -314,6 +315,7 @@
 		748CC67B7B40AAB92A44C579 /* PaintSoftware/Models/CelContentProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/CelContentProvider.swift; sourceTree = "<group>"; };
 		95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelContentProviderLogicTests.swift; sourceTree = "<group>"; };
 		5A0BC0D17597D128DC90F633 /* InterpolatedCelCopyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InterpolatedCelCopyLogicTests.swift; sourceTree = "<group>"; };
+		A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SplitDrawingLogicTests.swift; sourceTree = "<group>"; };
 		BF801812B09B82CA4AFB3C77 /* PaintSoftware/Models/KeyframeControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/KeyframeControl.swift; sourceTree = "<group>"; };
 		B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyframeControlLogicTests.swift; sourceTree = "<group>"; };
 		A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnimationCurveLogicTests.swift; sourceTree = "<group>"; };
@@ -625,6 +627,7 @@
 				A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */,
 				95F6D4E2F5D8A1C3A1DE2751 /* CelContentProviderLogicTests.swift */,
 				5A0BC0D17597D128DC90F633 /* InterpolatedCelCopyLogicTests.swift */,
+				A96913FB6558C8E265D2780B /* SplitDrawingLogicTests.swift */,
 				B61F213991B4BD3FF2D97D1C /* KeyframeControlLogicTests.swift */,
 				C33AFF1E0000000000000001 /* EffectParameterTrackLogicTests.swift */,
 				7C0400946A49A2883CBAEF2F /* MemoryBudgetLogicTests.swift */,
@@ -999,6 +1002,7 @@
 				1989A975A4272ED4D7FF9935 /* PaintSoftware/Models/CelContentProvider.swift in Sources */,
 				13B7864D0D2FF536BB86130E /* CelContentProviderLogicTests.swift in Sources */,
 				9A0B40D4DF051ECB5B0636F7 /* InterpolatedCelCopyLogicTests.swift in Sources */,
+				060C252BD6B4F88F1BA60B2B /* SplitDrawingLogicTests.swift in Sources */,
 				7FE01C7F64F823DEEF2B4E5B /* PaintSoftware/Models/KeyframeControl.swift in Sources */,
 				4B5CC177CEAC66CD5D6C99F3 /* KeyframeControlLogicTests.swift in Sources */,
 				A11CE0DE0000000000000002 /* AnimationCurveLogicTests.swift in Sources */,
