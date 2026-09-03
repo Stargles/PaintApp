@@ -161,10 +161,12 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     /// not cleared would show through.
     func testMetalStrippedCompositingAgreesWithNoPaperEither() throws {
         try skipUnlessGPUAvailable()
-        assertStrippedMatchesWholeOnGPU(CanvasFixture.stripingZoo(), stripBufferRows: 40,
-                                        includeBackground: false,
-                                        "With no paper every seam is translucent, and a pooled texture "
-                                        + "at a strip's size is one the previous strip has just used")
+        let strips = assertStrippedMatchesWholeOnGPU(CanvasFixture.stripingZoo(), stripBufferRows: 40,
+                                                      includeBackground: false,
+                                                      "With no paper every seam is translucent, and a "
+                                                      + "pooled texture at a strip's size is one the "
+                                                      + "previous strip has just used")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     /// A padded canvas: the paper rect is inset from the buffer, and a strip's translated copy of it
@@ -191,9 +193,11 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         let paper = try XCTUnwrap(recipe.background?.rect, "Premise: the paper must exist to be inset")
         XCTAssertNotEqual(paper, buffer, "Premise: the padding must leave a margin the paper does not cover")
 
-        assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 12,
-                                        "A paper rect translated above the band must clamp to the "
-                                        + "intersection rather than write outside the texture")
+        let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 12,
+                                                      "A paper rect translated above the band must clamp "
+                                                      + "to the intersection rather than write outside "
+                                                      + "the texture")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     // MARK: - The two kernels that read their own coordinate, on the GPU
@@ -216,8 +220,9 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         XCTAssertEqual(StripedCompositor.apron(of: recipe.tree, maskStacks: recipe.maskStacks), 0,
                        "Premise: noise reads no neighbour, so no apron can be what saves this")
 
-        assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 16,
-                                        "`applyEffect` must hash `gid + origin`, not `gid`")
+        let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 16,
+                                                      "`applyEffect` must hash `gid + origin`, not `gid`")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     /// The other one: a **screened posterize**, at a strip height deliberately not a multiple of four
@@ -273,9 +278,10 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         XCTAssertTrue(recipe.tree.contains { if case .node = $0.content { return $0.effect != nil } else { return false } },
                       "Premise: the grade must be on a node, or this is the leaf site again")
 
-        assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 18,
-                                        "A folder's grade is a separate `encode` call and needs the "
-                                        + "same origin the leaf's does")
+        let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 18,
+                                                      "A folder's grade is a separate `encode` call and "
+                                                      + "needs the same origin the leaf's does")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     // MARK: - Rules 1 to 4, met inside a strip
@@ -324,9 +330,11 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         XCTAssertTrue(manager.isCanvasBackgroundVisible,
                       "Rule 3 only exists where there is paper for the ink input to leave out")
 
-        assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 14,
-                                        "The ink re-walk runs inside each strip, from that strip's own "
-                                        + "windowed sources and at that strip's own origin")
+        let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 14,
+                                                      "The ink re-walk runs inside each strip, from that "
+                                                      + "strip's own windowed sources and at that strip's "
+                                                      + "own origin")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     /// **Rule 4 at a strip boundary on the GPU.** A mask's coverage is resolved through the CPU
@@ -345,8 +353,10 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(white, rect: CGRect(x: 24, y: 0, width: 40, height: 64)))
         manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[3].id)])
 
-        assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 16,
-                                        "A mask whose source is a different band must still clip exactly")
+        let strips = assertStrippedMatchesWholeOnGPU(manager, stripBufferRows: 16,
+                                                      "A mask whose source is a different band must "
+                                                      + "still clip exactly")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     // MARK: - The third memo, which only this backend has

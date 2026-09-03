@@ -169,10 +169,12 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// with no paper there is none to translate — so this is the arm where the accumulator is
     /// translucent at the seams and any assembly that composited rather than copied would show.
     func testStrippedCompositingAgreesWithNoPaperEither() {
-        assertStrippedMatchesWhole(CanvasFixture.stripingZoo(), stripBufferRows: 40,
-                                   includeBackground: false,
-                                   "With no paper the frame is translucent at every seam, so a strip "
-                                   + "written with source-over instead of copy would double the band")
+        let strips = assertStrippedMatchesWhole(CanvasFixture.stripingZoo(), stripBufferRows: 40,
+                                                includeBackground: false,
+                                                "With no paper the frame is translucent at every seam, so "
+                                                + "a strip written with source-over instead of copy would "
+                                                + "double the band")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     /// A padded canvas. `RenderBackground.rect` is inset from the buffer, so a strip's translated
@@ -200,9 +202,10 @@ final class StripedCompositeLogicTests: XCTestCase {
 
         // A band strictly inside the paper, a band straddling its top edge and a band straddling its
         // bottom edge all have to come out right; a 12-row buffer over an 80-row canvas gives all three.
-        assertStrippedMatchesWhole(manager, stripBufferRows: 12,
-                                   "A translated paper rect that hangs off the band must fill exactly "
-                                   + "the intersection")
+        let strips = assertStrippedMatchesWhole(manager, stripBufferRows: 12,
+                                                "A translated paper rect that hangs off the band must "
+                                                + "fill exactly the intersection")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     // MARK: - 1. The apron
@@ -322,8 +325,9 @@ final class StripedCompositeLogicTests: XCTestCase {
         XCTAssertTrue(Effect.noise(Effect.Noise(amount: 0.5)).readsAbsolutePosition,
                       "Noise is one of the two effects the origin exists for")
 
-        assertStrippedMatchesWhole(manager, stripBufferRows: 16,
-                                   "A strip must hash the frame's coordinate, not its own")
+        let strips = assertStrippedMatchesWhole(manager, stripBufferRows: 16,
+                                                "A strip must hash the frame's coordinate, not its own")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     /// The same mechanism through the other effect that reads it: a **screened posterize**, whose
@@ -640,9 +644,11 @@ final class StripedCompositeLogicTests: XCTestCase {
         XCTAssertTrue(manager.isCanvasBackgroundVisible,
                       "Rule 3 only exists where there is paper for the ink input to leave out")
 
-        assertStrippedMatchesWhole(manager, stripBufferRows: 14,
-                                   "The ink re-walk runs inside each strip from the strip's own "
-                                   + "windowed sources, which is the window of the whole frame's re-walk")
+        let strips = assertStrippedMatchesWhole(manager, stripBufferRows: 14,
+                                                "The ink re-walk runs inside each strip from the strip's "
+                                                + "own windowed sources, which is the window of the whole "
+                                                + "frame's re-walk")
+        XCTAssertGreaterThan(strips, 1, "The fixture must actually cut")
     }
 
     // MARK: - Fixtures

@@ -280,6 +280,8 @@ final class LiveHalvesStripLogicTests: XCTestCase {
         // The clipped column has to be visibly different from the unclipped one, or a mask that
         // resolved to nothing would look the same as one that resolved correctly.
         let budget = budgetBytes(forStripBufferRows: 14, of: recipe.belowRecipe)
+        XCTAssertGreaterThan(StripedCompositor.plan(for: recipe.belowRecipe, budgetBytes: budget).count, 1,
+                             "Premise: this budget must genuinely force a cut")
         guard let below = recipe.belowRecipe.composite(budgetBytes: budget) else {
             return XCTFail("The lower half must render")
         }
