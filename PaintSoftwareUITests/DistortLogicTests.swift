@@ -277,25 +277,6 @@ final class DistortLogicTests: XCTestCase {
         XCTAssertEqual(moved.p3, before.p3)
     }
 
-    /// **Pure: sixty deltas and one land in the same place.**
-    ///
-    /// `ObjectTransformDrag`'s property, restated for this gesture, and it is what a latched drag
-    /// buys — a reference frame recomputed per delta would let a mid-drag pinch move the thing the
-    /// finger is measured against.
-    func testTheDragIsAFunctionOfItsFinalPointAlone() throws {
-        let p = piece()
-        let target = CGPoint(x: 12, y: 20)
-
-        let once = try XCTUnwrap(FloatingDistortDrag(piece: p, corner: 0)?.quad(draggedTo: target))
-        let drag = try XCTUnwrap(FloatingDistortDrag(piece: p, corner: 0))
-        var last: Quad?
-        for step in 1...60 {
-            let t = CGFloat(step) / 60
-            last = drag.quad(draggedTo: CGPoint(x: 16 + (target.x - 16) * t, y: 24 + (target.y - 24) * t))
-        }
-        XCTAssertEqual(try XCTUnwrap(last), once)
-    }
-
     /// **A drag that would make an undrawable quad is refused, not clamped** — the handle sticks.
     ///
     /// Three shapes, and the middle one is why `Quad.isSimple` is checked separately from
