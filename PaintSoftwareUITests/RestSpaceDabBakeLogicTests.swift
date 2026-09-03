@@ -54,10 +54,8 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
                           brushSize: size, brushOpacity: 1, seed: seed)
     }
 
-    private func alphas(_ dabs: [BrushStamper.BakedDab]) -> [String] {
-        dabs.map { String(format: "%.9f", $0.alpha) }
-    }
-
+    /// Nine decimal places, because a grain multiplier that re-samples a few points along a noise
+    /// field moves the alpha in the third and a `Set<[CGFloat]>` would compare bit patterns.
     private func alphas(_ dabs: [DabProbe.Dab]) -> [String] {
         dabs.map { String(format: "%.9f", $0.alpha) }
     }
@@ -251,14 +249,15 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// artifact, and it comes free because `stampApproximateSquare` runs inside the rest-space walk
     /// and emits ordinary `stampCircle` calls the pose maps like any other.
     ///
-    /// **It also refutes half of §4.2's framing.** §4.2 names Square's sub-lattice beside Pencil's
-    /// grain as the two non-round-dab cases that shimmer. Pencil's does, on 24 frames of 24. Square's
-    /// does not over an ordinary shrink: its `spacingFraction` is **0.15**, three times Hard Round's,
-    /// so `24 × 0.15 = 3.6` pt stays clear of `stampSpacing`'s 1 pt floor all the way down to scale
-    /// 0.278, and `stampApproximateSquare`'s own two 1 pt floors are clear at 0.3 too. Under a uniform
-    /// map with no floor binding, a posed-space walk is *similar to itself*. The artifact is real but
-    /// needs a deeper shrink than an artist is likely to key, and the brush §4.2 should have named for
-    /// everyday exposure is the Pencil.
+    /// **It also refutes half of §4.2's framing, and the refutation is why the sweep below goes as
+    /// deep as it does.** §4.2 names Square's sub-lattice beside Pencil's grain as the two non-round-dab
+    /// cases that shimmer. Pencil's does, on 24 frames of 24. Square's does *not* over an ordinary
+    /// shrink: its `spacingFraction` is **0.15**, three times Hard Round's, so `24 × 0.15 = 3.6` pt
+    /// stays clear of `stampSpacing`'s 1 pt floor all the way down to scale 0.278, and
+    /// `stampApproximateSquare`'s own two 1 pt floors are clear at 0.3 too. Under a uniform map with no
+    /// floor binding, a posed-space walk is *similar to itself* and nothing shimmers — MEASURED: a
+    /// 1.0 → 0.3 sweep is green with every one of `stamp`'s rest-space arms reverted, which is a test
+    /// that cannot see the bug it is named for. Below 0.278 both floors bind and it can.
     ///
     /// **Coverage is preserved under a uniform scale and this is why**: the grid's step and its sub-dab
     /// radius are both rest-space numbers multiplied by the same local scale, so the overlap ratio is
@@ -271,6 +270,13 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         let ink = stroke(brush)
         let rest = stamped([.stroke(ink)])
         XCTAssertGreaterThan(rest.count, 100, "Setup: a sub-lattice per stamp, so the count is large")
+
+        var counts = Set<Int>()
+        for frame in 0..<24 {
+            let k = 1.0 - 0.95 * CGFloat(frame) / 23.0
+            counts.insert(stampedPosed(ink, through: CGAffineTransform(scaleX: k, y: k)).count)
+        }
+        XCTAssertEqual(counts, [rest.count], "one grid, walked once at rest, scaled 24 ways")
 
         let k: CGFloat = 0.3
         let shrunk = stampedPosed(ink, through: CGAffineTransform(scaleX: k, y: k))
