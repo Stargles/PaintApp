@@ -368,8 +368,14 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    **The source frame rate is read off the asset rather than stored on the element**, which is where
    this differs from `naturalSize`: a placement must be expressible with no decoder present, and this
    is asked once, when a menu row is tapped, by which time the clip's reader is already open.
-7. **Split Drawing on video cels.** §7's second row — trivial once 2 and 5 exist, which is why it is not
-   stage 1's problem.
+7. ~~**Split Drawing on video cels.**~~ **Built, and it stopped being optional the moment stage 3
+   landed.** §7's second row is two calls to stage 5's crop writer — the left half keeps its start and
+   is now `cut` frames long, so its anchored tail lands on the cut's source time; the right half keeps
+   its end, so its anchored head lands on the same instant from the other side — with no re-encode and
+   one shared asset file, `makeCopy()` having given the right half its own canvas. It is here rather
+   than in a later pass because stage 1 shipped Split Drawing enabled on every cel: before a video
+   decoded, splitting one produced two placeholders and cost nothing, and after it, two blocks both
+   playing the clip from its head.
 8. **Bake to cels of images.** §2.9.
 
 ---

@@ -789,7 +789,22 @@ extension CanvasManager {
             let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             layers[layerIndex].cels.append(secondHalf)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+            // **VIDEO.md §7's second row**: *"two cels; `sourceEnd` of the left half and
+            // `sourceStart` of the right are both set to the cut's source time"* — no re-encode and
+            // one shared asset file, since `makeCopy()` above gave the right half its own canvas
+            // holding the same `assetFileName`.
+            //
+            // It is two calls to the crop writer rather than arithmetic spelled here, and the two
+            // *are* that instant: the left half keeps its start and is now `cut` frames long, so its
+            // anchored tail lands on `sourceStart + cut · speed / fps`; the right half keeps its end
+            // and is the remainder, so its anchored head lands on the same value from the other side.
+            // A no-op on one memoized `Bool` for a cel holding no video, which is what makes Split
+            // Drawing on an ordinary cel exactly what it was.
+            if let left = activeCelIndex(inLayer: layerIndex, atFrame: cel.startFrame) {
+                writeVideoCrop(layerIndex: layerIndex, celIndex: left, anchoredAt: .head)
+            }
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
+                writeVideoCrop(layerIndex: layerIndex, celIndex: idx, anchoredAt: .tail)
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
         }

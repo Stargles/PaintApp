@@ -148,6 +148,53 @@ final class VideoCropLogicTests: XCTestCase {
         XCTAssertEqual(VideoCrop(of: try video(manager)), original)
     }
 
+    // MARK: - §7, Split Drawing
+
+    /// **VIDEO.md §7's second row.** Splitting a video cel gives two blocks that between them show
+    /// the same footage once: the left half's crop ends where the right half's begins, at the cut's
+    /// own source time.
+    ///
+    /// The canvas is what says it, not the fields: the right half's first frame shows the source
+    /// frame the left half was about to. Asserting the crops alone would pass against a split that
+    /// wrote two crops nothing reads.
+    func testSplittingAVideoCropsEachHalfToItsOwnSpan() throws {
+        let manager = try documentShowingAClip(frames: 30, blockLength: 6)
+        let whole = VideoCrop(of: try video(manager))
+
+        manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 4)
+
+        XCTAssertEqual(manager.layers[1].cels.count, 2)
+        let left = manager.layers[1].cels[0]
+        let right = manager.layers[1].cels[1]
+        XCTAssertEqual(left.startFrame, 0)
+        XCTAssertEqual(left.frameCount, 4)
+        XCTAssertEqual(right.startFrame, 4)
+        XCTAssertEqual(right.frameCount, 2)
+
+        let leftVideo = try XCTUnwrap(left.vector?.videos.first)
+        let rightVideo = try XCTUnwrap(right.vector?.videos.first)
+        XCTAssertEqual(leftVideo.sourceStart, whole.start, "The left half keeps the head.")
+        XCTAssertEqual(rightVideo.sourceEnd, whole.end, "The right half keeps the tail.")
+        XCTAssertEqual(leftVideo.sourceEnd, rightVideo.sourceStart,
+                       "And they meet at the cut, so no footage is shown twice or lost.")
+        XCTAssertEqual(leftVideo.assetFileName, rightVideo.assetFileName,
+                       "One asset file — the split is a crop, not a re-encode.")
+
+        XCTAssertEqual(try shownSourceFrame(manager, atFrame: 4), 4,
+                       "The right half's first frame is the one the left half was about to show.")
+    }
+
+    /// And Split Drawing on an ordinary cel is exactly what it was — the crop writer is a no-op on
+    /// one memoized `Bool`, so nothing about stage 5 reached the verb's existing behaviour.
+    func testSplittingAnOrdinaryCelIsUnchanged() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 8)])
+        manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 3)
+        XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 1).map { [$0.start, $0.length] },
+                       [[0, 3], [3, 5]])
+    }
+
     // MARK: - What a crop is not
 
     /// **Being shoved along the timeline is not being cropped.** A block pushed by its neighbour's
