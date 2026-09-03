@@ -156,32 +156,68 @@ enum TimelineGraphBand {
         /// that could not put it back: a channel the band does not draw is a channel no tap in the
         /// band can add a key to.
         let isAnimated: Bool
-        /// **Whether a gesture on this channel may write** — false for every pose channel, KEYFRAMES
-        /// §11.7.
+        /// **What a gesture on this channel is allowed to do** — KEYFRAMES §11.7's write-back, which
+        /// replaced the blanket refusal this used to spell as `isEditable`.
         ///
         /// A pose sub-curve is a **view** of a `PoseQuad` rather than a stored `AnimationCurve`:
-        /// `PoseComponents.decompose` produces it and `PoseComponents.setting` is what would put an
-        /// edit back. Two things are missing before a drag can do that safely, and neither is small.
-        /// A node's *value* would round-trip through the factorisation, so an edit to one component
-        /// must replace that component of the key's own decomposition and never re-derive the other
-        /// five (which `PoseComponents.setting` does, and is tested); and a node's *frame* is shared
-        /// by all six sub-curves, because they are one `TransformTrack.Key` — so retiming one of them
-        /// is retiming the key, and `moves(of:in:…)` computes a delta per channel with no notion that
-        /// six of them are one thing. Landing half of that would give a band whose horizontal drags
-        /// silently desynchronise a key from itself.
+        /// `PoseComponents.decompose` produces it and `PoseComponents.setting(_:to:of:)` puts an edit
+        /// back. What made the band read-only for a stage was not that arithmetic — it round-trips and
+        /// is tested — but that **a node's frame is shared by all six sub-curves, because they are one
+        /// `TransformTrack.Key`**, while every writer the band had addressed one curve at a time. A
+        /// drag that wrote through `setEffectParameterTrack` would have been dropped outright (that
+        /// funnel refuses an id that is not a parameter of the layer's grade), which is read-only by
+        /// accident of another function's guard rather than by decision: the bracket opens, the node
+        /// travels under the finger and snaps back on lift with nothing saying why.
         ///
-        /// **So the pose band ships read-only, said here rather than left to emerge.** Without this
-        /// flag it would be read-only anyway — `writeGraphBandCurves` writes through
-        /// `setEffectParameterTrack`, which refuses an id that is not a parameter of the layer's
-        /// grade, so a pose id is dropped and nothing changes. That is the right *outcome* reached by
-        /// an accident of another function's guard: it opens an undo bracket, drags the node under
-        /// the finger for the length of the gesture and snaps it back on lift, with nothing saying
-        /// why. The flag is what makes the refusal happen at touch-down instead.
-        let isEditable: Bool
+        /// **The repair is a second funnel, not a second selection rule.**
+        /// `TimelineGraphBand.poseEdits(_:in:)` folds a drag's row-level moves into *key*-level ones
+        /// and `CanvasManager.writeGraphBandPoseEdits(_:from:layerIndex:)` writes them onto the
+        /// `TransformTrack.Key` itself — one frame, six components — so the six cannot come apart
+        /// however the gesture layer carries them. See `PoseEdit`.
+        ///
+        /// **`.dragOnly` is what a pose channel gets, and the missing half is the tap family rather
+        /// than an oversight.** Four gestures stay refused because each of them addresses something a
+        /// pose channel does not have one of per row: focusing draws the node's two bezier handles,
+        /// and a `TransformTrack.Key` carries **one** handle pair for all six components, so shaping
+        /// Scale X's tangent would bend the other five; the second-stage menu's Delete funnels through
+        /// `removeEffectParameterKey`, a grade writer; and tapping a curve to add a key would have to
+        /// invent five component values the artist never gave. Those are (38)(b)'s surface and belong
+        /// to whoever extends it, not to this stage.
+        enum Gestures: String, Equatable {
+            /// Everything the band offers: drag a node, marquee it, tap to focus, shape its handles,
+            /// tap the line to add a key, tap the node twice for its menu.
+            case all
+            /// **A node may be dragged on both axes and caught by a marquee, and nothing else.**
+            case dragOnly
+        }
+        let gestures: Gestures
+
+        /// **Where each of this channel's keys may be dragged to, in the band's own absolute frames** —
+        /// keyed by the key's *current* frame, and empty for a grade, which has no such bound.
+        ///
+        /// A cel's pose track keys **cel-local** and rides its cel (§3.1), so a key of it belongs to
+        /// one cel and the frames it may occupy are that cel's own span. Nothing else in the band
+        /// needs such a bound: a grade's curve is one dictionary entry on the layer and its keys may
+        /// sit anywhere from frame 0 upwards.
+        ///
+        /// **It is here rather than in the writer because the drawn node and the written key have to
+        /// stop at the same frame.** A clamp applied only where the track is mutated would let the dot
+        /// travel under a finger the document had stopped following — the exact "snaps back on lift"
+        /// failure the read-only refusal existed to prevent, moved one axis over. `moves(of:in:…)`
+        /// folds it into the same `minDelta`/`maxDelta` the neighbour clamp uses, so it reads as the
+        /// same wall.
+        ///
+        /// **What it prevents, concretely.** A layer's cels are merged into one drawn channel per
+        /// component (`poseChannels`), so without a bound a key of cel A can be dragged into cel B's
+        /// frames — where it renders nothing (it is past its own cel's span) and can land on the same
+        /// *absolute* frame as one of B's keys, at which point the band draws one node for two stored
+        /// keys and the document has a key the artist can no longer see.
+        let frameWindows: [Int: ClosedRange<Int>]
 
         init(parameterID: String, name: String, curve: AnimationCurve,
              uiRange: ClosedRange<Double>?, modelDomain: ClosedRange<Double>, format: String?,
-             descriptorIndex: Int, isAnimated: Bool, isEditable: Bool = true) {
+             descriptorIndex: Int, isAnimated: Bool, gestures: Gestures = .all,
+             frameWindows: [Int: ClosedRange<Int>] = [:]) {
             self.parameterID = parameterID
             self.name = name
             self.curve = curve
@@ -190,7 +226,8 @@ enum TimelineGraphBand {
             self.format = format
             self.descriptorIndex = descriptorIndex
             self.isAnimated = isAnimated
-            self.isEditable = isEditable
+            self.gestures = gestures
+            self.frameWindows = frameWindows
         }
 
         /// The y axis this channel is drawn against — `range(uiRange:keyValues:)` applied to this
@@ -357,15 +394,23 @@ enum TimelineGraphBand {
         let channel: PoseChannelID
         let track: TransformTrack
         let frameOffset: Int
+        /// **The absolute frames a key of this source may occupy** — the cel's own span, and nil for
+        /// a container pose, which has no cel and is bounded only by frame 0.
+        ///
+        /// `Channel.frameWindows` is what this becomes and carries the argument for it. Inclusive at
+        /// both ends, so a one-frame cel is a window a key can sit in and not be dragged out of.
+        let frameWindow: ClosedRange<Int>?
         /// The artist-facing name for this channel's group header. Supplied rather than derived
         /// because an animation group's own `displayName` lives on `CanvasManager` and this file
         /// works in values.
         let name: String
 
-        init(channel: PoseChannelID, track: TransformTrack, frameOffset: Int, name: String? = nil) {
+        init(channel: PoseChannelID, track: TransformTrack, frameOffset: Int,
+             frameWindow: ClosedRange<Int>? = nil, name: String? = nil) {
             self.channel = channel
             self.track = track
             self.frameOffset = frameOffset
+            self.frameWindow = frameWindow
             self.name = name ?? channel.defaultName
         }
     }
@@ -435,11 +480,16 @@ enum TimelineGraphBand {
             // `atan2`, a `hypot` and an `atan`, and doing it six times per key would pay all of it
             // per component for one number each.
             var decomposed: [(frame: Int, key: TransformTrack.Key, values: PoseComponents.Values)] = []
+            // Which cel each merged key came out of, expressed as the frames it may be dragged
+            // between — `Channel.frameWindows`, and the reason a merged channel cannot fold two cels'
+            // keys onto one frame.
+            var windows: [Int: ClosedRange<Int>] = [:]
             var refused = false
             for source in group {
                 for key in source.track.keys {
                     guard let values = PoseComponents.decompose(key.pose) else { refused = true; break }
                     decomposed.append((key.frame + source.frameOffset, key, values))
+                    if let window = source.frameWindow { windows[key.frame + source.frameOffset] = window }
                 }
                 if refused { break }
             }
@@ -467,7 +517,8 @@ enum TimelineGraphBand {
                                         format: component.format,
                                         descriptorIndex: index,
                                         isAnimated: curve.isAnimated,
-                                        isEditable: false))
+                                        gestures: .dragOnly,
+                                        frameWindows: windows))
                 index += 1
             }
         }
@@ -839,6 +890,15 @@ enum TimelineGraphBand {
                 let above = blockers.first { $0 > key.frame }
                 minDelta = max(minDelta, max(0, (below ?? -1) + 1) - key.frame)
                 if let above { maxDelta = min(maxDelta, above - 1 - key.frame) }
+                // **And a key that rides a cel is walled by its cel** — `Channel.frameWindows`,
+                // empty for every grade channel, so this costs the ordinary case one dictionary
+                // lookup and changes nothing. Folded into the same two bounds as the neighbour
+                // clamp, so the group stays rigid: a marquee holding a key at the end of its cel is
+                // stopped as a body, exactly as one holding a key against a neighbour is.
+                if let window = channel.frameWindows[key.frame] {
+                    minDelta = max(minDelta, window.lowerBound - key.frame)
+                    maxDelta = min(maxDelta, window.upperBound - key.frame)
+                }
                 carried.append((KeyRef(parameterID: channel.parameterID, frame: key.frame), channel, key.value))
             }
         }
@@ -922,10 +982,12 @@ enum TimelineGraphBand {
     ///   the state a band opens in, where every node's tap is a first stage.
     static func tap(at point: CGPoint, channels all: [Channel], focused: KeyRef?, frameCount: Int,
                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Tap {
-        // Read-only channels are drawn and inert — `editable(_:)`. A tap that lands on a pose node
-        // resolves to `.nothing` rather than focusing it, because the handles a focus draws are
-        // themselves draggable and the drag would write nowhere.
-        let channels = editable(all)
+        // **A pose channel takes no tap** — `tappable(_:)`, and `Channel.Gestures` carries the four
+        // reasons. A tap that lands on a pose node resolves to `.nothing` rather than focusing it,
+        // because focusing is what draws the node's bezier handles and a `TransformTrack.Key` has one
+        // handle pair for all six components. The *drag* is not filtered here; it reaches every
+        // channel the band draws.
+        let channels = tappable(all)
         if let hit = nearestKey(to: point, channels: channels,
                                 pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
             return hit == focused ? .menu(hit) : .focus(hit)
@@ -954,10 +1016,11 @@ enum TimelineGraphBand {
     /// while the single-tap grab could still reach it from the rim. Reachable by both or by neither.
     static func keys(in rect: CGRect, channels all: [Channel],
                      pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Set<KeyRef> {
-        // Read-only channels are not picked up — `editable(_:)`. A marquee that caught a pose node
-        // would put a ring around something the next drag cannot move, and the group move clamps to
-        // the tightest allowance any member has, so one inert member would freeze the whole set.
-        let channels = editable(all)
+        // **Every drawn channel, pose channels included** — §11.7's write-back. The refusal that used
+        // to stand here was the other half of the read-only band: a ring around a node the next drag
+        // could not move. A pose node can be moved now, so catching one is the honest answer, and the
+        // group clamp it joins is the same rigid-body one every other member obeys.
+        let channels = all
         let box = rect.standardized
         guard box.width > 0 || box.height > 0 else { return [] }
         var result: Set<KeyRef> = []
@@ -1015,6 +1078,126 @@ enum TimelineGraphBand {
             }
             for key in moved { curve.setKey(key) }
             if curve != channel.curve { result[channel.parameterID] = curve }
+        }
+        return result
+    }
+
+    // MARK: - Writing a pose back — KEYFRAMES.md §11.7
+
+    /// **One pose channel's edit, folded out of a drag's row-level moves** — the type that makes six
+    /// rows one key.
+    ///
+    /// ## The problem it exists for
+    ///
+    /// The band draws a pose channel as six ordinary curves, and every gesture the band has is
+    /// expressed over a curve and a `KeyRef`, which names a **row** (`parameterID`) and a frame.
+    /// The document has no such thing: the six values live in one `TransformTrack.Key`, which has
+    /// one frame and one pose. So a write funnel shaped like `setEffectParameterTrack` — one curve
+    /// at a time — cannot express a retime at all without inventing six independent frames, and the
+    /// first thing it would do with them is let them differ.
+    ///
+    /// **This is where the two vocabularies meet, and it is deliberately the only place.** `retimes`
+    /// is keyed by the key's own frame and not by a `KeyRef`, so **a destination frame is a property
+    /// of the key** and six rows of one key cannot ask for two of them — the desynchronisation is
+    /// unrepresentable rather than merely avoided. `values` is keyed the same way and carries a
+    /// *component* map, which is the opposite half: a vertical drag names exactly one component and
+    /// the other five are carried by the key's own pose, never re-derived.
+    ///
+    /// ## Why only the components that actually moved are listed
+    ///
+    /// `PoseComponents.setting` round-trips a pose through `decompose`/`recompose`, which is an exact
+    /// inverse to floating point and not to the bit. Writing a component back at the value it already
+    /// holds would therefore perturb the other five in the last place, once per tick of a drag — so a
+    /// purely horizontal drag would slowly grind the pose it was only retiming. `poseEdits` compares
+    /// against the value the drag started from and lists nothing when they agree, which makes "a
+    /// retime changes no component" true by construction rather than by tolerance.
+    struct PoseEdit: Equatable {
+        /// Source frame → destination frame, in the band's absolute frames. **One entry per key.**
+        var retimes: [Int: Int] = [:]
+        /// Source frame → the components that changed, and to what.
+        var values: [Int: [PoseComponents.Component: Double]] = [:]
+
+        var isEmpty: Bool { retimes.isEmpty && values.isEmpty }
+    }
+
+    /// **One pose edit applied to one track** — the edit speaks the band's absolute frames and the
+    /// track keys in its own base (§3.1), so `frameOffset` is where the two meet and it is the only
+    /// place the conversion happens on the way in.
+    ///
+    /// **Every key it touches is removed before any is re-inserted**, which is `applying(_:to:)`'s
+    /// rule reached through the same door: `TransformTrack.setKey` replaces on collision, so a set of
+    /// keys sliding into frames its own leading edge just vacated would lose a member silently. The
+    /// walk is sorted for that function's stated reason as well — it makes the answer independent of
+    /// the order, and makes an interleaved *broken* version fail every time rather than five times in
+    /// six.
+    ///
+    /// **A key nothing named is returned untouched, by identity and not by re-derivation.** That is
+    /// what makes "a drag on one node leaves the rest of the track alone" a property of the shape
+    /// rather than of `recompose`'s tolerance.
+    static func applying(_ edit: PoseEdit, to track: TransformTrack,
+                         frameOffset: Int) -> TransformTrack {
+        guard !edit.isEmpty else { return track }
+        var result = track
+        var moved: [TransformTrack.Key] = []
+        for key in track.keys.sorted(by: { $0.frame < $1.frame }) {
+            let absolute = key.frame + frameOffset
+            var edited = key
+            var touched = false
+            if let components = edit.values[absolute] {
+                // **`Component.allCases`, never the dictionary's own order.** `setting` goes through
+                // `decompose`/`recompose`, so two components written in two orders differ in the last
+                // place — and a `Dictionary`'s order is a per-process coin flip, which is exactly the
+                // kind of intermittence `applying(_:to:)`'s doc refuses to ship.
+                for component in PoseComponents.Component.allCases {
+                    guard let value = components[component],
+                          let posed = PoseComponents.setting(component, to: value, of: edited.pose)
+                    else { continue }
+                    edited.pose = posed
+                    touched = true
+                }
+            }
+            // **The whole key moves, all six components with it.** There is one `frame` here and six
+            // rows drawn from it, which is the entire reason `PoseEdit` exists.
+            if let destination = edit.retimes[absolute], destination != absolute {
+                edited.frame = destination - frameOffset
+                touched = true
+            }
+            guard touched else { continue }
+            result.removeKey(atFrame: key.frame)
+            moved.append(edited)
+        }
+        for key in moved { result.setKey(key) }
+        return result
+    }
+
+    /// **A drag's moves, read as pose edits** — keyed by `PoseChannelID.groupID`, and empty for a
+    /// drag that touched no pose channel, which is every drag on a grade-only band.
+    ///
+    /// Rows that name no pose channel are ignored rather than refused: one marquee can hold a grade's
+    /// keys and a pose's, and the two halves are written through their own funnels from the same set
+    /// of moves. `applying(_:to:)` is the other half and takes the same input.
+    ///
+    /// **The retime is one number per key however many rows asked for it**, because `moves(of:…)`
+    /// gives the whole carried set a single frame delta (its own doc: *"one `frameDelta` for every
+    /// key, clamped to the tightest allowance any of them has"*). Two rows of one key therefore agree
+    /// by arithmetic; this type is what makes them agree by *shape* as well, so a later change to
+    /// that clamp cannot pull a key apart without first having somewhere to put the second answer.
+    static func poseEdits(_ moves: [KeyRef: Move], in channels: [Channel]) -> [String: PoseEdit] {
+        guard !moves.isEmpty else { return [:] }
+        var result: [String: PoseEdit] = [:]
+        // Sorted, so that two rows of one key are folded in a fixed order and the answer does not
+        // depend on Swift's per-process hash seed — `applying(_:to:)`'s reason, one type over.
+        for ref in moves.keys.sorted(by: { ($0.parameterID, $0.frame) < ($1.parameterID, $1.frame) }) {
+            guard let move = moves[ref],
+                  let resolved = PoseChannelID.resolve(parameterID: ref.parameterID),
+                  let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
+                  let start = channel.curve.key(atFrame: ref.frame)
+            else { continue }
+            let id = resolved.channel.groupID
+            var edit = result[id] ?? PoseEdit()
+            if move.frame != ref.frame { edit.retimes[ref.frame] = move.frame }
+            if move.value != start.value { edit.values[ref.frame, default: [:]][resolved.component] = move.value }
+            if edit.isEmpty { result.removeValue(forKey: id) } else { result[id] = edit }
         }
         return result
     }
@@ -1106,9 +1289,14 @@ enum TimelineGraphBand {
     /// `inHandle`, so those two are consulted by no evaluation whatever — and a dot an artist can drag
     /// that changes no pixel is worse than no dot: it teaches a wrong model of the control. So a
     /// one-key curve offers neither, and every curve's two ends offer one each.
+    /// **A channel that takes no tap offers no handles either**, and that guard is here rather than
+    /// only at the tap: a `TransformTrack.Key` carries **one** `inHandle`/`outHandle` pair for all six
+    /// of its components, so a dot drawn on Scale X's node would shape Y, Rotation and the rest with
+    /// it. Drawing it would teach a wrong model of the control before any drag went wrong.
     static func handles(of ref: KeyRef, in channels: [Channel],
                         pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> [DrawnHandle] {
         guard let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
+              channel.gestures == .all,
               let index = channel.curve.keys.firstIndex(where: { $0.frame == ref.frame })
         else { return [] }
         let key = channel.curve.keys[index]
@@ -1154,13 +1342,14 @@ enum TimelineGraphBand {
     /// and unambiguous.
     static func grab(at point: CGPoint, focused: KeyRef?, channels all: [Channel],
                      pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Grab {
-        // Read-only channels take no touch — `editable(_:)`, and this is the one of the three entry
-        // points where it matters most: without it a touch-down on a pose node opens an undo
-        // bracket, drags the node under the finger for the length of the gesture and snaps it back
-        // on lift, because `setEffectParameterTrack` refuses the id and nothing says so.
-        let channels = editable(all)
-        let key = nearestKey(to: point, channels: channels,
+        // **A node of any drawn channel can be taken hold of** — §11.7's write-back replaced the
+        // refusal that used to stand here. **Handles are still a `tappable` channel's alone**, and
+        // that asymmetry is the whole of `Channel.Gestures`: only a focused node has handles, only a
+        // tap focuses, and a tap does not reach a pose channel — so this is belt and braces rather
+        // than the load-bearing gate, which is what a control whose failure mode is silent deserves.
+        let key = nearestKey(to: point, channels: all,
                              pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight)
+        let channels = tappable(all)
         guard let focused,
               let channel = channels.first(where: { $0.parameterID == focused.parameterID }),
               let anchor = channel.curve.key(atFrame: focused.frame)
@@ -1436,16 +1625,16 @@ enum TimelineGraphBand {
 
     // MARK: - Which channels a gesture may touch
 
-    /// **The channels a touch on the band is allowed to resolve to** — `Channel.isEditable`, applied
-    /// once and named, rather than as a condition inside each of the three gesture entry points.
+    /// **The channels a *tap* — or a handle, which only a tap can reveal — may resolve to.**
+    /// `Channel.Gestures.all`, applied once and named rather than spelled as a condition inside each
+    /// entry point.
     ///
-    /// Drawing takes the full list and gestures take this one, which is the split that makes "the
-    /// pose band is read-only" a property of a value the fast tier can read. A pose node is therefore
-    /// **drawn and inert**: it cannot be grabbed, tapped, focused or caught by a marquee, so no drag
-    /// carries it under the finger and snaps it back, and no undo bracket is opened for an edit that
-    /// cannot land.
-    static func editable(_ channels: [Channel]) -> [Channel] {
-        channels.allSatisfy(\.isEditable) ? channels : channels.filter(\.isEditable)
+    /// **There is deliberately no `draggable(_:)` beside it.** Since §11.7's write-back every channel
+    /// the band draws takes a drag and a marquee, so a filter for those would be a function that
+    /// returns its argument — and a no-op filter is worse than none, because the next reader takes it
+    /// for a rule that is being enforced. `grab` and `keys` walk the full list on purpose.
+    static func tappable(_ channels: [Channel]) -> [Channel] {
+        channels.allSatisfy { $0.gestures == .all } ? channels : channels.filter { $0.gestures == .all }
     }
 
     /// **The band's *gesture* state, as a string** — which node's handles are drawn (38)(b) and what
@@ -1614,6 +1803,10 @@ extension CanvasManager {
                           let track = cel.transformTracks[key], !track.isEmpty else { continue }
                     sources.append(TimelineGraphBand.PoseSource(
                         channel: .cel(channel), track: track, frameOffset: cel.startFrame,
+                        // The cel's own span, inclusive, which is where a key of this track may be
+                        // dragged to and no further — `Channel.frameWindows`. `endFrame` is
+                        // exclusive, so the last frame the artist sees is one below it.
+                        frameWindow: cel.startFrame...max(cel.startFrame, cel.endFrame - 1),
                         name: poseChannelName(channel)))
                 }
             }
@@ -1624,6 +1817,196 @@ extension CanvasManager {
                                                         frameOffset: 0))
         }
         return sources
+    }
+
+    // MARK: - The pose write funnel — KEYFRAMES.md §11.7's write-back
+
+    /// **Every pose a band's drag can rewrite, as it stood when the finger went down.**
+    ///
+    /// **The drag applies each tick's edit to *this* rather than to the document**, which is
+    /// `TimelineGraphBand.applying(_:to:)`'s rule stated one level out and needed here for a reason
+    /// that function does not have: a retime names the frame a key *was* on, and after the first tick
+    /// it is no longer there. Composing tick two onto tick one's document would look for a key that
+    /// had moved and find either nothing or a neighbour.
+    ///
+    /// It is also what makes a cancelled drag one call — `restoreGraphBandPoses(_:layerIndex:)` —
+    /// rather than an inverse edit somebody has to derive.
+    ///
+    /// **Addressed by layer id, not by index**, `setEffectParameterTrack`'s rule: a restack between
+    /// the edit and the undo moves an index and cannot move an id.
+    struct GraphBandPoseSnapshot: Equatable {
+        /// One cel's pose state, with the frame its band-absolute keys are offset by.
+        struct Cel: Equatable {
+            let startFrame: Int
+            var state: CanvasManager.CelPoseState
+        }
+        var layerID: UUID?
+        var cels: [UUID: Cel] = [:]
+        /// `Layer.transform`, raw. Nil is a real value here — a layer with no container pose — so a
+        /// restore writes it back unconditionally rather than skipping.
+        var container: LayerPose?
+
+        var isEmpty: Bool { cels.isEmpty && container == nil }
+    }
+
+    /// The snapshot for one layer. Costs a dictionary of value types per cel that carries a pose, and
+    /// nothing at all for the overwhelming majority of documents, which carry none.
+    func graphBandPoseSnapshot(layerIndex: Int) -> GraphBandPoseSnapshot {
+        guard layers.indices.contains(layerIndex) else { return GraphBandPoseSnapshot() }
+        var snapshot = GraphBandPoseSnapshot(layerID: layers[layerIndex].id)
+        for cel in layers[layerIndex].cels where !cel.transformTracks.isEmpty
+            || !cel.pendingPoseBaselines.isEmpty {
+            snapshot.cels[cel.id] = GraphBandPoseSnapshot.Cel(
+                startFrame: cel.startFrame,
+                state: CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines))
+        }
+        // The accessor, never the raw field — `poseSources`' rule: a pose left behind by a kind change
+        // poses nothing, so it is not a channel the band drew and not one a drag may rewrite.
+        snapshot.container = layers[layerIndex].layerTransform
+        return snapshot
+    }
+
+    /// **The pose half of a graph-band drag, written** — the funnel `setEffectParameterTrack` is for a
+    /// grade, and the reason §11.7's band is no longer read-only.
+    ///
+    /// **It writes keys, never curves, and that is the whole of the six-rows-one-key problem.** The
+    /// band hands `[groupID: PoseEdit]`, in which a destination frame is a property of the *key*
+    /// (`PoseEdit`), so there is no shape in which six components could arrive at six frames. The
+    /// components a vertical drag changed are replaced through `PoseComponents.setting`, one at a
+    /// time, on the key's own pose — so the five it did not name are carried rather than re-derived.
+    ///
+    /// **One undo step for the whole gesture, by recording nothing while a bracket is open** —
+    /// `setEffectParameterTrack`'s arithmetic exactly. A drag calls this on every `.changed` tick and
+    /// `commitStructureGesture` writes the one step; a call outside a bracket (a test, or any future
+    /// discrete edit) records its own.
+    ///
+    /// - Returns: whether the document changed, which is the input to the drag's commit-or-cancel.
+    @discardableResult
+    func writeGraphBandPoseEdits(_ edits: [String: TimelineGraphBand.PoseEdit],
+                                 from snapshot: GraphBandPoseSnapshot,
+                                 layerIndex: Int) -> Bool {
+        guard !edits.isEmpty, !snapshot.isEmpty else { return false }
+        var after = snapshot
+        // Sorted, so two channels edited in one drag are folded in a fixed order — the answer does not
+        // depend on it (they address different tracks) but a failure that did would be intermittent.
+        for groupID in edits.keys.sorted() {
+            guard let edit = edits[groupID], !edit.isEmpty,
+                  let channel = PoseChannelID(groupID: groupID) else { continue }
+            switch channel {
+            case .cel(let id):
+                for celID in after.cels.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+                    guard let cel = after.cels[celID], let track = cel.state.tracks[id.id] else { continue }
+                    let rewritten = TimelineGraphBand.applying(edit, to: track,
+                                                               frameOffset: cel.startFrame)
+                    guard rewritten != track else { continue }
+                    after.cels[celID]?.state.tracks[id.id] = rewritten
+                }
+            case .container:
+                guard var pose = after.container else { continue }
+                let rewritten = TimelineGraphBand.applying(edit, to: pose.track, frameOffset: 0)
+                guard rewritten != pose.track else { continue }
+                pose.track = rewritten
+                after.container = pose
+            }
+        }
+        return commitGraphBandPoseSnapshot(after, from: snapshot, layerIndex: layerIndex)
+    }
+
+    /// **Puts a cancelled drag's poses back**, and records nothing doing it.
+    ///
+    /// One call rather than an inverse edit somebody has to derive, which is the snapshot's second
+    /// job. **No undo step**, deliberately: this is the cancel arm, and the drag's own
+    /// `cancelStructureGesture` throws the baseline away beside it — a step recorded here would be one
+    /// press of Undo that puts back the edit the artist has just cancelled. It is the same pairing
+    /// `endGraphBandDrag(cancelled:)` already makes for the grade curves, where "record nothing" and
+    /// "change nothing" have to be arranged separately.
+    @discardableResult
+    func restoreGraphBandPoses(_ snapshot: GraphBandPoseSnapshot, layerIndex: Int) -> Bool {
+        guard !snapshot.isEmpty,
+              let layerID = snapshot.layerID ?? layerID(atIndex: layerIndex),
+              let index = layers.firstIndex(where: { $0.id == layerID }),
+              graphBandPoseSnapshot(layerIndex: index) != snapshot
+        else { return false }
+        beginCanvasEdit()
+        return applyGraphBandPoseSnapshot(snapshot, layerID: layerID)
+    }
+
+    /// Applies a pose snapshot and records the one step that takes it back — `commitCelPoseState`'s
+    /// shape, widened to a whole layer because one drag can hold keys from several cels and from the
+    /// container pose at once.
+    ///
+    /// **The change test is a fresh snapshot rather than `state != before`**, because `before` is the
+    /// state the *drag* started from and the document has moved since: every tick of a live drag hands
+    /// the same `before` and a different `state`, and a tick that lands back on the frame and value
+    /// the document already holds must record nothing rather than an empty step.
+    @discardableResult
+    private func commitGraphBandPoseSnapshot(_ state: GraphBandPoseSnapshot,
+                                             from before: GraphBandPoseSnapshot,
+                                             layerIndex: Int) -> Bool {
+        guard let layerID = state.layerID ?? layerID(atIndex: layerIndex),
+              let index = layers.firstIndex(where: { $0.id == layerID }),
+              graphBandPoseSnapshot(layerIndex: index) != state
+        else { return false }
+        beginCanvasEdit()
+        guard applyGraphBandPoseSnapshot(state, layerID: layerID) else { return false }
+
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
+        recordUndo(label: .effectKeyframes,
+                   cost: Self.graphBandPoseUndoCost(before) + Self.graphBandPoseUndoCost(state),
+                   undo: { [weak self] in
+                       _ = self?.applyGraphBandPoseSnapshot(before, layerID: layerID)
+                   }, redo: { [weak self] in
+                       _ = self?.applyGraphBandPoseSnapshot(state, layerID: layerID)
+                   })
+        return true
+    }
+
+    /// The one mutation every direction of the undo above goes through, re-resolving the layer by id
+    /// on every call — `applyCelPoseState`'s rule, one container up.
+    ///
+    /// - Returns: whether anything actually moved, so a restore that had nothing to put back neither
+    ///   invalidates a bake nor records a step.
+    @discardableResult
+    private func applyGraphBandPoseSnapshot(_ snapshot: GraphBandPoseSnapshot,
+                                            layerID: UUID) -> Bool {
+        guard let index = layers.firstIndex(where: { $0.id == layerID }) else { return false }
+        var changed = false
+        for celIndex in layers[index].cels.indices {
+            let cel = layers[index].cels[celIndex]
+            guard let want = snapshot.cels[cel.id] else { continue }
+            guard cel.transformTracks != want.state.tracks
+                    || cel.pendingPoseBaselines != want.state.baselines else { continue }
+            layers[index].cels[celIndex].transformTracks = want.state.tracks
+            layers[index].cels[celIndex].pendingPoseBaselines = want.state.baselines
+            celContentChangedOutsideStroke(layerID: layerID, celID: cel.id)
+            changed = true
+        }
+        // The raw field, because nil is a real value here and a restore has to be able to write it —
+        // gated on the *accessor* so a pose left behind by a kind change is neither read nor written.
+        if layers[index].layerTransform != snapshot.container,
+           layers[index].layerTransform != nil || snapshot.container != nil {
+            layers[index].transform = snapshot.container
+            changed = true
+        }
+        return changed
+    }
+
+    /// `TransformKeyframes`' own estimate, in this snapshot's currency: a key is a rect, eight
+    /// coordinates and four handle numbers. What matters is that it is small, so a session spent in
+    /// the graph editor costs the history what a couple of structural edits do.
+    private static func graphBandPoseUndoCost(_ snapshot: GraphBandPoseSnapshot) -> Int {
+        var cost = snapshot.container.map { 64 + 160 * $0.track.keys.count } ?? 0
+        for cel in snapshot.cels.values {
+            cost += cel.state.tracks.values.reduce(0) { $0 + 64 + 160 * $1.keys.count }
+            cost += 160 * cel.state.baselines.count
+        }
+        return cost
+    }
+
+    /// The index-to-id conversion `keyframeTarget(layerIndex:)` makes, without minting a target — for
+    /// a snapshot taken before the layer was resolved, and for a stale index.
+    private func layerID(atIndex index: Int) -> UUID? {
+        layers.indices.contains(index) ? layers[index].id : nil
     }
 
     /// The words the artist picked a cel channel by — an animation group's own `displayName`, and

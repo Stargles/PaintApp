@@ -1968,8 +1968,10 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
 ### 11.6 Open
 
 - ~~**A transform channel has no band, so an object animated with Move has no curve to edit.**~~
-  **Built in §11.7, read-only.** The six decomposed curves are drawn, listed, grouped, folded and
-  navigable; a node on one takes no gesture. See §11.7 for what write-back would still need.
+  **Built in §11.7, and editable since.** The six decomposed curves are drawn, listed, grouped, folded
+  and navigable, and a node on one is dragged on both axes — vertically it edits that component,
+  horizontally it retimes the whole key. The tap family is still refused; §11.7 says which four and
+  why.
 
 - ~~**The y axis when several channels are visible at once.**~~ **Ruled 2026-08-29: each curve is scaled
   to fill the band.** Shown the trade — per-channel normalisation makes every curve legible and makes two
@@ -2045,19 +2047,52 @@ Distort is stage 5b and no writer produces a projective `PoseQuad`. **Whoever bu
 to add a corner fallback beside these six or to widen the six; do not quietly make `decompose`
 linearise.**
 
-**The band is read-only, deliberately and explicitly.** The decomposition round trip is built and
-tested — `recompose` is `decompose`'s exact inverse over its own range, and
-`PoseComponents.setting(_:to:of:)` replaces one component and leaves the other five alone — but two
-things stand between that and a drag. A node's *frame* is shared by all six sub-curves, because they
-are one `TransformTrack.Key`, so retiming one of them is retiming the key, and `moves(of:in:…)`
-computes a delta per channel with no notion that six of them are one thing; and the write funnel is
-`setEffectParameterTrack`, which addresses a grade's parameters. Landing half of that gives a band
-whose horizontal drags desynchronise a key from itself. **Without the refusal the band would be
-read-only anyway** — that funnel refuses an id it does not recognise — but by accident of another
-function's guard: the drag would open an undo bracket, carry the node under the finger and snap it
-back on lift with nothing saying why. `Channel.isEditable` moves the refusal to touch-down, and
-`TimelineGraphBand.editable(_:)` applies it at the three gesture entry points, so a pose node is
-**drawn and inert**.
+~~**The band is read-only, deliberately and explicitly.**~~ **Superseded — the nodes are draggable on
+both axes, and the refusal is gone rather than relaxed.** What stood between the decomposition round
+trip and a drag was never the arithmetic (`recompose` is `decompose`'s exact inverse over its own
+range, and `setting(_:to:of:)` replaces one component and leaves the other five alone, both tested)
+but the **write funnel**: `setEffectParameterTrack` addresses one curve at a time, a pose key has one
+frame and six rows, and a curve-at-a-time writer has no shape in which to say so. Passing a pose id
+through it was dropped outright, which was read-only by accident of another function's guard — the
+bracket opens, the node travels under the finger and snaps back on lift with nothing saying why.
+
+**The repair is a second funnel, and the desynchronisation is unrepresentable rather than guarded
+against.** `TimelineGraphBand.poseEdits(_:in:)` folds a drag's row-level `Move`s into a `PoseEdit`
+whose `retimes` are keyed **by frame, not by `KeyRef`** — so a destination frame is a property of the
+key and six rows cannot ask for two of them — and
+`CanvasManager.writeGraphBandPoseEdits(_:from:layerIndex:)` applies it to the `TransformTrack.Key`
+itself. A vertical drag lists only the component that moved, and only when its value actually changed,
+so a pure retime carries the pose by identity rather than round-tripping it through `recompose` once a
+tick. Every tick applies to `GraphBandPoseSnapshot`, the poses as they stood at touch-down, for the
+reason `applying(_:to:)` applies to the drag's starting curves — and that snapshot is also what a
+cancelled drag restores, in one call. One undo step, by recording nothing while the gesture bracket is
+open, which is `setEffectParameterTrack`'s own arithmetic.
+
+**A key that rides a cel cannot be dragged out of it** — `Channel.frameWindows`, folded into the same
+`minDelta`/`maxDelta` the neighbour clamp uses so it reads as the same wall. A layer's cels merge into
+one drawn channel per component, so without it a key of cel A travels into cel B's frames, where it
+renders nothing (it is past its own cel's span) and can land on the same *absolute* frame as one of
+B's keys — one drawn node over two stored ones. The clamp is in the band rather than in the writer so
+that the dot stops where the document stops.
+
+**What a pose channel still refuses is the tap family, and `Channel.Gestures` is where that is said.**
+`.dragOnly` against a grade's `.all`: no focus, no bezier handles, no node menu, no tap-to-add. Each
+has the same cause one level down — a `TransformTrack.Key` carries **one** handle pair for all six
+components, so shaping Scale X's tangent would bend the other five; the menu's Delete funnels through
+`removeEffectParameterKey`, a grade writer; and tapping a curve to add a key would have to invent five
+component values the artist never gave. Those belong to whoever extends (38)(b), not to this stage.
+`TimelineGraphBand.editable(_:)` is replaced by `tappable(_:)`, and there is deliberately no
+`draggable(_:)` beside it: every channel the band draws takes a drag, so such a filter would return
+its argument and read as a rule being enforced.
+
+**One thing the surface cannot do at the shipped height, found while writing the tests and not fixed.**
+All six rows of a pose channel key the same frames, so at any keyed frame the band draws six dots on
+one x, spread over 96 pt by per-channel normalisation alone — about 16 pt apart against a `hitRadius`
+of 22. `nearestKey` does exactly what it says and there is no room for six independent targets, so a
+finger cannot reliably pick *which* component it is grabbing where all six key. The artist's answer is
+the channel list's filter — hide the five rows you are not editing — which is an argument for that
+filter rather than against this band, and `PoseNodeDragLogicTests` buys unambiguous targets by
+choosing a taller band because what it tests is the write.
 
 **Two consequences of the drawing worth knowing rather than discovering.** The drawn line is the
 *timing* curve's interpolation of a component, while the animation's actual in-between is
@@ -2068,8 +2103,12 @@ here there is no disagreement at any *node*, which is where the artist grabs. An
 declare **no `uiRange`**, so each is normalised to its own key extent: none of them has a
 canvas-independent range, and the one that looks as though it does (rotation, −180…180) is the worst
 case, drawing a 5°-to-10° animation as a flat line in the middle of the band. §11.6's argument for
-preferring a declared range is about drags, which this band has none of; revisit it if write-back
-lands.
+preferring a declared range is about drags — **which this band now has, and the ruling is still to keep
+the nil.** The value written is exact either way: `moves` reads the axis captured at touch-down, so the
+finger gets the number it asked for. What rescales is the *drawing*, and it does so for the eight grade
+parameters that declare no `uiRange` too, so it is a pre-existing property of the band rather than
+something write-back introduced. Declaring −180…180 for rotation would trade a node that lags the
+finger for an animation drawn as a flat line, which is the worse of the two.
 
 #### Ruling 2 — the channel list is a navigator as well as a filter
 

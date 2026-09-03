@@ -424,27 +424,30 @@ final class PoseBandLogicTests: XCTestCase {
         XCTAssertNil(manager.vectorFloat)
     }
 
-    // MARK: - The band is read-only, and says so
+    // MARK: - What a pose node takes, and what it still refuses
 
-    /// **A pose node is drawn and inert.** Every gesture entry point refuses it — `grab` at
-    /// touch-down, `tap` on lift, and the marquee — so no drag opens an undo bracket for an edit that
-    /// `setEffectParameterTrack` would silently drop.
+    /// **A pose node is dragged and marquee'd like any other, and takes no tap** — §11.7's
+    /// write-back, which replaced the blanket refusal this test used to pin.
     ///
-    /// **The fixture holds an editable channel too**, which is the half that stops this being a test
-    /// of an empty list: the same three calls at the same three points answer normally for a grade,
-    /// so what is pinned is the refusal rather than the absence of anything to hit.
-    func testAPoseNodeTakesNoGestureWhileAGradeNodeStillDoes() throws {
+    /// The old assertion was that all three entry points answered nothing. Two of them answer now,
+    /// and the third still does not — so what this states is the **split** rather than either half:
+    /// `grab` takes the node, a marquee catches it, and `tap` declines it, because focusing is what
+    /// draws bezier handles and a `TransformTrack.Key` carries one handle pair for all six components.
+    ///
+    /// **The fixture holds a grade channel too**, which is what stops the refusal half being a test of
+    /// an empty list: the same `tap` at the same kind of point answers normally one channel over.
+    func testAPoseNodeIsDraggedAndMarqueedButTakesNoTap() throws {
         let (manager, layerID, celID) = celFixture()
         animateCel(manager, layerID: layerID, celID: celID)
         let pose = try XCTUnwrap(channel(try content(manager), celX))
-        XCTAssertFalse(pose.isEditable)
+        XCTAssertEqual(pose.gestures, .dragOnly)
 
         let grade = TimelineGraphBand.Channel(
             parameterID: "brightnessContrast.brightness", name: "Brightness",
             curve: AnimationCurve(keys: [.init(frame: 4, value: 0), .init(frame: 12, value: 1)]),
             uiRange: 0...1, modelDomain: 0...1, format: "%.2f", descriptorIndex: 0,
             isAnimated: true)
-        XCTAssertTrue(grade.isEditable, "Fixture: a grade's channel is still editable")
+        XCTAssertEqual(grade.gestures, .all, "Fixture: a grade's channel takes every gesture")
 
         let height = TimelineGraphBand.height
         let ppf: CGFloat = 30
@@ -458,27 +461,35 @@ final class PoseBandLogicTests: XCTestCase {
         let posePoint = at(pose, frame: 4)
         XCTAssertEqual(TimelineGraphBand.grab(at: posePoint, focused: nil, channels: [pose],
                                               pixelsPerFrame: ppf, bandHeight: height),
-                       .nothing, "A touch on a pose node takes hold of nothing")
+                       .key(.init(parameterID: celX, frame: 4)),
+                       "A touch on a pose node takes hold of it")
+        XCTAssertEqual(TimelineGraphBand.keys(in: CGRect(x: 0, y: 0, width: 1000, height: height),
+                                              channels: [pose], pixelsPerFrame: ppf,
+                                              bandHeight: height),
+                       [.init(parameterID: celX, frame: 4), .init(parameterID: celX, frame: 12)],
+                       "…and a marquee over the band picks up both of its nodes")
         XCTAssertEqual(TimelineGraphBand.tap(at: posePoint, channels: [pose], focused: nil,
                                              frameCount: 40, pixelsPerFrame: ppf,
                                              bandHeight: height),
                        .nothing, "…and a tap neither focuses it nor adds beside it")
-        XCTAssertTrue(TimelineGraphBand.keys(in: CGRect(x: 0, y: 0, width: 1000, height: height),
-                                             channels: [pose], pixelsPerFrame: ppf,
-                                             bandHeight: height).isEmpty,
-                      "…and a marquee over the whole band picks it up not at all")
+        XCTAssertTrue(TimelineGraphBand.handles(of: .init(parameterID: celX, frame: 4),
+                                                in: [pose], pixelsPerFrame: ppf,
+                                                bandHeight: height).isEmpty,
+                      "…and it offers no handles even when named as the focus outright")
 
         let gradePoint = at(grade, frame: 4)
-        XCTAssertEqual(TimelineGraphBand.grab(at: gradePoint, focused: nil, channels: both,
-                                              pixelsPerFrame: ppf, bandHeight: height),
-                       .key(.init(parameterID: grade.parameterID, frame: 4)),
-                       "…while the grade beside it is grabbed as it always was")
+        XCTAssertEqual(TimelineGraphBand.tap(at: gradePoint, channels: both, focused: nil,
+                                             frameCount: 40, pixelsPerFrame: ppf,
+                                             bandHeight: height),
+                       .focus(.init(parameterID: grade.parameterID, frame: 4)),
+                       "…while a tap on the grade beside it focuses as it always did")
         XCTAssertEqual(TimelineGraphBand.keys(in: CGRect(x: 0, y: 0, width: 1000, height: height),
                                               channels: both, pixelsPerFrame: ppf,
                                               bandHeight: height),
-                       [.init(parameterID: grade.parameterID, frame: 4),
+                       [.init(parameterID: celX, frame: 4), .init(parameterID: celX, frame: 12),
+                        .init(parameterID: grade.parameterID, frame: 4),
                         .init(parameterID: grade.parameterID, frame: 12)],
-                       "…and a marquee over both catches the grade's two nodes and only those")
+                       "…and a marquee over both catches all four nodes")
     }
 
     // MARK: - The projective refusal

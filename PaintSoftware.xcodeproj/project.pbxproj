@@ -10,6 +10,7 @@
 		79EBF29EEADB4D5CA3903B81 /* PaintSoftware/Models/PoseComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */; };
 		14B663FBCF7D75D535E037FD /* PoseComponentsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */; };
 		FF5656C311B7834F505F8383 /* PoseBandLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */; };
+		1DDB5C54CA9BC0792BF1D1F7 /* PoseNodeDragLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6BDF26D255F80046D1BC169 /* PoseNodeDragLogicTests.swift */; };
 		6BE6D2226D92F608F83D411F /* StripedCompositeMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570E970E680E3CA214298A50 /* StripedCompositeMetalLogicTests.swift */; };
 		42B798437C53DA892A8350D6 /* StripedCompositeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2776B8F88441CD4CB71117F2 /* StripedCompositeLogicTests.swift */; };
 		6123B7778948B50E883C5EC6 /* LiveHalvesStripLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 542A3EC192704C65D7CB6B70 /* LiveHalvesStripLogicTests.swift */; };
@@ -275,6 +276,7 @@
 		DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/PoseComponents.swift; sourceTree = "<group>"; };
 		20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseComponentsLogicTests.swift; sourceTree = "<group>"; };
 		01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseBandLogicTests.swift; sourceTree = "<group>"; };
+		E6BDF26D255F80046D1BC169 /* PoseNodeDragLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PoseNodeDragLogicTests.swift; sourceTree = "<group>"; };
 		570E970E680E3CA214298A50 /* StripedCompositeMetalLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StripedCompositeMetalLogicTests.swift; path = PaintSoftwareUITests/StripedCompositeMetalLogicTests.swift; sourceTree = SOURCE_ROOT; };
 		2776B8F88441CD4CB71117F2 /* StripedCompositeLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StripedCompositeLogicTests.swift; path = PaintSoftwareUITests/StripedCompositeLogicTests.swift; sourceTree = SOURCE_ROOT; };
 		542A3EC192704C65D7CB6B70 /* LiveHalvesStripLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LiveHalvesStripLogicTests.swift; path = PaintSoftwareUITests/LiveHalvesStripLogicTests.swift; sourceTree = SOURCE_ROOT; };
@@ -597,6 +599,7 @@
 				8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */,
 				20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */,
 				01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */,
+				E6BDF26D255F80046D1BC169 /* PoseNodeDragLogicTests.swift */,
 				73D8EE9913434A089208146B /* TimelineBakeBarLogicTests.swift */,
 				0DFF68BC4CC5FA51DAA2F130 /* TimelineBakeIndicationUITests.swift */,
 				057762C046FB4E93924750D2 /* TimelineGraphChannelListLogicTests.swift */,
@@ -960,6 +963,7 @@
 				79EBF29EEADB4D5CA3903B81 /* PaintSoftware/Models/PoseComponents.swift in Sources */,
 				14B663FBCF7D75D535E037FD /* PoseComponentsLogicTests.swift in Sources */,
 				FF5656C311B7834F505F8383 /* PoseBandLogicTests.swift in Sources */,
+				1DDB5C54CA9BC0792BF1D1F7 /* PoseNodeDragLogicTests.swift in Sources */,
 				4D6A8313C18E040312C62A1A /* TimelineGraphBandLogicTests.swift in Sources */,
 				77E55E7528A9D27CE36800D6 /* PaintSoftware/Views/TimelineGraphChannelList.swift in Sources */,
 				F7257BD80FAEC4324D78F90E /* TimelineGraphChannelListLogicTests.swift in Sources */,

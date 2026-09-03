@@ -131,11 +131,15 @@ enum PoseComponents {
         /// canvas-independent range to declare — X and Y are canvas coordinates, scale is unbounded —
         /// and the one that looks as though it does, rotation, is the worst case for it: an axis of
         /// −180…180 draws a 5°-to-10° animation as a flat line in the middle of the band, which is
-        /// exactly what per-channel normalisation exists to prevent. And the drag argument is moot
-        /// while the channel is read-only (`TimelineGraphBand.Channel.isEditable`).
+        /// exactly what per-channel normalisation exists to prevent.
         ///
-        /// **The day write-back lands, revisit rotation and skew**, whose declared ranges would then
-        /// buy the stability the ruling is about.
+        /// **Write-back landed, rotation and skew were revisited, and the nil stands.** The value a
+        /// drag writes is exact either way — `moves(of:in:…)` reads the axis captured at touch-down,
+        /// so the finger gets the number it asked for whatever the drawing does afterwards. What
+        /// rescales is the picture, and it rescales for the eight *grade* parameters that declare no
+        /// `uiRange` as well, so it is a property of the band rather than of this file. Declaring
+        /// −180…180 would trade a node that lags the finger for an animation drawn as a flat line,
+        /// which is the worse of the two.
         var uiRange: ClosedRange<Double>? { nil }
     }
 
