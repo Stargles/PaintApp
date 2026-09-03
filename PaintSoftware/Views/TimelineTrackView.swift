@@ -772,6 +772,14 @@ struct TimelineTrackView: UIViewRepresentable {
             let poseBaseline = content.channels.contains { PoseChannelID.isPose(parameterID: $0.parameterID) }
                 ? canvasManager.graphBandPoseSnapshot(layerIndex: content.layerIndex)
                 : CanvasManager.GraphBandPoseSnapshot()
+            // **The axes are frozen for the life of the drag** — see `TimelineGraphBandView.frozenAxes`.
+            // Taken from the same `content.channels` the drag itself captures, so the axis the value
+            // is computed through and the axis the dot is drawn through are one array.
+            // `uniquingKeysWith` rather than `uniqueKeysWithValues`: the ids are distinct by
+            // construction and a trap here would be a crash in a fingertip's path if they ever were
+            // not.
+            graphBandView.setFrozenAxes(Dictionary(content.channels.map { ($0.parameterID, $0.axis) },
+                                                   uniquingKeysWith: { first, _ in first }))
             graphBandDrag = GraphBandDrag(layerIndex: content.layerIndex, start: point,
                                           channels: content.channels,
                                           frameCount: content.frameCount, bandHeight: height,
@@ -800,11 +808,23 @@ struct TimelineTrackView: UIViewRepresentable {
             // the value the node holds has not changed, so a number that appeared here would be
             // answering a question (38)(d) did not ask.
             if let handle = drag.handle {
+                // **Two funnels over one handle**, for the same reason the node drag below has two:
+                // a grade's ease is a whole-curve replacement and a pose's is an edit to the one
+                // `TransformTrack.Key` its six rows are drawn from. Each answers empty for the other's
+                // kind of channel, so this is two calls rather than a branch.
                 if writeGraphBandCurves(TimelineGraphBand.draggingHandle(handle, in: drag.channels,
                                                                         translation: translation,
                                                                         pixelsPerFrame: pixelsPerFrame,
                                                                         bandHeight: drag.bandHeight),
                                         layerIndex: drag.layerIndex) {
+                    graphBandDrag?.didWrite = true
+                }
+                if canvasManager.writeGraphBandPoseEdits(
+                    TimelineGraphBand.poseHandleEdits(handle, in: drag.channels,
+                                                      translation: translation,
+                                                      pixelsPerFrame: pixelsPerFrame,
+                                                      bandHeight: drag.bandHeight),
+                    from: drag.poseBaseline, layerIndex: drag.layerIndex) {
                     graphBandDrag?.didWrite = true
                 }
                 relayout()
@@ -950,6 +970,10 @@ struct TimelineTrackView: UIViewRepresentable {
             // here rather than in each of the three exits, so a cancelled drag cannot leave a number
             // hanging over a node that has gone back where it came from.
             graphBandView.setReadout(nil)
+            // Thawed with the readout and for the same reason: both are the drag's own chrome, and a
+            // frozen axis outliving its drag would leave the band drawn against a window the document
+            // no longer justifies.
+            graphBandView.setFrozenAxes([:])
             guard let drag = graphBandDrag else { return }
             graphBandDrag = nil
             guard drag.didMove else { return }
@@ -1834,6 +1858,52 @@ private final class TimelineGraphBandView: UIView {
     }
     private var readout: Readout?
 
+    /// **The axes a live drag is drawing against, by parameter id** — empty except between touch-down
+    /// and lift, and the second half of 2026-09-03's *"the nodes just stay still"*.
+    ///
+    /// `TimelineGraphBand.moves(of:in:…)` reads the axis captured in `GraphBandDrag.channels` at
+    /// touch-down, so the value it writes is `startY + translation` read back through *that* axis.
+    /// The redraw derives the axis afresh from the document, and where the two differ the node is
+    /// drawn somewhere other than under the finger that is holding it. `anchoredRange` makes them
+    /// agree for every drag inside one doubling, which is most of them; this makes them agree for the
+    /// rest, and for the eight grade parameters whose axis is still the key extent and therefore
+    /// still rescales on every tick — §11.6's *"a key would move under the finger that is not
+    /// dragging it"*, which was the reason that ruling preferred a declared range in the first place.
+    ///
+    /// Cleared on lift rather than on the next layout, so the settle an artist sees when the window
+    /// doubles happens once, at the end, instead of mid-gesture.
+    private var frozenAxes: [String: ClosedRange<Double>] = [:]
+
+    /// **The content's channels as this view is drawing them**, each carrying the axis a live drag
+    /// froze where there is one — see `frozenAxes`.
+    ///
+    /// The substitution is made on the `Channel` rather than at each of the three places a y is
+    /// computed, because one of them is `TimelineGraphBand.handles(of:in:…)`, which places the handle
+    /// dots off the channel it is handed. One mapped array is what keeps every mark on the band on
+    /// one axis.
+    private func drawnChannels(_ channels: [TimelineGraphBand.Channel]) -> [TimelineGraphBand.Channel] {
+        guard !frozenAxes.isEmpty else { return channels }
+        return channels.map { channel in
+            guard let frozen = frozenAxes[channel.parameterID] else { return channel }
+            return TimelineGraphBand.Channel(parameterID: channel.parameterID, name: channel.name,
+                                             curve: channel.curve, uiRange: frozen,
+                                             modelDomain: channel.modelDomain, format: channel.format,
+                                             descriptorIndex: channel.descriptorIndex,
+                                             isAnimated: channel.isAnimated,
+                                             gestures: channel.gestures,
+                                             frameWindows: channel.frameWindows)
+        }
+    }
+
+    /// Freezes every drawn channel's axis for the life of one drag, or thaws them all. Whole-content
+    /// rather than per-channel: one marquee can hold keys from several channels at once, and a
+    /// selection half of whose nodes track the finger would be worse than none of them doing so.
+    func setFrozenAxes(_ axes: [String: ClosedRange<Double>]) {
+        guard axes != frozenAxes else { return }
+        frozenAxes = axes
+        setNeedsDisplay()
+    }
+
     /// The rubber band itself. A sibling `UIView` rather than a shape inside `draw(_:)`, because this
     /// view is `draw(_:)`-backed over the whole track's width and re-rasterising all of it on every
     /// `.changed` tick of a marquee is precisely the cost `TimelineGraphBand.sampling`'s clip exists
@@ -1992,9 +2062,9 @@ private final class TimelineGraphBandView: UIView {
             UIRectFill(CGRect(x: x, y: 0, width: TimelineKeyMarkers.gridlineWidth, height: bounds.height))
         }
 
-        for channel in content.channels {
-            let range = TimelineGraphBand.range(uiRange: channel.uiRange,
-                                                keyValues: channel.curve.keys.map(\.value))
+        let channels = drawnChannels(content.channels)
+        for channel in channels {
+            let range = channel.axis
             let colour = TimelineGraphBand.colour(forDescriptorIndex: channel.descriptorIndex)
             // **A channel that is not an animation is dashed and dimmed, and keeps its hue** —
             // `TimelineGraphBand.Channel.isAnimated`. The hue is what says *which* channel and must
@@ -2095,8 +2165,8 @@ private final class TimelineGraphBandView: UIView {
             }
         }
 
-        drawHandles(content: content)
-        drawReadout(content: content)
+        drawHandles(in: channels)
+        drawReadout(in: channels)
     }
 
     /// **The focused node's two bezier handles — the owner's *"line and two nodes"*** (38)(b).
@@ -2106,27 +2176,38 @@ private final class TimelineGraphBandView: UIView {
     /// palette ruling) and a second white object on one curve cannot be mistaken for a ninth channel.
     /// The dots are joined **through the key**, which is what makes the pair read as one straight
     /// line pivoting on the node rather than as two unrelated marks.
-    private func drawHandles(content: TimelineGraphBand.Content) {
-        guard let focus,
-              let channel = content.channels.first(where: { $0.parameterID == focus.parameterID }),
-              let key = channel.curve.key(atFrame: focus.frame)
-        else { return }
-        let drawn = TimelineGraphBand.handles(of: focus, in: content.channels,
-                                              pixelsPerFrame: pixelsPerFrame,
-                                              bandHeight: bounds.height)
+    private func drawHandles(in channels: [TimelineGraphBand.Channel]) {
+        guard let focus else { return }
+        // **One focused node, and on a pose channel six rows of it** — `handleRows(of:in:)`. A
+        // `TransformTrack.Key` carries one handle pair for all six components, so drawing it on the
+        // row the tap landed on alone would look like that row's ease and be all six.
+        var drawn: [(origin: CGPoint, handles: [TimelineGraphBand.DrawnHandle])] = []
+        for row in TimelineGraphBand.handleRows(of: focus, in: channels) {
+            guard let channel = channels.first(where: { $0.parameterID == row.parameterID }),
+                  let key = channel.curve.key(atFrame: row.frame)
+            else { continue }
+            let handles = TimelineGraphBand.handles(of: row, in: channels,
+                                                    pixelsPerFrame: pixelsPerFrame,
+                                                    bandHeight: bounds.height)
+            guard !handles.isEmpty else { continue }
+            drawn.append((CGPoint(x: TimelineGraphBand.x(ofFrame: key.frame,
+                                                         pixelsPerFrame: pixelsPerFrame),
+                                  y: TimelineGraphBand.y(ofValue: key.value, in: channel.axis,
+                                                         bandHeight: bounds.height)),
+                          handles))
+        }
         guard !drawn.isEmpty else { return }
-        let origin = CGPoint(x: TimelineGraphBand.x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame),
-                             y: TimelineGraphBand.y(ofValue: key.value, in: channel.axis,
-                                                    bandHeight: bounds.height))
         let line = UIBezierPath()
-        for handle in drawn {
-            line.move(to: origin)
-            line.addLine(to: handle.point)
+        for row in drawn {
+            for handle in row.handles {
+                line.move(to: row.origin)
+                line.addLine(to: handle.point)
+            }
         }
         UIColor.white.withAlphaComponent(0.8).setStroke()
         line.lineWidth = TimelineGraphBand.handleLineWidth
         line.stroke()
-        for handle in drawn {
+        for handle in drawn.flatMap(\.handles) {
             let dot = UIBezierPath(ovalIn: CGRect(x: handle.point.x - TimelineGraphBand.handleRadius,
                                                   y: handle.point.y - TimelineGraphBand.handleRadius,
                                                   width: TimelineGraphBand.handleRadius * 2,
@@ -2145,9 +2226,9 @@ private final class TimelineGraphBandView: UIView {
     /// and the rounded rect behind it, which is all a `draw(_:)` is allowed to own on this surface.
     /// The plate is what makes a number legible over a curve it happens to land on; without it the
     /// readout is unreadable exactly where the artist is looking.
-    private func drawReadout(content: TimelineGraphBand.Content) {
+    private func drawReadout(in channels: [TimelineGraphBand.Channel]) {
         guard let readout,
-              let channel = content.channels.first(where: { $0.parameterID == readout.node.parameterID }),
+              let channel = channels.first(where: { $0.parameterID == readout.node.parameterID }),
               let key = channel.curve.key(atFrame: readout.node.frame)
         else { return }
         let attributes: [NSAttributedString.Key: Any] = [

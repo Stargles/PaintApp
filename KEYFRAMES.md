@@ -2110,8 +2110,9 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
 - ~~**A transform channel has no band, so an object animated with Move has no curve to edit.**~~
   **Built in §11.7, and editable since.** The six decomposed curves are drawn, listed, grouped, folded
   and navigable, and a node on one is dragged on both axes — vertically it edits that component,
-  horizontally it retimes the whole key. The tap family is still refused; §11.7 says which four and
-  why.
+  horizontally it retimes the whole key. Since 2026-09-03 a node is also **focused and its bezier
+  handles shaped**; what stays refused is the node menu's Delete and tap-to-add, both for want of a
+  writer rather than for want of a rule.
 
 - ~~**The y axis when several channels are visible at once.**~~ **Ruled 2026-08-29: each curve is scaled
   to fill the band.** Shown the trade — per-channel normalisation makes every curve legible and makes two
@@ -2296,3 +2297,95 @@ over), `poseKeyframeFrames(inFolder:)` is its twin, and `listedAnimationChannelI
 channels **per component** — a pure translation leaves four of the six flat, and a track-level answer
 would call them animations. `curvedEffectChannelIDs` deliberately stays effect-only: its one caller
 marks the *sliders* that carry a curve, and a pose channel has no slider.
+
+#### Two device reports, both about the band's y axis and its handles — **done 2026-09-03**
+
+> *"if i try to move the nodes, the nodes dont move? its value changes but the nodes just stay still
+> in the graph."* … *"why cant i access the bezier handles in move?"*
+
+**The first is arithmetic and not tuning, which is the finding.** §11.6 rules the axis is a
+parameter's `uiRange` where it declares one and the extent of the channel's own keys otherwise, and
+all six pose components declared none — reasonably, since X and Y are canvas coordinates and an axis
+of −180…180 would draw a 5°-to-10° rotation as a flat line. But `keyValues.min()...keyValues.max()`
+maps the smallest key to the bottom of the band and the largest to the top, so **on a two-key channel
+both keys are extremes and each is pinned for every value it could hold** — which is a Move keyed at
+A and at B, the owner's plural exactly. The value a drag wrote was always right; only the picture was
+invariant.
+
+Three repairs were considered against that arithmetic before one was written, and the first two do
+not work:
+
+- **Padding the fit** moves the pin off the rim and leaves it a pin. Any axis built from the keys
+  alone — min/max, mean and maximum deviation, padded or minimum-spanned versions of either — is
+  affine-equivariant in the key set, and an affine-equivariant map sends a two-point set to the same
+  two positions whatever the two points are.
+- **Freezing the axis for the length of the drag**, which is where this pass was told to start, makes
+  the node follow the finger and then **snap back to where it started on lift**, when the fit is
+  retaken. It is worth having for a different reason (below) and it is not the fix.
+- **What shipped**: `TimelineGraphBand.anchoredRange` centres the axis on the component's *rest*
+  value — `PoseComponents.Component.restValue(inRestBox:)`, which is 1 for a scale, 0 for an angle
+  and the rest box's own centre for a position — and grows the half-axis in **doublings** from
+  `minimumAxisSpan`. Anchoring breaks the equivariance; the doublings stop the *outermost* key being
+  the thing that sets the scale, which a plain anchored fit would leave pinned. Inside one octave the
+  window is constant, so every node moves under the finger with a constant gain and the outermost
+  lands somewhere in (0.7, 0.9] of the half-band whatever the animation's size.
+
+**The second defect was hiding behind the same report**: gain followed the spread, so two X keys two
+points apart meant a full-band drag moved X by two points, and a channel keyed but not animated —
+drawn dashed, still draggable — got `range`'s half-unit widening and moved by **one**. The window is
+now a property of the component, so `minimumAxisSpan` is chosen for gain rather than for framing: 100
+points of X over an 80-point usable band is 1.25 points a point, 40° of rotation is half a degree a
+point. **The cost, stated**: an animation is drawn at between 35% and 90% of the half-band instead of
+always filling it, so a small one reads shallower than it did. The doubling is what bounds that to a
+factor of two rather than leaving it to the data.
+
+**The freeze shipped as well, for the case the anchor does not cover.** `moves(of:in:…)` reads the
+axis captured at touch-down and the redraw derived one afresh; they agree for every drag inside one
+octave, and `TimelineGraphBandView.frozenAxes` makes them agree at a boundary crossing and for the
+**eight grade parameters that declare no `uiRange`**, whose axis is still the key extent and still
+rescales on every tick — §11.6's *"a key would move under the finger that is not dragging it"*, which
+was that ruling's own reason for preferring a declared range. Those eight keep the fitted fallback:
+the anchor here is *rest*, and a blur radius has no rest.
+
+**The handles were refused on an argument that over-corrected.** A `TransformTrack.Key` carries one
+`inHandle`/`outHandle` pair and one tangent mode for all six components, and the refusal reasoned that
+shaping Scale X's tangent would bend the other five. It would — and that is the *model*: a shared ease
+is what is stored and what `PoseInterpolation.blend` runs. So the repair is the picture, not the
+gesture: `handleRows(of:in:)` draws the pair on **all six rows at once**, `grab` arbitrates across
+them and returns the row the finger took, and `Channel.Gestures` gains `.dragAndHandles` — everything
+except the node menu and tap-to-add. `.dragOnly` is deleted rather than left standing, having lost its
+only producer. A second tap on a pose node answers `.focus` again and deliberately not `.nothing`,
+which is the empty-band case and whose caller drops the focus — that would take the handles away on
+the second tap.
+
+**The units are the trap, and the brief that commissioned this did not see them.**
+`TransformTrack.timing` is an `AnimationCurve` whose key values are the pose **indices** `0, 1, 2, …`
+carrying those same handles, so a stored `deltaValue` is a fraction of a *pose*, while the band's six
+rows are in canvas points, degrees and multiples. Writing a row's handle through verbatim would have
+put a `deltaValue` of order 100 into a curve whose values are 0 and 1 — a hundred-pose overshoot on
+every drag. A `timing` segment rises by exactly one and a row's rises by that segment's own
+difference, so the row's curve is the **affine image** of the timing curve's and a bezier is
+affine-equivariant: `poseChannels` multiplies by the rise on the way out, `poseHandleEdits` divides by
+it on the way back, and `PoseEdit.Ease` carries the result through the pose funnel. **The copy at
+`poseChannels` was already unscaled and was already wrong**; it was inert only because every pose key
+ships `.autoClamped` and `effectiveHandles(at:)` ignores a stored pair under four of the five modes.
+This pass is what made `.free` reachable. A row that does not move across the segment offers no dot,
+which is `handles(of:in:…)`' existing rule about a handle that shapes nothing, reached by a second
+door.
+
+**And one thing the fitted axis had been holding up by accident.** `PoseEdit`'s "only what moved is
+listed" rule compares a move's value against the value the drag started from, so that a pure retime
+lists no component and `PoseComponents.setting` never grinds the other five in the last place. That
+comparison needs `moves` to hand back the key's own value bit for bit on a horizontal drag, and it
+was getting it only because the fitted axis put the fixture's values on the band's own rim, where the
+`y`/`value` round trip happens to be exact. `moves` short-circuits zero vertical travel now, the way
+`PoseInterpolation.blend` short-circuits `t == 0`. `testARetimeCarriesThePoseRatherThanRecomputingIt`
+is what found it.
+
+**Pinned in `PoseBandLogicTests`, and the assertions are about drawn y rather than about values** —
+a test that checked `key.value` passes against the build the owner is reporting. Six mutations, six
+reds: the anchored axis reverted to the fit (3 tests), the tap filtered pose nodes out again (1), the
+handle scale dropped on the way out (2), the divide dropped on the way back (1), a flat row offered a
+dot anyway (1), and the retime short-circuit removed (1, in `PoseNodeDragLogicTests`). The first of
+those also exposed a fixture whose grade node and pose node shared a point, so `nearestKey` was
+answering about the wrong channel; the two are now a fingertip apart and a fixture assertion says so.

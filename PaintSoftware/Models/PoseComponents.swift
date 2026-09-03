@@ -122,25 +122,51 @@ enum PoseComponents {
             }
         }
 
-        /// **`EffectParameter.uiRange` — nil for all six, deliberately.**
+        /// **The value this component holds when the pose is at rest** — 1 for a scale, 0 for an
+        /// angle, and the rest box's own centre for a position, which is why this takes the box.
         ///
-        /// §11.6 ruled the y axis is `uiRange` where a parameter declares one and the key extent
-        /// otherwise, and gave the reason for preferring the declared range: *"fitting to the key
-        /// extent instead would rescale the axis on every drag, so a key would move under the finger
-        /// that is not dragging it."* **Neither half of that applies here.** No pose component has a
-        /// canvas-independent range to declare — X and Y are canvas coordinates, scale is unbounded —
-        /// and the one that looks as though it does, rotation, is the worst case for it: an axis of
-        /// −180…180 draws a 5°-to-10° animation as a flat line in the middle of the band, which is
-        /// exactly what per-channel normalisation exists to prevent.
+        /// `decompose(PoseQuad(restingIn: box))` answers exactly this for all six and is what pins
+        /// it; the switch is here so that the band can ask one component without building a pose.
         ///
-        /// **Write-back landed, rotation and skew were revisited, and the nil stands.** The value a
-        /// drag writes is exact either way — `moves(of:in:…)` reads the axis captured at touch-down,
-        /// so the finger gets the number it asked for whatever the drawing does afterwards. What
-        /// rescales is the picture, and it rescales for the eight *grade* parameters that declare no
-        /// `uiRange` as well, so it is a property of the band rather than of this file. Declaring
-        /// −180…180 would trade a node that lags the finger for an animation drawn as a flat line,
-        /// which is the worse of the two.
-        var uiRange: ClosedRange<Double>? { nil }
+        /// **It is the anchor `TimelineGraphBand.anchoredRange` centres the y axis on**, and that is
+        /// the whole reason it exists. See that function for why a *fitted* axis cannot answer this
+        /// question and why an anchored one can.
+        func restValue(inRestBox box: CGRect) -> Double {
+            switch self {
+            case .x: return Double(box.midX)
+            case .y: return Double(box.midY)
+            case .scaleX, .scaleY: return 1
+            case .rotation, .skew: return 0
+            }
+        }
+
+        /// **How much of this component one band height covers when the channel sits at rest** —
+        /// the smallest window `anchoredRange` will draw, doubled from here as an animation outgrows
+        /// it.
+        ///
+        /// **These are gain, not framing.** An animated channel's window is set by the doubling
+        /// (see `anchoredRange`), so what this number decides is the case where there is nothing to
+        /// frame: a flat channel, where the only question a span answers is *how far does a
+        /// full-band drag move this component*. 96 pt of band minus two 8 pt insets is 80 pt of
+        /// travel, so 100 px of X is 1.25 px a point and 40° of rotation is half a degree a point —
+        /// both of them a nudge rather than a throw, which is what a graph editor is for. Position
+        /// is authored on the canvas with Move; this is where its timing is adjusted.
+        ///
+        /// **The nil this replaced argued for itself and was right about the alternative it
+        /// considered.** §11.6 ruled the axis is `uiRange` where a parameter declares one and the
+        /// key extent otherwise, and this file declared none for all six on the grounds that no pose
+        /// component has a canvas-independent range — an axis of −180…180 draws a 5°-to-10° rotation
+        /// as a flat line, which is what per-channel normalisation exists to prevent. That is still
+        /// true of a *constant* range and is why there is no constant range here. What it missed is
+        /// that the key extent is not a third option: see `anchoredRange`, where the arithmetic is.
+        var minimumAxisSpan: Double {
+            switch self {
+            case .x, .y: return 100
+            case .scaleX, .scaleY: return 2
+            case .rotation: return 40
+            case .skew: return 40
+            }
+        }
     }
 
     /// A pose's six numbers.

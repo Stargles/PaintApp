@@ -74,13 +74,16 @@ final class PoseNodeDragLogicTests: XCTestCase {
     /// `PoseComponentsLogicTests`': a pose that is *neutral* in some component makes "the other five
     /// did not move" true of an implementation that resets them to rest, so none of these is.
     ///
-    /// The second belongs to this band. A component that is **flat across the keys** has a degenerate
-    /// axis, which `range(uiRange:keyValues:)` widens by half a unit — so its node lands in the middle
-    /// of the band, and five flat components put five nodes on one point. Widening the poses fixed
-    /// that and left a subtler version of it: with three keys, a channel's **middle** node sits at the
-    /// fraction of its own axis that its middle value occupies, and two channels whose middle value is
-    /// at the same fraction draw at the same height however tall the band is. Composing rotations and
-    /// shears gives no control over that fraction at all.
+    /// The second belongs to this band, and **the axis it was learned against is gone** — 2026-09-03
+    /// replaced the fit with `anchoredRange`, a window centred on rest. What it was: a component flat
+    /// across the keys got a degenerate axis widened by half a unit, so its node landed in the middle
+    /// of the band and five flat components put five nodes on one point; widening the poses fixed that
+    /// and left a subtler version, since with three keys a channel's **middle** node sits at the
+    /// fraction of its own axis that its middle value occupies and two channels at the same fraction
+    /// draw at the same height. The anchored axis makes both far less likely and neither impossible —
+    /// six windows centred on six different rest values still admit a coincidence — so the fixture
+    /// stands as it is rather than being loosened on the strength of a change it was not written
+    /// against.
     ///
     /// So the fixture is authored in the currency it is read back in: minimum, a chosen fraction, and
     /// maximum, with the six fractions spread 0.10 to 0.90 so the six middle nodes are far apart.
@@ -100,10 +103,13 @@ final class PoseNodeDragLogicTests: XCTestCase {
     /// **Three keys** on the whole-cel channel at cel-local 0, 4 and 8 — absolute 4, 8 and 12 on the
     /// default fixture.
     ///
-    /// Three rather than two, which is the other half of `poseValues`' lesson: with exactly two keys
-    /// every channel's axis is exactly its two values, so every node is at the very top or the very
-    /// bottom of the band and six channels put six dots on two points. The **middle** key is the one
-    /// these tests grab, and it is the only one whose height is a channel's own business.
+    /// Three rather than two, which is the other half of `poseValues`' lesson: under the axis this
+    /// file was written against, two keys *were* a channel's whole axis, so every node sat at the very
+    /// top or the very bottom of the band and six channels put six dots on two points. That is the
+    /// owner's report of 2026-09-03 seen from inside a fixture a month early — the nodes did not move
+    /// because the axis was the keys — and `PoseBandLogicTests` now pins the repair. The **middle** key
+    /// is still the one these tests grab, and it is still the only one whose height is a channel's own
+    /// business.
     private func animate(_ manager: CanvasManager, layerID: UUID, celID: UUID,
                          at localFrames: [Int] = [0, 4, 8]) throws {
         for (n, frame) in localFrames.enumerated() {
