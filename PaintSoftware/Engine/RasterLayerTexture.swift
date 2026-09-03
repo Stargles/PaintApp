@@ -16,6 +16,66 @@ protocol DabTarget: AnyObject {
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode)
 }
 
+/// **The dabs the render path actually put down** — `CompositeProbe` one level lower, for the same
+/// reason and with the same shape.
+///
+/// A test that wants to know whether a posed frame's ink boils has exactly one honest operand: the
+/// arguments `stampCircle` received while `VectorCanvas.renderLocalContent` was drawing. Everything
+/// short of that is a re-derivation — a test-local copy of `VectorCanvas.stamp`'s dispatch pins the
+/// copy, and `BrushStamper.DabPose.applied(to:)` copies `alpha` verbatim, so an assertion built on it
+/// holds under an implementation that walks in posed space and re-samples the grain on every frame.
+/// KEYFRAMES.md §4.2 is a claim about which walk the renderer runs, and this is where that claim is
+/// observable.
+///
+/// **Off by default and nearly free when off**: one relaxed `Bool` load per dab, after the guard that
+/// already decides whether the dab costs a gradient at all. The lock is taken only while armed.
+enum DabProbe {
+
+    /// The three numbers a pose can move. `color`, `hardness` and `blendMode` are carried through
+    /// untouched by every path here, so recording them would only make a failure harder to read.
+    struct Dab: Equatable {
+        var center: CGPoint
+        var radius: CGFloat
+        var alpha: CGFloat
+    }
+
+    private static let lock = NSLock()
+    /// Read outside the lock on the hot path. A stale read is harmless in both directions: the probe
+    /// is armed before the render under test and read after it returns.
+    private static var isArmed = false
+    private static var dabs: [Dab] = []
+
+    /// Starts recording, discarding anything held from a previous run.
+    static func begin() {
+        lock.lock(); defer { lock.unlock() }
+        dabs = []
+        isArmed = true
+    }
+
+    /// Stops recording and returns what was stamped, in draw order.
+    @discardableResult
+    static func end() -> [Dab] {
+        lock.lock(); defer { lock.unlock() }
+        isArmed = false
+        let seen = dabs
+        dabs = []
+        return seen
+    }
+
+    /// Everything stamped since `begin()`, without stopping.
+    static func observed() -> [Dab] {
+        lock.lock(); defer { lock.unlock() }
+        return dabs
+    }
+
+    fileprivate static func record(_ dab: Dab) {
+        guard isArmed else { return }
+        lock.lock(); defer { lock.unlock() }
+        guard isArmed else { return }
+        dabs.append(dab)
+    }
+}
+
 /// Memoized radial gradients for round dabs, plus the drawing itself — the shared implementation
 /// behind every `DabTarget`.
 ///
@@ -136,6 +196,7 @@ final class CGContextDabTarget: DabTarget {
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
         guard radius > 0, alpha > 0 else { return }
         dabCount += 1
+        DabProbe.record(DabProbe.Dab(center: point, radius: radius, alpha: alpha))
         gradients.stamp(into: ctx, at: point, radius: radius, color: color,
                         alpha: alpha, hardness: hardness, blendMode: blendMode)
     }

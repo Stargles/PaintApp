@@ -275,8 +275,16 @@ final class TransformChannelLogicTests: XCTestCase {
     /// the lesson is CLAUDE.md's own: a green assertion is only as good as its two operands, and a
     /// *red* one is too.
     ///
-    /// `RestSpaceDabBakeLogicTests` carries the 24-frame form and the measurement (24 distinct alpha
-    /// sequences before, one after). This keeps the channel-level statement beside the channel.
+    /// `RestSpaceDabBakeLogicTests` carries the 24-frame form. This keeps the channel-level statement
+    /// beside the channel: the list under test comes out of `CanvasManager.posed`, so what is asserted
+    /// is what *this channel* hands the renderer.
+    ///
+    /// **And the dabs are read off the renderer, not off a copy of it.** This test carried a local
+    /// helper that reproduced `VectorCanvas.stamp`'s dispatch — read `restWalk`, wrap a
+    /// `PosedDabTarget`, walk the rest samples — and so pinned the helper: every arm of `stamp` could
+    /// be reverted to the posed-space walk with this still green. `DabProbe` sits on
+    /// `CGContextDabTarget`, which is the sink `renderLocalContent` actually draws into, so the arrays
+    /// below are the dabs that became pixels.
     ///
     /// Only `.pencil` among the five built-ins enables grain, so this is the whole of the exposure;
     /// §4.2 names `.square`'s sub-lattice as the other baked-walk artifact.
@@ -284,34 +292,26 @@ final class TransformChannelLogicTests: XCTestCase {
         let brush = BrushLibrary.pencil
         XCTAssertTrue(brush.grain.isEnabled, "Setup: the pencil is the one built-in that grains")
 
-        let points = (0..<8).map { CGPoint(x: CGFloat($0) * 3, y: 10) }
+        let points = (0..<8).map { CGPoint(x: 10 + CGFloat($0) * 3, y: 10) }
         let elements: [VectorElement] = [.stroke(VectorStroke(
             id: UUID(), brush: brush,
             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
             size: 6, opacity: 1,
             samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }))]
 
-        /// The dabs one posed display list actually stamps — the walk `VectorCanvas.stamp` runs,
-        /// reached through the same `restWalk` the renderer reads.
-        func dabs(_ list: [VectorElement]) throws -> [BrushStamper.BakedDab] {
-            let stroke = try XCTUnwrap(list.first?.stroke)
-            let sink = BrushStamper.CollectingDabTarget()
-            let walk = stroke.restWalk
-            let target: DabTarget = walk.map { BrushStamper.PosedDabTarget(sink, pose: $0.pose) } ?? sink
-            BrushStamper.stampStroke(
-                into: target,
-                samples: (walk?.samples ?? stroke.samples).map {
-                    BrushStamper.Sample(point: $0.point, pressure: $0.pressure)
-                },
-                brush: stroke.brush, color: stroke.uiColor, brushSize: walk?.size ?? stroke.size,
-                brushOpacity: stroke.opacity, seed: BrushStamper.seed(for: stroke.id))
-            return sink.dabs
+        /// The dabs one display list actually stamps, through `VectorCanvas.render`.
+        func dabs(_ list: [VectorElement]) -> [DabProbe.Dab] {
+            DabProbe.begin()
+            _ = VectorCanvas(size: size, elements: list).render(quality: .full)
+            return DabProbe.end()
         }
+        defer { DabProbe.end() }
 
-        let rest = try dabs(elements)
-        let near = try dabs(CanvasManager.posed(elements, through: [(.cel, .init(translationX: 17, y: 5))]))
-        let far = try dabs(CanvasManager.posed(elements, through: [(.cel, .init(translationX: 41, y: -9))]))
+        let rest = dabs(elements)
+        let near = dabs(CanvasManager.posed(elements, through: [(.cel, .init(translationX: 17, y: 5))]))
+        let far = dabs(CanvasManager.posed(elements, through: [(.cel, .init(translationX: 41, y: -9))]))
 
+        XCTAssertGreaterThan(rest.count, 10, "Setup: there are dabs to compare")
         XCTAssertGreaterThan(Set(rest.map(\.alpha)).count, 3,
                              "Setup: the grain is varying dab to dab, or there is nothing to hold still")
         XCTAssertEqual(near.map(\.alpha), rest.map(\.alpha),
