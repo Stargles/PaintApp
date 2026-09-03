@@ -3,9 +3,11 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## The bake key is covered now; the pass's headline feature still is not
+## Both families of the stage-4 test reading are closed; two fixtures and a missing premise are not
 
-**The ~230 tests RENDER stage 4 added have been read, and the reading found two families.** The first
+**The ~230 tests RENDER stage 4 added have been read, and the reading found two families.** Both are
+now closed and each was closed by measurement rather than by argument — the numbers are below, and they
+are the reason this entry is kept rather than pruned. The first
 — the bake key's own completeness table, the `.sorted` over `maskStacks`, `StructuralStamp`'s
 untouched fields, and three assertions whose two operands were not the two things claimed — **is
 closed**, and every test written for it was proven red by deleting the production line it names.
@@ -26,27 +28,37 @@ windowed version green. The witness has to be synchronous by construction, and t
 sets `isBaking` on the line before the dispatch. **A fix sketch for a fixture that measures nothing can
 itself measure nothing**, and only running it the wrong way round says so.
 
-**The second family is the expensive one, because it is the stage's own feature rather than its
-bookkeeping — and none of it is fixed.** The same reading of striped compositing and the dab bake
-found the pass's headline feature untested. `RestSpaceDabBakeLogicTests` is five tests over `BrushStamper.DabPose.applied(to:)`, which
-copies `alpha` verbatim and scales `radius` — so *every* assertion in them (alphas preserved, dab counts
-equal, step/radius ratio invariant, per-dab radius equal to `radius * scale`) is an algebraic
-consequence of that one function and true under any implementation whatever, **including one that walks
-in posed space and reintroduces the boil the stage exists to remove.** The only test that reaches the
-shipped dispatch, `testPosedInkIsDrawnAtThePosedPositionAndNotAtRest:408`, compares
-`opaqueContentBounds` at accuracy 2 — and `VectorCanvas.posing` has already posed the samples and scaled
-`size` by `sqrt(|det|)` before `stamp` chooses an arm, so reverting all three of `stamp`'s arms to the
-un-baked walk leaves the ink in the same place at the same weight and the test green. `Transform-
-ChannelLogicTests.swift:283`'s `testGrainTravelsWithTheInkUnderAPose` is blind the same way for a
-different reason: its local `dabs(_:)` helper *reimplements* `VectorCanvas.stamp`'s dispatch, so it pins
-the helper and not the one line that decides whether the shipped renderer uses the rest walk at all.
+**The second family is closed too, and closing it measured the thing the reading could only argue.**
+With `VectorCanvas.stamp`'s three rest-space arms reverted to the posed-space walk, the suite as it
+stood ran **46 tests, 0 failures** — the stage's headline feature deleted, every test green.
+`BrushStamper.DabPose.applied(to:)` copies `alpha` verbatim and scales `radius`, so alphas-preserved,
+counts-equal, radius-is-`radius x scale` and step-to-radius-invariant are all consequences of that one
+function; `TransformChannelLogicTests`' local `dabs(_:)` helper reimplemented the dispatch and pinned
+the copy; and the `[110, 111]` golden pin turns out to have been an accurate measurement of the
+*posed-space* walk, which the mutated run reproduces exactly.
 
-What both need is the dabs the shipped render path stamps for two poses of one stroke —
-`VectorCanvas.render` with a `DabTarget` interposed, or a byte-for-byte pin on two posed frames.
+`DabProbe` (`RasterLayerTexture.swift`, `CompositeProbe`'s shape one level down) records what
+`CGContextDabTarget` was handed, so a test reads the dabs `VectorCanvas.renderLocalContent` turned into
+pixels. Six tests move onto it and one needs no probe at all — two frames of one integer slide, cropped
+to their own opaque bounds, compared as bytes. **Same mutation, same tree: 40 passed, 7 failed.**
 
-Three smaller ones from the same reading: `RestSpaceDabBakeLogicTests.swift:199` is a golden-number pin
-(`[110, 111]`) on a pre-stage-4 construction that exists only in the test file and ships nowhere;
-`DistortLogicTests.swift:285`'s "the drag is a function of its final point alone" is enforced by
+**One thing that closing measured, and it generalises past this stage.** Moving a vacuous test onto the
+shipped path is not sufficient — the *fixture* has to reach the regime where the two implementations
+differ. The square-brush sub-lattice test, rewritten to read the renderer's own dabs but still sweeping
+1.0 -> 0.3 as the old one did, was **still green with all three arms reverted**: Square's
+`spacingFraction` of 0.15 keeps `24 x 0.15 = 3.6` pt clear of `stampSpacing`'s 1 pt floor down to scale
+0.278, and with no floor binding a posed-space walk under a similarity is similar to itself. It sees the
+bug only below 0.278. The same trap in the other direction is why a dab *count* is not a witness for
+grain: under a pure translation the posed-space walk re-samples the noise field while the count only
+moves between 110 and 111, so `VectorCanvas.lastRenderDabCount` — the seam that already existed — is
+blind on §2.16's own case.
+
+`testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` no longer exists and needs no action.
+It was retired into `testGrainTravelsWithTheInkUnderAPose` when the stage landed, correctly, because
+comparing `grainAlphaMultiplier` at two positions is the definition of a noise field and could not have
+gone red. Its replacement had the *other* hole and is now on the probe.
+
+Two smaller ones from the same reading: `DistortLogicTests.swift:285`'s "the drag is a function of its final point alone" is enforced by
 `FloatingDistortDrag` being a struct of four `let`s with a non-`mutating` accessor, so the defect it
 argues against would fail to build rather than fail the test; and the `resolvedBackend(for:) == .metal`
 premise asserted in three Metal suites is a tautology of their own `setUp`, which sets
