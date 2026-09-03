@@ -876,11 +876,19 @@ extension CanvasManager {
         // lower one and then carried by the upper one, which is `M.concatenating(accumulated)` — the
         // same reading `CanvasManager.poseMappings` gives for a group channel under a cel channel,
         // one level out.
+        //
+        // **Inside a node there is no "beneath", exactly as there is no `below`.** The entry one step
+        // down is the *other operand*, and inputs are isolated from each other (§4.3) — letting one
+        // operand pose another would reintroduce the cross-input dependency isolation exists to
+        // prevent, silently and as a move nobody authored. So the sibling-to-sibling carry is
+        // suppressed here for the same reason the clip-to-below source is suppressed below, and a
+        // transform layer dropped into a Mix as an operand simply reaches nothing. `inherited` still
+        // flows through untouched: whatever poses the node poses everything the node is built from.
         var carried = [CGAffineTransform?](repeating: inherited, count: stack.count)
         var accumulated = inherited
         for position in stride(from: stack.count - 1, through: 0, by: -1) {
             carried[position] = accumulated
-            guard case .layer(let index) = stack[position],
+            guard !containerIsNode, case .layer(let index) = stack[position],
                   let map = layers[index].layerTransform?.mapping(atFrame: frame) else { continue }
             accumulated = accumulated.map { map.concatenating($0) } ?? map
         }

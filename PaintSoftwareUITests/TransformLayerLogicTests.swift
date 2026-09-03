@@ -257,6 +257,38 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertNotNil(stack.manager.layers[stack.mover].layerEffect)
     }
 
+    /// **§4.3's isolation, which §4.4 asks for by name when it says to reuse the existing
+    /// `containerIsNode` machinery.** Inside a compositor node the entry one step down is the *other
+    /// operand*, not something beneath — inputs are isolated from each other, and one operand posing
+    /// another is the cross-input dependency isolation exists to prevent, arriving as a move nobody
+    /// authored. So a transformation layer dropped into a Mix reaches nothing.
+    ///
+    /// **The complement is asserted in the same test**, because suppressing too much is the other way
+    /// to get this wrong: a pose from *outside* the node still reaches everything the node is built
+    /// from, since whatever poses the node poses its operands too.
+    func testATransformLayerInsideACompositorNodePosesNoOtherOperand() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "operand")
+        manager.addValueLayer(name: "mover")
+        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        for name in ["operand", "mover"] {
+            guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
+            manager.layers[at].parentFolderID = node
+        }
+        let slide = CGAffineTransform(translationX: 12, y: 0)
+        manager.layers[manager.layers.firstIndex { $0.name == "mover" }!].transform = pose(slide)
+        XCTAssertTrue(manager.layerPoses(atFrame: 0).isEmpty,
+                      "An operand's pose is not the node's answer to how its inputs combine")
+
+        // …and the node itself, posed from outside, still carries both of its operands.
+        guard let at = manager.folders.firstIndex(where: { $0.id == node }) else {
+            return XCTFail("The node went missing")
+        }
+        manager.folders[at].transform = pose(slide)
+        XCTAssertEqual(manager.layerPoses(atFrame: 0).count, 2)
+    }
+
     /// **The safety property the whole feature is shaped around.** A document with no transformation
     /// layer mints no pose entries at all, so nothing downstream — not a derivation, not a cache key,
     /// not a canvas-sized render — is paid for by a document that has never used this.

@@ -618,6 +618,54 @@ in-between has no finger to stick. **Open, §9.1.**
 
 ### 4.4 The transformation layer
 
+**BUILT 2026-09-03 — the model, the render path and the cache safety; no artist-facing control yet.
+Six findings, and the construction itself survived exactly — accumulate down each container, emit per
+layer index, stamp ink at the posed position. Four of the six are claims this section makes that are
+false against the code; two are things it does not mention that turned out to be half the work.**
+`Layer.transform` and `LayerFolder.transform` are both a `LayerPose` (a stored `PoseQuad` plus a
+`TransformTrack` in §3.1's absolute document frames); `CanvasManager.renderTreeAndPoses(atFrame:)`
+accumulates the pose down each container and emits `[layerIndex: CGAffineTransform]` beside the tree.
+What was wrong:
+
+1. **"`FrameRecipe.resolveSources` maps the cel's elements through it."** It cannot. RENDER.md §3.2
+   cut `renderSources` in two after this section was written: `resolveSources` is pass 2, it runs on
+   `PixelOps.parallelMap`'s workers over `LeafSnapshot` values, and it may not read `layers` at all.
+   The pose is spent one step earlier, in **`leafSnapshots`** — which is where the frame, the layer
+   index, the derivation and the freeze are all already in scope, and which is therefore the only
+   place all three consumers can be fed from one value.
+2. **"…and hands the posed display list to `renderLocalContent(elements:)`."** There is no such
+   consumer on this path. The `CelContentProvider` seam (VECTOR_INTERPOLATION item 18) landed in
+   between, so a posed cel is a `DerivedCelContent` whose thunk renders a whole `VectorCanvas` — and
+   `CanvasManager.posed(_:through:inheriting:)` is the one line that had to change.
+3. **"Two placed-object refusals ride along."** Stale. The `assertionFailure` at
+   `VectorLayer.swift:2247` is gone and `canBeStretched` does not exist: LASSO_MOVE.md stage 3c gave
+   `VectorImageElement` a stored shape (`aspect`, `stretchAxis`, `mirrored`) and
+   `VectorCanvas.placed(_:through:)` composes and re-decomposes an arbitrary affine through it. A
+   photo under a transformation layer travels with the strokes around it, so **the refusal this
+   section asks for is not built, deliberately** —
+   `TransformLayerLogicTests.testAPlacedImageFollowsAContainerPoseRatherThanBeingRefused` pins the
+   behaviour that made it unnecessary.
+4. **"It is an arity-1 `CompositorOp`, the shape the existing effect node already takes."** It is
+   not, and the difference is the whole reason §4.5 exists. An effect node reaches the compositor as
+   `RenderNode.effect`; a pose **never reaches the compositor at all**, because the only thing a
+   compositor can do with one is resample the pixels it was handed, which is what §2.3 refuses. The
+   transformation layer is a leaf that contributes no pixels — elided by `leafSnapshots` exactly as a
+   grading layer is — and whose entire effect is spent before rasterisation. The observation that
+   *survives* is the one about the menu (§2.6): it is a third payload of a `.value` layer, beside
+   `effect` and `fill`, on the same "presence is the discriminant" recipe.
+5. **The refusal this section did not predict is the *interpolated* cel.** §2.18 says a derived
+   in-between has no stable elements, and `InterpolationEvaluator.render` answers with an image rather
+   than with the elements a pose maps — so there is nothing for "re-poses the vector objects" to act
+   on, and the alternative is the bitmap magnify §2.3 refuses. An in-between under a transformation
+   layer keeps its evaluated ink where the cel drew it (its *stored raster* tiers still move, by
+   §2.12's other currency). Stated at `derivedCelContent` and pinned.
+6. **And §2.12's raster half is not a footnote to this section, it is half of the implementation.**
+   `PixelOps.rasterizeUncached` lets a derivation replace the *vector* tier only and draws the baked,
+   stroke and fill tiers beside it, so re-posing vector objects moves exactly one of four tiers.
+   `PixelOps.FrozenCel.pose` carries the same affine onto the other three as a CTM. That is the
+   ruling working correctly — "a raster layer softens under a push-in while the vector layer beside
+   it stays sharp" — but it is two mechanisms, not one, and this section describes only the first.
+
 §2.3 and §2.12. It is **not** a blend mode and cannot be: all 25 modes are per-channel colour functions
 over two same-size, same-position images, with no positional argument anywhere in either backend's call
 chain. It is an **arity-1 `CompositorOp`**, the shape the existing effect node already takes. §2.6's
@@ -650,6 +698,29 @@ while the strokes around it move. That is Move stage 3c's gate
 refused out loud here rather than left to assert.
 
 ### 4.5 The caching trap — pin this on day one
+
+**BUILT 2026-09-03, and this section was right about the danger and wrong about the count: it is
+three keys, not two, and the two it names were already half-safe.**
+
+- **The two it names already carry `DerivedCelContent.identity`**, which stage 5 put there for the
+  cel-scoped channel. A *vector* cel's container pose rides in `PosedCelIdentity.inherited` and both
+  keys move for free. So the sentence below is false as written and the field that was actually
+  missing is elsewhere.
+- **A cel whose ink is in the raster tier has no derivation at all** — `posedCelContent` answers nil
+  without a `vector` — so for that leaf the pose reaches neither key by any route, and the failure
+  arrives in exactly the form described. `PixelOps.FrozenCel.Identity.pose` and
+  `LayerContentVersion.pose` are the two genuinely new fields, and both are pinned over a **raster**
+  fixture for that reason; a test written over a vector cel is green with either of them deleted.
+- **The third key is `FrameBakeKey`, and it is the one no compiler could have caught.** That file's
+  rule 1 — no `default:` anywhere — turns a new *enum case* into a build error; a new *stored
+  property* on `LayerContentVersion` is not a build error anywhere, and the hand-written walk simply
+  stops naming it. A content-addressed store has no second chance: two frames of a move resolve to
+  one file and it serves the first frame's pixels for the whole move. MEASURED by mutation — deleting
+  that one line compiles and reddens exactly one test.
+- **And a fourth cache is reached through the identity rather than through a key of its own.**
+  `CanvasView.updateInterpolationPreviews` builds `InterpolationPreviewKey` out of
+  `DerivedCelContent.identity` alone, so `PosedCelIdentity.inherited` is what stops the live canvas
+  freezing on the first posed frame while every export of the same frames moves.
 
 An animated pose defeats `PixelOps.rasterize`'s flatten memo for every leaf beneath it, on every frame.
 Neither `PixelOps.RasterizeKey` nor `LayerContentVersion` has a pose field.
