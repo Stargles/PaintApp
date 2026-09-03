@@ -78,32 +78,22 @@ counts rather than treating a chunk count as a frame count, and every suite that
 call sites across four suites discarded the strip count `assertStrippedMatchesWhole` already returns,
 over seven distinct fixtures. All eleven assert `> 1` now.
 
-## `duplicateCel`, `splitCel` and `pasteCel` drop a cel's interpolation recipe
+## A flattened cel keeps pose storage that can no longer render
 
-The same defect that lost a cel's **pose** channel at those three verbs loses its `interpolation` at all
-three as well, and the doc comment that wrongly claimed the pose rides along claimed the recipe does
-too. The pose half is fixed; this half is not.
+`moveCelToLayer` (`CanvasManager+BlockDrag.swift:198-201`) and `rasterizeLayer`
+(`CanvasManager.swift:436-446`) both clear `vector`, `fillImage`, `bakedImage` and `interpolation` when
+they flatten, and neither clears `transformTracks` or `pendingPoseBaselines`. `posedCelContent` guards
+on `let vector = cel.vector`, so those tracks render nothing — but `poseKeyframeFrames(inLayer:)` reads
+them with no such guard and keeps drawing pose markers on the timeline for an animation that is gone,
+and with the recipe now nil `poseDeltaForKeyframe`'s §2.18 guard no longer excludes the cel, so a
+keyframe press writes more poses into it.
 
-**"Nothing downstream is broken today by the recipe being dropped" was wrong, and this entry said it.**
-An in-between **stores nothing** — `CanvasManager+BlockDrag.swift:188` records it, which is why the
-block flatten had to go through the `ContentProvider` seam or bake the block away as blank. So the copy
-does not come out as a plain drawing that has stopped following its parents; it comes out **blank**.
-`splitCel` is the same defect half-applied: the left half is mutated in place and keeps its recipe, the
-right half is a fresh `Cel` and does not, so one split gives an in-between beside a blank.
-
-**Ruled, 2026-09-03.** The owner was asked what a copy of an in-between should be and chose **a
-flattened still**: the copy looks exactly like what the artist saw, as ordinary ink, and stops
-following the two drawings it derives from.
-
-- `duplicateCel` and `pasteCel` **flatten**, through `derivedCelContent` exactly as the block drag at
-  `CanvasManager+BlockDrag.swift:188` already does, and carry no recipe. That is the fourth and fifth
-  verb agreeing with the one that was already right.
-- `splitCel` **carries the recipe to both halves.** A split makes no copy — it cuts one span in two,
-  and both halves are the same in-between of the same pair at the same `t`. Carrying it is what makes
-  the two halves behave alike, which is the same argument the code already gives at that line for
-  `pendingPoseBaselines`.
-- `copyCel`'s `CopiedCel` has no `interpolation` field and needs none under this ruling; it needs the
-  flattened picture instead.
+`duplicateCel` and `copyCel`'s flatten drops both fields deliberately, for exactly this reason — the
+hazard runs the *opposite* way from the one it looks like. Carrying the tracks onto a copy that no
+longer has a recipe makes them **newly live**, so the copy animates where its source stood still: on a
+cel holding both, the recipe wins and the tracks are inert, because `derivedCelContent`'s first guard
+takes the interpolation arm and `posedCelContent` is never reached. These two verbs predate that
+reasoning and do not clear either field.
 
 ## A green test can pin the bug it was written near, and one did for the length of a stage
 
