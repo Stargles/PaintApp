@@ -198,8 +198,14 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
         manager.layers[3].blendMode = .multiply
 
         guard let recipe = sandwich(manager, active: 2) else { return }
+        // `resolvedBackend` answers `.metal` unconditionally once `setUp` has forced
+        // `Compositor.backend` — see BUGS.md's "the `resolvedBackend(for:) == .metal` premise… is a
+        // tautology of their own `setUp`" — so it is not evidence the half actually has anything on
+        // it. The leaf check below is: `.attempt` returning `.image` two lines further down is sound
+        // evidence the GPU ran, but it would also come back `.image` for an empty half, and an empty
+        // half has no texture for two strips to collide over.
         XCTAssertEqual(ChunkedCompositor.resolvedBackend(for: recipe.belowRecipe.tree), .metal,
-                       "Premise: five uploadable leaves is over `gpuLeafThreshold`, so this is a GPU walk")
+                       "Premise: the lower half must be handed to the GPU at all")
         XCTAssertEqual(StripedCompositor.apron(of: recipe.belowRecipe.tree,
                                                maskStacks: recipe.maskStacks), 0,
                        "Premise: no kernel here, so every strip but the last is exactly the same size "
@@ -210,6 +216,8 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
         XCTAssertEqual(plan.count, 4, "Four bands of sixteen rows — the same buffer size four times over")
         XCTAssertEqual(Set(plan.map(\.buffer.size)).count, 1,
                        "Every band must be the same size, or the key would tell them apart by accident")
+        XCTAssertNotNil(recipe.belowRecipe.leaves.compactMap { $0 }.first,
+                        "Premise: at least one leaf must have pixels, or nothing is uploaded at all")
 
         guard case .image(let whole) = MetalCompositor.attempt(recipe.resolve().below) else {
             return XCTFail("The GPU declined the unstripped reference")
