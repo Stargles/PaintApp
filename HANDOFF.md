@@ -10,9 +10,9 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first
 
-**Nothing is owed before you start.** The fast tier is **2678 / 2675 passed / 0 failed / 3 skipped**,
-taken at `8eb5aa5` on an idle machine after all four of this pass's branches merged; the arithmetic
-reconciles exactly against the base (2657 + 1 + 0 + 7 + 13). The last full run was at `04099a9` — 2759
+**Nothing is owed before you start.** The fast tier is **2683 / 2680 passed / 0 failed / 3 skipped**,
+taken at `f16d958`; it was 2678 after this pass's first four branches and TODO (38)(a) and (c) added the
+rest. The last full run was at `04099a9` — 2759
 tests, one environmental failure clean in isolation — and it now predates two passes that changed the
 compositing sweep, the export driver and the cel-copy verbs, so **a full run is the first thing worth
 twenty-two minutes** if you are about to close a phase. It is not owed before ordinary work.
@@ -40,9 +40,14 @@ and animation groups have no UI — which are more visible to the artist day to 
 
 **Nothing is in flight. No worktrees, no `tmp/*` branches, nothing uncommitted.**
 
-**Fast tier: 2678 total / 2675 passed / 0 failed / 3 skipped.** It was 2657 at the start of this pass.
+**Fast tier: 2683 total / 2680 passed / 0 failed / 3 skipped.** It was 2657 at the start of this pass.
 
-**Two owner rulings landed this pass and are recorded where they act**, not here: §2.16's grain-on-Move
+**TODO (38)(b) and (d) are the obvious next pickup** — a tap on a graph node should open its bezier
+handles rather than delete it, and a dragged node should show the value it is driving. Both sit on the
+model (38)(c) just settled, which is why they were held rather than built beside it.
+
+**Three owner rulings landed this pass and are recorded where they act**, not here: a node on the
+graph and an indicator on the cel are **one thing**, which supersedes KEYFRAMES §2.28's closing rule; §2.16's grain-on-Move
 decline **stands** and belongs to the brush overhaul, TODO (37); and a copy of an in-between is **a
 flattened still**, which duplicate, copy and split now implement.
 
