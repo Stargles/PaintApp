@@ -22,6 +22,12 @@ struct Cel: Identifiable {
     /// `CanvasManager.StructureSnapshot` copies wholesale) so undo covers every recipe edit with
     /// no new machinery. A `.reproject` recipe coexists with `vector` content (the artist's own
     /// drawing, re-posed); a `.generate` recipe normally sits on a cel with none.
+    ///
+    /// **A copy of a cel carrying one does not carry it** — ruled 2026-09-03. Duplicate and paste
+    /// flatten the in-between into a still and copy that (`CanvasManager.flattenedStill`), which is
+    /// the same thing `rasterizeLayer` and `moveCelToLayer` already do to a cel they flatten. Split
+    /// is the exception and carries it to *both* halves, because a split makes no copy: both halves
+    /// are the same in-between of the same pair at the same `t`.
     var interpolation: InterpolationRecipe? = nil
     /// **The pose channels animating this cel's content** — KEYFRAMES.md stage 5, keyed by
     /// `TransformChannelID.id` (`"cel"`, or `"group.<uuid>"`).
@@ -38,8 +44,9 @@ struct Cel: Identifiable {
     /// split or pasted came back as the drawing with its animation deleted, and nothing said so. The
     /// three call sites now carry these two fields explicitly, and `splitCel` carries §3.1's cut rule
     /// through `TransformTrack.split(atCelLocalFrame:)`. **Add a field here and you owe those three
-    /// sites a line each**; cel-local numbering is what makes the line a copy rather than a
-    /// conversion, which is the part that really is free.
+    /// sites a line each** — two of them by way of `Cel.CopyTiers` below, where the compiler collects
+    /// the debt; cel-local numbering is what makes the line a copy rather than a conversion, which is
+    /// the part that really is free.
     ///
     /// Empty is the overwhelmingly common case and every reader tests it first: a document that has
     /// never been keyframed must cost one `isEmpty` on the paths that ask, which is every rasterize of
@@ -83,5 +90,27 @@ struct Cel: Identifiable {
         fillImage == nil && bakedImage == nil
             && raster.strokeCount == 0 && raster.version == 0
             && (vector?.isEmpty ?? true)
+    }
+
+    /// **Everything a copy of a cel carries that is not its identity or its place in time** — the
+    /// return type of `CanvasManager.copyTiers(of:)`, which is the one place the 2026-09-03 ruling on
+    /// copying a derived cel is written down.
+    ///
+    /// It is a named type rather than a tuple so that the list of fields sits next to the fields it
+    /// mirrors. `Cel.transformTracks`' doc comment asks whoever adds a field above to owe three call
+    /// sites a line each; two of those three now read this instead, so the debt is one line here and
+    /// the compiler collects it.
+    ///
+    /// **`interpolation` is deliberately absent**, and its absence is the ruling: a copy of an
+    /// in-between is a flattened still that stops following the drawings it derived from, so no
+    /// copying verb has a recipe to put anywhere. `splitCel` is not a copy — it cuts one span in two
+    /// — and does not go through here.
+    struct CopyTiers {
+        var raster: RasterLayerTexture
+        var fillImage: UIImage?
+        var bakedImage: UIImage?
+        var vector: VectorCanvas?
+        var transformTracks: [String: TransformTrack]
+        var pendingPoseBaselines: [String: PoseQuad]
     }
 }

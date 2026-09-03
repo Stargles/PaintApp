@@ -96,29 +96,123 @@ extension CanvasManager {
         return true
     }
 
+    /// **The tiers a *copy* of `cel` carries** — the one place the 2026-09-03 ruling on copying a
+    /// derived cel lives, read by `duplicateCel` and by `copyCel` so the two verbs cannot drift.
+    ///
+    /// ## What the ruling is
+    ///
+    /// A copy of an **in-between** is a **flattened still**: it looks exactly like what the artist
+    /// saw, as ordinary ink, and stops following the two drawings it derives from. Until this
+    /// existed the three copying verbs carried a cel's `transformTracks` and `pendingPoseBaselines`
+    /// but not its `interpolation`, and the entry that filed that said "nothing downstream is broken
+    /// today by the recipe being dropped". That was wrong in the worst direction: a `.generate`
+    /// in-between **stores nothing at all** (see `PixelOps.rasterizeUncached`, and the block drag's
+    /// own note that flattening one without the seam "baked the block away as blank"), so a
+    /// duplicate or paste of one came out **blank** rather than as a plain drawing. A `.reproject`
+    /// one came out as the artist's linework in its *rest* position, un-reposed — wrong by less, and
+    /// wrong the same way.
+    ///
+    /// ## Through `derivedCelContent`, which is the third and fourth site of a flatten that exists
+    ///
+    /// `rasterizeLayer` and `moveCelToLayer` already flatten a derived cel this way, and already
+    /// drop the recipe afterwards for the reason both state: the frame is stored pixels now, so
+    /// leaving the recipe would evaluate the in-between a second time over its own bake.
+    ///
+    /// ## At `cel.startFrame`, and the choice is free rather than approximate
+    ///
+    /// The frame is a real question — a duplicate lands at the source's `endFrame` and a paste
+    /// wherever the artist tapped, so "the picture the artist saw" need not be the picture at the
+    /// start of the span. It is settled by which *arm* of `derivedCelContent` this gate takes.
+    /// **The gate is `cel.interpolation != nil`, so the arm is always the interpolation one, and
+    /// that arm never reads the frame**: `recipe.t` lives on the cel and is constant across every
+    /// frame the cel spans (`CelContentProvider` says so in as many words, and it is why
+    /// `InterpolatedCelIdentity` deliberately omits the frame). Every frame of the span therefore
+    /// derives the same picture, `startFrame` is the cel's canonical frame everywhere else that asks
+    /// — the thumbnail, `rasterizeLayer`, the block drag — and for `copyCel` it is the *only*
+    /// available answer, since a clipboard carries no frame at all.
+    ///
+    /// ## Pose is not applied twice, because on this arm it is not applied at all
+    ///
+    /// A cel can hold both a recipe and pose channels (`interpolate(mode: .reproject, …)` does not
+    /// refuse one on a posed cel, though the pose *writer* refuses the reverse — see
+    /// `commitTransformPose` and `poseDeltaForKeyframe`, both §2.18). On such a cel the recipe wins
+    /// and the tracks are inert: `derivedCelContent` takes the interpolation arm and never reaches
+    /// `posedCelContent`. So the flatten below bakes an **un-posed** frame, and there is no doubled
+    /// pose to fear — the hazard runs the other way. Carrying the tracks onto a copy that no longer
+    /// has a recipe would make them *newly live*, so the copy would animate where its source stood
+    /// still. They are dropped, explicitly rather than by defaulting, because defaulting an
+    /// unmentioned field is precisely how these two came to be lost in the first place.
+    ///
+    /// ## A recipe that is not evaluable at this instant
+    ///
+    /// `PixelOps.rasterize` falls back to the cel's stored tiers when the thunk answers nil (a
+    /// recipe mid-repick), so the copy is then whatever a flatten of that cel produces *at that
+    /// instant* — byte-for-byte what its own thumbnail, the onion skin and an export would produce.
+    /// That is the property worth having and it is true by construction: this is the same call with
+    /// the same arguments, not a second implementation of it.
+    ///
+    /// Returns nil for a cel that shows what it stores, which is every cel in a document that has
+    /// never been interpolated, so the ordinary verb costs one optional test and copies verbatim.
+    private func flattenedStill(of cel: Cel) -> Cel.CopyTiers? {
+        guard cel.interpolation != nil, let canvasSize,
+              let derived = derivedCelContent(for: cel, atFrame: cel.startFrame) else { return nil }
+        let flat = PixelOps.rasterize(cel: cel, canvasSize: canvasSize, derived: derived)
+        // **Everything lands in `bakedImage` and the other tiers are emptied**, because
+        // `PixelOps.rasterize` composited all four of them into `flat` — keeping any of them would
+        // draw that content twice. `bakedImage` rather than `raster` is the tier for it here, where
+        // `rasterizeLayer` and the block drag chose `raster`: those two are *becoming raster layers*,
+        // where a cel holds its content in exactly one tier, while a copy made by these verbs stays
+        // on the vector layer it came from, and `Cel.bakedImage` is that layer's tier for "flattened
+        // raster content baked in by a pixel-level operation" — a list whose examples already
+        // include duplicate.
+        //
+        // **The vector tier is emptied, not removed.** A vector layer's cel with no `VectorCanvas`
+        // is a cel `StrokeCanvasView` silently drops back to raster mode on (`addCel` spells the
+        // consequences out), so the artist could not draw on the copy at all. An empty canvas over a
+        // baked still is exactly the state a select-and-move bake leaves behind, and new ink lands
+        // on top of the still because `rasterizeUncached` draws `bakedImage` first.
+        return Cel.CopyTiers(raster: .empty(size: cel.raster.size), fillImage: nil, bakedImage: flat,
+                             vector: cel.vector.map { .empty(size: $0.size) },
+                             transformTracks: [:], pendingPoseBaselines: [:])
+    }
+
+    /// The tiers of a copy of `cel`: the flattened still when it derives its picture, and the cel's
+    /// own content otherwise.
+    private func copyTiers(of cel: Cel) -> Cel.CopyTiers {
+        flattenedStill(of: cel) ?? Cel.CopyTiers(
+            raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage,
+            vector: cel.vector?.makeCopy(),
+            // **The pose channels come with the drawing** — KEYFRAMES.md §3.1's *"it rides the cel
+            // through move, split, duplicate and paste for free"*, which was a claim in
+            // `Cel.transformTracks`' own doc comment and not true of these verbs until 2026-09-02:
+            // a memberwise `Cel(...)` defaults both fields to `[:]`, so duplicating an animated cel
+            // produced a copy of the drawing with the animation silently deleted.
+            //
+            // **Verbatim, including keys past the copy's length.** A copy can be shorter than its
+            // source when a neighbour is in the way, and §3.1's resize rule is the one to follow —
+            // *"a key pushed outside the new span is held, not deleted"* — so re-growing the copy
+            // gives the animation back rather than finding it trimmed.
+            transformTracks: cel.transformTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
+    }
+
     /// Copies a cel immediately after itself, at the source's `endFrame`, clamped to whatever room is
     /// free before the next cel.
     ///
     /// When a neighbour begins at *exactly* the source's end frame there is no free space at all, so
     /// `clampedCelLength` returns nil and this is a no-op. That is deliberate — see BUGS.md — and it
     /// is currently silent; a UI affordance for it is logged there as a low-priority follow-up.
+    ///
+    /// A copy of an in-between is a flattened still and carries no recipe — see `flattenedStill`.
     func duplicateCel(layerIndex: Int, celIndex: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]
         let newStart = source.endFrame
         guard let length = clampedCelLength(layerIndex: layerIndex, startFrame: newStart, maxLength: source.frameCount) else { return }
+        let tiers = copyTiers(of: source)
         withStructureUndo(label: .duplicateFrame) {
-            // **The pose channels come with the drawing** — KEYFRAMES.md §3.1's *"it rides the cel
-            // through move, split, duplicate and paste for free"*, which was a claim in
-            // `Cel.transformTracks`' own doc comment and not true of this line until 2026-09-02: the
-            // memberwise `Cel(...)` below defaults both fields to `[:]`, so duplicating an animated cel
-            // produced a copy of the drawing with the animation silently deleted.
-            //
-            // **Verbatim, including keys past `length`.** The copy can be shorter than its source when
-            // a neighbour is in the way, and §3.1's resize rule is the one to follow — *"a key pushed
-            // outside the new span is held, not deleted"* — so re-growing the copy gives the animation
-            // back rather than finding it trimmed.
-            let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: source.raster.makeCopy(), fillImage: source.fillImage, bakedImage: source.bakedImage, vector: source.vector?.makeCopy(), transformTracks: source.transformTracks, pendingPoseBaselines: source.pendingPoseBaselines)
+            // No `interpolation:` argument, on either arm — a copy never derives. On the flatten arm
+            // that is the ruling; on the verbatim arm the source had no recipe to carry.
+            let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, fillImage: tiers.fillImage, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             sceneFrameCount = max(sceneFrameCount, newStart + length)
@@ -131,6 +225,13 @@ extension CanvasManager {
     /// Snapshots a cel's content (not its position) onto a single clipboard slot, for `pasteCel` to
     /// drop into an empty slot elsewhere. Unlike `duplicateCel` this doesn't touch the timeline at
     /// all — copy and paste are two separate steps, matching the gap-tap "Add Drawing / Paste" menu.
+    ///
+    /// **An in-between is flattened here, at copy, rather than at paste** — which is what makes
+    /// `CopiedCel` need no `interpolation` field. The clipboard is already a snapshot (`makeCopy()`
+    /// on both class tiers), and a recipe is the one thing that cannot be snapshotted by copying it:
+    /// it names *other cels*, which the artist may redraw, delete or move to another layer before
+    /// pasting. Deferring the flatten would make the paste a picture of the document as it is then,
+    /// and the ruling asks for the picture the artist saw when they copied.
     func copyCel(layerIndex: Int, celIndex: Int) {
         // Copying doesn't change the canvas, but it does snapshot the cel's tiers — including a
         // still-transient fill preview, which `pasteCel` would then plant in the new cel as
@@ -139,15 +240,21 @@ extension CanvasManager {
         beginCanvasEdit()
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let source = layers[layerIndex].cels[celIndex]
-        copiedCel = CopiedCel(raster: source.raster.makeCopy(), fillImage: source.fillImage,
-                              bakedImage: source.bakedImage, vector: source.vector?.makeCopy(),
-                              transformTracks: source.transformTracks,
-                              pendingPoseBaselines: source.pendingPoseBaselines,
+        let tiers = copyTiers(of: source)
+        copiedCel = CopiedCel(raster: tiers.raster, fillImage: tiers.fillImage,
+                              bakedImage: tiers.bakedImage, vector: tiers.vector,
+                              transformTracks: tiers.transformTracks,
+                              pendingPoseBaselines: tiers.pendingPoseBaselines,
                               frameCount: source.frameCount)
     }
 
     /// Drops the clipboard's content into an empty slot as a new cel, sized to the copied cel's own
     /// length (clamped, like `addCel`, to whatever room is actually free before the next cel).
+    ///
+    /// **Nothing here knows about interpolation, and that is the point.** `CopiedCel` has no
+    /// `interpolation` field, so a paste cannot plant a recipe however hard it tries; the in-between
+    /// was already resolved to a flattened still by `copyCel`, which is the only end of this pair
+    /// that can still see the drawings it derived from.
     @discardableResult
     func pasteCel(layerIndex: Int, startFrame: Int) -> Bool {
         guard let copiedCel, layers.indices.contains(layerIndex) else { return false }
@@ -455,6 +562,19 @@ extension CanvasManager {
     /// not attached to a frame at all, so there is no cut to place it on either side of. Copying it
     /// costs one dictionary entry and loses nothing; sending it to one half would decide, silently and
     /// wrongly half the time, which half the artist is about to press the keyframe button on.
+    ///
+    /// **And the interpolation recipe goes to both halves, which is where this verb parts company
+    /// with duplicate and paste.** Those two make a *copy*, and the 2026-09-03 ruling flattens a copy
+    /// of an in-between into a still. A split makes no copy: it cuts one span in two, and both halves
+    /// are the same in-between, of the same pair, at the same `t` — carrying the recipe is what makes
+    /// them behave alike, exactly the argument the baselines get one paragraph up. Until 2026-09-03
+    /// this was the defect half-applied: the left half is mutated in place and kept its recipe while
+    /// the right half was built by a memberwise `Cel(...)` that defaulted the field to nil, so one
+    /// split gave an in-between beside a blank cel.
+    ///
+    /// A recipe names *other* cels, never the one it lives on, so the second half's fresh id needs
+    /// no rewriting on the way across — and a reference held elsewhere in the document still resolves,
+    /// because the half that keeps the original cel id is the one that was mutated in place.
     func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
@@ -470,7 +590,7 @@ extension CanvasManager {
         withStructureUndo(label: .splitFrame) {
             layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
             layers[layerIndex].cels[celIndex].transformTracks = leftTracks
-            let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
+            let secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             layers[layerIndex].cels.append(secondHalf)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
