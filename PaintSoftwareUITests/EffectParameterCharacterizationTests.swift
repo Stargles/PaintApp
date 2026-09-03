@@ -153,6 +153,34 @@ final class EffectParameterCharacterizationTests: XCTestCase {
         XCTAssertEqual(cases.flatMap { sliderRows($0) }.count, 25)
     }
 
+    /// **Every parameter a keyframe channel can drive carries a format string** — the premise TODO
+    /// (38)(d)'s readout rests on, and the reason `TimelineGraphBand.Channel.format` is optional and
+    /// yet never nil in practice.
+    ///
+    /// `isScalarAnimatable` is `.continuous && .double`, which is exactly the `double(…)` factory,
+    /// and every one of its call sites passes a format. So a dragged node always prints in the units
+    /// its own slider prints in and never falls through to the generic three-significant-figures
+    /// answer. The day a `double(…)` arrives with `format: nil` this goes red, which is the day the
+    /// band would start reading a number differently from the settings bar.
+    func testEveryAnimatableParameterCarriesAFormatForTheGraphEditorToRead() {
+        // By id, because `everyMenuEntry` lists Gaussian and Directional Blur separately and they are
+        // one case sharing one table — the same dedup `testThereAreTwentyFiveSlidersInTheWholeCatalogue`
+        // does by filtering the case, reached from the other side. Ids are unique across the
+        // catalogue (`testIdsAreUniqueWithinAndAcrossEffects`), so a set of them is the true count.
+        var animatable: Set<String> = []
+        for effect in Self.everyMenuEntry {
+            for parameter in effect.parameters where parameter.isScalarAnimatable {
+                XCTAssertNotNil(parameter.format, "\(parameter.id) animates but prints in no units")
+                animatable.insert(parameter.id)
+            }
+        }
+        XCTAssertEqual(animatable.count, 24,
+                       "PREMISE: the animatable set — got \(animatable.sorted())")
+        XCTAssertFalse(animatable.contains("posterize.levels"), """
+            PREMISE: 24 and not 25, and this is the one slider that is not among them — an `Int`             field, so `.stepped` rather than `.continuous`, and no scalar channel drives it. The             graph editor cannot draw a curve for it, so the readout is never asked about it.
+            """)
+    }
+
     /// A slider is exactly a parameter with a UI range, and a UI range implies a format string.
     func testAUiRangeAndAFormatArriveTogether() {
         for effect in Self.everyMenuEntry {

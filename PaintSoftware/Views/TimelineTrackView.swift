@@ -627,9 +627,9 @@ struct TimelineTrackView: UIViewRepresentable {
             /// **The node the finger actually took**, as opposed to the set it carries. Nil for a
             /// marquee and for a handle drag.
             ///
-            /// A marquee move carries several nodes and the focus belongs to one of them — the one
-            /// the artist is steering — so the ref that follows a drag has to be this rather than
-            /// any member of `carried`.
+            /// It exists for (38)(d): a group of nine dragged together has nine values changing and
+            /// nine readouts would be noise, so the number is drawn for the one node under the
+            /// finger. That is also the only one whose position the artist is steering.
             let grabbed: TimelineGraphBand.KeyRef?
             /// **The handle this drag is shaping**, or nil when it is moving nodes — (38)(b). A touch
             /// resolves to one or the other at touch-down (`TimelineGraphBand.grab`) and never
@@ -779,8 +779,9 @@ struct TimelineTrackView: UIViewRepresentable {
             graphBandDrag = drag
 
             // **A handle drag shapes one curve and moves no node** — (38)(b). It writes through the
-            // same funnel and takes the same bracket, and leaves the selection alone: no node moved,
-            // so no ring can have.
+            // same funnel, takes the same bracket, and touches neither the selection nor the readout:
+            // the value the node holds has not changed, so a number that appeared here would be
+            // answering a question (38)(d) did not ask.
             if let handle = drag.handle {
                 if writeGraphBandCurves(TimelineGraphBand.draggingHandle(handle, in: drag.channels,
                                                                         translation: translation,
@@ -818,6 +819,22 @@ struct TimelineTrackView: UIViewRepresentable {
                 TimelineGraphBand.KeyRef(parameterID: $0.key.parameterID, frame: $0.value.frame)
             })
             graphBandView.setSelection(graphBandSelection)
+            // **(38)(d): the node under the finger reads its own value while it is being dragged.**
+            //
+            // **Gated on the value having changed rather than on the direction of travel**, which is
+            // the ask's *"dragged up or down"* expressed as a property of the edit instead of as a
+            // test on the translation. A purely horizontal drag retimes the node and changes nothing
+            // the readout could report, so it silently shows none — by construction, with no
+            // `abs(dy) > k` threshold for an artist to fight at the boundary. The focus follows the
+            // node too, so the handles stay on the thing being dragged.
+            if let grabbed = drag.grabbed, let move = moves[grabbed],
+               let text = TimelineGraphBand.readout(forNodeAt: grabbed, movedTo: move,
+                                                    in: drag.channels) {
+                graphBandView.setReadout(.init(node: TimelineGraphBand.KeyRef(
+                                                    parameterID: grabbed.parameterID,
+                                                    frame: move.frame),
+                                               text: text))
+            }
             // **The focus follows the node it is on, and only that one.** A drag does not *take* the
             // focus — that is the tap's job, and the two-stage contract says so — but a focused node
             // dragged three frames right would otherwise leave the focus naming a frame it no longer
@@ -902,6 +919,10 @@ struct TimelineTrackView: UIViewRepresentable {
         /// mid-drag — so it is a state an artist can reach without meaning to.
         private func endGraphBandDrag(cancelled: Bool) {
             graphBandView.setMarquee(nil)
+            // The readout is the drag's own chrome and belongs to nothing else — (38)(d). Cleared
+            // here rather than in each of the three exits, so a cancelled drag cannot leave a number
+            // hanging over a node that has gone back where it came from.
+            graphBandView.setReadout(nil)
             guard let drag = graphBandDrag else { return }
             graphBandDrag = nil
             guard drag.didMove else { return }
@@ -1769,6 +1790,15 @@ private final class TimelineGraphBandView: UIView {
     /// where the two-stage tap that sets it lives; this view only draws what it is told.
     private var focus: TimelineGraphBand.KeyRef?
 
+    /// **What a dragged node is reading** — TODO (38)(d). The node is named rather than positioned,
+    /// so the label follows the dot through the same two mappings the dot itself is drawn with and
+    /// the two cannot come apart at a zoom.
+    struct Readout: Equatable {
+        let node: TimelineGraphBand.KeyRef
+        let text: String
+    }
+    private var readout: Readout?
+
     /// The rubber band itself. A sibling `UIView` rather than a shape inside `draw(_:)`, because this
     /// view is `draw(_:)`-backed over the whole track's width and re-rasterising all of it on every
     /// `.changed` tick of a marquee is precisely the cost `TimelineGraphBand.sampling`'s clip exists
@@ -1796,7 +1826,7 @@ private final class TimelineGraphBandView: UIView {
         isAccessibilityElement = true
         accessibilityTraits = .none
         accessibilityIdentifier = "timeline.graphBand"
-        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: nil)
+        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: nil, readout: nil)
 
         marqueeView.isUserInteractionEnabled = false
         marqueeView.isHidden = true
@@ -1855,10 +1885,20 @@ private final class TimelineGraphBandView: UIView {
         setNeedsDisplay()
     }
 
+    /// The dragged node's number, or nil for no drag. Gated the same way — a drag's `.changed` fires
+    /// many times a second and most ticks leave the printed string identical, since the readout is
+    /// rounded to the parameter's own precision.
+    func setReadout(_ value: Readout?) {
+        guard value != readout else { return }
+        readout = value
+        refreshGestureAccessibility()
+        setNeedsDisplay()
+    }
+
     /// The band's second accessibility slot — see `TimelineGraphBand.encodeGesture`, which is where
     /// the choice to use the label rather than widen the value is argued.
     private func refreshGestureAccessibility() {
-        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: focus)
+        accessibilityLabel = TimelineGraphBand.encodeGesture(focus: focus, readout: readout?.text)
     }
 
     /// **A node's column, in window coordinates — what the node menu's popover anchors to.**
@@ -2021,6 +2061,7 @@ private final class TimelineGraphBandView: UIView {
         }
 
         drawHandles(content: content)
+        drawReadout(content: content)
     }
 
     /// **The focused node's two bezier handles — the owner's *"line and two nodes"*** (38)(b).
@@ -2063,6 +2104,35 @@ private final class TimelineGraphBandView: UIView {
         }
     }
 
+    /// **The dragged node's value, in the parameter's own units** (38)(d).
+    ///
+    /// The text and where it goes are both `TimelineGraphBand`'s — this is the `NSAttributedString`
+    /// and the rounded rect behind it, which is all a `draw(_:)` is allowed to own on this surface.
+    /// The plate is what makes a number legible over a curve it happens to land on; without it the
+    /// readout is unreadable exactly where the artist is looking.
+    private func drawReadout(content: TimelineGraphBand.Content) {
+        guard let readout,
+              let channel = content.channels.first(where: { $0.parameterID == readout.node.parameterID }),
+              let key = channel.curve.key(atFrame: readout.node.frame)
+        else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: UIColor.white
+        ]
+        let text = NSAttributedString(string: readout.text, attributes: attributes)
+        let inset = CGSize(width: 5, height: 2)
+        let size = CGSize(width: text.size().width + inset.width * 2,
+                          height: text.size().height + inset.height * 2)
+        let node = CGPoint(x: TimelineGraphBand.x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame),
+                           y: TimelineGraphBand.reachableY(ofValue: key.value, in: channel.axis,
+                                                           bandHeight: bounds.height))
+        let origin = TimelineGraphBand.readoutOrigin(node: node, size: size,
+                                                     bandHeight: bounds.height, visibleX: visibleX)
+        let plate = UIBezierPath(roundedRect: CGRect(origin: origin, size: size), cornerRadius: 3)
+        UIColor.black.withAlphaComponent(0.75).setFill()
+        plate.fill()
+        text.draw(at: CGPoint(x: origin.x + inset.width, y: origin.y + inset.height))
+    }
 }
 
 /// Non-interactive playhead indicator.

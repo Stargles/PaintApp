@@ -111,6 +111,25 @@ enum TimelineGraphBand {
         /// the clamp a gesture applies is then keyed by `TimelineLayoutKey` like everything else the
         /// band decides, instead of being re-derived from `Effect.parameters` inside a recognizer.
         let modelDomain: ClosedRange<Double>
+        /// **`EffectParameter.format` — the `String(format:)` the settings bar prints this
+        /// parameter's live readout with, unit and all** (`"%.1f px"`, `"%.0f°"`).
+        ///
+        /// Carried for TODO (38)(d): a dragged node shows the value it is controlling, and the only
+        /// non-arbitrary answer to *in what units* is the one the slider for that same parameter
+        /// already gives. Deriving a format here from `uiRange`'s magnitude would make the band and
+        /// the settings bar disagree about the same number.
+        ///
+        /// **In the `Channel`, and therefore in `TimelineLayoutKey`, at no cost.** It is a constant
+        /// of the descriptor table — unlike `Effect.displayName`, which `TimelineGraphChannelList`'s
+        /// doc keeps off the channel precisely because a toggle can change it — so it can never make
+        /// the layout gate open on a pass it would otherwise have closed on.
+        ///
+        /// Optional because `EffectParameter.format` is, and total for that reason rather than
+        /// because the nil is reachable: `isScalarAnimatable` is `.continuous && .double`, which is
+        /// exactly the `double(…)` factory, and every one of its 24 call sites passes a format. That
+        /// premise is `testEveryChannelTheBandCanDrawCarriesAFormat`, so the day it stops being true
+        /// is a red rather than a silently different-looking readout.
+        let format: String?
         /// **The channel's position in `Effect.parameters`, which is where its colour comes from.**
         ///
         /// Not the position in the *drawn* list: that one shifts when a channel starts animating,
@@ -236,6 +255,7 @@ enum TimelineGraphBand {
                            curve: curve,
                            uiRange: parameter.uiRange,
                            modelDomain: parameter.modelDomain,
+                           format: parameter.format,
                            descriptorIndex: index,
                            isAnimated: curve.isAnimated)
         }
@@ -1019,6 +1039,98 @@ enum TimelineGraphBand {
         return [channel.parameterID: curve]
     }
 
+    // MARK: - What a dragged node reads — TODO (38)(d)
+
+    /// **The number a dragged node shows** — the owner's ask of 2026-09-03: *"There should be a
+    /// numerical indicator whenever a node is dragged up or down for the value that the node is
+    /// controlling in the graph editor."*
+    ///
+    /// **`EffectParameter.format`, verbatim, which is the same string the settings bar's slider
+    /// prints.** The ask's hard part is a channel whose units are not obvious — a 0…1 normalised
+    /// amount, an angle, a pixel radius — and the only non-arbitrary answer is the one the artist
+    /// already reads for that parameter somewhere else in the app. Deriving a precision here from the
+    /// axis's magnitude would let the band and the slider disagree about one number, which is the
+    /// class of defect this repo keeps finding.
+    ///
+    /// The fallback is total rather than reachable — see `Channel.format` — and prints three
+    /// significant figures, which is what a value with no declared unit can honestly claim.
+    static func readout(value: Double, format: String?) -> String {
+        guard let format, !format.isEmpty else { return String(format: "%.3g", value) }
+        return String(format: format, value)
+    }
+
+    /// **Whether a live drag shows a number at all, and what it says** — the whole of (38)(d)'s rule,
+    /// here rather than as a condition inside the recogniser.
+    ///
+    /// **It is here because it cannot be pinned there, and because no tier can pin it end to end.**
+    /// `Views/TimelineTrackView.swift` is not compiled into `PaintSoftwareUITests`, which is this
+    /// file's founding reason; and the readout is *transient by construction* — it exists only while a
+    /// finger is down — so XCUITest cannot see it either. There is no asynchronous drag API, and an
+    /// accessibility read taken after a synchronous `press(…thenDragTo:…)` returns is a read of the
+    /// state *after* the lift, when the readout is already gone. An attempt to catch it with an
+    /// `XCTNSPredicateExpectation` created before the drag was measured on 2026-09-03 and does not
+    /// work: it times out on the affirmative case, which means the inverted expectation on the
+    /// negative case would have passed **whatever the app did** — the vacuous-assertion trap
+    /// CLAUDE.md catalogues, one costume further on. So the rule lives in a value the fast tier can
+    /// read, and the UI tier makes no claim about it.
+    ///
+    /// **The gate is that the *value* changed, which is the ask's "up or down" expressed as a
+    /// property of the edit.** A drag that only retimes a node changes nothing the readout could
+    /// report, so it shows none — by construction, rather than by a threshold on the translation for
+    /// an artist to fight at the boundary. A diagonal drag changes the value and therefore reads,
+    /// which is right: it *is* being dragged up or down, among other things.
+    ///
+    /// - Parameter start: the node as it stood at touch-down — `GraphBandDrag.channels`, the drag's
+    ///   own starting curves, never the document's current ones. Comparing against the live document
+    ///   would compare this tick's value with last tick's and go blank the instant a finger paused.
+    static func readout(forNodeAt ref: KeyRef, movedTo move: Move,
+                        in start: [Channel]) -> String? {
+        guard let channel = start.first(where: { $0.parameterID == ref.parameterID }),
+              let key = channel.curve.key(atFrame: ref.frame),
+              move.value != key.value
+        else { return nil }
+        return readout(value: move.value, format: channel.format)
+    }
+
+    /// The gap between a node's dot and its readout, in points.
+    static let readoutGap: CGFloat = 8
+
+    /// **Where the readout sits, so the finger dragging the node does not cover it.**
+    ///
+    /// Three rules, in order:
+    ///
+    /// 1. **Above the node**, centred on its column. A touch's occlusion runs *downward* from the
+    ///    contact patch — the hand is between the artist and the screen below the fingertip — so
+    ///    above is the one direction that is free on both a left and a right hand.
+    /// 2. **Beside it when there is no room above**, at the node's own y. The band is 96 pt tall and
+    ///    a node dragged to the top of its axis has nothing above it; putting the label *below* there
+    ///    would put it exactly under the finger, which is the one placement the ask rules out. To the
+    ///    right, unless that would leave the window, in which case to the left.
+    /// 3. **Clamped into the visible window** rather than into the band's own bounds, which are as
+    ///    wide as the whole laid-out track. A node dragged near the edge of the screen keeps its
+    ///    number on screen; `visibleX` is the same window `sampling(in:visibleX:…)` clips to, so the
+    ///    label cannot land in track the artist is not looking at.
+    static func readoutOrigin(node: CGPoint, size: CGSize, bandHeight: CGFloat,
+                              visibleX: ClosedRange<CGFloat>) -> CGPoint {
+        let above = node.y - readoutGap - size.height
+        var origin: CGPoint
+        if above >= 0 {
+            origin = CGPoint(x: node.x - size.width / 2, y: above)
+        } else {
+            let y = min(max(node.y - size.height / 2, 0), max(bandHeight - size.height, 0))
+            let right = node.x + readoutGap
+            origin = CGPoint(x: right + size.width <= visibleX.upperBound
+                             ? right
+                             : node.x - readoutGap - size.width,
+                             y: y)
+        }
+        // The window can be narrower than the label at an absurd split-view width; pinning to the
+        // left edge then is the only answer that keeps any of it readable.
+        let highest = max(visibleX.upperBound - size.width, visibleX.lowerBound)
+        origin.x = min(max(origin.x, visibleX.lowerBound), highest)
+        return origin
+    }
+
     // MARK: - Telling the curves apart
 
     /// A curve's colour as hue/saturation/brightness, so the choice stays a value the fast tier can
@@ -1105,7 +1217,8 @@ enum TimelineGraphBand {
         return encode(content.channels)
     }
 
-    /// **The band's *gesture* state, as a string** — which node's handles are drawn (38)(b).
+    /// **The band's *gesture* state, as a string** — which node's handles are drawn (38)(b) and what
+    /// the node under the finger is reading (38)(d).
     ///
     /// **On the accessibility `label` rather than appended to the `value`**, which is the one design
     /// choice here. Every existing assertion in both tiers compares the value against a curve string
@@ -1113,11 +1226,13 @@ enum TimelineGraphBand {
     /// something else entirely and make each of them assert two unrelated facts. The band already has
     /// two accessibility slots and was using one.
     ///
-    /// `"none"` rather than an omission, so the string's shape is constant and a test can assert the
-    /// *absence* of a focus as directly as its presence — which is what the (38)(b) change most needs
-    /// pinned, a single tap that no longer deletes having no other visible effect than this.
-    static func encodeGesture(focus: KeyRef?) -> String {
+    /// `"none"` for either half rather than an omission, so the string's shape is constant and a test
+    /// can assert the *absence* of a focus or a readout as directly as its presence — which is what
+    /// the (38)(b) change most needs pinned, a single tap that no longer deletes having no other
+    /// visible effect than this.
+    static func encodeGesture(focus: KeyRef?, readout: String?) -> String {
         "focus:" + (focus.map { "\($0.parameterID)@\($0.frame)" } ?? "none")
+            + "|read:" + (readout ?? "none")
     }
 }
 

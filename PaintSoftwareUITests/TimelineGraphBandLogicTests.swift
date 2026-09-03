@@ -1765,14 +1765,107 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - What a dragged node reads — TODO (38)(d)
+
+    /// **The readout is the parameter's own slider string, unit and all.** The ask's hard part is a
+    /// channel whose units are not obvious, and the only non-arbitrary answer is the one the artist
+    /// already reads for that same parameter in the settings bar.
+    func testAReadoutIsTheParametersOwnSliderStringUnitAndAll() {
+        XCTAssertEqual(TimelineGraphBand.readout(value: 12.3456, format: "%.1f px"), "12.3 px")
+        XCTAssertEqual(TimelineGraphBand.readout(value: 44.6, format: "%.0f°"), "45°")
+        XCTAssertEqual(TimelineGraphBand.readout(value: 0.5, format: "%.2f"), "0.50",
+                       "A normalised 0…1 amount reads at the precision its own slider reads at")
+        XCTAssertEqual(TimelineGraphBand.readout(value: 0.5, format: nil), "0.5",
+                       "The total fallback — see `Channel.format` for why it is unreachable today")
+        XCTAssertEqual(brightnessChannel(rampedManager()).format, "%.2f",
+                       "…and the channel carries the descriptor's own string rather than deriving one")
+    }
+
+    /// **A drag that only retimes a node shows no number, and one that moves its value shows one** —
+    /// the ask's *"dragged up or down"* as a property of the edit rather than a threshold on the
+    /// travel, so there is no boundary for an artist to fight.
+    ///
+    /// **This is the whole of (38)(d)'s gate, and this is the only tier that can see it.** The
+    /// readout lives for the length of a touch; XCUITest has no asynchronous drag, so a read taken
+    /// after a synchronous one is a read of the state after the lift. An `XCTNSPredicateExpectation`
+    /// built before the drag was tried and times out (see `GraphEditorGestureUITests`' note), which
+    /// means the *inverted* form of it — the natural way to assert the negative case up there — would
+    /// have passed whatever the app did.
+    func testAReadoutAppearsForAValueThatMovedAndForNoOtherDrag() {
+        let manager = rampedManager()
+        let channels = [brightnessChannel(manager)]
+        let ref = node(10)
+
+        XCTAssertNil(TimelineGraphBand.readout(forNodeAt: ref,
+                                               movedTo: .init(frame: 14, value: 0.8),
+                                               in: channels), """
+            Four frames right and not a hair up or down: the node is being retimed, and a number             reporting the value it still holds answers a question nobody asked.
+            """)
+        XCTAssertEqual(TimelineGraphBand.readout(forNodeAt: ref,
+                                                 movedTo: .init(frame: 10, value: 1.25),
+                                                 in: channels),
+                       "1.25", "Straight up, in the units Brightness's own slider prints in")
+        XCTAssertEqual(TimelineGraphBand.readout(forNodeAt: ref,
+                                                 movedTo: .init(frame: 14, value: 1.25),
+                                                 in: channels),
+                       "1.25", "A diagonal drag *is* being dragged up or down, among other things")
+        XCTAssertNil(TimelineGraphBand.readout(forNodeAt: node(7),
+                                               movedTo: .init(frame: 7, value: 1.25),
+                                               in: channels),
+                     "A frame the channel does not key names no node and no value")
+    }
+
+    /// **Above the node, because the hand occludes downward from the fingertip** — and beside it
+    /// where there is no room above, never below, which is the one placement the ask rules out.
+    func testTheReadoutSitsAboveTheNodeAndBesideItWhenThereIsNoRoom() {
+        let size = CGSize(width: 40, height: 14)
+        let window: ClosedRange<CGFloat> = 0...1000
+
+        let middle = TimelineGraphBand.readoutOrigin(node: CGPoint(x: 300, y: 60), size: size,
+                                                     bandHeight: band, visibleX: window)
+        XCTAssertEqual(middle.x, 280, "Centred on the node's column")
+        XCTAssertEqual(middle.y, 60 - TimelineGraphBand.readoutGap - size.height)
+
+        let high = TimelineGraphBand.readoutOrigin(node: CGPoint(x: 300, y: 4), size: size,
+                                                   bandHeight: band, visibleX: window)
+        XCTAssertEqual(high.x, 300 + TimelineGraphBand.readoutGap, "Beside it, to the right")
+        XCTAssertGreaterThanOrEqual(high.y, 0)
+        XCTAssertLessThan(high.y, 4 + size.height, """
+            Beside, not below: a node at the top of its axis is held by a finger whose hand covers \
+            everything under it, which is the placement (38)(d) exists to avoid.
+            """)
+    }
+
+    /// **The readout is clamped into the *visible window*, not into the band's bounds** — those are
+    /// as wide as the whole laid-out track, so clamping to them would leave a number off screen for
+    /// any node the artist has scrolled to the edge of the viewport.
+    func testTheReadoutStaysInsideTheVisibleWindow() {
+        let size = CGSize(width: 40, height: 14)
+        let window: ClosedRange<CGFloat> = 600...1000
+
+        let offLeft = TimelineGraphBand.readoutOrigin(node: CGPoint(x: 605, y: 60), size: size,
+                                                      bandHeight: band, visibleX: window)
+        XCTAssertEqual(offLeft.x, 600, "A node at the left edge keeps its whole label on screen")
+
+        let offRight = TimelineGraphBand.readoutOrigin(node: CGPoint(x: 998, y: 60), size: size,
+                                                       bandHeight: band, visibleX: window)
+        XCTAssertEqual(offRight.x, 960, "…and so does one at the right")
+
+        // Narrower than the label: the left edge is the only answer that keeps any of it readable.
+        let cramped = TimelineGraphBand.readoutOrigin(node: CGPoint(x: 610, y: 60), size: size,
+                                                      bandHeight: band, visibleX: 600...620)
+        XCTAssertEqual(cramped.x, 600)
+    }
+
     /// **The band's gesture state rides the accessibility *label*, and its shape is constant** — so a
     /// UI test can assert the absence of a focus as directly as its presence, which is what the
     /// (38)(b) change most needs pinned: a single tap that no longer deletes has no other visible
     /// effect than this.
-    func testTheGestureStateNamesTheFocusedNodeAndSaysWhenThereIsNone() {
-        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: nil), "focus:none")
-        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: node(6)),
-                       "focus:brightnessContrast.brightness@6")
+    func testTheGestureStateSaysBothHalvesEvenWhenBothAreEmpty() {
+        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
+                       "focus:none|read:none")
+        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: node(6), readout: "1.25"),
+                       "focus:brightnessContrast.brightness@6|read:1.25")
     }
 
 }

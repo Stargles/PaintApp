@@ -470,7 +470,8 @@ final class GraphEditorGestureUITests: PaintUITestCase {
             predicate: NSPredicate(format: "label == %@",
                                    TimelineGraphBand.encodeGesture(
                                        focus: .init(parameterID: "brightnessContrast.brightness",
-                                                    frame: 3))),
+                                                    frame: 3),
+                                       readout: nil)),
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, """
             A single tap on a node used to delete it. It focuses it now — which is what puts its two \
@@ -588,7 +589,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let band = app.otherElements["timeline.graphBand"]
         XCTAssertTrue(band.waitForExistence(timeout: 5))
         XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6")
-        XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil),
+        XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil, readout: nil),
                        "PREMISE: a band opens with nothing focused, so every node's first tap focuses")
 
         let ppf = TimelineKeyMarkers.basePixelsPerFrame
@@ -603,7 +604,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         let node = TimelineGraphBand.KeyRef(parameterID: "brightnessContrast.brightness", frame: 0)
         let focused = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == %@",
-                                   TimelineGraphBand.encodeGesture(focus: node)),
+                                   TimelineGraphBand.encodeGesture(focus: node, readout: nil)),
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, """
             A single tap on a node used to delete it and now focuses it, which is what draws its \
@@ -642,6 +643,23 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertFalse(app.buttons["timeline.menu.Reset Curve"].exists,
                        "Reset Curve is gone, because the node is back on its derived tangents")
     }
+
+    // **There is deliberately no UI test for (38)(d)'s readout, and the attempt is worth recording.**
+    //
+    // The readout exists only while a finger is down. XCUITest has no asynchronous drag, so an
+    // accessibility read taken after `press(…thenDragTo:…)` returns is a read of the state after the
+    // lift, when the number is already gone. The obvious way round — build an `XCTNSPredicateExpectation`
+    // *before* the drag, on the theory that it evaluates from the moment it is created, and collect it
+    // afterwards — was written and MEASURED on 2026-09-03: it **times out** on the affirmative case.
+    //
+    // That is the important half. The negative case ("a sideways drag shows no number") was written as
+    // an *inverted* expectation over the same predicate, and it passed — but it would have passed
+    // whatever the app did, because the predicate is never evaluated while the number is on screen. A
+    // green test measuring nothing, in the fifth costume CLAUDE.md's catalogue lists. Both were deleted
+    // rather than left in.
+    //
+    // The rule is `TimelineGraphBand.readout(forNodeAt:movedTo:in:)`, and the fast tier pins all of it:
+    // the string, the gate, and where the label sits.
 
 }
 
