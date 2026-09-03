@@ -55,7 +55,16 @@ app, and whoever notices that should come back and say so rather than assuming i
   same presence-is-the-discriminant recipe the grade and the flat colour already use. Move on such a
   layer raises the canvas frame as a box, previews by writing the pose the render path actually reads,
   and commits through `commitContainerPose`, which is `KeyframeControl.write`'s same five arms in the
-  container's currency. **`LayerFolder.transform` still has no entry** — the model and the render treat
+  container's currency. **That sentence was written before the feature could actually be used, and the
+  owner found it on the device**: *"i selected the transform mode, now how do i use it? there is nothing
+  in the graph editor."* Two defects, both fixed, both in KEYFRAMES §4.4's fourth finding — the options
+  panel drew `EmptyView()` for the mode so nothing said Move was the verb (§11.7's channel row is the
+  only other affordance and it cannot appear until a Move has already keyed the channel: circular), and
+  `beginContainerPoseMove` demanded a cel it had no use for, so the box was silently refused past the end
+  of the block `addValueLayer` stamps at creation. There is a **Move row** in the panel now, and the cel
+  gate is gone. The half of that cause which is *not* fixed is in [BUGS.md](BUGS.md): the other two value
+  layer modes really do read the cel, so a flat colour or a grade still stops contributing out there.
+  **`LayerFolder.transform` still has no entry** — the model and the render treat
   it identically (§2.21), so it is a row in the folder options menu and a box, not new machinery.
   **Animation groups can be named**: the channel list draws each group's tag colour, which §3.4
   specified and nothing had ever drawn, and a long press on the header renames it. **Membership editing

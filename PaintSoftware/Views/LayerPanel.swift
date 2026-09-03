@@ -337,11 +337,22 @@ struct LayerOptionsPanel: View {
             // edit. Effect mode *is* `layerEffect != nil`; everything else is flat colour, including
             // the layer that has not been given a colour yet, which is what the swatch is for.
             if canvasManager.layers[index].layerTransform != nil {
-                // Transform mode has no row of its own: the pose is authored with the Move box on the
-                // canvas, not with a slider, and a row that opened an empty settings sheet would be a
-                // control that does nothing. The swatch is absent for `valueColorRow`'s own reason —
-                // in this mode the fill is inert storage the render never reads.
-                EmptyView()
+                // Transform mode's row **raises the box itself**, rather than describing where to find
+                // it. It rendered `EmptyView()` until the owner installed a build and asked *"i
+                // selected the transform mode, now how do i use it? there is nothing in the graph
+                // editor"* — and they were right, because the feature's entry was closed on itself.
+                // Move was already the verb (`CanvasManager.beginMove` routes a posing layer to
+                // `beginContainerPoseMove`), but nothing on screen said so: the only affordance that
+                // did was `revealPoseChannel`, which lives on a channel-list row, and that row exists
+                // only once the channel has two differing keys — which only a Move can put there. The
+                // artist had to already know the answer to be shown it.
+                //
+                // A row rather than a hint line, because a sentence pointing at a button somewhere else
+                // is a worse control than the button. The swatch stays absent for `valueColorRow`'s own
+                // reason — in this mode the fill is inert storage the render never reads.
+                transformMoveRow {
+                    leavingMaskEdit { canvasManager.beginContainerPoseMove() }
+                }
             } else if let effect = canvasManager.layers[index].layerEffect {
                 // Effect mode: the grade's knobs, behind a row rather than inline. Levels alone is
                 // five sliders and Gradient Map is a list, which is the same argument the Mask row
@@ -459,9 +470,16 @@ struct LayerOptionsPanel: View {
                     }
                 }
             }
-            effectMenuSections(current: effect, identifierPrefix: "layerOptions.blendMode") { picked in
-                canvasManager.setLayerEffect(layerIndex: index, to: picked)
-            }
+            // **Transform sits above the grade catalogue, not below it, and that ordering is
+            // load-bearing rather than cosmetic.** The three kinds of answer this row gives are two
+            // single picks and one list of thirteen; putting the list last is what keeps the other two
+            // within reach. Below it, Transform was the ~35th item in the menu — past the point where
+            // an accessibility client can see one at all (BUGS.md, *"The effects menu only exposes its
+            // first few items to XCUITest"*, which is a scrollable-menu limit rather than an app
+            // defect). An artist scrolling by hand could still reach it, so this was never a hard
+            // wall for them; what it *was* is a wall for every UI test, so the one entry point to a
+            // whole feature could not be driven by anything but a human. That is the same blindness
+            // that let the feature ship unusable, one layer further out.
             Section {
                 Button {
                     // Toggling, like every other entry in this list: picking the mode the layer is
@@ -479,6 +497,9 @@ struct LayerOptionsPanel: View {
                     }
                 }
                 .accessibilityIdentifier("layerOptions.blendMode.transform")
+            }
+            effectMenuSections(current: effect, identifierPrefix: "layerOptions.blendMode") { picked in
+                canvasManager.setLayerEffect(layerIndex: index, to: picked)
             }
         } label: {
             HStack(spacing: 8) {
@@ -709,6 +730,42 @@ private func effectSettingsRow(title: String, identifier: String,
     .buttonStyle(.plain)
     .accessibilityIdentifier(identifier)
     .accessibilityValue(title)
+}
+
+/// **Transform mode's row: the one that raises the Move box** — the entry point §4.4 always assumed
+/// and never drew.
+///
+/// The toolbar's own move glyph, deliberately, so the two read as one control rather than as two
+/// features that happen to overlap: this row and that button do the identical thing on a
+/// transformation layer (`CanvasManager.beginMove` routes straight to `beginContainerPoseMove`), and
+/// the artist who learns either has learned the other.
+///
+/// **The caption names the scope, not the gesture.** "Drag the box" is what the box itself already
+/// says once it is up; what the artist cannot see from the canvas is that this layer moves *what is
+/// beneath it* rather than anything of its own — a transformation layer holds no ink, so a box with
+/// nothing visibly inside it is otherwise a puzzle.
+///
+/// File-level beside `effectSettingsRow` and `maskRow`, so a folder's pose (§2.21) can be given the
+/// same row without a second spelling of it the day it earns one.
+private func transformMoveRow(onMove: @escaping () -> Void) -> some View {
+    Button(action: onMove) {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.up.and.down.and.arrow.left.and.right").frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Move").foregroundColor(.white)
+                Text("Pose everything beneath this layer")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("layerOptions.transformMove")
 }
 
 /// The picker's list with "Clip to Below" dropped, for a compositor op.

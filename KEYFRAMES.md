@@ -789,6 +789,61 @@ returns true and nothing else changes"*; it returns true, and one other thing ch
 `revealPoseChannel` had routed every channel through `beginVectorChannelMove`, which lifts geometry a
 container has none of.
 
+#### A fourth finding, from the owner's own iPad: the entry was closed on itself
+
+The three above are holes in the machinery. This one is the machinery being complete and **unreachable**,
+and it is the more expensive kind because every test we had passed over it. The owner installed the build
+and asked *"i selected the transform mode, now how do i use it? there is nothing in the graph editor. Im
+not even sure if the feature is implemented fully."*
+
+**Move was already the verb and nothing on screen said so.** `CanvasManager.beginMove` routes a posing
+layer to `beginContainerPoseMove` — so the toolbar button worked — but `LayerPanel` rendered
+**`EmptyView()`** for transform mode, with a code comment saying the pose *"is authored with the Move box
+on the canvas"*: a sentence written for us and never shown to the artist. The one affordance that *did*
+say so was §11.7's channel row, and that row cannot exist yet: `listedAnimationChannelIDs` lists a pose
+channel only when two of its keys hold different poses, and only a Move can put those there. **You had to
+use the feature to be told how to use it.** The fix is one row in the value layer's options —
+`LayerPanel.transformMoveRow`, the toolbar's own move glyph, calling `beginContainerPoseMove` directly.
+
+**And underneath it there was a genuine silent refusal, which is the reason the row alone would not have
+been enough.** `beginContainerPoseMove` required `activeCelIndex(inLayer:atFrame:)` — but `addValueLayer`
+stamps one block of `max(sceneFrameCount, 1)` frames **at creation** and never extends it, while
+`sceneFrameCount` goes on ratcheting up as blocks are added elsewhere. Add the transformation layer to a
+fresh 12-frame document, draw out to frame 30, park the playhead at 20, and the layer had no block there:
+`beginContainerPoseMove` returned false, `beginMove` discarded the result, and there was no float, no
+highlight and no `CanvasNotice`. **The gate is deleted rather than repaired, because there was nothing to
+refuse.** A container pose lives on `Layer.transform` in absolute document frames and
+`RenderTree.renderNodes` composes it with *no cel test at all*, so the layer poses everything beneath it
+at every frame; the box was being refused at frames the renderer was posing at. Extending the cel
+(`ensureCelAtCurrentFrame`) would have minted a stray one-frame block in the timeline — and moved
+`contentEndFrame` with it — for a payload that is not cel-scoped; a notice would have announced a refusal
+with nothing behind it. `FloatingPiece.sourceCelID`/`targetCelID` are optional now and nil for a
+`.containerPose` box, which is the honest statement of the same fact.
+
+**What the deeper version of that would be, and why it was not taken here.** The cel gate is spurious only
+for transform mode. `leafSnapshots` gates *every* leaf on `activeCelIndex`, so a value layer in the other
+two modes — flat colour, and §4.4's grade — genuinely stops contributing past the end of the block it was
+created with. That is filed in BUGS.md rather than fixed here: it is a rendering change touching every
+adjustment layer in every document, and it wants its own pass.
+
+**A third thing, found only by trying to drive it.** The Transform entry sat at the bottom of its menu,
+below the thirteen-item grade catalogue — which is **past the point where an accessibility client can see a
+menu item at all** (BUGS.md's *"The effects menu only exposes its first few items to XCUITest"*, a
+scrollable-menu limit rather than an app defect). An artist scrolling by hand could still reach it, so it
+was never a wall for them; it was a wall for every UI test, which means **the one entry point to this whole
+feature could not be driven by anything but a human**. That is the same blindness that let the feature ship
+unusable, one layer further out. The Transform section is above the catalogue now: two of the row's three
+answers are single picks and the third is a list of thirteen, so putting the list last is what keeps the
+other two in reach.
+
+**The acceptance bar this changes.** Every test in the repo reached the model and asserted stored values,
+and a feature can be perfect at that level and unusable. `LayerPanelControlsUITests.
+testTransformModeOffersAMoveRowThatRaisesTheBox` asserts what is on the screen — the row exists, tapping it
+raises the box, and the app's own two reports of a live Move agree — so it goes red if the affordance
+disappears while the model stays correct. `TransformLayerEntryLogicTests`' cold-start section starts from a
+document in the state the app actually creates, rather than from a fixture that has already been told the
+answer.
+
 #### What the model pass found
 
 **Six findings, and the construction itself survived exactly — accumulate down each container, emit per

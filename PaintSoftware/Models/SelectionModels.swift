@@ -180,9 +180,23 @@ enum FloatingPieceKind {
 struct FloatingPiece {
     var kind: FloatingPieceKind
     var sourceLayerID: UUID
-    var sourceCelID: UUID
+    /// **Nil for a `.containerPose` box, which genuinely has no cel** — and that is a statement about
+    /// where the payload lives rather than a convenience.
+    ///
+    /// A container pose is stored on `Layer.transform`, keyed in *absolute document frames*, and
+    /// `RenderTree.renderNodes` reads it with no cel test whatsoever — so the pose is in force at
+    /// every frame of the document, including frames no block of this layer covers. The two pixel
+    /// kinds are the opposite: they lift out of one cel and bake back into one, so for them this is
+    /// always present.
+    ///
+    /// It used to be non-optional, and `beginContainerPoseMove` therefore demanded a cel it had no
+    /// use for. That is the whole of the silent refusal the owner hit: create the transformation
+    /// layer early, draw out past the end of the block `addValueLayer` stamped at creation, park the
+    /// playhead out there, and Move did nothing and said nothing — at a frame the renderer was posing
+    /// perfectly well. A nil here is the honest answer, and every reader below already copes with it.
+    var sourceCelID: UUID?
     var targetLayerID: UUID
-    var targetCelID: UUID
+    var targetCelID: UUID?
 
     /// The extracted content, cropped to its own bounding box: `pieceImage`'s bounds map directly
     /// onto `baseSize` centered at the origin, before `transform` is applied.
@@ -749,24 +763,42 @@ extension CanvasManager {
     /// always nil at a lift. `containerRestPose` carries the pose instead and each nudge composes its
     /// delta onto it, which gives the same answer with none of that reinterpretation.
     ///
+    /// **It does not require a cel at the playhead, and that is the correction rather than a
+    /// looseness.** A container pose lives on `Layer.transform` in absolute document frames, and
+    /// `RenderTree.renderNodes` composes it with no cel test at all — so the layer poses everything
+    /// beneath it at *every* frame, and there is no frame at which raising the box would be a lie.
+    /// The gate that used to be here asked `activeCelIndex` purely to fill in `FloatingPiece`'s cel
+    /// ids, which for this kind are read by nothing: `commitFloatingPieceIfNeeded` returns to
+    /// `commitContainerFloat` before it looks up a cel, and `CanvasView`'s two readers are gated on
+    /// `.move`. What it cost was the owner's report — `addValueLayer` stamps one block of
+    /// `max(sceneFrameCount, 1)` frames *at creation* and never extends it, so a transformation layer
+    /// made early and used late fell off the end of its own block and Move went silent. Neither of the
+    /// two obvious repairs was right: extending the cel would mint a stray block in the timeline (and
+    /// move `contentEndFrame` with it) for a payload that is not cel-scoped, and a `CanvasNotice` would
+    /// announce a refusal with nothing behind it. There is nothing wrong, so nothing is refused.
+    ///
     /// - Returns: whether a box came up. False when the current layer is not posing, or before the
     ///   document has a canvas size to measure the frame against.
     @discardableResult
     func beginContainerPoseMove() -> Bool {
         commitAllInteractiveState()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
-              let pose = layers[currentLayerIndex].layerTransform,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
+              let pose = layers[currentLayerIndex].layerTransform
         else { return false }
 
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
         let lift = FloatingTransform(position: CGPoint(x: canvasRect.midX, y: canvasRect.midY),
                                      scaleX: 1, scaleY: 1, rotation: 0)
         let layerID = layers[currentLayerIndex].id
+        // Recorded when there is one, so `handleActiveContextChanged` keeps answering "still targeted"
+        // exactly as it did for a box raised inside a block — a scrub within one cel leaves the box up,
+        // anything else commits it. Nil out past the block's end, where there is no cel to name.
+        let celID = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
+            .map { layers[currentLayerIndex].cels[$0].id }
         floatingPiece = FloatingPiece(
             kind: .containerPose,
-            sourceLayerID: layerID, sourceCelID: layers[currentLayerIndex].cels[celIndex].id,
-            targetLayerID: layerID, targetCelID: layers[currentLayerIndex].cels[celIndex].id,
+            sourceLayerID: layerID, sourceCelID: celID,
+            targetLayerID: layerID, targetCelID: celID,
             // A clear pixel, because the box has no bitmap and the overlay wants one. The content it
             // appears to hold is the real composite underneath, moving through the render path.
             pieceImage: Self.clearPixel, baseSize: canvasRect.size,

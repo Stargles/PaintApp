@@ -579,4 +579,191 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertFalse(manager.revealPoseChannel(.container))
         XCTAssertNil(manager.floatingPiece)
     }
+
+    // MARK: - Cold start: can an artist who has read nothing reach this feature?
+    //
+    // **Every other test in this file starts from a fixture that has already been told the answer.**
+    // `makeStack` and `makeValueLayer` both set `sceneFrameCount = 12` *before* creating the layer, so
+    // the block `addValueLayer` stamps covers every frame those tests ever visit, and
+    // `enterTransformMode` hands the layer its pose by calling the model directly. That is the right
+    // shape for pinning what the pose *does* — and it is exactly why nothing here caught the feature
+    // being unreachable. The owner installed a build and asked *"i selected the transform mode, now
+    // how do i use it?"*, and the answer was that they could not: the graph editor's channel row is
+    // the only affordance the app drew, `listedAnimationChannelIDs` lists a channel only once it has
+    // two differing keys, and only a Move can put those there. The tests below start from a document
+    // in the state the app actually creates and walk the route an artist walks.
+
+    /// **A brand-new document, nothing arranged by hand: add the layer, pick Transform, get a box.**
+    ///
+    /// `sceneFrameCount` is left at its shipped default rather than being set for the fixture's
+    /// convenience, and the layer is created through `addValueLayer` and flipped through
+    /// `setLayerTransform` — which are the two calls the panel's own controls make
+    /// (`LayerPanel.valueBlendModeRow`), in the order the panel makes them.
+    ///
+    /// The box is raised through **`beginMove`**, not `beginContainerPoseMove`, because that is what
+    /// both artist-facing controls reach: the toolbar's move button goes through `TopToolbar.
+    /// toggleMove`, and `LayerPanel.transformMoveRow` calls the router's destination directly. A test
+    /// written against the inner call would pass with the router unhooked.
+    func testAColdDocumentReachesTheMoveBoxWithNothingArrangedByHand() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "floor")
+        manager.addValueLayer()
+        let mover = manager.layers.count - 1
+        manager.currentLayerIndex = mover
+
+        XCTAssertNil(manager.layers[mover].layerTransform,
+                     "The premise: a value layer arrives as flat colour, not as a transformation layer")
+        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+        XCTAssertNotNil(manager.layers[mover].layerTransform,
+                        "Picking Transform is what makes it one — through the accessor the render reads")
+
+        manager.beginMove()
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose,
+                       "Move is the verb for a transformation layer, and it must work on the very "
+                       + "first attempt from a document nobody has arranged")
+        XCTAssertEqual(manager.floatingPiece?.targetLayerID, manager.layers[mover].id)
+    }
+
+    /// **The owner's report, reproduced: the layer is made early and used late.**
+    ///
+    /// `addValueLayer` stamps one block of `max(sceneFrameCount, 1)` frames **at creation** and never
+    /// extends it, while `sceneFrameCount` goes on ratcheting up as blocks are added elsewhere
+    /// (`addCel`). So a transformation layer added to a fresh 12-frame document, on a scene that later
+    /// reaches frame 30, has no block of its own from frame 12 onward — and `beginContainerPoseMove`
+    /// used to ask `activeCelIndex` for one, return false, and be discarded by `beginMove` without a
+    /// float, a highlight or a `CanvasNotice`. Total silence, at a frame the artist has every reason
+    /// to expect the layer to work at.
+    ///
+    /// **The two operands are the refusal and the render, and that is what makes this a bug rather
+    /// than a policy.** `activeCelIndex` is asserted nil first, so the test is standing on the
+    /// condition that used to close the gate; the box then has to come up anyway, because there is
+    /// nothing at that frame for the app to be refusing.
+    func testTheMoveBoxComesUpPastTheEndOfTheBlockTheLayerWasCreatedWith() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "floor")
+        manager.addValueLayer()
+        let mover = manager.layers.count - 1
+        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+
+        // The artist draws out to frame 30 on the drawing layer — which is what raises the scene's
+        // length, and the one thing that never touches the transformation layer's own block.
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 30
+        XCTAssertNotNil(manager.ensureCelAtCurrentFrame(layerIndex: 0),
+                        "The premise: drawing on an empty frame mints a block there")
+        XCTAssertGreaterThan(manager.sceneFrameCount, 20, "…and the scene grew to hold it")
+
+        manager.currentLayerIndex = mover
+        manager.currentFrame = 20
+        XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20),
+                     "The premise this whole test stands on: the transformation layer has no block at "
+                     + "frame 20, because it was created when the scene was 12 frames long")
+
+        manager.beginMove()
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose, """
+            Move went silent at a frame the transformation layer is perfectly live at. The cel is \
+            incidental to a container pose — it is stored on `Layer.transform` in absolute document \
+            frames and `RenderTree.renderNodes` composes it with no cel test at all — so a gate on \
+            `activeCelIndex` refuses at frames where the feature demonstrably works.
+            """)
+        XCTAssertNil(manager.floatingPiece?.targetCelID,
+                     "…and it says so, rather than naming a cel it does not have")
+    }
+
+    /// **The refusal and the render, on one document, at one frame** — the pairing the test above
+    /// could only half-state, because an unmoved container maps to nil and so poses nothing to
+    /// measure.
+    ///
+    /// Here the artist has *already* moved the layer once, so `layerPoses(atFrame:)` reports the leaf
+    /// beneath it being posed at frame 20. A build that refuses the box at that same frame is
+    /// refusing to edit a transform it is simultaneously drawing with — which is the sharpest form of
+    /// the defect, and the one that would have looked most like the app being broken.
+    func testTheFrameThatRefusedTheBoxIsAFrameTheRenderIsPosingAt() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "floor")
+        manager.addValueLayer()
+        let mover = manager.layers.count - 1
+        manager.currentLayerIndex = mover
+        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+        XCTAssertTrue(moveBox(manager, by: CGVector(dx: 40, dy: 0)),
+                      "The first Move, made at frame 0 where the block does cover the playhead")
+
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 30
+        manager.ensureCelAtCurrentFrame(layerIndex: 0)
+        manager.currentLayerIndex = mover
+        manager.currentFrame = 20
+
+        XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The premise, again")
+        XCTAssertNotNil(manager.layerPoses(atFrame: 20)[0], """
+            The render is posing the layer beneath the transformation layer at frame 20 — no cel of \
+            the transformation layer's own is consulted anywhere on that path.
+            """)
+
+        manager.beginMove()
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose,
+                       "So the box has to come up at the frame the pose is in force at")
+    }
+
+    /// **The graph editor's row, at the same frame** — §11.7's affordance is the one the owner went
+    /// looking for, and it went through the identical gate.
+    ///
+    /// It is reachable only *after* a Move has keyed the channel (`listedAnimationChannelIDs` needs
+    /// two differing keys), which is the circularity this pass exists to break — but once a row is
+    /// there, clicking it must not be refused at a frame the row itself is drawn across.
+    func testTheChannelListRowAlsoRaisesTheBoxPastTheBlocksEnd() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "floor")
+        manager.addValueLayer()
+        let mover = manager.layers.count - 1
+        manager.currentLayerIndex = mover
+        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 30
+        manager.ensureCelAtCurrentFrame(layerIndex: 0)
+        manager.currentLayerIndex = mover
+        manager.currentFrame = 20
+        XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The premise, again")
+
+        XCTAssertTrue(manager.revealPoseChannel(.container),
+                      "A container row must raise its box wherever the channel is drawn")
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose)
+    }
+
+    /// **And the box still commits from out there**, which is the half a reachability test most
+    /// easily forgets: raising a float that then writes nothing would be a worse bug than the silence
+    /// it replaced, because the artist would watch their drag evaporate.
+    ///
+    /// The pose is asserted through `layerPoses(atFrame:)` — what the render actually maps the leaf
+    /// beneath through — rather than through `Layer.transform`, for this file's founding reason.
+    func testAMoveMadePastTheBlocksEndCommitsAndPosesTheLeavesBeneath() {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addVectorLayer(name: "floor")
+        manager.addValueLayer()
+        let mover = manager.layers.count - 1
+        manager.setLayerTransform(layerIndex: mover, to: manager.restingContainerPose)
+
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 30
+        manager.ensureCelAtCurrentFrame(layerIndex: 0)
+        manager.currentLayerIndex = mover
+        manager.currentFrame = 20
+        XCTAssertNil(manager.activeCelIndex(inLayer: mover, atFrame: 20), "The premise, again")
+        XCTAssertNil(manager.layerPoses(atFrame: 20)[0], "…and nothing is posed yet")
+
+        XCTAssertTrue(moveBox(manager, by: CGVector(dx: 40, dy: 0)),
+                      "The whole gesture — lift, drag, let go — from a frame with no block")
+
+        let posed = manager.layerPoses(atFrame: 20)[0]
+        XCTAssertNotNil(posed, "The commit has to reach the leaf beneath")
+        XCTAssertEqual(posed?.tx ?? 0, 40, accuracy: 0.5,
+                       "…carrying the drag, in canvas points")
+        XCTAssertNil(manager.floatingPiece, "…and the box is down again")
+    }
 }

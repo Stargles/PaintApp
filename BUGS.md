@@ -3,6 +3,70 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Three more silent refusals, swept for after the transformation layer's (2026-09-03)
+
+The transform-layer entry defect (KEYFRAMES §4.4) was a control that did nothing and said nothing. These
+came out of sweeping `Views/` and `Models/` for the same shape — a `@discardableResult` Bool dropped by
+its caller, or a menu row that is always enabled over an operation that can decline. **Reported, not
+fixed**; ranked by how likely an artist is to hit one.
+
+1. **Flip Horizontal / Flip Vertical do nothing on a vector layer, and clear the undo stack anyway.**
+   `ActionsMenu.swift:76,82` → `CanvasManager+Document.swift:833`. Both rows are always enabled (unlike
+   Export / Resize / Bake beside them); `flipCanvas` mirrors `cel.raster`, `cel.fillImage` and
+   `cel.bakedImage` and — by its own comment at `:849-852` — *"is not mirrored by this loop at all"* for
+   vector content. A new document's first layer is `.vector` (`CanvasSizePickerView.swift:84`), so this is
+   the default case. `history.removeAll()` at `:857` then runs unconditionally, so the artist loses their
+   whole undo stack and cannot even undo the nothing that happened. **The worst of the three**:
+   destructive, on the default kind, with no notice. `resizeRefused` is exactly the notice this wants.
+2. **Merge Down skips the confirmation the pinch path runs, and can refuse in silence.**
+   `LayerPanel.swift:398-403`. The row shows for every layer that is not at the bottom. It drops
+   `mergeLayers`' `Bool`, which is false when either layer has no cel at the playhead — so on a frame the
+   lower layer has a gap in, the row does nothing and says nothing. Worse, the pinch-to-merge path
+   (`LayerStackListView.swift:433`) asks `mergeLossKind` first and routes an unbakeable pair through
+   `pendingMergeConfirmation`; **this row does not**. `mergeLossKind` returns `.unbakeableLayer` when
+   `bottom.layerTransform != nil || top.layerTransform != nil`, so **Merge Down on a transformation layer
+   deletes it and bakes nothing, unprompted** — one row below the Move row this pass just added.
+3. **A pose-channel row in the graph editor can close the list and raise no box.**
+   `AnimationTimeline.swift:842-846` sets `isGraphChannelListOpen = false` and then discards
+   `revealPoseChannel`'s result. The row's `.disabled` predicate tests `PoseChannelID.raisesMoveBox`, which
+   is a property of the channel *kind*, not of the playhead — so at a frame whose ink is on another cel the
+   popup closes and nothing comes up. **The closest sibling of the defect this pass fixed**: same row, same
+   feature, opposite direction.
+
+Also noted, weaker: `ActionsMenu.swift:407` drops `insertImage`'s result while its video sibling three
+lines away reports a failure through the same `notice` slot; and `beginVectorLassoDuplicate`
+(`CanvasManager+LassoMove.swift:512`) does not run the `refusesToDamageAnAnimation` check that both Move
+lifts run, so the 2026-09-03 group ruling has a door it does not cover.
+
+## A value layer stops contributing past the end of the block it was created with (2026-09-03)
+
+**Reproduction**, from a new document:
+
+1. Add a value layer — flat colour, or flip it to a grade from the Blend Mode row. It is born with one
+   cel of `max(sceneFrameCount, 1)` = **12** frames.
+2. On the drawing layer, scrub to frame 30 and draw. That mints a block there and ratchets
+   `sceneFrameCount` to 31. Nothing extends the value layer's block.
+3. Scrub back and forth across frame 12. **From frame 12 on, the flat colour is simply not there** — and
+   an adjustment layer stops grading, so the art beneath goes ungraded with no indication why.
+
+**`addValueLayer` stamps that cel at creation and never extends it** (`CanvasManager.swift:1416`), while
+`sceneFrameCount` only ever ratchets upward. `leafSnapshots` gates every leaf on
+`activeCelIndex(inLayer:atFrame:)` (`Engine/RenderRequest.swift`), so past the end of that first block the
+leaf contributes nothing at all.
+
+**Found while fixing the transformation layer's entry (KEYFRAMES §4.4), which had the same cause through a
+different door and is fixed.** Transform mode was the one value-layer mode the cel could be dropped from
+outright — `RenderTree.renderNodes` composes a container pose with no cel test whatsoever, so the gate in
+`beginContainerPoseMove` was refusing at frames the renderer was posing at, and deleting it changed no
+rendering. The other two modes genuinely read the cel, so the same trick does not work: this wants either
+a value layer's cel growing with `sceneFrameCount`, or `leafSnapshots` treating a `.value` leaf as
+cel-independent the way the pose path already does.
+
+**Not fixed with the entry pass, deliberately** — it is a rendering change that touches every adjustment
+layer in every existing document (and `contentEndFrame`, hence playback bounds, if the cel is the thing
+that grows), and it wants its own pass with its own before/after images rather than riding along inside a
+UI fix.
+
 ## Both families of the stage-4 test reading are closed; two fixtures and a missing premise are not
 
 **The ~230 tests RENDER stage 4 added have been read, and the reading found two families.** Both are

@@ -696,6 +696,116 @@ final class LayerPanelControlsUITests: PaintUITestCase {
                        "…and only a value layer's: setLayerFill refuses every other kind anyway")
     }
 
+    /// **§4.4's transformation layer, reachable at last — and this test exists because it was not.**
+    ///
+    /// The owner installed a build and asked *"i selected the transform mode, now how do i use it?
+    /// there is nothing in the graph editor. Im not even sure if the feature is implemented fully."*
+    /// It was implemented and it was unusable: the panel rendered `EmptyView()` for the mode, the
+    /// graph editor's channel row appears only once a channel has two differing keys, and only a Move
+    /// can put those there — so the one affordance that told the artist Move was the verb could not
+    /// exist until they had already guessed it. Every test we had reached the model directly and
+    /// asserted stored values, so all of them passed over a feature with no entry.
+    ///
+    /// **This one asserts what is on the screen and what it does when pressed**, in that order, which
+    /// is the property none of the logic tests can have: the row must exist, tapping it must raise the
+    /// Move box, and the box must be up in the sense the *app* means — `DrawingView` shows
+    /// `MoveTransformBottomBar` off `isAnyPieceFloating`, and the toolbar's own move glyph lights off
+    /// the float too, so those two agreeing is the app reporting a live Move rather than a view
+    /// rendering hopefully. It goes red if the row disappears while the model stays perfectly correct,
+    /// which is exactly the state that shipped.
+    func testTransformModeOffersAMoveRowThatPosesTheInkBeneathIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        /// The horizontal centre of gravity of whatever ink is on the canvas' middle row, as a
+        /// fraction of `canvas.host`'s width — **one screenshot, every column**. `rgbaPixel` takes a
+        /// capture per sample, which both costs sixty of them and steps clean over a hairline stroke;
+        /// the first draft of this test did exactly that and reported a blank canvas.
+        func inkColumn() -> Double? {
+            guard let cg = canvas.screenshot().image.cgImage else { return nil }
+            let w = cg.width, h = cg.height, bpr = w * 4
+            var buf = [UInt8](repeating: 0, count: h * bpr)
+            guard let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: bpr, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return nil }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            var sum = 0.0, weight = 0.0
+            for x in 0..<w {
+                let o = (h / 2) * bpr + x * 4
+                if Int(buf[o]) + Int(buf[o + 1]) + Int(buf[o + 2]) < 500 { sum += Double(x); weight += 1 }
+            }
+            return weight > 0 ? (sum / weight) / Double(w) : nil
+        }
+
+        // Ink on the drawing layer the document is born with, left of centre — the thing the
+        // transformation layer is going to move. Seven passes so it is a band rather than a hairline.
+        for i in 0..<7 {
+            let x = 0.30 + Double(i) * 0.006
+            drawLine(on: canvas, from: CGVector(dx: x, dy: 0.40), to: CGVector(dx: x, dy: 0.60))
+        }
+        let inkBefore = inkColumn()
+        XCTAssertNotNil(inkBefore, "Sanity: the stroke landed")
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()   // already selected after the add: opens its options
+
+        let moveRow = app.buttons["layerOptions.transformMove"]
+        XCTAssertFalse(moveRow.exists,
+                       "A flat-colour value layer has nothing to move — the row belongs to the mode")
+
+        // The mode picker's third arm, from the merged Blend Mode row (§2.6).
+        let modeButton = app.buttons["layerOptions.blendModeButton"]
+        XCTAssertTrue(modeButton.waitForExistence(timeout: 5))
+        modeButton.tap()
+        let transformItem = app.buttons["layerOptions.blendMode.transform"]
+        XCTAssertTrue(transformItem.waitForExistence(timeout: 5), """
+            The Transform entry is not visible to an accessibility client. It used to sit below the             thirteen-item grade catalogue, past the point where a scrollable menu exposes its items             at all (BUGS.md) — which made the one entry point to this whole feature undrivable by             any test. It is above the catalogue now; this assertion is what keeps it there.
+            """)
+        transformItem.tap()
+
+        XCTAssertEqual(modeButton.value as? String, "transform",
+                       "The row reports which of the three kinds of answer is live — the slug, "
+                       + "beside a grade's `effectMenuSlug` and a blend's raw value")
+        XCTAssertTrue(moveRow.waitForExistence(timeout: 5), """
+            Transform mode offers no way to use it. This is the defect the owner reported: the pose is             authored with the Move box and nothing on screen said so, while the graph editor's channel             row — the only other affordance — cannot appear until a Move has already keyed the channel.
+            """)
+        XCTAssertFalse(app.buttons["layerOptions.valueColorButton"].exists,
+                       "…and the flat colour's swatch is gone, as it is in effect mode")
+
+        moveRow.tap()
+
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), """
+            Tapping Move raised no box. `DrawingView` docks the Move bar off `isAnyPieceFloating`, so             its absence means `beginContainerPoseMove` refused — which it used to do in silence at             any frame the layer's own block did not cover.
+            """)
+        XCTAssertTrue(app.buttons["toolbar.moveButton"].isSelected,
+                      "…and the toolbar agrees a Move is live, which is the artist's other reading of it")
+        XCTAssertFalse(moveRow.exists, "The options panel steps out of the way, as every action row does")
+
+        // **The rail is left up on purpose.** Tapping `toolbar.layersButton` to clear it settles
+        // interactive state and commits the float, so the box would be gone before the drag — which
+        // is what the first draft of this test did, and it read as the box never having come up.
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.50))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.50))
+        start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        if app.buttons["moveBar.doneButton"].exists { app.buttons["moveBar.doneButton"].tap() }
+
+        // **The assertion that the affordance does something real**, and it is about ink on a
+        // *different* layer: the strokes are on Vector 1 and the box belongs to the transformation
+        // layer above it, so this is §2.3's "re-poses whatever is under it" measured on the canvas.
+        let inkAfter = inkColumn()
+        XCTAssertNotNil(inkAfter, "The ink is still on the canvas after the move")
+        XCTAssertGreaterThan(inkAfter ?? 0, (inkBefore ?? 0) + 0.05, """
+            The drawing beneath the transformation layer did not travel with the box. A Move row that             raises a box which poses nothing is the same unusable feature wearing a control.
+            """)
+    }
+
+
     /// **One colour picker, not two** (owner, 2026-08-17: "the canvas color changer … is different
     /// than the color changer for the brush. They should be the same").
     ///
