@@ -282,6 +282,81 @@ final class ToolPanelsUITests: PaintUITestCase {
             """)
     }
 
+    /// **Export, end to end in the running app** — RENDER.md §3.9, and the half no logic test can
+    /// reach.
+    ///
+    /// `FrameExportSessionLogicTests` owns the driver: the walk, the focus hand-back, the phases,
+    /// every failure. What is only true here is that the artist can *get* to it — that the row is in
+    /// the Actions menu, that a sheet raised from inside that panel presents at all, that the
+    /// running view is drawn while the wait happens, and that the wait ends somewhere the file can
+    /// be picked up from. A session driven straight from a test would agree happily with a row
+    /// nobody can tap and a `ShareLink` that never appears.
+    ///
+    /// **In an existing class on purpose**: `xcodebuild` distributes parallel work per test *class*,
+    /// so a new class lengthens the suite's critical path and pays its own setup. This one is the
+    /// resize test's twin — a row in the Actions menu that opens a sheet — so it belongs beside it.
+    ///
+    /// The progress view is polled tightly rather than asserted on the next line: §2.13's ruling
+    /// that a moment of staleness is acceptable applies to every wait in this feature, and how long
+    /// a fresh document's single frame takes to bake and encode is a property of the machine.
+    func testExportIsInTheActionsMenuAndRunsThroughToAShareableFile() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let row = app.buttons["actions.exportRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Export is a row in the Actions menu")
+        XCTAssertTrue(row.isEnabled, "…and a document with a canvas can be exported")
+        row.tap()
+
+        let video = app.buttons["export.videoButton"]
+        XCTAssertTrue(video.waitForExistence(timeout: 5),
+                      "the row opens the export sheet — a sheet raised from inside the Actions panel presents")
+        XCTAssertTrue(app.buttons["export.frameButton"].exists, "…offering both products (§3.9)")
+        let caption = app.staticTexts["export.caption"]
+        XCTAssertTrue(caption.exists)
+        XCTAssertTrue(caption.label.contains("fps"), """
+            The caption is where §2.8 becomes visible — the pixel size the knob produces and the \
+            rate, at the moment the artist is about to hand a file to somebody. It reads \
+            \(caption.label).
+            """)
+
+        video.tap()
+
+        // The wait, which is the reason this is a sheet at all. Polled without a sleep so a fast
+        // machine is still caught; `export.status` and the bar are the two halves of the running
+        // view and either one appearing means the phase reached the artist.
+        let progress = app.progressIndicators["export.progress"]
+        let status = app.staticTexts["export.status"]
+        let share = app.buttons["export.share"]
+        var sawRunning = false
+        let deadline = Date().addingTimeInterval(120)
+        while Date() < deadline {
+            if progress.exists || status.exists { sawRunning = true }
+            if share.exists { break }
+        }
+        XCTAssertTrue(sawRunning, """
+            The export never showed the artist that it was working. §3.9 asks for visible progress, \
+            and a sheet that goes straight from the two buttons to a Share button is an export whose \
+            phase never reached the view.
+            """)
+        XCTAssertTrue(share.waitForExistence(timeout: 120), """
+            The export never finished. Nothing else in the app can say this: the driver's own tests \
+            run headless, so a bake that never reaches the sheet, or a sheet that never re-renders \
+            on the finished phase, looks like a pass everywhere but here.
+            """)
+        XCTAssertTrue(app.buttons["export.doneButton"].exists, "…and it offers a way out")
+
+        share.tap()
+        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 20),
+                      "Delivery is the system share sheet (§3.9), and `ShareLink` is what raises it")
+        // Left up rather than dismissed. Every test in this class starts with `launchIntoEditor`,
+        // which calls `app.launch()`, so the next one gets a fresh process and none of this — and
+        // the obvious tidy-up is a trap: three `PopoverDismissRegion`s are on screen here (the
+        // Actions panel's, the sheet's and the activity view's) and a query for the identifier is
+        // ambiguous, which MEASURED as a failed tap rather than a clean close.
+    }
+
 }
 
 final class SelectionAndMoveUITests: PaintUITestCase {

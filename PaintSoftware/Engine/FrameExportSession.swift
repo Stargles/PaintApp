@@ -79,14 +79,22 @@ final class FrameExportSession: ObservableObject {
         /// **The two phases share one bar**, because from the artist's side they are one wait: the
         /// bake is most of it on a cold document and none of it on a warm one, and a bar that
         /// restarted at zero halfway through would read as a stall.
+        ///
+        /// **`done` is frames *complete* in both cases, and the phase is which half of the next one
+        /// is under way** — so a frame is two steps of `1 / 2N` and the bar advances through both of
+        /// them. The obvious spelling, `baking` filling the first half of the bar and `writing` the
+        /// second, is wrong here and visibly so: the video loop bakes *and* writes each frame before
+        /// it touches the next, so the phase alternates all the way down and a bar built that way
+        /// jumps forward to the halfway mark on the first frame and then back again on the second,
+        /// once per frame, for the length of the export.
         var fraction: Double? {
             switch self {
             case .baking(let done, let total):
                 guard total > 0 else { return nil }
-                return min(max(Double(done) / Double(total * 2), 0), 1)
+                return min(max(Double(done) / Double(total), 0), 1)
             case .writing(let done, let total):
                 guard total > 0 else { return nil }
-                return min(max(0.5 + Double(done) / Double(total * 2), 0), 1)
+                return min(max(Double(done * 2 + 1) / Double(total * 2), 0), 1)
             case .idle, .finished, .failed:
                 return nil
             }
@@ -98,7 +106,31 @@ final class FrameExportSession: ObservableObject {
     /// The frames the current or last export covers — for the sheet's caption and for a test.
     private(set) var frames: ClosedRange<Int>?
 
-    private unowned let manager: CanvasManager
+    /// The document being exported. **Weak, and a `nil` here is a *cancellation* rather than a
+    /// failure**: the document went away, so there is nobody left to hand a file to and the walk
+    /// stops exactly as `cancel()` stops it.
+    ///
+    /// ## It was `unowned`, and that was a live crash rather than a tightening
+    ///
+    /// `start` dispatches a `Task` that outlives the sheet. `ExportSheet.onDisappear` calls
+    /// `cancel()`, which only *asks* the walk to stop — a `withCheckedContinuation` is not
+    /// interrupted by cancellation, so a task suspended inside `offMain` runs to the end of whatever
+    /// it is doing first, and `VideoFrameWriter.finish()` on a long document is seconds of that.
+    /// `ContentView` holds the `CanvasManager` in a `@State` it **replaces** on `openProject` and
+    /// `startNewProject`, which is two taps from the sheet the artist just dismissed; that drops the
+    /// last strong reference, and the unwinding task then reads it in `endFocus`. MEASURED
+    /// 2026-09-03 as `swift_abortRetainUnowned` in `endFocus` ← `run` ← `start`'s closure, taking
+    /// the whole process down — which on the artist's iPad is the app disappearing while they
+    /// export.
+    ///
+    /// ## Strong is the other answer, and it is the wrong one here
+    ///
+    /// An export that retained the document would keep every cel, the bake store's bookkeeping and a
+    /// 96 MiB decoded ring resident after the artist closed it — on the device this whole feature
+    /// exists to fit inside (§2, §3.5). It would also invert the ownership the rest of the feature
+    /// is built on: `FrameBaker.manager` is weak, and says so, *"because `CanvasManager` owns this"*.
+    private weak var manager: CanvasManager?
+
     private let workQueue = DispatchQueue(label: "com.paintapp.FrameExportSession", qos: .userInitiated)
     private var task: Task<Void, Never>?
 
@@ -118,7 +150,17 @@ final class FrameExportSession: ObservableObject {
     func exportVideo() { start(.video) }
 
     /// Exports one frame as a PNG. `frame` defaults to the playhead.
-    func exportFrame(_ frame: Int? = nil) { start(.frame(frame ?? manager.currentFrame)) }
+    func exportFrame(_ frame: Int? = nil) { start(.frame(frame ?? manager?.currentFrame ?? 0)) }
+
+    /// The document, or the cancellation that its absence means. See `manager`.
+    ///
+    /// **Read afresh at every use rather than hoisted into a local for the length of the walk**,
+    /// because a local is a strong reference and holding one across the export would be the retain
+    /// this property is weak in order to avoid.
+    private func liveDocument() throws -> CanvasManager {
+        guard let manager else { throw CancellationError() }
+        return manager
+    }
 
     /// Abandons whatever is running and puts the baker back on the artist's playhead.
     func cancel() {
@@ -137,6 +179,13 @@ final class FrameExportSession: ObservableObject {
     private func start(_ product: Product) {
         guard !phase.isRunning else { return }
         task?.cancel()
+        // No document is nothing to export, and it is the honest sentence for it. Unreachable from
+        // the sheet, which holds the manager itself; here so that `manager` being weak costs no
+        // force-unwrap.
+        guard let manager else {
+            phase = .failed(Failure.nothingToExport.sentence)
+            return
+        }
         let range: ClosedRange<Int>?
         switch product {
         case .video:
@@ -187,7 +236,7 @@ final class FrameExportSession: ObservableObject {
         case .frame(let frame):
             let decoded = try await bakedFrame(frame, within: range, index: 0, of: 1)
             phase = .writing(done: 0, total: 1)
-            let stem = FrameExport.safeStem(manager.projectName) + "-frame-\(frame)"
+            let stem = FrameExport.safeStem(try liveDocument().projectName) + "-frame-\(frame)"
             let url = Self.outputURL(stem: stem, extension: "png")
             try await offMain {
                 guard let png = FrameExport.pngData(decoded) else {
@@ -201,8 +250,9 @@ final class FrameExportSession: ObservableObject {
 
         case .video:
             let total = range.count
-            let url = Self.outputURL(stem: FrameExport.safeStem(manager.projectName), extension: "mp4")
-            let fps = manager.fps
+            let url = Self.outputURL(stem: FrameExport.safeStem(try liveDocument().projectName),
+                                     extension: "mp4")
+            let fps = try liveDocument().fps
             var writer: VideoFrameWriter?
             for (index, frame) in range.enumerated() {
                 try Task.checkCancellation()
@@ -240,13 +290,16 @@ final class FrameExportSession: ObservableObject {
         var deadlines = 0
         while true {
             try Task.checkCancellation()
-            let baker = manager.frameBaker
+            // A document that has gone away throws `CancellationError` here, which is exactly what
+            // it is: nobody is waiting for this file any more. See `manager`.
+            let baker = try liveDocument().frameBaker
             guard let key = baker.currentKey(atFrame: frame) else { throw Failure.noCanvas }
             let store = baker.store
-            if let decoded = try await offMain({ store.loadDecoded(key) }) {
-                phase = .baking(done: index + 1, total: total)
-                return decoded
-            }
+            // No phase is published on the way out, and that is the counterpart to `fraction`'s
+            // rule that `done` counts frames *complete*: this frame is baked and not yet written,
+            // which is the state `produce`'s `.writing(done: index, …)` on the very next line says.
+            // Claiming `index + 1` here would be claiming a frame that has not been written.
+            if let decoded = try await offMain({ store.loadDecoded(key) }) { return decoded }
             // The baker tried this frame and gave up on it. `finish` marks a failed frame clean and
             // forgets its key, so "not pending and unrecorded, *after* we asked" is exactly that
             // state — and it is the one thing that must never be waited on forever.
@@ -278,12 +331,15 @@ final class FrameExportSession: ObservableObject {
     /// re-checks the store rather than trusting the frame number, which it has to, because a hold
     /// resolves many frames to one file — so baking frame 3 can be what makes frame 6 readable.
     private func waitForBakeProgress() async -> Bool {
+        // No document is no baker to wait on. False rather than a throw because the caller's next
+        // round throws for it, in the one place that decides what a missing document means.
+        guard let baker = manager?.frameBaker else { return false }
         waitGeneration += 1
         let generation = waitGeneration
         let timeout = bakeTimeout
         return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             pendingWait = continuation
-            manager.frameBaker.observeFrameFinished(self) { [weak self] _ in
+            baker.observeFrameFinished(self) { [weak self] _ in
                 self?.resumeWait(generation: generation, finished: true)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
@@ -296,15 +352,20 @@ final class FrameExportSession: ObservableObject {
         guard generation == waitGeneration, let continuation = pendingWait else { return }
         pendingWait = nil
         waitGeneration += 1
-        manager.frameBaker.stopObservingFrameFinished(self)
+        manager?.frameBaker.stopObservingFrameFinished(self)
         continuation.resume(returning: finished)
     }
 
     /// Releases the baker back to the artist's playhead and unblocks anything still suspended.
     private func endFocus() {
         resumeWait(generation: waitGeneration, finished: false)
-        manager.frameBaker.stopObservingFrameFinished(self)
-        manager.frameBaker.endExport()
+        // **The crash site.** This runs on every path out of `run`, including the one an unwinding
+        // task takes after `cancel()` — long after the sheet is gone, and possibly after the
+        // document with it. A document that has gone away has no baker to hand back to, and there
+        // is nothing to put right: `FrameBaker` died with its owner, taking the focus with it.
+        guard let baker = manager?.frameBaker else { return }
+        baker.stopObservingFrameFinished(self)
+        baker.endExport()
     }
 
     // MARK: - Off the main actor
