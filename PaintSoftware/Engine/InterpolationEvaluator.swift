@@ -452,6 +452,15 @@ enum InterpolationEvaluator {
             case .image(let image):
                 guard !hidden(nil) else { return nil }
                 return .image(warped(image) { fallback?.map($0, direction) ?? $0 })
+            case .video:
+                // **Passed through unwarped — a refusal, not an oversight.** VIDEO.md §4.2: a video
+                // is not interpolatable. Warping it would have to mean one of two things and neither
+                // is available here: bending the *frame* through the lattice, which a rectangle of
+                // decoded pixels cannot express (that is the placed image's own deferred Distort),
+                // or interpolating the *footage*, which is a decoder's job and not a lattice's.
+                // Hidden with the group like a fill or an image, so a hidden frame hides it.
+                guard !hidden(nil) else { return nil }
+                return element
             case .text:
                 // Passed through unwarped. A text object's geometry is a layout box plus the four
                 // points its corners map to (`TextFrame`), and warping the box's *corners* through
@@ -731,8 +740,10 @@ enum InterpolationEvaluator {
                 // recipe, and `TextLayout.attributedString` folds it into the glyph colour.
                 text.recipe.opacity *= Double(weight)
                 return .text(text)
-            case .image:
-                // Nothing to scale — point 3 above.
+            case .image, .video:
+                // Nothing to scale — point 3 above. Neither kind carries an opacity: a video's
+                // frames are opaque pixels the same way a photo's are, and fading one would need a
+                // scalar the element does not have.
                 return element
             }
         }

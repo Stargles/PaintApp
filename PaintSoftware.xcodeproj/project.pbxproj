@@ -155,6 +155,7 @@
 		DEC0DE000000000000000022 /* PaintSoftware/Services/ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000021 /* PaintSoftware/Services/ProjectStore.swift */; };
 		742A6AF0182ABF3DB2BC4AA8 /* PaintSoftware/Services/SaveDamageGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B1C5C838033EF8F6B37B71 /* PaintSoftware/Services/SaveDamageGate.swift */; };
 		304C1E5B36D4B205473F5BFE /* SaveDamageGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */; };
+		0F09EFC688D4B043164F8D1B /* VideoElementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */; };
 		502D39FD1CBDCA1628CCFC8D /* PaintSoftware/Services/ScenePhaseSaveGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42168148BAF9E4228B3FF1B6 /* PaintSoftware/Services/ScenePhaseSaveGate.swift */; };
 		DEC0DE000000000000000024 /* PaintSoftware/Utilities/AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */; };
 		DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */; };
@@ -423,6 +424,7 @@
 		DEC0DE000000000000000021 /* PaintSoftware/Services/ProjectStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectStore.swift; sourceTree = "<group>"; };
 		A0B1C5C838033EF8F6B37B71 /* PaintSoftware/Services/SaveDamageGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/SaveDamageGate.swift; sourceTree = "<group>"; };
 		E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SaveDamageGateLogicTests.swift; sourceTree = "<group>"; };
+		4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoElementLogicTests.swift; sourceTree = "<group>"; };
 		42168148BAF9E4228B3FF1B6 /* PaintSoftware/Services/ScenePhaseSaveGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ScenePhaseSaveGate.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/AppVersion.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorConversion.swift; sourceTree = "<group>"; };
@@ -639,6 +641,7 @@
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */,
+				4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */,
@@ -1180,6 +1183,7 @@
 				DEC0DE000000000000000022 /* PaintSoftware/Services/ProjectStore.swift in Sources */,
 				742A6AF0182ABF3DB2BC4AA8 /* PaintSoftware/Services/SaveDamageGate.swift in Sources */,
 				304C1E5B36D4B205473F5BFE /* SaveDamageGateLogicTests.swift in Sources */,
+				0F09EFC688D4B043164F8D1B /* VideoElementLogicTests.swift in Sources */,
 				502D39FD1CBDCA1628CCFC8D /* PaintSoftware/Services/ScenePhaseSaveGate.swift in Sources */,
 				DEC0DE000000000000000024 /* PaintSoftware/Utilities/AppVersion.swift in Sources */,
 				DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */,

@@ -25,7 +25,8 @@ import Foundation
 /// - A vector payload that will not parse *as a payload* costs the cel every mark on it. **Counted**,
 ///   as a whole drawing, because it is the largest loss of the three.
 /// - A placed image whose PNG is missing from the package is **counted**, since the artist put it
-///   there and it will not come back.
+///   there and it will not come back. **So is an imported video whose asset file is missing**, for
+///   the same reason and through the same seam — see `ProjectStore`'s two resolvers.
 ///
 /// **Three failures deliberately absent, because they cannot reach a normal open.**
 /// `ProjectBackupManager.validateProject` refuses a package whose manifest is unreadable, whose
@@ -54,12 +55,16 @@ nonisolated struct ProjectLoadDamage: Equatable {
         var fills: Int = 0
         var images: Int = 0
         var texts: Int = 0
+        /// An imported video whose asset file is missing from the package, or whose entry this build
+        /// knows and cannot read. Counted for the placed image's reason exactly: the artist put it
+        /// there and it will not come back on its own.
+        var videos: Int = 0
         /// A mark whose own kind could not be read either — a legacy payload, or an entry broken at
         /// the discriminator. Counted rather than dropped: the artist lost it whether or not the file
         /// can say what it was.
         var unnamed: Int = 0
 
-        var total: Int { drawings + brushStrokes + fills + images + texts + unnamed }
+        var total: Int { drawings + brushStrokes + fills + images + texts + videos + unnamed }
         var isEmpty: Bool { total == 0 }
 
         /// Folds another cel's losses on the same layer into this one. The load fans out per cel, so a
@@ -70,6 +75,7 @@ nonisolated struct ProjectLoadDamage: Equatable {
             fills += other.fills
             images += other.images
             texts += other.texts
+            videos += other.videos
             unnamed += other.unnamed
         }
 
@@ -81,6 +87,7 @@ nonisolated struct ProjectLoadDamage: Equatable {
             case "fill": fills += 1
             case "image": images += 1
             case "text": texts += 1
+            case "video": videos += 1
             default: unnamed += 1
             }
         }
@@ -93,6 +100,7 @@ nonisolated struct ProjectLoadDamage: Equatable {
             if fills > 0 { parts.append(ProjectLoadDamage.counted(fills, "fill")) }
             if images > 0 { parts.append(ProjectLoadDamage.counted(images, "image")) }
             if texts > 0 { parts.append(ProjectLoadDamage.counted(texts, "text object")) }
+            if videos > 0 { parts.append(ProjectLoadDamage.counted(videos, "video")) }
             if unnamed > 0 { parts.append(ProjectLoadDamage.counted(unnamed, "mark")) }
             return ProjectLoadDamage.list(parts)
         }

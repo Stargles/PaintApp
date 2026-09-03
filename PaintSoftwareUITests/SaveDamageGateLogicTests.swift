@@ -114,11 +114,21 @@ final class SaveDamageGateLogicTests: XCTestCase {
     }
 
     /// An element written by a build that has a feature this one does not. **Not damage** — see
-    /// `ProjectLoadDamage`. `"video"` is the sentinel `VectorCanvasDataLogicTests` already uses, for
-    /// its reason: a sentinel has to be a kind nothing implements.
+    /// `ProjectLoadDamage`. The string is the sentinel `VectorCanvasDataLogicTests` owns, for its
+    /// reason: a sentinel has to be a kind nothing implements, and it was `"video"` here until
+    /// VIDEO.md stage 2 implemented video and took it away — the second time a sentinel in this
+    /// suite has been shipped out from under it. That file's
+    /// `testTheSentinelIsNotAKindThisBuildImplements` is what makes the third time say so out loud;
+    /// this file reads the same constant so the two cannot drift apart.
+    private static let unimplementedKind = VectorCanvasDataLogicTests.unimplementedKind
+
+    private static var unknownKindElement: [String: Any] {
+        ["kind": unimplementedKind, unimplementedKind: ["fileName": "surface.iges"]]
+    }
+
     private func insertUnknownKind(in projectURL: URL) throws {
         try rewriteElements(at: try vectorPayloadURL(in: projectURL)) { elements in
-            elements.append(["kind": "video", "video": ["fileName": "clip.mov"]])
+            elements.append(Self.unknownKindElement)
         }
     }
 
@@ -217,7 +227,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
         let url = writtenProject()
         try rewriteElements(at: try vectorPayloadURL(in: url)) { elements in
             elements[0] = ["kind": "stroke", "stroke": ["not": "a stroke"]]
-            elements.append(["kind": "video", "video": ["fileName": "clip.mov"]])
+            elements.append(Self.unknownKindElement)
         }
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))
 

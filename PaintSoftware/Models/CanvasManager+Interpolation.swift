@@ -1192,8 +1192,12 @@ extension CanvasManager {
                 return RegistrationElement(points: points, stroke: points,
                                            groupID: stroke.motionGroupID)
             default:
-                // A fill or placed image cannot carry a tag (`motionGroupID` is a `VectorStroke`
-                // field only, VECTOR_INTERPOLATION.md §4 item 11), so it rides the first binding.
+                // Nothing but a stroke can carry a tag (`motionGroupID` is a `VectorStroke` field
+                // only, VECTOR_INTERPOLATION.md §4 item 11), so a fill, a placed image, a text
+                // object or a video rides the first binding. **`default:` rather than four arms, and
+                // a video reaches it correctly**: `registrationPoints` answers `[]` for the two
+                // kinds that are not interpolatable, so the entry is empty and holds its position in
+                // the list — which is what keeps the tags coming back out in order.
                 return RegistrationElement(points: registrationPoints(of: [element]), stroke: nil,
                                            groupID: nil)
             }
@@ -1219,6 +1223,13 @@ extension CanvasManager {
                 }
             case .image(let image):
                 points.append(image.transform.position)
+            case .video:
+                // **Deliberately contributes nothing, for the text arm's reason exactly.**
+                // `InterpolationEvaluator` passes a video through unwarped (see its element switch),
+                // so a lattice sized to cover the video's rectangle would grow without anything
+                // inside it moving — and a bigger lattice makes every *other* element's warp coarser.
+                // VIDEO.md §4.2: a video is not interpolatable.
+                continue
             case .text:
                 // Deliberately contributes nothing. `InterpolationEvaluator` passes text through
                 // unwarped (see its element switch), so sizing the lattice to cover a text object

@@ -415,6 +415,7 @@ final class BrushEngineLogicTests: XCTestCase {
             case .fill: return "fill"
             case .image: return "image"
             case .text: return "text"
+            case .video: return "video"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -426,6 +427,7 @@ final class BrushEngineLogicTests: XCTestCase {
             case .fill: return "fill"
             case .image: return "image"
             case .text: return "text"
+            case .video: return "video"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -690,8 +692,12 @@ final class BrushEngineLogicTests: XCTestCase {
 
         // …and the pixels. One resolver for both so the placed image is byte-identical either way.
         let resolve: (VectorCanvasData.ImageRef) -> UIImage? = { [weak self] _ in self?.solidImage(.green) }
-        let before = VectorCanvas(size: Self.canvasSize, elements: first.canvasSpaceElements(resolvingImages: resolve))
-        let after = VectorCanvas(size: Self.canvasSize, elements: second.canvasSpaceElements(resolvingImages: resolve))
+        let before = VectorCanvas(size: Self.canvasSize,
+                                  elements: first.canvasSpaceElements(resolvingImages: resolve,
+                                                                      resolvingVideos: { _ in nil }))
+        let after = VectorCanvas(size: Self.canvasSize,
+                                 elements: second.canvasSpaceElements(resolvingImages: resolve,
+                                                                      resolvingVideos: { _ in nil }))
         XCTAssertEqual(renderedBytes(before), renderedBytes(after),
                        "A migrated payload must render exactly as the legacy one it came from")
 

@@ -113,10 +113,31 @@ and drag-and-drop.)
 A fifth `VectorElement` case, `.video(VectorVideoElement)`, holding the placement fields
 `VectorImageElement` holds plus the source binding:
 
-- `assetFileName: String` — the copied source in the project package, the same lifetime story as `ImageRef`.
+- `assetFileName: String` — the copied source in the project package.
+- `assetURL: URL` — runtime-only, where those bytes are *now*; `ProjectStore`'s load resolves it out
+  of the package and drops the element when the file is not there, exactly as a missing PNG drops a
+  placed image. The persisted twin stores no path.
+- `naturalSize: CGSize` — **the source's own pixel dimensions, and this list did not have it.**
+  Added by stage 2, because a placement has to be expressible with no decoder present: `placement`
+  maps a rect of this size, so without it the element cannot say where its own rectangle is and
+  neither the render, the membership quad nor the lasso's reach has anything to work with. An image
+  gets its size free with its pixels; a video does not.
 - `sourceStart`, `sourceEnd` — the crop, **in source time**, as exact rationals. §2.2 writes these.
+  Stage 2's `SourceTime` is a normalised `value`/`timescale` pair, not `CMTime`: `CMTime` is not
+  `Codable` and would need this struct as its DTO anyway, and normalising is what makes `==` agree
+  with `seconds` about whether `2/4` and `1/2` are one instant.
 - `speed` — §2.5.
-- the placement group: `transform`, `aspect`, `stretchAxis`, `mirrored`.
+- the placement group: `transform`, `aspect`, `stretchAxis`, `mirrored`. Shared with
+  `VectorImageElement` through the `PlacedRectangle` protocol stage 2 factored out, which is also
+  where `placement`, `quad(of:)`, `bounds(of:)` and `placed(_:through:)` now live — once, for both
+  kinds, so the two cannot come to disagree about where a rectangle of pixels is.
+
+**The lifetime is *not* `ImageRef`'s, and that sentence was the misleading half of this list.** An
+image's runtime payload is a `UIImage` in memory and its file is a cache the save re-encodes; a
+video's payload *is* the file, so `assetFileName` is non-optional and the save copies bytes rather
+than encoding them. What makes that copy safe is `writeAtomically`'s step order — the new package is
+staged *before* the live one is moved aside, so `assetURL` still names a real file when `writeCel`
+reads it, and the swap puts the new package back at the same path.
 
 **Crop is stored in source time, not in document frames.** A crop expressed in document frames would move
 under a speed change and under a document frame-rate change, and §2.5 changes the block length on purpose —
@@ -129,6 +150,26 @@ engine and model files, plus its persisted twin `VectorCanvasData.ElementData`. 
 change and it is mechanical**: the compiler names every site. Budget for it rather than being surprised by it,
 and resolve each arm deliberately — several will be a genuine refusal (a video is not lassoable ink, not
 splittable by the vector eraser, not interpolatable) rather than a translation of the image arm.
+
+**Built, and smaller than the survey said. It was fifteen arms, not two dozen** — one `VectorElement`
+switch each in `AnimationGroup.swift` (×2), `CanvasManager+Interpolation.swift`,
+`CanvasManager+LassoMove.swift`, `CanvasManager+Document.swift`, `SelectionModels.swift` and
+`InterpolationEvaluator.swift` (×2), and eight in `VectorLayer.swift`. **`Compositor.swift` and
+`MetalCompositor.swift` are not on the list at all**: their `case .image` is
+`MetalCompositor.Attempt.image`, a different enum, and the compiler names neither file.
+
+How they resolved. **A video is a placed rectangle wherever the arm is about the rectangle** — the
+similarity and stretch maps, `canBeMapped`, the eraser's residue-overlap test, the lasso's
+membership under all three modes, the move cluster's hull, and the render. It is caught by a lasso
+by its centre under Cut and by its own quad under Touching and Enclosed, exactly as LASSO_MOVE.md
+§5.23-24 settled for a photo — refusing instead would make a Move that lassoes the whole canvas
+silently leave the video behind, which §9's open question can still overrule but which is the worse
+default. **Four are refusals**, each explicit rather than a fallthrough: it is never split by the
+lasso (§7 reserves the only legitimate cut of a video for Split Drawing, which cuts it in *time*);
+Change Colour skips it, as it skips a photo; `InterpolationEvaluator` passes it through unwarped;
+and it contributes **no registration points**, for the text arm's reason — a lattice grown to cover
+it would move nothing inside it and would only make every other element's warp coarser.
+
 
 ### 4.3 The frame map
 
@@ -153,6 +194,14 @@ documentFPS`, then leaves neighbours alone.
 `SaveDamageGateLogicTests` use the literal `"video"` as their unimplemented kind. **Implementing it takes the
 sentinel away**; both files need a new one that is genuinely unimplemented, and the comments naming why must
 move with it.
+
+**Done. The sentinel is now `"nurbsPatch"`, and it is the last time this can happen quietly.** It was
+`"text"` until `ADD_TEXT.md` stage 3 and `"video"` until this stage, and on both occasions the tests
+went on passing while measuring something else entirely — not "an unknown kind costs one element" but
+"a feature this build ships is absent". `VectorCanvasDataLogicTests.testTheSentinelIsNotAKindThisBuildImplements`
+closes it mechanically: it asks the *encoder* for the discriminators it writes and fails if the
+sentinel is among them. `SaveDamageGateLogicTests` reads the same constant, so the two cannot drift.
+
 
 ---
 
@@ -203,12 +252,13 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
 
 ## 8. Build order
 
-1. **Split Drawing on ordinary cels.** A menu row in the `.block` arm gated on `startFrame < frame < endFrame`,
+1. ~~**Split Drawing on ordinary cels.**~~ **Merged.** A menu row in the `.block` arm gated on `startFrame < frame < endFrame`,
    calling the verb that already exists, plus the test it never had. **No video involved** — independently
    useful, and it proves the menu seam before anything larger leans on it.
-2. **`VectorVideoElement` and the fifth case.** §4.1 and §4.2 — the model, the persisted twin, every exhaustive
-   switch, and the sentinel swap (§4.4). Still no decoding: the element persists, round-trips, and renders a
-   placeholder.
+2. ~~**`VectorVideoElement` and the fifth case.**~~ **Built.** §4.1 and §4.2 — the model, the persisted twin,
+   every exhaustive switch, and the sentinel swap (§4.4). No decoding: the element persists, round-trips,
+   degrades when its asset is missing, and renders a placeholder rectangle drawn through its own `placement`
+   so that what a lasso catches is what the artist can see. `VideoElementLogicTests` is its suite.
 3. **The reader and the frame map.** §4.3 and §5 — `AVAssetReader`, the `FrameBakeKey` component,
    `derivedCelContent`'s third branch. A video now plays.
 4. **Import.** `matching: .videos` beside the existing picker, landing a video in its own new vector layer per
@@ -229,5 +279,6 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
   artist can draw into it, and the rotoscoping workflow (27) is built around wanting to draw *over* a video
   rather than on it.
 - **A video has no Distort door**, inheriting the placed image's gap: six numbers plus a mirror bit where a
-  homography needs eight. §2.10 settles the lasso and the refusals; this one it does not settle.
+  homography needs eight. §2.10 settles the lasso and the refusals — §4.2's built note carries the arms and
+  the reasoning behind each — but not this one.
 - **Backwards scrubbing cost** (§5) is unmeasured, and it is the one performance question this feature owns.

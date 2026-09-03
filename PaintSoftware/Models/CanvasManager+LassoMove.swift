@@ -168,6 +168,15 @@ struct MoveBoxInk {
                                                        aspect: image.aspect)
             return Cluster(hull: [image.transform.position],
                            reach: hypot(size.width, size.height) / 2 * max(abs(axes.x), abs(axes.y)))
+        case .video(let video):
+            // The placed-image arm on the same numbers: a centre point plus the circumscribing
+            // radius of the scaled rectangle, which is rotation-independent and therefore right
+            // whatever the placement's angle is.
+            let axes = ObjectTransformFrame.axisScales(scale: video.transform.scale,
+                                                       aspect: video.aspect)
+            return Cluster(hull: [video.transform.position],
+                           reach: hypot(video.naturalSize.width, video.naturalSize.height) / 2
+                               * max(abs(axes.x), abs(axes.y)))
         case .text(let text):
             guard !text.frame.corners.isEmpty else { return nil }
             return Cluster(hull: text.frame.corners, reach: 0)

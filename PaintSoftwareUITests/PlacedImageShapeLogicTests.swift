@@ -419,10 +419,10 @@ final class PlacedImageShapeLogicTests: XCTestCase {
 
     private func decodedImage(from ref: VectorCanvasData.ImageRef) -> VectorImageElement? {
         let data = VectorCanvasData(elements: [.image(ref)], transform: [])
-        let rebuilt = data.canvasSpaceElements { _ in
+        let rebuilt = data.canvasSpaceElements(resolvingImages: { _ in
             CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
                                      size: CGSize(width: 6, height: 6))
-        }
+        }, resolvingVideos: { _ in nil })
         return rebuilt.compactMap(\.image).first
     }
 

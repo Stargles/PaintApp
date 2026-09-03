@@ -1410,7 +1410,11 @@ extension CanvasManager {
                 newElements[index] = .text(text)
                 changed += 1
 
-            case .image:
+            case .image, .video:
+                // **A refusal, and the same one for both.** Change Colour recolours the artist's own
+                // marks; a photograph and a video frame are neither, and there is no field on either
+                // to put a colour in. Tinting them would be an effect (`Effect`, the adjustment-layer
+                // path), not a recolour.
                 continue
             }
         }

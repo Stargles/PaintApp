@@ -46,6 +46,14 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         VectorCanvasData.ImageRef(fileName: name, x: 32, y: 32, scale: 1, rotation: 0)
     }
 
+    private func videoRef(_ name: String) -> VectorCanvasData.VideoRef {
+        VectorCanvasData.VideoRef(fileName: name, width: 16, height: 9,
+                                  sourceStart: SourceTime(value: 0, timescale: 30),
+                                  sourceEnd: SourceTime(value: 90, timescale: 30), speed: 1,
+                                  x: 32, y: 32, scale: 1, rotation: 0,
+                                  aspect: 1, stretchAxis: 0, mirrored: false)
+    }
+
     private func solidImage(_ color: UIColor, side: CGFloat = 16) -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
             color.setFill()
@@ -60,6 +68,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
             case .fill: return "fill"
             case .image: return "image"
             case .text: return "text"
+            case .video: return "video"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -71,6 +80,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
             case .fill: return "fill"
             case .image: return "image"
             case .text: return "text"
+            case .video: return "video"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -85,6 +95,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
             case .fill(let fill): return fill.id.uuidString
             case .text(let text): return text.id.uuidString
             case .image(let ref): return ref.fileName
+            case .video(let ref): return ref.fileName
             }
         }
     }
@@ -132,13 +143,38 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     /// A well-formed element of a kind this build has no case for — literally what a newer build
     /// writing a new element type produces.
     ///
-    /// **It used to be `"text"`, and `ADD_TEXT.md` stage 3 is what made that stop being fictional**:
-    /// text is now a kind this build knows, so using it here would test the wrong branch entirely.
-    /// `"video"` is the next thing `VectorImageElement`'s own comment says will slot into the display
-    /// list, and it is still unwritten — the sentinel has to be a kind nothing implements, or this
-    /// test quietly starts asserting that a real feature is missing.
+    /// **This is the third string to hold the job and the first one that cannot silently lose it.**
+    /// It was `"text"` until `ADD_TEXT.md` stage 3 implemented text, and `"video"` until VIDEO.md
+    /// stage 2 implemented video; each time, the sentinel quietly stopped testing the unknown-kind
+    /// branch and started asserting that a shipped feature was missing — a green test measuring
+    /// nothing. `testTheSentinelIsNotAKindThisBuildImplements` closes that door mechanically, by
+    /// asking the *encoder* which discriminators exist rather than trusting this comment.
+    ///
+    /// `"nurbsPatch"` is chosen to be un-implementable rather than plausible: this app's vector model
+    /// is polylines and `CGPath`s, there is no spline surface anywhere in it, and nothing on
+    /// VIDEO.md's or KEYFRAMES.md's build orders goes near one. The decoder cannot tell a realistic
+    /// noun from an unrealistic one anyway — all it sees is a string it has no case for.
+    static let unimplementedKind = "nurbsPatch"
+
     private var futureElement: [String: Any] {
-        ["kind": "video", "video": ["fileName": "clip.mov", "x": 32, "y": 32]]
+        [
+            "kind": Self.unimplementedKind,
+            Self.unimplementedKind: ["fileName": "surface.iges", "x": 32, "y": 32],
+        ]
+    }
+
+    /// Every discriminator this build actually writes, **read out of the encoder** rather than listed
+    /// by hand — one `ElementData` of each case, encoded, and its `kind` key read back. A hand-kept
+    /// list would go stale exactly when the sentinel does, which is the failure this exists to catch.
+    private func implementedKinds() throws -> Set<String> {
+        let samples: [VectorCanvasData.ElementData] = [
+            .stroke(stroke(1)), .fill(fill(1)), .image(imageRef("a.png")),
+            .text(VectorTextElement(recipe: TextRecipe(string: "a"),
+                                    frame: TextFrame(origin: CGPoint(x: 8, y: 8),
+                                                     size: CGSize(width: 8, height: 8)))),
+            .video(videoRef("clip.mov")),
+        ]
+        return Set(try samples.map { try XCTUnwrap(try jsonObject($0)["kind"] as? String) })
     }
 
     /// A `stroke` element whose payload is missing a required key. The discriminator is one this
@@ -180,7 +216,9 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
 
         let placed = solidImage(.green)
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: decoded.canvasSpaceElements { _ in placed })
+        let canvas = VectorCanvas(size: Self.canvasSize,
+                                  elements: decoded.canvasSpaceElements(resolvingImages: { _ in placed },
+                                                                        resolvingVideos: { _ in nil }))
 
         XCTAssertEqual(kinds(canvas.elements), ["fill", "image", "erase"])
         XCTAssertFalse(canvas.isEmpty, "A cel that lost one element is not an empty cel")
@@ -188,6 +226,25 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     }
 
     // MARK: - Unknown kind vs corrupt known kind
+
+    /// **The guard on every other test in this section.** Twice now a sentinel has been implemented
+    /// out from under these tests — `"text"` by `ADD_TEXT.md` stage 3, `"video"` by VIDEO.md stage 2
+    /// — and on both occasions the tests below went on passing while measuring something else
+    /// entirely: not "an unknown kind costs one element" but "a feature this build ships is absent".
+    /// Nothing said so, because the decoder's answer is identical either way.
+    ///
+    /// If this goes red, the code is wrong in the precise sense that matters here: a discriminator
+    /// the encoder now writes is being used as one it does not, and every unknown-kind assertion in
+    /// this file has silently stopped testing its branch. The fix is to pick a new sentinel, not to
+    /// relax this.
+    func testTheSentinelIsNotAKindThisBuildImplements() throws {
+        let implemented = try implementedKinds()
+        XCTAssertEqual(implemented, ["stroke", "fill", "image", "text", "video"],
+                       "fixture precondition: the encoder writes exactly these five discriminators")
+        XCTAssertFalse(implemented.contains(Self.unimplementedKind),
+                       "'\(Self.unimplementedKind)' is a kind this build now writes, so every "
+                       + "unknown-kind test in this file has stopped testing the unknown-kind branch")
+    }
 
     /// The case this fix exists ahead of: an older build opening a project that contains an element
     /// type it has never heard of. Expected, benign, and it must cost that element only.
@@ -200,7 +257,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
 
         XCTAssertEqual(ids(decoded.elements), [expected[0], expected[2], expected[3]])
         XCTAssertEqual(kinds(decoded.elements), ["fill", "stroke", "erase"])
-        XCTAssertEqual(decoded.decodeReport.unknownKinds, ["video"],
+        XCTAssertEqual(decoded.decodeReport.unknownKinds, [Self.unimplementedKind],
                        "An unrecognised discriminator is reported by name, so a log line can say which feature is missing")
         XCTAssertEqual(decoded.decodeReport.malformedCount, 0,
                        "A newer build's element is not a malformed one — that distinction is the whole point of the report")
@@ -218,7 +275,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: try jsonData(object))
 
         XCTAssertEqual(kinds(decoded.elements), ["fill", "erase"])
-        XCTAssertEqual(decoded.decodeReport.unknownKinds, ["video"])
+        XCTAssertEqual(decoded.decodeReport.unknownKinds, [Self.unimplementedKind])
         XCTAssertEqual(decoded.decodeReport.malformedCount, 1)
         XCTAssertEqual(decoded.decodeReport.droppedCount, 2)
         XCTAssertFalse(decoded.decodeReport.isClean)
@@ -390,7 +447,8 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(decoded.affineTransform.tx, 12, "fixture precondition: the file says +12")
 
         let placed = solidImage(.green)
-        let baked = decoded.canvasSpaceElements { _ in placed }
+        let baked = decoded.canvasSpaceElements(resolvingImages: { _ in placed },
+                                                resolvingVideos: { _ in nil })
         let canvas = VectorCanvas(size: Self.canvasSize, elements: baked)
 
         XCTAssertTrue(canvas.transform.isIdentity, "the cel itself must carry nothing")

@@ -73,6 +73,7 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
             case .fill: return "fill"
             case .image: return "image"
             case .text: return "text"
+            case .video: return "video"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -84,6 +85,7 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
             case .fill: return "fill"
             case .image: return "image"
             case .text: return "text"
+            case .video: return "video"
             case .stroke(let stroke): return stroke.composite == .erase ? "erase" : "stroke"
             }
         }
@@ -234,7 +236,8 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
                                  elements: [.fill(fill()), .text(element), .stroke(stroke())])
         let payload = try reload(VectorCanvasData(from: saved, imageFileNames: [:]))
         let loaded = VectorCanvas(size: Self.canvasSize,
-                                  elements: payload.canvasSpaceElements(resolvingImages: { _ in nil }))
+                                  elements: payload.canvasSpaceElements(resolvingImages: { _ in nil },
+                                                                        resolvingVideos: { _ in nil }))
 
         // 1. It came back as a text object, not as pixels, and as the same one.
         let reopened = try XCTUnwrap(loaded.topmostText(atCanvasPoint: CGPoint(x: 30, y: 18)))

@@ -66,6 +66,7 @@ extension VectorElement {
         case .fill(let fill): return fill.animationGroupID
         case .image(let image): return image.animationGroupID
         case .text(let text): return text.animationGroupID
+        case .video(let video): return video.animationGroupID
         }
     }
 
@@ -77,6 +78,7 @@ extension VectorElement {
         case .fill(var fill): fill.animationGroupID = group; return .fill(fill)
         case .image(var image): image.animationGroupID = group; return .image(image)
         case .text(var text): text.animationGroupID = group; return .text(text)
+        case .video(var video): video.animationGroupID = group; return .video(video)
         }
     }
 

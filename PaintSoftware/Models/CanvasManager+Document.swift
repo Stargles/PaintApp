@@ -639,7 +639,7 @@ extension CanvasManager {
         return audit
     }
 
-    /// The artist-facing noun for an element kind — the same four words
+    /// The artist-facing noun for an element kind — the same five words
     /// `VectorCanvasData.DecodeReport.malformedKinds` writes, so a resize refusal and a load report
     /// name the same thing the same way.
     private static func kindName(of element: VectorElement) -> String {
@@ -648,6 +648,7 @@ extension CanvasManager {
         case .fill: return "fill"
         case .image: return "image"
         case .text: return "text"
+        case .video: return "video"
         }
     }
 

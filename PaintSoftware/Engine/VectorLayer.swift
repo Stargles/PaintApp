@@ -320,6 +320,73 @@ struct VectorFillElement: Identifiable, Codable {
     var uiColor: UIColor { color.uiColor }
 }
 
+/// **A rectangle of pixels placed on a vector layer by a general affine** — the "placement group"
+/// VIDEO.md §4.1 names, factored out when the video element became the second thing to hold it.
+///
+/// The four stored values plus the natural size are everything `placement`, `VectorCanvas.quad(of:)`,
+/// `VectorCanvas.bounds(of:)` and `VectorCanvas.placed(_:through:)` read, so those four are written
+/// once here rather than once per kind. That matters more than the lines it saves: they are the
+/// **same** geometry, and two copies of `placement` that drifted by a sign would put a video's
+/// membership quad somewhere its own picture is not.
+///
+/// It is deliberately not a requirement that the payload be *renderable* — a placed image carries its
+/// pixels and a video carries a file name — because none of the four functions above touches pixels.
+protocol PlacedRectangle {
+    /// The picture's own pixel size, before any of the placement is applied. It is the rect
+    /// `placement` maps: `CGRect(x: -width / 2, y: -height / 2, width: width, height: height)`.
+    var naturalSize: CGSize { get }
+    var transform: LayerTransform { get set }
+
+    /// **How much wider than tall the placement is** — `ObjectTransformFrame.aspect`'s number, stored.
+    /// 1 is a picture nobody has stretched, and the *area* factor stays in `transform.scale`, which is
+    /// the geometric mean of the two axis scales. `ObjectTransformFrame.axisScales(scale:aspect:)` is
+    /// the one place the pair is turned back into two axis scales, here as on the box.
+    var aspect: CGFloat { get set }
+
+    /// **The axis a stretch was made about** — LASSO_MOVE.md §5.20's second angle, stored. 0 for a
+    /// placement nobody has stretched off-axis, where the map reduces to `R(rotation)·S` exactly.
+    ///
+    /// With `transform`'s four numbers and `aspect` this is six, which §5.20's own arithmetic says
+    /// *is* a general affine — so nothing is left for a later stage to invent. (Distort is a
+    /// homography and needs eight; it is stage 5 and is not reachable from here.)
+    var stretchAxis: CGFloat { get set }
+
+    /// **Whether the picture is reflected.** The seventh value, and it is a `Bool` rather than a
+    /// seventh number because the six above are the SVD `R·S·R` with both scales positive, which
+    /// covers exactly the affines whose determinant is positive. The other component of the group is
+    /// that set composed with one reflection, so one bit is the whole of it.
+    ///
+    /// It flips the picture in **its own** space, before everything else (`placement` below), which is
+    /// what makes Mirror-then-Mirror-back the original: `CanvasManager.applyToVectorFloat` maps the
+    /// *lift's* element every nudge, so two presses hand this arm a delta with the reflection folded
+    /// in twice, i.e. no reflection at all.
+    ///
+    /// Which axis it flips is free: `diag(-1, 1)` and `diag(1, -1)` differ by a half turn, and the
+    /// half turn lands in `transform.rotation` when the pose is decomposed.
+    var mirrored: Bool { get set }
+}
+
+extension PlacedRectangle {
+    /// **The one place the four fields become a matrix**, so the render, the membership quad and the
+    /// lasso's own map cannot come to disagree about where the picture is. It maps the picture's
+    /// centred rect — `CGRect(x: -size.width / 2, y: -size.height / 2, ...)` — into layer-local space.
+    ///
+    /// Built from `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` with a zero pivot, which is
+    /// the same builder the Move box's pose goes through, and which spells `aspect == 1` and
+    /// `stretchAxis == 0` as their shorter expressions rather than computing them — so an unstretched
+    /// placement produces bit-for-bit the `translate · rotate · scale` `VectorImageElement` had
+    /// before LASSO_MOVE.md §3 stage 3c.
+    var placement: CGAffineTransform {
+        let base = VectorCanvas.affine(from: transform, aspect: aspect, stretchAxis: stretchAxis,
+                                       pivot: .zero)
+        return mirrored ? Self.sourceFlip.concatenating(base) : base
+    }
+
+    /// The reflection `mirrored` means, in the picture's own space. See that field for why the axis is
+    /// arbitrary.
+    static var sourceFlip: CGAffineTransform { CGAffineTransform(scaleX: -1, y: 1) }
+}
+
 /// An imported image placed on a vector layer, movable/scalable/rotatable via its own transform.
 /// `image` is runtime-only; persistence stores a file name + the transform (see `ProjectStore`).
 ///
@@ -330,37 +397,12 @@ struct VectorFillElement: Identifiable, Codable {
 /// is; `ObjectTransformFrame` already holds `aspect` and `stretchAxis` beside a `LayerTransform` for
 /// that reason, and this is the same split applied to the document rather than to the box. Widening
 /// `LayerTransform` itself would give the box two homes for one number.
-struct VectorImageElement: Identifiable {
+struct VectorImageElement: Identifiable, PlacedRectangle {
     var id: UUID = UUID()
     var image: UIImage
     var transform: LayerTransform
-
-    /// **How much wider than tall the placement is** — `ObjectTransformFrame.aspect`'s number, stored.
-    /// 1 is a photo nobody has stretched, and the *area* factor stays in `transform.scale`, which is
-    /// the geometric mean of the two axis scales. `ObjectTransformFrame.axisScales(scale:aspect:)` is
-    /// the one place the pair is turned back into two axis scales, here as on the box.
     var aspect: CGFloat = 1
-
-    /// **The axis a stretch was made about** — LASSO_MOVE.md §5.20's second angle, stored. 0 for a
-    /// placement nobody has stretched off-axis, where the map reduces to `R(rotation)·S` exactly.
-    ///
-    /// With `transform`'s four numbers and `aspect` this is six, which §5.20's own arithmetic says
-    /// *is* a general affine — so nothing is left for a later stage to invent. (Distort is a
-    /// homography and needs eight; it is stage 5 and is not reachable from here.)
     var stretchAxis: CGFloat = 0
-
-    /// **Whether the picture is reflected.** The seventh value, and it is a `Bool` rather than a
-    /// seventh number because the six above are the SVD `R·S·R` with both scales positive, which
-    /// covers exactly the affines whose determinant is positive. The other component of the group is
-    /// that set composed with one reflection, so one bit is the whole of it.
-    ///
-    /// It flips the image in **its own** space, before everything else (`placement` below), which is
-    /// what makes Mirror-then-Mirror-back the original: `CanvasManager.applyToVectorFloat` maps the
-    /// *lift's* element every nudge, so two presses hand this arm a delta with the reflection folded
-    /// in twice, i.e. no reflection at all.
-    ///
-    /// Which axis it flips is free: `diag(-1, 1)` and `diag(1, -1)` differ by a half turn, and the
-    /// half turn lands in `transform.rotation` when the pose is decomposed.
     var mirrored: Bool = false
 
     /// Set once the element has been persisted, so save can reuse the same file.
@@ -372,24 +414,140 @@ struct VectorImageElement: Identifiable {
     /// Optional, so the synthesized decoder reads a file written before it existed.
     var animationGroupID: UUID? = nil
 
+    /// The image's own pixels' size — `PlacedRectangle.naturalSize`, which an image gets for free
+    /// because it carries its picture. A video does not, which is why the protocol asks for it rather
+    /// than reading a `UIImage`.
+    var naturalSize: CGSize { image.size }
+}
 
-    /// **The one place the four fields become a matrix**, so the render, the membership quad and the
-    /// lasso's own map cannot come to disagree about where the picture is. It maps the image's
-    /// centred rect — `CGRect(x: -size.width / 2, y: -size.height / 2, ...)` — into layer-local space.
-    ///
-    /// Built from `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` with a zero pivot, which is
-    /// the same builder the Move box's pose goes through, and which spells `aspect == 1` and
-    /// `stretchAxis == 0` as their shorter expressions rather than computing them — so an unstretched
-    /// placement produces bit-for-bit the `translate · rotate · scale` this type had before 3c.
-    var placement: CGAffineTransform {
-        let base = VectorCanvas.affine(from: transform, aspect: aspect, stretchAxis: stretchAxis,
-                                       pivot: .zero)
-        return mirrored ? Self.sourceFlip.concatenating(base) : base
+/// **An exact instant on a video's own clock** — VIDEO.md §4.1's *"as exact rationals"*, and §6's
+/// audio seam depends on it being exact rather than on it being convenient.
+///
+/// A crop stored in *document frames* would move under a speed change and under a document
+/// frame-rate change, and VIDEO.md §2.5 changes the block's length on purpose — so the two would
+/// interact and the artist's crop would drift. A crop stored in `Double` seconds would drift a
+/// different way: 1/30 s is not representable, and a clip cut at frame 900 and re-cut there a
+/// hundred saves later would not land on the same source frame. The same argument produced
+/// `VideoFrameWriter`'s `CMTime(value: index, timescale: fps)` on the export side
+/// (`Engine/FrameExport.swift`), which this mirrors deliberately: the two ends of the app should
+/// disagree about nothing.
+///
+/// **Normalised on construction, so `==` means what it says.** `2/4` and `1/2` are the same instant,
+/// and a synthesized `Equatable` over the raw pair would call them different while `seconds` called
+/// them equal — which is exactly the kind of two-answers-for-one-question a round-trip test cannot
+/// see. Reducing by the gcd makes one representative per instant, and reducing costs one loop at a
+/// construction that happens a handful of times per import.
+///
+/// Not `CMTime`: that type is not `Codable`, so it would need this struct as its DTO anyway, and
+/// keeping CoreMedia out of `VectorLayer.swift` keeps the whole model compiling in the test target
+/// without a framework the logic tier has no use for. Stage 3's reader converts at the boundary.
+struct SourceTime: Codable, Equatable {
+    /// The numerator: how many `1 / timescale` units from the start of the source.
+    let value: Int64
+    /// The denominator, and always positive — a non-positive one is a division by zero waiting in
+    /// `seconds`, so `init` traps on it and `init(from:)` rejects the file instead (see there).
+    let timescale: Int32
+
+    init(value: Int64, timescale: Int32) {
+        precondition(timescale > 0,
+                     "A source time's timescale is a denominator: \(timescale) is not a clock.")
+        let divisor = Int64(Self.gcd(value.magnitude, UInt64(timescale)))
+        self.value = value / divisor
+        self.timescale = Int32(Int64(timescale) / divisor)
     }
 
-    /// The reflection `mirrored` means, in the image's own space. See that field for why the axis is
-    /// arbitrary.
-    static let sourceFlip = CGAffineTransform(scaleX: -1, y: 1)
+    /// The zero instant, i.e. the head of the source. `0/1` after normalisation, so every way of
+    /// spelling zero compares equal to it.
+    static let zero = SourceTime(value: 0, timescale: 1)
+
+    /// The instant in seconds. Lossy by construction — this is for display and for handing to a
+    /// decoder that wants a `Double`, never for storing back.
+    var seconds: Double { Double(value) / Double(timescale) }
+
+    /// `gcd(0, t) == t`, so a zero value normalises to `0/1` rather than dividing by zero, and the
+    /// result is never 0 because `timescale > 0`. Taken over magnitudes so `Int64.min` cannot trap
+    /// the way `abs` would.
+    private static func gcd(_ a: UInt64, _ b: UInt64) -> UInt64 {
+        var a = a, b = b
+        while b != 0 { (a, b) = (b, a % b) }
+        return a
+    }
+
+    private enum CodingKeys: String, CodingKey { case value, timescale }
+
+    /// **A file's timescale is untrusted input, and a bad one throws rather than trapping.** In the
+    /// app a non-positive timescale is a programmer error and `init` says so; on disk it is a damaged
+    /// or hostile file, and throwing here routes it through `VectorCanvasData.LossySlot` — which
+    /// costs that one element and counts it as malformed, exactly like any other unreadable payload.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let value = try c.decode(Int64.self, forKey: .value)
+        let timescale = try c.decode(Int32.self, forKey: .timescale)
+        guard timescale > 0 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .timescale, in: c,
+                debugDescription: "A source time's timescale must be positive; \(timescale) is not.")
+        }
+        self.init(value: value, timescale: timescale)
+    }
+}
+
+/// **An imported video placed on a vector layer** — VIDEO.md §4.1, and the fifth `VectorElement`.
+///
+/// Geometrically it is `VectorImageElement`: a rectangle of pixels under a general affine, which is
+/// why both conform to `PlacedRectangle` and why every geometry arm in this file treats the two the
+/// same. What it adds is a **time axis** — the source binding below — and that is the whole of the
+/// difference.
+///
+/// **`assetURL` is the runtime resource and `assetFileName` is the persisted one**, the same split
+/// `VectorImageElement` draws between `image` and `fileName`. A video's payload is a file rather
+/// than a decoded picture, so what a load resolves is a path: `VectorCanvasData.VideoRef` stores the
+/// name and `ProjectStore` turns it back into a URL inside the package, dropping the element and
+/// counting the loss when the file is not there — the same degradation a missing PNG already gets.
+///
+/// **No decoded frame and no frame map here.** VIDEO.md stage 2 is the model; §4.3's
+/// `documentFrame → sourceTime` map and the `AVAssetReader` behind it are stage 3, and they read
+/// these fields rather than adding any.
+struct VectorVideoElement: Identifiable, PlacedRectangle {
+    var id: UUID = UUID()
+
+    /// **Where the bytes are right now.** Runtime-only and never persisted — `assetFileName` is what
+    /// a file records, and the package it names moves (`ProjectStore.writeAtomically` stages a new
+    /// package and swaps), so an absolute path is only ever true of the load that produced it.
+    var assetURL: URL
+
+    /// The copied source's name inside the project package. VIDEO.md §6 rules that the file is copied
+    /// **whole** — every track, audio included — because audio cannot be recovered from a
+    /// re-encoded video-only asset once the original is gone.
+    var assetFileName: String
+
+    /// **The source's own pixel dimensions.** Stored rather than read from the asset, because a
+    /// placement has to be expressible with no decoder present: `placement` maps a rect of this size,
+    /// and stage 2 renders, hit-tests and lasso-tests a video without opening the file at all.
+    ///
+    /// (VIDEO.md §4.1 lists neither this nor anything like it. It is the one field the survey missed:
+    /// an image gets its size free with its pixels and a video does not, so without it the element
+    /// cannot say where its own rectangle is.)
+    var naturalSize: CGSize
+
+    /// **The crop, in source time** — VIDEO.md §2.2's edge drag writes these two, and §4.1 explains
+    /// at length why they are not document frames.
+    var sourceStart: SourceTime
+    var sourceEnd: SourceTime
+
+    /// How fast the footage runs against the document's clock — VIDEO.md §2.5, and §4.3's frame map
+    /// is the one place it is read. A **property of the element rather than of the crop** (§6), so
+    /// audio can later read the same field and decide independently about pitch.
+    var speed: Double = 1
+
+    var transform: LayerTransform
+    var aspect: CGFloat = 1
+    var stretchAxis: CGFloat = 0
+    var mirrored: Bool = false
+
+    /// The animation group this element belongs to — KEYFRAMES.md §3.4 rules it onto **every** element
+    /// kind, and a video is as movable as a placed photo.
+    var animationGroupID: UUID? = nil
 }
 
 /// One entry in a `VectorCanvas`'s display list, drawn back to front. Not three parallel arrays,
@@ -407,6 +565,12 @@ enum VectorElement: Identifiable {
     /// `ImageRef` / `<project>/images/` machinery, and `VectorCanvasData.ElementData.text` stores the
     /// very same value inline.
     case text(VectorTextElement)
+    /// An imported video — VIDEO.md stage 2. **Geometrically a placed image with a time axis**: it
+    /// shares `PlacedRectangle` with `.image`, so every arm in this file that is about *where the
+    /// rectangle is* treats the two alike, and the arms that are about *ink* — the vector eraser's
+    /// split, interpolation's warp, a recolour — refuse it in as many words. Its payload holds a file
+    /// name rather than pixels, so it needs `ProjectStore`'s asset machinery the way `.image` does.
+    case video(VectorVideoElement)
 
     var id: UUID {
         switch self {
@@ -414,6 +578,7 @@ enum VectorElement: Identifiable {
         case .fill(let fill): return fill.id
         case .image(let image): return image.id
         case .text(let text): return text.id
+        case .video(let video): return video.id
         }
     }
 
@@ -435,6 +600,25 @@ enum VectorElement: Identifiable {
     var text: VectorTextElement? {
         if case .text(let text) = self { return text }
         return nil
+    }
+
+    var video: VectorVideoElement? {
+        if case .video(let video) = self { return video }
+        return nil
+    }
+
+    /// The element's placement when it *has* one — the two kinds that are a rectangle of pixels under
+    /// an affine, and nil for the three that are ink.
+    ///
+    /// It exists so `VectorCanvas`'s geometry arms can say "a placed rectangle" once instead of
+    /// spelling `.image` and `.video` twice each; every one of them was a literal duplicate before,
+    /// and a duplicate is how the two kinds come to disagree about where a picture is.
+    var placedRectangle: (any PlacedRectangle)? {
+        switch self {
+        case .image(let image): return image
+        case .video(let video): return video
+        case .stroke, .fill, .text: return nil
+        }
     }
 }
 
@@ -595,6 +779,13 @@ final class VectorCanvas {
             defer { lock.unlock() }
             _elements = Self.splicing(_elements, kind: .text, with: newValue.map { .text($0) })
         }
+    }
+
+    /// The layer's videos, back to front. **Read-only, unlike the four above**: there is no verb yet
+    /// that replaces a video element in place, and a setter with no caller would be a splice contract
+    /// nothing tests. `ProjectStore`'s save reads it to copy each asset into the package.
+    var videos: [VectorVideoElement] {
+        lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.video)
     }
 
     /// The elements skipped by the flatten while something else is drawing them: the one text object
@@ -781,17 +972,24 @@ final class VectorCanvas {
     /// original z-position (the `fills` setter on an empty bucket, `init(size:strokes:fills:images:)`
     /// on a legacy project), and "under the strokes" is the right answer there because that is where
     /// those documents' fills were.
+    ///
+    /// **`.video` is numbered beside `.image`**, which is where a placed rectangle of pixels belongs,
+    /// and the renumbering below changes no existing relative order. Nothing inserts a video through
+    /// `insertionIndex` yet — VIDEO.md stage 4's import creates the layer *and* the element — but a
+    /// video that ever is inserted should land exactly where a photo would.
     private enum Kind: Int {
         case fill = 0
         case image = 1
-        case text = 2
-        case stroke = 3
+        case video = 2
+        case text = 3
+        case stroke = 4
     }
 
     private static func kind(of element: VectorElement) -> Kind {
         switch element {
         case .fill: return .fill
         case .image: return .image
+        case .video: return .video
         case .text: return .text
         case .stroke: return .stroke
         }
@@ -1582,6 +1780,10 @@ final class VectorCanvas {
                 if let path = fill.cgPath, path.boundingBoxOfPath.intersects(box) { return true }
             case .image(let image):
                 if Self.bounds(of: image).intersects(box) { return true }
+            case .video(let video):
+                // A video is content a punch can be hiding for exactly the reason a photo is: the
+                // vector eraser never split it, so any overlap means the punch is still doing work.
+                if Self.bounds(of: video).intersects(box) { return true }
             case .text(let text):
                 // Text is content the punch can be hiding, and geometry the split could never have
                 // removed — the vector eraser does not bite letterforms (`ADD_TEXT.md` §1, §5.4), so
@@ -1656,6 +1858,10 @@ final class VectorCanvas {
             return fill.cgPath?.boundingBoxOfPath
         case .image(let image):
             return bounds(of: image)
+        case .video(let video):
+            // Its whole rectangle, always. A video has no analogue of the text arm's "ink, not the
+            // box" — every pixel of the frame is content, including the black ones.
+            return bounds(of: video)
         case .text(let text):
             // Ink, not the box: an empty or whitespace-only object is not a backdrop, and a punch
             // kept alive by a box with nothing in it is a hole in nothing that never gets collected.
@@ -1663,16 +1869,16 @@ final class VectorCanvas {
         }
     }
 
-    /// A placed image's local-space bounding box, taken as the circumscribing circle of its scaled
-    /// size so the answer is rotation-independent — conservative, and rotation is stored as a free
-    /// angle rather than a quadrant.
+    /// A placed rectangle's local-space bounding box, taken as the circumscribing circle of its
+    /// scaled size so the answer is rotation-independent — conservative, and rotation is stored as a
+    /// free angle rather than a quadrant.
     ///
     /// **The radius takes the larger of the two axis scales**, which keeps it independent of
     /// `stretchAxis` as well: the operator norm of `R·S·R` is `max(sx, sy)`, so no corner of the
     /// stretched rectangle can reach further than this whatever axis the stretch was made about. At
     /// `aspect == 1` the two scales are one number and this is the expression it was before stage 3c.
-    private static func bounds(of element: VectorImageElement) -> CGRect {
-        let size = element.image.size
+    private static func bounds(of element: some PlacedRectangle) -> CGRect {
+        let size = element.naturalSize
         let axes = ObjectTransformFrame.axisScales(scale: element.transform.scale,
                                                    aspect: element.aspect)
         let radius = hypot(size.width, size.height) / 2 * max(abs(axes.x), abs(axes.y))
@@ -1753,8 +1959,8 @@ final class VectorCanvas {
     /// `CGPath` booleans the membership rules run it through normalise the fill rule (LASSO_MOVE.md
     /// §1's measured table), and under `.winding` a rectangle traversed either way has a winding
     /// number of ±1 and is filled.
-    static func quad(of element: VectorImageElement) -> CGPath {
-        let size = element.image.size
+    static func quad(of element: some PlacedRectangle) -> CGPath {
+        let size = element.naturalSize
         var t = element.placement
         return CGPath(rect: CGRect(x: -size.width / 2, y: -size.height / 2,
                                    width: size.width, height: size.height), transform: &t)
@@ -1843,6 +2049,21 @@ final class VectorCanvas {
                 return loop.contains(image.transform.position, using: rule)
             }
             let quad = Self.quad(of: image)
+            guard quad.boundingBoxOfPath.intersects(loopBounds) else { return false }
+            return area(quad, using: .winding)
+
+        case .video(let video):
+            // **The placed-image rule verbatim, and that is a decision rather than a copy.**
+            // VIDEO.md §4.2 warns that several arms are refusals and §9 leaves this one open; the
+            // reason it is not a refusal is that a lasso never *cuts* a placed rectangle in any mode
+            // — LASSO_MOVE.md §5.23-24 already settled that a photo travels whole, by its centre
+            // under Cut and by its own quad under Touching and Enclosed. Answering "not caught" here
+            // would instead make a Move that lassoes the whole canvas silently leave the video
+            // behind, which is the one outcome the artist cannot see the reason for.
+            guard membership != .cutting else {
+                return loop.contains(video.transform.position, using: rule)
+            }
+            let quad = Self.quad(of: video)
             guard quad.boundingBoxOfPath.intersects(loopBounds) else { return false }
             return area(quad, using: .winding)
 
@@ -2032,6 +2253,14 @@ final class VectorCanvas {
                 // A centre point rather than a centre line, which is the same principle for a kind
                 // that has no spine.
                 if loop.contains(image.transform.position, using: rule) { insideIDs.insert(image.id) }
+                result.append(element)
+
+            case .video(let video):
+                // **Whole, by its centre, and never split.** Cutting a video at the loop would mean
+                // two elements over one asset with two different crops of the *same* frames, which
+                // is not what a lasso means anywhere else in the app — VIDEO.md §7 reserves the only
+                // legitimate cut of a video for Split Drawing, which cuts it in *time*.
+                if loop.contains(video.transform.position, using: rule) { insideIDs.insert(video.id) }
                 result.append(element)
 
             case .text(let text):
@@ -2310,6 +2539,17 @@ final class VectorCanvas {
             if k != 1 { image.transform.scale *= k }
             if theta != 0 { image.transform.rotation += theta }
             return .image(image)
+        case .video(var video):
+            // The `.image` arm's arithmetic, on the same six fields, because a video *is* a placed
+            // rectangle here — the reflection composes and re-decomposes, and a similarity moves
+            // three numbers and leaves the stored shape alone. This is the arm a canvas resize
+            // (CANVAS_RESIZE.md) and a whole-cel move both go through, so refusing it would leave a
+            // video at coordinates the rest of the document no longer uses.
+            guard t.a * t.d - t.b * t.c > 0 else { return .video(placed(video, through: t)) }
+            video.transform.position = video.transform.position.applying(t)
+            if k != 1 { video.transform.scale *= k }
+            if theta != 0 { video.transform.rotation += theta }
+            return .video(video)
         case .text(let text):
             // **A reflection is safe here, and that is what makes Mirror available on text** — the
             // assert this arm used to carry was policy rather than a real limit, and the owner ruled
@@ -2455,6 +2695,11 @@ final class VectorCanvas {
             // construction, since `placed` splits the composed pose's two axis scales into their
             // geometric mean and their ratio.
             return .image(placed(image, through: t))
+        case .video(let video):
+            // Same arm, same reason: a video is a rectangle of pixels, so a per-axis stretch is
+            // simply what its own placement now is. It is the frame that stretches, not the footage
+            // — nothing here reaches the source, and stage 3's decode is unaffected by any of it.
+            return .video(placed(video, through: t))
         }
     }
 
@@ -2511,12 +2756,12 @@ final class VectorCanvas {
     /// answers nil only for a singular or non-finite map — `sqrt(aspect)` would then be NaN and the
     /// picture would vanish with nothing on screen to explain it. Refusing one nudge is the same
     /// choice `ObjectTransformDrag` makes, and the artist can see it and drag again.
-    private static func placed(_ element: VectorImageElement,
-                               through t: CGAffineTransform) -> VectorImageElement {
+    private static func placed<Element: PlacedRectangle>(_ element: Element,
+                                                         through t: CGAffineTransform) -> Element {
         var element = element
         let mirrored = element.mirrored != (t.a * t.d - t.b * t.c < 0)
         var composed = element.placement.concatenating(t)
-        if mirrored { composed = VectorImageElement.sourceFlip.concatenating(composed) }
+        if mirrored { composed = Element.sourceFlip.concatenating(composed) }
         guard let pose = ObjectTransformFrame.decompose(composed,
                                                         preferringAxisNear: element.stretchAxis)
         else { return element }
@@ -2570,7 +2815,9 @@ final class VectorCanvas {
             // and the float tracks its pieces by id.
             mapped.id = fill.id
             return .fill(mapped)
-        case .image, .text:
+        case .image, .text, .video:
+            // The kinds whose placement is a stored pose or four ordered corners. Each caller answers
+            // for them itself, because the currency differs — see the header.
             return nil
         }
     }
@@ -2603,7 +2850,9 @@ final class VectorCanvas {
     /// mutation pass will carry.
     static func canBeMapped(_ element: VectorElement) -> Bool {
         switch element {
-        case .stroke, .text, .image: return true
+        // `.video` joins the three that decode nothing on this path: it is a `LayerTransform`, four
+        // more numbers and a file name, and the map moves the numbers without ever opening the file.
+        case .stroke, .text, .image, .video: return true
         case .fill(let fill): return fill.cgPath != nil
         }
     }
@@ -3377,6 +3626,10 @@ final class VectorCanvas {
                 case .image(let element):
                     Self.draw(image: element, into: cg)
                     index += 1
+                case .video(let element):
+                    // Ends a paint run exactly as an image does (rule 1 above).
+                    Self.draw(video: element, into: cg)
+                    index += 1
                 case .text(let element):
                     // Ends a paint run exactly as a fill or an image does (rule 1 above): a stroke
                     // before it and a stroke after it must not blend against each other through it.
@@ -3519,6 +3772,47 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
+    /// **The stage-2 placeholder: where the video is, and that it is a video.** VIDEO.md stage 3
+    /// replaces the body with a decoded frame; what must not change is the rect it fills, which is
+    /// `placement` applied to the natural size — the identical map `draw(image:into:)` uses and the
+    /// identical rect `quad(of:)` tests, so what the artist lassoes is what the artist can see.
+    ///
+    /// Drawn in *local* coordinates under the placement, so it turns, stretches and mirrors with the
+    /// element rather than sitting axis-aligned beside it. The border is stroked at a width that is
+    /// pulled back through the placement's own scale, so a scaled-down video still shows a visible
+    /// edge instead of a hairline that vanishes.
+    private static func draw(video element: VectorVideoElement, into cg: CGContext) {
+        let size = element.naturalSize
+        guard size.width > 0, size.height > 0 else { return }
+        let rect = CGRect(x: -size.width / 2, y: -size.height / 2,
+                          width: size.width, height: size.height)
+        cg.saveGState()
+        cg.concatenate(element.placement)
+        cg.setFillColor(UIColor(white: 0.35, alpha: 0.55).cgColor)
+        cg.fill(rect)
+        // `hypot(a, b)` is the placement's scale along the x axis, i.e. how many device points one
+        // local unit becomes; dividing by it makes the stroke a constant width on screen. Floored so
+        // a degenerate placement cannot ask for a zero or negative line width.
+        let scale = max(hypot(element.placement.a, element.placement.b), 1e-6)
+        cg.setStrokeColor(UIColor(white: 0.85, alpha: 0.9).cgColor)
+        cg.setLineWidth(max(2 / scale, 0.5))
+        cg.stroke(rect.insetBy(dx: 1 / scale, dy: 1 / scale))
+        // A play triangle centred in the rect, sized off the shorter side so it stays inside a very
+        // wide or very tall frame.
+        let reach = min(rect.width, rect.height) * 0.18
+        let glyph = CGMutablePath()
+        glyph.move(to: CGPoint(x: -reach * 0.6, y: -reach))
+        glyph.addLine(to: CGPoint(x: reach, y: 0))
+        glyph.addLine(to: CGPoint(x: -reach * 0.6, y: reach))
+        glyph.closeSubpath()
+        // Its own colour: the fill above is the same grey as the panel, so re-using it would draw the
+        // triangle invisibly.
+        cg.setFillColor(UIColor(white: 0.85, alpha: 0.9).cgColor)
+        cg.addPath(glyph)
+        cg.fillPath()
+        cg.restoreGState()
+    }
+
     /// Replays one stored stroke. The seed is derived from the stroke's id so a `scatter`/
     /// `rotationJitter` brush's dabs stay stable across invalidations and save/load — see
     /// `BrushStamper.DabRNG`.
@@ -3644,6 +3938,38 @@ struct VectorCanvasData: Codable {
         var animationGroupID: UUID?
     }
 
+    /// The persisted form of a `VectorVideoElement` — VIDEO.md §4.1's fields, and nothing runtime.
+    ///
+    /// **Every key is non-optional here, which is the opposite of `ImageRef` above, and deliberately
+    /// so.** `ImageRef`'s three optional keys buy backwards compatibility with files written before
+    /// LASSO_MOVE.md stage 3c existed. No build has ever written a video element, so there is no
+    /// older file to be compatible with, and "absent means the default" would only be a second way to
+    /// spell a value the first way already spells — which is a divergence a round-trip test cannot
+    /// see and a mutation of the encoder can hide behind. `animationGroupID` stays optional because
+    /// nil is a *value* there (untagged) rather than an absent key.
+    ///
+    /// `assetURL` is not here: a path into a package is true only of the load that produced it, and
+    /// `ProjectStore` re-derives it from `fileName` on the way back in.
+    struct VideoRef: Codable {
+        var fileName: String
+        /// `VectorVideoElement.naturalSize`, split so the payload stays plain JSON numbers rather
+        /// than a `CGSize`'s own encoding.
+        var width: Double
+        var height: Double
+        var sourceStart: SourceTime
+        var sourceEnd: SourceTime
+        var speed: Double
+        var x: Double
+        var y: Double
+        var scale: Double
+        var rotation: Double
+        var aspect: Double
+        var stretchAxis: Double
+        var mirrored: Bool
+        /// Absent means untagged — `VectorVideoElement.animationGroupID`.
+        var animationGroupID: UUID?
+    }
+
     /// The persisted form of one `VectorElement`. Written with an explicit `kind` discriminator rather
     /// than Swift's synthesized enum encoding, so the on-disk shape is human-readable and extensible.
     ///
@@ -3667,6 +3993,14 @@ struct VectorCanvasData: Codable {
         /// per-element decode landed (`ADD_TEXT.md` stage 2) it would have swallowed the error and
         /// degraded the whole cel to `.empty`, discarding every stroke, fill and image on it.
         case text(VectorTextElement)
+        /// **VIDEO.md stage 2, and the `"video"` discriminator was a test fixture until it landed.**
+        /// `VectorCanvasDataLogicTests` and `SaveDamageGateLogicTests` both used the literal
+        /// `"video"` as their example of a kind nothing implements — the same job `"text"` did before
+        /// `ADD_TEXT.md` stage 3 took it away. Both files moved to a new sentinel when this case was
+        /// added, and both now assert mechanically that the sentinel they picked is not a kind this
+        /// build writes, so the third time it happens the test says so instead of quietly asserting
+        /// that a shipped feature is missing.
+        case video(VideoRef)
 
         /// The one decode failure worth naming. Everything else stays a `DecodingError` and is
         /// classified as malformed — see `VectorCanvasData.DecodeReport`.
@@ -3675,8 +4009,8 @@ struct VectorCanvasData: Codable {
             case unknownKind(String)
         }
 
-        private enum Kind: String, Codable { case stroke, fill, image, text }
-        private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text }
+        private enum Kind: String, Codable { case stroke, fill, image, text, video }
+        private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text, video }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -3690,6 +4024,7 @@ struct VectorCanvasData: Codable {
             case .fill: self = .fill(try c.decode(VectorFillElement.self, forKey: .fill))
             case .image: self = .image(try c.decode(ImageRef.self, forKey: .image))
             case .text: self = .text(try c.decode(VectorTextElement.self, forKey: .text))
+            case .video: self = .video(try c.decode(VideoRef.self, forKey: .video))
             }
         }
 
@@ -3708,6 +4043,9 @@ struct VectorCanvasData: Codable {
             case .text(let text):
                 try c.encode(Kind.text, forKey: .kind)
                 try c.encode(text, forKey: .text)
+            case .video(let ref):
+                try c.encode(Kind.video, forKey: .kind)
+                try c.encode(ref, forKey: .video)
             }
         }
     }
@@ -3739,7 +4077,7 @@ struct VectorCanvasData: Codable {
         /// a damaged file, not a version gap.
         var malformedCount: Int = 0
         /// What each malformed entry *was*, in file order, for the ones whose discriminator was itself
-        /// still readable — `"stroke"`, `"fill"`, `"image"`, `"text"`.
+        /// still readable — `"stroke"`, `"fill"`, `"image"`, `"text"`, `"video"`.
         ///
         /// **Shorter than `malformedCount` whenever an entry was broken at the discriminator**, which
         /// is why the two are separate rather than one array with a count. The count is the number the
@@ -3814,6 +4152,9 @@ struct VectorCanvasData: Codable {
     var texts: [VectorTextElement] {
         elements.compactMap { if case .text(let text) = $0 { return text } else { return nil } }
     }
+    var videos: [VideoRef] {
+        elements.compactMap { if case .video(let ref) = $0 { return ref } else { return nil } }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case elements
@@ -3863,6 +4204,23 @@ struct VectorCanvasData: Codable {
                                        aspect: el.aspect == 1 ? nil : Double(el.aspect),
                                        stretchAxis: el.stretchAxis == 0 ? nil : Double(el.stretchAxis),
                                        mirrored: el.mirrored ? true : nil,
+                                       animationGroupID: el.animationGroupID))
+            case .video(let el):
+                // **Nothing is dropped here, unlike an image.** A photo's bytes live in a `UIImage`
+                // and its file name is minted at the first save, so an image the save could not write
+                // has no name to reference; a video's file name is the element's own non-optional
+                // field, because a video *is* its file and there is no state in which it has one and
+                // not the other.
+                return .video(VideoRef(fileName: el.assetFileName,
+                                       width: Double(el.naturalSize.width),
+                                       height: Double(el.naturalSize.height),
+                                       sourceStart: el.sourceStart, sourceEnd: el.sourceEnd,
+                                       speed: el.speed,
+                                       x: el.transform.position.x, y: el.transform.position.y,
+                                       scale: el.transform.scale, rotation: el.transform.rotation,
+                                       aspect: Double(el.aspect),
+                                       stretchAxis: Double(el.stretchAxis),
+                                       mirrored: el.mirrored,
                                        animationGroupID: el.animationGroupID))
             }
         }
@@ -3944,16 +4302,24 @@ struct VectorCanvasData: Codable {
     /// Documents are expendable (TODO.md, the owner 2026-08-27), so this is not migration machinery
     /// that has to be kept working — it is twelve lines that open the owner's current file correctly,
     /// and it costs nothing on a file this build wrote, where `transform` is absent.
-    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) -> UIImage?) -> [VectorElement] {
+    ///
+    /// **`resolvingVideos` has no default value, and that is on purpose.** A default of "resolve
+    /// nothing" would compile at every existing call site and silently drop every video element that
+    /// reached it — the exact shape of failure this whole type was rebuilt to make impossible. A
+    /// caller with no project directory to resolve against says so by passing `{ _ in nil }`, which
+    /// is a decision on the page rather than an omission.
+    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) -> UIImage?,
+                             resolvingVideos resolveVideo: (VideoRef) -> URL?) -> [VectorElement] {
         let stored = affineTransform
-        let rebuilt = localElements(resolvingImages: resolveImage)
+        let rebuilt = localElements(resolvingImages: resolveImage, resolvingVideos: resolveVideo)
         guard !stored.isIdentity else { return rebuilt }
         return rebuilt.map { VectorCanvas.mapping($0, throughSimilarity: stored) }
     }
 
     /// The display list as the file literally holds it, before `affineTransform` is baked in. Private
     /// to the accessor above — nothing outside this type has any business with layer-local geometry.
-    private func localElements(resolvingImages resolveImage: (ImageRef) -> UIImage?) -> [VectorElement] {
+    private func localElements(resolvingImages resolveImage: (ImageRef) -> UIImage?,
+                               resolvingVideos resolveVideo: (VideoRef) -> URL?) -> [VectorElement] {
         elements.compactMap { data in
             switch data {
             case .stroke(let stroke): return .stroke(stroke)
@@ -3969,6 +4335,19 @@ struct VectorCanvasData: Codable {
                                                  mirrored: ref.mirrored ?? false,
                                                  fileName: ref.fileName,
                                                  animationGroupID: ref.animationGroupID))
+            case .video(let ref):
+                // A video whose asset is not in the package is dropped exactly as a placed image
+                // whose PNG is missing is — the resolver is the only thing that knows a package
+                // directory, and `ProjectStore` counts the loss where it answers nil.
+                guard let url = resolveVideo(ref) else { return nil }
+                return .video(VectorVideoElement(
+                    assetURL: url, assetFileName: ref.fileName,
+                    naturalSize: CGSize(width: ref.width, height: ref.height),
+                    sourceStart: ref.sourceStart, sourceEnd: ref.sourceEnd, speed: ref.speed,
+                    transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
+                                              scale: ref.scale, rotation: ref.rotation),
+                    aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
+                    mirrored: ref.mirrored, animationGroupID: ref.animationGroupID))
             }
         }
     }

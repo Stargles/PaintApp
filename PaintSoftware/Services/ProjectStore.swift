@@ -836,6 +836,40 @@ enum ProjectStore {
             writeSeconds += CFAbsoluteTimeGetCurrent() - started
             bytes += data.count
         }
+        /// Copies one imported asset into the staged package — VIDEO.md §6's *"the source file is
+        /// copied into the project whole"*, which is why it is a file copy rather than a re-encode:
+        /// a video-only asset would discard the audio track for good.
+        ///
+        /// **It reads the element's `assetURL`, and that is safe only because of where this runs in
+        /// `writeAtomically`'s step order.** After a load, `assetURL` names a file inside the *live*
+        /// package; the save then stages a whole new package and swaps by rename, so the live one is
+        /// moved aside. This copy happens during the stage, before that move — so every re-save of a
+        /// video copies the live package's own asset into the new one, and the path stays valid
+        /// because the swap puts the new package at the same URL. Reorder those steps and a second
+        /// save writes a package with no asset in it, which the next load would report as damage.
+        /// `VideoElementLogicTests.testASecondSaveKeepsTheAssetEvenWithTheImportSourceGone` is what
+        /// notices.
+        ///
+        /// `copyItem` rather than `Data(contentsOf:)` + `write`: a clip is unbounded in size and has
+        /// no business passing through memory. Its bytes are not added to `bytes`, which counts what
+        /// this save *encoded*.
+        func copyAsset(named name: String, from source: URL) {
+            let fm = FileManager.default
+            let destination = imagesDir.appendingPathComponent(name)
+            guard !fm.fileExists(atPath: destination.path) else { return }
+            let started = CFAbsoluteTimeGetCurrent()
+            defer { writeSeconds += CFAbsoluteTimeGetCurrent() - started }
+            do {
+                try fm.copyItem(at: source, to: destination)
+            } catch {
+                log.error("""
+                    Copying asset \(name, privacy: .public) for cel \
+                    \(cel.id.uuidString, privacy: .public) from \(source.path, privacy: .public) \
+                    failed, so the staged package will not contain it: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
 
         // The raster tier. A cel whose texture never had a bitmap gets no PNG and says so in the
         // manifest — `fileName` is still the name the file *would* have, so the cel's identity on
@@ -876,6 +910,12 @@ enum ProjectStore {
                     write(data, name)
                     imageFileNames[element.id] = name
                 }
+            }
+            // A video's bytes are copied rather than encoded — see `copyAsset`. Its name is the
+            // element's own field rather than one minted here, because a video element cannot exist
+            // without the file it names (`VectorVideoElement.assetFileName`).
+            for element in vector.videos {
+                copyAsset(named: element.assetFileName, from: element.assetURL)
             }
             let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames)
             if let data = json(payload) {
@@ -1240,7 +1280,7 @@ enum ProjectStore {
                     // directory.
                     // **`validateProject` cannot catch this one**: image refs live inside the vector
                     // JSON, not in the manifest, so the integrity check never sees their file names.
-                    let elements = payload.canvasSpaceElements { ref in
+                    let elements = payload.canvasSpaceElements(resolvingImages: { ref in
                         guard let image = UIImage(contentsOfFile: imagesDir.appendingPathComponent(ref.fileName).path) else {
                             damage.images += 1
                             log.error("""
@@ -1251,7 +1291,26 @@ enum ProjectStore {
                             return nil
                         }
                         return image
-                    }
+                    }, resolvingVideos: { ref in
+                        // The placed image's story one door over: a video's payload is a file rather
+                        // than a decoded picture, so what "resolves" is a path, and the existence
+                        // check here is the whole of the missing-asset degradation. Existence rather
+                        // than readability, deliberately — deciding a file is not a *video* needs a
+                        // decoder, and VIDEO.md stage 3 owns that; a file that is present and
+                        // unplayable is a stage-3 failure to report at the frame, not a stage-2
+                        // reason to throw the element away at load.
+                        let url = imagesDir.appendingPathComponent(ref.fileName)
+                        guard FileManager.default.fileExists(atPath: url.path) else {
+                            damage.videos += 1
+                            log.error("""
+                                Video asset \(ref.fileName, privacy: .public) for cel \
+                                \(celManifest.id.uuidString, privacy: .public) is missing from the package — \
+                                the video is dropped and the rest of the cel loaded
+                                """)
+                            return nil
+                        }
+                        return url
+                    })
                     // No `transform:`. The accessor above has already baked whatever the file carried
                     // into the geometry, so a cel loads in canvas coordinates and its own transform is
                     // identity — TODO item (12) stage 3.
