@@ -311,6 +311,46 @@ LAYER_TRANSFORM.md.
       RENDER §2.2 and §2.13 rule this: compositing leaves the main thread, and a split-second stale canvas
       is acceptable as long as the canvas can be moved and the next stroke laid during it.
 
+### (39) Three timeline defects, all reported from the device
+
+- [ ] **(a) The pinch-zoom anchor drifts.** > "when you put two fingers on it and spread them apart or pinch
+      them in, it scales horizontally. That seems to work for lower values, but for some reason when i try it
+      sometimes usually in further frames, the center of its scale is not between my two fingers, and is
+      somewhere far back in the timeline."
+
+      **INFERRED lead, unverified**: an anchor that is correct near frame 0 and drifts further out is the
+      signature of a point computed in one space and applied in another — content coordinates against view
+      coordinates, with the error equal to the scroll offset. That matches "usually in further frames"
+      exactly, and it is checkable by reading the pinch handler rather than by reproducing.
+
+- [ ] **(b) The area under the layer rows is dead, and should not be.** > "the space under the layers: right
+      now if you try to move the timeline it, it does nothing. No grey lines also go down from there too. That
+      area is still the timeline, not some empty space which has nothing to do."
+
+      Two symptoms, one likely cause: the gridlines stop and the drag does nothing, which is what happens when
+      the interactive view is sized to the layer rows rather than to the timeline's full area. The frame
+      gridlines that landed with (38) are the thing to compare against — they know the full extent.
+
+- [ ] **(c) The timeline freezes, and it is not reproducible yet.** > "I seem to have ran into the timeline
+      freezing bug again, but still cant figure out how to recreate it. It seems to be a bit random. Some notes:
+      if i retract the timeline down using the arrow then open it back up, it disappears. In the frozen state, i
+      can still press play and even move the blue cursor through the top, but i cannot click on cels or move the
+      timeline."
+
+      **The owner's own notes narrow this a long way and should not be re-derived.** Play runs and the playhead
+      moves, so the model and the render loop are alive; cels do not take a tap and the timeline does not drag,
+      so **the gesture recognisers are what is dead**, not the view and not the data. `TimelineTrackView` drives
+      everything through `UILongPressGestureRecognizer`s with `minimumPressDuration = 0`, and `handleLongPress`
+      resets one with the `gr.isEnabled = false; gr.isEnabled = true` idiom — **a recogniser left disabled on an
+      early-return path produces exactly this symptom set**. Start there. Whether the retract-then-reopen
+      disappearance shares the cause or is a second defect is unknown.
+
+      **This is what [ActionRecorder](PaintSoftware/Debug/ActionRecorder.swift) exists for**, and CLAUDE.md says
+      so in as many words: an agent poking a simulator cannot reproduce a device-only, timing-dependent bug, and
+      the recording carries every gesture-recogniser state transition and every `shouldRequireFailureOf` answer
+      on one clock. **Ask the owner to leave "Record My Actions" running during an ordinary working session and
+      to stop it once the freeze happens** — the file is the diagnosis. Do not spend runs guessing first.
+
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and
