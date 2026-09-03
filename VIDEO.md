@@ -357,7 +357,17 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    `speed`, captured behind `layer.kind == .vector` and the memoized `VectorCanvas.holdsVideo`, so a
    document with no video pays one enum comparison per vector layer. No other structural verb has
    this problem, because none of them mutates a vector canvas in place; `splitCel` mints copies.
-6. **Adjust Speed.** A menu row and §4.3's inverse. §2.5, including the frame-for-frame setting §2.3 names.
+6. ~~**Adjust Speed.**~~ **Built.** Rows in `AnimationTimeline`'s `.block` arm, shown only on a cel
+   that holds a video, calling `CanvasManager.setVideoSpeed` — §4.3's inverse rewrites `frameCount`
+   and the crop is untouched, which is §4.1's separation doing its job. §2.3's frame-for-frame is one
+   of the rows and its speed is computed per clip from the asset's own rate. `VideoSpeedLogicTests`.
+   **The two rulings decide a case neither states.** Slowing a clip down lengthens its block; §2.5
+   says later cels do not move, and two cels covering one frame make `activeCelIndex` pick between
+   them arbitrarily. So the block takes the room there is and its crop is rewritten to match — a
+   crop, visible and undoable and expressed in the same two fields a right-edge drag writes.
+   **The source frame rate is read off the asset rather than stored on the element**, which is where
+   this differs from `naturalSize`: a placement must be expressible with no decoder present, and this
+   is asked once, when a menu row is tapped, by which time the clip's reader is already open.
 7. **Split Drawing on video cels.** §7's second row — trivial once 2 and 5 exist, which is why it is not
    stage 1's problem.
 8. **Bake to cels of images.** §2.9.
@@ -386,9 +396,8 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
 - **Nothing sweeps `VideoImportStore`.** A clip imported and then undone leaves its bytes in Application
   Support for good. The safe sweep is not "delete what is old" but "delete what no open document and no
   undo stack still names", which is a question that type cannot answer on its own.
-- **The element stores no source frame rate**, and stage 3 does not need one: the reader picks by real
-  presentation timestamps and the bake key names an *instant* rather than a frame index. **Stage 6 does**
-  — §2.3's frame-for-frame setting is `documentFPS / sourceFPS` and the menu has to offer it without
-  opening a decoder, which is `naturalSize`'s argument (§4.1) reaching a second field. Adding it also
-  lets the key snap to the source's own frame grid, so a clip at half speed would be one bake per source
-  frame instead of two; today it is two, which costs disk and never a wrong picture.
+- **The element stores no source frame rate and does not need one yet.** The reader picks by real
+  presentation timestamps, the bake key names an *instant* rather than a frame index, and stage 6's
+  frame-for-frame row reads the rate off the asset when it is tapped. What a stored rate would buy is
+  a key that snaps to the source's own frame grid: a clip at half speed is two bakes per source frame
+  today, which costs disk and never a wrong picture.

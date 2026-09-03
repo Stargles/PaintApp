@@ -265,6 +265,7 @@ struct AnimationTimeline: View {
                         canvasManager.splitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame)
                     }
                     .disabled(!canvasManager.canSplitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame))
+                    videoSpeedItems(layerIndex: layerIndex, celIndex: celIndex)
                     menuButton("Clear", icon: "eraser") {
                         canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
                     }
@@ -408,6 +409,61 @@ struct AnimationTimeline: View {
             }
         }
     }
+
+    /// **VIDEO.md §2.5's Adjust Speed**, shown only on a block that holds a video — so an ordinary
+    /// block's menu is exactly the menu it was.
+    ///
+    /// **Flat rows rather than a nested `Menu`**, which is a deliberate refusal rather than a
+    /// simplification: this popover is hand-built out of a `VStack` (`menuList`) under
+    /// `.presentationCompactAdaptation(.popover)`, so a SwiftUI `Menu` here would be a presentation
+    /// inside a presentation — a shape nothing else in this app uses and nothing in the fast tier
+    /// could pin, since this file is not compiled into `PaintSoftwareUITests`.
+    ///
+    /// **The list and the arithmetic both live on `CanvasManager`** for that same reason:
+    /// `videoSpeedChoices` is a static there and `frameForFrameVideoSpeed` computes §2.3's setting
+    /// per clip, so what this file holds is a row per value and no rule at all. `TimelineGraphBand`'s
+    /// doc gives the argument at length.
+    ///
+    /// Frame for Frame is offered only when the clip says what rate it runs at — a legal thing for a
+    /// file not to say — and it is the one row whose number depends on the footage rather than on a
+    /// list.
+    @ViewBuilder
+    private func videoSpeedItems(layerIndex: Int, celIndex: Int) -> some View {
+        if let current = canvasManager.videoSpeed(layerIndex: layerIndex, celIndex: celIndex) {
+            Text("Adjust Speed")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
+            ForEach(CanvasManager.videoSpeedChoices, id: \.self) { choice in
+                menuButton(Self.speedTitle(choice),
+                           icon: Self.isSameSpeed(current, choice) ? "checkmark" : "speedometer") {
+                    canvasManager.setVideoSpeed(layerIndex: layerIndex, celIndex: celIndex, to: choice)
+                }
+            }
+            if let frameForFrame = canvasManager.frameForFrameVideoSpeed(layerIndex: layerIndex,
+                                                                        celIndex: celIndex) {
+                menuButton("Frame for Frame",
+                           icon: Self.isSameSpeed(current, frameForFrame) ? "checkmark" : "film.stack") {
+                    canvasManager.setVideoSpeed(layerIndex: layerIndex, celIndex: celIndex,
+                                                to: frameForFrame)
+                }
+            }
+        }
+    }
+
+    /// "1× (real time)" for the default and "0.5×" for the rest — the multiplier is the number the
+    /// artist is choosing, and only one of them needs saying out loud.
+    private static func speedTitle(_ speed: Double) -> String {
+        let number = speed == speed.rounded() ? String(Int(speed)) : String(speed)
+        return speed == 1 ? "1× (real time)" : "\(number)×"
+    }
+
+    /// Speeds are `Double`s an artist picked off a list or a clip's own rate produced, so they are
+    /// compared with a tolerance rather than by `==`: 24/30 is not 0.8 in binary and a checkmark that
+    /// depended on that would simply never appear.
+    private static func isSameSpeed(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
 
     private func menuList<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }

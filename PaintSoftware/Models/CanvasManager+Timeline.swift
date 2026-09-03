@@ -604,6 +604,106 @@ extension CanvasManager {
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
+    // MARK: - Adjust Speed (VIDEO.md §2.5)
+
+    /// The speeds Adjust Speed offers, plus §2.3's frame-for-frame, which is computed per clip.
+    ///
+    /// Here rather than in `AnimationTimeline` because that file is not compiled into
+    /// `PaintSoftwareUITests` — a list a view holds is a list the fast tier cannot see, which is the
+    /// argument `canSplitCel` already makes one verb over.
+    static let videoSpeedChoices: [Double] = [0.25, 0.5, 1, 2, 4]
+
+    /// Whether this cel holds a video. One memoized `Bool`, so the block menu can ask it while it
+    /// builds without walking anything.
+    func celHoldsVideo(layerIndex: Int, celIndex: Int) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex) else { return false }
+        return layers[layerIndex].cels[celIndex].vector?.holdsVideo == true
+    }
+
+    /// The speed the cel's video is playing at, or nil when it holds none — which is also the block
+    /// menu's test for whether to offer Adjust Speed at all.
+    func videoSpeed(layerIndex: Int, celIndex: Int) -> Double? {
+        guard celHoldsVideo(layerIndex: layerIndex, celIndex: celIndex) else { return nil }
+        return layers[layerIndex].cels[celIndex].vector?.videos.first?.speed
+    }
+
+    /// **§2.3's frame-for-frame speed for this cel's clip** — every source frame shown, one per
+    /// document frame. Nil when the asset will not say what rate it runs at, which is a legal thing
+    /// for a file to do and means the setting is simply not offered.
+    ///
+    /// **The rate is read off the asset rather than stored on the element**, which is the one place
+    /// this differs from `naturalSize`. A placement has to be expressible with no decoder present —
+    /// the render, the membership quad and the lasso all need it — and this is asked once, when a
+    /// menu row is tapped, by which time `VideoFrameSource` already has the clip's reader open. A
+    /// stored field would be a second thing a file can be wrong about for no gain. (If a later stage
+    /// wants the *bake key* to snap to the source's frame grid, that is when it earns its place.)
+    func frameForFrameVideoSpeed(layerIndex: Int, celIndex: Int) -> Double? {
+        guard celHoldsVideo(layerIndex: layerIndex, celIndex: celIndex),
+              let video = layers[layerIndex].cels[celIndex].vector?.videos.first,
+              let info = VideoFrameSource.shared.info(for: video.assetURL),
+              info.nominalFrameRate > 0 else { return nil }
+        return VideoFrameMap.frameForFrameSpeed(sourceFPS: info.nominalFrameRate, documentFPS: fps)
+    }
+
+    /// **§2.5: setting a speed changes the block's length, and later cels do not move.**
+    ///
+    /// The new length is §4.3's inverse — `(sourceEnd − sourceStart) / speed · documentFPS` — so at
+    /// 2x the block halves: same footage, half the frames, and the block's length goes on meaning its
+    /// duration. The crop is untouched, which is §4.1's whole argument for storing it in source time:
+    /// a speed change and a crop must not interact.
+    ///
+    /// **"Later cels do not move" and "cels may not overlap" together decide what happens when there
+    /// is not room.** Slowing a clip down lengthens its block, and the block behind it is not allowed
+    /// to be pushed (§2.5) nor to be overlapped (`activeCelIndex` picks one of two arbitrarily). So
+    /// the block takes the room it has and the crop is rewritten to match it, which is a *crop* —
+    /// visible, undoable, and expressed in the same two fields a right-edge drag writes. The
+    /// alternative, silently overlapping, is a layer that renders one of two cels at random.
+    ///
+    /// One structure step covering both the element and the block:
+    /// `StructureSnapshot.videoCrops` carries `speed`, so undo puts the footage back as well as the
+    /// frames.
+    ///
+    /// A cel holding more than one video takes the last one's length. §2.1 gives a video its own
+    /// layer so that is not a state the app can reach by importing; a lasso move could put a second
+    /// one there, and taking one answer rather than none is the same choice `videoSpeed` makes.
+    func setVideoSpeed(layerIndex: Int, celIndex: Int, to speed: Double) {
+        guard speed.isFinite, speed > 0,
+              layers.indices.contains(layerIndex),
+              layers[layerIndex].cels.indices.contains(celIndex),
+              let vector = layers[layerIndex].cels[celIndex].vector, vector.holdsVideo else { return }
+
+        withStructureUndo(label: .adjustVideoSpeed) {
+            var elements = vector.elements
+            var wanted = layers[layerIndex].cels[celIndex].frameCount
+            var changed = false
+            for index in elements.indices {
+                guard case .video(var video) = elements[index], video.speed != speed else { continue }
+                video.speed = speed
+                elements[index] = .video(video)
+                wanted = VideoFrameMap.frameCount(of: video, documentFPS: fps)
+                changed = true
+            }
+            guard changed else { return }
+            vector.elements = elements
+            vector.bumpVersion()
+
+            let start = layers[layerIndex].cels[celIndex].startFrame
+            let ceiling = layers[layerIndex].cels.enumerated()
+                .filter { $0.offset != celIndex && $0.element.startFrame > start }
+                .map { $0.element.startFrame }.min()
+            let room = ceiling.map { $0 - start } ?? Int.max
+            let length = max(1, min(wanted, room))
+            layers[layerIndex].cels[celIndex].frameCount = length
+            sceneFrameCount = max(sceneFrameCount, start + length)
+            // Only when the neighbour clipped it: otherwise the crop already says exactly this.
+            if length != wanted {
+                writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
+            }
+            scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+        }
+    }
+
     /// Drag the block body: repositions it (startFrame changes, length unchanged), clamped to not
     /// overlap neighbors. Not wrapped here either — see `resizeCelLeftEdge`'s comment.
     func moveCel(layerIndex: Int, celIndex: Int, newStartFrame: Int) {
