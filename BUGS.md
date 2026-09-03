@@ -64,18 +64,32 @@ fixtures do not assert their plan actually cut into more than one strip; all sev
 not vacuous — but the premise their siblings state explicitly is missing, and a fixture edit could make
 them one-strip silently.
 
-## `duplicateCel`, `splitCel` and `pasteCel` drop a cel's interpolation recipe, and it needs a ruling
+## `duplicateCel`, `splitCel` and `pasteCel` drop a cel's interpolation recipe
 
 The same defect that lost a cel's **pose** channel at those three verbs loses its `interpolation` at all
 three as well, and the doc comment that wrongly claimed the pose rides along claimed the recipe does
-too. The pose half is fixed; this half is deliberately not, because **it is not obvious that carrying
-the recipe is right.** A recipe names *references* — other cels, by id — and half of a split span is not
-self-evidently a coherent in-between of the same pair; a duplicate that copies the references produces a
-second cel deriving from the same two keyframes, which may be exactly what the artist wants or may be
-nonsense. `poseDeltaForKeyframe` skips interpolated cels regardless, so nothing downstream is broken
-today by the recipe being dropped.
+too. The pose half is fixed; this half is not.
 
-Decide what each verb should do before changing any of them.
+**"Nothing downstream is broken today by the recipe being dropped" was wrong, and this entry said it.**
+An in-between **stores nothing** — `CanvasManager+BlockDrag.swift:188` records it, which is why the
+block flatten had to go through the `ContentProvider` seam or bake the block away as blank. So the copy
+does not come out as a plain drawing that has stopped following its parents; it comes out **blank**.
+`splitCel` is the same defect half-applied: the left half is mutated in place and keeps its recipe, the
+right half is a fresh `Cel` and does not, so one split gives an in-between beside a blank.
+
+**Ruled, 2026-09-03.** The owner was asked what a copy of an in-between should be and chose **a
+flattened still**: the copy looks exactly like what the artist saw, as ordinary ink, and stops
+following the two drawings it derives from.
+
+- `duplicateCel` and `pasteCel` **flatten**, through `derivedCelContent` exactly as the block drag at
+  `CanvasManager+BlockDrag.swift:188` already does, and carry no recipe. That is the fourth and fifth
+  verb agreeing with the one that was already right.
+- `splitCel` **carries the recipe to both halves.** A split makes no copy — it cuts one span in two,
+  and both halves are the same in-between of the same pair at the same `t`. Carrying it is what makes
+  the two halves behave alike, which is the same argument the code already gives at that line for
+  `pendingPoseBaselines`.
+- `copyCel`'s `CopiedCel` has no `interpolation` field and needs none under this ruling; it needs the
+  flattened picture instead.
 
 ## A green test can pin the bug it was written near, and one did for the length of a stage
 

@@ -479,7 +479,9 @@ scale its radius by the local area root. It landed as `BrushStamper.DabPose` / `
    rest space itself moves. Storing it would be ~8 floats per stored sample (a 110 pt stroke walks 92
    dabs from 12 samples) for a value that is a pure function of position, which is `VectorStroke`
    `precise`'s own argument against a second copy of a derivable fact. **The headline ruling is
-   delivered; the parenthetical is declined, in writing, at `mapping(_:throughSimilarity:)`.**
+   delivered; the parenthetical is declined, in writing, at `mapping(_:throughSimilarity:)`, and the
+   owner has since ruled the decline stands** — grain is expected to change with the brush overhaul
+   that makes brushes importable, so TODO (37) inherits it.
 
 Two things this section got exactly right and they were the load-bearing ones: **no `VectorSample`
 change, no wire-format change, no decode migration** (`VectorStroke`'s hand-written coder names every

@@ -203,8 +203,9 @@ but **"if this went red, would the code be wrong?"**
   brush.
 - **§2.16's "a stroke you Move keeps its grain" was declined rather than delivered.** A commit rewrites
   the stored samples, so the rest space itself moves; storing the multiplier would be ~8 floats per
-  stored sample for a derivable value. **This is an owner ruling that the implementation did not
-  honour — worth putting back to the owner rather than leaving as a silent decline.**
+  stored sample for a derivable value. **Put back to the owner and ruled: it stays declined**, and
+  belongs to the brush overhaul, item (37) — grain is expected to change when brushes become
+  importable, so it is that item's inheritance rather than an open defect.
 - The fix was **one field** (`VectorStroke.restWalk`) plus a 15-line `DabTarget` decorator, and no
   change to grain code at all: wrapping the *sink* rather than the walk leaves `stampSpacing`,
   `applyScatter`, `grainAlphaMultiplier` and `stampApproximateSquare` running unchanged in rest space.

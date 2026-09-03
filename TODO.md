@@ -473,6 +473,15 @@ once; and (29) was blocked on derived content being invisible to the render walk
 
       Low priority. BRUSH_ENGINE_EXTENSIBILITY.md is the document; unread this pass by instruction.
 
+      **KEYFRAMES §2.16's declined half belongs to this overhaul.** The ruling was *"a stroke you Move
+      keeps its grain instead of re-sampling"*. Under a keyframe pose it does; under a *committed* Move
+      it still re-samples, because the commit rewrites the stored samples so the rest space itself
+      moves, and keeping it would mean storing the multiplier per dab — ~8 floats per stored sample for
+      a pure function of position. The owner, 2026-09-03: *"i forsee that brush grain is probably going
+      to get changed with the brush overhaul where brushes will eventually be able to be imported. Do
+      the option with no work for now, its something to touch up later in the overhaul."* So it stays
+      declined and it is this item's inheritance, not an open defect.
+
 ### (30) Video editor — requires (29)
 
 - [ ] > "video editor: (requires #5) right now each animation is viewed in the gallery. This would be the
