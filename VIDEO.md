@@ -330,8 +330,18 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    `derivedCelContent`'s third branch. A video plays. `VideoFrameMapLogicTests` and
    `VideoFrameReaderLogicTests` are its suites, and their clips are generated at test time with the app's
    own `VideoFrameWriter` so a test can say *which* frame came back.
-4. **Import.** `matching: .videos` beside the existing picker, landing a video in its own new vector layer per
-   §2.1, clipped to the scene per §2.4.
+4. ~~**Import.**~~ **Built.** `matching: .videos` beside the existing picker in `ActionsMenu`, calling
+   `CanvasManager.insertVideo` — its own new vector layer per §2.1 (**always**, unlike `insertImage`,
+   which joins an active vector layer), clipped to the scene per §2.4 with `sourceEnd` written to
+   match so the block and the crop agree from the first instant. `VideoImportLogicTests` is its suite.
+   Two things the survey did not say. **A clip is loaded as a file and never as `Data`** — a video's
+   payload is a file for its whole life, and `loadTransferable(type: Data.self)` on a half-gigabyte
+   clip is a half-gigabyte resident on the device whose `Compositor` header documents jetsam; so
+   `PickedMovie` is a `FileRepresentation` and `VideoImportStore` stages the bytes in Application
+   Support (not Caches, which the system may evict before the artist has saved). And **the track's
+   `preferredTransform` becomes the placement's rotation and mirror rather than a resample**, which
+   is what `naturalSize` being the decoded size and `placement` being a general affine already
+   bought.
 5. **Crop.** Teach `resizeCelLeftEdge` / `resizeCelRightEdge` to write `sourceStart` / `sourceEnd`. §2.2.
 6. **Adjust Speed.** A menu row and §4.3's inverse. §2.5, including the frame-for-frame setting §2.3 names.
 7. **Split Drawing on video cels.** §7's second row — trivial once 2 and 5 exist, which is why it is not
@@ -355,10 +365,13 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
   iPad, which depends on the clip's keyframe interval and is the number PERFORMANCE.md would want. Also
   unmeasured: `VideoFrameSource` holds one lock across the decode, so a backward seek blocks the other
   render workers behind it.
-- **A quarter-turn clip is decoded the way it is stored.** `VideoFrameReader.info` reports the track's
-  `preferredTransform` and the `rotation` it implies, so an import can fold it into
-  `LayerTransform.rotation` and resample nothing — but nothing does that yet, so a phone-shot portrait
-  clip imported today would lie on its side. Stage 4's problem, and the seam for it is built.
+- **A quarter-turn clip stands up through its placement, and nothing has tested that it does.** Stage 4
+  folds `VideoFrameReader.info.rotation` into `LayerTransform.rotation` and the transform's sign into
+  `mirrored`, so no pixel is resampled — but `VideoFrameWriter` writes no `preferredTransform`, so the
+  generated fixtures cannot exercise it and only a phone-shot clip on the device can.
+- **Nothing sweeps `VideoImportStore`.** A clip imported and then undone leaves its bytes in Application
+  Support for good. The safe sweep is not "delete what is old" but "delete what no open document and no
+  undo stack still names", which is a question that type cannot answer on its own.
 - **The element stores no source frame rate**, and stage 3 does not need one: the reader picks by real
   presentation timestamps and the bake key names an *instant* rather than a frame index. **Stage 6 does**
   — §2.3's frame-for-frame setting is `documentFPS / sourceFPS` and the menu has to offer it without

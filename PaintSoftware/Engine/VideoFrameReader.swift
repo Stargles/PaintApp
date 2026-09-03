@@ -68,6 +68,66 @@ extension SourceTime {
     }
 }
 
+// MARK: - Where an imported clip's bytes live before the first save
+
+/// **The staging directory an import copies a picked clip into** — VIDEO.md stage 4.
+///
+/// A video's payload *is* a file (`VectorVideoElement`'s own doc), so an import cannot hold the
+/// picked movie the way `insertImage` holds a `UIImage`: it has to put the bytes somewhere the
+/// element can point at until a save copies them into the project package. The picker hands over a
+/// file in a location the system deletes as soon as the transfer closure returns, so this is a copy
+/// and not a reference.
+///
+/// **Application Support rather than Caches**, which is the whole of the choice: the system may
+/// evict `Library/Caches` at any time, and until the artist saves, this copy is the *only* copy of
+/// artwork they have imported. It is not user-visible, unlike `Documents`.
+///
+/// **Nothing sweeps it yet** — see VIDEO.md §9. A clip imported and then undone leaves its bytes
+/// behind, and the safe sweep is not "delete what is old" but "delete what no open document and no
+/// undo stack still names", which is a question this type cannot answer on its own.
+enum VideoImportStore {
+
+    /// Overridable so a test stages into its own directory rather than the real one, exactly as
+    /// `FrameBakeStore.cachesDirectoryOverride` and `ProjectBackupManager.rootDirectoryOverride`
+    /// already do.
+    nonisolated(unsafe) static var directoryOverride: URL?
+
+    static var directory: URL {
+        if let directoryOverride { return directoryOverride }
+        let support = FileManager.default.urls(for: .applicationSupportDirectory,
+                                               in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support.appendingPathComponent("VideoImports", isDirectory: true)
+    }
+
+    /// Puts `source` in under `name`, creating the directory if it is not there. Nil when that
+    /// fails, which the import reports as a refusal rather than storing an element pointing at
+    /// nothing.
+    ///
+    /// **`consumingSource` moves instead of copying, and a clip is why the distinction is worth a
+    /// parameter.** Getting a picked movie this far already costs two copies — Photos exports it to
+    /// a temporary file, and `Transferable`'s import closure must copy that before it is deleted —
+    /// so a third on a half-gigabyte clip is a second of I/O and a gigabyte of transient disk for
+    /// nothing. Only a caller that owns the source may pass true.
+    static func stage(_ source: URL, as name: String, consumingSource: Bool = false) -> URL? {
+        let fm = FileManager.default
+        let root = directory
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent(name)
+        try? fm.removeItem(at: destination)
+        do {
+            if consumingSource {
+                try fm.moveItem(at: source, to: destination)
+            } else {
+                try fm.copyItem(at: source, to: destination)
+            }
+        } catch {
+            return nil
+        }
+        return destination
+    }
+}
+
 // MARK: - One asset, one playhead
 
 /// **A single video file, decoded around a playhead.**

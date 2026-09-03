@@ -451,6 +451,108 @@ final class CanvasManager: ObservableObject {
         return true
     }
 
+    /// **Imports a video** — VIDEO.md stage 4, and the two rulings it has to obey are §2.1 and §2.4.
+    ///
+    /// **§2.1: its own new vector layer, always.** Unlike `insertImage`, which adds to the active
+    /// vector layer when there is one, this never joins an existing layer: *"lets have it be
+    /// imported inside of its own vector layer for simplicity"*, and the crop verbs (§2.2) are edge
+    /// drags on the layer's own block, which only means "crop the video" if the block holds nothing
+    /// else. The layer is a separate, preceding undo step, exactly as `insertImage`'s fallback is.
+    ///
+    /// **§2.4: the block arrives clipped to the scene and crops outward.** The cel is
+    /// `min(clip, scene)` frames long and `sourceEnd` is written to match, so dragging the right
+    /// edge outward (stage 5) reveals more up to the full duration. **Import never changes the shape
+    /// of the timeline** — `sceneFrameCount` is not touched here, and a clip longer than the scene
+    /// arrives with its tail cropped rather than making the scene longer.
+    ///
+    /// **The picked file is copied into `VideoImportStore` first**, because a video's payload is a
+    /// file and the picker's own is deleted the moment the transfer ends. `assetFileName` names it
+    /// inside the project package; `assetURL` names it here until a save copies it across.
+    ///
+    /// **The track's `preferredTransform` becomes the placement's rotation and mirror rather than a
+    /// resample.** A phone-shot portrait clip decodes landscape with a quarter turn stored beside it;
+    /// folding that into `LayerTransform.rotation` stands it up with no pixel touched, which is what
+    /// `naturalSize` being the *decoded* size and `placement` being a general affine already buy. The
+    /// fit is measured against the **displayed** size for the same reason — a quarter-turned clip's
+    /// bounding box has its axes swapped.
+    ///
+    /// False when the file will not open as a video, holds no frames, or cannot be staged.
+    /// - Parameter consumingSource: true when the caller owns `pickedURL` and it may be *moved*
+    ///   into the staging directory rather than copied — see `VideoImportStore.stage`.
+    @discardableResult
+    func insertVideo(at pickedURL: URL, consumingSource: Bool = false) -> Bool {
+        guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0,
+              let info = VideoFrameSource.shared.info(for: pickedURL),
+              info.decodedSize.width > 0, info.decodedSize.height > 0,
+              info.displaySize.width > 0, info.displaySize.height > 0,
+              info.duration.seconds > 0 else { return false }
+
+        let id = UUID()
+        let suffix = pickedURL.pathExtension.isEmpty ? "mov" : pickedURL.pathExtension
+        let assetFileName = "\(id.uuidString)_video.\(suffix)"
+        guard let assetURL = VideoImportStore.stage(pickedURL, as: assetFileName,
+                                                    consumingSource: consumingSource)
+        else { return false }
+
+        // §2.1. This is its own undo step and has to be, because the element below is registered
+        // against the layer it lands on.
+        addVectorLayer()
+        guard layers.indices.contains(currentLayerIndex),
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: 0),
+              let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
+
+        // §2.4. The whole clip's length in document frames, clipped to the scene the artist already
+        // has — and `sourceEnd` written to the clipped length, so the crop and the block agree from
+        // the first instant and a right-edge drag has somewhere to go.
+        let whole = VideoFrameMap.frameCount(sourceStart: .zero, sourceEnd: info.duration,
+                                             speed: 1, documentFPS: fps)
+        let blockLength = max(1, min(whole, max(sceneFrameCount, 1)))
+        let end = VideoFrameMap.unclampedSourceTime(sourceStart: .zero,
+                                                    elapsedDocumentFrames: blockLength,
+                                                    speed: 1, documentFPS: fps)
+        let sourceEnd = end < info.duration ? end : info.duration
+
+        let transform = info.preferredTransform
+        let fit = min(canvasSize.width / info.displaySize.width,
+                      canvasSize.height / info.displaySize.height) * 0.8
+        let element = VectorVideoElement(
+            id: id,
+            assetURL: assetURL,
+            assetFileName: assetFileName,
+            naturalSize: info.decodedSize,
+            sourceStart: .zero,
+            sourceEnd: sourceEnd,
+            speed: 1,
+            transform: LayerTransform(position: CGPoint(x: canvasSize.width / 2,
+                                                        y: canvasSize.height / 2),
+                                      scale: fit, rotation: info.rotation),
+            mirrored: transform.a * transform.d - transform.b * transform.c < 0)
+
+        let layerIndex = currentLayerIndex
+        let before = vector.elements
+        layers[layerIndex].cels[celIndex].frameCount = blockLength
+        vector.elements = before + [.video(element)]
+        vector.bumpVersion()
+        scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
+        objectWillChange.send()
+
+        let layerID = layers[layerIndex].id
+        let celID = layers[layerIndex].cels[celIndex].id
+        // **`cost: 0`, and that is not an oversight.** `UndoHistory`'s budget is about pixels this
+        // process is holding; a video element holds a file name, and the bytes are on disk whether
+        // or not this step is on the stack.
+        recordUndo(label: .insertVideo, cost: 0, undo: { [weak self] in
+            vector.elements = before
+            vector.bumpVersion()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        }, redo: { [weak self] in
+            vector.elements = before + [.video(element)]
+            vector.bumpVersion()
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        })
+        return true
+    }
+
     /// Converts a vector layer to raster in place: each cel's full content is folded into `raster`
     /// (not `bakedImage` — a raster-layer cel must hold its content in exactly one tier at rest, or
     /// the eraser can never reach it), `vector` is cleared, `kind` becomes `.raster`. No-op if the

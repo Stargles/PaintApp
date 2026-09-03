@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct ActionsMenu: View {
     @ObservedObject var canvasManager: CanvasManager
@@ -11,6 +12,7 @@ struct ActionsMenu: View {
     /// wants to be bisectable on its own.
     @Binding var activePanel: ActivePanel
     @State private var photoPickerItem: PhotosPickerItem?
+    @State private var videoPickerItem: PhotosPickerItem?
     @State private var notice: String?
     /// Live slider position for the padding control. The (buffer-resizing) commit happens only on
     /// release, in `onEditingChanged`, so dragging the thumb doesn't re-render every layer per tick;
@@ -56,6 +58,17 @@ struct ActionsMenu: View {
             }
             .onChange(of: photoPickerItem) { _, newItem in
                 Task { await insertPhoto(newItem) }
+            }
+
+            // **VIDEO.md stage 4, and it is deliberately the picker beside the photo one rather than
+            // a row inside it.** §2.1 gives a video its own vector layer whatever the active layer
+            // is, so the two verbs differ in more than the file they take — the photo row's title
+            // even changes to say which layer it will land on, and this one never can.
+            PhotosPicker(selection: $videoPickerItem, matching: .videos) {
+                row(icon: "film", title: "Insert Video (new layer)")
+            }
+            .onChange(of: videoPickerItem) { _, newItem in
+                Task { await insertVideo(newItem) }
             }
 
             addTextRow
@@ -392,6 +405,51 @@ struct ActionsMenu: View {
         guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         await MainActor.run {
             canvasManager.insertImage(image)
+        }
+    }
+
+    /// **A clip is loaded as a file, never as `Data`** — which is the one respect this path cannot
+    /// copy the photo one above it. A photo is a few megabytes and a `UIImage` is where it has to end
+    /// up anyway; a video is unbounded, its payload stays a file for its whole life (VIDEO.md §4.1),
+    /// and `loadTransferable(type: Data.self)` on a half-gigabyte clip is a half-gigabyte of resident
+    /// memory on the device this app's `Compositor` header already documents jetsam killing.
+    ///
+    /// `consumingSource: true` because the file handed back here is `PickedMovie`'s own copy: the
+    /// system deletes its export the moment the transfer closure returns, so that copy is ours to
+    /// move rather than copy again.
+    private func insertVideo(_ item: PhotosPickerItem?) async {
+        guard let item else { return }
+        guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else {
+            return await MainActor.run { notice = "That video could not be read." }
+        }
+        await MainActor.run {
+            if !canvasManager.insertVideo(at: movie.url, consumingSource: true) {
+                try? FileManager.default.removeItem(at: movie.url)
+                notice = "That video could not be read."
+            }
+        }
+    }
+}
+
+/// **A picked movie, as a file rather than as bytes** — the `Transferable` the video picker loads.
+///
+/// `PhotosPickerItem` will hand a clip over as `Data`, and doing that is what this type exists to
+/// avoid: see `ActionsMenu.insertVideo`. The import closure has to copy, because the file it is
+/// given is deleted as soon as it returns; `CanvasManager.insertVideo` then *moves* that copy into
+/// `VideoImportStore`, so the picked clip is written twice on its way in and not three times.
+struct PickedMovie: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            let suffix = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
+            let copy = FileManager.default.temporaryDirectory
+                .appendingPathComponent("picked-\(UUID().uuidString).\(suffix)")
+            try? FileManager.default.removeItem(at: copy)
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return Self(url: copy)
         }
     }
 }
