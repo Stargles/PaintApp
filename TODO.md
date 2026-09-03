@@ -302,6 +302,41 @@ LAYER_TRANSFORM.md.
       > layers. The expected outcome is that the HSV gets baked into the vector layer (colors get
       > transformed). Right now it does nothing. This may be an issue other blend modes. Lower priority."
 
+      **Both halves reproduce, MEASURED 2026-09-03 by driving `mergeLayers` headlessly.** A pure red
+      floor under an HSV Shift layer at +120° hue merges to **255,0,0** — the grade did nothing and the
+      adjustment layer was deleted; a 120° rotation of pure red is pure green. And a pure red floor
+      under a pure blue layer set to **Screen** merges to **0,0,255**, which is Normal's answer; Screen
+      is 255,0,255. So the owner's *"may be an issue other blend modes"* is confirmed, and the two
+      halves are one defect: `PixelOps.flatten` composites with `.normal` unconditionally, and
+      `PixelOps.rasterize(cel:)` of a `.value` layer's cel is transparent because that layer's content
+      is `Layer.fill`/`Layer.effect`, outside the cel entirely.
+
+      **The obvious worry is not the blocker.** Merging does *not* newly destroy vector data: it
+      already calls `rasterizeLayer` on both layers before flattening, so every merge involving a
+      vector layer has always been a flatten to pixels, and `MergeLossKind.valueLayerContent`'s
+      confirmation already tells the artist the adjustment "will no longer be editable as its own
+      colour or adjustment". What that confirmation also says is *"Merging will flatten it into the
+      layer below"* — a promise the code does not keep, which is exactly the report.
+
+      **The blocker is [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) §1, and it is an owner ruling rather
+      than an implementation gap.** *"Paper is part of the picture"*: an adjustment layer grades — and
+      a blend mode blends against — the accumulator **including the canvas paper and every layer
+      beneath**, which is what `testEveryBlendModeBlendsAgainstThePaper` pins. A merge can only bake
+      the grade against the **one layer below**, so wherever the paper or a lower layer shows through,
+      the merged result cannot be the picture the artist was looking at. Baking against the full
+      backdrop instead is worse, not better: §2.1 is that a grade over the paper makes the composite
+      opaque, so the merged layer would become an opaque sheet hiding everything under it.
+
+      **So the question, in the owner's terms.** *When you merge an HSV (or Multiply, or Screen) layer
+      into the layer below, and there is paper or another drawing showing through the gaps, which
+      should the merged layer be?* Either **(a)** the transformed colours of that one layer only —
+      what Photoshop does, what the owner's words describe, and the gaps change appearance because the
+      paper stops being graded; or **(b)** the picture exactly as it looked, which means baking the
+      paper and everything beneath into the result and losing every layer under it as separate
+      layers. There is no third answer, and (a) is only a small change on top of the arithmetic
+      already in `CoreGraphicsCompositor.draw(_:mode:opacity:in:context:)` — which is where the blend
+      belongs, rather than a second copy of it in `PixelOps`.
+
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and
