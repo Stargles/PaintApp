@@ -10,14 +10,28 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first
 
-**Nothing is owed before you start.** The fast tier is **2657 / 2654 passed / 0 failed / 3 skipped**,
-up from 2622 at the start of this pass. The last full run was at `04099a9` — 2759 tests, one
-environmental failure that passed clean in isolation — and it predates this pass, so **a full run is the
-first thing worth spending twenty-two minutes on** if you are about to close a phase. It is not owed
-before ordinary work.
+**Nothing is owed before you start.** The fast tier is **2678 / 2675 passed / 0 failed / 3 skipped**,
+taken at `8eb5aa5` on an idle machine after all four of this pass's branches merged; the arithmetic
+reconciles exactly against the base (2657 + 1 + 0 + 7 + 13). The last full run was at `04099a9` — 2759
+tests, one environmental failure clean in isolation — and it now predates two passes that changed the
+compositing sweep, the export driver and the cel-copy verbs, so **a full run is the first thing worth
+twenty-two minutes** if you are about to close a phase. It is not owed before ordinary work.
 
-**Pick up from "Everything else open" at the bottom, or from BUGS.md's first entry**, which is the
-largest open thing in the repo right now and is about the tests rather than the code.
+**The owner's ordering, given 2026-09-03 and not yet acted on past step 2.** Steps 1 and 2 are done —
+the test debt and the in-between flatten. What is next:
+
+1. **Distort's ink tier and KEYFRAMES 5b, together.** Both were blocked on §4.2's rest-space dab bake,
+   which has landed: `DabPose` answers `localScale` per dab, which is exactly the per-dab width a
+   homography needs. They are the same machinery, so building them apart builds it twice.
+2. **(32), (33), (34)** — three small independent defects, one worker each.
+3. **(31)'s last symptom** — 16383² cannot be composited at all and needs a downscaled display proxy —
+   with `StripedCompositor.assemble`'s unbudgeted two-frame peak, which is the same code.
+4. **(29) stage 7**, the rest of the memory audit. PERFORMANCE §9's census wants re-taking before it is
+   plannable.
+
+Everything else needs a design conversation. **The competing claim on step 1 is the three gaps stage 5
+left** — Move is refused at a frame whose pose is not resting, a pose channel has no graph-editor band,
+and animation groups have no UI — which are more visible to the artist day to day than Distort is.
 
 ## State
 
@@ -26,7 +40,11 @@ largest open thing in the repo right now and is about the tests rather than the 
 
 **Nothing is in flight. No worktrees, no `tmp/*` branches, nothing uncommitted.**
 
-**Fast tier: 2657 total / 2654 passed / 0 failed / 3 skipped.** It was 2622 at the start of this pass.
+**Fast tier: 2678 total / 2675 passed / 0 failed / 3 skipped.** It was 2657 at the start of this pass.
+
+**Two owner rulings landed this pass and are recorded where they act**, not here: §2.16's grain-on-Move
+decline **stands** and belongs to the brush overhaul, TODO (37); and a copy of an in-between is **a
+flattened still**, which duplicate, copy and split now implement.
 
 ## RENDER (29) is delivered through stage 6; stage 7 is what is left
 
