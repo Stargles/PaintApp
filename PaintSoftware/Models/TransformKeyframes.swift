@@ -72,7 +72,51 @@ extension CanvasManager {
                 for key in track.keys { frames.insert(cel.startFrame + key.frame) }
             }
         }
+        // **The container's own channel, and it needs no conversion** — §3.1: `LayerPose.track` keys
+        // in *absolute document frames* because a transformation layer has no cel to ride.
+        //
+        // **It was missing until §11.7 and the divergence it left is exactly §2.28's.** The
+        // transformation layer landed with `Layer.transform` animated by a `TransformTrack`, and this
+        // funnel folded only the cels' — so a key on a transformation layer drew a node in the graph
+        // editor with no keyframe indicator on the track beside it, which is the same report §2.28
+        // was written from, arriving through the third door.
+        //
+        // **`layerTransform`, not `transform`**, which is `storedEffect(of:)`'s asymmetry one payload
+        // over: a `.raster` layer carrying a pose left behind by a kind change poses nothing, so a
+        // marker for it would claim a keyframe for an animation the canvas is not running.
+        if let track = layers[index].layerTransform?.track {
+            frames.formUnion(track.keyedFrames)
+        }
         return frames.sorted()
+    }
+
+    /// **The same for a folder's own pose** — §2.21's twin, absolute frames, no cel conversion.
+    ///
+    /// A folder holds no cels, so this is the *whole* of a folder target's pose contribution; there
+    /// is no kind gate because a folder has no kinds.
+    func poseKeyframeFrames(inFolder id: UUID) -> [Int] {
+        guard let track = folders.first(where: { $0.id == id })?.transform?.track else { return [] }
+        return track.keyedFrames.sorted()
+    }
+
+    // MARK: - Raising the Move box from the channel list — KEYFRAMES.md §11.7
+
+    /// **What a click on a channel list row does** — the owner's *"clicking on a move item in there
+    /// should bring up the move box for that move item so you don't need to select it manually
+    /// again."*
+    ///
+    /// One line, because every decision in it is somewhere else: which channel a row names is
+    /// `PoseChannelID.resolve(parameterID:)`, whether it has a box to raise is
+    /// `PoseChannelID.raisesMoveBox`, and raising it is `beginVectorChannelMove(_:)`. It is here
+    /// rather than in `Views/AnimationTimeline.swift` for that file's founding reason — it is not
+    /// compiled into `PaintSoftwareUITests`, so a rule written there is pinned by nothing.
+    ///
+    /// - Returns: whether a box came up. False for a container pose (there is no Move on a
+    ///   transformation layer yet) and for a channel whose ink is not on the cel under the playhead.
+    @discardableResult
+    func revealPoseChannel(_ channel: PoseChannelID) -> Bool {
+        guard channel.raisesMoveBox, case .cel(let id) = channel else { return false }
+        return beginVectorChannelMove(id)
     }
 
     // MARK: - Writing one key

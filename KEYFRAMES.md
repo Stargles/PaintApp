@@ -1193,8 +1193,9 @@ frame of it — the same argument interpolation's identity already makes for omi
 ## 11. The graph editor
 
 Asks 4, 5 and 6 of 2026-08-29, and §2.17 sharpened by the owner from *"a drawer that grows the timeline
-upward"* to *"it pops up above the layer that has it when on"*. **D1 through D4 are built, and §11.6 is
-empty**, so the drawer and the channel panel §8's 3b row owes are the ones described here. Line numbers
+upward"* to *"it pops up above the layer that has it when on"*. **D1 through D4 are built, §11.6 is
+empty, and §11.7 is the transform band on top of them**, so the drawer and the channel panel §8's 3b row
+owes are the ones described here. Line numbers
 are **gone from §11.2 and §11.3** rather than re-taken: every one they carried was stale twice, and D2
 moved all four timeline files again. Name the symbol, not the line — the two sections below now do, and
 §11.4's remaining numbers should be re-taken rather than trusted.
@@ -1791,7 +1792,11 @@ It sits above the node, beside it when there is no room above, clamped to the *v
 than the band's bounds, and appears only when the drag has changed the node's **value**, so a pure
 retiming drag shows nothing by construction rather than by a threshold.
 
-### 11.5 Stage D4 — the channel list is a filter, not a navigator — **done 2026-08-29**
+### 11.5 Stage D4 — the channel list is a filter — **done 2026-08-29, amended by §11.7**
+
+**Its title said *"a filter, not a navigator"* and the owner reversed exactly that half.** The list is
+both now: the box filters and the row body navigates. §11.7 carries the ruling and the gesture split;
+everything below about *what* the rows are is unchanged.
 
 The owner: *"just a button option in the graph editor which brings up a scrollable popup menu, which is
 basically an include or exclude checkmark box for each animation. Animations may have multiple values
@@ -1814,18 +1819,28 @@ is not compiled into the test target, so a rule written there is pinned by nothi
 needed — but a band is one layer, a layer is one grade, and a grade is one prefix, so **every band today
 has exactly one group**. That is not a reason to drop it: the group row is the only control that switches
 a whole effect off in one tap, which is the owner's *"visible or invisible like a whole"*, and the shape
-is what a second channel source (a transform, a folder's grade) will need. It is pinned by
+is what a second channel source (a transform, a folder's grade) will need. It was pinned by
 `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade`, which is the assertion that changes the
-day the premise does.
+day the premise does — **and the day came**: §11.7's transform band makes two Move channels on one layer
+two groups, so that test is now `testAGradeContributesExactlyOneGroupNamedByTheEffect` beside
+`PoseBandLogicTests.testABandShowingTwoMoveChannelsHasTwoGroups`.
 
-**And it is why there is no fold.** The groups are not merely expanded by default, they cannot be
-collapsed at all: a chevron over one group folds the only thing in the list, so its only reachable state
-today is the empty list the expanded default exists to prevent. Collapse state is also the one piece of
-this feature that has no natural scope — keyed by effect case it is *"brightnessContrast"*, which follows
-the artist to the next layer carrying a Brightness/Contrast grade and greets them with a header and no
-channels, where the visibility filter carries its `KeyframeTarget` and dies with the band. The control
-comes back with the second channel source, when it has something to fold and a reason to be scoped, and
-the premise test above is what says when. **The decision lives in `TimelineGraphChannelList`, not in the
+**One thing the id format was said to give for free and does not.** `TransformChannelID`'s own doc says
+its id doubles as the grouping key *"so a transform channel lands in the channel list's existing shape
+rather than needing a second one"*. That is true of `.cel` and false of `.group`, whose id is
+`"group.<uuid>"` — already carrying a dot — so a component appended to it would put **every** animation
+group under the prefix `"group"`, and one tap on that header would switch off channels belonging to
+drawings the artist never picked. `PoseChannelID` mints a dot-free prefix instead — `"celPose"`,
+`"poseGroup-<uuid>"`, `"containerPose"` — and `groupID(ofParameterID:)` is untouched.
+
+~~**And it is why there is no fold.**~~ **Built in §11.7, and the two objections recorded here were
+answered rather than waived.** They were that a chevron over one group folds the only thing in the list,
+and that collapse state has no natural scope — keyed by effect case it is *"brightnessContrast"*, which
+follows the artist to the next layer carrying that grade and greets them with a header and no channels.
+The transform channel is the second channel source this paragraph named as the condition for revisiting:
+a layer can carry a whole-cel Move and any number of animation groups, so there is something to fold; and
+`TimelineGraphChannelList.Fold` carries the `KeyframeTarget` it was authored on exactly as `Filter` does,
+so it dies with the band. **The decision lives in `TimelineGraphChannelList`, not in the
 view** — `AnimationTimeline.swift` is not compiled into the test target, so a rule written there is
 pinned by nothing, which is the same reason the grouping and the toggle arithmetic are in that file.
 
@@ -1901,6 +1916,10 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
 
 ### 11.6 Open
 
+- ~~**A transform channel has no band, so an object animated with Move has no curve to edit.**~~
+  **Built in §11.7, read-only.** The six decomposed curves are drawn, listed, grouped, folded and
+  navigable; a node on one takes no gesture. See §11.7 for what write-back would still need.
+
 - ~~**The y axis when several channels are visible at once.**~~ **Ruled 2026-08-29: each curve is scaled
   to fill the band.** Shown the trade — per-channel normalisation makes every curve legible and makes two
   slopes incomparable, one shared axis is honest and leaves a 0…1 opacity flat beside a 0…500 blur radius
@@ -1933,3 +1952,115 @@ names nothing hides nothing and no id can resurrect a channel `isAnimated` refus
   and a single "there is animation in here" indicator, the owner kept the blank row. Recorded as ruled
   rather than deleted because it was found as a gap and will be found again: the next session to notice
   a folder swallowing its children's markers should read this and move on.
+
+### 11.7 The transform band — the two rulings, and what shipped
+
+**A transform/pose channel had no band at all.** `TimelineGraphBand.allChannels(effect:tracks:)` took
+an `Effect?` and a `[String: AnimationCurve]`, so a `TransformTrack` could not reach it — a missing
+door rather than a hidden band, and the brief that opened this stage said so and was right.
+
+#### Ruling 1 — the band shows the pose decomposed
+
+Asked whether a transform band should show eight raw corner coordinates, six decomposed curves (X, Y,
+Scale X, Scale Y, Rotation, Skew — what After Effects and Clip Studio show), or decomposed with a
+corner fallback for a genuinely projective pose, the owner answered: **"decomposed"**.
+
+**`DeformFactorization.Matrix2x2.polar` is not the decomposition to reuse, and the brief's hypothesis
+that it would be is refuted.** §4.3 blends two poses through `polar` and `interpolatedFromIdentity`,
+which factor a 2×2 as rotation × **symmetric** remainder — the right choice for interpolation, because
+it is the path from the identity that makes an arm swing instead of collapsing, and `polar`'s own doc
+says so. It is the wrong one for *naming*: a pure horizontal shear `[1 k; 0 1]` has
+`atan2(c − b, a + d)`, so **polar reports a rotation for a pose that was never rotated** — a skew of
+0.5 comes back as −16.7° of turn plus a squash, and an artist who skewed would watch the Rotation
+curve move. The six the owner named are the **QR / Gram-Schmidt** factorisation
+`M = R(θ) · Sk(φ) · diag(sx, sy)`, which is what AE, CSP and the CSS transform specification all
+report; it is eight lines in `Models/PoseComponents.swift`, and everything else in `Engine/Deform` —
+`Matrix2x2`, `Homography.affine()`, `Quad.rect(_:).mapped(by:)` — is reused unchanged. Pinned by
+`PoseComponentsLogicTests.testPolarReportsARotationForAPureSkewAndTheQRDecompositionDoesNot`, which
+exists so the next session reaching for the shared primitive finds the arithmetic rather than an
+opinion.
+
+**A projective pose is declined, with a reason, rather than shown as its affine part.** A homography
+has eight degrees of freedom and these six curves have six, so there is no honest drawing of one.
+`PoseQuad.affineOrLinearised` *does* answer — the linearisation at the box centre, which is right for
+rendering (§4.2's third honest artifact; drawing nothing would make a frame vanish) and wrong for a
+graph editor, where it would show six curves that are not what the pose does and a write-back through
+them would flatten the keystone the artist authored. So `PoseComponents.decompose` asks
+`Homography.affine()` at its exact-zero tolerance, the **whole channel** is declined if any of its keys
+is projective (five honest curves and one linearisation would be worse, because nothing would mark the
+sixth), and `Content.declinedChannelIDs` names it — the band's accessibility value reads
+`declined:celPose`, which is a third state beside `empty` and `hidden`. Unreachable today: animated
+Distort is stage 5b and no writer produces a projective `PoseQuad`. **Whoever builds 5b decides whether
+to add a corner fallback beside these six or to widen the six; do not quietly make `decompose`
+linearise.**
+
+**The band is read-only, deliberately and explicitly.** The decomposition round trip is built and
+tested — `recompose` is `decompose`'s exact inverse over its own range, and
+`PoseComponents.setting(_:to:of:)` replaces one component and leaves the other five alone — but two
+things stand between that and a drag. A node's *frame* is shared by all six sub-curves, because they
+are one `TransformTrack.Key`, so retiming one of them is retiming the key, and `moves(of:in:…)`
+computes a delta per channel with no notion that six of them are one thing; and the write funnel is
+`setEffectParameterTrack`, which addresses a grade's parameters. Landing half of that gives a band
+whose horizontal drags desynchronise a key from itself. **Without the refusal the band would be
+read-only anyway** — that funnel refuses an id it does not recognise — but by accident of another
+function's guard: the drag would open an undo bracket, carry the node under the finger and snap it
+back on lift with nothing saying why. `Channel.isEditable` moves the refusal to touch-down, and
+`TimelineGraphBand.editable(_:)` applies it at the three gesture entry points, so a pose node is
+**drawn and inert**.
+
+**Two consequences of the drawing worth knowing rather than discovering.** The drawn line is the
+*timing* curve's interpolation of a component, while the animation's actual in-between is
+`PoseInterpolation.blend`, which factors and blends the two poses; they agree exactly at every key and
+differ slightly between them for a large rotation. That is the same shape as the `step > 1` gap
+`stem(forKeyAt:in:)` already draws — two truths, neither bent onto the other — with the difference that
+here there is no disagreement at any *node*, which is where the artist grabs. And all six components
+declare **no `uiRange`**, so each is normalised to its own key extent: none of them has a
+canvas-independent range, and the one that looks as though it does (rotation, −180…180) is the worst
+case, drawing a 5°-to-10° animation as a flat line in the middle of the band. §11.6's argument for
+preferring a declared range is about drags, which this band has none of; revisit it if write-back
+lands.
+
+#### Ruling 2 — the channel list is a navigator as well as a filter
+
+The owner, verbatim: *"in the menu list of animations, clicking on a move item in there should bring up
+the move box for that move item so you don't need to select it manually again."*
+
+This amends §11.5, whose title and whose file's opening line both said *"a filter over the band, not a
+navigator through it"*. Both are rewritten rather than left to contradict the shipped behaviour.
+
+**The gesture split: the box filters, the row body is the subject, the chevron folds.** One rule for the
+whole list rather than one per kind of row — tapping a row's body raises the thing that row is about. A
+grade's channel has nothing to raise (the surface an artist edits a Brightness curve on is the settings
+bar, and they are already there), so its body is inert; the alternative considered and rejected was
+letting the body toggle the box wherever there was nothing to navigate to, which makes one gesture mean
+two things depending on a property of the row the artist cannot see. All six rows of one Move channel
+raise the same box, because the owner asked for *"the move box for that move item"* and the move item
+is the channel, not the component.
+
+**What it raises is `beginVectorWholeCelMove` with the moved set narrowed** — membership on a pose
+channel is `VectorElement.isMoved(by:)`, a field rather than a region, so nothing is split, no id is
+minted and the float is the ordinary one. It does **not** move the playhead or the layer: the band is
+open on the selected layer and the cel is the one under the playhead, so a click reveals the channel
+where the artist is standing. A container pose (`Layer.transform`, `LayerFolder.transform`) offers no
+navigation at all, because there is no Move-on-a-transformation-layer gesture yet;
+`PoseChannelID.raisesMoveBox` is the one line that changes the day there is.
+
+#### The fold, and the two funnels
+
+**The fold is §11.5's deferred chevron, built now that there is something to fold.** It is a
+disclosure and not a second filter, which is the owner's own analogy taken literally — *"like the
+hide/show layers and layer groups"*: a layer folder has a chevron that shows or hides its rows in the
+panel and an eye that shows or hides its contents on the canvas. Folding changes nothing the band
+draws, and a folded group still carries its whole membership so its box still describes it.
+
+**Both funnels the transformation layer's pass left open are closed, and both were §2.28's
+biconditional broken from a door §2.28 could not have known about.** `keyedFrames(of:tracks:)` folded
+the *cels'* pose tracks and stopped, under a comment that read as exhaustive — so a key on a
+transformation layer or on a folder's own pose drew a node in the graph editor with no diamond beside
+it on the track, which is the report §2.28 was written from arriving a third and fourth time.
+`poseKeyframeFrames(inLayer:)` now folds `layerTransform?.track` (through the accessor, so a pose left
+behind by a kind change contributes nothing, which is `storedEffect(of:)`'s asymmetry one payload
+over), `poseKeyframeFrames(inFolder:)` is its twin, and `listedAnimationChannelIDs` lists the pose
+channels **per component** — a pure translation leaves four of the six flat, and a track-level answer
+would call them animations. `curvedEffectChannelIDs` deliberately stays effect-only: its one caller
+marks the *sliders* that carry a curve, and a pose channel has no slider.

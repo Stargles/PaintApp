@@ -90,23 +90,29 @@ final class TimelineGraphChannelListLogicTests: XCTestCase {
                        "An id with no dot is its own group rather than a crash or an empty string")
     }
 
-    /// **What the id format actually buys, stated as a fact rather than assumed.**
+    /// **A grade is still one group, and it is no longer the only kind a band can hold.**
     ///
-    /// §11.5 says grouping falls out of the format for free. It does — but a band is one layer, a
-    /// layer is one grade and a grade is one id prefix, so **every band today has exactly one
-    /// group**. That is worth a test rather than a comment: it is the premise behind the list coming
-    /// up expanded, and the day a second channel source arrives (a transform, a folder's grade) this
-    /// assertion is the one that changes and says so.
-    func testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade() throws {
+    /// This test was `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade` until
+    /// KEYFRAMES.md §11.7, and it said so in its own name: §11.5 pinned *"every band today has
+    /// exactly one group"* as the premise behind there being no fold, and named the day a second
+    /// channel source arrived as the day the assertion changes. The transform channel is that source
+    /// — a layer can carry a whole-cel Move and any number of animation groups — so the fold is
+    /// built and this keeps only the half that is still true: a **grade** contributes exactly one
+    /// group, named by the effect rather than by the descriptor table.
+    ///
+    /// `PoseBandLogicTests.testABandShowingTwoMoveChannelsHasTwoGroups` is what replaces the other
+    /// half.
+    func testAGradeContributesExactlyOneGroupNamedByTheEffect() throws {
         let manager = bandManager()
         let groups = try XCTUnwrap(manager.graphChannelGroups)
-        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.count, 1, "This layer carries a grade and no Move")
         let group = try XCTUnwrap(groups.first)
         XCTAssertEqual(group.id, "brightnessContrast")
         XCTAssertEqual(group.name, "Brightness / Contrast",
                        "The group's label is the effect's own name — a group has no descriptor row")
         XCTAssertEqual(group.rows.map(\.parameterID), [brightnessID, contrastID],
                        "…in `Effect.parameters` order, which is the order the band draws them in")
+        XCTAssertFalse(group.isCollapsed, "…and the list still comes up expanded")
     }
 
     /// **The rows are exactly the band's channels, and each row says which of the two predicates it

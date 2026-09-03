@@ -143,6 +143,7 @@ final class CanvasManager: ObservableObject {
         didSet {
             if !isGraphEditorOpen {
                 graphChannelFilter = .none
+                graphChannelFold = .none
                 isGraphChannelListOpen = false
             }
         }
@@ -179,6 +180,22 @@ final class CanvasManager: ObservableObject {
     /// nothing in it a reopened project would be worse for having forgotten. Deliberately absent from
     /// `LayerManifest`, `FolderManifest` and every codec.
     @Published var graphChannelFilter: TimelineGraphChannelList.Filter = .none
+
+    /// **Which of the open band's groups the artist has folded shut** — KEYFRAMES.md §11.7, the
+    /// control §11.5 deferred until there was a second channel source to fold.
+    ///
+    /// **A disclosure, not a filter, and the two live side by side because the owner's own analogy
+    /// puts them there**: *"This is basically like the hide/show layers and layer groups."* A layer
+    /// folder has a chevron that shows or hides its rows **in the panel** and an eye that shows or
+    /// hides its contents **on the canvas**; this is the chevron and `graphChannelFilter` is the eye.
+    /// Folding a group therefore changes nothing the band draws — pinned by
+    /// `testFoldingAGroupDrawsTheSameBand`.
+    ///
+    /// Transient and scoped to one band exactly as the filter is, and §11.5's objection to a fold is
+    /// answered by that scoping rather than waived: collapse state keyed by effect case *"would
+    /// follow the artist to a layer they never folded it on"*, and `Fold` carries the
+    /// `KeyframeTarget` it was authored against so it cannot.
+    @Published var graphChannelFold: TimelineGraphChannelList.Fold = .none
 
     /// **The layer the band is held under while a timeline gesture owns the track**, or nil when it
     /// is free to follow the selection — KEYFRAMES.md §11.3. Written only through

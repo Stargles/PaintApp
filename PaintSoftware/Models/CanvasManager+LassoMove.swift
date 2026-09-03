@@ -633,30 +633,88 @@ extension CanvasManager {
     @discardableResult
     func beginVectorWholeCelMove() -> Bool {
         commitAllInteractiveState()
-        guard let target = activeVectorMoveTarget() else { return false }
-        let vector = target.vector
-        guard let lift = vector.liftWholeCel() else { return false }
+        guard let target = activeVectorMoveTarget(), let lift = target.vector.liftWholeCel()
+        else { return false }
         // **It can never fire here, and it is called anyway.** `liftWholeCel` returns every id on the
         // cel, so this lift contains every group's membership by construction — but the rule is about
         // *a Move*, not about the lasso, and one door is what keeps it from becoming two rules that
         // can disagree. `TopToolbar`'s deleted duplicate of the derived-frame guard is the same
         // lesson from the other side.
+        //
+        // **`beginVectorChannelMove` does not ask, and does not need to**: it lifts exactly one
+        // channel's membership, and an element carries one `animationGroupID`, so that lift cannot
+        // hold part of any group.
         guard !refusesToTearAnAnimationGroup(lift.elements, movedIDs: lift.insideIDs) else {
             return false
         }
+        return beginVectorFloat(target: target, lift: lift)
+    }
 
+    /// **The Move box, raised over exactly the drawing one pose channel moves** — KEYFRAMES.md
+    /// §11.7's second ruling, the owner's *"clicking on a move item in there should bring up the move
+    /// box for that move item so you don't need to select it manually again."*
+    ///
+    /// **`beginVectorWholeCelMove`'s lift with the moved set narrowed, and nothing else.** A channel's
+    /// membership is `VectorElement.isMoved(by:)` — a field on the element, not a region — so there is
+    /// no loop to map, nothing to split, and no id to re-mint; the float is the ordinary one and every
+    /// nudge, knob and commit after this is the path Move already had. `.cel` is literally the
+    /// whole-cel lift, which is what that channel means (`TransformChannelID.cel`: *"`.cel` means
+    /// whatever is on this cel, evaluated per frame"*), so it takes that arm rather than a set of ids
+    /// computed to be everything.
+    ///
+    /// **It does not move the playhead or the layer**, and that is a deliberate limit rather than an
+    /// oversight. The band is open on the selected layer and `activeVectorMoveTarget()` resolves the
+    /// cel under the playhead, so a click reveals the channel *where the artist is standing*. Scrubbing
+    /// them to a frame the channel keys would be a second thing happening for one thing asked for, and
+    /// the artist's own frame is the one they were looking at the curve on.
+    ///
+    /// - Returns: false when the channel owns nothing on the cel under the playhead — a group whose
+    ///   ink is on another cel, or a layer that is not vector. The row is still worth showing: the
+    ///   curve is real, it is only the drawing that is not here.
+    @discardableResult
+    func beginVectorChannelMove(_ channel: TransformChannelID) -> Bool {
+        commitAllInteractiveState()
+        guard let target = activeVectorMoveTarget() else { return false }
+        let lifted: (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)?
+        switch channel {
+        case .cel:
+            lifted = target.vector.liftWholeCel()
+        case .group:
+            let ids = Set(target.vector.elements.filter { $0.isMoved(by: channel) }.map(\.id))
+            lifted = target.vector.lift(elementIDs: ids)
+        }
+        guard let lift = lifted else { return false }
+        return beginVectorFloat(target: target, lift: lift)
+    }
+
+    /// The tail both un-split lifts share: suppress, measure the box on the ink where it is *shown*,
+    /// and hand the float over. Extracted when the channel lift arrived rather than duplicated,
+    /// because every line of it is a decision with a reason recorded above and two copies would be
+    /// two places to keep them.
+    private func beginVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
+                                           poses: [UUID: CGAffineTransform]),
+                                  lift: (elements: [VectorElement], insideIDs: Set<UUID>,
+                                         mayDiverge: Bool)) -> Bool {
+        let vector = target.vector
         let elementsBeforeLift = vector.elements
-        let lifted = Dictionary(uniqueKeysWithValues: lift.elements.map { ($0.id, $0) })
+        // **Filtered by `insideIDs`, which is an identity on the whole-cel arm and is not on the
+        // channel one.** `liftWholeCel` returns the whole display list with every id inside it, so
+        // this line read `lift.elements` until the channel lift arrived; a group lift returns the
+        // same whole list with a *subset* of ids, and taking all of it here would put the artist's
+        // entire drawing in the float and the box around all of it.
+        let carried = lift.elements.filter { lift.insideIDs.contains($0.id) }
+        let lifted = Dictionary(uniqueKeysWithValues: carried.map { ($0.id, $0) })
         // No assignment to `vector.elements`: the lift splits nothing, so `lift.elements` *is* the
         // list already there. Assigning the suppression is therefore the lift's one invalidation,
         // exactly as it is on the lasso arm.
         vector.suppressedElementIDs = lift.insideIDs
 
         // No re-take here, unlike the lasso arm: nothing was cut, so no id changed and
-        // `target.poses` already describes exactly these elements.
-        let poses = target.poses
+        // `target.poses` already describes exactly these elements — narrowed to the ones travelling,
+        // for the reason the line above gives.
+        let poses = target.poses.filter { lift.insideIDs.contains($0.key) }
         // Measured on the ink where it is *shown* — `VectorFloat.poses`, and the lasso arm's reason.
-        let ink = MoveBoxInk(of: Self.posed(lift.elements, by: poses))
+        let ink = MoveBoxInk(of: Self.posed(carried, by: poses))
         guard let bounds = ink.bounds() else {
             // A cel whose every element is degenerate — nothing measurable to put a box around.
             // Clear rather than leave a suppression nothing will ever come back for.

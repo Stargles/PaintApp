@@ -643,14 +643,15 @@ struct AnimationTimeline: View {
     /// will not fit** — and capped in height so a short list is a short popover rather than a tall
     /// one with air in it.
     ///
-    /// **Every group's rows are always shown; there is no fold.** The owner's *"drop down"* is about
-    /// switching a group's channels as a whole, which is the box — and a fold has nothing to earn
-    /// here yet, because a band is one layer, a layer is one grade and a grade is one id prefix, so
-    /// **every band today has exactly one group** (`TimelineGraphChannelList`'s doc, pinned by
-    /// `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade`). A chevron over one group
-    /// folds the only thing in the list, and the state it reaches is the empty list §11.5 says the
-    /// expanded default exists to prevent. It comes back with the second channel source, and by then
-    /// it has something to fold.
+    /// **A group's rows fold now, and its header's body raises the Move box** — KEYFRAMES.md §11.7,
+    /// which is where the two rulings this surface carries are recorded.
+    ///
+    /// §11.5 deferred the fold because *"a band is one layer, a layer is one grade and a grade is one
+    /// id prefix, so every band today has exactly one group"*, and a chevron over one group folds the
+    /// only thing in the list. The transform channel is the second channel source that premise was
+    /// waiting for: a band can now show a grade beside one or more Move channels, so a fold has
+    /// something to fold, and `TimelineGraphChannelList.Fold` scopes it to the band it was made on —
+    /// which answers §11.5's other objection rather than waiving it.
     private var graphChannelList: some View {
         let groups = canvasManager.graphChannelGroups ?? []
         return ScrollView {
@@ -667,8 +668,10 @@ struct AnimationTimeline: View {
                 }
                 ForEach(groups) { group in
                     graphChannelGroupRow(group)
-                    ForEach(group.rows, id: \.parameterID) { row in
-                        graphChannelRow(row)
+                    if !group.isCollapsed {
+                        ForEach(group.rows, id: \.parameterID) { row in
+                            graphChannelRow(row)
+                        }
                     }
                 }
             }
@@ -677,29 +680,65 @@ struct AnimationTimeline: View {
         .frame(maxHeight: 300)
     }
 
-    /// The group's header: one box that takes every channel under it, and nothing else. See
-    /// `graphChannelList` for why there is no chevron beside it.
+    /// The group's header: a chevron that folds, a box that takes every channel under it, and a body
+    /// that raises the Move box for the drawing the group names.
+    ///
+    /// **Three targets in one row, and they are three `Button`s rather than one with a `switch` on
+    /// where the finger landed.** SwiftUI resolves that for us and the split is then legible from the
+    /// layout; the alternative — one button plus a `simultaneousGesture` reading the location — is
+    /// how a control comes to have a rule nobody can find. The chevron is present on every group,
+    /// including a lone one, because a list whose rows appear and disappear with the *number* of
+    /// groups is worse than one that always has the same furniture.
     private func graphChannelGroupRow(_ group: TimelineGraphChannelList.Group) -> some View {
-        Button(action: {
-            canvasManager.setGraphChannels(group.rows.map(\.parameterID),
-                                           visible: group.visibilityAfterToggle)
-        }) {
-            HStack(spacing: 8) {
+        HStack(spacing: 8) {
+            Button(action: {
+                canvasManager.setGraphGroupCollapsed(group.id, collapsed: !group.isCollapsed)
+            }) {
+                Image(systemName: group.isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption2)
+                    .frame(width: 12)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("timeline.graphChannels.fold.\(group.id)")
+            .accessibilityValue(group.isCollapsed ? "collapsed" : "expanded")
+            Button(action: {
+                canvasManager.setGraphChannels(group.rows.map(\.parameterID),
+                                               visible: group.visibilityAfterToggle)
+            }) {
                 // Three states, because a group can be half off: checked, dashed, empty. The
                 // dash is what stops "some are hidden" reading as "none are".
                 Image(systemName: group.isMixed ? "minus.square"
                       : (group.isFullyVisible ? "checkmark.square.fill" : "square"))
-                Text(group.name).font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
+                    .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
+            .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
+            Button(action: { revealGraphChannel(group.navigation) }) {
+                HStack(spacing: 0) {
+                    Text(group.name).font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(group.navigation == nil)
+            .accessibilityIdentifier("timeline.graphChannels.reveal.\(group.id)")
         }
-        .buttonStyle(.plain)
         .foregroundColor(group.isFullyVisible || group.isMixed ? .primary : .secondary)
-        .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
-        .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
+    }
+
+    /// **The click that raises the Move box** — §11.7's second ruling, wired here and decided in
+    /// `CanvasManager.revealPoseChannel(_:)`. The popup goes down with it: the artist asked for the
+    /// box, and leaving a list over the canvas they are about to drag on would cover the thing they
+    /// came for.
+    private func revealGraphChannel(_ channel: PoseChannelID?) {
+        guard let channel else { return }
+        canvasManager.isGraphChannelListOpen = false
+        canvasManager.revealPoseChannel(channel)
     }
 
     /// One channel's row.
@@ -717,37 +756,50 @@ struct AnimationTimeline: View {
         let colour = TimelineGraphBand.colour(forDescriptorIndex: row.descriptorIndex)
         let swatch = Color(hue: colour.hue, saturation: colour.saturation,
                            brightness: colour.brightness)
-        return Button(action: {
-            canvasManager.setGraphChannels([row.parameterID], visible: !row.isVisible)
-        }) {
-            HStack(spacing: 8) {
+        // **The box and the body are two buttons, §11.7's gesture split.** The box is the filter it
+        // always was; the body raises the Move box for the channel the row names, and is disabled on
+        // a grade's row because a Brightness curve has no subject to raise. The identifier stays on
+        // the *box*, so every existing assertion about a row's on/off state still names the control
+        // that carries it.
+        return HStack(spacing: 8) {
+            Button(action: {
+                canvasManager.setGraphChannels([row.parameterID], visible: !row.isVisible)
+            }) {
                 Image(systemName: row.isVisible ? "checkmark.square.fill" : "square")
-                Group {
-                    if row.isAnimated {
-                        Circle().fill(swatch)
-                    } else {
-                        Circle().strokeBorder(swatch, lineWidth: 1.5)
-                    }
-                }
-                .frame(width: 8, height: 8)
-                .opacity(row.isVisible ? 1 : 0.3)
-                Text(row.name).font(.caption)
-                if !row.isAnimated {
-                    Text("not animated").font(.caption2).foregroundColor(.secondary)
-                }
-                Spacer(minLength: 0)
+                    .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("timeline.graphChannels.\(row.parameterID)")
+            // Two facts on one value, comma-separated, because a row has two independent states and
+            // XCUITest gives an element exactly one string to carry them in.
+            .accessibilityValue((row.isVisible ? "on" : "off") + (row.isAnimated ? "" : ",flat"))
+            Button(action: { revealGraphChannel(row.navigation) }) {
+                HStack(spacing: 8) {
+                    Group {
+                        if row.isAnimated {
+                            Circle().fill(swatch)
+                        } else {
+                            Circle().strokeBorder(swatch, lineWidth: 1.5)
+                        }
+                    }
+                    .frame(width: 8, height: 8)
+                    .opacity(row.isVisible ? 1 : 0.3)
+                    Text(row.name).font(.caption)
+                    if !row.isAnimated {
+                        Text("not animated").font(.caption2).foregroundColor(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(row.navigation == nil)
+            .accessibilityIdentifier("timeline.graphChannels.reveal.\(row.parameterID)")
         }
-        .buttonStyle(.plain)
         .foregroundColor(row.isVisible ? .primary : .secondary)
         .padding(.leading, 28)
         .padding(.trailing, 12)
         .padding(.vertical, 6)
-        .accessibilityIdentifier("timeline.graphChannels.\(row.parameterID)")
-        // Two facts on one value, comma-separated, because a row has two independent states and
-        // XCUITest gives an element exactly one string to carry them in.
-        .accessibilityValue((row.isVisible ? "on" : "off") + (row.isAnimated ? "" : ",flat"))
     }
 
     /// Interpolate mode's entry point, next to onion skin and loop rather than in the canvas's top

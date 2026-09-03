@@ -2158,6 +2158,29 @@ final class VectorCanvas {
         return (_elements, allIDs, Self.mayDiverge(_elements, movedIDs: allIDs))
     }
 
+    /// **A lift of the elements one animation group owns** — KEYFRAMES.md §11.7's navigator, which
+    /// raises the Move box over the drawing a channel row names.
+    ///
+    /// `liftWholeCel()` with the moved set narrowed, and **nothing else**: membership here is a
+    /// field on the element (`animationGroupID`) rather than a region, so no stroke is cut, no id is
+    /// minted and `elements` is not rewritten — the caller assigns the suppression and that is the
+    /// whole of the lift, exactly as it is on the whole-cel arm. That is what makes this cheap enough
+    /// to be a menu tap.
+    ///
+    /// Nil when the group owns nothing on this cel, so a stale channel raises no empty box.
+    ///
+    /// **`mayDiverge` is asked against the narrowed set and is far more likely to answer yes here**,
+    /// which is correct and is the point of asking: a subset genuinely can render differently in
+    /// isolation, and the float then drops its latch at each gesture end and shows the truth.
+    func lift(elementIDs ids: Set<UUID>) -> (elements: [VectorElement], insideIDs: Set<UUID>,
+                                             mayDiverge: Bool)? {
+        lock.lock()
+        defer { lock.unlock() }
+        let present = Set(_elements.map(\.id)).intersection(ids)
+        guard !present.isEmpty else { return nil }
+        return (_elements, present, Self.mayDiverge(_elements, movedIDs: present))
+    }
+
     /// Whether "render the moved ids alone, composite over the rest" can differ from "render the whole
     /// list" — i.e. whether the latched float is an approximation rather than the truth.
     ///

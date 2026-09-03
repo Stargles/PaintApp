@@ -45,12 +45,16 @@ app, and whoever notices that should come back and say so rather than assuming i
 - **(21) Keyframes — stages 0 through 3b and stage 5 merged**, spec at [KEYFRAMES.md](KEYFRAMES.md).
   Stage 5 is the transform channel: a cel or an animation group carries a track of quad poses, ink is
   posed through `mapping(_:throughStretch:)`'s `sqrt(|det|)` width rule, and the blend is factored so
-  the endpoints come back bit-exact. **Two things it does not have** — a pose channel has no
-  graph-editor band, and animation groups have no UI. **A Move at a posed in-between works**: it measures
+  the endpoints come back bit-exact. **A pose channel has a graph-editor band now** (§11.7): six
+  decomposed curves — X, Y, Scale X, Scale Y, Rotation, Skew — grouped, foldable, and **read-only**, with
+  a click on a row raising the Move box over the drawing that channel moves. What it does not have is
+  write-back, because a node's frame is shared by all six sub-curves and retiming one is retiming the
+  key; §11.7 says what that would need. **Animation groups still have no UI of their own.**
+  **A Move at a posed in-between works**: it measures
   its box, its loop and its drag in the space the artist is looking at, and commits by conjugating the
   delta onto the channel, which is §2.27's `.key` arm.
-  **The missing pose band is now also what stops (38)(c)'s rule being exactly true**: a pose key draws an
-  indicator on the cel and there is no band for it to have a node in.
+  **(38)(c)'s rule is exactly true now**: every pose key has a node, including a transformation layer's
+  and a folder's, which were two funnels the container-pose pass left open.
 
   **Stage 4, the rest-space dab bake, is merged**, and its tests reach the shipped dispatch now rather
   than an algebraic consequence of `DabPose.applied(to:)`. That unblocks **5b**, animated Distort — the

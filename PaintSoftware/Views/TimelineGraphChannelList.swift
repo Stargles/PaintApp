@@ -1,7 +1,25 @@
 import Foundation
 
-/// **The graph editor's channel list — a filter over the band, not a navigator through it** —
-/// KEYFRAMES.md §11.5, stage D4.
+/// **The graph editor's channel list — a filter over the band *and*, since KEYFRAMES.md §11.7, a
+/// navigator through it** — §11.5, stage D4, amended.
+///
+/// This file opened by calling itself *"a filter over the band, not a navigator through it"*, and the
+/// owner reversed exactly that: *"in the menu list of animations, clicking on a move item in there
+/// should bring up the move box for that move item so you don't need to select it manually again."*
+/// So a row now has two jobs, and they are split by **which part of the row the finger lands on**:
+///
+///   * the **box** is the filter, on a channel row and on a group header alike — unchanged, and the
+///     only thing that changes what the band draws;
+///   * the **row body** is the subject: tapping it raises the Move box over the drawing that channel
+///     moves (`Row.navigation`), which is the ruling;
+///   * the **chevron** on a group header is the fold (`Fold`), which is §11.5's deferred control.
+///
+/// **A grade's channel has no subject and its body is therefore inert.** That is one rule rather than
+/// two — "the box filters, the row reveals what it is about" — and a Brightness curve has nothing to
+/// reveal, because the surface an artist edits it on is the settings bar and it is already there. The
+/// alternative considered and rejected was letting the body toggle the box wherever there was nothing
+/// to navigate to, which would make one gesture mean two different things depending on a property of
+/// the row the artist cannot see.
 ///
 /// The owner: *"just a button option in the graph editor which brings up a scrollable popup menu,
 /// which is basically an include or exclude checkmark box for each animation. Animations may have
@@ -27,18 +45,25 @@ import Foundation
 ///
 /// **What the id format does and does not buy.** §11.5 says grouping falls out of it for free, and
 /// mechanically that is true — `EffectParameter.id` is `"<case>.<field>"` and `groupID(of:)` is the
-/// text before the dot, so no second table is needed. What it does not say is the consequence:
-/// **one band is one layer, one layer is one grade, and one grade is one prefix, so every band today
-/// has exactly one group.** That is not a reason to drop the grouping — the group row is what
-/// carries the owner's *"visible or invisible like a whole"*, and it is the only control that can
-/// switch a whole effect off in one tap — but it **is** the reason there is no fold. A chevron over
-/// one group folds the only thing in the list, so its only reachable effect today is the empty list
-/// §11.5 says the expanded default exists to prevent; and collapse state, being keyed by effect case
-/// and scoped to no band, would follow the artist to a layer they never folded it on. The control
-/// arrives with the second channel source, when it has something to fold and a reason to be scoped.
-/// **`testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade` is that premise**, so the day it
-/// fails is the day to reconsider — which is what putting the decision on this side of the target
-/// boundary buys, since `Views/AnimationTimeline.swift` can pin nothing.
+/// text before the dot, so no second table is needed. What it did not say, and what was true until
+/// §11.7, is the consequence: one band was one layer, one layer was one grade, and one grade was one
+/// prefix, so **every band had exactly one group** — which was the reason there was no fold.
+///
+/// **The transform channel is the second channel source that premise was waiting for**, so
+/// `testEveryBandTodayHasExactlyOneGroupBecauseALayerHasOneGrade` is now
+/// `testAGradeContributesExactlyOneGroupNamedByTheEffect` beside
+/// `PoseBandLogicTests.testABandShowingTwoMoveChannelsHasTwoGroups`, and the fold is built. The
+/// scoping objection §11.5
+/// raised against it — that collapse state keyed by effect case *"would follow the artist to a layer
+/// they never folded it on"* — is **answered rather than waived**: `Fold` carries the
+/// `KeyframeTarget` it was authored on exactly as `Filter` does, and `isGraphEditorOpen`'s `didSet`
+/// drops both.
+///
+/// **A pose channel's group prefix is minted rather than taken from `TransformChannelID.id`**, and
+/// that is a repair rather than a preference — see `PoseChannelID`, which carries the arithmetic.
+/// `"group.<uuid>"` already contains a dot, so appending a component would make every animation
+/// group on a cel share the prefix `"group"` and one tap on a header would switch off channels
+/// belonging to drawings the artist never picked.
 ///
 /// **The group's *name* is the one thing the id format cannot supply**, and §11.5's "display names
 /// come from the descriptor table" is only true of the channels. `EffectParameter.name` is a field
@@ -112,6 +137,48 @@ enum TimelineGraphChannelList {
         }
     }
 
+    // MARK: - What the artist has folded shut
+
+    /// **The collapsed groups, and the band they were collapsed on** — KEYFRAMES.md §11.7's fold.
+    ///
+    /// `Filter`'s twin in every respect, deliberately: the same scope field for the same reason, the
+    /// same `.none` neutral state so "is anything folded" has one spelling, and the same pruning
+    /// against what the band currently lists so a grade swap cannot leave `"blur"` folded waiting for
+    /// a Blur to come back.
+    ///
+    /// **What it is not is a second filter.** A folded group's channels are still drawn — the band
+    /// reads `Filter` and has never heard of this — so folding is a way to get thirty rows of a long
+    /// list out of the way, which is the owner's *"scrollable popup menu"* problem, and hiding is a
+    /// way to get a curve off the band. `testFoldingAGroupDrawsTheSameBand` is the pin, and it is the
+    /// assertion that would go red if a later session routed one through the other.
+    struct Fold: Equatable {
+        /// Nothing folded, no band.
+        static let none = Fold(target: nil, collapsed: [])
+
+        let target: KeyframeTarget?
+        /// Group ids — `groupID(ofParameterID:)`'s answers, not parameter ids.
+        let collapsed: Set<String>
+
+        /// The collapsed ids **as they apply to `target`**, `Filter.hidden(on:)`'s rule verbatim: a
+        /// band that opens on another layer starts fully expanded, which is the state §11.5 says the
+        /// expanded default exists to guarantee.
+        func collapsed(on target: KeyframeTarget) -> Set<String> {
+            self.target == target ? collapsed : []
+        }
+
+        /// One group's chevron, flipped. `listed` is the band's current group ids and is the prune.
+        func setting(_ id: String, collapsed shut: Bool, on target: KeyframeTarget,
+                     listed: [String]) -> Fold {
+            let listedSet = Set(listed)
+            var next = collapsed(on: target).intersection(listedSet)
+            guard listedSet.contains(id) else {
+                return next.isEmpty ? .none : Fold(target: target, collapsed: next)
+            }
+            if shut { next.insert(id) } else { next.remove(id) }
+            return next.isEmpty ? .none : Fold(target: target, collapsed: next)
+        }
+    }
+
     // MARK: - The rows
 
     /// One channel's row: a checkbox, a name, and the swatch that ties it to a curve.
@@ -136,6 +203,24 @@ enum TimelineGraphChannelList {
         /// channel hidden while it was an animation must not reappear the moment a key is tapped away
         /// from it. A row the artist cannot see is a row they cannot switch back on.
         let isAnimated: Bool
+        /// **What tapping this row's body raises** — §11.7's second ruling, nil for a channel that
+        /// has no subject to raise.
+        ///
+        /// The channel rather than the parameter: all six of a pose channel's rows name the same
+        /// Move, because they are six readings of one `TransformTrack`, so tapping "Rotation" and
+        /// tapping "X" put up the same box. That is the right answer and not a shortcut — the owner
+        /// asked for *"the move box for that move item"*, and the move item is the channel.
+        let navigation: PoseChannelID?
+
+        init(parameterID: String, name: String, descriptorIndex: Int, isVisible: Bool,
+             isAnimated: Bool, navigation: PoseChannelID? = nil) {
+            self.parameterID = parameterID
+            self.name = name
+            self.descriptorIndex = descriptorIndex
+            self.isVisible = isVisible
+            self.isAnimated = isAnimated
+            self.navigation = navigation
+        }
     }
 
     /// One group: every channel sharing an id prefix, with the whole-group box the owner asked for.
@@ -145,7 +230,27 @@ enum TimelineGraphChannelList {
         /// The artist-facing label for the group. See the type's doc: not from the descriptor table.
         let name: String
         /// In `Effect.parameters` order, which is the order the band draws them in.
+        ///
+        /// **Always the whole membership, folded or not.** The fold is a property of the group that
+        /// the view reads to decide what to lay out; dropping the rows here instead would make
+        /// `visibilityAfterToggle` and `isMixed` answer about a subset, so a folded group's box would
+        /// stop describing the group.
         let rows: [Row]
+        /// **Whether the chevron is shut** — §11.7's fold. A view concern by construction: nothing
+        /// the band draws depends on it.
+        let isCollapsed: Bool
+        /// What tapping the header's body raises — the group's own channel, when every row in it
+        /// names one. Nil for a grade, whose header has no subject.
+        let navigation: PoseChannelID?
+
+        init(id: String, name: String, rows: [Row], isCollapsed: Bool = false,
+             navigation: PoseChannelID? = nil) {
+            self.id = id
+            self.name = name
+            self.rows = rows
+            self.isCollapsed = isCollapsed
+            self.navigation = navigation
+        }
 
         /// Every channel in the group is drawn — the checked box.
         var isFullyVisible: Bool { rows.allSatisfy(\.isVisible) }
@@ -201,7 +306,8 @@ enum TimelineGraphChannelList {
     /// channel appears, so the list cannot reshuffle itself when a channel starts animating.
     static func groups(of channels: [TimelineGraphBand.Channel],
                        hidden: Set<String>,
-                       names: [String: String]) -> [Group] {
+                       names: [String: String],
+                       collapsed: Set<String> = []) -> [Group] {
         var order: [String] = []
         var rows: [String: [Row]] = [:]
         for channel in channels {
@@ -212,9 +318,29 @@ enum TimelineGraphChannelList {
                     name: channel.name,
                     descriptorIndex: channel.descriptorIndex,
                     isVisible: !hidden.contains(channel.parameterID),
-                    isAnimated: channel.isAnimated))
+                    isAnimated: channel.isAnimated,
+                    navigation: Self.navigation(forParameterID: channel.parameterID)))
         }
-        return order.map { Group(id: $0, name: names[$0] ?? $0, rows: rows[$0] ?? []) }
+        return order.map { id in
+            Group(id: id, name: names[id] ?? id, rows: rows[id] ?? [],
+                  isCollapsed: collapsed.contains(id),
+                  navigation: Self.navigation(forGroupID: id))
+        }
+    }
+
+    /// **What a row's body raises, or nil** — the resolution in one place, so the row and its group
+    /// header cannot disagree about whether a channel has a subject.
+    ///
+    /// Resolved from the id rather than carried on the channel, `groupNames(of:)`'s rule: a
+    /// `TimelineGraphBand.Channel` is inside `TimelineLayoutKey`, so a field the band never draws
+    /// with would gate `relayout()` for nothing.
+    static func navigation(forParameterID id: String) -> PoseChannelID? {
+        navigation(forGroupID: groupID(ofParameterID: id))
+    }
+
+    static func navigation(forGroupID id: String) -> PoseChannelID? {
+        guard let channel = PoseChannelID(groupID: id), channel.raisesMoveBox else { return nil }
+        return channel
     }
 
     /// **The channels the band actually draws.**
@@ -242,12 +368,18 @@ extension CanvasManager {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return nil }
-        let effect = storedEffect(of: target)
-        let channels = TimelineGraphBand.allChannels(effect: effect,
-                                                     tracks: keyframeState(of: target).tracks)
+        let channels = graphBandListing(of: target).channels
+        // **Two name tables merged, which is the shape `groupNames(of:)`' doc predicted**: *"the day
+        // a band lists a transform beside a grade, its names are two of these merged, and nothing
+        // above here changes."* It is that day.
+        var names = TimelineGraphChannelList.groupNames(of: storedEffect(of: target))
+        for (id, name) in TimelineGraphBand.poseGroupNames(poseSources(of: target)) {
+            names[id] = name
+        }
         return TimelineGraphChannelList.groups(of: channels,
                                                hidden: graphChannelFilter.hidden(on: target),
-                                               names: TimelineGraphChannelList.groupNames(of: effect))
+                                               names: names,
+                                               collapsed: graphChannelFold.collapsed(on: target))
     }
 
     /// Whether anything is switched off on the band that is open.
@@ -265,10 +397,20 @@ extension CanvasManager {
         guard let expansion = graphBandExpansion,
               let target = keyframeTarget(layerIndex: expansion.layerIndex)
         else { return }
-        let listed = TimelineGraphBand.allChannels(effect: storedEffect(of: target),
-                                                   tracks: keyframeState(of: target).tracks)
-            .map(\.parameterID)
+        let listed = graphBandListing(of: target).channels.map(\.parameterID)
         graphChannelFilter = graphChannelFilter.setting(ids, visible: visible,
                                                         on: target, listed: listed)
+    }
+
+    /// **One group's chevron, flipped on the band that is open** — §11.7's fold, and
+    /// `setGraphChannels`' twin down to the no-op with the band closed.
+    func setGraphGroupCollapsed(_ id: String, collapsed: Bool) {
+        guard let expansion = graphBandExpansion,
+              let target = keyframeTarget(layerIndex: expansion.layerIndex)
+        else { return }
+        let listed = graphBandListing(of: target).channels
+            .map { TimelineGraphChannelList.groupID(ofParameterID: $0.parameterID) }
+        graphChannelFold = graphChannelFold.setting(id, collapsed: collapsed,
+                                                    on: target, listed: listed)
     }
 }

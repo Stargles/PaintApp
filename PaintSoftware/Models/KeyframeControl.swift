@@ -249,9 +249,19 @@ extension CanvasManager {
         }
         // A pose key is a landed key exactly as a curve key is. Ungated by the grade, unlike the
         // effect curves: a pose channel is not a property of an effect at all, so a drawing layer with
-        // no grade whatsoever still carries its transform keys. A folder holds no cels, so it holds no
-        // object channels — §2.4's target has no cel to ride.
-        if case .layer(let id) = target { keyed.formUnion(poseKeyframeFrames(inLayer: id)) }
+        // no grade whatsoever still carries its transform keys.
+        //
+        // **A folder holds no cels, so it holds no *object* channels — and since §4.4 it holds a
+        // container pose of its own, which this used to miss.** The comment here said "a folder holds
+        // no cels, so it holds no object channels" and stopped, which was true and was read as
+        // exhaustive; `LayerFolder.transform` arrived afterwards with a `TransformTrack` on it, and a
+        // key on a folder's pose therefore drew a node in the graph editor with no indicator beside
+        // it. That is §2.28's biconditional broken through the door §2.28 could not have known about.
+        // `poseKeyframeFrames(inLayer:)` folds the layer's own container pose for the same reason.
+        switch target {
+        case .layer(let id): keyed.formUnion(poseKeyframeFrames(inLayer: id))
+        case .folder(let id): keyed.formUnion(poseKeyframeFrames(inFolder: id))
+        }
         return keyed
     }
 
@@ -311,6 +321,11 @@ extension CanvasManager {
     /// and this is read from `AnimationTimeline`'s body, which SwiftUI re-evaluates on every
     /// `CanvasManager` publish — several times a scrub tick. The overwhelming majority of documents
     /// have no track at all, and for those this is one dictionary `isEmpty` and a return.
+    /// **Effect channels only, and it stays that way after §11.7 while `listedAnimationChannelIDs`
+    /// does not.** Its one caller is `DrawingView`'s `animatedChannelIDs`, which marks the *sliders*
+    /// in the effect settings bar that carry a curve — a pose channel has no slider, so adding one
+    /// here would put an id in a set nothing can match while making the name a lie. The name is the
+    /// contract.
     func curvedEffectChannelIDs(of target: KeyframeTarget) -> [String] {
         channelIDs(of: target) { !$0.isEmpty }
     }
@@ -322,8 +337,23 @@ extension CanvasManager {
     /// Strictly narrower than `curvedEffectChannelIDs`: a channel keyed twice at the same value is a
     /// curve in force but is not yet an animation, and listing it would be offering the artist a graph
     /// with a flat line and no way to tell it from one they authored.
+    /// **And since KEYFRAMES.md §11.7 it lists the pose channels too**, which is what the band draws
+    /// and is therefore what this has to say. The grade's channels first and the poses after, which
+    /// is `graphBandListing(of:)`'s order and the only place that order is decided — the two are
+    /// pinned equal by `TimelineGraphBandLogicTests`, in both directions, because two
+    /// implementations of one invariant is the defect §2.28 was written about.
+    ///
+    /// **Per *component*, not per track.** A track is animated the moment two of its keys hold
+    /// different poses, but a pure translation leaves Scale X, Scale Y, Rotation and Skew flat — so a
+    /// track-level answer here would list four channels the band draws as dashed flat lines and call
+    /// them animations. The predicate is the same one every other channel gets, applied to the
+    /// synthesised sub-curve: `AnimationCurve.isAnimated`.
     func listedAnimationChannelIDs(of target: KeyframeTarget) -> [String] {
-        channelIDs(of: target) { $0.isAnimated }
+        let grade = channelIDs(of: target) { $0.isAnimated }
+        let sources = poseSources(of: target)
+        guard !sources.isEmpty else { return grade }
+        return grade + TimelineGraphBand.poseChannels(sources, descriptorOffset: 0)
+            .channels.filter(\.isAnimated).map(\.parameterID)
     }
 
     /// Whether one channel is an animation by the list's definition — `listedAnimationChannelIDs` for
