@@ -539,7 +539,7 @@ struct DrawingView: View {
             }
         case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingEnclosed,
              .nothingWhollyInside, .cannotMoveDerivedFrame, .onlyPartOfAnAnimationGroup,
-             .saveFailed, .resizeRefused, .resizeResampled:
+             .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled:
             // No action, and `CanvasNotice.actionTitle` returns nil for all of these, so the banner
             // never offers a button that would land here. Every case is spelled out rather than
             // defaulted so that adding a new kind is a compile error here, not a silent no-op.

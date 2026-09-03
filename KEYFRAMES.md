@@ -9,8 +9,8 @@ reference cels and ships already ([VECTOR_INTERPOLATION.md](VECTOR_INTERPOLATION
 and grades content that is already drawn. They are complementary, they will sit in the same timeline,
 and §2.8 is how the artist tells them apart.
 
-**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — twenty-seven of
-them, twenty from 2026-08-28 and seven from 2026-08-29 — and TODO.md's rule applies: *a question the owner has answered stops being a
+**How to read it.** Blockquotes are the owner's own words. §2 is the settled rulings — thirty of
+them, twenty from 2026-08-28, eight from 2026-08-29 and two from 2026-09-03 — and TODO.md's rule applies: *a question the owner has answered stops being a
 question*. Everything else is our reading of the tree at `2eb3e5f`, marked INFERRED where it is a guess.
 
 ---
@@ -323,9 +323,10 @@ a later session reinstating it by rediscovering the argument that produced it.
 
     **The predicate is stated over group *membership*, not over which channel the write would land
     on**: a Move is refused when the elements it caught include some but not all of the members an
-    animation group has on that cel. `CanvasManager.animationGroupPartlyCaught` is the one statement
-    of it, and `CanvasNotice.onlyPartOfAnAnimationGroup` is the sentence the artist reads — which
-    names the way out, since selecting the whole group is a Move this rule permits.
+    animation group has on that cel. `CanvasManager.animationGroupHarmedByMove` is the one statement
+    of it — of both halves, since §2.30 below joined them — and
+    `CanvasNotice.onlyPartOfAnAnimationGroup` is the sentence the artist reads, which names the way
+    out, since selecting the whole group is a Move this rule permits.
 
     **The cel channel is not one of these, and that narrowing is required rather than an exemption.**
     `.cel` carries every element, so a rule stated over channels would make an animated cel refuse
@@ -342,6 +343,56 @@ a later session reinstating it by rediscovering the argument that produced it.
 
     **And refused rather than narrowed to the lassoed half.** Splitting one animated group into two is
     a different feature; the owner ruled for the refusal.
+30. **A Move that catches a whole animation group *plus anything else* is refused too, and says so.**
+    2026-09-03, the same day and the same rule reaching its second case. The owner's reasoning is the
+    one they set in §2.29 just before:
+
+    > if a Move would damage an existing animation, it does not happen, and it says why
+
+    §2.29 covers a lasso that catches **part** of one group. This is a lasso that catches **all** of
+    two — which that refusal deliberately allows — and it silently ends both of their animations.
+    `existingAnimationChannel` reuses a group only when *every* carried element shares one, so a
+    selection spanning two answers nil and `commitPoseFromFloat` falls through to
+    `mintAnimationChannel`, which **overwrites** `animationGroupID` on every carried element with the
+    fresh group's id. From that moment `isMoved(by: .group(old))` is false for all of them, so the two
+    tracks still sitting on the cel claim no elements and pose nothing. Nothing looks wrong at the
+    frame the Move was made on — the ink keeps moving, under the new channel, from wherever the drag
+    left it — and the loss shows up only when the artist scrubs, with nothing pointing back at the
+    Move.
+
+    **One rule, and §2.29 is restated by it rather than sitting beside it:** *an animation group moves
+    whole, and on its own.* `CanvasManager.animationGroupHarmedByMove` is the one statement of both
+    halves and answers which one failed.
+
+    **Two whole groups is not the only door, and the rule is not a count of groups.**
+    `existingAnimationChannel` builds a `Set` of the carried elements' tags, so an untagged element
+    contributes `nil` and the set has two members exactly as two groups would — meaning **one whole
+    group carried beside ink in no group** takes the same fall-through and loses that group's
+    animation identically. A four-element drawing is enough to reach it. Both are one case, because
+    the way out of them is the same: loop around just one group.
+
+    **The whole-cel escape is required rather than an exemption, and it is the trap in this rule.** A
+    whole-cel lift carries every element, so it carries every group whole and *not alone* — and a
+    predicate that stopped at the sentence above would refuse **Move with no selection on every
+    animated document**. It is allowed because `existingAnimationChannel` answers `.cel` for exactly
+    that Move: nothing is minted, no tag is rewritten, and each group travels whole nested inside the
+    cel's own move, which is a character walking with both arms still swinging. Stated as *every
+    element on the cel is carried*, not as *no group was left behind* — the damaging case has untagged
+    ink outside the loop and no group's member there at all.
+
+    **`beginVectorChannelMove` still does not ask, and still does not need to.** It lifts
+    `isMoved(by:)`'s membership — every member of one group and no other ink — which fails neither
+    half, on a document with any number of groups.
+
+    **Two sentences, not one, and that is the one place this rule is not single.** A torn group is
+    fixed by widening the loop until it holds all of the group; a group carried with ink it does not
+    own by narrowing it until it holds nothing else. A single notice would have to say "wider or
+    narrower", which is not an instruction, and the owner's requirement of both refusals is that they
+    name the way out. So `CanvasNotice.animationGroupNotAlone` reads *"The loop holds an animated
+    group and ink that isn't part of it — a group moves on its own, so loop around just one group."*
+
+    **Refused at the lift** for §2.29's reason, and **refused rather than narrowed to one of the
+    groups**: choosing which of them the artist meant is a Move on ink they did not point at.
 
 ---
 

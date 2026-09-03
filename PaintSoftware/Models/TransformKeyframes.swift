@@ -401,20 +401,48 @@ extension CanvasManager {
         let carried = elements.filter { moved.contains($0.id) }
         guard !carried.isEmpty else { return nil }
         // Reused only when *every* carried element already shares one group, so re-moving the same
-        // piece extends its channel instead of minting a second one over the same ink; a mixed
-        // selection mints a fresh group rather than silently joining one of them.
+        // piece extends its channel instead of minting a second one over the same ink.
+        //
+        // **A mixed selection answers nil, and the mint that follows is why the lift refuses one.**
+        // `mintAnimationChannel` *overwrites* `animationGroupID` on everything it is given, so the
+        // fall-through does not "join one of them" — it ends every animation the carried ink already
+        // had. `animationGroupHarmedByMove` is the rule that stops a Move reaching here in that
+        // state; the `Set` below is the exact expression it is stated against, untagged ink's `nil`
+        // included.
         let tags = Set(carried.map(\.animationGroupID))
         guard tags.count == 1, let existing = tags.first, let id = existing,
               animationGroups.contains(where: { $0.id == id }) else { return nil }
         return .group(id)
     }
 
-    /// **The animation group a Move would tear in half, or nil when it would tear none** — the
+    /// **How a Move would damage an animation that already exists** — the two ways there are, and
+    /// which group it would happen to. `animationGroupHarmedByMove` answers with one of these or
+    /// with nil, and the two cases exist because **the way out of them is opposite**: one is fixed by
+    /// widening the loop and the other by narrowing it, so they cannot share a sentence.
+    enum AnimationGroupHarm: Equatable {
+        /// Some but not all of the group's members are carried, so the half left behind travels too.
+        case torn(UUID)
+        /// The group is carried whole, but with ink it does not own — another group's, or none's.
+        /// `existingAnimationChannel` answers nil for that mixture and the commit **mints**, which
+        /// overwrites `animationGroupID` on every carried element and orphans the tracks they had.
+        case notAlone(UUID)
+    }
+
+    /// **How a Move would damage an existing animation, or nil when it would damage none** — the
     /// owner's ruling of 2026-09-03: *"Lets say animation A is a movement of a selection to a
     /// location. Now if you select half of the selection, then it shouldn't allow you to move it
-    /// because that would break things."*
+    /// because that would break things."* Extended the same day to its second case, on the same
+    /// reasoning: **if a Move would damage an existing animation, it does not happen, and it says
+    /// why.**
     ///
-    /// ## What breaks, precisely
+    /// ## One rule, and it is a sentence about membership: *an animation group moves whole, and on its own*
+    ///
+    /// Everything below is that sentence failing in one of its two halves, and stating it once is
+    /// what keeps the two from drifting apart. Routing is a consequence; membership is the thing the
+    /// artist can see and reason about, it needs no keyframe state to evaluate, and it is what the
+    /// notice can say back to them.
+    ///
+    /// ## `.torn` — the half the loop missed moves as well
     ///
     /// A group's members are carried by **one** pose channel, so a key written for it moves all of
     /// them. `existingAnimationChannel` above reuses a group as soon as every *carried* element
@@ -425,14 +453,33 @@ extension CanvasManager {
     /// leaves the drag baked *and* keys the group, so the lassoed half moves twice and the rest once,
     /// and `.storedValueHoldingBaseline` parks a baseline that does it when the next mark lands.
     ///
-    /// ## Why the predicate is membership rather than "which channel would be written"
+    /// ## `.notAlone` — the animation stops existing, and nothing on screen says so
     ///
-    /// Routing is a consequence; membership is the thing the artist can see and reason about. Stating
-    /// it as *a group moves as one piece* covers all three arms at once, needs no keyframe state to
-    /// evaluate, and is the sentence the notice can say back to them.
+    /// `existingAnimationChannel` reuses a group only when **every** carried element shares one, so a
+    /// selection spanning two groups — or one group plus ink in no group — answers nil and
+    /// `commitPoseFromFloat` falls through to `mintAnimationChannel`, which **overwrites**
+    /// `animationGroupID` on every carried element with the fresh group's id. From that moment
+    /// `VectorElement.isMoved(by: .group(old))` is false for all of them, so the tracks still sitting
+    /// on the cel claim no elements and pose nothing. Nothing looks wrong at the frame the Move was
+    /// made on — the ink keeps moving, under the new channel, from wherever the drag left it. The
+    /// loss shows up only when the artist scrubs.
     ///
-    /// ## Three narrowings, each of which a broader rule would get wrong
+    /// **Two whole groups and one whole group beside untagged ink are the same defect through the
+    /// same door**, which is why one case covers both rather than two: the mint does not care what
+    /// the other carried ink is, only that the carried set is not one group exactly. A predicate
+    /// written for "two or more groups" alone would leave the identical silent loss reachable with a
+    /// four-element drawing.
     ///
+    /// ## Four narrowings, each of which a broader rule would get wrong
+    ///
+    ///   * **A Move that carries the whole cel is never harm, and this is the narrowing the second
+    ///     case needs.** `existingAnimationChannel` answers `.cel` for exactly that Move, so nothing
+    ///     is minted and every group on the cel travels whole inside it — a character walking with
+    ///     both arms still swinging. Without this line, `beginVectorWholeCelMove` on any drawing
+    ///     holding two animated groups would refuse, which is Move with no selection made unusable on
+    ///     every animated document. It is stated as "every element is carried" rather than as
+    ///     "nothing was left behind by a *group*", because the damaging case has untagged ink outside
+    ///     the loop and no group's member there at all.
     ///   * **Group channels only — the cel channel is not one of these.** `.cel`'s membership is
     ///     every element, so a rule stated over channels would make an animated cel refuse every
     ///     lasso on it. It also would not be protecting anything: `existingAnimationChannel` answers
@@ -441,7 +488,8 @@ extension CanvasManager {
     ///     move, which is a character's arm swinging while the character walks and is exactly right.
     ///   * **Only groups that are in `animationGroups`**, matching `existingAnimationChannel`'s own
     ///     guard to the letter. A tag whose registry entry is gone is not a channel anything reuses,
-    ///     so refusing on it would block a Move that could not have written onto it.
+    ///     so refusing on it would block a Move that could not have written onto it — and an element
+    ///     wearing one counts as ink in no group, because that is what the mint would cost it.
     ///   * **Membership is counted on the cel's own display list**, not across the document. A pose
     ///     channel lives on one cel and keys one cel's rest box, so a group's members on *other* cels
     ///     are moved by other channels and are none of this Move's business.
@@ -451,20 +499,35 @@ extension CanvasManager {
     /// carries the group onto both — so a loop drawn *through* an animated stroke leaves half of it
     /// behind and is refused, which is the same tear by a narrower door.
     ///
+    /// **`.torn` is answered before `.notAlone`** when a Move manages both. It is the worse damage —
+    /// ink the artist never pointed at moves — and its fix comes first: widen the loop to all of that
+    /// group, and ask again.
+    ///
     /// Sorted before the first is taken so the answer does not depend on Swift's per-process hash
     /// seed — `poseMappings` makes the same argument for the same reason one file over.
-    func animationGroupPartlyCaught(_ elements: [VectorElement], movedIDs moved: Set<UUID>) -> UUID? {
-        guard !animationGroups.isEmpty, !moved.isEmpty else { return nil }
+    func animationGroupHarmedByMove(_ elements: [VectorElement],
+                                    movedIDs moved: Set<UUID>) -> AnimationGroupHarm? {
+        guard !animationGroups.isEmpty, !moved.isEmpty, !elements.isEmpty else { return nil }
+        // The `.cel` channel's own membership. Nothing is minted for it and nothing is torn by it.
+        if elements.allSatisfy({ moved.contains($0.id) }) { return nil }
+
+        let registered = Set(animationGroups.map(\.id))
         var caught: Set<UUID> = []
         var left: Set<UUID> = []
+        var carriesInkInNoGroup = false
         for element in elements {
-            guard let group = element.animationGroupID else { continue }
-            if moved.contains(element.id) { caught.insert(group) } else { left.insert(group) }
+            let group = element.animationGroupID.flatMap { registered.contains($0) ? $0 : nil }
+            if moved.contains(element.id) {
+                if let group { caught.insert(group) } else { carriesInkInNoGroup = true }
+            } else if let group {
+                left.insert(group)
+            }
         }
-        guard !caught.isEmpty, !left.isEmpty else { return nil }
-        return caught.intersection(left)
-            .intersection(animationGroups.map(\.id))
-            .sorted { $0.uuidString < $1.uuidString }.first
+        let ordered = { (ids: Set<UUID>) in ids.sorted { $0.uuidString < $1.uuidString }.first }
+        guard let first = ordered(caught) else { return nil }
+        if let torn = ordered(caught.intersection(left)) { return .torn(torn) }
+        guard caught.count == 1, !carriesInkInNoGroup else { return .notAlone(first) }
+        return nil
     }
 
     /// **Mints a group over the carried elements and tags them** — the writing half of the pair above,
@@ -473,6 +536,13 @@ extension CanvasManager {
     /// The tag is written onto `vector.elements` directly rather than through an undo record of its
     /// own: it travels with the pose write in the same commit, and the arm that restores rest geometry
     /// (`.key`) is never the arm that mints, because a channel with a track already has its group.
+    ///
+    /// **The write is an overwrite, and that is why the lift has a guard rather than this having a
+    /// merge.** Anything carried here loses the group it had, so a Move that reaches this holding
+    /// ink from an existing animation ends that animation — silently, since the ink keeps moving
+    /// under the new channel and only a scrub shows the loss. `animationGroupHarmedByMove` refuses
+    /// such a Move at the lift, so by the time this runs the carried set is either untagged ink or
+    /// ink whose tags no channel claims.
     @discardableResult
     func mintAnimationChannel(forMovedElementIDs moved: Set<UUID>, layerID: UUID,
                               celID: UUID) -> TransformChannelID? {

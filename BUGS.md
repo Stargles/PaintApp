@@ -3,27 +3,6 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
-## A Move that catches two whole animation groups re-tags them into a third, and both old animations stop
-
-**Found while building KEYFRAMES.md §2.29's refusal, not fixed by it, and it is the other half of the
-same question.** §2.29 covers a lasso that catches *part* of one group and refuses. This is a lasso
-that catches **all** of two, which the refusal deliberately allows — and it silently ends both of
-their animations.
-
-`existingAnimationChannel` reuses a group only when every carried element shares one, so a selection
-spanning two groups answers nil and `commitPoseFromFloat` falls through to `mintAnimationChannel` —
-which **overwrites** `animationGroupID` on every carried element with the fresh group's id. From that
-moment `VectorElement.isMoved(by: .group(old))` is false for all of them, so the two tracks still
-sitting on the cel claim no elements and pose nothing. Nothing looks wrong at the frame the Move was
-made on: the ink keeps moving, under the new channel, from wherever the drag left it. The loss shows
-up only when the artist scrubs, with nothing on screen pointing back at the Move.
-
-**Not covered by the refusal because it is not the case the owner ruled on**, and the fix is not
-obviously another refusal — writing the delta onto each of the two existing channels is a defensible
-answer, and so is refusing, and they feel different in the hand. It needs the owner. Reachable only
-through an existing animation: a document with no pose keys anywhere takes the `.storedValue` arm and
-mints nothing.
-
 ## Both families of the stage-4 test reading are closed; two fixtures and a missing premise are not
 
 **The ~230 tests RENDER stage 4 added have been read, and the reading found two families.** Both are

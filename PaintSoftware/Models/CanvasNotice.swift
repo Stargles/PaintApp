@@ -106,6 +106,24 @@ struct CanvasNotice: Identifiable, Equatable {
         /// **Named for the ink rather than for the tool**, `nothingWhollyInside`'s rule: what the
         /// artist has to change is the loop, and the message says so.
         case onlyPartOfAnAnimationGroup
+        /// A Move caught an animation group **whole, but not on its own** — a second group's ink, or
+        /// ink in no group at all, came with it. The other half of the same 2026-09-03 ruling, and
+        /// the same rule reaching a second case: *if a Move would damage an existing animation, it
+        /// does not happen, and it says why.*
+        ///
+        /// **What it was before the refusal existed.** `existingAnimationChannel` reuses a group only
+        /// when every carried element shares one, so a mixed selection answered nil and
+        /// `commitPoseFromFloat` fell through to `mintAnimationChannel` — which **overwrites**
+        /// `animationGroupID` on every carried element with the fresh group's id. From that moment
+        /// the tracks still sitting on the cel claimed no elements and posed nothing, so two
+        /// animations silently stopped existing. Nothing looked wrong at the frame the Move was made
+        /// on; the loss showed up only when the artist scrubbed.
+        ///
+        /// **A separate sentence from `onlyPartOfAnAnimationGroup` because the way out is opposite.**
+        /// That one is fixed by widening the loop until it holds all of the group; this one by
+        /// narrowing it until it holds nothing else. One rule, two instructions, and a notice that
+        /// cannot say which is worth less than no notice.
+        case animationGroupNotAlone
         /// `ProjectStore.writeAtomically` could not stage a valid package — the pre-save validation,
         /// the live-package stash, or the final rename failed. Until ARCHITECTURE_REVIEW.md finding 3,
         /// all three returns were silent: `completion` ran regardless, so the gallery appeared exactly
@@ -153,6 +171,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
         case .onlyPartOfAnAnimationGroup: return "Only part of an animated group is inside the loop — it moves as one piece, so loop around all of it."
+        case .animationGroupNotAlone: return "The loop holds an animated group and ink that isn't part of it — a group moves on its own, so loop around just one group."
         case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
         case .resizeRefused(let refusal):
@@ -196,6 +215,11 @@ struct CanvasNotice: Identifiable, Equatable {
         // alternative a button could offer — widen the selection to the whole group for them — is a
         // Move they did not ask for on ink they did not point at.
         case .onlyPartOfAnAnimationGroup: return nil
+        // Nor this one, and the same argument once more from the other side. "Drop the rest of the
+        // loop" is a loop only the artist can redraw, and the button that would do it for them —
+        // narrow the Move to one of the groups — is a Move on ink they did not choose, and there is
+        // no way for a button to know which group they meant.
+        case .animationGroupNotAlone: return nil
         // Nor this one: the artist's next stroke or the next backgrounding will retry the save on its
         // own, and there is no button here that would do anything a retry doesn't already do.
         case .saveFailed:       return nil
@@ -222,6 +246,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingWhollyInside: return "nothingWhollyInside"
         case .cannotMoveDerivedFrame: return "cannotMoveDerivedFrame"
         case .onlyPartOfAnAnimationGroup: return "onlyPartOfAnAnimationGroup"
+        case .animationGroupNotAlone: return "animationGroupNotAlone"
         case .saveFailed:       return "saveFailed"
         case .resizeRefused:    return "resizeRefused"
         case .resizeResampled:  return "resizeResampled"

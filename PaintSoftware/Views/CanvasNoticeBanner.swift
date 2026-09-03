@@ -76,6 +76,9 @@ struct CanvasNoticeBanner: View {
         // And once more: the loop is what the artist has to redraw, so it is the loop's glyph rather
         // than the timeline's — the group is animated, but nothing about the fix is on the timeline.
         case .onlyPartOfAnAnimationGroup: return "lasso"
+        // And its twin, whose fix is the same kind of thing done the other way round — a loop the
+        // artist redraws smaller rather than larger.
+        case .animationGroupNotAlone: return "lasso"
         // The timeline's own glyph: the message is about which frame the artist is standing on, and
         // the fix is a scrub rather than anything on the canvas.
         case .cannotMoveDerivedFrame: return "film"

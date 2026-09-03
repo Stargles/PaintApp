@@ -404,7 +404,7 @@ extension CanvasManager {
         // **Before anything is mutated**, which is what makes this a refusal rather than a rollback:
         // `splitForLassoMove` returns a new list and assigns nothing, so a Move refused here leaves
         // the display list, the suppression and the loop exactly as the artist left them.
-        guard !refusesToTearAnAnimationGroup(split.elements, movedIDs: split.insideIDs) else {
+        guard !refusesToDamageAnAnimation(split.elements, movedIDs: split.insideIDs) else {
             return false
         }
 
@@ -500,29 +500,40 @@ extension CanvasManager {
         raise(.nothingWhollyInside)
     }
 
-    /// **A Move may not tear an animation group in half, and it says so** — the owner's ruling of
-    /// 2026-09-03, *"if you select half of the selection, then it shouldn't allow you to move it
-    /// because that would break things"*. `CanvasManager.animationGroupPartlyCaught` is the rule and
-    /// carries the argument; this is the two lifts' shared door onto it.
+    /// **A Move that would damage an existing animation does not happen, and it says why** — the
+    /// owner's ruling of 2026-09-03, *"if you select half of the selection, then it shouldn't allow
+    /// you to move it because that would break things"*, and its second case the same day.
+    /// `CanvasManager.animationGroupHarmedByMove` is the rule and carries the argument; this is the
+    /// two lifts' shared door onto it, and the one place the harm is turned into a sentence.
+    ///
+    /// **One rule, two sentences.** *An animation group moves whole, and on its own* fails in two
+    /// halves, and the way out of them is opposite: a torn group is fixed by widening the loop until
+    /// it holds all of the group, a group carried with ink it does not own by narrowing it until it
+    /// holds nothing else. A single notice would have to say "wider or narrower", which is not an
+    /// instruction — and the owner's requirement of both refusals is that they name the way out.
     ///
     /// **At the lift, not at the commit**, which is the whole point of it being here. The commit is
-    /// where the damage was — `keyPoseRestoringRest` un-splits the cut and keys the group — but by
-    /// then the artist has drawn a loop, tapped Move, dragged a box across the canvas and let go, and
-    /// a refusal that lands there tells them their gesture was wasted *after* they made it. §5.24's
-    /// argument, one step earlier: the artist learns before dragging, not after. Nothing is lost by
-    /// asking early, because the lassoed set is known at the lift — `splitForLassoMove` has already
-    /// answered which elements travel, on a list it has not yet installed.
+    /// where the damage was — `keyPoseRestoringRest` un-splits the cut and keys the group, or
+    /// `mintAnimationChannel` overwrites every carried tag — but by then the artist has drawn a loop,
+    /// tapped Move, dragged a box across the canvas and let go, and a refusal that lands there tells
+    /// them their gesture was wasted *after* they made it. §5.24's argument, one step earlier: the
+    /// artist learns before dragging, not after. Nothing is lost by asking early, because the lassoed
+    /// set is known at the lift — `splitForLassoMove` has already answered which elements travel, on
+    /// a list it has not yet installed.
     ///
-    /// **It refuses rather than narrowing the Move to the lassoed half.** That would be a different
-    /// feature — splitting one animated group into two — and the owner ruled for the refusal.
+    /// **It refuses rather than narrowing the Move.** Narrowing to the lassoed half would be
+    /// splitting one animated group into two, and narrowing to one of several would be a Move on ink
+    /// the artist did not choose; both are different features, and the owner ruled for the refusal.
     ///
     /// - Returns: whether the lift must abandon. The notice is raised here so neither caller can
     ///   forget it, which is the defect `cannotMoveDerivedFrame` was written to retire.
-    private func refusesToTearAnAnimationGroup(_ elements: [VectorElement],
-                                              movedIDs moved: Set<UUID>) -> Bool {
-        guard animationGroupPartlyCaught(elements, movedIDs: moved) != nil else { return false }
-        raise(.onlyPartOfAnAnimationGroup)
-        return true
+    private func refusesToDamageAnAnimation(_ elements: [VectorElement],
+                                            movedIDs moved: Set<UUID>) -> Bool {
+        switch animationGroupHarmedByMove(elements, movedIDs: moved) {
+        case .none: return false
+        case .torn: raise(.onlyPartOfAnAnimationGroup); return true
+        case .notAlone: raise(.animationGroupNotAlone); return true
+        }
     }
 
     /// **Changes which of the three membership rules a lasso answers with** (TODO items (20) and
@@ -641,10 +652,19 @@ extension CanvasManager {
         // can disagree. `TopToolbar`'s deleted duplicate of the derived-frame guard is the same
         // lesson from the other side.
         //
-        // **`beginVectorChannelMove` does not ask, and does not need to**: it lifts exactly one
-        // channel's membership, and an element carries one `animationGroupID`, so that lift cannot
-        // hold part of any group.
-        guard !refusesToTearAnAnimationGroup(lift.elements, movedIDs: lift.insideIDs) else {
+        // **The second half of the rule is what makes "can never fire" worth re-checking, and it
+        // survives.** *A group moves on its own* is failed by a Move carrying two whole groups — which
+        // is exactly what a drawing with two animated groups hands this lift. It is not refused here
+        // because `animationGroupHarmedByMove`'s first line excuses a Move that carries the **whole
+        // cel**: `existingAnimationChannel` answers `.cel` for it, nothing is minted, and both groups
+        // travel whole inside the cel's own move. Without that narrowing, Move with no selection
+        // would be refused on every animated document, which is why it is pinned by a test of its own
+        // (`testAWholeCelMoveOnADrawingWithTwoAnimatedGroupsStillMoves`).
+        //
+        // **`beginVectorChannelMove` does not ask, and still does not need to**: it lifts exactly one
+        // channel's membership, and an element carries one `animationGroupID` — so that lift holds
+        // every member of one group and no other ink, which is neither half of the rule failing.
+        guard !refusesToDamageAnAnimation(lift.elements, movedIDs: lift.insideIDs) else {
             return false
         }
         return beginVectorFloat(target: target, lift: lift)
