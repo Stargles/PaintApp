@@ -1338,8 +1338,17 @@ extension CanvasManager {
         // rasterize in a document that has never been keyframed, which is the contract this whole
         // function is written to.
         guard let recipe = cel.interpolation, let canvasSize else {
-            return cel.interpolation == nil
-                ? posedCelContent(for: cel, atFrame: frame, inheriting: inherited) : nil
+            guard cel.interpolation == nil else { return nil }
+            // **VIDEO.md §5's third branch**, and it is asked before the pose arm rather than beside
+            // it because it is a *superset* of that arm: a video cel can be posed like any other, so
+            // `videoCelContent` resolves the same channels through the same `posed(_:through:)` and
+            // then resolves the frames as well. Two arms answering for one cel would be two
+            // derivations for one picture, which is exactly the shape §4.5 warns about.
+            //
+            // It answers nil on one memoized `Bool` for a cel holding no video, which is every cel
+            // of every document that has never imported one — this function's stated contract.
+            return videoCelContent(for: cel, atFrame: frame, inheriting: inherited)
+                ?? posedCelContent(for: cel, atFrame: frame, inheriting: inherited)
         }
 
         let t = overrideT ?? recipe.t
@@ -1386,6 +1395,97 @@ extension CanvasManager {
             InterpolationEvaluator.render(recipe: recipe, at: t, size: canvasSize,
                                           content: content, subject: subject, guides: guideStrokes,
                                           quality: quality, options: options)
+        }
+    }
+
+    /// **What a cel holding a video shows** — VIDEO.md stage 3, and the third derivation source
+    /// beside interpolation's and the pose's.
+    ///
+    /// ## It is the pose arm plus the frame map, not a rival to it
+    ///
+    /// A video element is movable like any other (KEYFRAMES §3.4 rules `animationGroupID` onto every
+    /// kind), so a cel can hold both a video and transform channels, and one cel must have one
+    /// derivation. This resolves the channels exactly as `posedCelContent` does — the same
+    /// `poseMappings`, the same `posed(_:through:inheriting:)`, the same carried transform — and then
+    /// resolves each video's source frame on top. `posedCelContent` is unreached for such a cel and
+    /// `derivedCelContent` says so at the call site.
+    ///
+    /// ## The map is read here and the pixels are read in the thunk
+    ///
+    /// `VideoFrameMap.sourceTime` is pure arithmetic over the element and the frame, so it runs on
+    /// the main actor beside the identity that has to name its answer — §4.5's "minted together from
+    /// the same locals" rule, which is what stops the identity and the render disagreeing about which
+    /// instant this frame is. The **decode** is inside the thunk, on whatever queue resolved the
+    /// recipe, because it is the expensive half and a memo hit must not pay it.
+    ///
+    /// ## A frame that has not arrived is the placeholder, not a failure
+    ///
+    /// `VideoFrameSource.frame` answers nil for an asset that will not open or has no frame at that
+    /// instant, and the element then draws stage 2's placeholder rectangle in the identical rect.
+    /// That is RENDER §2.10's rule applied to a source file: the artist sees where the video is
+    /// rather than a hole where it was.
+    ///
+    /// ## What it deliberately does not cover
+    ///
+    /// A cel that carries an **interpolation recipe** never reaches here — `derivedCelContent` takes
+    /// that arm first — so a video inside an in-between shows the placeholder. That is §4.2's refusal
+    /// standing rather than a gap: `InterpolationEvaluator` passes a video through unwarped and
+    /// answers with an image, so there is no element left for a frame map to resolve.
+    func videoCelContent(for cel: Cel, atFrame frame: Int,
+                         inheriting inherited: CGAffineTransform? = nil) -> DerivedCelContent? {
+        guard let vector = cel.vector, vector.holdsVideo, let canvasSize else { return nil }
+        let container = inherited.flatMap { $0.isIdentity ? nil : $0 }
+        let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
+
+        let suppressed = vector.suppressedElementIDs
+        let elements = suppressed.isEmpty ? vector.elements
+                                          : vector.elements.filter { !suppressed.contains($0.id) }
+        let carried = vector.transform
+        let documentFPS = fps
+
+        // One cut per video still on the display list. A cel whose only video is suppressed under a
+        // live lasso float has nothing to resolve, and answering nil hands it back to the pose arm
+        // rather than minting a derivation that would draw the same pixels through a longer route.
+        var cuts: [String: VideoCut] = [:]
+        var times: [UUID: SourceTime] = [:]
+        for element in elements {
+            guard case .video(let video) = element else { continue }
+            let time = VideoFrameMap.sourceTime(of: video, atDocumentFrame: frame,
+                                                celStartFrame: cel.startFrame,
+                                                documentFPS: documentFPS)
+            times[video.id] = time
+            cuts[video.id.uuidString] = VideoCut(assetFileName: video.assetFileName, at: time)
+        }
+        guard !cuts.isEmpty else { return nil }
+
+        let identity = VideoCelIdentity(
+            celID: cel.id,
+            canvas: ObjectIdentifier(vector),
+            vectorVersion: vector.version,
+            suppressed: suppressed.map(\.uuidString).sorted(),
+            carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
+            maps: Dictionary(uniqueKeysWithValues: mappings.map {
+                ($0.0.id, [$0.1.a, $0.1.b, $0.1.c, $0.1.d, $0.1.tx, $0.1.ty])
+            }),
+            inherited: container.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] },
+            cuts: cuts,
+            canvasWidth: Int(canvasSize.width.rounded()),
+            canvasHeight: Int(canvasSize.height.rounded()))
+
+        let source = VideoFrameSource.shared
+        return DerivedCelContent(identity: AnyHashable(identity)) { quality in
+            let resolved = elements.map { element -> VectorElement in
+                guard case .video(var video) = element, let time = times[video.id] else { return element }
+                if let decoded = source.frame(assetURL: video.assetURL, at: time),
+                   let image = decoded.makeImage() {
+                    video.displayFrame = UIImage(cgImage: image)
+                }
+                return .video(video)
+            }
+            return VectorCanvas(size: canvasSize,
+                                elements: Self.posed(resolved, through: mappings,
+                                                     inheriting: container),
+                                transform: carried).render(quality: quality)
         }
     }
 

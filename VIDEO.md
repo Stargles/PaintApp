@@ -180,12 +180,37 @@ documentFrame  →  sourceTime = sourceStart + (documentFrame - cel.startFrame) 
                →  nearest source frame at that time
 ```
 
-§2.3's resampling *is* "nearest source frame at that time" — nothing else is needed for it. §2.3's
-frame-for-frame arm is `speed = sourceFPS / documentFPS`, which is why it is a speed setting rather than a
-separate mode: the two are the same control, and one of them has a name.
+§2.3's resampling *is* "nearest source frame at that time" — nothing else is needed for it. It is a speed
+setting rather than a separate mode: the two are the same control, and one of them has a name.
 
 §2.5 is the inverse read: setting a speed rewrites `frameCount` to `(sourceEnd - sourceStart) / speed ·
 documentFPS`, then leaves neighbours alone.
+
+**Built as `VideoFrameMap` (`Engine/VideoFrameMap.swift`), and this section had the frame-for-frame
+formula upside down.** It said `speed = sourceFPS / documentFPS`; the line above it refutes that. One
+document frame advances the source by `speed / documentFPS` seconds, so showing exactly one source frame
+per document frame means that quantity is `1 / sourceFPS`, i.e. **`speed = documentFPS / sourceFPS`**. The
+inverse read corroborates it: at that value the block length is `span · sourceFPS`, the number of source
+frames, where the inverted value gives `span · documentFPS² / sourceFPS`, a number with no meaning.
+Concretely, 30 fps footage in a 24 fps document plays frame-for-frame at **0.8** — slowed down, over 30
+document frames rather than 24 — which is what "every source frame shown" costs and is the reason §2.3
+makes real time the default and this the setting. `VideoFrameMapLogicTests.testFrameForFrameShowsEvery
+SourceFrameExactlyOnce` is the pin, and at the documented 1.25 it lands on `0, 1, 3, 3, 4, 5, 6, 8, 8, …`.
+
+**The map is exact at `speed == 1` and the working timescale is what makes it so** — but the obvious
+denominator is not fine enough, and the reason is a property of `SourceTime` rather than of the map.
+`sourceStart.timescale · documentFPS` divides both terms and looks sufficient; `SourceTime` *normalises*,
+so a crop starting at the head of the clip has timescale **1**, and the denominator collapses to
+`documentFPS` — one tick per document frame, every fractional speed quantised to a whole document frame.
+The map builds on `lcm(sourceStart.timescale, documentFPS)` scaled up by a thousand, which keeps the start
+and the speed-1 step exact, makes the tick about a microsecond, and keeps every decimal speed an artist can
+type (0.5, 0.8, 1.25, 2) exact as well.
+
+**Two "nearest"s exist and they have to agree about ties.** `VideoFrameMap.sourceFrameIndex` names a
+source frame by arithmetic, for a test or a menu; `VideoFrameReader` picks one by the presentation
+timestamps the file actually carries, which is right for variable-rate footage where a nominal rate is a
+lie. Ties are reachable rather than exotic — 30 into 24 lands on one every fifth frame — so both round
+**up**, to the later frame.
 
 ### 4.4 The `"video"` sentinel has to be replaced
 
@@ -223,6 +248,47 @@ a compile-error-guided change rather than a silent collision.
 tearing it down and re-seeking, which is the one place this feature can be slow in a way the store cannot fix.
 Design the reader around a playhead the way `BakeQueue` already is, rather than around random access.
 
+**Built. `VideoFrameReader` is that playhead and `VideoFrameSource` owns the fleet of them.** The reader
+holds two samples — the newest at or before the instant wanted and the first after it — so "nearest"
+costs one sample the pipe was going to deliver anyway, a forward scrub across a whole clip is **one**
+pipe however many frames it holds, and a backward step is **one** rebuild and no more (both MEASURED, as
+`seekCount`, in `VideoFrameReaderLogicTests`). Resuming forwards after a backward step re-seeks nothing.
+The only unbounded case is an instant past the end of the clip on a fresh reader, which re-opens at the
+head and walks to the tail once, because a pipe opened past the end delivers nothing at all.
+
+**The ring is keyed by the timestamp the *file* carries, not by the instant the map asked for.** That is
+what makes a clip at half speed one decode per source frame rather than two, and it is why `locate` and
+`currentFrame` are two calls: the ring is consulted between them, so a hit converts no pixels.
+
+**Three corrections to this section's cache story.** *One:* only the in-memory tier is reused —
+`FrameBakeStore` holds *composited* frames and is reached without the reader knowing about it, so there
+is deliberately **no** second on-disk store of decoded source frames; the source file already is one, and
+re-decoding it is what a seek costs. *Two:* the component `FrameBakeKey` was owed is
+`VideoCelIdentity.cuts` — asset file name plus resolved `SourceTime`, per video element — and it arrives
+through `LayerContentVersion.derived` rather than through a new field on the key, which is what keeps
+RENDER §3.3's "a hold is one file" intact for everything that is not a video. `VideoCelIdentity` is the
+first type in the app to conform to `BakeKeyEncodable`, so it is walked field by field rather than
+through `BakeKeyEncoder.derived`'s reflective fallback. *Three:* this file said adding the component is
+"compile-error-guided". **It is not.** `FrameBakeKey`'s no-`default:` rule catches a new enum *case*; a
+new stored *property* is a compile error nowhere, which is exactly the shape of `cuts` — omit it and
+every document frame of a video block is one digest, the store serves frame 0's picture for the whole
+block, and nothing errors at any level. MEASURED by mutation: deleting those four lines reddens
+`testTwoFramesOfOneVideoBlockAreTwoDigests` and leaves the ordinary-hold control green.
+
+**The render substitutes a frame into the video element rather than swapping in a `VectorImageElement`,
+and the shorter route would have moved the picture.** An image draws at `image.size`; a video's placement
+maps `naturalSize`. A decoded buffer disagreeing with the stored size by a pixel would then land
+somewhere the lasso's own quad is not. So `VectorVideoElement` gains a runtime-only `displayFrame` in
+`assetURL`'s exact sense, `draw(video:into:)` fills the identical rect whether the frame arrived or not,
+and stage 2's placeholder becomes the not-decoded-yet state instead of a second code path — which is
+also what an asset that will not open still shows.
+
+**A video cel that also carries transform channels is one derivation, not two.**
+`CanvasManager.videoCelContent` is a superset of `posedCelContent`: same `poseMappings`, same
+`posed(_:through:inheriting:)`, plus the frames. `derivedCelContent` asks it first and falls through to
+the pose arm, and it answers nil on one memoized `Bool` (`VectorCanvas.holdsVideo`) for every cel of
+every document that has never imported a video.
+
 ---
 
 ## 6. Audio — the seam, per §2.6
@@ -259,8 +325,11 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    every exhaustive switch, and the sentinel swap (§4.4). No decoding: the element persists, round-trips,
    degrades when its asset is missing, and renders a placeholder rectangle drawn through its own `placement`
    so that what a lasso catches is what the artist can see. `VideoElementLogicTests` is its suite.
-3. **The reader and the frame map.** §4.3 and §5 — `AVAssetReader`, the `FrameBakeKey` component,
-   `derivedCelContent`'s third branch. A video now plays.
+3. ~~**The reader and the frame map.**~~ **Built.** §4.3 and §5 — `VideoFrameMap`, `VideoFrameReader` and
+   `VideoFrameSource`, `VideoCelIdentity` as the `FrameBakeKey` component, and `videoCelContent` as
+   `derivedCelContent`'s third branch. A video plays. `VideoFrameMapLogicTests` and
+   `VideoFrameReaderLogicTests` are its suites, and their clips are generated at test time with the app's
+   own `VideoFrameWriter` so a test can say *which* frame came back.
 4. **Import.** `matching: .videos` beside the existing picker, landing a video in its own new vector layer per
    §2.1, clipped to the scene per §2.4.
 5. **Crop.** Teach `resizeCelLeftEdge` / `resizeCelRightEdge` to write `sourceStart` / `sourceEnd`. §2.2.
@@ -281,4 +350,18 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
 - **A video has no Distort door**, inheriting the placed image's gap: six numbers plus a mirror bit where a
   homography needs eight. §2.10 settles the lasso and the refusals — §4.2's built note carries the arms and
   the reasoning behind each — but not this one.
-- **Backwards scrubbing cost** (§5) is unmeasured, and it is the one performance question this feature owns.
+- **Backwards scrubbing cost** (§5) is now counted rather than timed: one pipe rebuild per backward step,
+  zero for any forward walk. What is still unmeasured is what a rebuild costs in *milliseconds* on the
+  iPad, which depends on the clip's keyframe interval and is the number PERFORMANCE.md would want. Also
+  unmeasured: `VideoFrameSource` holds one lock across the decode, so a backward seek blocks the other
+  render workers behind it.
+- **A quarter-turn clip is decoded the way it is stored.** `VideoFrameReader.info` reports the track's
+  `preferredTransform` and the `rotation` it implies, so an import can fold it into
+  `LayerTransform.rotation` and resample nothing — but nothing does that yet, so a phone-shot portrait
+  clip imported today would lie on its side. Stage 4's problem, and the seam for it is built.
+- **The element stores no source frame rate**, and stage 3 does not need one: the reader picks by real
+  presentation timestamps and the bake key names an *instant* rather than a frame index. **Stage 6 does**
+  — §2.3's frame-for-frame setting is `documentFPS / sourceFPS` and the menu has to offer it without
+  opening a decoder, which is `naturalSize`'s argument (§4.1) reaching a second field. Adding it also
+  lets the key snap to the source's own frame grid, so a clip at half speed would be one bake per source
+  frame instead of two; today it is two, which costs disk and never a wrong picture.

@@ -159,6 +159,10 @@
 		742A6AF0182ABF3DB2BC4AA8 /* PaintSoftware/Services/SaveDamageGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B1C5C838033EF8F6B37B71 /* PaintSoftware/Services/SaveDamageGate.swift */; };
 		304C1E5B36D4B205473F5BFE /* SaveDamageGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */; };
 		0F09EFC688D4B043164F8D1B /* VideoElementLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */; };
+		4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */; };
+		163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */; };
+		833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */; };
+		C5D5F98B9EE6C3CF2372D1ED /* VideoFrameReaderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */; };
 		502D39FD1CBDCA1628CCFC8D /* PaintSoftware/Services/ScenePhaseSaveGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42168148BAF9E4228B3FF1B6 /* PaintSoftware/Services/ScenePhaseSaveGate.swift */; };
 		DEC0DE000000000000000024 /* PaintSoftware/Utilities/AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */; };
 		DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */; };
@@ -432,6 +436,10 @@
 		A0B1C5C838033EF8F6B37B71 /* PaintSoftware/Services/SaveDamageGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/SaveDamageGate.swift; sourceTree = "<group>"; };
 		E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SaveDamageGateLogicTests.swift; sourceTree = "<group>"; };
 		4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoElementLogicTests.swift; sourceTree = "<group>"; };
+		BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameMap.swift; sourceTree = "<group>"; };
+		372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameReader.swift; sourceTree = "<group>"; };
+		AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoFrameMapLogicTests.swift; sourceTree = "<group>"; };
+		201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoFrameReaderLogicTests.swift; sourceTree = "<group>"; };
 		42168148BAF9E4228B3FF1B6 /* PaintSoftware/Services/ScenePhaseSaveGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ScenePhaseSaveGate.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000023 /* PaintSoftware/Utilities/AppVersion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/AppVersion.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000025 /* PaintSoftware/Utilities/ColorConversion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Utilities/ColorConversion.swift; sourceTree = "<group>"; };
@@ -653,6 +661,8 @@
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */,
 				4B2E518C71BCCF72DFA7569C /* VideoElementLogicTests.swift */,
+				AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */,
+				201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
 				B2C3D4E5F600112233445501 /* ShapeHoldClockLogicTests.swift */,
 				A11CE0DE0000000000000001 /* AnimationCurveLogicTests.swift */,
@@ -791,6 +801,8 @@
 				10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */,
 				DEC0DE000000000000000011 /* PaintSoftware/Engine/StrokeInput.swift */,
 				DEC0DE000000000000000013 /* PaintSoftware/Engine/VectorLayer.swift */,
+				BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */,
+				372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */,
 				DEC0DE000000000000000015 /* PaintSoftware/Models/CanvasManager.swift */,
 				636F63CE197DC2BB403AEC88 /* PaintSoftware/Models/TransformKeyframes.swift */,
 				EAD3A96214BE59F70D644DDA /* PaintSoftware/Models/TransformChannel.swift */,
@@ -1200,6 +1212,10 @@
 				742A6AF0182ABF3DB2BC4AA8 /* PaintSoftware/Services/SaveDamageGate.swift in Sources */,
 				304C1E5B36D4B205473F5BFE /* SaveDamageGateLogicTests.swift in Sources */,
 				0F09EFC688D4B043164F8D1B /* VideoElementLogicTests.swift in Sources */,
+				4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */,
+				163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */,
+				833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */,
+				C5D5F98B9EE6C3CF2372D1ED /* VideoFrameReaderLogicTests.swift in Sources */,
 				502D39FD1CBDCA1628CCFC8D /* PaintSoftware/Services/ScenePhaseSaveGate.swift in Sources */,
 				DEC0DE000000000000000024 /* PaintSoftware/Utilities/AppVersion.swift in Sources */,
 				DEC0DE000000000000000026 /* PaintSoftware/Utilities/ColorConversion.swift in Sources */,

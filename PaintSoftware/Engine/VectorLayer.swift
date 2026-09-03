@@ -548,6 +548,23 @@ struct VectorVideoElement: Identifiable, PlacedRectangle {
     /// The animation group this element belongs to — KEYFRAMES.md §3.4 rules it onto **every** element
     /// kind, and a video is as movable as a placed photo.
     var animationGroupID: UUID? = nil
+
+    /// **The source frame this element is showing right now** — stage 3, and runtime-only in
+    /// `assetURL`'s exact sense: it is never persisted, never compared and never carried by a copy
+    /// that outlives one render.
+    ///
+    /// **The frame is a slot on the element rather than a `.image` substituted for it, and that is
+    /// the whole reason a video keeps its own draw arm.** Swapping in a `VectorImageElement` would
+    /// have been shorter, and it would have moved the picture: an image draws at `image.size` while a
+    /// video's placement maps `naturalSize`, so a decoded buffer that disagreed with the stored size
+    /// by a pixel would land somewhere the lasso's own quad is not. Here `draw(video:into:)` fills
+    /// the *identical* rect whether the frame arrived or not — see there — so what the artist
+    /// lassoes stays what the artist can see, and the stage-2 placeholder is simply the
+    /// not-decoded-yet state rather than a separate code path.
+    ///
+    /// Nil everywhere but inside `CanvasManager.videoCelContent`'s render thunk, which resolves it
+    /// per frame from `VideoFrameSource` and throws the whole element copy away afterwards.
+    var displayFrame: UIImage? = nil
 }
 
 /// One entry in a `VectorCanvas`'s display list, drawn back to front. Not three parallel arrays,
@@ -788,6 +805,27 @@ final class VectorCanvas {
         lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.video)
     }
 
+    /// **Whether this cel has anything for VIDEO.md §4.3's map to do**, memoized against
+    /// `contentVersion`.
+    ///
+    /// It exists for `CanvasManager.derivedCelContent`'s stated contract — *"returns nil on a field
+    /// test before doing any work"*, because that accessor is reached for every cel of every
+    /// rasterize including in documents that have never imported anything. A `contains` over the
+    /// display list is cheap but it is O(elements), and paying it per cel per rasterize forever is
+    /// exactly the cost that contract exists to refuse.
+    ///
+    /// Version-keyed rather than cleared by `invalidate()`, which is `cachedIndex`'s pattern one
+    /// property up and carries its argument: `contentVersion` only increases, so a stale answer can
+    /// never be mistaken for a current one.
+    var holdsVideo: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = cachedVideoFlag, cached.version == contentVersion { return cached.value }
+        let value = _elements.contains { if case .video = $0 { return true } else { return false } }
+        cachedVideoFlag = (contentVersion, value)
+        return value
+    }
+
     /// The elements skipped by the flatten while something else is drawing them: the one text object
     /// whose editor is open, or the set a lasso move has lifted into a floating piece.
     ///
@@ -878,6 +916,9 @@ final class VectorCanvas {
     /// `strokeIndex()`. Version-keyed rather than cleared by `invalidate()`, since `version` only
     /// increases, so a stale index can never be mistaken for current.
     private var cachedIndex: StrokeSpatialIndex?
+
+    /// Backing store for `holdsVideo`; see there for why it is keyed by version rather than cleared.
+    private var cachedVideoFlag: (version: Int, value: Bool)?
     private var cachedIndexVersion: Int = -1
 
     init(size: CGSize, elements: [VectorElement], transform: CGAffineTransform = .identity) {
@@ -3772,10 +3813,17 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
-    /// **The stage-2 placeholder: where the video is, and that it is a video.** VIDEO.md stage 3
-    /// replaces the body with a decoded frame; what must not change is the rect it fills, which is
-    /// `placement` applied to the natural size — the identical map `draw(image:into:)` uses and the
-    /// identical rect `quad(of:)` tests, so what the artist lassoes is what the artist can see.
+    /// **The decoded source frame, or the stage-2 placeholder when there is not one yet.**
+    ///
+    /// The rect is the same either way and that is the point: `placement` applied to `naturalSize`,
+    /// the identical map `draw(image:into:)` uses and the identical rect `quad(of:)` tests, so what
+    /// the artist lassoes is what the artist can see whether the decoder has caught up or not. Stage
+    /// 3 added the first branch and moved nothing.
+    ///
+    /// **`UIImage.draw(in:)` rather than `CGContext.draw`**, which is the same call the placed-image
+    /// arm makes two functions up: it takes UIKit's flipped current context into account, and a
+    /// `CGContext.draw` here would put every video frame in upside down while the photo beside it
+    /// stayed the right way up.
     ///
     /// Drawn in *local* coordinates under the placement, so it turns, stretches and mirrors with the
     /// element rather than sitting axis-aligned beside it. The border is stroked at a width that is
@@ -3786,6 +3834,13 @@ final class VectorCanvas {
         guard size.width > 0, size.height > 0 else { return }
         let rect = CGRect(x: -size.width / 2, y: -size.height / 2,
                           width: size.width, height: size.height)
+        if let frame = element.displayFrame {
+            cg.saveGState()
+            cg.concatenate(element.placement)
+            frame.draw(in: rect)
+            cg.restoreGState()
+            return
+        }
         cg.saveGState()
         cg.concatenate(element.placement)
         cg.setFillColor(UIColor(white: 0.35, alpha: 0.55).cgColor)

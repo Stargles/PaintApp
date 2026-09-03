@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 import UIKit
 
@@ -221,6 +222,87 @@ enum CanvasFixture {
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return bytes
+    }
+
+    // MARK: - Video fixtures (VIDEO.md stage 3)
+
+    /// **A clip generated at test time rather than committed as a binary**, which is what lets a test
+    /// say *which* frame came back.
+    ///
+    /// Every frame is a flat grey at its own level, so a decoded frame names its own index — a real
+    /// clip could only ever prove that *something* decoded. It is written with the app's own
+    /// `VideoFrameWriter`, so the fixture and the shipped export path agree about the container, the
+    /// codec, the pixel format and the timing by construction: if the reader and the writer ever
+    /// stop agreeing, the fixture goes with the writer and the test reddens, which is the direction
+    /// that is useful.
+    ///
+    /// Levels should be **at least 40 apart**. `FrameExportLogicTests` measures a flat grey coming
+    /// back within 14 of what it was handed across one H.264 BT.709 round trip, so a smaller step
+    /// would let two frames be mistaken for each other and the test would be asserting nothing.
+    static func writeGreyClip(levels: [UInt8], fps: Int, side: Int = 64, to url: URL) throws {
+        let writer = try VideoFrameWriter(url: url, size: CGSize(width: side, height: side), fps: fps)
+        for (index, level) in levels.enumerated() {
+            try writer.append(greyDecodedFrame(level, side: side), at: index)
+        }
+        try writer.finish()
+    }
+
+    /// One flat grey frame in `DecodedFrame`'s layout: BGRA, premultiplied, opaque.
+    static func greyDecodedFrame(_ level: UInt8, side: Int = 64) -> DecodedFrame {
+        var pixels = Data(count: side * side * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            guard let p = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            for i in 0..<(side * side) {
+                p[i * 4] = level; p[i * 4 + 1] = level; p[i * 4 + 2] = level; p[i * 4 + 3] = 255
+            }
+        }
+        return DecodedFrame(width: side, height: side, pixels: pixels)
+    }
+
+    /// **The presentation timestamps a written clip actually carries**, read with a plain
+    /// `AVAssetReader` pass.
+    ///
+    /// A test that assumed frame `i` sits at `i / fps` would be asserting against its own arithmetic
+    /// rather than against the file — an mp4 may carry an edit list or a start offset, and the
+    /// question a reader test asks is which of the file's *own* samples came back.
+    static func clipTimestamps(_ url: URL) -> [CMTime] {
+        let asset = AVURLAsset(url: url)
+        guard let track = asset.tracks(withMediaType: .video).first,
+              let reader = try? AVAssetReader(asset: asset) else { return [] }
+        let output = AVAssetReaderTrackOutput(
+            track: track,
+            outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        guard reader.canAdd(output) else { return [] }
+        reader.add(output)
+        guard reader.startReading() else { return [] }
+        var times: [CMTime] = []
+        while let sample = output.copyNextSampleBuffer() {
+            guard CMSampleBufferGetImageBuffer(sample) != nil else { continue }
+            times.append(CMSampleBufferGetPresentationTimeStamp(sample))
+        }
+        return times
+    }
+
+    /// Which of `levels` a decoded sample is closest to — "which frame is this?" answered by
+    /// nearest-in-palette rather than by an absolute tolerance, so a constant offset the codec
+    /// introduces cannot be mistaken for the wrong frame.
+    static func nearestLevelIndex(_ sample: UInt8, in levels: [UInt8]) -> Int {
+        var best = 0
+        var bestDistance = Int.max
+        for (index, level) in levels.enumerated() {
+            let distance = abs(Int(level) - Int(sample))
+            if distance < bestDistance { bestDistance = distance; best = index }
+        }
+        return best
+    }
+
+    /// The grey of one pixel of a rendered canvas, read through `rgbaBytes` so the layout question
+    /// is answered in one place.
+    static func greyAt(_ image: UIImage, x: Int, y: Int) -> UInt8? {
+        guard let cg = image.cgImage, let bytes = rgbaBytes(cg) else { return nil }
+        let index = (y * cg.width + x) * 4
+        guard index + 3 < bytes.count, bytes[index + 3] > 0 else { return nil }
+        return bytes[index]
     }
 }
 
