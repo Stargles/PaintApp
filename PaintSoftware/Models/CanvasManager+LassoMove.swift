@@ -401,6 +401,12 @@ extension CanvasManager {
             noteALassoThatCaughtNothing(vector: vector, loops: loops)
             return false
         }
+        // **Before anything is mutated**, which is what makes this a refusal rather than a rollback:
+        // `splitForLassoMove` returns a new list and assigns nothing, so a Move refused here leaves
+        // the display list, the suppression and the loop exactly as the artist left them.
+        guard !refusesToTearAnAnimationGroup(split.elements, movedIDs: split.insideIDs) else {
+            return false
+        }
 
         let elementsBeforeLift = vector.elements
         vector.elements = split.elements
@@ -492,6 +498,31 @@ extension CanvasManager {
         guard selectionMembership == .enclosed,
               !vector.elementIDs(insideLoops: loops, membership: .touching).isEmpty else { return }
         raise(.nothingWhollyInside)
+    }
+
+    /// **A Move may not tear an animation group in half, and it says so** — the owner's ruling of
+    /// 2026-09-03, *"if you select half of the selection, then it shouldn't allow you to move it
+    /// because that would break things"*. `CanvasManager.animationGroupPartlyCaught` is the rule and
+    /// carries the argument; this is the two lifts' shared door onto it.
+    ///
+    /// **At the lift, not at the commit**, which is the whole point of it being here. The commit is
+    /// where the damage was — `keyPoseRestoringRest` un-splits the cut and keys the group — but by
+    /// then the artist has drawn a loop, tapped Move, dragged a box across the canvas and let go, and
+    /// a refusal that lands there tells them their gesture was wasted *after* they made it. §5.24's
+    /// argument, one step earlier: the artist learns before dragging, not after. Nothing is lost by
+    /// asking early, because the lassoed set is known at the lift — `splitForLassoMove` has already
+    /// answered which elements travel, on a list it has not yet installed.
+    ///
+    /// **It refuses rather than narrowing the Move to the lassoed half.** That would be a different
+    /// feature — splitting one animated group into two — and the owner ruled for the refusal.
+    ///
+    /// - Returns: whether the lift must abandon. The notice is raised here so neither caller can
+    ///   forget it, which is the defect `cannotMoveDerivedFrame` was written to retire.
+    private func refusesToTearAnAnimationGroup(_ elements: [VectorElement],
+                                              movedIDs moved: Set<UUID>) -> Bool {
+        guard animationGroupPartlyCaught(elements, movedIDs: moved) != nil else { return false }
+        raise(.onlyPartOfAnAnimationGroup)
+        return true
     }
 
     /// **Changes which of the three membership rules a lasso answers with** (TODO items (20) and
@@ -605,6 +636,14 @@ extension CanvasManager {
         guard let target = activeVectorMoveTarget() else { return false }
         let vector = target.vector
         guard let lift = vector.liftWholeCel() else { return false }
+        // **It can never fire here, and it is called anyway.** `liftWholeCel` returns every id on the
+        // cel, so this lift contains every group's membership by construction — but the rule is about
+        // *a Move*, not about the lasso, and one door is what keeps it from becoming two rules that
+        // can disagree. `TopToolbar`'s deleted duplicate of the derived-frame guard is the same
+        // lesson from the other side.
+        guard !refusesToTearAnAnimationGroup(lift.elements, movedIDs: lift.insideIDs) else {
+            return false
+        }
 
         let elementsBeforeLift = vector.elements
         let lifted = Dictionary(uniqueKeysWithValues: lift.elements.map { ($0.id, $0) })

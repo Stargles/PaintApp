@@ -365,6 +365,64 @@ extension CanvasManager {
         return .group(id)
     }
 
+    /// **The animation group a Move would tear in half, or nil when it would tear none** — the
+    /// owner's ruling of 2026-09-03: *"Lets say animation A is a movement of a selection to a
+    /// location. Now if you select half of the selection, then it shouldn't allow you to move it
+    /// because that would break things."*
+    ///
+    /// ## What breaks, precisely
+    ///
+    /// A group's members are carried by **one** pose channel, so a key written for it moves all of
+    /// them. `existingAnimationChannel` above reuses a group as soon as every *carried* element
+    /// shares it and never asks whether the group has members the loop missed — so a half-lasso of an
+    /// animated group routes to that group's channel, and `commitTransformPose`'s `.key` arm then
+    /// restores the pre-lift display list and keys the whole thing. The artist dragged half and the
+    /// whole piece moved. The other two writing arms fail the same way one step later: `.seedAndKey`
+    /// leaves the drag baked *and* keys the group, so the lassoed half moves twice and the rest once,
+    /// and `.storedValueHoldingBaseline` parks a baseline that does it when the next mark lands.
+    ///
+    /// ## Why the predicate is membership rather than "which channel would be written"
+    ///
+    /// Routing is a consequence; membership is the thing the artist can see and reason about. Stating
+    /// it as *a group moves as one piece* covers all three arms at once, needs no keyframe state to
+    /// evaluate, and is the sentence the notice can say back to them.
+    ///
+    /// ## Three narrowings, each of which a broader rule would get wrong
+    ///
+    ///   * **Group channels only — the cel channel is not one of these.** `.cel`'s membership is
+    ///     every element, so a rule stated over channels would make an animated cel refuse every
+    ///     lasso on it. It also would not be protecting anything: `existingAnimationChannel` answers
+    ///     `.cel` only for a Move that carries the whole list, so a partial lasso on a cel-animated
+    ///     cel never reaches that channel — it mints a group of its own and nests inside the cel
+    ///     move, which is a character's arm swinging while the character walks and is exactly right.
+    ///   * **Only groups that are in `animationGroups`**, matching `existingAnimationChannel`'s own
+    ///     guard to the letter. A tag whose registry entry is gone is not a channel anything reuses,
+    ///     so refusing on it would block a Move that could not have written onto it.
+    ///   * **Membership is counted on the cel's own display list**, not across the document. A pose
+    ///     channel lives on one cel and keys one cel's rest box, so a group's members on *other* cels
+    ///     are moved by other channels and are none of this Move's business.
+    ///
+    /// `elements` is a parameter for `celPoseMaps`' reason: the lasso lift has to ask against the
+    /// **post-split** list, since a cut mints fresh ids for both halves and `splitForLassoMove`
+    /// carries the group onto both — so a loop drawn *through* an animated stroke leaves half of it
+    /// behind and is refused, which is the same tear by a narrower door.
+    ///
+    /// Sorted before the first is taken so the answer does not depend on Swift's per-process hash
+    /// seed — `poseMappings` makes the same argument for the same reason one file over.
+    func animationGroupPartlyCaught(_ elements: [VectorElement], movedIDs moved: Set<UUID>) -> UUID? {
+        guard !animationGroups.isEmpty, !moved.isEmpty else { return nil }
+        var caught: Set<UUID> = []
+        var left: Set<UUID> = []
+        for element in elements {
+            guard let group = element.animationGroupID else { continue }
+            if moved.contains(element.id) { caught.insert(group) } else { left.insert(group) }
+        }
+        guard !caught.isEmpty, !left.isEmpty else { return nil }
+        return caught.intersection(left)
+            .intersection(animationGroups.map(\.id))
+            .sorted { $0.uuidString < $1.uuidString }.first
+    }
+
     /// **Mints a group over the carried elements and tags them** — the writing half of the pair above,
     /// called only once the route has said a key is actually going to be written.
     ///

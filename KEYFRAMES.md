@@ -306,6 +306,42 @@ a later session reinstating it by rediscovering the argument that produced it.
     And **pose keys draw indicators while a pose channel has no graph-editor band at all** (TODO
     (21)'s stage-5 gap), so every pose keyframe is an indicator with no possible node until that band
     exists.
+29. **A Move that catches part of an animation group is refused, and says so.** 2026-09-03, and the
+    owner's words are the whole of it:
+
+    > "Lets say animation A is a movement of a selection to a location. Now if you select half of the
+    > selection, then it shouldn't allow you to move it because that would break things."
+
+    A group's members are carried by **one** channel, so a key written for it moves every one of them.
+    `existingAnimationChannel` reused a group as soon as every element the lasso *caught* shared it,
+    and never asked whether the group had members the loop had missed — so a half-lasso routed onto
+    that group's channel and `commitTransformPose`'s `.key` arm restored the pre-lift display list and
+    keyed the whole thing. The artist dragged half a drawing and all of it moved, in silence. The
+    other two writing arms fail the same way one step later: `.seedAndKey` leaves the drag baked *and*
+    keys the group, and `.storedValueHoldingBaseline` parks a baseline that does it when the next mark
+    lands.
+
+    **The predicate is stated over group *membership*, not over which channel the write would land
+    on**: a Move is refused when the elements it caught include some but not all of the members an
+    animation group has on that cel. `CanvasManager.animationGroupPartlyCaught` is the one statement
+    of it, and `CanvasNotice.onlyPartOfAnAnimationGroup` is the sentence the artist reads — which
+    names the way out, since selecting the whole group is a Move this rule permits.
+
+    **The cel channel is not one of these, and that narrowing is required rather than an exemption.**
+    `.cel` carries every element, so a rule stated over channels would make an animated cel refuse
+    every lasso drawn on it — and it would protect nothing, because `existingAnimationChannel` answers
+    `.cel` only for a Move that carries the whole list. A partial lasso on a cel-animated drawing
+    mints a group of its own and nests inside the cel move, which is a character's arm swinging while
+    the character walks.
+
+    **Refused at the lift, not at the commit.** The damage is at the commit, but by then the artist
+    has drawn a loop, tapped Move, dragged a box across the canvas and let go — and a refusal that
+    lands there tells them their gesture was wasted after they made it. The lassoed set is known at
+    the lift (`splitForLassoMove` has answered it on a list it has not yet installed), so waiting buys
+    nothing and costs a gesture.
+
+    **And refused rather than narrowed to the lassoed half.** Splitting one animated group into two is
+    a different feature; the owner ruled for the refusal.
 
 ---
 

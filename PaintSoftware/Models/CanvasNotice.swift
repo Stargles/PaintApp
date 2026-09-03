@@ -91,6 +91,21 @@ struct CanvasNotice: Identifiable, Equatable {
         /// The fix is to move to one of the drawn cels either side, which is a decision the artist
         /// makes at the timeline rather than a button this banner could press.
         case cannotMoveDerivedFrame
+        /// A Move caught **some but not all** of an animation group's members — the owner's ruling of
+        /// 2026-09-03: *"Lets say animation A is a movement of a selection to a location. Now if you
+        /// select half of the selection, then it shouldn't allow you to move it because that would
+        /// break things."*
+        ///
+        /// **What it was before the refusal existed.** A group is a set of elements one pose channel
+        /// carries, so a key written for it moves every one of them. `commitPoseFromFloat` reused an
+        /// existing group whenever the lassoed elements all shared one — *without* asking whether the
+        /// group had members the loop had missed — and `keyPoseRestoringRest` then put the pre-lift
+        /// display list back and keyed the channel. So lassoing half of an animated group and dragging
+        /// it moved **all** of it, and said nothing.
+        ///
+        /// **Named for the ink rather than for the tool**, `nothingWhollyInside`'s rule: what the
+        /// artist has to change is the loop, and the message says so.
+        case onlyPartOfAnAnimationGroup
         /// `ProjectStore.writeAtomically` could not stage a valid package — the pre-save validation,
         /// the live-package stash, or the final rename failed. Until ARCHITECTURE_REVIEW.md finding 3,
         /// all three returns were silent: `completion` ran regardless, so the gallery appeared exactly
@@ -137,6 +152,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingToPick:    return "Nothing to pick up there."
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
+        case .onlyPartOfAnAnimationGroup: return "Only part of an animated group is inside the loop — it moves as one piece, so loop around all of it."
         case .nothingEnclosed:  return "Nothing enclosed — the fill leaked through a gap in the line, there was no shape inside the loop, or Edge Overlap pulled the colour back past everything there was to paint."
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
         case .resizeRefused(let refusal):
@@ -176,6 +192,10 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one, and for the same reason once more: the fix is to scrub to a drawn cel, which
         // is a move on the timeline the artist can already see.
         case .cannotMoveDerivedFrame: return nil
+        // Nor this one. "Select the rest of the group" is a loop only the artist can draw, and the
+        // alternative a button could offer — widen the selection to the whole group for them — is a
+        // Move they did not ask for on ink they did not point at.
+        case .onlyPartOfAnAnimationGroup: return nil
         // Nor this one: the artist's next stroke or the next backgrounding will retry the save on its
         // own, and there is no button here that would do anything a retry doesn't already do.
         case .saveFailed:       return nil
@@ -201,6 +221,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingEnclosed:  return "nothingEnclosed"
         case .nothingWhollyInside: return "nothingWhollyInside"
         case .cannotMoveDerivedFrame: return "cannotMoveDerivedFrame"
+        case .onlyPartOfAnAnimationGroup: return "onlyPartOfAnAnimationGroup"
         case .saveFailed:       return "saveFailed"
         case .resizeRefused:    return "resizeRefused"
         case .resizeResampled:  return "resizeResampled"
