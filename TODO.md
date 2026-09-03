@@ -266,6 +266,44 @@ LAYER_TRANSFORM.md.
 - [ ] > "Right now when you import images they appear in the center of the canvas with no move box. Make them
       > have the move box. You likely can reuse the move code, this should be a simple fix."
 
+### (38) The timeline and the graph editor should read as one thing
+
+Four asks from the owner, 2026-09-03, on one surface. **(c) is the one to do first and the other three
+sit on top of it**, because it changes what a node *is* rather than how one is drawn.
+
+- [ ] **(a) Frame gridlines.** > "add vertical grey lines to segment the timeline so that I can see
+      which frame is which. Same with the graph editor."
+
+- [ ] **(b) The graph is bezier, and a node's tap opens its curve rather than deleting it.**
+      > "The graph should be bezier curved. Right now clicking on a node in it deletes it. Instead, when
+      > you click on it it should open the adjust bezier curve from that node menu, the one with the line
+      > and two nodes. Clicking on a node twice just like clicking on a cel twice brings up the menu and
+      > the option to delete it."
+
+      A single tap currently deletes, which is a destructive default; the ask makes single-tap open the
+      handle editor and double-tap the menu that carries Delete, matching what a double-tap on a cel
+      already does.
+
+- [ ] **(c) A key and a keyframe are the same thing, and the code should say so once.**
+      > "Right now I really dont like the disparity between keyframes and keys etc. It should be a simple
+      > rule: if a node exists on the graph editor, it should also exist on the cel as an indicator and
+      > vice versa. Right now keyframes show up as greyed out when the nodes are moved away from the
+      > frame on the graph. They should be the same to avoid confusion. This simplification probably
+      > cleans up architecture, so be sure to simplify architecture and remove code cleanly as if it were
+      > never there."
+
+      **This is the third report of one divergence, and [KEYFRAMES.md](KEYFRAMES.md) §2.28 already rules
+      on it**: a keyframe is the **union** of the explicit marks and every frame a channel keys on,
+      computed by one accessor and never stored twice — and §2.28 exists *because* two earlier device bug
+      reports were the same divergence between those two lists. So the first question is not what to
+      build but **why §2.28's single accessor is not what both surfaces read**, and the greyed-out state
+      is the tell: something still holds the two lists apart. Answer that before designing anything, and
+      the "remove code cleanly as if it were never there" the owner asks for is then the natural shape of
+      the fix rather than an extra instruction.
+
+- [ ] **(d) A dragged node shows its value.** > "There should be a numerical indicator whenever a node is
+      dragged up or down for the value that the node is controlling in the graph editor."
+
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and
