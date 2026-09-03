@@ -226,15 +226,15 @@ extension CanvasManager {
         else { return .storedValue }
         let cel = layers[at.layer].cels[at.cel]
         guard cel.interpolation == nil else { return .storedValue }
-        let placed = keyframes(of: target)
+        let placed = keyframeFrames(of: target)
         return KeyframeControl.write(
             // A pose is not a scalar, and this input is not asking whether it is: it is the refusal
             // gate for the nine stepped, array and colour *effect* parameters, and a transform channel
             // is none of them. `TransformTrack` stores and renders every pose it can hold.
             isScalarAnimatable: true,
             channelHasCurve: channel.flatMap { cel.transformTracks[$0.id] }?.isEmpty == false,
-            keyframeCount: placed.frames.count,
-            playheadIsOnKeyframe: placed.frames.contains(frame))
+            keyframeCount: placed.count,
+            playheadIsOnKeyframe: placed.contains(frame))
     }
 
     /// **One committed Move, routed** — §2.5's write-at-commit, and the whole of the transform
@@ -259,7 +259,7 @@ extension CanvasManager {
         // the writer refuses rather than leaving storage that renders nothing.
         guard cel.interpolation == nil else { return .storedValue }
 
-        let placed = keyframes(of: target)
+        let placed = keyframeFrames(of: target)
         let route = transformWrite(layerID: layerID, celID: celID, channel: channel, atFrame: frame)
 
         guard route != .storedValue else { return .storedValue }
@@ -279,7 +279,7 @@ extension CanvasManager {
             holdPoseBaseline(layerID: layerID, celID: celID, channel: channel, pose: wasAt)
 
         case .seedAndKey:
-            let localKeyframes = placed.frames.map { $0 - cel.startFrame }
+            let localKeyframes = placed.map { $0 - cel.startFrame }
             seedAndKeyPose(layerID: layerID, celID: celID, channel: channel,
                            oldPose: wasAt, newPose: resting,
                            atCelLocalFrame: local, keyframes: localKeyframes)

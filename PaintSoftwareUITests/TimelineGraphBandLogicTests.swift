@@ -1269,36 +1269,154 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.cancelStructureGesture()
     }
 
-    /// **§2.28: moving a curve key moves the keyframe, because the union is computed and never
-    /// stored.** Both device reports of 2026-08-29 were a divergence between the marks and the keyed
-    /// frames; the fix was one accessor, and this is the guard that a graph-editor edit goes through
-    /// it rather than around it by writing a mark of its own.
-    ///
-    /// The frame vacated by the key keeps its diamond and becomes **bare**, which is the whole point
-    /// of the two kinds: the artist's explicit mark is still there and now carries nothing.
-    func testMovingAKeyMovesTheKeyframeUnionAndLeavesABareMarkBehind() {
-        let manager = gradedManager()
-        manager.addKeyframe(target(manager), atFrame: 0)
-        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
-                                        to: linear([(0, 0.0), (10, 2.0)]))
-        XCTAssertEqual(manager.keyframes(of: target(manager)).frames, [0, 10])
-        XCTAssertEqual(manager.keyframes(of: target(manager)).keyed, [0, 10])
+    // MARK: - A node and a keyframe indicator are the same thing
 
+    /// **Every frame the graph editor draws a node on**, for the band's target — the left-hand side
+    /// of the owner's rule of 2026-09-03: *"if a node exists on the graph editor, it should also
+    /// exist on the cel as an indicator and vice versa."*
+    ///
+    /// `allChannels` rather than `channels`, because that is what `graphBandContent` draws (§11.4's
+    /// vanishing channel): a flat curve is still drawn, and its dots are still nodes a finger can
+    /// take. The right-hand side is `CanvasManager.keyframeFrames(of:)`, which is what
+    /// `TimelineLayoutKey` hands the marker band.
+    private func nodeFrames(_ manager: CanvasManager) -> [Int] {
+        let target = target(manager)
+        let drawn = TimelineGraphBand.allChannels(effect: manager.storedEffect(of: target),
+                                                  tracks: manager.keyframeState(of: target).tracks)
+        return Set(drawn.flatMap { $0.curve.keys.map(\.frame) }).sorted()
+    }
+
+    /// The band string a cel row would publish for the same target, so a failure reads as what the
+    /// artist sees rather than as an array.
+    private func markerBand(_ manager: CanvasManager) -> String {
+        TimelineKeyMarkers.encode(
+            TimelineKeyMarkers.runs(frames: manager.keyframeFrames(of: target(manager)),
+                                    pixelsPerFrame: base))
+    }
+
+    /// Drags one node `frames` frames along, through the same three calls the coordinator makes.
+    private func dragNode(_ manager: CanvasManager, parameterID: String, from frame: Int, by frames: Int) {
         let drawn = channels(manager)
-        let ref = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 0)
-        let moves = TimelineGraphBand.moves(of: [ref], in: drawn,
-                                            translation: CGSize(width: base * 4, height: 0),
+        let moves = TimelineGraphBand.moves(of: [TimelineGraphBand.KeyRef(parameterID: parameterID,
+                                                                          frame: frame)],
+                                            in: drawn,
+                                            translation: CGSize(width: base * CGFloat(frames), height: 0),
                                             pixelsPerFrame: base, bandHeight: band)
         for (id, curve) in TimelineGraphBand.applying(moves, to: drawn) {
             manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: id, to: curve)
         }
+    }
 
-        let after = manager.keyframes(of: target(manager))
-        XCTAssertEqual(after.frames, [0, 4, 10], "The union followed the key, with no mark written")
-        XCTAssertEqual(after.keyed, [4, 10])
-        XCTAssertEqual(TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(
-            markers: TimelineKeyMarkers.markers(frames: after.frames, keyed: after.keyed),
-            pixelsPerFrame: base)), "(0)|4|10",
-            "…and the frame it left keeps its explicit mark, now hollow")
+    /// **The owner's report of 2026-09-03, end to end** — *"keyframes show up as greyed out when the
+    /// nodes are moved away from the frame on the graph."*
+    ///
+    /// The fixture is the owner's own A/B workflow through the shipped writers, so both marks are
+    /// real, and then **one node is dragged off the frame that placed it** — which is the regime the
+    /// bug lives in and the reason a fixture whose nodes sit on their marks proves nothing here.
+    /// §2.28's arrangement left the mark behind and drew a hollow diamond at frame 10 with no node
+    /// under it; the test that pinned that behaviour was deleted with it.
+    ///
+    /// The assertion is the owner's rule itself, in both directions, rather than a literal: the
+    /// graph editor's nodes and the cel's indicators are one list.
+    func testDraggingANodeTakesItsKeyframeIndicatorWithIt() throws {
+        let manager = gradedManager()
+        let target = target(manager)
+        let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
+            .parameters.first { $0.id == brightnessID })
+
+        manager.addKeyframe(target, atFrame: 0)
+        manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 10)
+        manager.addKeyframe(target, atFrame: 10)
+        XCTAssertEqual(nodeFrames(manager), [0, 10], "PREMISE: A and B both carry a node")
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10])
+
+        dragNode(manager, parameterID: brightnessID, from: 10, by: 4)
+
+        XCTAssertEqual(nodeFrames(manager), [0, 14], "PREMISE: the node really moved")
+        XCTAssertEqual(manager.keyframeFrames(of: target), nodeFrames(manager), """
+            A node on the graph editor and an indicator on the cel are the same thing, in both \
+            directions. Frame 10 has neither now, and frame 14 has both.
+            """)
+        XCTAssertEqual(markerBand(manager), "0|14",
+                       "…and nothing is left at frame 10 for the artist to read as a keyframe")
+    }
+
+    /// **The same rule reached by the other door**: a node deleted, rather than moved. `tap` on a key
+    /// is `.remove`, and the frame it vacates must stop being a keyframe on the cel too — §2.28 left
+    /// a mark there for exactly the same reason it left one behind a drag.
+    func testDeletingANodeTakesItsKeyframeIndicatorWithIt() throws {
+        let manager = gradedManager()
+        let target = target(manager)
+        let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
+            .parameters.first { $0.id == brightnessID })
+
+        manager.addKeyframe(target, atFrame: 0)
+        manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 10)
+        manager.addKeyframe(target, atFrame: 10)
+
+        var curve = try XCTUnwrap(manager.keyframeState(of: target).tracks[brightnessID])
+        curve.removeKey(atFrame: 0)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID, to: curve)
+
+        XCTAssertEqual(nodeFrames(manager), [10], "PREMISE: the node at 0 is gone")
+        XCTAssertEqual(manager.keyframeFrames(of: target), nodeFrames(manager),
+                       "The indicator at frame 0 went with it")
+    }
+
+    /// **A mark a node lands on later, and is then dragged off** — the case the pruning in
+    /// `setEffectParameterTrack` exists for, and the one the workflow test above cannot reach.
+    ///
+    /// After `addKeyframe` seeds a channel, only the *immediate* neighbours take a key
+    /// (`seedAndKeyChannel` says why), so a fourth mark further out survives un-keyed while the band
+    /// has curves to draw. Dragging a node onto it is then the moment a key and a mark first coincide
+    /// on a frame no `commitKeyframeState` write is running — and if the mark is not dropped there,
+    /// **the next drag strands it**, which is the owner's symptom two gestures deep.
+    func testAMarkANodeLandsOnDoesNotStrandWhenTheNodeLeavesAgain() throws {
+        let manager = gradedManager()
+        let target = target(manager)
+        let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
+            .parameters.first { $0.id == brightnessID })
+
+        for frame in [0, 4, 10, 20] { manager.addKeyframe(target, atFrame: frame) }
+        manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 4)
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [20], """
+            PREMISE: seeding keys 0, 4 and 10 and drops their marks, and 20 is not an immediate \
+            neighbour — so it is the one keyframe still stored as a bare mark while the band draws.
+            """)
+        XCTAssertEqual(nodeFrames(manager), [0, 4, 10])
+
+        // The node at 10 is dragged onto the surviving mark, and then off it again.
+        dragNode(manager, parameterID: brightnessID, from: 10, by: 10)
+        XCTAssertEqual(nodeFrames(manager), [0, 4, 20], "PREMISE: the node is on frame 20 now")
+        dragNode(manager, parameterID: brightnessID, from: 20, by: 4)
+
+        XCTAssertEqual(nodeFrames(manager), [0, 4, 24], "PREMISE: and off it again")
+        XCTAssertEqual(manager.keyframeFrames(of: target), nodeFrames(manager),
+                       "Frame 20 is not a keyframe any more, because nothing keys it and no mark is left")
+    }
+
+    /// **Undo puts the indicator back with the node**, which is what makes the marks ride inside
+    /// `writeEffectParameterTrack` rather than being pruned beside it. A drag that dropped a mark and
+    /// an undo that restored only the curve would leave the artist one press away from a document
+    /// neither state ever had.
+    func testUndoingADragRestoresBothTheNodeAndTheIndicator() throws {
+        let manager = gradedManager()
+        let target = target(manager)
+        let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
+            .parameters.first { $0.id == brightnessID })
+
+        for frame in [0, 4, 10, 20] { manager.addKeyframe(target, atFrame: frame) }
+        manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 4)
+        let before = manager.keyframeFrames(of: target)
+        XCTAssertEqual(before, [0, 4, 10, 20], "PREMISE: four keyframes, one of them a bare mark")
+
+        dragNode(manager, parameterID: brightnessID, from: 10, by: 10)
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 4, 20],
+                       "PREMISE: the node landed on the mark and the two became one keyframe")
+
+        manager.undo()
+        XCTAssertEqual(manager.keyframeFrames(of: target), before)
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [20],
+                       "The mark the write dropped comes back with the curve, in the same step")
     }
 }

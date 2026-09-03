@@ -1407,31 +1407,58 @@ final class CanvasManager: ObservableObject {
         let after = (curve?.isEmpty == false) ? curve : nil
         guard after != before else { return false }
 
+        // **The graph editor's own write, and therefore the one that used to strand a mark.** A key
+        // dragged or tapped off a marked frame leaves the mark behind on the timeline with nothing
+        // under it in the band — three device reports of one divergence. `marks(_:droppingKeyed:)`
+        // is the rule and it is asked against the keys either side of this write, so the mark goes
+        // with the node. Free when the target has no marks, which is every target once its first
+        // keyframe cycle has landed.
+        let marksBefore = layers[layerIndex].keyframeMarks
+        let marksAfter: [Int]
+        if marksBefore.isEmpty {
+            marksAfter = marksBefore
+        } else {
+            var tracksAfter = layers[layerIndex].effectTracks
+            if let after { tracksAfter[parameterID] = after } else { tracksAfter.removeValue(forKey: parameterID) }
+            let target = KeyframeTarget.layer(id: layerID)
+            marksAfter = Self.marks(marksBefore,
+                                    droppingKeyed: keyedFrames(of: target)
+                                        .union(keyedFrames(of: target, tracks: tracksAfter)))
+        }
+
         // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as
         // its own earlier step, rather than being swallowed into this one. Re-entrant-safe, so calling
         // it inside an enclosing bracket that already did is free.
         beginCanvasEdit()
-        writeEffectParameterTrack(after, parameterID: parameterID, layerID: layerID)
+        writeEffectParameterTrack(after, marks: marksAfter, parameterID: parameterID, layerID: layerID)
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
         recordUndo(label: .effectKeyframes,
                    cost: Self.trackUndoCost(before) + Self.trackUndoCost(after),
                    undo: { [weak self] in
-                       self?.writeEffectParameterTrack(before, parameterID: parameterID, layerID: layerID)
+                       self?.writeEffectParameterTrack(before, marks: marksBefore,
+                                                       parameterID: parameterID, layerID: layerID)
                    }, redo: { [weak self] in
-                       self?.writeEffectParameterTrack(after, parameterID: parameterID, layerID: layerID)
+                       self?.writeEffectParameterTrack(after, marks: marksAfter,
+                                                       parameterID: parameterID, layerID: layerID)
                    })
         return true
     }
 
     /// The one mutation both directions of the undo above go through, addressing the layer by id.
-    private func writeEffectParameterTrack(_ curve: AnimationCurve?, parameterID: String, layerID: UUID) {
+    ///
+    /// **The marks travel with the curve**, because pruning one is part of writing the other: a mark
+    /// dropped when a key landed on it has to come back when that key is undone, and it can only do
+    /// that if both directions carry the pair.
+    private func writeEffectParameterTrack(_ curve: AnimationCurve?, marks: [Int],
+                                           parameterID: String, layerID: UUID) {
         guard let index = layers.firstIndex(where: { $0.id == layerID }) else { return }
         if let curve {
             layers[index].effectTracks[parameterID] = curve
         } else {
             layers[index].effectTracks.removeValue(forKey: parameterID)
         }
+        if layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
     }
 
     /// **The same write, on a folder's grade** — KEYFRAMES.md §2.21, stage 2b, and the folder twin of
@@ -1469,30 +1496,52 @@ final class CanvasManager: ObservableObject {
         let after = (curve?.isEmpty == false) ? curve : nil
         guard after != before else { return false }
 
+        // A mark a key lands on, or a key leaves, goes — the layer overload above carries the
+        // argument, and it holds here for the same reason: §2.21 makes a folder's grade animate
+        // exactly as a layer's, so its marks must not be able to strand either.
+        let marksBefore = folders[index].keyframeMarks
+        let marksAfter: [Int]
+        if marksBefore.isEmpty {
+            marksAfter = marksBefore
+        } else {
+            var tracksAfter = folders[index].effectTracks
+            if let after { tracksAfter[parameterID] = after } else { tracksAfter.removeValue(forKey: parameterID) }
+            let target = KeyframeTarget.folder(id: folderID)
+            marksAfter = Self.marks(marksBefore,
+                                    droppingKeyed: keyedFrames(of: target)
+                                        .union(keyedFrames(of: target, tracks: tracksAfter)))
+        }
+
         beginCanvasEdit()
-        writeFolderEffectParameterTrack(after, parameterID: parameterID, folderID: folderID)
+        writeFolderEffectParameterTrack(after, marks: marksAfter,
+                                        parameterID: parameterID, folderID: folderID)
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return true }
         recordUndo(label: .effectKeyframes,
                    cost: Self.trackUndoCost(before) + Self.trackUndoCost(after),
                    undo: { [weak self] in
-                       self?.writeFolderEffectParameterTrack(before, parameterID: parameterID, folderID: folderID)
+                       self?.writeFolderEffectParameterTrack(before, marks: marksBefore,
+                                                             parameterID: parameterID, folderID: folderID)
                    }, redo: { [weak self] in
-                       self?.writeFolderEffectParameterTrack(after, parameterID: parameterID, folderID: folderID)
+                       self?.writeFolderEffectParameterTrack(after, marks: marksAfter,
+                                                             parameterID: parameterID, folderID: folderID)
                    })
         return true
     }
 
     /// The one mutation both directions of the undo above go through, addressing the folder by id —
     /// re-resolved on every call rather than captured, because a folder deleted and restored between
-    /// the edit and the undo is a different position in `folders` and the same id.
-    private func writeFolderEffectParameterTrack(_ curve: AnimationCurve?, parameterID: String, folderID: UUID) {
+    /// the edit and the undo is a different position in `folders` and the same id. The marks ride with
+    /// the curve for the layer overload's reason.
+    private func writeFolderEffectParameterTrack(_ curve: AnimationCurve?, marks: [Int],
+                                                 parameterID: String, folderID: UUID) {
         guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return }
         if let curve {
             folders[index].effectTracks[parameterID] = curve
         } else {
             folders[index].effectTracks.removeValue(forKey: parameterID)
         }
+        if folders[index].keyframeMarks != marks { folders[index].keyframeMarks = marks }
     }
 
     /// Roughly what one retained `AnimationCurve` costs `UndoHistory`'s byte budget.

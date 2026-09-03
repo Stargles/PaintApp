@@ -76,7 +76,7 @@ struct TimelineLayoutKey: Equatable {
         /// The folder's own markers — §2.21 makes a folder's grade animate exactly as a layer's, so
         /// the folder row draws a marker band like any other row. Its **own** marks and keys, not its
         /// descendants': a marker says "a keyframe is here on this target", and a target is a row.
-        let markers: [TimelineKeyMarkers.Marker]
+        let markers: [Int]
     }
 
     /// A block in flight. `TimelineTrackView.Coordinator.BlockDrag` mapped down to the parts the
@@ -96,7 +96,7 @@ struct TimelineLayoutKey: Equatable {
     /// Parallel to the `.layer` entries of `rows`, in their order.
     let tracks: [[CelKey]]
     /// The document frames each of those layers carries a keyframe on — ascending, unique, and **one
-    /// entry per frame however many channels key there** (`CanvasManager.keyframes(of:)`).
+    /// entry per frame however many channels key there** (`CanvasManager.keyframeFrames(of:)`).
     ///
     /// **A second array rather than a field on `CelKey`, because a keyframe is not on a cel.** §2.4
     /// puts effect keys on the *layer*, in absolute document frames, and §2.26's marks likewise, so
@@ -112,9 +112,9 @@ struct TimelineLayoutKey: Equatable {
     /// documents, which have neither a mark nor a track; for one that does it is a walk of the curves'
     /// own key arrays and nothing else — in particular it never touches `Effect.parameters`, which
     /// rebuilds up to thirty-three closures per call. Comparing it is equality over a handful of
-    /// `(Int, Bool)` pairs, against a key that already carries every cel's id, start, length and
-    /// thumbnail address.
-    let trackMarkers: [[TimelineKeyMarkers.Marker]]
+    /// `Int`s, against a key that already carries every cel's id, start, length and thumbnail
+    /// address.
+    let trackMarkers: [[Int]]
     /// Parallel to the `.folder` entries of `rows`, in their order.
     let folders: [FolderKey]
 
@@ -185,7 +185,7 @@ extension TimelineLayoutKey {
                      rulerHeight: CGFloat,
                      drag: DragKey?) -> (key: TimelineLayoutKey, retainedThumbnails: [UIImage]) {
         var tracks: [[CelKey]] = []
-        var trackMarkers: [[TimelineKeyMarkers.Marker]] = []
+        var trackMarkers: [[Int]] = []
         var folders: [FolderKey] = []
         var retained: [UIImage] = []
 
@@ -199,11 +199,10 @@ extension TimelineLayoutKey {
                 }
                 tracks.append(cels)
                 // **What counts as a keyframe is the model's answer, asked here rather than rebuilt.**
-                // `CanvasManager.keyframes(of:)` unions the explicit marks with every frame a channel
-                // in force keys on, and carries the grade asymmetry that used to sit on this line.
-                let placed = canvasManager.keyframes(of: .layer(id: layer.id))
-                trackMarkers.append(TimelineKeyMarkers.markers(frames: placed.frames,
-                                                               keyed: placed.keyed))
+                // `CanvasManager.keyframeFrames(of:)` unions the explicit marks with every frame a
+                // channel in force keys on, and carries the grade asymmetry that used to sit on this
+                // line.
+                trackMarkers.append(canvasManager.keyframeFrames(of: .layer(id: layer.id)))
             } else if let folderID = row.folderID {
                 let folder = canvasManager.folders.first { $0.id == folderID }
                 let childCels = canvasManager.descendantLayerIndices(ofFolder: folderID)
@@ -212,13 +211,11 @@ extension TimelineLayoutKey {
                     ? nil
                     : (childCels.map(\.startFrame).min() ?? 0)...(childCels.map(\.endFrame).max() ?? 0)
                 // §2.21: a folder's grade animates exactly as a layer's, so it asks the same accessor.
-                let placed = canvasManager.keyframes(of: .folder(id: folderID))
                 folders.append(FolderKey(id: folderID,
                                          name: folder?.name ?? folderID.uuidString,
                                          isVisible: folder?.isVisible ?? true,
                                          span: span,
-                                         markers: TimelineKeyMarkers.markers(frames: placed.frames,
-                                                                             keyed: placed.keyed)))
+                                         markers: canvasManager.keyframeFrames(of: .folder(id: folderID))))
             }
         }
 

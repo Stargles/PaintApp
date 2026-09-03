@@ -64,7 +64,7 @@ enum KeyframeControl {
     /// same statement as "there is a keyframe other than this one", because the playhead's own is in
     /// the count.
     ///
-    /// **Both counts are of `CanvasManager.keyframeFrames` — marks *and* keyed frames.** A frame a
+    /// **Both counts are of `CanvasManager.keyframeFrames(of:)` — marks *and* keyed frames.** A frame a
     /// channel keys on with no mark beside it is a keyframe the artist placed with a slider, and
     /// counting only the stored marks is what made an edit at the last of three keyframes seed onto the
     /// first.
@@ -181,29 +181,16 @@ extension CanvasManager {
         }
     }
 
-    /// **The frames a target carries a keyframe on, and which of them a channel actually keys.**
+    /// **A keyframe is any frame the target marks explicitly *or* any of its channels holds a key on**,
+    /// ascending and unique — the one accessor, and the only definition.
     ///
-    /// `frames` is the whole answer and `keyed` is only how each one is *drawn* — hollow when nothing
-    /// has landed on it yet (§2.26's bare mark), filled otherwise. They are returned together because
-    /// the walk that finds one finds the other, and the timeline needs both on every layout pass.
-    struct Keyframes: Equatable {
-        /// Ascending and unique.
-        var frames: [Int] = []
-        /// The subset of `frames` some channel holds a key on. `frames` minus this is the bare ones.
-        var keyed: Set<Int> = []
-    }
-
-    /// **A keyframe is any frame the target marks explicitly *or* any of its channels holds a key on.**
-    ///
-    /// **This union is the invariant, and it is computed rather than stored.** Storing it — making
-    /// every key write append a mark as well — would put the same fact in two places and let them
-    /// drift apart the first time a writer forgot, which is exactly the defect the two reports of
-    /// 2026-08-29 were: a curve keyed at a frame with no mark beside it drew a diamond the artist could
-    /// see, could not delete, and which the seed arm's neighbour search stepped straight over. So
-    /// `KeyframeState.marks` keeps its narrow meaning — the frames the artist marked *explicitly*,
-    /// which is what makes "keyframe A is added, nothing is saved" storable at all — and stops being
-    /// the whole answer. Everything that asks *is there a keyframe here*, *how many are there* or
-    /// *which is nearest below* asks this.
+    /// **The two lists cannot disagree, because they are disjoint.** A mark is stored *only* for a
+    /// frame no channel keys (`marks(_:droppingKeyed:)`), so this union is a partition rather than an
+    /// overlap: a key is the keyframe wherever there is one, and a mark is the keyframe everywhere
+    /// else. That is what makes the owner's rule of 2026-09-03 true by construction — *"if a node
+    /// exists on the graph editor, it should also exist on the cel as an indicator and vice versa"* —
+    /// and it is what replaced §2.28's original arrangement, where a mark survived its key being
+    /// dragged away in the graph editor and drew a keyframe with nothing under it.
     ///
     /// **A target with no grade contributes no curves, and that asymmetry is deliberate.**
     /// `storedEffect(of:)`'s rule: a layer that is not in effect form grades nothing, so tracks left on
@@ -212,77 +199,86 @@ extension CanvasManager {
     /// with no grade whatsoever, and later stages key transforms onto the same marks — so gating those
     /// would hide the entire first step of the workflow on every ordinary drawing layer.
     ///
-    /// **The `isEmpty` fast path is what makes this affordable from a SwiftUI body.** The overwhelming
-    /// majority of documents carry neither a mark nor a track, and for those this is two `isEmpty`
-    /// checks; for one that does it is a walk of the curves' own key arrays and never a call to
-    /// `Effect.parameters`, which rebuilds up to thirty-three closures.
-    /// **The pose channels are part of this union too, and stage 5 is where that stopped being
-    /// theoretical.** §2.28's invariant is *any frame the target marks explicitly **or** any of its
-    /// channels holds a key on*, and a transform key is a key — the two device reports that produced
-    /// the ruling were both the timeline and the model asking different questions, and a pose channel
-    /// omitted here would reproduce both of them exactly (a diamond with no Remove Keyframe, and a
-    /// seed arm stepping over a frame the artist can see). The keys live on the layer's *cels* in
-    /// cel-local frames (§3.1) and are converted by `poseKeyframeFrames(inLayer:)`, which is the one
-    /// place that conversion happens.
-    ///
-    /// **They are ungated by the grade, unlike the effect curves.** `storedEffect(of:) == nil` drops
-    /// the effect tracks because a layer that is not in effect form grades nothing; a pose channel is
-    /// not a property of an effect at all, so a drawing layer with no grade whatsoever still shows its
-    /// transform keys.
-    func keyframes(of target: KeyframeTarget) -> Keyframes {
+    /// **The pose channels are part of this too, and stage 5 is where that stopped being theoretical.**
+    /// A transform key is a key — the two device reports that produced §2.28 were both the timeline and
+    /// the model asking different questions, and a pose channel omitted here would reproduce both of
+    /// them exactly (a diamond with no Remove Keyframe, and a seed arm stepping over a frame the artist
+    /// can see). The keys live on the layer's *cels* in cel-local frames (§3.1) and are converted by
+    /// `poseKeyframeFrames(inLayer:)`, which is the one place that conversion happens.
+    func keyframeFrames(of target: KeyframeTarget) -> [Int] {
         let state = keyframeState(of: target)
-        return keyframes(of: target, marks: state.marks, tracks: state.tracks)
+        return keyframeFrames(of: target, marks: state.marks, tracks: state.tracks)
     }
 
     /// **The same union, taken against marks and curves a writer is holding mid-edit** — which is the
     /// only other shape anything is allowed to ask this in.
     ///
     /// `addKeyframe` needs the union over its *new* marks and its *old* curves, and `seedAndKeyChannel`
-    /// needs it before it writes; neither can go through `keyframes(of:)`, which re-reads the document.
-    /// **Both of them used to call the static form below and get the two-argument overload**, whose
-    /// `poseFrames` defaulted to empty — so §2.28's union had two spellings in one file, one of which
-    /// could not see a pose key. That is precisely the divergence the ruling exists to forbid, and its
-    /// two symptoms are the ones the owner reported: the neighbour search steps over a keyframe the
-    /// artist can see, and the seed arm writes onto the wrong one. The default is gone from the static
-    /// form and this is what stands in its place, so the pose frames cannot be forgotten by omission.
-    func keyframes(of target: KeyframeTarget,
-                   marks: [Int], tracks: [String: AnimationCurve]) -> Keyframes {
-        let poses: [Int]
-        switch target {
-        case .layer(let id): poses = poseKeyframeFrames(inLayer: id)
-        // A folder holds no cels, so it holds no object channels — §2.4's target has no cel to ride.
-        case .folder: poses = []
-        }
-        return Self.keyframes(marks: marks,
-                              tracks: storedEffect(of: target) == nil ? [:] : tracks,
-                              poseFrames: poses)
-    }
-
-    /// The union as a function of values — the one implementation, so the writers above can take it
-    /// against a state they hold rather than re-reading the document mid-edit.
-    ///
-    /// **`poseFrames` has no default and must not be given one.** It had one until 2026-09-02 and two
-    /// callers took it, which is how §2.28's *"computed by one accessor and never stored twice"* came
-    /// to have two answers. Nothing outside this file should reach past `keyframes(of:)` or its
-    /// marks-and-tracks twin above.
-    static func keyframes(marks: [Int], tracks: [String: AnimationCurve],
-                          poseFrames: [Int]) -> Keyframes {
-        guard !marks.isEmpty || !tracks.isEmpty || !poseFrames.isEmpty else { return Keyframes() }
-        var keyed: Set<Int> = []
-        for curve in tracks.values {
-            for key in curve.keys { keyed.insert(key.frame) }
-        }
-        // A pose key is a landed key exactly as a curve key is, so it goes in `keyed` and draws
-        // filled rather than hollow.
-        keyed.formUnion(poseFrames)
-        var frames = keyed
+    /// needs it before it writes; neither can go through `keyframeFrames(of:)`, which re-reads the
+    /// document. **Both of them used to call a static form** whose `poseFrames` defaulted to empty — so
+    /// the union had two spellings in one file, one of which could not see a pose key. That is
+    /// precisely the divergence §2.28 exists to forbid, and its two symptoms are the ones the owner
+    /// reported: the neighbour search steps over a keyframe the artist can see, and the seed arm writes
+    /// onto the wrong one. The static form is gone and this stands in its place, so the pose frames
+    /// cannot be forgotten by omission.
+    func keyframeFrames(of target: KeyframeTarget,
+                        marks: [Int], tracks: [String: AnimationCurve]) -> [Int] {
+        var frames = keyedFrames(of: target, tracks: tracks)
         frames.formUnion(marks)
-        return Keyframes(frames: frames.sorted(), keyed: keyed)
+        return frames.sorted()
     }
 
-    /// **The frames this target carries a keyframe on**, ascending — `keyframes(of:).frames`, which is
-    /// what almost every caller wants.
-    func keyframeFrames(of target: KeyframeTarget) -> [Int] { keyframes(of: target).frames }
+    /// **The frames some channel of `target` holds a key on** — the keyed half of the union above, and
+    /// the predicate `marks(_:droppingKeyed:)` prunes against.
+    ///
+    /// **The `isEmpty` fast paths are what make this affordable from a SwiftUI body.** The overwhelming
+    /// majority of documents carry no track at all, and for those this is one dictionary `isEmpty` and
+    /// one per-cel `isEmpty` per cel; for one that does it is a walk of the curves' own key arrays and
+    /// never a call to `Effect.parameters`, which rebuilds up to thirty-three closures.
+    func keyedFrames(of target: KeyframeTarget) -> Set<Int> {
+        keyedFrames(of: target, tracks: keyframeState(of: target).tracks)
+    }
+
+    /// The same, against a track dictionary the caller is holding mid-edit.
+    func keyedFrames(of target: KeyframeTarget, tracks: [String: AnimationCurve]) -> Set<Int> {
+        var keyed: Set<Int> = []
+        if !tracks.isEmpty, storedEffect(of: target) != nil {
+            for curve in tracks.values {
+                for key in curve.keys { keyed.insert(key.frame) }
+            }
+        }
+        // A pose key is a landed key exactly as a curve key is. Ungated by the grade, unlike the
+        // effect curves: a pose channel is not a property of an effect at all, so a drawing layer with
+        // no grade whatsoever still carries its transform keys. A folder holds no cels, so it holds no
+        // object channels — §2.4's target has no cel to ride.
+        if case .layer(let id) = target { keyed.formUnion(poseKeyframeFrames(inLayer: id)) }
+        return keyed
+    }
+
+    /// **A mark on a frame some channel keys is redundant, and it goes** — the owner's rule of
+    /// 2026-09-03, and the one line that keeps the two lists from ever coming apart.
+    ///
+    /// It supersedes the last paragraph of §2.28, which said the opposite in as many words: *"a key is
+    /// a value some channel holds and a mark is the artist saying this frame is a keyframe, and the two
+    /// come apart the moment that key is dragged or deleted in the graph editor."* They did, and what
+    /// the artist saw was a keyframe indicator on a cel with no node under it in the graph editor —
+    /// reported three times. **A mark that has been keyed can therefore never be orphaned by a later
+    /// edit, because it is no longer there to orphan.**
+    ///
+    /// Nothing is lost by dropping it. A mark is only ever load-bearing while it is *un*keyed: once a
+    /// channel keys the frame, every question anything asks — is there a keyframe here, how many are
+    /// there, which is nearest below, draw a diamond — is answered by the key. §2.26's *"keyframe A is
+    /// added, nothing is saved"* is exactly the un-keyed case, which is why `keyframeMarks` still
+    /// exists and cannot be deleted outright.
+    ///
+    /// - Parameter keyed: every frame a channel keys **before or after** the write being made. Both
+    ///   halves: the "after" set is what stops a mark being written under a key, and the "before" set
+    ///   is what makes a key dragged *off* a marked frame take the mark with it, which is the reported
+    ///   symptom and is also how a document saved under the old rule heals itself on first touch.
+    static func marks(_ marks: [Int], droppingKeyed keyed: Set<Int>) -> [Int] {
+        guard !marks.isEmpty, !keyed.isEmpty else { return marks }
+        return marks.filter { !keyed.contains($0) }
+    }
 
     /// Whether a keyframe already sits on `frame`. The predicate `KeyframeControl.write`'s third arm
     /// asks about, named so no caller writes `contains` by hand against an unsorted assumption.
@@ -358,12 +354,12 @@ extension CanvasManager {
     /// target, so a routing bug built there would be invisible to the fast tier.
     func keyframeWrite(_ target: KeyframeTarget, parameter: EffectParameter,
                        atFrame frame: Int) -> KeyframeControl.Write {
-        let placed = keyframes(of: target)
+        let placed = keyframeFrames(of: target)
         return KeyframeControl.write(
             isScalarAnimatable: parameter.isScalarAnimatable,
             channelHasCurve: keyframeState(of: target).tracks[parameter.id]?.isEmpty == false,
-            keyframeCount: placed.frames.count,
-            playheadIsOnKeyframe: placed.frames.contains(frame))
+            keyframeCount: placed.count,
+            playheadIsOnKeyframe: placed.contains(frame))
     }
 
     /// **Writes the grade back onto whichever of the two homes `target` names.**
@@ -481,7 +477,7 @@ extension CanvasManager {
 
         var state = keyframeState(of: target)
         let before = state
-        let placed = keyframes(of: target, marks: state.marks, tracks: state.tracks).frames
+        let placed = keyframeFrames(of: target, marks: state.marks, tracks: state.tracks)
         state.tracks[parameterID] = Self.seeded(state.tracks[parameterID], keyframes: placed,
                                                 frame: frame, oldValue: oldValue, newValue: newValue)
         // A channel that seeds is a channel that no longer needs its held value.
@@ -499,11 +495,13 @@ extension CanvasManager {
     /// 1. **The mark is recorded**, if it is not already there. A mark with no channel is legal and is
     ///    the point: *"keyframe A is added, nothing is saved."*
     ///
-    ///    **The mark is taken even on a frame a channel already keys, where `keyframes(of:)` would
-    ///    already answer yes.** It is not the same fact twice: a key is a value some channel holds and
-    ///    a mark is the artist saying *this frame is a keyframe*, and the two come apart the moment
-    ///    that key is dragged or deleted — a keyframe the artist placed by hand must not go with it.
-    ///    The guard therefore stays what it always was, a dedupe of `marks` against itself.
+    ///    **And it does not survive steps 2 and 3 keying the frame it names.** `commitKeyframeState`
+    ///    prunes it — `marks(_:droppingKeyed:)` — so a press that lands a key stores the key alone.
+    ///    This reverses §2.28's closing paragraph, which kept the mark on the grounds that *"a key is
+    ///    a value some channel holds and a mark is the artist saying this frame is a keyframe"*: true,
+    ///    but what it bought was a keyframe indicator that outlived the node under it, which the owner
+    ///    reported three times. The guard here therefore stays what it always was, a dedupe of `marks`
+    ///    against itself; the pruning is one level down, where every writer reaches it.
     /// 2. **Every held baseline is committed and cleared.** The old value goes onto the nearest mark
     ///    below and the nearest mark above (whichever exist — see `seedAndKeyChannel` for why only the
     ///    immediate neighbours), and the channel's **current stored value** goes on `frame`. This is
@@ -541,12 +539,12 @@ extension CanvasManager {
         // snapshot of `before.tracks` rather than of the tracks being written, because seeding one
         // channel adds keys and would otherwise move the next channel's neighbour — an order
         // dependence over a dictionary, which has none; and **§2.28's union including the pose
-        // channels**, which is what `keyframes(of:marks:tracks:)` supplies and what the static
+        // channels**, which is what `keyframeFrames(of:marks:tracks:)` supplies and what the static
         // two-argument form silently did not. It feeds `poseDeltaForKeyframe` below as well as the
         // effect loop, so a pose key missing from it seeds a pose baseline onto the wrong frame — or,
         // when it is the only other keyframe there is, onto no frame at all, discarding the baseline
         // and the animation with it.
-        let placed = keyframes(of: target, marks: state.marks, tracks: before.tracks).frames
+        let placed = keyframeFrames(of: target, marks: state.marks, tracks: before.tracks)
 
         if let stored = storedEffect(of: target) {
             let resolved = resolvedEffect(of: target, atFrame: frame)
@@ -652,7 +650,7 @@ extension CanvasManager {
     /// up in the channel list animating nothing.
     ///
     /// **Both halves is also what makes this work on a keyframe that has no mark at all** — one placed
-    /// by moving a slider, which `keyframes(of:)` counts and which the artist can therefore reach.
+    /// by moving a slider, which `keyframeFrames(of:)` counts and which the artist can therefore reach.
     ///
     /// - Returns: whether the document changed.
     @discardableResult
@@ -833,11 +831,25 @@ extension CanvasManager {
                                      to target: KeyframeTarget, label: HistoryActionLabel,
                                      poses: KeyframePoseDelta = [:],
                                      posesBefore: KeyframePoseDelta = [:]) {
+        var state = state
         // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as its
         // own earlier step. Re-entrant-safe, so calling it inside a bracket that already did is free.
         beginCanvasEdit()
+        // **Taken before the write as well as after, and free when there is no mark to prune** —
+        // `marks(_:droppingKeyed:)` carries the argument for both halves. This is the funnel every
+        // writer in this file reaches, so `addKeyframe`'s own mark is dropped by the same keys that
+        // write commits, in the one call that writes them.
+        let keyedBefore = state.marks.isEmpty ? [] : keyedFrames(of: target)
         applyKeyframeState(state, to: target)
         applyPoseDelta(poses, to: target)
+        if !state.marks.isEmpty {
+            let pruned = Self.marks(state.marks,
+                                    droppingKeyed: keyedBefore.union(keyedFrames(of: target)))
+            if pruned != state.marks {
+                state.marks = pruned
+                applyKeyframeState(state, to: target)
+            }
+        }
 
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return }
         recordUndo(label: label, cost: Self.stateUndoCost(before) + Self.stateUndoCost(state),

@@ -15,9 +15,12 @@ import UIKit
 /// - **What is a marker?** One per (target, frame), however many channels key there — the channel
 ///   collapse, which is unconditional. The frame set is the **union** of the target's keyframe marks
 ///   and its curves' keys, because neither list contains the other; that union is
-///   `CanvasManager.keyframes`, so these tests take it from there rather than from a second copy.
-/// - **Which kind is it?** Bare when the artist placed a keyframe there and nothing has been saved
-///   onto it yet (§2.26), landed otherwise.
+///   `CanvasManager.keyframeFrames(of:)`, so these tests take it from there rather than from a second
+///   copy.
+/// - **How many kinds of marker are there?** One. There were two — a hollow form for a frame the
+///   artist marked and no channel keyed — and the owner had it removed on 2026-09-03: a node in the
+///   graph editor and an indicator on the cel are the same thing, so a greyed third state is
+///   something to read and act on that says nothing.
 /// - **What happens when markers touch?** The zoom collapse, which is the interesting one, and which
 ///   is pinned against the timeline's own pinch limits rather than against numbers re-typed here.
 @MainActor
@@ -26,30 +29,33 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     private let brightnessID = "brightnessContrast.brightness"
     private let contrastID = "brightnessContrast.contrast"
 
-    /// A landed marker on each of `frames` — the shape most of the collapse tests want, since the
-    /// collapse itself is indifferent to which kind a marker is.
-    private func landed(_ frames: [Int]) -> [TimelineKeyMarkers.Marker] {
-        frames.map { TimelineKeyMarkers.Marker(frame: $0, isBare: false) }
-    }
-
     /// The two ends of the pinch range, named so a test reads as the zoom the artist is at.
     private var floorZoom: CGFloat { TimelineKeyMarkers.pixelsPerFrameRange.lowerBound }
     private var defaultZoom: CGFloat { TimelineKeyMarkers.basePixelsPerFrame }
 
-    /// **The band's markers for one target's stored state.** The union is
-    /// `CanvasManager.keyframes(marks:tracks:)`' — the model owns what counts as a keyframe — and
-    /// `TimelineKeyMarkers.markers` only says which kind each one is drawn as. Pairing them here is
-    /// what `TimelineLayoutKey.make` does, so the assertions below are about the band the artist sees
-    /// rather than about either half alone.
-    private func markerRow(marks: [Int], tracks: [String: AnimationCurve]) -> [TimelineKeyMarkers.Marker] {
-        let placed = CanvasManager.keyframes(marks: marks, tracks: tracks, poseFrames: [])
-        return TimelineKeyMarkers.markers(frames: placed.frames, keyed: placed.keyed)
+    /// **The band's markers for a state a writer would be holding mid-edit.** The union is the
+    /// model's — `CanvasManager.keyframeFrames(of:marks:tracks:)`, the one accessor — asked against a
+    /// real graded document so the grade asymmetry it carries is in force. `TimelineLayoutKey.make`
+    /// asks the same question the same way, so the assertions below are about the band the artist
+    /// sees rather than about a fixture's own arithmetic.
+    private func markerRow(marks: [Int], tracks: [String: AnimationCurve]) -> [Int] {
+        let manager = gradedManager()
+        let target = KeyframeTarget.layer(id: manager.layers[1].id)
+        return manager.keyframeFrames(of: target, marks: marks, tracks: tracks)
     }
 
-    /// The same pair against a real document, through the accessor production reads.
-    private func markerRow(_ manager: CanvasManager, _ target: KeyframeTarget) -> [TimelineKeyMarkers.Marker] {
-        let placed = manager.keyframes(of: target)
-        return TimelineKeyMarkers.markers(frames: placed.frames, keyed: placed.keyed)
+    /// The same against a document's stored state, through the accessor production reads.
+    private func markerRow(_ manager: CanvasManager, _ target: KeyframeTarget) -> [Int] {
+        manager.keyframeFrames(of: target)
+    }
+
+    /// An opaque floor under a value layer carrying a brightness/contrast grade — the fixture
+    /// `KeyframeControlLogicTests` and `TimelineGraphBandLogicTests` both use, so a track written
+    /// against `brightnessID` is one the layer really grades through.
+    private func gradedManager() -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
+        return manager
     }
 
     private func curve(_ frames: [Int]) -> AnimationCurve {
@@ -94,7 +100,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
             brightnessID: curve([4]),
             contrastID: curve([4])
         ])
-        XCTAssertEqual(markers, landed([4]), "Two channels, one frame, one marker")
+        XCTAssertEqual(markers, [4], "Two channels, one frame, one marker")
     }
 
     func testChannelsKeyedOnDifferentFramesProduceOneMarkerEach() {
@@ -102,7 +108,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
             brightnessID: curve([0, 8]),
             contrastID: curve([4, 8])
         ])
-        XCTAssertEqual(markers, landed([0, 4, 8]),
+        XCTAssertEqual(markers, [0, 4, 8],
                        "The union, deduped — frame 8 is keyed twice and drawn once")
     }
 
@@ -115,15 +121,14 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
                                                                contrastID: curve([5])])
         let b = markerRow(marks: [], tracks: [contrastID: curve([5]),
                                                                brightnessID: curve([2, 9])])
-        XCTAssertEqual(a, landed([2, 5, 9]))
+        XCTAssertEqual(a, [2, 5, 9])
         XCTAssertEqual(a, b, "Two dictionaries with the same content must produce the same array")
     }
 
     /// The marks arrive sorted from the model, but the union is a `Set` and only this sort decides
     /// what comes out — so an out-of-order input must not survive into the layout key.
     func testTheUnionIsAscendingWhateverOrderTheMarksArriveIn() {
-        XCTAssertEqual(markerRow(marks: [9, 2, 5], tracks: [:]).map(\.frame),
-                       [2, 5, 9])
+        XCTAssertEqual(markerRow(marks: [9, 2, 5], tracks: [:]), [2, 5, 9])
     }
 
     func testATargetWithNothingOnItHasNoMarkers() {
@@ -132,50 +137,50 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
                        "A channel whose curve is empty animates nothing and draws nothing")
     }
 
-    // MARK: - The union, and which kind each marker is
+    // MARK: - The union
 
     /// **The whole of §2.26's first step.** A keyframe is placed and nothing is saved onto it; if that
-    /// draws nothing the artist places A blind and the feature cannot be used. It has to be a marker,
-    /// and it has to be visibly a *different* marker from one that carries a key.
-    func testAMarkWithNoKeyOnItIsABareMarker() {
-        XCTAssertEqual(markerRow(marks: [3], tracks: [:]),
-                       [TimelineKeyMarkers.Marker(frame: 3, isBare: true)])
+    /// draws nothing the artist places A blind and the feature cannot be used. It is a marker, and it
+    /// is the *same* marker as one that carries a key — the owner's rule of 2026-09-03, which took the
+    /// second form away.
+    func testAMarkWithNoKeyOnItIsStillAMarker() {
+        XCTAssertEqual(markerRow(marks: [3], tracks: [:]), [3])
     }
 
-    /// **A key with no mark is landed, not bare**, and it is a case that really occurs: §2.26 says a
+    /// **A key with no mark is a marker too**, and it is a case that really occurs: §2.26 says a
     /// curve carries keys the artist never marked — an auto-key at the playhead, or a value seeded
     /// onto a neighbouring mark. So the union cannot be derived from the marks either.
-    func testAKeyWithNoMarkOnItIsALandedMarker() {
+    func testAKeyWithNoMarkOnItIsAMarker() {
         XCTAssertEqual(markerRow(marks: [], tracks: [brightnessID: curve([7])]),
-                       landed([7]))
+                       [7])
     }
 
-    /// The mixed row: the artist's mark at 0 has taken a value, the one at 12 has not yet.
-    func testAMarkThatHasTakenAKeyIsLandedAndOneThatHasNotIsBare() {
+    /// The mixed row draws as one row: the artist's mark at 0 has taken a value and the one at 12 has
+    /// not, and both are keyframes.
+    func testAMarkThatHasTakenAKeyAndOneThatHasNotAreTheSameKindOfMarker() {
         XCTAssertEqual(markerRow(marks: [0, 12], tracks: [brightnessID: curve([0])]),
-                       [TimelineKeyMarkers.Marker(frame: 0, isBare: false),
-                        TimelineKeyMarkers.Marker(frame: 12, isBare: true)])
+                       [0, 12])
     }
 
     // MARK: - Collapse (2): zoom
 
     func testOneKeyIsOneUncollapsedMarkerAtEveryZoom() {
         for zoom in [floorZoom, defaultZoom, TimelineKeyMarkers.pixelsPerFrameRange.upperBound] {
-            let runs = TimelineKeyMarkers.runs(markers: landed([6]), pixelsPerFrame: zoom)
-            XCTAssertEqual(runs, [TimelineKeyMarkers.Run(firstFrame: 6, lastFrame: 6, count: 1, isBare: false)])
+            let runs = TimelineKeyMarkers.runs(frames: [6], pixelsPerFrame: zoom)
+            XCTAssertEqual(runs, [TimelineKeyMarkers.Run(firstFrame: 6, lastFrame: 6, count: 1)])
             XCTAssertFalse(runs[0].isCollapsed, "A run of one is a key, not a collapse")
         }
     }
 
     func testAtTheDefaultZoomAdjacentFramesAreStillDrawnApart() {
-        let runs = TimelineKeyMarkers.runs(markers: landed([4, 5, 6]), pixelsPerFrame: defaultZoom)
+        let runs = TimelineKeyMarkers.runs(frames: [4, 5, 6], pixelsPerFrame: defaultZoom)
         XCTAssertEqual(runs.count, 3, "30 pt of column is far more room than a 9 pt diamond needs")
         XCTAssertTrue(runs.allSatisfy { !$0.isCollapsed })
     }
 
     func testAtTheMinimumZoomAdjacentFramesCollapseIntoOneRun() {
-        let runs = TimelineKeyMarkers.runs(markers: landed([4, 5, 6, 7]), pixelsPerFrame: floorZoom)
-        XCTAssertEqual(runs, [TimelineKeyMarkers.Run(firstFrame: 4, lastFrame: 7, count: 4, isBare: false)],
+        let runs = TimelineKeyMarkers.runs(frames: [4, 5, 6, 7], pixelsPerFrame: floorZoom)
+        XCTAssertEqual(runs, [TimelineKeyMarkers.Run(firstFrame: 4, lastFrame: 7, count: 4)],
                        "Chaining is the behaviour wanted: four keys with no daylight anywhere between them are one dense region, not two pairs")
         XCTAssertTrue(runs[0].isCollapsed)
     }
@@ -185,7 +190,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// can reach, and a timeline that drew it as a bar would be hiding the difference between ink on
     /// twos and a run recorded on every frame — the one distinction §2.10 exists to preserve.
     func testKeysOnTwosStayCountableEvenFullyPinchedOut() {
-        let runs = TimelineKeyMarkers.runs(markers: landed([0, 2, 4, 6]), pixelsPerFrame: floorZoom)
+        let runs = TimelineKeyMarkers.runs(frames: [0, 2, 4, 6], pixelsPerFrame: floorZoom)
         XCTAssertEqual(runs.count, 4)
         XCTAssertTrue(runs.allSatisfy { !$0.isCollapsed })
     }
@@ -194,50 +199,23 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     /// says so. At the minimum zoom a dense burst collapses while a key forty frames away stays its
     /// own diamond — only the parts of the track that actually collide lose detail.
     func testOnlyTheDensePartOfATrackCollapses() {
-        let runs = TimelineKeyMarkers.runs(markers: landed([0, 1, 2, 40]), pixelsPerFrame: floorZoom)
-        XCTAssertEqual(runs, [TimelineKeyMarkers.Run(firstFrame: 0, lastFrame: 2, count: 3, isBare: false),
-                              TimelineKeyMarkers.Run(firstFrame: 40, lastFrame: 40, count: 1, isBare: false)])
-    }
-
-    /// **A run is hollow only when everything in it is bare, and a mixed run draws as landed.** The
-    /// collapse already gives up which interior frames carry keys, so giving up which of them are bare
-    /// is the same loss resolved the same way — by zooming in. The direction is what matters: hollow
-    /// is the alarming reading, *nothing here is saved yet*, so claiming it over a run that does hold
-    /// saved keys would send the artist hunting a bug that is not there.
-    func testARunIsBareOnlyWhenEveryMarkerInItIs() {
-        let allBare = [0, 1, 2].map { TimelineKeyMarkers.Marker(frame: $0, isBare: true) }
-        XCTAssertEqual(TimelineKeyMarkers.runs(markers: allBare, pixelsPerFrame: floorZoom),
-                       [TimelineKeyMarkers.Run(firstFrame: 0, lastFrame: 2, count: 3, isBare: true)])
-
-        var mixed = allBare
-        mixed[1] = TimelineKeyMarkers.Marker(frame: 1, isBare: false)
-        XCTAssertEqual(TimelineKeyMarkers.runs(markers: mixed, pixelsPerFrame: floorZoom),
-                       [TimelineKeyMarkers.Run(firstFrame: 0, lastFrame: 2, count: 3, isBare: false)],
-                       "One landed key in the run is enough for the run to read as landed")
-    }
-
-    /// The kind belongs to the run it is in and does not leak into the next one — the mirror of
-    /// `testOnlyTheDensePartOfATrackCollapses`, for the field that was added beside `count`.
-    func testEachRunCarriesItsOwnKindWhenTheTrackMixesThem() {
-        let markers = [TimelineKeyMarkers.Marker(frame: 0, isBare: false),
-                       TimelineKeyMarkers.Marker(frame: 40, isBare: true)]
-        XCTAssertEqual(TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: floorZoom),
-                       [TimelineKeyMarkers.Run(firstFrame: 0, lastFrame: 0, count: 1, isBare: false),
-                        TimelineKeyMarkers.Run(firstFrame: 40, lastFrame: 40, count: 1, isBare: true)])
+        let runs = TimelineKeyMarkers.runs(frames: [0, 1, 2, 40], pixelsPerFrame: floorZoom)
+        XCTAssertEqual(runs, [TimelineKeyMarkers.Run(firstFrame: 0, lastFrame: 2, count: 3),
+                              TimelineKeyMarkers.Run(firstFrame: 40, lastFrame: 40, count: 1)])
     }
 
     /// **A collapsed run keeps its two ends exactly.** That is the whole contract of the collapsed
     /// form: where the animation starts and where it stops survive, and only which interior frames
     /// carry keys is given up — which is what zooming in is for.
     func testACollapsedRunReportsItsRealFirstAndLastFrames() {
-        let runs = TimelineKeyMarkers.runs(markers: landed([12, 13, 14, 15, 16]), pixelsPerFrame: floorZoom)
+        let runs = TimelineKeyMarkers.runs(frames: [12, 13, 14, 15, 16], pixelsPerFrame: floorZoom)
         XCTAssertEqual(runs.first?.firstFrame, 12)
         XCTAssertEqual(runs.first?.lastFrame, 16)
         XCTAssertEqual(runs.first?.count, 5)
     }
 
     func testNoKeysIsNoRuns() {
-        XCTAssertEqual(TimelineKeyMarkers.runs(markers: [], pixelsPerFrame: defaultZoom), [])
+        XCTAssertEqual(TimelineKeyMarkers.runs(frames: [], pixelsPerFrame: defaultZoom), [])
     }
 
     // MARK: - Geometry
@@ -272,7 +250,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     }
 
     func testASingleKeysRectIsExactlyOneMarkerWide() {
-        let run = TimelineKeyMarkers.Run(firstFrame: 5, lastFrame: 5, count: 1, isBare: false)
+        let run = TimelineKeyMarkers.Run(firstFrame: 5, lastFrame: 5, count: 1)
         let rect = TimelineKeyMarkers.rect(for: run, pixelsPerFrame: defaultZoom,
                                            bandHeight: TimelineKeyMarkers.bandHeight)
         XCTAssertEqual(rect.width, TimelineKeyMarkers.markerWidth, accuracy: 0.0001)
@@ -284,7 +262,7 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
     }
 
     func testACollapsedRunsRectReachesFromItsFirstKeyToItsLast() {
-        let run = TimelineKeyMarkers.Run(firstFrame: 2, lastFrame: 9, count: 8, isBare: false)
+        let run = TimelineKeyMarkers.Run(firstFrame: 2, lastFrame: 9, count: 8)
         let rect = TimelineKeyMarkers.rect(for: run, pixelsPerFrame: floorZoom,
                                            bandHeight: TimelineKeyMarkers.bandHeight)
         XCTAssertEqual(rect.minX,
@@ -365,22 +343,27 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
 
     /// The band publishes one encoded value rather than one element per marker — `CurveEditor`'s
     /// `encode(points)` convention and `TimelineFolderRowView`'s. It exists because XCUITest can see
-    /// neither a `CGContext` nor a colour, and the collapse and the hollow form are *only* visible as
-    /// shapes, so without this the two things this stage designs would be unassertable above this tier.
+    /// neither a `CGContext` nor a colour, and the collapse is *only* visible as a shape, so without
+    /// this the thing this stage designs would be unassertable above this tier.
     func testTheAccessibilityValueSaysWhichMarkersAreCollapsed() {
-        let runs = TimelineKeyMarkers.runs(markers: landed([0, 1, 2, 40]), pixelsPerFrame: floorZoom)
+        let runs = TimelineKeyMarkers.runs(frames: [0, 1, 2, 40], pixelsPerFrame: floorZoom)
         XCTAssertEqual(TimelineKeyMarkers.encode(runs), "0-2|40")
         XCTAssertEqual(TimelineKeyMarkers.encode(
-            TimelineKeyMarkers.runs(markers: landed([0, 1, 2, 40]), pixelsPerFrame: defaultZoom)),
+            TimelineKeyMarkers.runs(frames: [0, 1, 2, 40], pixelsPerFrame: defaultZoom)),
                        "0|1|2|40",
                        "The same four keys, zoomed in: four separate markers")
         XCTAssertEqual(TimelineKeyMarkers.encode([]), "")
     }
 
-    func testTheAccessibilityValueParenthesisesABareMarker() {
+    /// **The encoding has one form for a marker, and this is the guard on that.** It carried a second
+    /// — a keyframe no channel keyed was parenthesised — and the owner asked for the state itself to
+    /// go on 2026-09-03. A row mixing a keyed frame with an unkeyed mark is the case that used to
+    /// print two shapes; it prints one now, and the assertion is on the *string* rather than on a flag
+    /// so it is about what a UI test can read rather than about a field.
+    func testTheAccessibilityValueDrawsEveryKeyframeTheSameWay() {
         let markers = markerRow(marks: [0, 12], tracks: [brightnessID: curve([0])])
         XCTAssertEqual(TimelineKeyMarkers.encode(
-            TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: defaultZoom)), "0|(12)")
+            TimelineKeyMarkers.runs(frames: markers, pixelsPerFrame: defaultZoom)), "0|12")
     }
 
     // MARK: - End to end, from a document to what is drawn
@@ -397,26 +380,32 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
         }
 
         let markers = markerRow(manager, target)
-        XCTAssertEqual(markers, landed([3, 4, 20]),
-                       "Two channels keyed on each of three frames — three markers, none of them bare")
+        XCTAssertEqual(markers, [3, 4, 20],
+                       "Two channels keyed on each of three frames — three markers")
         XCTAssertEqual(TimelineKeyMarkers.encode(
-            TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: defaultZoom)), "3|4|20")
+            TimelineKeyMarkers.runs(frames: markers, pixelsPerFrame: defaultZoom)), "3|4|20")
         XCTAssertEqual(TimelineKeyMarkers.encode(
-            TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: floorZoom)), "3-4|20",
+            TimelineKeyMarkers.runs(frames: markers, pixelsPerFrame: floorZoom)), "3-4|20",
                        "Fully pinched out, the pair on adjacent frames becomes one run and the lone key does not")
     }
 
     /// **The owner's A/B workflow, read off the band at each step** — the one sequence this half of
-    /// the stage exists to make visible. A is placed and is hollow; a slider moves and *stays* hollow,
-    /// because §2.27 holds the previous value rather than writing a key; B is placed and both fill in.
-    /// A band that showed nothing until the last step is exactly the unusable state this fixes.
+    /// the stage exists to make visible. A is placed and shows; a slider moves and the band does not
+    /// change, because §2.27 holds the previous value rather than writing a key; B is placed and both
+    /// frames are keyed. A band that showed nothing until the last step is exactly the unusable state
+    /// this fixes.
+    ///
+    /// **It also pins where the mark goes.** §2.26 needs a mark to store *"keyframe A is added,
+    /// nothing is saved"* — that is why `keyframeMarks` still exists — and the 2026-09-03 rule needs
+    /// it gone the moment a key lands on the same frame. Both are asserted here, on the same three
+    /// steps, because they are the two halves of one invariant.
     func testTheOwnersABWorkflowFillsInOnTheTimelineOnlyWhenBLands() {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addValueLayer(effect: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
         let target = KeyframeTarget.layer(id: manager.layers[1].id)
         func band() -> String {
             let markers = markerRow(manager, target)
-            return TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(markers: markers,
+            return TimelineKeyMarkers.encode(TimelineKeyMarkers.runs(frames: markers,
                                                                      pixelsPerFrame: defaultZoom))
         }
         guard let brightness = manager.layers[1].layerEffect?
@@ -425,13 +414,20 @@ final class TimelineKeyMarkersLogicTests: XCTestCase {
         }
 
         manager.addKeyframe(target, atFrame: 0)
-        XCTAssertEqual(band(), "(0)", "Keyframe A is added and nothing is saved — a bare mark")
+        XCTAssertEqual(band(), "0", "Keyframe A is added and nothing is saved — the mark alone")
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [0],
+                       "…and until a key lands on it, the mark is what stores it")
 
         manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 8)
-        XCTAssertEqual(band(), "(0)",
+        XCTAssertEqual(band(), "0",
                        "The previous value is only held, so nothing has landed on the timeline yet")
 
         manager.addKeyframe(target, atFrame: 8)
         XCTAssertEqual(band(), "0|8", "B commits the held value onto A and the new one onto B")
+        XCTAssertEqual(manager.keyframeState(of: target).marks, [], """
+            And both marks are gone from storage, because both frames are keyed now. That is the \
+            whole of the fix: a mark that has been keyed cannot be stranded by a later graph-editor \
+            edit, because it is no longer there to strand.
+            """)
     }
 }

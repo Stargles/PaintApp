@@ -1388,7 +1388,7 @@ private final class TimelineFolderRowView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(span: ClosedRange<Int>?, pixelsPerFrame: CGFloat, isVisible: Bool, identifier: String,
-                markers: [TimelineKeyMarkers.Marker]) {
+                markers: [Int]) {
         accessibilityIdentifier = identifier
         keyMarkers.frame = CGRect(x: 0, y: bounds.height - TimelineKeyMarkers.bandHeight,
                                   width: bounds.width, height: TimelineKeyMarkers.bandHeight)
@@ -1462,8 +1462,7 @@ private final class TimelineDropIndicatorView: UIView {
 /// **Fill white, stroke dark.** Blue is the playhead and the current layer; yellow is an interpolation
 /// reference, and §2.8 exists precisely so the two kinds of "keyframe" are never confused — so an
 /// animation key must not be yellow. White over a 1 pt dark outline reads on a pale thumbnail and on a
-/// dark one, which is the only requirement a marker drawn over arbitrary artwork actually has. The
-/// hollow form a bare mark takes keeps that property — see `paint(_:isBare:)`.
+/// dark one, which is the only requirement a marker drawn over arbitrary artwork actually has.
 private final class TimelineKeyMarkerBand: UIView {
     private var runs: [TimelineKeyMarkers.Run] = []
     private var pixelsPerFrame: CGFloat = TimelineKeyMarkers.basePixelsPerFrame
@@ -1480,11 +1479,11 @@ private final class TimelineKeyMarkerBand: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// - Parameter markers: ascending and unique — `TimelineKeyMarkers.markers`' output, carried
-    ///   here through `TimelineLayoutKey` so what is drawn and what the layout gate compares are the
-    ///   same array.
-    func update(markers: [TimelineKeyMarkers.Marker], pixelsPerFrame: CGFloat, identifier: String) {
-        let runs = TimelineKeyMarkers.runs(markers: markers, pixelsPerFrame: pixelsPerFrame)
+    /// - Parameter markers: ascending and unique — `CanvasManager.keyframeFrames(of:)`' output,
+    ///   carried here through `TimelineLayoutKey` so what is drawn and what the layout gate compares
+    ///   are the same array.
+    func update(markers: [Int], pixelsPerFrame: CGFloat, identifier: String) {
+        let runs = TimelineKeyMarkers.runs(frames: markers, pixelsPerFrame: pixelsPerFrame)
         // A pinch changes `pixelsPerFrame` without changing a single key, and it changes what
         // collapses — so both halves gate the redraw. `relayout` is already gated by the layout key;
         // this is the second gate, for the same reason `appliedDisplacementFrames` is.
@@ -1518,8 +1517,7 @@ private final class TimelineKeyMarkerBand: UIView {
                                  width: max(runRect.width - TimelineKeyMarkers.markerWidth, 0),
                                  height: TimelineKeyMarkers.runBarHeight)
                 paint(UIBezierPath(roundedRect: bar,
-                                   cornerRadius: TimelineKeyMarkers.runBarHeight / 2),
-                      isBare: run.isBare)
+                                   cornerRadius: TimelineKeyMarkers.runBarHeight / 2))
             }
 
             let capped = run.isCollapsed ? [run.firstFrame, run.lastFrame] : [run.firstFrame]
@@ -1531,38 +1529,26 @@ private final class TimelineKeyMarkerBand: UIView {
                 diamond.addLine(to: CGPoint(x: centerX, y: midY + half))
                 diamond.addLine(to: CGPoint(x: centerX - half, y: midY))
                 diamond.close()
-                paint(diamond, isBare: run.isBare)
+                paint(diamond)
             }
         }
     }
 
-    /// **Solid white for a keyframe that has saved something, an outline for one that has not** —
-    /// §2.26's bare mark, whose whole point is that placing it saves nothing yet. Without the
-    /// distinction the artist cannot tell a keyframe their edit reached from one it did not, which is
-    /// the single thing about this workflow that would otherwise be unreadable.
+    /// **One form for every keyframe**, white over a dark hairline so it reads on a pale cel
+    /// thumbnail and on a dark one, which is the only requirement a marker drawn over arbitrary
+    /// artwork has.
     ///
-    /// **The hollow form is a white line inside a dark one rather than a dark outline around
-    /// nothing**, for the reason the filled form is white over dark: the band sits over an arbitrary
-    /// cel thumbnail, so a marker drawn in one colour disappears against half of them. Stroking the
-    /// same path twice — wide in the dark, narrow in the white — gives the outline its own halo and
-    /// costs one extra `stroke()`.
-    private func paint(_ path: UIBezierPath, isBare: Bool) {
-        let fill = UIColor.white
-        let stroke = UIColor.black.withAlphaComponent(0.6)
-        if isBare {
-            stroke.setStroke()
-            path.lineWidth = 3
-            path.stroke()
-            fill.setStroke()
-            path.lineWidth = 1
-            path.stroke()
-        } else {
-            fill.setFill()
-            path.fill()
-            stroke.setStroke()
-            path.lineWidth = 1
-            path.stroke()
-        }
+    /// **There was a second, hollow form and it is gone.** It meant *the artist marked this frame and
+    /// no channel keys it*, which is a distinction the owner asked to be removed on 2026-09-03: a node
+    /// in the graph editor and an indicator on the cel are the same thing, so a greyed third state is
+    /// something to read and act on that says nothing. `CanvasManager.marks(_:droppingKeyed:)` is what
+    /// removes the state that produced most of them — a mark stranded by a key dragged off it.
+    private func paint(_ path: UIBezierPath) {
+        UIColor.white.setFill()
+        path.fill()
+        UIColor.black.withAlphaComponent(0.6).setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
@@ -2033,7 +2019,7 @@ private final class TimelineRowView: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(cels: [Cel], sceneFrameCount: Int, markers: [TimelineKeyMarkers.Marker]) {
+    func update(cels: [Cel], sceneFrameCount: Int, markers: [Int]) {
         var result: [Segment] = []
         var cursor = 0
         let ordered = cels.enumerated().sorted { $0.element.startFrame < $1.element.startFrame }

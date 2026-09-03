@@ -279,7 +279,8 @@ final class KeyframeControlLogicTests: XCTestCase {
                                                   mappedBy: CGAffineTransform(translationX: 3, y: 0)))])
         ]
         manager.addKeyframe(target, atFrame: 10)
-        XCTAssertEqual(manager.keyframeState(of: target).marks, [10])
+        XCTAssertFalse(manager.keyframeState(of: target).marks.contains(4),
+                       "Setup: no mark records frame 4 — the pose key is the whole of what makes it one")
         XCTAssertEqual(manager.keyframeFrames(of: target), [4, 10],
                        "Setup: two keyframes, one of which no mark records")
 
@@ -557,7 +558,7 @@ final class KeyframeControlLogicTests: XCTestCase {
         // writes no mark, which is the whole of how the artist places one.
         XCTAssertEqual(moveSlider(manager, target, brightnessID, to: 5, atFrame: 2), .key,
                        "Fixture premise: the diamond at 2 comes from a curve key alone")
-        XCTAssertEqual(manager.keyframeState(of: target).marks, [1, 3],
+        XCTAssertFalse(manager.keyframeState(of: target).marks.contains(2),
                        "…and the stored marks never learned about it")
 
         XCTAssertEqual(manager.keyframeFrames(of: target), [1, 2, 3])
@@ -901,15 +902,20 @@ final class KeyframeControlLogicTests: XCTestCase {
     func testDuplicatingALayerCarriesItsKeyframeState() {
         let manager = gradedManager()
         let target = layerTarget(manager)
-        manager.addKeyframe(target, atFrame: 0)
+        // **Four marks placed before anything is animated, and the edit made in the middle of them.**
+        // Seeding keys only the *immediate* neighbours (`seedAndKeyChannel` says why), and a mark a
+        // key has landed on is dropped — so 0, 10 and 20 become keys and 30 is the one keyframe still
+        // stored as a mark. Without that far mark this test would be asserting that an empty array
+        // copies, which is true of a `duplicateLayer` that carries no marks at all.
+        for frame in [0, 10, 20, 30] { manager.addKeyframe(target, atFrame: frame) }
         moveSlider(manager, target, brightnessID, to: 2, atFrame: 10)
-        manager.addKeyframe(target, atFrame: 10)
         moveSlider(manager, target, contrastID, to: 4, atFrame: 15)
 
         manager.duplicateLayer(at: gradeIndex)
         let copy = manager.layers[gradeIndex + 1]
         XCTAssertEqual(copy.name, manager.layers[gradeIndex].name + " copy", "Fixture premise")
-        XCTAssertEqual(copy.keyframeMarks, [0, 10])
+        XCTAssertEqual(manager.layers[gradeIndex].keyframeMarks, [30], "Fixture premise")
+        XCTAssertEqual(copy.keyframeMarks, [30])
         XCTAssertEqual(copy.effectTracks[brightnessID], manager.layers[gradeIndex].effectTracks[brightnessID],
                        "The animation came with it, which it did not before this stage")
         XCTAssertEqual(copy.pendingBaselines[contrastID] ?? .nan, 1, accuracy: 1e-9,

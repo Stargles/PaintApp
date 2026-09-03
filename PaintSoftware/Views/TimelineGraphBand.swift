@@ -215,7 +215,7 @@ enum TimelineGraphBand {
     /// this filtered, so there is one walk and one place the two predicates are stated against each
     /// other; splitting them into two functions is what would let them drift.
     ///
-    /// **A target with no grade contributes nothing**, which is `keyframes(of:)`'s asymmetry read
+    /// **A target with no grade contributes nothing**, which is `keyframeFrames(of:)`'s asymmetry read
     /// the same way: a layer that is not in effect form grades nothing, so tracks left on it by a
     /// kind change are storage rather than animation and must not draw a curve for a value the
     /// canvas is not showing.

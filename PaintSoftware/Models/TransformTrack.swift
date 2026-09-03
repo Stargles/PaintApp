@@ -147,7 +147,7 @@ struct TransformTrack: Equatable {
 
     func key(atFrame frame: Int) -> Key? { keys.first { $0.frame == frame } }
 
-    /// Every frame this channel holds a key on — what `CanvasManager.keyframes(of:)` folds into
+    /// Every frame this channel holds a key on — what `CanvasManager.keyframeFrames(of:)` folds into
     /// §2.28's union, converted to absolute frames by its caller because only the caller knows the
     /// cel's `startFrame`.
     var keyedFrames: [Int] { keys.map(\.frame) }

@@ -335,8 +335,8 @@ final class TransformChannelLogicTests: XCTestCase {
                                     atCelLocalFrame: 2, pose: slide(9))
         XCTAssertEqual(manager.keyframeFrames(of: target), [6],
                        "Cel-local 2 on a cel starting at 4 is document frame 6")
-        XCTAssertTrue(manager.keyframes(of: target).keyed.contains(6),
-                      "A pose key has landed, so the marker draws filled rather than hollow")
+        XCTAssertTrue(manager.keyedFrames(of: target).contains(6),
+                      "…and it is a *keyed* frame, not a mark, which is what makes it a node's peer")
     }
 
     // MARK: - Undo

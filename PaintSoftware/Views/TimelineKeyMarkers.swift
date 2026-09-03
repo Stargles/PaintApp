@@ -14,10 +14,16 @@ import Foundation
 /// **The two collapses, which are different things and are easy to conflate.**
 ///
 /// 1. **Channels collapse unconditionally.** A target can key thirteen effect parameters on one frame
-///    and the artist needs to see *a key is here*, not thirteen stacked diamonds. `markers`
-///    therefore works from a **set** of frames — one marker per (target, frame), at every zoom. Which
-///    channels those are is the channel panel's question, not the marker's.
-/// 2. **Frames collapse by zoom, and only when they actually touch.** See `runs(markers:pixelsPerFrame:)`.
+///    and the artist needs to see *a key is here*, not thirteen stacked diamonds. `runs` therefore
+///    works from a **set** of frames — one marker per (target, frame), at every zoom. Which channels
+///    those are is the channel panel's question, not the marker's.
+/// 2. **Frames collapse by zoom, and only when they actually touch.** See `runs(frames:pixelsPerFrame:)`.
+///
+/// **There is one kind of marker and there used to be two.** A keyframe whose frame no channel keyed
+/// was drawn hollow, which is how an artist who dragged a node in the graph editor was left looking at
+/// a greyed diamond with nothing under it. The owner's rule of 2026-09-03 is that a node and an
+/// indicator are the same thing in both directions, and `CanvasManager.marks(_:droppingKeyed:)` is
+/// what makes that true of the model; there is nothing left here for a second form to mean.
 enum TimelineKeyMarkers {
 
     // MARK: - The timeline's zoom limits, declared here so the threshold below is a relationship
@@ -90,41 +96,6 @@ enum TimelineKeyMarkers {
 
     // MARK: - What is on a row
 
-    /// One frame of one target that has something to show, and which of the two kinds it is.
-    struct Marker: Equatable {
-        let frame: Int
-        /// **True when the artist has placed a keyframe here and no channel keys on it** — §2.26's
-        /// bare mark, which is the first step of the whole workflow: *"keyframe A is added, nothing
-        /// is saved."*
-        ///
-        /// The two kinds are drawn differently (hollow against filled) because otherwise the one
-        /// question the artist most needs answered — *did my edit land on a channel?* — has no
-        /// answer on screen, and a keyframe that saved nothing looks exactly like one that saved
-        /// everything.
-        let isBare: Bool
-    }
-
-    /// **One marker per keyframe, each carrying which of the two kinds it is.**
-    ///
-    /// **The frame set is the model's, not this file's** — `CanvasManager.keyframes(of:)`, which is
-    /// where a keyframe is defined as a frame the target marks explicitly *or* any of its channels
-    /// keys on. This once computed that union a second time, and a second implementation of an
-    /// invariant is a second thing to forget: the two reports of 2026-08-29 are what a divergence
-    /// between them looks like from the artist's chair, and they were both against the model's half.
-    ///
-    /// **Deduping *is* collapse (1) above**, and it happens in that union rather than at the drawing
-    /// so the marker count is a property of the document rather than of the paint code.
-    ///
-    /// - Parameters:
-    ///   - frames: ascending and unique. Unsorted input would merge the wrong things in `runs` and
-    ///     would make `TimelineLayoutKey` — an `Equatable` memoization gate — unequal to itself at
-    ///     random, which reads as a performance regression with no cause.
-    ///   - keyed: the frames some channel holds a key on. The rest are §2.26's bare marks, which are
-    ///     drawn hollow because otherwise *did my edit land on a channel?* has no answer on screen.
-    static func markers(frames: [Int], keyed: Set<Int>) -> [Marker] {
-        frames.map { Marker(frame: $0, isBare: !keyed.contains($0)) }
-    }
-
     /// One drawn thing on the band: either a single key, or a run of keys too close together to draw
     /// apart.
     ///
@@ -137,16 +108,6 @@ enum TimelineKeyMarkers {
         let lastFrame: Int
         /// How many keys the run swallowed. 1 is a plain diamond.
         let count: Int
-        /// **True only when every marker in the run is bare**, so a run that mixes the two kinds
-        /// draws as landed.
-        ///
-        /// The collapse is already lossy — it gives up which interior frames carry keys — and this
-        /// is the same species of loss, resolved the same way, by zooming in. What decides the
-        /// direction is which error is worse: hollow says *nothing here is saved yet*, which is the
-        /// alarming, actionable reading, so claiming it over a run that does contain saved keys
-        /// would send the artist looking for a bug that is not there. Filled says *something is
-        /// here*, which is true of a mixed run.
-        let isBare: Bool
 
         /// A run of one is not collapsed — it is just a key. Derived rather than stored so the two
         /// can never disagree.
@@ -165,29 +126,34 @@ enum TimelineKeyMarkers {
     /// minimum zoom, because they do not collide. Only the parts of the track that are actually dense
     /// collapse, and the rest of the row is untouched.
     ///
-    /// - Parameter markers: ascending and unique — `markers(frames:keyed:)`' output. Unsorted input
-    ///   would merge the wrong things silently, and the single production caller is that function.
-    static func runs(markers: [Marker], pixelsPerFrame: CGFloat) -> [Run] {
-        guard let first = markers.first else { return [] }
+    /// - Parameter frames: the target's keyframes, ascending and unique —
+    ///   `CanvasManager.keyframeFrames(of:)`' output, which is the one place a keyframe is defined.
+    ///   This file once computed that union a second time, and a second implementation of an
+    ///   invariant is a second thing to forget: the two reports of 2026-08-29 are what a divergence
+    ///   between the two looks like from the artist's chair. Unsorted input would merge the wrong
+    ///   things silently, and would make `TimelineLayoutKey` — an `Equatable` memoization gate —
+    ///   unequal to itself at random, which reads as a performance regression with no cause.
+    ///
+    /// **Deduping is collapse (1) above**, and it happens in that union rather than here, so the
+    /// marker count is a property of the document rather than of the paint code.
+    static func runs(frames: [Int], pixelsPerFrame: CGFloat) -> [Run] {
+        guard let first = frames.first else { return [] }
         var result: [Run] = []
-        var start = first.frame
-        var last = first.frame
+        var start = first
+        var last = first
         var count = 1
-        var isBare = first.isBare
-        for marker in markers.dropFirst() {
-            if CGFloat(marker.frame - last) * pixelsPerFrame < minimumSeparation {
-                last = marker.frame
+        for frame in frames.dropFirst() {
+            if CGFloat(frame - last) * pixelsPerFrame < minimumSeparation {
+                last = frame
                 count += 1
-                isBare = isBare && marker.isBare
             } else {
-                result.append(Run(firstFrame: start, lastFrame: last, count: count, isBare: isBare))
-                start = marker.frame
-                last = marker.frame
+                result.append(Run(firstFrame: start, lastFrame: last, count: count))
+                start = frame
+                last = frame
                 count = 1
-                isBare = marker.isBare
             }
         }
-        result.append(Run(firstFrame: start, lastFrame: last, count: count, isBare: isBare))
+        result.append(Run(firstFrame: start, lastFrame: last, count: count))
         return result
     }
 
@@ -251,20 +217,18 @@ enum TimelineKeyMarkers {
 
     // MARK: - What a test can see
 
-    /// The band's accessibility value: each run as `frame`, or `first-last` when it collapsed,
-    /// **parenthesised when it is bare**, joined by `|`. So `"(3)|7-9"` is a keyframe at frame 3 that
-    /// has saved nothing yet, beside a collapsed run of landed keys. Frames are 0-based, matching
-    /// `TimelineRowView`'s `"startFrame,frameCount"`.
+    /// The band's accessibility value: each run as `frame`, or `first-last` when it collapsed, joined
+    /// by `|`. So `"3|7-9"` is a keyframe at frame 3 beside a collapsed run of three. Frames are
+    /// 0-based, matching `TimelineRowView`'s `"startFrame,frameCount"`.
     ///
     /// **An encoded value on one element rather than one element per marker**, which is
     /// `CurveEditor.encode(points)`' convention and `TimelineFolderRowView`'s. It exists because
     /// XCUITest can see neither a `CGContext` nor a colour, so "there is a diamond at frame 6" is not
-    /// otherwise assertable — and the collapse and the hollow form are *only* visible as shapes, so
-    /// without this the two things this stage designs would be untestable above the logic tier.
+    /// otherwise assertable — and the collapse is *only* visible as a shape, so without this it would
+    /// be untestable above the logic tier.
     static func encode(_ runs: [Run]) -> String {
         runs.map { run in
-            let span = run.isCollapsed ? "\(run.firstFrame)-\(run.lastFrame)" : "\(run.firstFrame)"
-            return run.isBare ? "(\(span))" : span
+            run.isCollapsed ? "\(run.firstFrame)-\(run.lastFrame)" : "\(run.firstFrame)"
         }.joined(separator: "|")
     }
 }
