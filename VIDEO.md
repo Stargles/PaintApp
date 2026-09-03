@@ -59,6 +59,14 @@ for keyframe animated cels, so you dont need to add that functionality in."*
 **2.9 Baking a video to cels of images stays in scope** — the brief's *"same option to bake to multiple cels
 containing images instead of the video"*, which is KEYFRAMES §6's Bake reaching a new source.
 
+**2.10 A video is an object like a placed image: a lasso catches it the same way, it moves, and it never
+splits.** Owner: *"lasso should be able to catch a video in the same way it catches an image. Videos should
+be objects similar to images which can be moved around, but not split (unless it is rasterized and
+baked)."* So membership follows LASSO_MOVE §5.23-24 exactly as a photo does — by centre under Cut, by its
+own quad under Touching and Enclosed — and the four refusals in §4.2 stand, `splitForLassoMove` among them.
+The parenthesis is §2.9 arriving by another door: bake the video to cels of images and those images split
+like any other ink, because by then it is ink.
+
 ---
 
 ## 3. What already exists, and it is most of the plumbing
@@ -220,7 +228,6 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
 - **Whether a video layer refuses ink.** §2.1 gives a video its own layer, but nothing yet says whether the
   artist can draw into it, and the rotoscoping workflow (27) is built around wanting to draw *over* a video
   rather than on it.
-- **What a video element does under a transform, a lasso, or the vector eraser.** §4.2 says several arms are
-  refusals; which ones is not settled, and the placed-image precedent is itself unresolved here — a photo has
-  no Distort door, and a video inherits that.
+- **A video has no Distort door**, inheriting the placed image's gap: six numbers plus a mirror bit where a
+  homography needs eight. §2.10 settles the lasso and the refusals; this one it does not settle.
 - **Backwards scrubbing cost** (§5) is unmeasured, and it is the one performance question this feature owns.
