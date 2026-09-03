@@ -653,10 +653,39 @@ not say.
   because three quarters of an odd canvas is odd, and a movie one pixel wider than the artwork would be a wrong file
   with no error.
 
-**Still owed at stage 6**: the driver and the sheet have no tests — `FrameExportLogicTests` is 14 green on the pure
-half only, and the frame walk, the focus hand-back and the progress phases are covered by nothing. No XCUITest, so
-"the menu row exists, the progress is visible, the share sheet appears" is unverified. Nothing has run on the
-device.
+**The driver is tested, and writing the tests found two shipped defects.** `FrameExportSessionLogicTests` is 13
+green over it: §2.1 counted with `CompositeProbe` — zero composites on a warm export, with four frames read back
+out of the movie so the zero is a walk that delivered — the frame walk asserted off the greys the movie decodes
+back rather than off a range the session also computes, the focus hand-back on all three exits, the phase
+sequence, and every `Failure` but two. One XCUITest in `ToolPanelsUITests` covers the artist's path: row, sheet,
+running view, `ShareLink`, `ActivityListView`.
+
+**`manager` was `unowned`, and an export unwinding after the document closed aborted the process.** `cancel()`
+only *asks* — `withCheckedContinuation` is not interrupted by cancellation, so a walk suspended inside `offMain`
+finishes what it is doing and only then unwinds through `run` into `endFocus()`, which dereferences the manager;
+`ContentView` **replaces** its `@State` `CanvasManager` on `openProject`/`startNewProject`, two taps from the
+sheet the artist just dismissed, against a `VideoFrameWriter.finish()` that is seconds long on a real document.
+It is `weak` now, and a vanished document ends the walk the way a cancel does, through one `liveDocument()` that
+throws `CancellationError` and is read afresh at each use. **Strong was rejected**: it would keep a closed
+document's cels, its store bookkeeping and a 96 MiB decoded ring resident on the device this feature exists to
+fit inside, and would invert the ownership `FrameBaker.manager` already establishes.
+
+**And the progress bar ran backwards once per frame.** `fraction` gave `baking` the first half of the bar and
+`writing` the second, but the video loop bakes *and* writes each frame before touching the next, so the phase
+alternates all the way down: MEASURED `0, 0, .17, .5, .17, .33, .67, .33, .5, .83, 1.0` for three frames. `done`
+counts frames complete in both phases now and a frame is two steps of `1/2N`.
+
+**Still owed**: `unreadableFrame` (which may be unreachable — `FrameBakeStore.loadDecoded` rejects every
+malformed file as a *miss* by design, so proving it either way is a reading exercise rather than a fixture), the
+PNG write refusal, `bakeFailed(.exceedsCeiling)` (no seam — `manager.frameBaker` is a `private(set) lazy var` and
+the store's ceiling has no override), the five `VideoFrameWriter.Failure` sentences, §3.9's two "free"
+consequences of the focus — that eviction drops what the export has written and that `fillRingAhead` warms ahead
+of the cursor — and **nothing has run on the device**.
+
+**`FrameBaker.exportFocus`'s doc claim of "free readahead" from band 2 is conditional, not automatic.**
+`requestExport` marks only the frame it is blocked on, so band 2 can prebake only frames that are *already*
+dirty. In the app the first sweep marks everything and it holds; driven from a cold store with no sweep, the
+export walks strictly one frame at a time.
 
 **§2.8's stale copy is fixed here rather than left.** `ActionsMenu.renderResolutionControl`'s subtitle promised
 *"Your artwork, exports and thumbnails are always saved at full size"*, and stage 4d made the middle third of that

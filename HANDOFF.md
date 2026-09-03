@@ -44,9 +44,15 @@ was already a pure function of the playhead handed to it, so the export needed o
 playhead (`FrameBaker.exportFocus`), and no second queue. Store eviction and ring warming follow from
 the same local.
 
-**What export still owes**, and it is the honest gap: `FrameExportSession` and the sheet have **no
-tests** — the frame walk, the focus hand-back and the progress phases are uncovered, there is no
-XCUITest for "row exists / progress visible / share sheet appears", and nothing has run on the device.
+**Export is tested now, and writing the tests found two defects that are fixed in the same change**: an
+`unowned` `CanvasManager` that aborted the process when an export unwound after the document closed —
+`ContentView` replaces its `@State` manager on open/new, two taps from the sheet the artist just
+dismissed — and a progress bar that ran backwards once per frame, because the video loop interleaves
+bake and write while `fraction` modelled them as two consecutive halves. `FrameExportSessionLogicTests`
+is 13 green on the driver and `ToolPanelsUITests` carries one XCUITest for row / progress / share sheet.
+**What export still owes**: four failure arms with no fixture (`unreadableFrame`, the PNG write refusal,
+`bakeFailed(.exceedsCeiling)`, the `VideoFrameWriter.Failure` sentences), the focus's two knock-on
+consequences, and **nothing has run on the device**.
 **The keep-the-bake option (§2.11) is deferred, not built**, with the stamp decided — the encoded-tier
 hash, because a manifest stamp bumped from edit sites inherits every hole the sweep exists to cover, and
 in a *persistent* content-addressed store a missed site is a wrong picture with no error. §3.9a carries
