@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // MARK: - The render tree
@@ -806,7 +807,32 @@ extension CanvasManager {
     /// of them meant. `RenderTreeCharacterizationTests.testTheTreeIsTheSameAtEveryFrame` pins the
     /// invariance so that the phase which *breaks* it has to say so.
     func renderTree(atFrame frame: Int) -> [RenderNode] {
-        renderNodes(inContainer: nil, atFrame: frame)
+        renderTreeAndPoses(atFrame: frame).tree
+    }
+
+    /// **The tree and §4.4's per-layer pose map, from one walk** — the one producer, so the two
+    /// cannot disagree about which leaves a transformation layer reaches.
+    ///
+    /// `poses` is keyed by `layers` index and holds **only** the leaves a container pose actually
+    /// moves: a document with no transformation layer and no posed folder produces an empty
+    /// dictionary, which is what keeps this free for every document that has never used the feature.
+    ///
+    /// **The pose is emitted *alongside* the tree rather than as a field on `RenderNode`, and that is
+    /// §2.3 rather than tidiness.** A pose in the tree would reach the compositor, and the only thing
+    /// a compositor can do with one is resample the pixels it was handed — *"the owner wants crisp
+    /// lines, not a bitmap magnify"*. Ink is stamped at the posed position instead, which happens at
+    /// rasterisation, so this map's consumer is `leafSnapshots` and not `Compositor.draw`.
+    func renderTreeAndPoses(atFrame frame: Int) -> (tree: [RenderNode], poses: [Int: CGAffineTransform]) {
+        var poses: [Int: CGAffineTransform] = [:]
+        let tree = renderNodes(inContainer: nil, atFrame: frame,
+                               inheriting: nil, poses: &poses)
+        return (tree, poses)
+    }
+
+    /// §4.4's map on its own, for the two callers that want the poses without the nodes —
+    /// `leafSnapshots` and `CanvasView.makeSandwichKey`'s content versions.
+    func layerPoses(atFrame frame: Int) -> [Int: CGAffineTransform] {
+        renderTreeAndPoses(atFrame: frame).poses
     }
 
     /// Every `layers` index in evaluation order. Characterized as identical to `layers.indices` —
@@ -818,7 +844,12 @@ extension CanvasManager {
         renderTree(atFrame: frame).leafLayerIndices
     }
 
-    private func renderNodes(inContainer container: UUID?, atFrame frame: Int) -> [RenderNode] {
+    /// `inherited` is the pose this whole container is already being shown through — nil at the root
+    /// and at every container no transformation layer or posed folder reaches. `poses` collects
+    /// §4.4's per-leaf map on the way down.
+    private func renderNodes(inContainer container: UUID?, atFrame frame: Int,
+                             inheriting inherited: CGAffineTransform?,
+                             poses: inout [Int: CGAffineTransform]) -> [RenderNode] {
         // `containerEntries` ranks top-to-bottom for the panel; evaluation runs the other way.
         let stack = Array(containerEntries(inContainer: container).reversed())
         // **Whether these entries are a node's operands rather than an ordinary stack.** Three rules
@@ -827,7 +858,36 @@ extension CanvasManager {
         // covered a *layer* dropped straight in as an operand even while slots existed.
         let containerIsNode = container
             .flatMap { id in folders.first { $0.id == id } }?.isCompositorNode == true
-        return stack.enumerated().map { position, entry in
+
+        // **§4.4's accumulation, and it runs the opposite way from everything else in this
+        // function.** A transformation layer poses what is *beneath* it — §2.3's *"whatever is under
+        // it"*, which is the adjustment layer's scope rule reused verbatim — so the pose each entry
+        // is shown through is the product of every transform layer *above* it in this same container.
+        // `stack` is bottom-to-top, so the carry walks from the last element to the first.
+        //
+        // **This is where the scope is enforced, and §4.4 says it has to be here rather than at
+        // composite time**: an effect's containment is a buffer (`needsOwnBuffer` / `isIsolated`), and
+        // a pose applied at rasterisation has no buffer to be bounded by. `carried` is a local, and
+        // the only way out of this container is *downward* into the recursion below — so a pose
+        // cannot reach a sibling of this container, cannot reach its parent, and cannot outlive the
+        // call. The containment is structural rather than a check somebody has to remember to write.
+        //
+        // **Composition order is "inner first".** An entry below two transform layers is moved by the
+        // lower one and then carried by the upper one, which is `M.concatenating(accumulated)` — the
+        // same reading `CanvasManager.poseMappings` gives for a group channel under a cel channel,
+        // one level out.
+        var carried = [CGAffineTransform?](repeating: inherited, count: stack.count)
+        var accumulated = inherited
+        for position in stride(from: stack.count - 1, through: 0, by: -1) {
+            carried[position] = accumulated
+            guard case .layer(let index) = stack[position],
+                  let map = layers[index].layerTransform?.mapping(atFrame: frame) else { continue }
+            accumulated = accumulated.map { map.concatenating($0) } ?? map
+        }
+
+        var result: [RenderNode] = []
+        result.reserveCapacity(stack.count)
+        for (position, entry) in stack.enumerated() {
             // What "Clip to below" clips to: the entry one step down in this same container, which
             // after the reverse above is the previous element. Nothing below means nothing to clip
             // to, and the layer simply draws — the same answer Photoshop gives.
@@ -842,7 +902,13 @@ extension CanvasManager {
             case .layer(let index):
                 let layer = layers[index]
                 let effect = layer.layerEffect(atFrame: frame)
-                return RenderNode(id: layer.id, content: .leaf(layerIndex: index),
+                // **The one place a leaf's pose is recorded.** Absent rather than present-and-identity
+                // for `TransformTrack.mapping(atCelLocalFrame:)`'s reason reached from the tree side:
+                // an entry in this dictionary is what gives a cel a derivation, and a derivation costs
+                // a canvas-sized render and an entry in each of three caches (§4.5). A document with
+                // no transformation layer therefore mints nothing at all.
+                if let pose = carried[position] { poses[index] = pose }
+                result.append(RenderNode(id: layer.id, content: .leaf(layerIndex: index),
                                   opacity: layer.opacity, isVisible: layer.isVisible,
                                   // **`.clipToBelow` never reaches the compositor as a mode.** It is
                                   // not a blend (§7 says so while listing it among them); it is this
@@ -876,12 +942,18 @@ extension CanvasManager {
                                   // **A layer dropped straight into a node is an operand**, and an
                                   // operand's own mode is the node's op asked a second time — so it
                                   // is pinned here for the same reason the folder case below is.
-                                  blendMode: effect != nil || containerIsNode
+                                  //
+                                  // **A transformation layer is pinned for the leaf clause's own
+                                  // reason** (§4.4): it holds no pixels either — `leafSnapshots`
+                                  // elides it exactly as it elides a grading leaf — so there is
+                                  // nothing for a stored mode to compose, and leaving one live would
+                                  // be a field read on a leaf with no source.
+                                  blendMode: effect != nil || layer.layerTransform != nil || containerIsNode
                                       ? .normal : layer.blendMode.compositedMode,
                                   isIsolated: false,
                                   masks: masks(ofNode: layer.id, declared: layer.alphaMask,
                                                clippingTo: layer.blendMode == .clipToBelow ? below : nil),
-                                  effect: effect)
+                                  effect: effect))
             case .folder(let folder):
                 // Unconditional descent: `isExpanded` is a panel affordance and must not reach
                 // rendering. A collapsed folder still draws everything inside it.
@@ -889,7 +961,16 @@ extension CanvasManager {
                 // An empty folder becomes a node with one empty slot rather than being dropped, so
                 // the group properties below have somewhere to hang even with nothing inside — and
                 // so a group that is empty only at this frame doesn't blink out of the tree.
-                let children = renderNodes(inContainer: folder.id, atFrame: frame)
+                //
+                // **The folder's own pose is composed in on the way down, and that is the whole of
+                // §2.21's folder form** — this container's contents are moved by the folder's pose
+                // and then carried by whatever is already carrying the folder, which is the same
+                // "inner first" order the accumulation above uses one level out.
+                let outer = carried[position]
+                let inner = folder.resolvedPoseMapping(atFrame: frame)
+                    .map { map in outer.map { map.concatenating($0) } ?? map } ?? outer
+                let children = renderNodes(inContainer: folder.id, atFrame: frame,
+                                           inheriting: inner, poses: &poses)
                 // **A compositor node's children *are* its inputs (§4.3)**, one each, whether a child
                 // is a folder or a bare layer; an ordinary folder is the same thing at arity 1, one
                 // input holding all of them. Splitting the same child list either way is what keeps
@@ -900,7 +981,7 @@ extension CanvasManager {
                 // "input 1 composites over input 0" names, which is the direction a plain stack
                 // already reads. Index is position and nothing else, which is what makes dragging
                 // one child above the other swap the operands.
-                return RenderNode(id: folder.id,
+                result.append(RenderNode(id: folder.id,
                                   content: .node(op: folder.compositorOp ?? .stack,
                                                  inputs: folder.isCompositorNode ? children.map { [$0] } : [children]),
                                   // The folder's real group properties (§4.1), not the identities
@@ -955,9 +1036,10 @@ extension CanvasManager {
                                   // lands, and a raw field read is a grade frozen at whatever the
                                   // artist last typed. Today the two answer identically, which is
                                   // exactly what makes the mistake invisible until it is expensive.
-                                  effect: folder.resolvedEffect(atFrame: frame))
+                                  effect: folder.resolvedEffect(atFrame: frame)))
             }
         }
+        return result
     }
 
     private func source(of entry: ContainerEntry) -> MaskSource {

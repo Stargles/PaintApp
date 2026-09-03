@@ -95,9 +95,9 @@ struct CelContentProvider {
     /// The frame every `content(for:)` answer is for.
     let frame: Int
 
-    private let derive: (Cel, Int) -> DerivedCelContent?
+    private let derive: (Cel, Int, CGAffineTransform?) -> DerivedCelContent?
 
-    init(frame: Int, derive: @escaping (Cel, Int) -> DerivedCelContent?) {
+    init(frame: Int, derive: @escaping (Cel, Int, CGAffineTransform?) -> DerivedCelContent?) {
         self.frame = frame
         self.derive = derive
     }
@@ -105,7 +105,15 @@ struct CelContentProvider {
     /// What `cel` displays at this provider's frame, or nil when the cel simply shows what it
     /// stores — which is every cel in a document that uses neither animation system, so this has to
     /// be cheap. Implementations answer nil on a field test before doing any work.
-    func content(for cel: Cel) -> DerivedCelContent? { derive(cel, frame) }
+    ///
+    /// **`inheriting` is KEYFRAMES §4.4's container pose**, and it is a parameter here rather than a
+    /// field on the provider because it is a property of the *layer* rather than of the cel: one
+    /// provider answers for the whole stack, and `CanvasManager.renderNodes` resolves a different
+    /// pose for each leaf in it. Nil is every cel under no transformation layer, which is every cel
+    /// in every document that has not used the feature.
+    func content(for cel: Cel, inheriting pose: CGAffineTransform? = nil) -> DerivedCelContent? {
+        derive(cel, frame, pose)
+    }
 
     /// The same derivation, bound to another frame.
     func at(_ frame: Int) -> CelContentProvider {
@@ -115,7 +123,7 @@ struct CelContentProvider {
     /// A provider that derives nothing, for a caller that has no document — parity fixtures and the
     /// pure-logic tests. Behaviourally identical to passing nil, and named so a test can say which
     /// of the two it meant.
-    static let none = CelContentProvider(frame: 0) { _, _ in nil }
+    static let none = CelContentProvider(frame: 0) { _, _, _ in nil }
 }
 
 /// **What the live canvas puts in one layer host's derived-image slot at one frame** — the whole of

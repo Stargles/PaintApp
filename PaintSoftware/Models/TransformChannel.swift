@@ -111,14 +111,31 @@ extension CanvasManager {
     /// **The maps are composed before they are applied, not applied in turn.** Two `mapping` calls
     /// would walk and re-round every sample twice; one composed affine walks them once, and the width
     /// scale is identical either way because `sqrt(|det|)` is multiplicative.
+    /// **`inherited` is §4.4's container pose** — the transformation layer above this cel, or the
+    /// folder holding it, resolved by `renderNodes` and handed down.
+    ///
+    /// **It reaches every element, which is what makes it a *container* pose rather than a channel.**
+    /// `TransformChannelID` addresses a subset of one cel's own drawing and its members are asked by
+    /// `isMoved(by:)`; a transformation layer addresses *whatever is under it* (§2.3), which at this
+    /// level is the whole cel and cannot be otherwise — a stroke drawn a moment later has to join the
+    /// move, exactly as `.cel`'s own doc argues one level in.
+    ///
+    /// **It composes last**, after the cel's own channels, because it moves the drawing rather than
+    /// moving something within it — the reading `poseMappings`' ordering note already gives for a
+    /// group channel under a cel channel, taken one level further out.
     static func posed(_ elements: [VectorElement],
-                      through mappings: [(TransformChannelID, CGAffineTransform)]) -> [VectorElement] {
-        guard !mappings.isEmpty else { return elements }
+                      through mappings: [(TransformChannelID, CGAffineTransform)],
+                      inheriting inherited: CGAffineTransform? = nil) -> [VectorElement] {
+        guard !mappings.isEmpty || inherited != nil else { return elements }
         return elements.map { element in
             var composed = CGAffineTransform.identity
             var carried = false
             for (channel, map) in mappings where element.isMoved(by: channel) {
                 composed = composed.concatenating(map)
+                carried = true
+            }
+            if let inherited {
+                composed = composed.concatenating(inherited)
                 carried = true
             }
             guard carried, !composed.isIdentity else { return element }
@@ -313,10 +330,26 @@ extension CanvasManager {
     /// what is suppressed under a live float, the canvas's own carried transform, the canvas size, and
     /// the resolved maps. Drop any one of them and a stale image is served; `TransformChannelLogicTests`
     /// pins the maps by mutation, which is §4.5's trap in its exact form.
-    func posedCelContent(for cel: Cel, atFrame frame: Int) -> DerivedCelContent? {
-        guard !cel.transformTracks.isEmpty, let vector = cel.vector, let canvasSize else { return nil }
+    ///
+    /// ## `inherited` — §4.4's transformation layer, and the half of it this derivation owns
+    ///
+    /// A container pose arrives here already resolved (`CanvasManager.renderNodes` accumulated it
+    /// down the tree) and is composed onto every element, after the cel's own channels.
+    ///
+    /// **It covers the *vector* tier and only the vector tier, which is §2.12 rather than a
+    /// shortfall.** `PixelOps.rasterizeUncached` lets a derivation replace `cel.vector`'s image and
+    /// draws the baked, raster and fill tiers beside it — so this arm re-poses vector objects (§2.3's
+    /// *"crisp lines, not a bitmap magnify"*) and `PixelOps.FrozenCel.pose` resamples the raster
+    /// tiers through the CTM. Two currencies, which is exactly the ruling: *"a raster layer softens
+    /// under a push-in while the vector layer beside it stays sharp"*. **So a cel with no vector tier
+    /// answers nil here and is still posed** — by the other half.
+    func posedCelContent(for cel: Cel, atFrame frame: Int,
+                         inheriting inherited: CGAffineTransform? = nil) -> DerivedCelContent? {
+        let container = inherited.flatMap { $0.isIdentity ? nil : $0 }
+        guard !cel.transformTracks.isEmpty || container != nil,
+              let vector = cel.vector, let canvasSize else { return nil }
         let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame)
-        guard !mappings.isEmpty else { return nil }
+        guard !mappings.isEmpty || container != nil else { return nil }
 
         // Resolved **now**, on the main actor, into values the closure captures — `DerivedCelContent`'s
         // purity contract. `FrameRecipe.resolveSources` calls `render` from `PixelOps.parallelMap`'s
@@ -336,6 +369,12 @@ extension CanvasManager {
             maps: Dictionary(uniqueKeysWithValues: mappings.map {
                 ($0.0.id, [$0.1.a, $0.1.b, $0.1.c, $0.1.d, $0.1.tx, $0.1.ty])
             }),
+            // **§4.5, reached from the transformation layer's door.** The container pose is an input
+            // `render` reads and nothing else in this identity carries it: two frames of a cel with
+            // *no channels of its own*, moved only by a transform layer above it, are identical in
+            // every other field — so without this the flatten memo hands the first frame's pixels to
+            // every frame of the move, and `SandwichKey` rebuilds the composite dutifully from it.
+            inherited: container.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] },
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
@@ -354,7 +393,7 @@ extension CanvasManager {
             // **every SwiftUI pass** of a posed document and throw it away on the memo hit that
             // follows. `livePreview` asks on every pass, which is what makes the difference visible.
             VectorCanvas(size: canvasSize,
-                         elements: Self.posed(elements, through: mappings),
+                         elements: Self.posed(elements, through: mappings, inheriting: container),
                          transform: carried).render(quality: quality)
         }
     }
@@ -373,6 +412,13 @@ private struct PosedCelIdentity: Hashable {
     let suppressed: [String]
     let carried: [CGFloat]
     let maps: [String: [CGFloat]]
+    /// §4.4's container pose, six numbers or nil. **An array rather than a second dictionary**, and
+    /// that is about `FrameBakeKey` rather than about this type: `BakeKeyEncoder.derived(_:)` falls
+    /// back to `String(reflecting:)` for an identity that is not `BakeKeyEncodable`, and a dictionary
+    /// prints in per-process hash order — which is safe in the direction it fails (two descriptions
+    /// for one value is a re-bake, never one description for two) but is a cost with no reason to
+    /// pay it here, where there is exactly one pose.
+    let inherited: [CGFloat]?
     let canvasWidth: Int
     let canvasHeight: Int
 }

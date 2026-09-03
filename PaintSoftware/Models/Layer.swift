@@ -149,6 +149,27 @@ struct Layer: Identifiable {
     /// keyframe B would otherwise produce two identical keys and no animation — a wrong result with
     /// nothing on screen to explain it.
     var pendingBaselines: [String: Double] = [:]
+    /// **The pose a `.value` layer in *transform mode* applies to everything beneath it inside its
+    /// own container** — KEYFRAMES.md §2.3 and §4.4's transformation layer — or nil on a layer that
+    /// is grading, filling or drawing pixels.
+    ///
+    /// **Presence is the discriminant, which makes this the third payload of the two-payload recipe
+    /// `effect` documents above.** §2.6 is the ruling that puts all three in one menu — *"Blend Mode /
+    /// Effect / Transform"* — so the layer is one of three things and never two, and the three
+    /// accessors below (`layerEffect`, `layerTransform`, `valueFill`) are where that is decided. The
+    /// alternative was still a `mode` enum beside the payloads, and it is still rejected for the
+    /// reason `effect` gives: a document could then say "transform mode, no pose".
+    ///
+    /// **The precedence is stated once, in the accessors, and it is: effect, then transform, then
+    /// flat colour.** Order matters only for a document that carries two payloads at once, which no
+    /// writer produces and only a hand-edited manifest can contain; picking one rather than leaving
+    /// it to whichever accessor is asked first is what stops the panel and the renderer disagreeing
+    /// about what the layer is.
+    ///
+    /// Stored on `Layer` beside `effect` and `fill` for their two reasons: flipping a layer's kind
+    /// cannot lose it, and it decodes with the one `decodeIfPresent` the persistence idiom
+    /// prescribes.
+    var transform: LayerPose? = nil
     /// The flat colour a `.value` layer is in **flat-colour mode** (§4.5), or nil on a layer that
     /// draws pixels instead.
     ///
@@ -195,6 +216,28 @@ extension Layer {
     /// and a `.value` layer with no effect is not "an effect that does nothing", it is the *other*
     /// mode, which `valueFill` answers. Rendering asks this, never `kind` or `effect` on their own.
     var layerEffect: Effect? { kind == .value ? effect : nil }
+
+    /// **The pose this layer applies to everything beneath it in its container, or nil** — §4.4's
+    /// transformation layer, and `layerEffect`'s twin in every respect including why both halves are
+    /// required. A `.raster` layer that once carried a pose and has since been changed back must not
+    /// silently start moving the stack.
+    ///
+    /// **Rendering asks this, never `transform` on its own**, and there are two consumers rather than
+    /// one: `CanvasManager.renderNodes(inContainer:atFrame:)` accumulates it down the container, and
+    /// `leafSnapshots` elides this leaf's pixels because — exactly like a grading layer — a
+    /// transformation layer holds none. Those two must agree or the layer both moves the stack and
+    /// paints a blank canvas-sized image over it.
+    ///
+    /// **No `(atFrame:)` twin, and that asymmetry is deliberate.** `layerEffect(atFrame:)` exists
+    /// because a track drives an effect's *parameters* while presence is decided here; a pose channel
+    /// has no parameters — the track drives the whole value — so the frame-resolved question is
+    /// `LayerPose.mapping(atFrame:)` on the payload, and asking it through a second accessor here
+    /// would put the same optional chain in two places.
+    ///
+    /// **`effect == nil` is the precedence clause `transform`'s own note names**, and it is the same
+    /// shape `valueFill` already carries one field down: three payloads, one layer, and a document
+    /// that carries two of them resolves to the first rather than to whichever accessor was asked.
+    var layerTransform: LayerPose? { kind == .value && effect == nil ? transform : nil }
 
     /// **The grade at one frame — the function KEYFRAMES.md stage 2 filled in.**
     ///
@@ -261,7 +304,13 @@ extension Layer {
     /// costs one inert field and buys the round trip: flip to an effect, flip back, and the colour the
     /// artist mixed is still there. Clearing it instead would be a silent destructive edit performed by
     /// a mode picker, which is the one thing a mode picker must not do.
-    var valueFill: ValueFill? { kind == .value && effect == nil ? fill : nil }
+    /// **`transform == nil` is the third clause, added with §4.4's transformation layer**, and it is
+    /// the same argument the other two make: a transformation layer holds no pixels either, so a
+    /// `fill` left on a layer the artist has since put into transform mode must read as inert storage
+    /// rather than as a canvas-sized sheet of colour painted under the move. The mode flip stays
+    /// asymmetric for `fill`'s own reason — going *to* transform keeps the colour, so flipping back
+    /// restores it.
+    var valueFill: ValueFill? { kind == .value && effect == nil && transform == nil ? fill : nil }
 
     /// Whether a brush stroke has anywhere to land on this layer.
     ///

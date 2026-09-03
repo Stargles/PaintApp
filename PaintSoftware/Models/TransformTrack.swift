@@ -266,6 +266,111 @@ struct TransformTrack: Equatable {
         else { return nil }
         return transform
     }
+
+    /// **The same two evaluations, spelled for a track whose base is not a cel's.**
+    ///
+    /// §3.1 gives a layer- or folder-scoped channel **absolute document frames**, because its target
+    /// has no cel to ride — so the frame handed in is the playhead's own number and there is no
+    /// `startFrame` to subtract. The arithmetic is identical and these delegate; what differs is the
+    /// argument label, and that is the whole reason they exist. A label reading `atCelLocalFrame:` on
+    /// a channel that has no cel is a lie a later reader corrects by subtracting a `startFrame` that
+    /// is not there.
+    func pose(atDocumentFrame frame: Int) -> PoseQuad? { pose(atCelLocalFrame: frame) }
+
+    func mapping(atDocumentFrame frame: Int) -> CGAffineTransform? { mapping(atCelLocalFrame: frame) }
+}
+
+// MARK: - The container pose (§2.3, §4.4)
+
+/// **The pose a *container* shows everything inside it at** — KEYFRAMES.md §2.3's transformation
+/// layer and §4.4, plus §2.21's folder twin of the same thing.
+///
+/// ## What it is, and what it is not
+///
+/// §2.3: *"A transformation layer re-poses the vector objects below it, rather than resampling the
+/// composited pixels below it. The owner wants crisp lines, not a bitmap magnify."* So this is not a
+/// blend mode and cannot be — §4.4 says all 25 modes are per-channel colour functions over two
+/// same-size, same-position images, with no positional argument anywhere in either backend. It is
+/// applied where the ink is **stamped**, not where the pixels are composited.
+///
+/// **Its two homes are the two homes `Effect` already has**, and that symmetry is §2.21's ruling
+/// rather than a convenience: `Layer.transform` is the transformation *layer*, which poses
+/// everything beneath it inside its own container, and `LayerFolder.transform` poses the folder's
+/// own contents. `Layer.layerEffect` / `LayerFolder.effect` is the exact precedent, one field over,
+/// and the reasoning §2.21 gives for refusing to let the two differ applies word for word.
+///
+/// ## Two fields, because a channel needs a base and a pose channel's base is not the geometry
+///
+/// `CanvasManager.CelPoseState` notes that a *cel* channel needs no stored base — a Move with no
+/// keyframes bakes into `VectorCanvas.elements` and the pose describing where that geometry sits
+/// relative to itself is the identity. **A container channel has no geometry to bake into**: a
+/// transform layer holds no pixels and a folder holds only children, so the pose the artist set with
+/// nothing keyed has to be stored, exactly as `Layer.effect` stores the number a slider writes. That
+/// is `pose` below; `track` is what animates it.
+///
+/// **The track is nested rather than a sibling field**, which is the one place this departs from
+/// `effect`/`effectTracks`. There the rule *"this layer's tracks are exactly the ones its current
+/// effect can drive"* has to be enforced by four writers calling `Effect.tracksAddressed(by:from:)`,
+/// because a grade can change shape underneath its channels. A pose channel cannot: there is exactly
+/// one of it, it addresses the container itself, and its shape never varies. Nesting makes "a channel
+/// never outlives the thing it addresses" structural instead of a rule somebody has to remember.
+struct LayerPose: Equatable {
+
+    /// Where the container puts its contents when nothing is keyed — §2.5's stored base, and the
+    /// pose a future Move-on-a-transform-layer writes.
+    var pose: PoseQuad
+
+    /// The keyframe channel, in **absolute document frames** (§3.1, and see `LayerFolder.effectTracks`
+    /// for why a folder's argument for absolute time is stronger than a layer's rather than weaker).
+    /// Empty on a container the artist has posed but not animated.
+    var track: TransformTrack
+
+    init(pose: PoseQuad, track: TransformTrack = TransformTrack()) {
+        self.pose = pose
+        self.track = track
+    }
+
+    /// A container that shows its contents exactly where they are — what a freshly created
+    /// transformation layer holds, and the value §2.5's *"a state of the unmoved item at keyframe A"*
+    /// means one level out.
+    init(restingIn box: CGRect) { self.init(pose: PoseQuad(restingIn: box)) }
+
+    /// §2.26's stricter predicate, for the channel list: two or more keys not all holding one pose.
+    var isAnimated: Bool { track.isAnimated }
+
+    /// The pose at one document frame — **the track when it holds keys, the stored base otherwise.**
+    ///
+    /// The same precedence `Layer.layerEffect(atFrame:)` has: a channel that exists is what the
+    /// render reads, and the stored value is what a channel-free container shows at every frame.
+    func resolvedPose(atFrame frame: Int) -> PoseQuad {
+        track.pose(atDocumentFrame: frame) ?? pose
+    }
+
+    /// **The affine this container maps its contents through at `frame`, or nil when it shows them
+    /// where they are.**
+    ///
+    /// Nil for a resting pose is load-bearing rather than an optimisation, for
+    /// `TransformTrack.mapping(atCelLocalFrame:)`'s reason reached one level out: it is what decides
+    /// whether the leaves underneath have a derivation at all, and a derivation costs a canvas-sized
+    /// render plus an entry in each of three caches (§4.5). A transformation layer the artist has
+    /// added and not yet moved must therefore cost the document nothing.
+    func mapping(atFrame frame: Int) -> CGAffineTransform? {
+        let resolved = resolvedPose(atFrame: frame)
+        guard !resolved.isIdentity, let transform = resolved.affineOrLinearised,
+              !transform.isIdentity else { return nil }
+        return transform
+    }
+}
+
+extension LayerPose: Codable {
+
+    private enum CodingKeys: String, CodingKey { case pose, track }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pose = try c.decode(PoseQuad.self, forKey: .pose)
+        track = try c.decodeIfPresent(TransformTrack.self, forKey: .track) ?? TransformTrack()
+    }
 }
 
 // MARK: - Codable

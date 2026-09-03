@@ -139,10 +139,12 @@ enum PixelOps {
     /// (`CanvasView.SandwichKey`, which compares the whole node tree) rebuild happily from the stale
     /// entry. KEYFRAMES §4.5, "pin this on day one".
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
-                          memoize: Bool = true, derived: DerivedCelContent? = nil) -> UIImage {
-        let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity)
+                          memoize: Bool = true, derived: DerivedCelContent? = nil,
+                          pose: CGAffineTransform? = nil) -> UIImage {
+        let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity, pose: pose)
         guard memoize else {
-            return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived, quality: quality),
+            return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
+                                               pose: pose, quality: quality),
                                      canvasSize: canvasSize, quality: quality)
         }
         let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality, window: nil)
@@ -150,7 +152,8 @@ enum PixelOps {
         // Frozen only after the memo has missed, so a hit never touches either tier — the tiers'
         // own memos are not free to fill (`RasterLayerTexture.renderToUIImage` pins the context's
         // buffer copy-on-write) and a warm flatten has no business filling them.
-        let image = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived, quality: quality),
+        let image = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
+                                                pose: pose, quality: quality),
                                       canvasSize: canvasSize, quality: quality)
         rasterizeCache.store(image, for: key)
         return image
@@ -227,9 +230,21 @@ enum PixelOps {
             /// should have to learn either list. `AnyHashable` compares unequal across types, so two
             /// derivations can never collide on one entry.
             let derived: AnyHashable?
+            /// **KEYFRAMES §4.4's container pose, as six numbers** — what a transformation layer
+            /// above this leaf, or a posed folder around it, resolved to at this frame.
+            ///
+            /// **`derived` does not imply it, which is why this is here.** A vector cel folds the
+            /// same pose into its derivation identity; a cel whose ink is in the raster tier has no
+            /// derivation at all, and is posed below by the CTM instead (§2.12: raster resamples,
+            /// vector re-poses). Without this field every frame of a move over a raster layer is one
+            /// key, and the memo serves frame one's pixels for all of them — §4.5's trap in the exact
+            /// form it describes, since `SandwichKey` compares the whole tree and rebuilds happily
+            /// from the stale entry.
+            let pose: [CGFloat]?
 
-            init(cel: Cel, derived: AnyHashable?) {
+            init(cel: Cel, derived: AnyHashable?, pose: CGAffineTransform? = nil) {
                 self.derived = derived
+                self.pose = pose.map { [$0.a, $0.b, $0.c, $0.d, $0.tx, $0.ty] }
                 celID = cel.id
                 // **Identity *and* version, for both tiers, and the identity is the load-bearing
                 // half.** A version alone is monotonic only within one object's lifetime, while a
@@ -260,10 +275,15 @@ enum PixelOps {
         let fillImage: UIImage?
         /// Already values-only and thread-safe by its own contract — see `DerivedCelContent.render`.
         let derived: DerivedCelContent?
+        /// **§4.4's container pose, applied to the *stored* tiers** — see `Identity.pose` for why it
+        /// is not implied by `derived`, and `rasterizeUncached` for where it is spent.
+        let pose: CGAffineTransform?
 
-        init(cel: Cel, identity: Identity, derived: DerivedCelContent?, quality: RenderQuality) {
+        init(cel: Cel, identity: Identity, derived: DerivedCelContent?,
+             pose: CGAffineTransform? = nil, quality: RenderQuality) {
             self.identity = identity
             self.derived = derived
+            self.pose = pose
             bakedImage = cel.bakedImage
             fillImage = cel.fillImage
             strokesImage = cel.raster.hasContent ? cel.raster.renderToUIImage() : nil
@@ -272,9 +292,10 @@ enum PixelOps {
             vector = cel.vector?.freeze(quality: quality)
         }
 
-        init(cel: Cel, derived: DerivedCelContent?, quality: RenderQuality) {
-            self.init(cel: cel, identity: Identity(cel: cel, derived: derived?.identity),
-                      derived: derived, quality: quality)
+        init(cel: Cel, derived: DerivedCelContent?, pose: CGAffineTransform? = nil,
+             quality: RenderQuality) {
+            self.init(cel: cel, identity: Identity(cel: cel, derived: derived?.identity, pose: pose),
+                      derived: derived, pose: pose, quality: quality)
         }
     }
 
@@ -437,9 +458,35 @@ enum PixelOps {
         // back to the stored tier rather than to a hole.
         let vectorImage = cel.derived?.render(quality) ?? cel.vector?.render(quality: quality)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
-        return renderer.image { _ in
-            cel.bakedImage?.draw(in: content)
-            cel.strokesImage?.draw(in: content)
+        return renderer.image { context in
+            // **KEYFRAMES §2.12's raster half, and it is the *other* currency from the vector one.**
+            // A transformation layer *re-poses* vector objects — `cel.derived` above already holds
+            // ink stamped at the posed position, so `vectorImage` must not be touched here — and
+            // *resamples* raster content, which is what this CTM is. The owner ruled the difference
+            // inherent rather than a defect to chase: "a raster layer softens under a push-in while
+            // the vector layer beside it stays sharp".
+            //
+            // **The window is handled by translating rather than by the `content` rect**, because a
+            // rect offset only composes with the pose the way it does with the identity. Drawing an
+            // image into `content` maps a frame point p to p − origin; what a posed strip wants is
+            // pose(p) − origin, so the shift goes on the CTM outside the pose and the draw is into
+            // the frame's own rect. With no pose this branch is not taken at all, so every existing
+            // caller's bytes are the bytes they were.
+            let posedTiers: (() -> Void) -> Void = { draw in
+                guard let pose = cel.pose else { return draw() }
+                context.cgContext.saveGState()
+                if let window { context.cgContext.translateBy(x: -window.origin.x, y: -window.origin.y) }
+                context.cgContext.concatenate(pose)
+                draw()
+                context.cgContext.restoreGState()
+            }
+            // The rect the posed tiers draw into: the frame in its own coordinates, since the shift
+            // above has already moved the origin. Identical to `content` when there is no window.
+            let frameRect = CGRect(origin: .zero, size: window?.frameSize ?? canvasSize)
+            posedTiers {
+                cel.bakedImage?.draw(in: cel.pose == nil ? content : frameRect)
+                cel.strokesImage?.draw(in: cel.pose == nil ? content : frameRect)
+            }
             vectorImage?.draw(in: content)
             // **`fillImage` is last, and that is the whole of LASSO_FILL.md §2a on the preview side.**
             // A fill covers everything already on the cel, so the live preview has to stack the way
@@ -454,7 +501,7 @@ enum PixelOps {
             // It also settles a disagreement that predates the fill ruling: `LayerHostView` has stacked
             // `fillImageView` above `bakedImageView` since the fill preview became a recolour preview,
             // while this drew it below. The two now agree, in the one order the commit produces.
-            cel.fillImage?.draw(in: content)
+            posedTiers { cel.fillImage?.draw(in: cel.pose == nil ? content : frameRect) }
         }
     }
 

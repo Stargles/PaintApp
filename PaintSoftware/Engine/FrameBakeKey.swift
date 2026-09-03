@@ -365,6 +365,16 @@ private extension BakeKeyEncoder {
             e.string(fill.color.hex)
         }
         optional(version.effect) { e, effect in e.encode(effect: effect) }
+        // **KEYFRAMES §4.4's container pose, and it is the one field on this key that the "no
+        // `default:`" rule could never have caught.** Rule 1 in this file's header turns a new *enum
+        // case* into a compile error; a new *stored property* on `LayerContentVersion` is not a
+        // compile error anywhere, and this walk would simply stop naming it. A raster leaf under a
+        // transformation layer carries the pose here and nowhere else in this digest — the tree
+        // carries no pose by design (`renderTreeAndPoses` says why) and `derived` is nil for a cel
+        // with no vector tier — so omitting it resolves every frame of a move to one file on disk and
+        // the store serves the first frame's pixels for all of them, with no error anywhere.
+        // `FrameBakeKeyLogicTests.testAContainerPoseMovesTheDigest` is the pin.
+        optional(version.pose) { e, pose in e.array(pose) { e, value in e.cgFloat(value) } }
         derived(version.derived)
     }
 }

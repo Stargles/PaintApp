@@ -193,6 +193,11 @@ enum ProjectStore {
             /// layer in effect mode still carries the colour it will go back to (`Layer.valueFill`).
             let fill: ValueFill?
             let fillReferenceOverride: Bool?
+            /// `Layer.transform` — §4.4's transformation layer, the third of the `.value` layer's
+            /// three payloads. A value type all the way down (`PoseQuad` and `TransformTrack` both
+            /// are), so like `effect` and `fill` it needs no defensive copy to be safe off main, and
+            /// it is snapshotted unconditionally for the same reason they are.
+            let transform: LayerPose?
             let cels: [CelContent]
         }
 
@@ -260,7 +265,11 @@ enum ProjectStore {
                                // still a `LayerContent`; the rule is one rule.
                                effectTracks: folder.effectTracks.isEmpty ? nil : folder.effectTracks,
                                keyframeMarks: folder.keyframeMarks.isEmpty ? nil : folder.keyframeMarks,
-                               pendingBaselines: folder.pendingBaselines.isEmpty ? nil : folder.pendingBaselines)
+                               pendingBaselines: folder.pendingBaselines.isEmpty ? nil : folder.pendingBaselines,
+                               // §4.4's container pose. Already optional in the model, so there is
+                               // no empty-to-absent line to write: a folder nobody has posed carries
+                               // nil and the synthesized encoder omits the key.
+                               transform: folder.transform)
             }
             viewPresets = canvasManager.viewPresets.map { preset in
                 var vis: [String: Bool] = [:]
@@ -283,6 +292,7 @@ enum ProjectStore {
                              pendingBaselines: layer.pendingBaselines,
                              fill: layer.fill,
                              fillReferenceOverride: layer.fillReferenceOverride,
+                             transform: layer.transform,
                              cels: layer.cels.map { cel in
                     CelContent(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                rasterImage: cel.raster.hasContent ? cel.raster.renderToUIImage() : nil,
@@ -717,6 +727,9 @@ enum ProjectStore {
                 pendingBaselines: layer.pendingBaselines.isEmpty ? nil : layer.pendingBaselines,
                 fill: layer.fill,
                 fillReferenceOverride: layer.fillReferenceOverride,
+                // §4.4's transformation layer. Optional in the model as well, so this needs no
+                // empty-to-absent mapping — `effect` one field up is the same shape.
+                transform: layer.transform,
                 cels: celManifests
             ))
         }
@@ -1359,7 +1372,10 @@ enum ProjectStore {
                         // Absent means "none", one meaning in both directions — §2.26's marks and
                         // baselines follow `effectTracks`' rule exactly.
                         keyframeMarks: f.keyframeMarks ?? [],
-                        pendingBaselines: f.pendingBaselines ?? [:])
+                        pendingBaselines: f.pendingBaselines ?? [:],
+                        // Optional on both sides — absent means "not posed", which is the same one
+                        // meaning `alphaMask` and `effect` above carry.
+                        transform: f.transform)
         }
 
         // Restore view presets.
@@ -1392,6 +1408,7 @@ enum ProjectStore {
                 effectTracks: layerManifest.effectTracks ?? [:],
                 keyframeMarks: layerManifest.keyframeMarks ?? [],
                 pendingBaselines: layerManifest.pendingBaselines ?? [:],
+                transform: layerManifest.transform,
                 fill: layerManifest.fill,
                 blendMode: layerManifest.blendMode,
                 alphaMask: layerManifest.alphaMask,

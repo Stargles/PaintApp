@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 struct LayerFolder: Identifiable {
@@ -104,6 +105,26 @@ struct LayerFolder: Identifiable {
     /// **The value each channel held before the first edit since the last mark** — `Layer.pendingBaselines`
     /// on the folder side, same rules, same reasons.
     var pendingBaselines: [String: Double] = [:]
+
+    /// **The pose this folder shows its contents at** — KEYFRAMES.md §4.4's transformation layer in
+    /// its container form, and `effect`'s twin two fields up under §2.21's ruling.
+    ///
+    /// **Where it differs from the layer form, and it is only the scope.** `Layer.transform` poses
+    /// everything *beneath that layer inside its own container* — §4.4 reuses the adjustment layer's
+    /// scope rule verbatim. This poses everything *inside this folder*, which is the same rule with
+    /// the container itself as the subject, exactly as `effect` above grades this folder's finished
+    /// composite rather than the backdrop a `.value` layer in effect mode grades.
+    ///
+    /// **Redundant with the layer form and kept anyway, which is §2.21's argument rather than a new
+    /// one.** A transformation layer at the top of a folder poses everything else in it, so this
+    /// field expresses nothing new. §2.21 refused exactly that reasoning for the grade — the artist
+    /// meets one control in two places, and one that works in one and silently refuses in the other
+    /// is a defect nothing reveals until they reach for it. The cost is one storage site and one arm
+    /// on the accumulator, paid here.
+    ///
+    /// Absent for every project saved before this field and for every folder nobody has posed, which
+    /// is one meaning rather than two — `alphaMask`'s argument, and the whole migration this needs.
+    var transform: LayerPose? = nil
 }
 
 // MARK: - Compositor nodes (§4.3)
@@ -259,5 +280,21 @@ extension LayerFolder {
     /// frame; `RenderTree.peakCompositeTextures` is the other place that assumption is load-bearing.
     func resolvedEffect(atFrame frame: Int) -> Effect? {
         effect?.resolved(atFrame: frame, through: effectTracks)
+    }
+
+    /// **The affine this folder maps its contents through at `frame`, or nil when it shows them where
+    /// they are** — `resolvedEffect(atFrame:)`'s twin, and the accessor
+    /// `CanvasManager.renderNodes(inContainer:atFrame:)` reads when it descends into this folder.
+    ///
+    /// **Read this, never `transform` directly**, for the reason `resolvedEffect` gives at length one
+    /// method up: the accessor is where the keyframe track lands, and a raw field read is a pose
+    /// frozen at whatever the artist last dragged. Unlike the grade, the two do *not* answer
+    /// identically today — `LayerPose.mapping(atFrame:)` already consults the track — so the mistake
+    /// is visible immediately rather than lying in wait.
+    ///
+    /// Named for `resolvedEffect`'s reason as well: `transform(atFrame:)` would differ from the
+    /// stored `transform` by an argument label alone.
+    func resolvedPoseMapping(atFrame frame: Int) -> CGAffineTransform? {
+        transform?.mapping(atFrame: frame)
     }
 }

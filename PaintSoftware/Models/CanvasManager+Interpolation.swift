@@ -1260,8 +1260,8 @@ extension CanvasManager {
     /// This document's derivations, bound to `frame` — what a caller hands `PixelOps.rasterize` so
     /// that a derived cel stops flattening blank. See `CelContentProvider`.
     func celContentProvider(atFrame frame: Int) -> CelContentProvider {
-        CelContentProvider(frame: frame) { [weak self] cel, frame in
-            self?.derivedCelContent(for: cel, atFrame: frame)
+        CelContentProvider(frame: frame) { [weak self] cel, frame, inherited in
+            self?.derivedCelContent(for: cel, atFrame: frame, inheriting: inherited)
         }
     }
 
@@ -1291,7 +1291,30 @@ extension CanvasManager {
     ///
     /// `overridingT` is for a live scrub, which evaluates without writing `t` to the document; it is
     /// part of the identity, so two positions of the slider are two cache entries and never one.
+    ///
+    /// ## `inheriting` — §4.4's container pose, and the one arm that declines it
+    ///
+    /// A transformation layer above this cel (or a posed folder around it) resolves to an affine in
+    /// `CanvasManager.renderNodes` and arrives here. It reaches the **pose** arm, where it is composed
+    /// onto every element after the cel's own channels.
+    ///
+    /// **The interpolation arm ignores it, and that is a stated refusal rather than an oversight.**
+    /// §2.18 is the ruling that a derived in-between has no stable elements — its display list is
+    /// computed — and `InterpolationEvaluator.render` answers with an *image* rather than with the
+    /// elements a pose maps, so there is nothing here for §2.3's *"re-poses the vector objects"* to
+    /// act on. The available alternative is to resample that image, which is the bitmap magnify §2.3
+    /// exists to refuse. So an in-between under a transformation layer stays where the cel drew it,
+    /// which is visible and wrong-looking rather than silently subtle, and it is the same shape as the
+    /// two places Move is already refused outright on an interpolated cel. **Deliberately not folded
+    /// into this arm's identity either**: the value is not read, and a field carried but unread mints
+    /// a second cache entry per frame of a move for pixels that did not change.
+    ///
+    /// Note the *raster* half of a posed leaf never comes through here at all — `PixelOps.FrozenCel`
+    /// carries the same pose and resamples the baked, stroke and fill tiers through the CTM (§2.12),
+    /// so an interpolated cel's stored raster tiers do follow the move. It is only the evaluated
+    /// in-between that does not.
     func derivedCelContent(for cel: Cel, atFrame frame: Int,
+                           inheriting inherited: CGAffineTransform? = nil,
                            overridingT overrideT: CGFloat? = nil) -> DerivedCelContent? {
         // **Two derivation sources, and they are alternatives rather than a composition** —
         // KEYFRAMES.md §2.18. *"A derived in-between carries no object channels"*: its display list is
@@ -1304,7 +1327,8 @@ extension CanvasManager {
         // rasterize in a document that has never been keyframed, which is the contract this whole
         // function is written to.
         guard let recipe = cel.interpolation, let canvasSize else {
-            return cel.interpolation == nil ? posedCelContent(for: cel, atFrame: frame) : nil
+            return cel.interpolation == nil
+                ? posedCelContent(for: cel, atFrame: frame, inheriting: inherited) : nil
         }
 
         let t = overrideT ?? recipe.t
@@ -1373,8 +1397,16 @@ extension CanvasManager {
     /// every cel of a document that was never keyframed — while a document that *was* pays one
     /// `poseMappings` and an identity, the display-list walk having moved inside the thunk where a
     /// memo hit skips it.
-    func livePreview(forCel cel: Cel, atFrame frame: Int) -> LiveCelPreview {
-        if let derived = derivedCelContent(for: cel, atFrame: frame) { return .derived(derived) }
+    ///
+    /// **`inheriting` is §4.4's container pose**, and the live canvas has to pass it for the reason
+    /// this function's own note gives about the recipe test: a layer moved *only* by a transformation
+    /// layer above it has no derivation of its own, so a caller that omits the pose draws the resting
+    /// ink at every frame of a move the composite and the export are both animating.
+    func livePreview(forCel cel: Cel, atFrame frame: Int,
+                     inheriting inherited: CGAffineTransform? = nil) -> LiveCelPreview {
+        if let derived = derivedCelContent(for: cel, atFrame: frame, inheriting: inherited) {
+            return .derived(derived)
+        }
         return cel.interpolation == nil ? .motionGroupTint : .cleared
     }
 

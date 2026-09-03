@@ -199,12 +199,18 @@ struct FolderManifest: Codable {
     /// migration there for what it does with it.
     var wasSavedBeforeGroupProperties = false
 
+    /// `LayerFolder.transform` — KEYFRAMES.md §4.4's container pose, **written only when there is
+    /// one**. `alphaMask`'s recipe: absence is what every project saved before this field carries and
+    /// what every folder nobody has posed carries, which is one meaning rather than two.
+    var transform: LayerPose? = nil
+
     init(id: UUID, name: String, hasCustomName: Bool = false, isExpanded: Bool, isVisible: Bool,
          parentFolderID: UUID? = nil,
          opacity: Double = 1, blendMode: BlendMode = .normal, isIsolated: Bool = true,
          alphaMask: AlphaMask? = nil, compositorRole: CompositorRole? = nil, effect: Effect? = nil,
          effectTracks: [String: AnimationCurve]? = nil,
-         keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil) {
+         keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
+         transform: LayerPose? = nil) {
         self.id = id
         self.name = name
         self.hasCustomName = hasCustomName
@@ -220,6 +226,7 @@ struct FolderManifest: Codable {
         self.effectTracks = effectTracks
         self.keyframeMarks = keyframeMarks
         self.pendingBaselines = pendingBaselines
+        self.transform = transform
     }
 
     // Custom decoding for the same reason `LayerManifest` has one: a synthesized decoder demands
@@ -252,6 +259,7 @@ struct FolderManifest: Codable {
         effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
         keyframeMarks = try container.decodeIfPresent([Int].self, forKey: .keyframeMarks)
         pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
+        transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
         // `opacity` stands in for the whole group-property set, so **it must keep being written
         // unconditionally**. Omitting it when it happens to be 1 — the trick `ProjectManifest.encode`
         // plays with the interpolation registries — would make every untouched folder in every
@@ -262,7 +270,7 @@ struct FolderManifest: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, isExpanded, isVisible, parentFolderID, opacity, blendMode
         case isIsolated, alphaMask, compositorRole, effect, effectTracks
-        case keyframeMarks, pendingBaselines
+        case keyframeMarks, pendingBaselines, transform
     }
 }
 
@@ -356,6 +364,11 @@ struct LayerManifest: Codable {
     /// project saved before this key — where fill reference was derived from visibility at load —
     /// decodes to exactly the behaviour it had.
     var fillReferenceOverride: Bool? = nil
+    /// `Layer.transform` — KEYFRAMES.md §4.4's transformation layer, **written only when there is
+    /// one**. `effect`'s recipe one field up, and it carries the same discriminant meaning on the
+    /// way back in: a `.value` layer whose manifest has this key and no `effect` is in transform
+    /// mode. Absence is the whole migration.
+    var transform: LayerPose? = nil
     var cels: [CelManifest]
 
     init(id: UUID, name: String, hasCustomName: Bool = false, opacity: Double, isVisible: Bool,
@@ -365,7 +378,8 @@ struct LayerManifest: Codable {
          effectTracks: [String: AnimationCurve]? = nil,
          keyframeMarks: [Int]? = nil, pendingBaselines: [String: Double]? = nil,
          fill: ValueFill? = nil,
-         fillReferenceOverride: Bool? = nil, cels: [CelManifest]) {
+         fillReferenceOverride: Bool? = nil, transform: LayerPose? = nil,
+         cels: [CelManifest]) {
         self.id = id
         self.name = name
         self.hasCustomName = hasCustomName
@@ -381,6 +395,7 @@ struct LayerManifest: Codable {
         self.pendingBaselines = pendingBaselines
         self.fill = fill
         self.fillReferenceOverride = fillReferenceOverride
+        self.transform = transform
         self.cels = cels
     }
 
@@ -407,11 +422,13 @@ struct LayerManifest: Codable {
         pendingBaselines = try container.decodeIfPresent([String: Double].self, forKey: .pendingBaselines)
         fill = try container.decodeIfPresent(ValueFill.self, forKey: .fill)
         fillReferenceOverride = try container.decodeIfPresent(Bool.self, forKey: .fillReferenceOverride)
+        transform = try container.decodeIfPresent(LayerPose.self, forKey: .transform)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, hasCustomName, opacity, isVisible, kind, parentFolderID, blendMode, alphaMask
-        case effect, effectTracks, keyframeMarks, pendingBaselines, fill, fillReferenceOverride, cels
+        case effect, effectTracks, keyframeMarks, pendingBaselines, fill, fillReferenceOverride
+        case transform, cels
     }
 }
 

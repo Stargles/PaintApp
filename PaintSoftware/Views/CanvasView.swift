@@ -1516,6 +1516,11 @@ struct CanvasView: UIViewRepresentable {
             // 276 ms snapshot `RenderRequest` records as the expensive half of a composite.
             let textEditLive = canvasManager.isTextEditLive
             if !textEditLive { textEditHeldContent = nil }
+            // **§4.4's per-leaf container poses, resolved once for the whole map.**
+            // `contentVersion(ofLayer:atFrame:)` resolves them itself when they are not handed in,
+            // and this loop runs once per layer on every SwiftUI pass — so asking inside it would
+            // make a tree walk quadratic in the layer count on the path §2 is most protective of.
+            let poses = canvasManager.layerPoses(atFrame: frame)
             let contents = canvasManager.layers.indices.map { index -> LayerContentVersion? in
                 // **The active layer's content version is in the key only while no stroke is in
                 // progress, and that one clause is both halves of the contract.** During a dab the
@@ -1545,7 +1550,8 @@ struct CanvasView: UIViewRepresentable {
                 // list is what makes the claim structural rather than a promise two files keep by
                 // hand. It resolves at `frame` for the same reason: a mirror that asks a different
                 // question is the one shape a reader checking them will not catch.
-                guard let content = canvasManager.contentVersion(ofLayer: index, atFrame: frame) else {
+                guard let content = canvasManager.contentVersion(ofLayer: index, atFrame: frame,
+                                                                poses: poses) else {
                     if textEditLive, index == active { textEditHeldContent = (index, nil) }
                     return nil
                 }
@@ -2274,6 +2280,10 @@ struct CanvasView: UIViewRepresentable {
         /// it everywhere else. `.preview` quality while scrubbing, `.full` on release — cached in
         /// separate slots on `VectorCanvas` so switching doesn't throw the other away.
         func updateInterpolationPreviews() {
+            // §4.4's per-leaf poses, resolved once for the whole loop rather than per layer: the
+            // accumulation is a walk of the tree, and asking it inside the loop would make this pass
+            // quadratic in the layer count for a document nobody has posed.
+            let poses = canvasManager.layerPoses(atFrame: canvasManager.currentFrame)
             for (layerIndex, layer) in canvasManager.layers.enumerated() {
                 guard let host = layerHosts[layer.id] else { continue }
                 guard let celIndex = canvasManager.activeCelIndex(inLayer: layerIndex,
@@ -2288,7 +2298,8 @@ struct CanvasView: UIViewRepresentable {
                 // `cel.interpolation != nil` first, which is a test for *one* of the two derivation
                 // sources, so a cel animated purely by a transform key took the no-recipe exit and
                 // the canvas drew its resting ink at every frame of a move the export was animating.
-                switch canvasManager.livePreview(forCel: cel, atFrame: canvasManager.currentFrame) {
+                switch canvasManager.livePreview(forCel: cel, atFrame: canvasManager.currentFrame,
+                                                 inheriting: poses[layerIndex]) {
                 case .derived(let derived):
                     // **The derivation is resolved before the key, and it is what the key is made
                     // of** — see `InterpolationPreviewKey`. That covers a pose with no extra work:
