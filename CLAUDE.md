@@ -311,6 +311,51 @@ whatever the app does. That is how a "no readout appears on a sideways drag" tes
 an app that shows one on every drag. If an assertion's window closes before the behaviour it names can
 occur, it is measuring the harness.
 
+### A feature is not finished because its model is correct — drive it before you call it done
+
+**Three features shipped to the owner's iPad in one pass that could not be used at all**, and the owner
+found all three in about a minute. Every one had a green fast tier, mutation-tested assertions, and a
+worker report describing it as complete. The owner, afterwards:
+
+> *"these bugs makes features unusable and thus unfinished, where as if I did not step in and test it, it
+> would have gotten marked as fully done. Even a quick one minuite test could have found out these things."*
+
+**The common cause is structural, not carelessness.** Every test in this repo reaches the model directly
+and asserts a **stored value**. Not one asserted what is *drawn*, or whether an artist can *reach* the
+feature. So the suite was blind to an entire class of defect by construction, and the more rigorous the
+worker, the more confidently it reported done.
+
+**Case 1 — a correct value drawn in the wrong place.** Dragging a node in the graph editor wrote the right
+number and the node did not move. `Channel.axis` auto-ranges to the channel's own live key values, so with
+**two** keys — the ordinary case, a Move at A and a Move at B — both are extremes and `t` is 0 and 1 *always*.
+The axis rescales by exactly what the drag changed and the dot lands back under the finger. Every assertion
+in the suite was on the value, and the value was never wrong.
+
+**Case 2 — a feature whose only entry point requires state that only that entry point can create.** A fresh
+transformation layer has an empty track; the graph editor lists only channels that carry a curve; the
+channel-list row is the only thing that says Move is the verb. So you must Move to get a channel, and the
+channel is the only thing that tells you to Move. The model was correct at every step and the loop was
+closed nowhere. **Look for this shape specifically** — it is invisible to any test that starts by
+constructing the state the artist cannot reach.
+
+**Case 3 — a refusal with no notice.** `beginContainerPoseMove` returned false and its caller discarded the
+`Bool`: no float, no highlight, nothing said. This file already has a section on that, reached by a new door.
+
+So, in addition to the two-operands rule above, for any change with a visible surface:
+
+1. **Drive it in the simulator and look at it.** Build, install, launch, perform the gesture, screenshot.
+   This is available to agents and takes a minute. If you cannot, say so loudly rather than skipping it.
+2. **Write a cold-start reachability test.** From a new document with no prior state, can the feature be
+   reached? Constructing the post-state in a fixture and asserting on it is what let all three of these ship.
+3. **Assert what is drawn or exposed, not only what is stored.** At least one assertion must fail if the
+   affordance disappears while the model stays correct.
+4. **Answer "what does the artist do next?"** at each step, in the report. If any step's answer is "read the
+   source", the feature is unfinished.
+
+**The bar is the orchestrator's to set, and this one was set wrong.** The briefs for all three asked for
+round trips, cache keys, mutation tests and refutations, and got them. None asked whether a person could
+use the result. Put these four in the brief, not in the reviewer's head.
+
 ### A static that writes through to `UserDefaults` outlives the test that set it
 
 `CanvasManager.renderResolution` persists on every set, so it is process-wide **and survives into the
