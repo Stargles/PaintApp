@@ -374,12 +374,24 @@ final class CanvasManager: ObservableObject {
     /// can be sure hasn't changed in between.
     @discardableResult
     func addImageToActiveVectorLayer(_ image: UIImage) -> Bool {
+        importedImageElement(image) != nil
+    }
+
+    /// `addImageToActiveVectorLayer`'s whole body, returning **which element arrived** rather than
+    /// merely whether one did — the one thing `insertImage` needs and a `Bool` cannot carry.
+    ///
+    /// The public method above stays a `Bool` because that is what its callers ask of it: "did this
+    /// layer take the image". Only the import verb needs the identity, and it needs it to put a Move
+    /// box around exactly the picture that just landed (TODO item (34)); reaching for the last
+    /// element of `vector.images` instead would be a guess about ordering that
+    /// `VectorCanvas.insertionIndex(forKind:in:)` is free to change.
+    private func importedImageElement(_ image: UIImage) -> VectorImageElement? {
         beginCanvasEdit()
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].kind == .vector,
               let celIdx = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
               let vector = layers[currentLayerIndex].cels[celIdx].vector,
-              image.size.width > 0, image.size.height > 0 else { return false }
+              image.size.width > 0, image.size.height > 0 else { return nil }
         let fit = min(canvasSize.width / image.size.width, canvasSize.height / image.size.height) * 0.8
         let imagesBefore = vector.images
         let element = vector.addImage(canvasSpaceElement: image,
@@ -399,7 +411,7 @@ final class CanvasManager: ObservableObject {
             vector.bumpVersion()
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
-        return true
+        return element
     }
 
     /// Inserts a photo as a movable vector element — images are always vector content (resolution-
@@ -407,11 +419,36 @@ final class CanvasManager: ObservableObject {
     /// Adds to the active layer if it's already a vector layer; otherwise creates a fresh vector layer
     /// first (a separate, preceding undo step — see `addVectorLayer`). Replaces the old dedicated
     /// "object layer" concept (a whole layer pinned to one image).
+    ///
+    /// **The picture arrives already held** — TODO item (34), the owner's *"when you import images
+    /// they appear in the center of the canvas with no move box. Make them have the move box."* The
+    /// import centres the image on the canvas, which is almost never where the artist wants it, and
+    /// until now the only route to moving it was to put the Select tool on, draw a loop around it and
+    /// press Move. The box is Move's own — `beginVectorMove(ofElementIDs:)` is
+    /// `beginVectorChannelMove`'s lift with the set named directly — so every nudge, knob, mirror and
+    /// commit after this is the path a lassoed piece already takes, and the import records its own
+    /// undo step before the lift the way any edit before a Move does.
+    ///
+    /// **Here rather than in `addImageToActiveVectorLayer`, and that seam is the decision.** The box
+    /// belongs to the artist's *import*, not to "put this image on that layer": the second is a
+    /// primitive that a future paste or drop path may want to call several times, and a lift per call
+    /// would settle the previous one at each step. `ActionsMenu`'s photo picker is this method's only
+    /// caller in the app.
+    ///
+    /// **Silent on an in-between**, which is the one frame where Move refuses. `beginVectorMove`
+    /// routes through `activeVectorMoveTarget()`, which raises `.cannotMoveDerivedFrame` when it
+    /// declines — the right banner for a Move the artist asked for, and the wrong one for an import
+    /// that succeeded. So the lift is only attempted where it can succeed; the image still lands.
     @discardableResult
     func insertImage(_ image: UIImage) -> Bool {
-        if addImageToActiveVectorLayer(image) { return true }
-        addVectorLayer()
-        return addImageToActiveVectorLayer(image)
+        var element = importedImageElement(image)
+        if element == nil {
+            addVectorLayer()
+            element = importedImageElement(image)
+        }
+        guard let element else { return false }
+        if !activeCelIsInBetween { beginVectorMove(ofElementIDs: [element.id]) }
+        return true
     }
 
     /// Converts a vector layer to raster in place: each cel's full content is folded into `raster`

@@ -716,6 +716,27 @@ extension CanvasManager {
         return beginVectorFloat(target: target, lift: lift)
     }
 
+    /// **A lift of exactly the elements named** — `beginVectorChannelMove`'s `.group` arm with the
+    /// membership handed in rather than derived from a channel, for the callers that already know
+    /// which ink they mean because they just put it there.
+    ///
+    /// Its one caller today is `CanvasManager.insertImage` (TODO item (34)): an imported picture
+    /// arrives held in the Move box instead of parked at the canvas centre with nothing on screen
+    /// saying it can be moved. Nothing about the float is special — `beginVectorFloat` is the same
+    /// tail the channel lift takes, so the nudge, the knobs, the mirror, the commit and the undo are
+    /// Move's, not the import's.
+    ///
+    /// - Returns: false when none of `ids` is on the cel under the playhead, when the active layer is
+    ///   not vector, or when that cel is a derived in-between — which is `activeVectorMoveTarget()`'s
+    ///   own refusal, banner included, so a caller that must not raise that banner asks first.
+    @discardableResult
+    func beginVectorMove(ofElementIDs ids: Set<UUID>) -> Bool {
+        commitAllInteractiveState()
+        guard let target = activeVectorMoveTarget(), let lift = target.vector.lift(elementIDs: ids)
+        else { return false }
+        return beginVectorFloat(target: target, lift: lift)
+    }
+
     /// The tail both un-split lifts share: suppress, measure the box on the ink where it is *shown*,
     /// and hand the float over. Extracted when the channel lift arrived rather than duplicated,
     /// because every line of it is a decision with a reason recorded above and two copies would be

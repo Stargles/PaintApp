@@ -312,11 +312,6 @@ LAYER_TRANSFORM.md.
 
       BUGS.md already carries this as "Duplicate rasterizes a vector layer, silently"; the entry names the path.
 
-### (34) Imported images should arrive in a move box
-
-- [ ] > "Right now when you import images they appear in the center of the canvas with no move box. Make them
-      > have the move box. You likely can reuse the move code, this should be a simple fix."
-
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and

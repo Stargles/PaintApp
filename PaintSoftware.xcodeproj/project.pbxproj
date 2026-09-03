@@ -31,6 +31,7 @@
 		99D1EA5B5A7EEE8F514A763E /* PaintSoftware/Engine/LassoFillMask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */; };
 		7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */; };
 		C1CD1F052FA075DAED11D29E /* LassoMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7130AC5DE1A80DC1E0BAE062 /* LassoMoveLogicTests.swift */; };
+		40E61F99D0A53E8A85E55D4F /* ImportedImageMoveBoxLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */; };
 		A728470C839E1CB03DB5CDF8 /* PosedLassoMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */; };
 		CD1DEA5762F9E7208E28B8BE /* PartialAnimationGroupMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */; };
 		FA5E22753C4B7D504B335D8F /* TwoAnimationGroupMoveLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */; };
@@ -298,6 +299,7 @@
 		EA1C5749F5AA74C36489D347 /* PaintSoftware/Engine/LassoFillMask.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LassoFillMask.swift"; sourceTree = "<group>"; };
 		0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+LassoMove.swift"; sourceTree = "<group>"; };
 		7130AC5DE1A80DC1E0BAE062 /* LassoMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LassoMoveLogicTests.swift; sourceTree = "<group>"; };
+		BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImportedImageMoveBoxLogicTests.swift; sourceTree = "<group>"; };
 		DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PosedLassoMoveLogicTests.swift; sourceTree = "<group>"; };
 		B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartialAnimationGroupMoveLogicTests.swift; sourceTree = "<group>"; };
 		487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TwoAnimationGroupMoveLogicTests.swift; sourceTree = "<group>"; };
@@ -633,6 +635,7 @@
 				F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */,
 				71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */,
 				7130AC5DE1A80DC1E0BAE062 /* LassoMoveLogicTests.swift */,
+				BA8F6D562F84A5AB1DE1C11F /* ImportedImageMoveBoxLogicTests.swift */,
 				DED24503B317D1307934B64A /* PosedLassoMoveLogicTests.swift */,
 				B663FBA588AADE6B99AC54CA /* PartialAnimationGroupMoveLogicTests.swift */,
 				487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */,
@@ -1007,6 +1010,7 @@
 				A5AE05B50FA1839D2B60FB53 /* FillBoundaryLogicTests.swift in Sources */,
 				E600A079E7FD19755BD9EC47 /* LassoFillLogicTests.swift in Sources */,
 				C1CD1F052FA075DAED11D29E /* LassoMoveLogicTests.swift in Sources */,
+				40E61F99D0A53E8A85E55D4F /* ImportedImageMoveBoxLogicTests.swift in Sources */,
 				A728470C839E1CB03DB5CDF8 /* PosedLassoMoveLogicTests.swift in Sources */,
 				CD1DEA5762F9E7208E28B8BE /* PartialAnimationGroupMoveLogicTests.swift in Sources */,
 				FA5E22753C4B7D504B335D8F /* TwoAnimationGroupMoveLogicTests.swift in Sources */,
