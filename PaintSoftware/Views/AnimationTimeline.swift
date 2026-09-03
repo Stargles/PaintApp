@@ -302,6 +302,44 @@ struct AnimationTimeline: View {
                 }
             }
 
+        // **The graph editor node's own menu** — TODO (38)(b), and the fourth arm of the one engine.
+        //
+        // > *"Clicking on a node twice just like clicking on a cel twice brings up the menu and the
+        // > option to delete it."*
+        //
+        // **This is where Delete lives now.** Until 2026-09-03 a single tap on a node removed it,
+        // which is a destructive default on a surface where a fingertip is 22 pt across; the first
+        // tap focuses the node and draws its bezier handles, and this is the second. It is the
+        // `.block` arm's contract in every respect that matters — a second tap on the thing already
+        // selected, a popover hung off that thing's own column, and one press of Undo behind whatever
+        // it does.
+        //
+        // **Both actions go through `CanvasManager`, not through a curve edit written here**, because
+        // this file is not compiled into `PaintSoftwareUITests` and a rule spelled here is pinned by
+        // nothing — `TimelineGraphBand`'s doc gives that argument at length. They funnel to
+        // `setEffectParameterTrack`, which is the one writer that drops a mark the node was standing
+        // on, so a node deleted from here takes its keyframe indicator with it exactly as one dragged
+        // off its frame does.
+        case .graphNode(let layerIndex, let parameterID, let frame):
+            menuList {
+                // Offered only where there is something to reset — an authored tangent rather than a
+                // derived one — which is `Clear Loop Range`'s rule on the arm above. It is also the
+                // only way back out of `.free` once a handle has been dragged, so its absence on an
+                // untouched node is the honest signal that the node is already on the default.
+                if canvasManager.effectParameterKeyIsAuthored(layerIndex: layerIndex,
+                                                              parameterID: parameterID, frame: frame) {
+                    menuButton("Reset Curve", icon: "arrow.uturn.backward") {
+                        canvasManager.resetEffectParameterKeyCurve(layerIndex: layerIndex,
+                                                                   parameterID: parameterID,
+                                                                   frame: frame)
+                    }
+                }
+                menuButton("Delete Keyframe", icon: "trash", role: .destructive) {
+                    canvasManager.removeEffectParameterKey(layerIndex: layerIndex,
+                                                           parameterID: parameterID, frame: frame)
+                }
+            }
+
         case nil:
             EmptyView()
         }

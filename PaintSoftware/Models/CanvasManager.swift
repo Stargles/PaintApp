@@ -1461,6 +1461,65 @@ final class CanvasManager: ObservableObject {
         if layers[index].keyframeMarks != marks { layers[index].keyframeMarks = marks }
     }
 
+    /// **Delete one node from the graph editor** — TODO (38)(b), the item the node's own menu carries.
+    ///
+    /// **Through `setEffectParameterTrack`, which is the funnel and not a convenience.** That writer
+    /// is where a mark the node was standing on is dropped and where the undo step is recorded, so
+    /// removing a key any other way would be the second writer the rule of 2026-09-03 exists to
+    /// forbid — a node and a keyframe indicator are one thing, and they stay one thing by there being
+    /// one place that writes both. It is also what makes this **one press of Undo**, unchanged from
+    /// the tap-to-remove it replaces: one call, no bracket, one step.
+    ///
+    /// Written here rather than in `AnimationTimeline`'s menu closure because that file is not
+    /// compiled into `PaintSoftwareUITests`, so a curve edit spelled there would be pinned by nothing
+    /// — `TimelineGraphBand`'s own doc gives the rule at length.
+    ///
+    /// - Returns: whether the document changed. False for a frame the channel does not key, which is
+    ///   the state a menu left up while an undo removed the node underneath it reaches.
+    @discardableResult
+    func removeEffectParameterKey(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              var curve = layers[layerIndex].effectTracks[parameterID],
+              curve.key(atFrame: frame) != nil
+        else { return false }
+        curve.removeKey(atFrame: frame)
+        return setEffectParameterTrack(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+    }
+
+    /// **Give one node its derived tangents back** — the node menu's Reset Curve, and the only way
+    /// out of `.free` once a handle has been dragged.
+    ///
+    /// The handles are zeroed as well as the mode being restored, which is not redundant:
+    /// `.autoClamped` ignores the stored pair, so leaving a dragged pair behind would store two
+    /// numbers nothing reads and resurrect them the moment another handle drag seeded from
+    /// `effectiveHandles` — the artist's reset would come undone one gesture later, with nothing on
+    /// screen to explain it.
+    ///
+    /// - Returns: whether the document changed. False when the node is already on the default, which
+    ///   is what lets the menu hide the item rather than offering an action that does nothing.
+    @discardableResult
+    func resetEffectParameterKeyCurve(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              var curve = layers[layerIndex].effectTracks[parameterID],
+              var key = curve.key(atFrame: frame)
+        else { return false }
+        key.tangentMode = .autoClamped
+        key.inHandle = .zero
+        key.outHandle = .zero
+        curve.setKey(key)
+        return setEffectParameterTrack(layerIndex: layerIndex, parameterID: parameterID, to: curve)
+    }
+
+    /// Whether that node has anything to reset — an authored tangent rather than a derived one. The
+    /// menu reads this so Reset Curve appears only where it would do something, which is
+    /// `Clear Loop Range`'s rule on the ruler menu beside it.
+    func effectParameterKeyIsAuthored(layerIndex: Int, parameterID: String, frame: Int) -> Bool {
+        guard layers.indices.contains(layerIndex),
+              let key = layers[layerIndex].effectTracks[parameterID]?.key(atFrame: frame)
+        else { return false }
+        return key.tangentMode != .autoClamped
+    }
+
     /// **The same write, on a folder's grade** — KEYFRAMES.md §2.21, stage 2b, and the folder twin of
     /// `setEffectParameterTrack(layerIndex:parameterID:to:)` above.
     ///

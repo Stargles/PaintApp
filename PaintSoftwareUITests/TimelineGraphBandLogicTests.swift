@@ -902,7 +902,8 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertNil(TimelineGraphBand.nearestKey(to: onTheLine, channels: drawn,
                                                   pixelsPerFrame: base, bandHeight: band),
                      "PREMISE: and far enough off it that the tap is not a grab")
-        XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: drawn, frameCount: frames,
+        XCTAssertEqual(TimelineGraphBand.tap(at: onTheLine, channels: drawn, focused: nil,
+                                             frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .nothing,
                        "Adding here would have replaced the key at frame 1 with no gesture that looked destructive")
@@ -939,9 +940,10 @@ final class TimelineGraphBandLogicTests: XCTestCase {
             """)
         XCTAssertFalse(TimelineGraphBand.isTap(didMove: true, translation: still), """
             A drag that changed its mind: out past the slop, then back to where it started. Asking \
-            only the travel calls this a tap, and a tap on the key it is carrying REMOVES that key — \
-            with the drag's bracket open, so `setEffectParameterTrack` records nothing and the \
-            deletion cannot be undone. This is the assertion the shipped predicate failed.
+            only the travel calls this a tap on the key it is carrying. Until (38)(b) that REMOVED \
+            the key, with the drag's bracket open so the deletion could not be undone; now it merely \
+            focuses it, and this half of the conjunction is the cheaper of the two. The first half \
+            still is not — a sweep from empty band read as a tap lands a key where the finger stopped.
             """)
         XCTAssertFalse(TimelineGraphBand.isTap(didMove: true, translation: sweep),
                        "An ordinary drag, which is neither half's disputed case")
@@ -959,7 +961,14 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// `CurveEditor`'s two halves of one gesture, and the part that has no equivalent there: with
     /// several curves in one band, "add here" has to name one, and proximity is the only
     /// non-arbitrary namer.
-    func testATapRemovesAKeyAddsToTheNearestCurveAndOtherwiseDoesNothing() {
+    ///
+    /// **The first assertion changed on 2026-09-03 and its old form is worth recording**, because it
+    /// was a correct pin on behaviour the owner has since ruled out rather than a defect: it asserted
+    /// `.remove` for a tap on a node, which was `CurveEditor`'s grammar inherited wholesale by §11.4.
+    /// TODO (38)(b) makes a tap on a node **focus** it, and Delete moves to the menu the second tap
+    /// raises. The other two thirds of this test are untouched, which is the point — the add half and
+    /// the empty-band half were never about deletion.
+    func testATapFocusesANodeAddsToTheNearestCurveAndOtherwiseDoesNothing() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 0.0), (10, 2.0)]))
@@ -967,17 +976,27 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                                         to: linear([(0, 2.0), (10, 0.0)]))
         let drawn = channels(manager)
         let brightness = drawn.first { $0.parameterID == brightnessID }!
+        let node = TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 10)
 
         XCTAssertEqual(TimelineGraphBand.tap(at: dot(brightness, frame: 10), channels: drawn,
+                                             focused: nil,
                                              frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
-                       .remove(TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 10)))
+                       .focus(node),
+                       "A single tap on a node no longer deletes it — it takes it, and draws its handles")
+        XCTAssertEqual(TimelineGraphBand.tap(at: dot(brightness, frame: 10), channels: drawn,
+                                             focused: node,
+                                             frameCount: frames,
+                                             pixelsPerFrame: base, bandHeight: band),
+                       .menu(node),
+                       "…and the second tap on the node already focused raises the menu Delete is on")
 
         // Frame 5, on brightness's own line: the two curves cross at the middle of the band, so aim
         // a quarter of the way up, which is brightness's half and not contrast's.
         let quarter = TimelineGraphBand.y(ofValue: 0.5, in: brightness.axis, bandHeight: band)
         let onBrightness = CGPoint(x: TimelineGraphBand.x(ofFrame: 3, pixelsPerFrame: base), y: quarter)
-        XCTAssertEqual(TimelineGraphBand.tap(at: onBrightness, channels: drawn, frameCount: frames,
+        XCTAssertEqual(TimelineGraphBand.tap(at: onBrightness, channels: drawn, focused: nil,
+                                             frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .add(parameterID: brightnessID, frame: 3, value: 0.5),
                        "The tapped value, not the curve's own there — the dot lands under the finger")
@@ -986,7 +1005,8 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         // which is what the marquee needs to exist.
         let farAbove = CGPoint(x: TimelineGraphBand.x(ofFrame: 5, pixelsPerFrame: base),
                                y: TimelineGraphBand.verticalInset)
-        XCTAssertEqual(TimelineGraphBand.tap(at: farAbove, channels: drawn, frameCount: frames,
+        XCTAssertEqual(TimelineGraphBand.tap(at: farAbove, channels: drawn, focused: nil,
+                                             frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .nothing)
     }
@@ -1015,6 +1035,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                        "PREMISE: the extrapolated value is the same at both, so y cannot be the difference")
 
         XCTAssertEqual(TimelineGraphBand.tap(at: onTheHeldLine(11), channels: drawn,
+                                             focused: nil,
                                              frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .add(parameterID: brightnessID, frame: 11,
@@ -1022,21 +1043,24 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                                                            in: brightness.axis, bandHeight: band)),
                        "The last frame the document has is still a frame, and the line is drawn there")
         XCTAssertEqual(TimelineGraphBand.tap(at: onTheHeldLine(14), channels: drawn,
+                                             focused: nil,
                                              frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .nothing,
                        "Three frames past the end of a twelve-frame document is dead track")
 
-        // …and a *remove* is deliberately not bounded, because the bound widens to hold any key past
-        // the end: a key that is drawn out there must stay removable.
+        // …and a tap that lands *on a node* is deliberately not bounded, because the bound widens to
+        // hold any key past the end: a node that is drawn out there must stay reachable. This
+        // asserted `.remove` until 2026-09-03; the bound is what it is about either way.
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 0.0), (20, 2.0)]))
         let wide = channels(manager)
         XCTAssertEqual(TimelineGraphBand.tap(at: dot(wide.first { $0.parameterID == brightnessID }!,
                                                      frame: 20),
-                                             channels: wide, frameCount: frames,
+                                             channels: wide, focused: nil,
+                                             frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
-                       .remove(TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 20)))
+                       .focus(TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: 20)))
     }
 
     /// **The nearest *curve*, not the first one in reach** — and it is `nearestKey`'s weakness one
@@ -1083,7 +1107,8 @@ final class TimelineGraphBandLogicTests: XCTestCase {
                                                         pixelsPerFrame: base, bandHeight: band),
                        contrastID,
                        "The nearest line, not the first one the walk finds inside the radius")
-        XCTAssertEqual(TimelineGraphBand.tap(at: between, channels: drawn, frameCount: frames,
+        XCTAssertEqual(TimelineGraphBand.tap(at: between, channels: drawn, focused: nil,
+                                             frameCount: frames,
                                              pixelsPerFrame: base, bandHeight: band),
                        .add(parameterID: contrastID, frame: 3,
                             value: TimelineGraphBand.value(atY: between.y, in: contrast.axis,
@@ -1419,4 +1444,335 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         XCTAssertEqual(manager.keyframeState(of: target).marks, [20],
                        "The mark the write dropped comes back with the curve, in the same step")
     }
+
+    // MARK: - The bezier handles — TODO (38)(b)
+
+    /// A curve authored the way every writer in the app authors one: `AnimationCurve.Key`'s own
+    /// defaults, which are `.bezier` and `.autoClamped`. The `linear(_:)` fixture above deliberately
+    /// is not that, and using it for a handle test would measure a segment the handles do not reach.
+    private func bezier(_ pairs: [(Int, Double)]) -> AnimationCurve {
+        AnimationCurve(keys: pairs.map { AnimationCurve.Key(frame: $0.0, value: $0.1) })
+    }
+
+    /// A three-key monotone ramp on brightness, whose middle key gets a genuinely **sloped**
+    /// `.autoClamped` tangent — a hump would clamp both handles flat and every handle assertion below
+    /// would be true of an implementation that returned horizontal handles for everything.
+    private func rampedManager() -> CanvasManager {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: bezier([(0, 0.2), (10, 0.8), (20, 1.6)]))
+        return manager
+    }
+
+    private func brightnessChannel(_ manager: CanvasManager) -> TimelineGraphBand.Channel {
+        allChannels(manager).first { $0.parameterID == brightnessID }!
+    }
+
+    private func node(_ frame: Int) -> TimelineGraphBand.KeyRef {
+        TimelineGraphBand.KeyRef(parameterID: brightnessID, frame: frame)
+    }
+
+    /// **PREMISE for the owner's first sentence, *"The graph should be bezier curved."*** — and the
+    /// answer to which half of the feature was missing.
+    ///
+    /// The curve was **already** bezier: `Key.interpolation` defaults to `.bezier`, the evaluator
+    /// solves the cubic, and the band has always drawn one sample per point of that solution. What no
+    /// gesture could do was *shape* one, and this test is why — `.autoClamped` derives its handles and
+    /// **ignores the stored pair**, so an authored handle changed nothing at all until the tangent
+    /// mode moved with it. That is the one line (38)(b) had to add to the model side, and it is the
+    /// difference between the second and third assertions here.
+    func testACurveIsAlreadyBezierAndWhatWasMissingIsAnyWayToShapeIt() {
+        var curve = bezier([(0, 0), (10, 1)])
+        XCTAssertEqual(curve.keys.map(\.interpolation), [.bezier, .bezier],
+                       "PREMISE: the default a key ships with, at every writer in the app")
+
+        let eased = curve.evaluate(at: 2.5)
+        XCTAssertLessThan(eased, 0.24, """
+            PREMISE: a quarter of the way along, an eased bezier is well below the 0.25 a straight \
+            line would give — so what the band draws is a curve and always was.
+            """)
+
+        var key = curve.keys[0]
+        key.outHandle = AnimationCurve.Handle(deltaFrames: 8, deltaValue: 1)
+        curve.setKey(key)
+        XCTAssertEqual(curve.evaluate(at: 2.5), eased, accuracy: 1e-12, """
+            An authored handle on an `.autoClamped` key changes nothing: `effectiveHandles(at:)` \
+            derives the pair and throws the stored one away. This is why the graph could not be \
+            shaped, and it is not a drawing problem.
+            """)
+
+        key.tangentMode = .free
+        curve.setKey(key)
+        XCTAssertGreaterThan(curve.evaluate(at: 2.5), eased + 0.05,
+                             "…and the same handle with the mode moved is what (38)(b) makes reachable")
+    }
+
+    /// **The two mappings a handle is drawn through are exact inverses**, so a dot dragged to a point
+    /// and read back names the same handle. Frames across and the channel's own value up, which is
+    /// the same pair the band draws every other object with.
+    func testAHandleOffsetRoundTripsThroughTheBandsOwnAxes() {
+        let axis: ClosedRange<Double> = 0...2
+        for offset in [CGVector(dx: 40, dy: -12), CGVector(dx: -33.5, dy: 7.25), .zero] {
+            let handle = TimelineGraphBand.handle(fromOffset: offset, in: axis,
+                                                  pixelsPerFrame: base, bandHeight: band)
+            let back = TimelineGraphBand.handleOffset(handle, in: axis,
+                                                      pixelsPerFrame: base, bandHeight: band)
+            XCTAssertEqual(back.dx, offset.dx, accuracy: 1e-9)
+            XCTAssertEqual(back.dy, offset.dy, accuracy: 1e-9)
+        }
+        XCTAssertGreaterThan(TimelineGraphBand.handle(fromOffset: CGVector(dx: 0, dy: -40), in: axis,
+                                                      pixelsPerFrame: base, bandHeight: band).deltaValue,
+                             0, "Up is more: a handle drawn upward is a positive `deltaValue`")
+    }
+
+    /// **The handles drawn are the *derived* ones, not the stored zeroes** — the defect that would
+    /// make the control look broken on every key the artist has not already touched.
+    ///
+    /// Four of `AnimationCurve`'s five tangent modes ignore what is stored, and every key in every
+    /// document ships in one of them with both handles at `.zero`. An implementation that drew
+    /// `keys[i].outHandle` would put both dots exactly on the node, on the whole document, and the
+    /// artist would have no line and no two nodes to drag.
+    func testTheHandlesDrawnAreTheDerivedOnesAndNotTheStoredZeroes() {
+        let manager = rampedManager()
+        let channel = brightnessChannel(manager)
+        XCTAssertEqual(channel.curve.keys[1].inHandle, .zero, "PREMISE: nothing is stored on this key")
+        XCTAssertEqual(channel.curve.keys[1].outHandle, .zero)
+
+        let drawn = TimelineGraphBand.handles(of: node(10), in: [channel],
+                                              pixelsPerFrame: base, bandHeight: band)
+        let key = CGPoint(x: TimelineGraphBand.x(ofFrame: 10, pixelsPerFrame: base),
+                          y: TimelineGraphBand.y(ofValue: 0.8, in: channel.axis, bandHeight: band))
+        XCTAssertEqual(drawn.count, 2, "An interior node has both")
+        for handle in drawn {
+            XCTAssertGreaterThan(hypot(handle.point.x - key.x, handle.point.y - key.y), 20, """
+                A dot drawn from the stored handle sits on the node itself. \(handle.side) landed at \
+                \(handle.point) against a node at \(key).
+                """)
+        }
+        // Sloped, not horizontal — the ramp's own tangent, which is what makes the assertion above
+        // about `effectiveHandles` and not merely about a non-zero `deltaFrames`.
+        XCTAssertNotEqual(drawn[0].point.y, key.y)
+    }
+
+    /// **A handle that shapes nothing is not offered.** The first key's incoming handle and the last
+    /// key's outgoing one bound no segment — no evaluation consults either — so a dot there would be
+    /// a control that changes nothing and teaches a wrong model of the one beside it.
+    func testACurvesEndsOfferOnlyTheHandleThatShapesASegment() {
+        let manager = rampedManager()
+        let channels = [brightnessChannel(manager)]
+        func sides(_ frame: Int) -> [TimelineGraphBand.HandleSide] {
+            TimelineGraphBand.handles(of: node(frame), in: channels,
+                                      pixelsPerFrame: base, bandHeight: band).map(\.side)
+        }
+        XCTAssertEqual(sides(0), [.outgoing], "The first key has nothing arriving")
+        XCTAssertEqual(sides(10), [.incoming, .outgoing])
+        XCTAssertEqual(sides(20), [.incoming], "The last key has nothing leaving")
+
+        // A curve with one key bounds no segment at all, and is still drawn — `allChannels` lists it
+        // (§11.4's vanishing channel), so it is a node a finger can focus and it must offer neither.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: bezier([(4, 1.0)]))
+        XCTAssertEqual(TimelineGraphBand.handles(of: node(4), in: [brightnessChannel(manager)],
+                                                 pixelsPerFrame: base, bandHeight: band).map(\.side),
+                       [])
+    }
+
+    /// **A node is grabbable at its own dot whatever the zoom** — the arbitration KEYFRAMES.md §11.4
+    /// named as the reason tangent handles were a stage rather than an afternoon.
+    ///
+    /// A handle's length in points is `deltaFrames * pixelsPerFrame`, so a short segment at a
+    /// pinched-out zoom puts the dot a few points from the node it belongs to, well inside both hit
+    /// radii. "Handles first, they are drawn on top" is then a rule that makes the node permanently
+    /// ungrabbable — an unreachable state the gesture created for itself. Nearest-wins makes the
+    /// collapsed *handle* the unreachable one instead, which is the right casualty: a handle comes
+    /// back the moment the artist zooms in, and the node's own drag is the load-bearing gesture.
+    func testAHandleWinsAGrabOnlyWhenItIsNearerThanItsOwnNode() {
+        let manager = rampedManager()
+        let channels = [brightnessChannel(manager)]
+        let focus = node(10)
+        let key = CGPoint(x: TimelineGraphBand.x(ofFrame: 10, pixelsPerFrame: base),
+                          y: TimelineGraphBand.y(ofValue: 0.8, in: channels[0].axis, bandHeight: band))
+        let outgoing = TimelineGraphBand.handles(of: focus, in: channels, pixelsPerFrame: base,
+                                                 bandHeight: band).first { $0.side == .outgoing }!
+
+        XCTAssertEqual(TimelineGraphBand.grab(at: outgoing.point, focused: focus, channels: channels,
+                                              pixelsPerFrame: base, bandHeight: band),
+                       .handle(TimelineGraphBand.HandleRef(key: focus, side: .outgoing)))
+        XCTAssertEqual(TimelineGraphBand.grab(at: key, focused: focus, channels: channels,
+                                              pixelsPerFrame: base, bandHeight: band),
+                       .key(focus), "The node's own dot is the node, never its handle")
+
+        // **Nothing focused is the state a band opens in**, and then a handle cannot win at all.
+        XCTAssertEqual(TimelineGraphBand.grab(at: outgoing.point, focused: nil, channels: channels,
+                                              pixelsPerFrame: base, bandHeight: band),
+                       .nothing, "A handle nobody has focused is not on the band to be grabbed")
+
+        // The collapsed case: a two-frame segment at the pinched-out end of the zoom range puts the
+        // handle a few points away, inside `handleHitRadius`, and the node must still win at its dot.
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: bezier([(0, 0.2), (2, 0.8), (4, 1.6)]))
+        let tight = [brightnessChannel(manager)]
+        let squeezed: CGFloat = 10.5
+        let tightFocus = node(2)
+        let tightKey = CGPoint(x: TimelineGraphBand.x(ofFrame: 2, pixelsPerFrame: squeezed),
+                               y: TimelineGraphBand.y(ofValue: 0.8, in: tight[0].axis, bandHeight: band))
+        let tightHandle = TimelineGraphBand.handles(of: tightFocus, in: tight,
+                                                    pixelsPerFrame: squeezed, bandHeight: band)
+            .first { $0.side == .outgoing }!
+        XCTAssertLessThan(hypot(tightHandle.point.x - tightKey.x, tightHandle.point.y - tightKey.y),
+                          TimelineGraphBand.handleHitRadius,
+                          "PREMISE: the handle has collapsed inside its own hit radius of the node")
+        XCTAssertEqual(TimelineGraphBand.grab(at: tightKey, focused: tightFocus, channels: tight,
+                                              pixelsPerFrame: squeezed, bandHeight: band),
+                       .key(tightFocus), """
+            A handles-first rule makes this node ungrabbable at every zoom the artist can reach it \
+            at. Nearest-wins keeps the node and loses the handle, which is the recoverable half.
+            """)
+    }
+
+    /// **Taking a handle changes the *mode* and must not change the *curve*.**
+    ///
+    /// `draggingHandle` switches the key to `.free`, which is what makes the stored pair take effect
+    /// — and `.free` reads a stored pair that is `.zero` on every untouched key. Flipping the mode
+    /// before seeding the derived handles into it snaps the whole segment straight at touch-down,
+    /// before the finger has travelled a point. The assertion is over the evaluated curve rather than
+    /// over the handles, because it is the picture that must not move.
+    func testTakingAHandleAtZeroTravelChangesNothingAboutTheCurve() throws {
+        let manager = rampedManager()
+        let channels = [brightnessChannel(manager)]
+        let before = channels[0].curve
+
+        let written = TimelineGraphBand.draggingHandle(
+            TimelineGraphBand.HandleRef(key: node(10), side: .outgoing),
+            in: channels, translation: .zero, pixelsPerFrame: base, bandHeight: band)
+        let after = try XCTUnwrap(written[brightnessID])
+
+        XCTAssertEqual(after.keys[1].tangentMode, .free, "PREMISE: the mode really did move")
+        for frame in stride(from: 0.0, through: 20.0, by: 0.5) {
+            XCTAssertEqual(after.evaluate(at: frame), before.evaluate(at: frame), accuracy: 1e-9, """
+                The curve moved at frame \(frame) before the finger did. The derived handles have to \
+                be seeded into the stored pair in the same write that sets `.free`.
+                """)
+        }
+    }
+
+    /// **A handle drag shapes the curve, and the dot ends up where the finger left it.**
+    ///
+    /// Both halves, because either alone passes for an implementation that is wrong in the other: a
+    /// curve that changed proves nothing about *which* handle moved, and a dot that followed the
+    /// finger proves nothing about the stored pair being read.
+    func testDraggingAHandleShapesTheCurveAndLeavesTheDotUnderTheFinger() throws {
+        let manager = rampedManager()
+        let channels = [brightnessChannel(manager)]
+        let before = channels[0].curve
+        let start = TimelineGraphBand.handles(of: node(10), in: channels, pixelsPerFrame: base,
+                                              bandHeight: band).first { $0.side == .outgoing }!
+        let travel = CGSize(width: 0, height: -18)
+
+        let written = TimelineGraphBand.draggingHandle(
+            TimelineGraphBand.HandleRef(key: node(10), side: .outgoing),
+            in: channels, translation: travel, pixelsPerFrame: base, bandHeight: band)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: try XCTUnwrap(written[brightnessID]))
+        let moved = [brightnessChannel(manager)]
+
+        let dot = TimelineGraphBand.handles(of: node(10), in: moved, pixelsPerFrame: base,
+                                            bandHeight: band).first { $0.side == .outgoing }!
+        XCTAssertEqual(dot.point.x, start.point.x, accuracy: 1e-6)
+        XCTAssertEqual(dot.point.y, start.point.y + travel.height, accuracy: 1e-6,
+                       "The dot is where the finger left it — the two axis maps are inverses")
+
+        XCTAssertGreaterThan(moved[0].curve.evaluate(at: 14), before.evaluate(at: 14) + 0.02, """
+            An outgoing handle lifted is a segment that leaves its key faster. The segment it shapes \
+            is 10→20, so frame 14 is inside it.
+            """)
+        XCTAssertEqual(moved[0].curve.evaluate(at: 4), before.evaluate(at: 4), accuracy: 1e-9,
+                       "…and the segment on the other side of the node is untouched")
+        XCTAssertEqual(moved[0].curve.keys.map(\.frame), before.keys.map(\.frame),
+                       "A handle drag retimes nothing")
+        XCTAssertEqual(moved[0].curve.keys[1].value, before.keys[1].value,
+                       "…and moves no value: the node stays where it is")
+    }
+
+    /// **The node menu's Delete is one press of Undo, and takes the keyframe indicator with it** —
+    /// which is the whole reason it goes through `setEffectParameterTrack` rather than editing a
+    /// curve in the menu's own closure. The rule of 2026-09-03 is that a node and an indicator are
+    /// one thing; a second writer is how that stops being true.
+    func testTheNodeMenusDeleteIsOneUndoStepAndTakesTheIndicatorWithIt() throws {
+        let manager = gradedManager()
+        let target = target(manager)
+        let brightness = try XCTUnwrap(manager.storedEffect(of: target)?
+            .parameters.first { $0.id == brightnessID })
+        manager.addKeyframe(target, atFrame: 0)
+        manager.applyEffectParameterEdit(target, parameter: brightness, newValue: 2, atFrame: 10)
+        manager.addKeyframe(target, atFrame: 10)
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "PREMISE: two keyframes, two nodes")
+
+        let before = manager.history.undoStack.count
+        XCTAssertTrue(manager.removeEffectParameterKey(layerIndex: gradeIndex,
+                                                       parameterID: brightnessID, frame: 10))
+        XCTAssertEqual(nodeFrames(manager), [0], "The node is gone")
+        XCTAssertEqual(manager.keyframeFrames(of: target), nodeFrames(manager),
+                       "…and so is the indicator that was standing on the same frame")
+        XCTAssertEqual(manager.history.undoStack.count - before, 1, "One menu item, one press of Undo")
+
+        manager.undo()
+        XCTAssertEqual(manager.keyframeFrames(of: target), [0, 10], "…and one press brings both back")
+
+        XCTAssertFalse(manager.removeEffectParameterKey(layerIndex: gradeIndex,
+                                                        parameterID: brightnessID, frame: 7),
+                       "A frame the channel does not key is not an edit — a menu left up over an undo")
+    }
+
+    /// **Reset Curve gives a node its derived tangents back, and says when there is nothing to give.**
+    ///
+    /// The handles are zeroed as well as the mode restored, and that is not tidiness: `.autoClamped`
+    /// ignores the stored pair, so a dragged pair left behind would be resurrected by the next handle
+    /// drag, which seeds from `effectiveHandles`. The artist's reset would come undone one gesture
+    /// later with nothing on screen to explain it.
+    func testResetCurveGivesANodeItsDerivedTangentsBackAndOnlySaysSoWhenItCan() throws {
+        let manager = rampedManager()
+        let untouched = brightnessChannel(manager).curve
+        XCTAssertFalse(manager.effectParameterKeyIsAuthored(layerIndex: gradeIndex,
+                                                            parameterID: brightnessID, frame: 10),
+                       "PREMISE: nothing authored yet, so the menu offers no item")
+        XCTAssertFalse(manager.resetEffectParameterKeyCurve(layerIndex: gradeIndex,
+                                                            parameterID: brightnessID, frame: 10),
+                       "…and calling it anyway changes nothing")
+
+        let written = TimelineGraphBand.draggingHandle(
+            TimelineGraphBand.HandleRef(key: node(10), side: .outgoing),
+            in: [brightnessChannel(manager)], translation: CGSize(width: 0, height: -18),
+            pixelsPerFrame: base, bandHeight: band)
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: try XCTUnwrap(written[brightnessID]))
+        XCTAssertTrue(manager.effectParameterKeyIsAuthored(layerIndex: gradeIndex,
+                                                           parameterID: brightnessID, frame: 10),
+                      "PREMISE: now there is something to reset, so the menu offers it")
+
+        XCTAssertTrue(manager.resetEffectParameterKeyCurve(layerIndex: gradeIndex,
+                                                           parameterID: brightnessID, frame: 10))
+        let reset = brightnessChannel(manager).curve
+        XCTAssertEqual(reset.keys[1].tangentMode, .autoClamped)
+        XCTAssertEqual(reset.keys[1].inHandle, .zero)
+        XCTAssertEqual(reset.keys[1].outHandle, .zero, """
+            A dragged pair left stored would be seeded back by the next handle drag, undoing the \
+            reset a gesture later.
+            """)
+        for frame in stride(from: 0.0, through: 20.0, by: 0.5) {
+            XCTAssertEqual(reset.evaluate(at: frame), untouched.evaluate(at: frame), accuracy: 1e-9,
+                           "…and the picture is the one the node started with, at frame \(frame)")
+        }
+    }
+
+    /// **The band's gesture state rides the accessibility *label*, and its shape is constant** — so a
+    /// UI test can assert the absence of a focus as directly as its presence, which is what the
+    /// (38)(b) change most needs pinned: a single tap that no longer deletes has no other visible
+    /// effect than this.
+    func testTheGestureStateNamesTheFocusedNodeAndSaysWhenThereIsNone() {
+        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: nil), "focus:none")
+        XCTAssertEqual(TimelineGraphBand.encodeGesture(focus: node(6)),
+                       "focus:brightnessContrast.brightness@6")
+    }
+
 }

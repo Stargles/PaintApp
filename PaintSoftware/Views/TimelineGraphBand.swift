@@ -462,13 +462,16 @@ enum TimelineGraphBand {
     ///   flag is set only after a handle was grabbed; here it is set for the marquee too, before the
     ///   gesture has decided which kind it is. So a drag that changes its mind — out past `tapSlop`,
     ///   then back to where it started — arrives with a translation of nothing, and the translation
-    ///   alone reads it as a tap **on the key it was carrying**, and removes it.
+    ///   alone reads it as a tap **on the key it was carrying**.
     ///
-    /// That deletion is worse than a mistaken edit. A tap's write is a bare
-    /// `setEffectParameterTrack`, and the reversed drag has an undo bracket open by then;
-    /// `setEffectParameterTrack` records **nothing** while a gesture snapshot is open, and the
-    /// bracket is then dropped by `cancelStructureGesture` because a clamped drag can easily have
-    /// written nothing of its own. The key is gone from the document with no undo step at all.
+    /// **The stakes of that second half fell on 2026-09-03 and the predicate is unchanged.** Until
+    /// (38)(b) a tap on a key *removed* it, so a reversed drag deleted the key it was carrying — and
+    /// with the drag's bracket open, `setEffectParameterTrack` records nothing and
+    /// `cancelStructureGesture` then drops the bracket, so the key was gone with **no undo step at
+    /// all**. A tap on a node now focuses it, so the worst that case can do is draw two handle dots.
+    /// The predicate stays because its *first* half was never about deletion: a sweep that began on
+    /// empty band still resolves as `.add` under `didMove` alone, and lands a key wherever the finger
+    /// happened to stop.
     static func isTap(didMove: Bool, translation: CGSize) -> Bool {
         !didMove && hypot(translation.width, translation.height) <= tapSlop
     }
@@ -643,11 +646,34 @@ enum TimelineGraphBand {
         return result
     }
 
-    /// **What a tap on the band does.** `CurveEditor`'s two halves of one gesture, unchanged: on a key
-    /// it removes, on empty graph it adds — *"because a curve editor with separate add and remove
-    /// buttons makes the artist name a point before they can delete it."*
+    /// **What a tap on the band does** — TODO (38)(b), the owner's ask of 2026-09-03.
+    ///
+    /// > *"Right now clicking on a node in it deletes it. Instead, when you click on it it should
+    /// > open the adjust bezier curve from that node menu, the one with the line and two nodes.
+    /// > Clicking on a node twice just like clicking on a cel twice brings up the menu and the option
+    /// > to delete it."*
+    ///
+    /// **So a tap on a node no longer removes it**, and the case that did is gone rather than
+    /// deprecated: deleting was the *default* outcome of the commonest gesture on the surface, on a
+    /// control where a fingertip is 22 pt wide and the thing being destroyed is the artist's own
+    /// timing. `CurveEditor`'s tap-to-remove — which §11.4 inherited wholesale along with the rest of
+    /// that grammar — is right for a tone curve, where a point is one of four and costs nothing to
+    /// redraw, and wrong for a keyframe.
+    ///
+    /// **The two-stage tap is `handleTapOnCel`'s, which is what the owner is naming**: the first tap
+    /// on a cel only selects the layer and frame it landed on, and the menu opens on a *second* tap
+    /// that lands where the selection already is. Here the first tap **focuses** the node, which is
+    /// what puts its two bezier handles on the band (`handles(of:in:…)` — the line and two nodes), and
+    /// the second opens the menu that carries Delete. Neither stage is a `UITapGestureRecognizer` with
+    /// `numberOfTapsRequired = 2`; there is no double-tap anywhere in this app and adding one here
+    /// would make the node the only control in the timeline with a different idiom.
     enum Tap: Equatable {
-        case remove(KeyRef)
+        /// Take this node as the focused one, so its handles are drawn and can be dragged. The first
+        /// of the two stages, and the one that replaced `.remove`.
+        case focus(KeyRef)
+        /// A second tap on the node that is *already* focused: raise its menu, which is where Delete
+        /// now lives. `TimelineTrackView.MenuRequest.graphNode` is what carries it.
+        case menu(KeyRef)
         /// A new key on `parameterID`, at the tapped frame and the tapped value.
         case add(parameterID: String, frame: Int, value: Double)
         /// The touch named no channel, or named one that already holds a key on that frame.
@@ -672,14 +698,19 @@ enum TimelineGraphBand {
     /// `nearestChannel`'s rule is proximity to the **drawn** line — that is the sentence its own doc
     /// makes the choice on — so once the curves stop at the document's own length
     /// (`drawnFrameCount(sceneFrameCount:channels:)`) a tap out in the look-ahead would be aiming at a
-    /// line nobody can see, and would land a key by luck. A **remove** is deliberately not bounded the
-    /// same way: the bound already widens to hold any key past the end, so every key the band draws is
-    /// inside it and a key that is drawn must stay removable.
-    static func tap(at point: CGPoint, channels: [Channel], frameCount: Int,
+    /// line nobody can see, and would land a key by luck. A tap that lands *on a node* is deliberately
+    /// not bounded the same way: the bound already widens to hold any key past the end, so every node
+    /// the band draws is inside it and a node that is drawn must stay reachable.
+    ///
+    /// - Parameter focused: the node whose handles are currently drawn, which is what makes this a
+    ///   two-stage gesture rather than a one-stage one. A tap on *that* node is the second stage and
+    ///   answers `.menu`; a tap on any other node is the first and answers `.focus`. Passing nil is
+    ///   the state a band opens in, where every node's tap is a first stage.
+    static func tap(at point: CGPoint, channels: [Channel], focused: KeyRef?, frameCount: Int,
                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Tap {
         if let hit = nearestKey(to: point, channels: channels,
                                 pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
-            return .remove(hit)
+            return hit == focused ? .menu(hit) : .focus(hit)
         }
         guard let id = nearestChannel(to: point, channels: channels,
                                       pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight),
@@ -766,6 +797,228 @@ enum TimelineGraphBand {
         return result
     }
 
+    // MARK: - The bezier handles — TODO (38)(b)
+
+    /// **Which of a node's two handles.** The owner's *"the line and two nodes"*: one straight line
+    /// through the key, a dot at each end, the incoming handle shaping the segment that arrives and
+    /// the outgoing one the segment that leaves.
+    enum HandleSide: Hashable, CaseIterable {
+        case incoming
+        case outgoing
+    }
+
+    /// One handle, addressed the way `KeyRef` addresses a node — by channel and frame rather than by
+    /// index, for `KeyRef`'s stated reason: an index moves under an edit and a selection held across
+    /// a gesture has to be stated in the model's own terms.
+    struct HandleRef: Hashable {
+        let key: KeyRef
+        let side: HandleSide
+    }
+
+    /// A handle dot, drawn. Smaller than `keyRadius`'s neighbour on purpose: `selectedKeyRadius` is
+    /// the ring round a *selected* node and this is a different object, so it must not be mistaken
+    /// for one at a glance.
+    static let handleRadius: CGFloat = 3.5
+    /// The line joining the two handle dots through their key. Thinner than a curve, because it is
+    /// an annotation on one — `stemWidth`'s argument, one point wider so it reads as grabbable.
+    static let handleLineWidth: CGFloat = 1
+
+    /// **How near a touch has to land to count as *on* a handle.** Smaller than `hitRadius`
+    /// deliberately, and the arbitration in `grab(at:…)` is what actually decides the contest — see
+    /// its doc. A handle that has collapsed onto its own key is unreachable rather than making the
+    /// key unreachable, which is the right way round: the key must always be draggable, and a handle
+    /// too short to grab is reached by zooming in, which changes the dot's distance and not the key's.
+    static let handleHitRadius: CGFloat = 18
+
+    /// **Where a handle's dot sits, relative to its key, in the band's own points.**
+    ///
+    /// The two axes are different units — frames across, the channel's own value up — so this is the
+    /// same pair of mappings the rest of the band uses (`x(ofFrame:)`'s scale and `y(ofValue:)`'s),
+    /// applied to a *delta* rather than to a position. `deltaValue` is negated for `y(ofValue:)`'s
+    /// reason: up is more.
+    ///
+    /// **A consequence worth naming rather than discovering**: a handle's drawn *direction* depends
+    /// on the zoom and on the channel's axis, so the same stored handle looks steeper on a 0…1
+    /// opacity than on a 0…500 blur radius. That is inherent to a graph editor with per-channel
+    /// normalisation (§11.6) — `AnimationCurve.Handle.unit`'s doc records the same property about
+    /// `.aligned` — and it is why a drag is expressed in points and converted here rather than being
+    /// stored in points.
+    static func handleOffset(_ handle: AnimationCurve.Handle, in range: ClosedRange<Double>,
+                             pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> CGVector {
+        let usable = max(bandHeight - verticalInset * 2, 1)
+        let span = range.upperBound - range.lowerBound
+        let dy = span > 0 ? -CGFloat(handle.deltaValue / span) * usable : 0
+        return CGVector(dx: CGFloat(handle.deltaFrames) * pixelsPerFrame, dy: dy)
+    }
+
+    /// The exact inverse of `handleOffset(_:in:pixelsPerFrame:bandHeight:)`, so a handle dragged to a
+    /// point and read back lands on the same point. Pinned by
+    /// `testAHandleOffsetRoundTripsThroughTheBandsOwnAxes`.
+    static func handle(fromOffset offset: CGVector, in range: ClosedRange<Double>,
+                       pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> AnimationCurve.Handle {
+        let usable = max(bandHeight - verticalInset * 2, 1)
+        let span = range.upperBound - range.lowerBound
+        return AnimationCurve.Handle(
+            deltaFrames: pixelsPerFrame > 0 ? Double(offset.dx / pixelsPerFrame) : 0,
+            deltaValue: span > 0 ? -Double(offset.dy / usable) * span : 0)
+    }
+
+    /// A handle as the band draws it: which one, and where its dot is.
+    struct DrawnHandle: Equatable {
+        let side: HandleSide
+        let point: CGPoint
+    }
+
+    /// **The focused node's handles — the "line and two nodes", as points.**
+    ///
+    /// **Drawn from `effectiveHandles(at:)`, never from the stored pair.** Four of `AnimationCurve`'s
+    /// five tangent modes *derive* their handles and ignore what is stored, so drawing the stored pair
+    /// would put the dots at the origin for every key the artist has not yet touched — a control that
+    /// looks broken on the whole document until it is used. `AnimationCurve`'s own doc names this
+    /// function as the one an editor should draw the curve from, and the handles have to agree with
+    /// the curve or the two operands of every judgement the artist makes are different things.
+    ///
+    /// **A handle that shapes nothing is not offered**, which is the one asymmetry here. The first
+    /// key's incoming handle and the last key's outgoing one bound no segment —
+    /// `value(inSegmentStartingAt:)` reads the earlier key's `outHandle` and the later key's
+    /// `inHandle`, so those two are consulted by no evaluation whatever — and a dot an artist can drag
+    /// that changes no pixel is worse than no dot: it teaches a wrong model of the control. So a
+    /// one-key curve offers neither, and every curve's two ends offer one each.
+    static func handles(of ref: KeyRef, in channels: [Channel],
+                        pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> [DrawnHandle] {
+        guard let channel = channels.first(where: { $0.parameterID == ref.parameterID }),
+              let index = channel.curve.keys.firstIndex(where: { $0.frame == ref.frame })
+        else { return [] }
+        let key = channel.curve.keys[index]
+        let effective = channel.curve.effectiveHandles(at: index)
+        let axis = channel.axis
+        let origin = CGPoint(x: x(ofFrame: key.frame, pixelsPerFrame: pixelsPerFrame),
+                             y: y(ofValue: key.value, in: axis, bandHeight: bandHeight))
+        func dot(_ handle: AnimationCurve.Handle) -> CGPoint {
+            let offset = handleOffset(handle, in: axis, pixelsPerFrame: pixelsPerFrame,
+                                      bandHeight: bandHeight)
+            return CGPoint(x: origin.x + offset.dx, y: origin.y + offset.dy)
+        }
+        var drawn: [DrawnHandle] = []
+        if index > 0 { drawn.append(DrawnHandle(side: .incoming, point: dot(effective.inHandle))) }
+        if index < channel.curve.keys.count - 1 {
+            drawn.append(DrawnHandle(side: .outgoing, point: dot(effective.outHandle)))
+        }
+        return drawn
+    }
+
+    /// What a touch-down on the band took hold of.
+    enum Grab: Equatable {
+        case handle(HandleRef)
+        case key(KeyRef)
+        case nothing
+    }
+
+    /// **The arbitration KEYFRAMES.md §11.4 named as the reason tangent handles were a stage rather
+    /// than an afternoon**: *"the second hit target per key and the arbitration between grabbing a
+    /// handle and grabbing the key it belongs to."*
+    ///
+    /// **A handle wins only when it is strictly nearer than the node it belongs to.** The naive rule —
+    /// handles first, because they are drawn on top — is wrong in a way that is invisible until it
+    /// bites: a handle's length in points is `deltaFrames * pixelsPerFrame`, so at the pinched-out
+    /// zoom of 10.5 pt per frame a two-frame segment puts an `.autoClamped` dot **7 pt** from its own
+    /// key, inside both radii, and the key underneath it could never be picked up again. Comparing the
+    /// two distances makes the collapsed handle the unreachable one instead, and that is the right
+    /// casualty: a node must always be draggable, and a handle is reached by zooming in — which moves
+    /// the dot and not the key.
+    ///
+    /// **Only the focused node has handles**, so this reduces to `nearestKey` on every other node and
+    /// on a band with nothing focused. That is what keeps the first stage of the two-stage tap cheap
+    /// and unambiguous.
+    static func grab(at point: CGPoint, focused: KeyRef?, channels: [Channel],
+                     pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> Grab {
+        let key = nearestKey(to: point, channels: channels,
+                             pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight)
+        guard let focused,
+              let channel = channels.first(where: { $0.parameterID == focused.parameterID }),
+              let anchor = channel.curve.key(atFrame: focused.frame)
+        else { return key.map(Grab.key) ?? .nothing }
+
+        let keyDistance = hypot(x(ofFrame: anchor.frame, pixelsPerFrame: pixelsPerFrame) - point.x,
+                                reachableY(ofValue: anchor.value, in: channel.axis,
+                                           bandHeight: bandHeight) - point.y)
+        var best: (side: HandleSide, distance: CGFloat)?
+        for handle in handles(of: focused, in: channels,
+                              pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight) {
+            let distance = hypot(handle.point.x - point.x, handle.point.y - point.y)
+            guard distance <= handleHitRadius, distance < keyDistance else { continue }
+            if best == nil || distance < best!.distance { best = (handle.side, distance) }
+        }
+        if let best { return .handle(HandleRef(key: focused, side: best.side)) }
+        return key.map(Grab.key) ?? .nothing
+    }
+
+    /// **Where a handle drag leaves the curve it is shaping** — the whole of the authoring half of
+    /// (38)(b), and the answer to *"the graph should be bezier curved"*.
+    ///
+    /// The curve was **already** bezier before this existed: `AnimationCurve.Key.interpolation`
+    /// defaults to `.bezier`, `value(inSegmentStartingAt:)` solves the cubic, and the band has always
+    /// drawn one sample per point of that solution. What no gesture in the app could do was *shape*
+    /// one — every key ships `.autoClamped`, whose `effectiveHandles(at:)` ignores the stored pair
+    /// outright, so an authored handle was unreachable and unreadable. This is the function that
+    /// makes the stored pair take effect.
+    ///
+    /// **Both handles are seeded from the effective pair before either moves, and the mode goes to
+    /// `.free` in the same write.** Doing it the obvious way round — flip the mode, then apply the
+    /// translation — replaces the derived handles with the stored `.zero`s and **snaps the whole
+    /// segment straight at touch-down**, before the finger has travelled a point. Seeding first makes
+    /// the switch invisible: at zero translation the curve this returns is identical to the one it
+    /// was given. `testTakingAHandleAtZeroTravelChangesNothingAboutTheCurve` is that property, and it
+    /// is the one an implementation gets wrong without noticing, because the jump only shows on a key
+    /// whose neighbours give it a slope.
+    ///
+    /// **`.free` rather than `.aligned`.** Aligned would keep the join smooth by moving the *other*
+    /// handle under the artist's finger, which is a second thing happening for every one thing asked
+    /// for, on a control the artist is meeting for the first time; free is what-you-drag-is-what-you-
+    /// get, and the way back to a smooth join is the node menu's Reset Curve rather than a mode the
+    /// artist has to know about. `AnimationCurve` carries `.aligned` and enforces it, so the choice
+    /// is one line if the owner wants the other one.
+    ///
+    /// **Nothing is clamped here, and that is `AnimationCurve` decision 3 rather than an omission.**
+    /// That decision rules the handle's frame component clamped *on the way out, at evaluation*, so
+    /// that "the stored handle keeps what the artist drew" and the editor draws the dot where the
+    /// finger left it while the curve stays a function of time. Clamping on the way in would make the
+    /// dot stop under a finger that is still moving *and* silently rewrite what was stored.
+    ///
+    /// Applied to the drag's **starting** curves, exactly as `moves(of:…)` is and for the same
+    /// reason: composing this tick's translation onto last tick's result accelerates the handle away
+    /// from the finger.
+    ///
+    /// - Returns: the changed channel keyed by parameter id, or empty when the handle names nothing —
+    ///   the same shape `applying(_:to:)` returns, so `writeGraphBandCurves` takes either.
+    static func draggingHandle(_ ref: HandleRef, in channels: [Channel], translation: CGSize,
+                               pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> [String: AnimationCurve] {
+        guard let channel = channels.first(where: { $0.parameterID == ref.key.parameterID }),
+              let index = channel.curve.keys.firstIndex(where: { $0.frame == ref.key.frame })
+        else { return [:] }
+        let axis = channel.axis
+        let effective = channel.curve.effectiveHandles(at: index)
+        var key = channel.curve.keys[index]
+        key.tangentMode = .free
+        key.inHandle = effective.inHandle
+        key.outHandle = effective.outHandle
+
+        let base = ref.side == .incoming ? effective.inHandle : effective.outHandle
+        let from = handleOffset(base, in: axis, pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight)
+        let moved = handle(fromOffset: CGVector(dx: from.dx + translation.width,
+                                                dy: from.dy + translation.height),
+                           in: axis, pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight)
+        switch ref.side {
+        case .incoming: key.inHandle = moved
+        case .outgoing: key.outHandle = moved
+        }
+
+        var curve = channel.curve
+        curve.setKey(key)
+        guard curve != channel.curve else { return [:] }
+        return [channel.parameterID: curve]
+    }
+
     // MARK: - Telling the curves apart
 
     /// A curve's colour as hue/saturation/brightness, so the choice stays a value the fast tier can
@@ -850,6 +1103,21 @@ enum TimelineGraphBand {
     static func encode(_ content: Content) -> String {
         if content.channels.isEmpty && content.hiddenCount > 0 { return "hidden" }
         return encode(content.channels)
+    }
+
+    /// **The band's *gesture* state, as a string** — which node's handles are drawn (38)(b).
+    ///
+    /// **On the accessibility `label` rather than appended to the `value`**, which is the one design
+    /// choice here. Every existing assertion in both tiers compares the value against a curve string
+    /// — `"brightnessContrast.brightness:0,6"` — so widening it would rewrite tests that are about
+    /// something else entirely and make each of them assert two unrelated facts. The band already has
+    /// two accessibility slots and was using one.
+    ///
+    /// `"none"` rather than an omission, so the string's shape is constant and a test can assert the
+    /// *absence* of a focus as directly as its presence — which is what the (38)(b) change most needs
+    /// pinned, a single tap that no longer deletes having no other visible effect than this.
+    static func encodeGesture(focus: KeyRef?) -> String {
+        "focus:" + (focus.map { "\($0.parameterID)@\($0.frame)" } ?? "none")
     }
 }
 

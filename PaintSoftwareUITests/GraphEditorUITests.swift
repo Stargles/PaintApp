@@ -425,10 +425,16 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertEqual(markers.value as? String, "0|6", "…and the union came back with it")
     }
 
-    /// **A tap on the band is the other half of the same gesture** — `CurveEditor`'s rule, which
-    /// §11.4 nominates: on a key it removes, on empty graph it adds. Both are one press of Undo,
-    /// being one write each.
-    func testATapAddsAKeyToTheCurveItLandsOnAndRemovesOneItLandsOn() throws {
+    /// **A tap on empty graph adds a key; a tap on a node focuses it and the second tap on that node
+    /// deletes it from the menu** — TODO (38)(b), which replaced §11.4's inherited tap-to-remove.
+    ///
+    /// **This test asserted the old behaviour and is the record of it**: it used to tap the same
+    /// point twice and expect the second tap to take the key away, captioned *"a second tap, now on
+    /// the key it just made, takes it away again"*. That was a correct pin on a destructive default
+    /// the owner has since removed, not a bug — so the shape is kept and only the middle stage is
+    /// new. Deletion is still one press of Undo, and it still has to be, because it is still a bare
+    /// `setEffectParameterTrack` with no bracket around it.
+    func testATapAddsAKeyToTheCurveItLandsOnAndTheNodeMenuRemovesOne() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
@@ -456,12 +462,35 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String, "0|3|6",
                        "…and the new key is a keyframe, with no mark written for it")
 
+        // **The new key is at frame 3 and the tap landed on the line, not on the dot** — the added
+        // key takes the tapped *value*, so the dot is under the finger and the same point is now a
+        // node. That is what makes the next two taps the two stages of (38)(b) at one location.
         onTheLine.tap()
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@",
+                                   TimelineGraphBand.encodeGesture(
+                                       focus: .init(parameterID: "brightnessContrast.brightness",
+                                                    frame: 3))),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, """
+            A single tap on a node used to delete it. It focuses it now — which is what puts its two \
+            bezier handles on the band — and the curve is untouched: got \(band.label).
+            """)
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,3,6",
+                       "…and the tap that focused it wrote nothing at all")
+
+        // The second tap on the node already focused raises its menu, where Delete now lives.
+        onTheLine.tap()
+        let delete = app.buttons["timeline.menu.Delete Keyframe"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 5),
+                      "The second tap on a focused node raises its menu, the way a cel's second tap does")
+        delete.tap()
+
         let removed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "brightnessContrast.brightness:0,6"),
             object: band)
         XCTAssertEqual(XCTWaiter().wait(for: [removed], timeout: 5), .completed,
-                       "…and a second tap, now on the key it just made, takes it away again")
+                       "…and Delete takes the node away")
 
         // **And that removal is recoverable, which is not a free consequence of removing it.** A
         // tap's write is a bare `setEffectParameterTrack`, and that records a step only while no
@@ -535,6 +564,85 @@ final class GraphEditorGestureUITests: PaintUITestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 5), .completed,
                        "A marquee move of two keys is still one press of Undo")
     }
+
+    /// **A single tap draws a node's two bezier handles; dragging one reshapes the curve and moves
+    /// nothing** — TODO (38)(b), end to end through a real finger.
+    ///
+    /// **What only this tier can see** is that the two-stage tap and the handle grab arbitrate
+    /// correctly against everything else on the band: the scroll view's pan, the row recognisers, the
+    /// pinch and the playhead. The fast tier pins which object a point resolves to; this pins that a
+    /// touch reaches the band at all.
+    ///
+    /// **The assertion that the drag reached the document is the node menu's own Reset Curve.** A
+    /// handle drag retimes nothing and moves no value, so the band's accessibility value — a list of
+    /// frames — is *identical* before and after, which is itself half of what is being pinned. What
+    /// changes is the key's tangent mode, and `Reset Curve` appears exactly when a node carries an
+    /// authored one. So the item's arrival is the drag having landed, and its departure after the
+    /// reset is the round trip.
+    func testTappingANodeDrawsItsHandlesAndDraggingOneReshapesTheCurve() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6")
+        XCTAssertEqual(band.label, TimelineGraphBand.encodeGesture(focus: nil),
+                       "PREMISE: a band opens with nothing focused, so every node's first tap focuses")
+
+        let ppf = TimelineKeyMarkers.basePixelsPerFrame
+        let height = band.frame.height
+        let origin = band.coordinate(withNormalizedOffset: .zero)
+        // Frame 0's key holds the grade's default of 1.0, the middle of Brightness's 0…2 `uiRange`.
+        let keyY = TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: height)
+        let key = origin.withOffset(CGVector(dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: ppf),
+                                             dy: keyY))
+        key.tap()
+
+        let node = TimelineGraphBand.KeyRef(parameterID: "brightnessContrast.brightness", frame: 0)
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@",
+                                   TimelineGraphBand.encodeGesture(focus: node)),
+            object: band)
+        XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, """
+            A single tap on a node used to delete it and now focuses it, which is what draws its \
+            handles: got \(band.label).
+            """)
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6",
+                       "…and wrote nothing while doing it")
+
+        // **The outgoing handle of the first key of a two-key curve is computable without the model.**
+        // `.autoClamped` gives the first key a flat tangent (`AnimationCurve` decision 2), and a
+        // handle a third of the segment long — so the dot is two frames to the right at the key's own
+        // y, which is 60 pt at the default zoom and well clear of `handleHitRadius`.
+        let handle = key.withOffset(CGVector(dx: ppf * 2, dy: 0))
+        handle.press(forDuration: 0.2, thenDragTo: handle.withOffset(CGVector(dx: 0, dy: 22)),
+                     withVelocity: .slow, thenHoldForDuration: 0.3)
+
+        XCTAssertEqual(band.value as? String, "brightnessContrast.brightness:0,6", """
+            A handle drag shapes the curve and must not retime or revalue the node it belongs to. \
+            A frame in this list moving means the grab resolved to the key rather than to its handle.
+            """)
+
+        key.tap()
+        let reset = app.buttons["timeline.menu.Reset Curve"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5), """
+            The second tap on the focused node raises its menu, and Reset Curve is on it exactly when \
+            the node carries an authored tangent — so its absence here is the handle drag not having \
+            reached the document.
+            """)
+        XCTAssertTrue(app.buttons["timeline.menu.Delete Keyframe"].exists,
+                      "…and Delete is on the same menu, which is where the owner asked for it")
+        reset.tap()
+
+        key.tap()
+        XCTAssertTrue(app.buttons["timeline.menu.Delete Keyframe"].waitForExistence(timeout: 5),
+                      "PREMISE: the menu came up again")
+        XCTAssertFalse(app.buttons["timeline.menu.Reset Curve"].exists,
+                       "Reset Curve is gone, because the node is back on its derived tangents")
+    }
+
 }
 
 /// **The fixture both graph-editor classes share**, on `PaintUITestCase` rather than on either of
