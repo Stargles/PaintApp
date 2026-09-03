@@ -183,7 +183,8 @@ struct FolderManifest: Codable {
     /// answer "is anything animated" differently depending on which one the artist reached for.
     var effectTracks: [String: AnimationCurve]? = nil
 
-    /// `LayerFolder.keyframeMarks` — §2.26's bare marks, **written only when there are any**.
+    /// `LayerFolder.keyframeMarks` — §2.26's marks that no channel keys, **written only when there
+    /// are any**.
     /// `LayerManifest.keyframeMarks` carries the argument for the optional-here / non-optional-in-the-
     /// model shape; this is that field on the folder.
     var keyframeMarks: [Int]? = nil
@@ -327,7 +328,7 @@ struct LayerManifest: Codable {
     /// saved before keyframes says, and an older build reading a manifest that *does* carry it ignores
     /// the unknown key and opens the document with its grades static.
     var effectTracks: [String: AnimationCurve]? = nil
-    /// `Layer.keyframeMarks` — §2.26's bare keyframe marks in absolute document frames, **written only
+    /// `Layer.keyframeMarks` — §2.26's keyframe marks no channel keys, in absolute document frames, **written only
     /// when there are any**.
     ///
     /// Optional here and non-optional in the model for `effectTracks`' reason above, which applies

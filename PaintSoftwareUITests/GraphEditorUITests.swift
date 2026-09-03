@@ -171,7 +171,7 @@ final class GraphEditorUITests: PaintUITestCase {
     /// `.block` arm of `timelineMenuContent` only, and §2.4 and §2.26 put marks on the *layer* in
     /// absolute document frames — `TimelineKeyMarkers` says they "exist perfectly well at frames the
     /// layer has no cel at", which is why the marker band spans the whole track. So a layer whose one
-    /// block covers frames 0–9 had no gesture anywhere in the app that could give it a bare mark at
+    /// block covers frames 0–9 had no gesture anywhere in the app that could give it a mark at
     /// frame 20. This is the test that a slot with no drawing on it is still a place a keyframe can
     /// go, and it lives here rather than with the other keyframe UI tests because it is D2's debt.
     func testAnEmptySlotCanStillBeGivenAKeyframe() throws {
@@ -365,14 +365,14 @@ final class GraphEditorUITests: PaintUITestCase {
 /// here is eaten by the scroll view and the band is a picture, which is exactly what D2 shipped.
 final class GraphEditorGestureUITests: PaintUITestCase {
 
-    /// **A key travels under a finger, and the §2.28 union travels with it.**
+    /// **A key travels under a finger, and the keyframe travels with it.**
     ///
-    /// **The assertion that a moved key moves its keyframe is the one this feature could get
-    /// wrong invisibly.** §2.28 makes a keyframe the *union* of the artist's explicit marks and every
-    /// frame a channel keys on, computed by one accessor and never stored twice — both of the owner's
-    /// device reports were a divergence between those two lists. So the marker band a row up must
-    /// follow a curve edit for free, and the frame the key left must keep its mark and go **hollow**:
-    /// the artist marked it, and it now carries nothing.
+    /// **The assertion that a moved key moves its keyframe is the one this feature could get wrong
+    /// invisibly**, and until 2026-09-03 it got it half wrong on purpose: §2.28 left the artist's
+    /// mark behind on the frame the key vacated, and the band drew a hollow diamond there with no
+    /// node under it. The owner reported that three times, and the rule now is theirs — a node on the
+    /// graph editor and an indicator on the cel are the same thing, in both directions. So the marker
+    /// band a row up follows the curve edit exactly, and the frame the key left carries nothing.
     func testDraggingAKeyMovesItAndTheKeyframeUnderneathItFollows() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -385,7 +385,7 @@ final class GraphEditorGestureUITests: PaintUITestCase {
                        "PREMISE: the band is drawing the curve the settings bar just authored")
         let markers = app.otherElements["timeline.keyMarkers.1"]
         XCTAssertEqual(markers.value as? String, "0|6",
-                       "PREMISE: two keyframes, both landed on a channel, neither bare")
+                       "PREMISE: two keyframes, both carrying a node on the channel")
 
         // The key at frame 0 holds Brightness / Contrast's default of 1.0, which is the middle of its
         // 0…2 `uiRange` — so its y is computable without knowing what the slider drag produced at the
@@ -408,10 +408,9 @@ final class GraphEditorGestureUITests: PaintUITestCase {
                       "The key should have travelled toward frame 3 and stopped short of its neighbour: \(moved)")
         XCTAssertEqual(moved, "brightnessContrast.brightness:\(landed),6",
                        "…and the key at 6 did not move")
-        XCTAssertEqual(markers.value as? String, "(0)|\(landed)|6", """
-            The keyframe union did not follow the key. §2.28: a keyframe is the union of the marks \
-            and the keyed frames, computed by one accessor — so moving a key moves the diamond, and \
-            the frame it left keeps the artist's own mark, now hollow because nothing is saved on it.
+        XCTAssertEqual(markers.value as? String, "\(landed)|6", """
+            The keyframe did not follow the key. A node on the graph editor and an indicator on the \
+            cel are one thing — so moving a key moves the diamond, and the frame it left has neither.
             """)
 
         app.buttons["sideToolbar.undoButton"].tap()
@@ -599,8 +598,8 @@ private extension PaintUITestCase {
         mark(from)
         mark(to)
         XCTAssertEqual(app.otherElements["timeline.keyMarkers.1"].value as? String,
-                       "(\(from))|(\(to))",
-                       "PREMISE: two bare marks, which is what puts the next slider edit in seedAndKey")
+                       "\(from)|\(to)",
+                       "PREMISE: two marks carrying no channel, which is what puts the next slider edit in seedAndKey")
 
         openLayerPanel(app)
         app.staticTexts["layerPanel.row.1"].tap()

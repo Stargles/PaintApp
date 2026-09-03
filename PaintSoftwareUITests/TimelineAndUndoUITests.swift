@@ -213,8 +213,8 @@ final class TimelineGestureUITests: PaintUITestCase {
         // The label is 1-based and marker frames are 0-based. Asserting against the label rather than
         // against a literal is what makes this a pin on *the frame that was tapped* rather than on
         // where the block happens to sit.
-        XCTAssertEqual(band.value as? String, "(\(tappedFrame - 1))",
-                       "The mark lands on the playhead, and it is bare because nothing has been saved onto it")
+        XCTAssertEqual(band.value as? String, "\(tappedFrame - 1)",
+                       "The mark lands on the playhead, and it draws as any other keyframe does")
 
         // The playhead has not moved, so one tap is now the second stage.
         target.tap()

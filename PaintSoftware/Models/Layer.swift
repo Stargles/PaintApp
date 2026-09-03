@@ -121,10 +121,15 @@ struct Layer: Identifiable {
     /// what makes that possible: a curve cannot represent "the artist marked this frame and has not
     /// yet changed anything".
     ///
-    /// **Not derivable from `effectTracks`.** A key's frame and a mark are different facts: a curve
-    /// carries keys the artist never placed a mark on (an auto-key at the playhead, a seeded
-    /// neighbour), and a mark carries no key at all until something changes. Deriving one from the
-    /// other in either direction loses the distinction the workflow is built on.
+    /// **Not derivable from `effectTracks`, and disjoint from it.** A curve carries keys the artist
+    /// never placed a mark on (an auto-key at the playhead, a seeded neighbour), so the marks cannot
+    /// be derived from the keys; and a mark carries no key at all until something changes, so this
+    /// field cannot be deleted. But the moment a key *does* land on a marked frame the mark is
+    /// dropped — `CanvasManager.marks(_:droppingKeyed:)`, the owner's rule of 2026-09-03 — because
+    /// from then on the key answers every question the mark was answering, and a mark that outlived
+    /// its key is a keyframe indicator with no node under it in the graph editor. **So this holds
+    /// exactly the keyframes no channel keys**, and `CanvasManager.keyframeFrames(of:)` is their
+    /// union with the rest.
     ///
     /// Empty by default, so every existing `Layer(...)` call site and every saved manifest is
     /// unchanged by this field arriving — `effectTracks`' recipe, one field up.
