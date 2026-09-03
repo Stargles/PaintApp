@@ -353,16 +353,14 @@ enum PoseChannelID: Hashable {
 
     /// **Whether §11.7's click has a Move box to raise.**
     ///
-    /// False for `.container`, and that is a gap in the *app* rather than in the ruling. A
-    /// transformation layer's own pose is what a Move on a transformation layer would write, and
-    /// there is no such gesture yet — `LayerPose.pose`'s doc calls its stored base *"the pose a
-    /// future Move-on-a-transform-layer writes"*. Offering the tap anyway would give the artist a
-    /// control that does nothing on one row in a list where the row above it works, which is worse
-    /// than not offering it. The day that Move exists, this returns true and nothing else changes.
-    var raisesMoveBox: Bool {
-        if case .container = self { return false }
-        return true
-    }
+    /// **True for every channel now, including `.container`.** It was false for that one, and the
+    /// note here said the gap was in the app rather than in the ruling: *"there is no such gesture
+    /// yet… the day that Move exists, this returns true and nothing else changes."* It exists —
+    /// `CanvasManager.beginContainerPoseMove()` — so this is that line being kept. The property is
+    /// left standing rather than deleted with its one false case, because it is the place §11.7's
+    /// rule is *stated* ("a row's body reveals its subject, and a grade has none"), and the next
+    /// channel source to arrive will need it to have an answer.
+    var raisesMoveBox: Bool { true }
 
     /// The inverse of `groupID`, so a parameter id read off a row can name the channel it addresses
     /// — which is the whole of §11.7's second ruling, the navigator click.

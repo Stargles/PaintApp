@@ -303,9 +303,12 @@ a later session reinstating it by rediscovering the argument that produced it.
 
     **The biconditional has two residues and neither is a defect.** A mark no channel keys is an
     indicator with no node — that is §2.26's first step and deleting it would delete the workflow.
-    And **pose keys draw indicators while a pose channel has no graph-editor band at all** (TODO
+    ~~And **pose keys draw indicators while a pose channel has no graph-editor band at all** (TODO
     (21)'s stage-5 gap), so every pose keyframe is an indicator with no possible node until that band
-    exists.
+    exists.~~ **Gone**: §11.7 built the band, and the two funnels a *container* pose reaches — the
+    ones `removeKeyframe` and `addKeyframe` go through — were widened to see it when the
+    transformation layer got its artist entry (§4.4). Both had walked the layer's cels and stopped,
+    so a container pose key drew an indicator the artist could not delete.
 29. **A Move that catches part of an animation group is refused, and says so.** 2026-09-03, and the
     owner's words are the whole of it:
 
@@ -480,6 +483,18 @@ tag"* (`Engine/VectorLayer.swift:52-54`).
 the split mints fresh UUIDs on both pieces (`VectorLayer.swift:1146`, `:1234`) — so a channel keyed to
 raw element ids is orphaned the moment the artist re-lassoes. A field is the only thing that survives.
 
+**The identity is reachable now, and half of it had never been drawn.** A minted group is called
+"Group 1" by a count, and `poseChannelName(_:)` draws that over the curve in the graph editor's channel
+list — so a document with four of them offered four rows differing by a number.
+`CanvasManager.renameAnimationGroup` is the writer and a long press on the group's header is the way in.
+**`tagColor` was specified here and displayed nowhere**: the swatch on a *channel* row is
+`TimelineGraphBand.colour(forDescriptorIndex:)`, the band's curve colour, which is a different thing
+keyed on a different input. The group header draws the tag now. **What is still missing is membership
+editing** — adding an element to a group or taking one out — and it is not a UI gap but an unruled one:
+§2.29 settles that splitting one animated group into two is *"a different feature"*, and retagging is
+that question from the other side, since every key on both tracks changes meaning. §2.11's *"reassignable
+by a tap"* is one line and its consequences are not settled; it needs a design conversation.
+
 **It must go on every element kind, not just strokes.** `motionGroupID` today is on `VectorStroke` and
 `VectorTextElement` only, so fills and placed images ride the recipe's first binding and cannot be
 tinted by the group overlay — VECTOR_INTERPOLATION.md items 11/41 already ask for this to be fixed.
@@ -502,7 +517,13 @@ Doing it once serves both features.
 - **Layer-scoped tracks** (§2.4) go on `LayerManifest` beside `effect`, optional, written only when
   present — the format is versioned by field presence, not by a number, and every persisted field in
   the tree follows that idiom. **§2.26's `keyframeMarks` and §2.27's `pendingBaselines` join them
-  there and on `FolderManifest`, same idiom, same absence-is-the-migration.** The baseline is the one
+  there and on `FolderManifest`, same idiom, same absence-is-the-migration.** **And so does the
+  container pose's own held baseline, which is a *third* place rather than an entry in
+  `pendingBaselines`**: that dictionary is `[String: Double]` keyed by `EffectParameter.id`, and every
+  effect writer that walks it prunes it against the grade's descriptors, so a pose stored there would be
+  either unnameable or thrown away. `LayerPose.baseline` is nested beside the track for `LayerPose`'s
+  own reason — one channel, fixed shape — and rides `LayerManifest.transform`, which already persists.
+  The baseline is the one
   that looks like a transient and is not: it is the state *between* keyframe A and keyframe B, and
   that gap can span a save.
 - **A track outlives the effect it was written for, deliberately.** Key `bloom.intensity`, then switch
@@ -705,8 +726,72 @@ in-between has no finger to stick. **Open, §9.1.**
 
 ### 4.4 The transformation layer
 
-**BUILT 2026-09-03 — the model, the render path and the cache safety; no artist-facing control yet.
-Six findings, and the construction itself survived exactly — accumulate down each container, emit per
+**COMPLETE — the model, the render path, the cache safety and, since the entry pass, the artist's way
+in.** What that pass added is below; the model pass's own findings follow it.
+
+#### The artist's entry — the menu, the Move box and the writer
+
+**Creating one is §2.6's relabelled menu doing exactly what §2.6 says it does.** The value layer's row
+title now follows what is set — Blend Mode / Effect / Transform — and a Transform section of one entry
+makes the layer a transformation layer through `CanvasManager.setLayerTransform`. It is the third
+payload on the same recipe, and the accessors were already written for it: `Layer.layerTransform` is
+`kind == .value && effect == nil ? transform : nil` and `valueFill` was already gated on
+`transform == nil`, so nothing about the discriminant had to be invented. **The two ways out differ, and
+that asymmetry is load-bearing**: picking a grade leaves the pose stored and inert (that `effect == nil`
+clause takes it out of force, so flipping back restores the move *and its keyframes*), while picking a
+blend destroys it, because `valueFill` has no clause left and a layer that kept its pose would answer
+"transform" to the renderer with the artist's tick beside Multiply.
+
+**Moving one is the Move box, with three things that are new.** `FloatingPieceKind.containerPose` is a
+piece that carries no pixels: a container holds no geometry, so the box is *the canvas frame*, which is
+the fallback `beginMove` already takes for a cel with no opaque pixels in it. **The preview is the real
+render path** — `showContainerPoseLive` writes the pose on every tick and the canvas composites through
+it — because §2.3's whole content is that the content beneath is re-posed rather than resampled, so a
+bitmap preview would be a picture of the wrong feature. And **the commit puts the preview back before it
+routes**, since `commitContainerPose` reads the stored pose to take its undo baseline from; without that
+line one press of Undo leaves the drawing exactly where the artist had just dragged it.
+`FloatingPiece.containerRest` carries the whole `LayerPose` the lift found, which is also what lets a
+second Move compose onto the first instead of replacing it.
+
+**Every arm of the writer writes the stored base, and that is the one real difference from a cel
+channel.** `commitTransformPose`'s `.key` arm *takes the bake back* because a cel has no stored base and
+the render composes geometry x pose. A container has one, and `LayerPose.resolvedPose(atFrame:)` is a
+**precedence** — the track when it holds keys, the base otherwise — so nothing is doubled and §2.27's
+*"the edit still writes the stored base, exactly as it always did"* applies unchanged. The practical
+consequence is that deleting every key leaves the container where the artist last saw it rather than
+snapping it to rest.
+
+**Distort is refused on a container float and says so.** Not for the raster arm's reason — a `PoseQuad`
+is four corners and could hold a keystone — but because `affineOrLinearised` would linearise it at the
+box centre, which §8 measures as wrong by 315% at the far end. That is §2.13 arriving at the one surface
+that could have offered Distort early.
+
+#### Three findings, all of them holes this section could not have predicted
+
+1. **§2.27's held baseline had nowhere to live on a container.** `Layer.pendingBaselines` is
+   `[String: Double]` keyed by `EffectParameter.id`, and a pose is neither a `Double` nor addressed by
+   one. `LayerPose.baseline` is the field, persisted by the same field-presence idiom, because §2.27
+   rules that the gap between A and B can span a save. Without it the owner's canonical A-then-B
+   workflow wrote two identical keys and produced no animation.
+2. **`removeKeyframe` could not remove a container pose key.** `keyedFrames(of:)` folds them into
+   §2.28's union — so the timeline *drew* a keyframe — but `poseDeltaClearing` walked the layer's cels
+   and nothing else. The artist's tap took the mark it did not have and left the key it did: the
+   drawing kept moving with the marker gone, which is report 1 of the two §2.28 was written from,
+   arriving through a fourth door.
+3. **And `addKeyframe` could not hold one.** The same walk, so §2.24's surviving half — *"every channel
+   that already carries a curve takes a key at the new mark"* — skipped the container, and a mark placed
+   halfway through its move let the move run straight through the keyframe placed to stop it. Both are
+   fixed by `KeyframePoseDelta` gaining a `container` arm, **and it serves the folder too**, which
+   neither producer reached at all because both bailed on a folder target before their first line.
+
+**§11.7's `raisesMoveBox` note is kept rather than deleted.** It said *"the day that Move exists, this
+returns true and nothing else changes"*; it returns true, and one other thing changed —
+`revealPoseChannel` had routed every channel through `beginVectorChannelMove`, which lifts geometry a
+container has none of.
+
+#### What the model pass found
+
+**Six findings, and the construction itself survived exactly — accumulate down each container, emit per
 layer index, stamp ink at the posed position. Four of the six are claims this section makes that are
 false against the code; two are things it does not mention that turned out to be half the work.**
 `Layer.transform` and `LayerFolder.transform` are both a `LayerPose` (a stored `PoseQuad` plus a
@@ -1058,13 +1143,13 @@ Each stage is mergeable and leaves the app working.
 | **3a** ✅ | **The effect-parameter channel end to end, from the artist's side** — the settings bar reading the value **resolved at the playhead**, the keyframe writer that keys many channels as one undo step, and `KeyframeTarget` making §2.21's two grade homes one path. | Two findings the plan did not have. **Making the bar read the playhead is not one line** — the bar writes back a whole `Effect`, so one slider move would bake every other animated channel's resolved value into the stored base; it needs the resolved and stored grades side by side. And **a routing rule that a view holds is a rule the fast tier cannot see**, which is why the whole edit path is a `CanvasManager` method rather than a `switch` in a callback. This stage also shipped Animate mode, which §2.26 withdrew the same day; §2.1 carries what that cost and what it taught. |
 | **3b** ✅ | **The keyframe marks, the channel panel and the graph-editor drawer** | §2.26 and §2.27, and §11's D1 through D4. The **model** half: `keyframeMarks` and `pendingBaselines` on both grade homes, persisted by field presence; `addKeyframe` / `removeKeyframe` / `clearKeyframes` in `KeyframeControl.swift`, one undo step each; and the five-arm routing rule. **The cel menu and the marks' timeline form** — Add / Remove / Clear Keyframes on the block menu, addressing the tapped block's layer at the frame the request carries (the playhead, captured when the menu is raised, because playback does not stop for a menu); and `TimelineKeyMarkers.markers` is the **union** of marks and curve keys, and there is one form of marker: §2.28's closing rule, which let a mark and a key both live at one frame, is superseded. **The grade gates the curves and does not gate the marks** — a mark on an ungraded layer is where the workflow starts, so `TimelineLayoutKey` passes `[:]` for the tracks and the marks in full. **The drawer** is `TimelineGraphBand`, drawn by `TimelineTrackView`'s coordinator inside the scroll content (§11.1) and sized through `CanvasManager.graphBandExpansion` in the layout key — not a presentation of any kind. **The channel panel** is `TimelineGraphChannelList`, raised from `timeline.graphChannelsButton` and presented as `CanvasPresentation.graphChannelList`; §11.5 is why it is a filter rather than a navigator. §2.22's keyframe button became the graph-editor button, which is why the marks are placed from the cel menu. |
 | **4** ✅ | **The rest-space dab bake + grain** — built 2026-09-02. | §4.2 and §2.16, and §4.2 now carries the four of its own claims that contact with the code refuted. Engine-only, as predicted; every number in it was taken on the standalone `swiftc` loop at ~4 s a cycle. **The test written to go red did not go red, and could not have** — `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` compared `grainAlphaMultiplier` at a stroke's rest samples against its *posed* samples, which is the position-dependence of a noise field rather than any behaviour of the ink; the posed display list still carries posed samples after this stage, because §4.2 requires it to. It is rewritten as `testGrainTravelsWithTheInkUnderAPose` and compares the **dab alphas** two poses of one stroke actually stamp. `RestSpaceDabBakeLogicTests` is the engine half. **What this unblocks is real**: `DabPose` answers `localScale` per dab, so stage 5b's projective ink has per-dab width. |
-| **5** ✅ | **The transform channel** — merged `4e18b7a` and the test commits after it. | Quad keys (`PoseQuad`, box plus four corners, which stage 5 only ever writes as parallelograms), animation groups, §2.5's write-at-commit — `commitVectorFloatIfNeeded` and not the nudge — and §4.3's factored blend in `Engine/Deform/PoseInterpolation.swift`. Ink is posed through `mapping(_:throughStretch:)`, the `sqrt(|det|)` arm. §2.10's `step`, §2.27's held baselines, §2.28's keyframe union, §3.5's `_anim.json` sidecar and §4.5's cache trap all land with it, the last pinned by mutation. **Two things it does not have**: there is no graph-editor band for a pose channel, and animation groups have no UI — names and tag colours are generated. The third, *Move is refused at a frame whose pose is not resting*, is **done 2026-09-03** and is the entry below. |
+| **5** ✅ | **The transform channel** — merged `4e18b7a` and the test commits after it. | Quad keys (`PoseQuad`, box plus four corners, which stage 5 only ever writes as parallelograms), animation groups, §2.5's write-at-commit — `commitVectorFloatIfNeeded` and not the nudge — and §4.3's factored blend in `Engine/Deform/PoseInterpolation.swift`. Ink is posed through `mapping(_:throughStretch:)`, the `sqrt(|det|)` arm. §2.10's `step`, §2.27's held baselines, §2.28's keyframe union, §3.5's `_anim.json` sidecar and §4.5's cache trap all land with it, the last pinned by mutation. ~~**Two things it does not have**: there is no graph-editor band for a pose channel, and animation groups have no UI — names and tag colours are generated.~~ **Both closed**: §11.7 is the band, and §3.4's identity is reachable — the channel-list header draws the tag colour and renames the group. Membership editing is what is left of the second, and it is unruled rather than unbuilt (§3.4). The third, *Move is refused at a frame whose pose is not resting*, is **done 2026-09-03** and is the entry below. |
 | **5a** ✅ | **Move at a posed frame** — the owner's *"trying to move an object from A to B, then try to select it in an inbetween, it does not let you"*. | The refusal was `activeVectorMoveTarget`'s `celPoseIsResting` guard, and its argument was sound: the box was measured on stored ink while the cel showed a derived picture. **Relaxing it alone would have been strictly worse than the refusal** — the lasso was rest-space-blind too (`localPath(fromCanvas:)` maps through `_transform` and nothing else), so a loop drawn around visible ink would have selected the wrong elements *silently*. Both land together. `VectorFloat.poses` is the pose each lifted element is shown through; the box is `MoveBoxInk` of the posed ink, the loop is pulled back per element (`LassoLoops`, exact because containment and the boolean ops commute with an invertible affine, which is what lets the *split* stay on stored geometry), every nudge is conjugated `P·D·P⁻¹`, and the latch renders `renderIsolated(ids:posedBy:)`. **The commit is §2.27 rather than a new ruling** — *"if it isnt a current keyframe the drag creates a keyframe at that frame… only when the value is already being animated"* — so it is the `.key` arm the refusal had made unreachable, with the delta conjugated onto the channel as `M · O · D · O⁻¹` for the channel's own map `M` and whatever is applied after it (`O` is the cel map when writing a group, the identity for the cel itself). Both reduce to `D` on an unkeyframed document, so an ordinary Move is byte-for-byte what it was. |
 | **5b** | **Real Distort** — the *animated* one, a projective quad keyed across frames | §2.13. **Not to be confused with the Move-box Distort that shipped** (LASSO_MOVE §3 stage 5): that is a raster floating piece reshaped by a live gesture, and nothing keys a projective quad over time — `TransformKeyframes` only ever writes a `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` treats a projective pose as something only a document *this* stage wrote could contain. Ink through §4.2's point map, then placed images behind Move stage 3c. |
 | **6** | **Bake to cels** | §6. Shares its frame-walker with TODO (29). |
 | **6b** | **The playback cache** | **Delivered by TODO (29) instead**, and this row is a cross-reference rather than work: §4.6's store is RENDER.md §3.5-3.7, whose stages 4 and 5 are merged, so playback is served from LZ4 frames on disk today. What it is *not* is §2.20's span-scoped unit — it is a per-frame content-addressed store with playhead-distance eviction. Read RENDER §3.5-3.7 before planning anything on this row. |
 | **7** | **Live recording + editable fps** | §5. Its one prerequisite is met: the playback clock is on the model (`Engine/PlaybackClock.swift`, RENDER stage 1). Nothing else of it exists — `fps` is fixed at 24 and only load and save write it. |
-| **8** | **The transformation layer** | §4.4. Late because §4.6's cache is its real cost — which RENDER §3.5-3.7 has now paid, so what remains here is the layer itself. |
+| **8** ✅ | **The transformation layer** | §4.4, complete: the model and the render path, then the artist's entry — §2.6's relabelled menu, a Move box that previews through the render path rather than a bitmap, and `commitContainerPose` routing through `KeyframeControl.write`'s same five arms. Three holes fell out of making it reachable and all three are in §4.4: §2.27's baseline had nowhere to live on a container, and neither `removeKeyframe` nor `addKeyframe` could see a container pose key — the second of those had been drawing a keyframe indicator the artist could not delete. **`LayerFolder.transform` still has no entry**, and it is a row in the folder options menu plus the same box, not new machinery. |
 | **10** | **The timing recorder** | §7. Small, sits on 7. |
 
 **Stage 5 comes before stage 4, ruled by the owner 2026-08-30.** Asked whether the effort should go to
@@ -2131,9 +2216,11 @@ is the channel, not the component.
 channel is `VectorElement.isMoved(by:)`, a field rather than a region, so nothing is split, no id is
 minted and the float is the ordinary one. It does **not** move the playhead or the layer: the band is
 open on the selected layer and the cel is the one under the playhead, so a click reveals the channel
-where the artist is standing. A container pose (`Layer.transform`, `LayerFolder.transform`) offers no
-navigation at all, because there is no Move-on-a-transformation-layer gesture yet;
-`PoseChannelID.raisesMoveBox` is the one line that changes the day there is.
+where the artist is standing. **A container pose navigates too, since §4.4's entry pass**: it raises
+`beginContainerPoseMove()` rather than the vector lift, because a container has no geometry to lift and
+its box is the canvas frame. `PoseChannelID.raisesMoveBox` was the one line that had to change and it
+is true for every channel now; `revealPoseChannel` was the one that had to learn there are two kinds of
+box. `LayerFolder.transform` is the case still without an entry.
 
 #### The fold, and the two funnels
 

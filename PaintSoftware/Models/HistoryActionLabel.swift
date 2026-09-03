@@ -67,6 +67,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// A value layer's grade changing, including the live drag of one of its parameters
     /// (`setLayerEffect`, and the panel's `commitStructureGesture(label: .valueLayerEffect)`).
     case valueLayerEffect
+    /// A value layer becoming — or ceasing to be — a transformation layer (`setLayerTransform`),
+    /// KEYFRAMES.md §2.6's third payload. Named apart from `.valueLayerEffect` for that case's own
+    /// reason: the two are different things to want back, and an artist who picked Transform by
+    /// mistake reads "undo adjust layer effect" as a grade having changed.
+    case valueLayerTransform
     /// One keyframe track on one effect parameter being written, replaced or removed
     /// (`setEffectParameterTrack`) — KEYFRAMES.md stage 2. Named apart from `.valueLayerEffect`
     /// because the two are different things to want back: that one is the grade the artist picked,
@@ -101,6 +106,10 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     case addNode
     case deleteFolder
     case renameFolder
+    /// An animation group's display name changing (`CanvasManager.renameAnimationGroup`) —
+    /// KEYFRAMES.md §3.4. Named apart from `.renameLayer` because a group is not a layer and an
+    /// artist reading the history has to be able to tell which of the two they renamed.
+    case renameAnimationGroup
     case rasterize
     /// TODO item (9): "Resize Canvas". **One step for the whole document**, whose undo is the
     /// inverse resize rather than a restoration of captured pixels — CANVAS_RESIZE.md §5 rule 10.
@@ -186,6 +195,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addEffectLayer: return "add effect layer"
         case .valueLayerColor: return "change layer colour"
         case .valueLayerEffect: return "adjust layer effect"
+        case .valueLayerTransform: return "change layer transform"
         case .effectKeyframes: return "edit effect keyframes"
         case .addKeyframe: return "add keyframe"
         case .removeKeyframe: return "remove keyframe"
@@ -204,6 +214,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .addNode: return "add mix node"
         case .deleteFolder: return "delete folder"
         case .renameFolder: return "rename folder"
+        case .renameAnimationGroup: return "rename animation group"
         case .rasterize: return "rasterize layer"
         case .resizeCanvas: return "resize canvas"
         case .bakePrecision: return "bake precision"

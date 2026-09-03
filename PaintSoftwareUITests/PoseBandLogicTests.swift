@@ -348,10 +348,14 @@ final class PoseBandLogicTests: XCTestCase {
                        "A Brightness curve has no subject to raise")
     }
 
-    /// **A container pose's rows offer no navigation**, because there is no Move on a transformation
-    /// layer to raise. Recorded as a test rather than as a comment so that the day that gesture
-    /// exists there is a red pointing at the one line to change.
-    func testAContainerPosesRowsOfferNoNavigation() throws {
+    /// **A container pose's rows navigate to the transformation layer's own Move box.**
+    ///
+    /// This test read the other way — *"offer no navigation, because there is no Move on a
+    /// transformation layer to raise… the day that gesture exists there is a red pointing at the one
+    /// line to change"*. It pointed, and this is the change: `beginContainerPoseMove()` is the
+    /// gesture and it comes up as a `.containerPose` float rather than a vector one, because a
+    /// container has no geometry to lift.
+    func testAContainerPosesRowsNavigateToItsOwnMoveBox() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addValueLayer()
         let canvasBox = CGRect(origin: .zero, size: size)
@@ -367,9 +371,13 @@ final class PoseBandLogicTests: XCTestCase {
 
         let rows = try XCTUnwrap(manager.graphChannelGroups?.first?.rows)
         XCTAssertEqual(rows.count, 6, "Fixture: the rows are there")
-        XCTAssertEqual(Set(rows.map(\.navigation)), [nil])
-        XCTAssertFalse(manager.revealPoseChannel(.container),
-                       "…and asking anyway is refused rather than half-done")
+        XCTAssertEqual(Set(rows.map(\.navigation)), [.container],
+                       "All six decompose one channel, so all six name the same subject")
+        XCTAssertTrue(manager.revealPoseChannel(.container))
+        XCTAssertEqual(manager.floatingPiece?.kind, .containerPose,
+                       "A container's box carries no pixels — it is the canvas frame, and the "
+                       + "content beneath moves through the real render path rather than a preview")
+        XCTAssertEqual(manager.floatingPiece?.targetLayerID, manager.layers[1].id)
     }
 
     // MARK: - The click that raises the Move box

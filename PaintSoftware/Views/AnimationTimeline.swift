@@ -68,6 +68,11 @@ struct AnimationTimeline: View {
     @State private var pendingRasterizeDrop: CanvasManager.CelDropRequest?
 
     // Press-and-hold reorder state for the pinned name column.
+    /// The animation group the rename alert is open on, and the text field's draft — the shape
+    /// `LayerPanel`'s own rename alert uses, and `@State` for the reason the popovers just above are:
+    /// there is no rule about it that the model has to be able to see.
+    @State private var renamingAnimationGroup: AnimationGroup?
+    @State private var animationGroupDraftName = ""
     @State private var draggingRowID: UUID?
     @State private var dragTranslation: CGFloat = 0
     @State private var dragOffsetRows: Int = 0
@@ -678,6 +683,21 @@ struct AnimationTimeline: View {
             .padding(.vertical, 6)
         }
         .frame(maxHeight: 300)
+        .alert("Rename Group", isPresented: Binding(get: { renamingAnimationGroup != nil },
+                                                    set: { if !$0 { renamingAnimationGroup = nil } })) {
+            TextField("Name", text: $animationGroupDraftName)
+                .accessibilityIdentifier("timeline.graphChannels.nameField")
+            Button("Cancel", role: .cancel) { renamingAnimationGroup = nil }
+            Button("Save") {
+                if let group = renamingAnimationGroup {
+                    // Through the writer, never by writing `displayName` here: it is where the empty
+                    // name is refused and where the one undo step is recorded, and a view that wrote
+                    // the field would have neither.
+                    canvasManager.renameAnimationGroup(group.id, to: animationGroupDraftName)
+                }
+                renamingAnimationGroup = nil
+            }
+        }
     }
 
     /// The group's header: a chevron that folds, a box that takes every channel under it, and a body
@@ -716,7 +736,19 @@ struct AnimationTimeline: View {
             .accessibilityIdentifier("timeline.graphChannels.group.\(group.id)")
             .accessibilityValue(group.isMixed ? "mixed" : (group.isFullyVisible ? "on" : "off"))
             Button(action: { revealGraphChannel(group.navigation) }) {
-                HStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    // **An animation group's tag colour, shown for the first time.** §3.4 calls it
+                    // *"the swatch this group is drawn in when the timeline or a channel list names
+                    // it"*, and until now nothing drew it — the swatch on a *channel* row is the
+                    // band's curve colour, which is a different thing keyed on a different input. A
+                    // generated colour nothing shows is a field that cannot be checked; a group with
+                    // no tag (the whole cel's Move, a grade) draws none rather than a grey stand-in.
+                    if let tag = canvasManager.animationGroup(named: group.navigation)?.tagColor {
+                        Circle()
+                            .fill(Color(red: tag.red, green: tag.green, blue: tag.blue)
+                                .opacity(tag.alpha))
+                            .frame(width: 8, height: 8)
+                    }
                     Text(group.name).font(.caption.weight(.semibold))
                     Spacer(minLength: 0)
                 }
@@ -725,6 +757,22 @@ struct AnimationTimeline: View {
             .buttonStyle(.plain)
             .disabled(group.navigation == nil)
             .accessibilityIdentifier("timeline.graphChannels.reveal.\(group.id)")
+            // **Rename lives behind a long press rather than on the row**, for the reason the row's
+            // three buttons are three buttons: the row already means fold / filter / reveal, and a
+            // fourth target would leave no space that means "reveal" any more. A group whose name is
+            // generated is the only thing here worth renaming — a grade's header is named by the
+            // effect the artist picked, and the whole cel's Move is named by what it is.
+            .contextMenu {
+                if let animationGroup = canvasManager.animationGroup(named: group.navigation) {
+                    Button {
+                        animationGroupDraftName = animationGroup.displayName
+                        renamingAnimationGroup = animationGroup
+                    } label: {
+                        Label("Rename Group", systemImage: "pencil")
+                    }
+                    .accessibilityIdentifier("timeline.graphChannels.rename.\(group.id)")
+                }
+            }
         }
         .foregroundColor(group.isFullyVisible || group.isMixed ? .primary : .secondary)
         .padding(.horizontal, 12)

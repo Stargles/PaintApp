@@ -1344,8 +1344,15 @@ final class CanvasManager: ObservableObject {
     /// a layer that leaves effect mode in a taller stack than it entered it comes back with a larger
     /// number. Worth stating because it looks like a bug and is not; the alternative, storing the
     /// birth ordinal to reproduce it, is a second field carrying nothing an artist can act on.
-    static func defaultValueLayerName(effect: Effect?, ordinal: Int) -> String {
-        effect?.displayName ?? "Value \(ordinal)"
+    ///
+    /// **`transform` is the third mode and it is read in the accessors' own precedence order** —
+    /// effect, then transform, then flat colour (`Layer.transform`'s note states it once). Passing
+    /// both is not a state any writer produces; naming the effect for it is what keeps this function
+    /// agreeing with `Layer.layerEffect`/`layerTransform` rather than inventing a fourth answer.
+    static func defaultValueLayerName(effect: Effect?, transform: LayerPose? = nil,
+                                      ordinal: Int) -> String {
+        if let effect { return effect.displayName }
+        return transform == nil ? "Value \(ordinal)" : "Transform \(ordinal)"
     }
 
     /// Sets or clears the grade on a `.value` layer — **the mode picker's whole model half.** Passing
@@ -1405,9 +1412,74 @@ final class CanvasManager: ObservableObject {
             layers[layerIndex].pendingBaselines =
                 Effect.channelEntriesAddressed(by: effect, from: layers[layerIndex].pendingBaselines)
             if !layers[layerIndex].hasCustomName {
-                layers[layerIndex].name = Self.defaultValueLayerName(effect: effect, ordinal: layers.count)
+                // The **stored** pose, because clearing the grade is what lets it back into force —
+                // `Layer.layerTransform` is gated on `effect == nil`, so a layer leaving effect mode
+                // with a pose underneath is a transformation layer again and must not come back
+                // named "Value n". This is `valueFill`'s asymmetry reaching the name.
+                layers[layerIndex].name =
+                    Self.defaultValueLayerName(effect: effect, transform: layers[layerIndex].transform,
+                                               ordinal: layers.count)
             }
         }
+    }
+
+    /// **Sets or clears the pose on a `.value` layer — the mode picker's third arm**, KEYFRAMES.md
+    /// §2.6's *"Blend Mode / Effect / Transform"* and §4.4's transformation layer.
+    ///
+    /// `setLayerEffect`'s twin, and every rule it states applies here with one word changed. What
+    /// differs is only which payload is the discriminant.
+    ///
+    /// **Setting a pose clears the grade, and that is the merged menu's own rule rather than a new
+    /// one.** `Layer.layerTransform` is `kind == .value && effect == nil ? transform : nil`, so a
+    /// layer that kept its grade would take the pick, move the checkmark, and pose nothing —
+    /// precisely the state `setLayerBlendMode`'s doc says the row exists to make unreachable rather
+    /// than to explain afterwards. The grade's channels go with it, `Effect.tracksAddressed(by:from:)`,
+    /// for that function's reason.
+    ///
+    /// **Clearing a pose keeps the fill**, which is `valueFill`'s asymmetry read from the third side:
+    /// the colour is inert storage while the layer poses, and keeping it is what makes flipping back
+    /// restore the artist's colour instead of resetting it to grey.
+    ///
+    /// **What it does *not* do is clear the pose when a grade is picked.** That is the same asymmetry
+    /// again and it is deliberate: `layerTransform`'s `effect == nil` clause already takes the pose
+    /// out of force, so storing it costs nothing and flipping back restores the move the artist
+    /// made — including its keyframes. `setLayerBlendMode` is the one route that destroys it, because
+    /// picking a blend means "flat colour in this mode" and there is no clause left to gate it with.
+    ///
+    /// One undo step, with the rename inside it, for `setLayerEffect`'s reason: an artist who picks
+    /// Transform and presses undo once expects the pose *and* the name back.
+    func setLayerTransform(layerIndex: Int, to pose: LayerPose?) {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].kind == .value else { return }
+        let clearsEffect = pose != nil && layers[layerIndex].effect != nil
+        guard layers[layerIndex].transform != pose || clearsEffect else { return }
+        withStructureUndo(label: pose == nil ? .valueLayerColor : .valueLayerTransform) {
+            layers[layerIndex].transform = pose
+            if clearsEffect {
+                layers[layerIndex].effect = nil
+                layers[layerIndex].effectTracks =
+                    Effect.tracksAddressed(by: nil, from: layers[layerIndex].effectTracks)
+                layers[layerIndex].pendingBaselines =
+                    Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
+            }
+            if !layers[layerIndex].hasCustomName {
+                layers[layerIndex].name =
+                    Self.defaultValueLayerName(effect: layers[layerIndex].effect,
+                                               transform: pose, ordinal: layers.count)
+            }
+        }
+    }
+
+    /// **A container showing its contents exactly where they are, measured against this canvas** —
+    /// what the Transform entry in the value layer's menu creates, and what a transformation layer
+    /// holds until the artist moves it.
+    ///
+    /// Nil before the document has a canvas size, which is the one state in which there is no box to
+    /// measure a pose against. Every pose on this path is measured against the canvas rect: a
+    /// container holds no geometry of its own (`LayerPose`'s doc), so there is no content bounding
+    /// box for the reference frame to come from and `Homography(rect:to:)` recovers the same affine
+    /// from any non-degenerate one anyway.
+    var restingContainerPose: LayerPose? {
+        canvasSize.map { LayerPose(restingIn: CGRect(origin: .zero, size: $0)) }
     }
 
     /// **Writes, replaces or removes one keyframe track on one effect parameter** — KEYFRAMES.md
@@ -2432,10 +2504,20 @@ final class CanvasManager: ObservableObject {
     /// writes and one undo step, with the rename inside it — `setLayerEffect` argues all of them, and
     /// a layer still named "Gaussian Blur" after the blur was cleared is the same lie told backwards.
     /// Ordinary layers are untouched: they have no grade for a blend to conflict with.
+    ///
+    /// **It clears the pose as well as the grade, and that is the one place the three payloads are
+    /// not treated alike.** A grade picked over a pose leaves the pose stored and inert, because
+    /// `Layer.layerTransform`'s `effect == nil` clause takes it out of force and flipping back
+    /// restores it. A blend mode has no such clause: `valueFill` is gated on `transform == nil`, so a
+    /// layer that kept its pose would answer "transform" to the renderer while the artist's tick sat
+    /// beside Multiply. Picking a blend *is* picking flat colour, so this is the one route out of
+    /// transform mode and it has to be a real one.
     func setLayerBlendMode(layerIndex: Int, to mode: BlendMode) {
         guard layers.indices.contains(layerIndex) else { return }
-        let clearsEffect = layers[layerIndex].kind == .value && layers[layerIndex].effect != nil
-        guard layers[layerIndex].blendMode != mode || clearsEffect else { return }
+        let isValue = layers[layerIndex].kind == .value
+        let clearsEffect = isValue && layers[layerIndex].effect != nil
+        let clearsTransform = isValue && layers[layerIndex].transform != nil
+        guard layers[layerIndex].blendMode != mode || clearsEffect || clearsTransform else { return }
         withStructureUndo(label: .blendMode) {
             layers[layerIndex].blendMode = mode
             if clearsEffect {
@@ -2446,9 +2528,13 @@ final class CanvasManager: ObservableObject {
                                                                          from: layers[layerIndex].effectTracks)
                 layers[layerIndex].pendingBaselines =
                     Effect.channelEntriesAddressed(by: nil, from: layers[layerIndex].pendingBaselines)
-                if !layers[layerIndex].hasCustomName {
-                    layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, ordinal: layers.count)
-                }
+            }
+            // The pose's channel is nested inside it (`LayerPose`'s doc says why), so clearing the
+            // payload takes the track with it and there is no second field to prune.
+            if clearsTransform { layers[layerIndex].transform = nil }
+            if (clearsEffect || clearsTransform) && !layers[layerIndex].hasCustomName {
+                layers[layerIndex].name = Self.defaultValueLayerName(effect: nil, transform: nil,
+                                                                     ordinal: layers.count)
             }
         }
     }

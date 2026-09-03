@@ -281,11 +281,15 @@ final class PoseComponentsLogicTests: XCTestCase {
         XCTAssertTrue(PoseChannelID.isPose(parameterID: PoseChannelID.cel(.cel).parameterID(.x)))
     }
 
-    /// **A container pose raises no Move box, and says so rather than offering a dead tap** — the
-    /// gap is in the app (there is no Move on a transformation layer yet), and this is where it is
-    /// recorded so that the day it closes there is one line to change.
-    func testAContainerPoseOffersNoMoveBoxAndACelChannelDoes() {
-        XCTAssertFalse(PoseChannelID.container.raisesMoveBox)
+    /// **Every pose channel raises a Move box, the container included.**
+    ///
+    /// This test read the other way — *"a container pose raises no Move box… the day it closes there
+    /// is one line to change"* — and that day is here: `CanvasManager.beginContainerPoseMove()` is the
+    /// gesture, and `PoseChannelID.raisesMoveBox` was the one line. Kept rather than deleted with its
+    /// one false case, because the property is where §11.7's rule is *stated* (a row's body reveals
+    /// its subject, and a grade has none), and the next channel source to arrive will need an answer.
+    func testEveryPoseChannelRaisesAMoveBoxNowThatAContainerHasOne() {
+        XCTAssertTrue(PoseChannelID.container.raisesMoveBox)
         XCTAssertTrue(PoseChannelID.cel(.cel).raisesMoveBox)
         XCTAssertTrue(PoseChannelID.cel(.group(UUID())).raisesMoveBox)
     }

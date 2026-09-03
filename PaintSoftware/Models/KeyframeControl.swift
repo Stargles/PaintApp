@@ -149,6 +149,18 @@ extension CanvasManager {
         }
     }
 
+    /// **The container pose as stored on a target** — §4.4's transformation layer on the layer side,
+    /// §2.21's folder twin on the other. `storedEffect(of:)`'s shape one payload over, including its
+    /// asymmetry: `layerTransform` rather than the raw field, because a `.raster` layer carrying a
+    /// pose left behind by a kind change poses nothing, while a folder's field's presence *is* the
+    /// answer and there is no second field to reconcile.
+    func containerPose(of target: KeyframeTarget) -> LayerPose? {
+        switch target {
+        case .layer(let id): return layers.first { $0.id == id }?.layerTransform
+        case .folder(let id): return folders.first { $0.id == id }?.transform
+        }
+    }
+
     /// The grade at one frame — every keyed parameter evaluated, through whichever of the two
     /// resolvers this target owns.
     func resolvedEffect(of target: KeyframeTarget, atFrame frame: Int) -> Effect? {
@@ -628,10 +640,35 @@ extension CanvasManager {
     /// can draw and `splitCel`'s rule would then have to carry.
     private func poseDeltaForKeyframe(_ target: KeyframeTarget, atFrame frame: Int,
                                       keyframes placed: [Int]) -> (KeyframePoseDelta, KeyframePoseDelta) {
+        var after = KeyframePoseDelta()
+        var before = KeyframePoseDelta()
+
+        // **The container's channel first, and it belongs to both homes.** §3.1: it keys in absolute
+        // document frames, so there is no cel span to fall inside and no conversion to make — which
+        // is also why it sits outside the loop rather than inside it. A folder reaches only this
+        // half, because it holds no cels.
+        if let container = containerPose(of: target), !container.track.isEmpty || container.baseline != nil {
+            var now = container
+            if let baseline = container.baseline {
+                now.track = CanvasManager.seedingContainer(now.track, keyframes: placed, frame: frame,
+                                                           oldPose: baseline, newPose: container.pose)
+                now.baseline = nil
+            } else {
+                // §2.24's surviving half: a channel that already has a curve takes a key holding the
+                // pose it *resolves* to here, or placing a mark lets the container drift straight
+                // through it.
+                if let resolved = now.track.pose(atDocumentFrame: frame) {
+                    now.track.setKey(TransformTrack.Key(frame: frame, pose: resolved))
+                }
+            }
+            if now != container {
+                before.container = container
+                after.container = now
+            }
+        }
+
         guard case .layer(let layerID) = target,
-              let index = layers.firstIndex(where: { $0.id == layerID }) else { return ([:], [:]) }
-        var after: KeyframePoseDelta = [:]
-        var before: KeyframePoseDelta = [:]
+              let index = layers.firstIndex(where: { $0.id == layerID }) else { return (after, before) }
 
         for cel in layers[index].cels {
             guard !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty else { continue }
@@ -665,8 +702,8 @@ extension CanvasManager {
             now.baselines = [:]
 
             guard now != was else { continue }
-            before[cel.id] = was
-            after[cel.id] = now
+            before.cels[cel.id] = was
+            after.cels[cel.id] = now
         }
         return (after, before)
     }
@@ -733,10 +770,28 @@ extension CanvasManager {
     /// other direction, and the only two places either happens.
     private func poseDeltaClearing(_ target: KeyframeTarget,
                                    inFrames frames: Range<Int>) -> (KeyframePoseDelta, KeyframePoseDelta) {
+        var after = KeyframePoseDelta()
+        var before = KeyframePoseDelta()
+
+        // **The container's own keys go too, and until §4.4 was reachable nothing dropped them.**
+        // `keyedFrames(of:)` folds them into §2.28's union, so the timeline drew a keyframe for one;
+        // Remove Keyframe then took the mark it did not have and left the key it did, which is the
+        // biconditional broken in the direction §2.28 was reported from. Absolute frames, no cel
+        // conversion (§3.1), and both homes — a folder holds no cels and reaches only this half.
+        if let container = containerPose(of: target), !container.track.isEmpty {
+            var now = container
+            for frame in frames { now.track.removeKey(atFrame: frame) }
+            // A baseline whose channel has no keys left has nothing to be committed onto — the rule
+            // `clearPoseKeys` applies one container down.
+            if now.track.isEmpty { now.baseline = nil }
+            if now != container {
+                before.container = container
+                after.container = now
+            }
+        }
+
         guard case .layer(let layerID) = target,
-              let index = layers.firstIndex(where: { $0.id == layerID }) else { return ([:], [:]) }
-        var after: KeyframePoseDelta = [:]
-        var before: KeyframePoseDelta = [:]
+              let index = layers.firstIndex(where: { $0.id == layerID }) else { return (after, before) }
         for cel in layers[index].cels where !cel.transformTracks.isEmpty {
             let was = CelPoseState(tracks: cel.transformTracks, baselines: cel.pendingPoseBaselines)
             var now = was
@@ -750,8 +805,8 @@ extension CanvasManager {
             }
             now.baselines = now.baselines.filter { now.tracks[$0.key] != nil }
             guard now != was else { continue }
-            before[cel.id] = was
-            after[cel.id] = now
+            before.cels[cel.id] = was
+            after.cels[cel.id] = now
         }
         return (after, before)
     }
@@ -855,12 +910,24 @@ extension CanvasManager {
     /// It rides in the *same* undo record as the marks, baselines and curves for `KeyframeState`'s own
     /// reason: one artist action touches all of them, so one step covers all of them by construction
     /// rather than by four careful closures.
-    typealias KeyframePoseDelta = [UUID: CelPoseState]
+    /// **And the container's own pose beside them**, §4.4's transformation layer, which is not a cel
+    /// and so has nowhere in the dictionary to live. It arrived after this type and was missed by
+    /// both producers: `keyedFrames(of:)` folds a container pose key into §2.28's union, so the
+    /// timeline drew a diamond for one — and Remove Keyframe then took the mark and left the key,
+    /// which is a control that appears not to work. Nil means *untouched*, which is every document
+    /// with no transformation layer in it.
+    struct KeyframePoseDelta: Equatable {
+        var cels: [UUID: CelPoseState] = [:]
+        var container: LayerPose?
+
+        static let none = KeyframePoseDelta()
+        var isEmpty: Bool { cels.isEmpty && container == nil }
+    }
 
     private func commitKeyframeState(_ state: KeyframeState, from before: KeyframeState,
                                      to target: KeyframeTarget, label: HistoryActionLabel,
-                                     poses: KeyframePoseDelta = [:],
-                                     posesBefore: KeyframePoseDelta = [:]) {
+                                     poses: KeyframePoseDelta = .none,
+                                     posesBefore: KeyframePoseDelta = .none) {
         var state = state
         // Every document edit is a canvas edit: a pending shape/fill/text transient bakes first, as its
         // own earlier step. Re-entrant-safe, so calling it inside a bracket that already did is free.
@@ -895,9 +962,26 @@ extension CanvasManager {
 
     /// Writes a pose delta onto the cels it names. A folder target carries none — it holds no cels.
     private func applyPoseDelta(_ delta: KeyframePoseDelta, to target: KeyframeTarget) {
-        guard !delta.isEmpty, case .layer(let layerID) = target else { return }
-        for (celID, state) in delta {
-            applyCelPoseState(state, layerID: layerID, celID: celID)
+        guard !delta.isEmpty else { return }
+        if case .layer(let layerID) = target {
+            for (celID, state) in delta.cels {
+                applyCelPoseState(state, layerID: layerID, celID: celID)
+            }
+        }
+        // The raw field, gated on the accessor by whoever built the delta — a delta only ever names
+        // a container the target is actually posing through, so writing it back cannot put a pose
+        // left inert by a kind change into force. Both homes, §2.21: a folder holds no cels and its
+        // pose is therefore the *whole* of its pose delta.
+        guard let container = delta.container else { return }
+        switch target {
+        case .layer(let id):
+            guard let index = layers.firstIndex(where: { $0.id == id }),
+                  layers[index].transform != container else { return }
+            layers[index].transform = container
+        case .folder(let id):
+            guard let index = folders.firstIndex(where: { $0.id == id }),
+                  folders[index].transform != container else { return }
+            folders[index].transform = container
         }
     }
 

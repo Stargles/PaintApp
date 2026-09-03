@@ -805,4 +805,65 @@ final class TransformChannelLogicTests: XCTestCase {
             return XCTFail("A recipe that derives nothing must not reach the motion-group tint arm")
         }
     }
+
+    // MARK: - An animation group's identity, reached (KEYFRAMES.md §3.4)
+
+    /// **A minted group can be renamed, and the channel list reads the new name.**
+    ///
+    /// `mintAnimationChannel` calls them "Group 1", "Group 2" — a count — and `poseChannelName(_:)`
+    /// is what draws that over the curve in the graph editor's channel list. A document with four of
+    /// them offered four rows differing by a number, so the one thing a group's identity is *for*
+    /// could not be used. Asserted through `poseChannelName` rather than through the stored field,
+    /// because that accessor is what the artist reads and a rename the list did not pick up would be
+    /// a rename that did nothing.
+    func testRenamingAnAnimationGroupChangesTheNameTheChannelListDraws() {
+        let manager = CanvasManager()
+        manager.canvasSize = CanvasFixture.canvasSize
+        let group = AnimationGroup(displayName: "Group 1",
+                                   tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.animationGroups = [group]
+        XCTAssertEqual(manager.poseChannelName(.group(group.id)), "Group 1")
+
+        XCTAssertTrue(manager.renameAnimationGroup(group.id, to: "  Left arm  "))
+
+        XCTAssertEqual(manager.poseChannelName(.group(group.id)), "Left arm",
+                       "Trimmed, and read back through the accessor the list draws with")
+        manager.undo()
+        XCTAssertEqual(manager.poseChannelName(.group(group.id)), "Group 1",
+                       "One press, because `animationGroups` is inside the structure snapshot")
+    }
+
+    /// **An empty name is refused rather than stored.** `poseChannelName`'s fallback covers a group
+    /// that is *missing*, not one that is blank, so a blank name would draw an unpickable row — which
+    /// is `renameLayer`'s own rule reached one type over.
+    func testAnEmptyAnimationGroupNameIsRefused() {
+        let manager = CanvasManager()
+        manager.canvasSize = CanvasFixture.canvasSize
+        let group = AnimationGroup(displayName: "Group 1",
+                                   tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.animationGroups = [group]
+
+        XCTAssertFalse(manager.renameAnimationGroup(group.id, to: "   "))
+        XCTAssertEqual(manager.poseChannelName(.group(group.id)), "Group 1")
+        XCTAssertFalse(manager.canUndo, "…and refusing records no step to take back")
+    }
+
+    /// **The row-to-group accessor answers only for a group's row.** The channel list asks it to
+    /// decide whether to draw a tag dot and offer Rename, and a whole-cel Move, a container pose or a
+    /// grade's header must get neither — a rename control on a row with nothing to rename is the
+    /// dead-control shape this feature keeps running into.
+    func testOnlyAGroupsRowNamesAnAnimationGroup() {
+        let manager = CanvasManager()
+        manager.canvasSize = CanvasFixture.canvasSize
+        let group = AnimationGroup(displayName: "Group 1",
+                                   tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.animationGroups = [group]
+
+        XCTAssertEqual(manager.animationGroup(named: .cel(.group(group.id))), group)
+        XCTAssertNil(manager.animationGroup(named: .cel(.cel)))
+        XCTAssertNil(manager.animationGroup(named: .container))
+        XCTAssertNil(manager.animationGroup(named: nil))
+        XCTAssertNil(manager.animationGroup(named: .cel(.group(UUID()))),
+                     "A tag whose group has been deleted names nothing")
+    }
 }

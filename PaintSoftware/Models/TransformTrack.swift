@@ -325,9 +325,29 @@ struct LayerPose: Equatable {
     /// Empty on a container the artist has posed but not animated.
     var track: TransformTrack
 
-    init(pose: PoseQuad, track: TransformTrack = TransformTrack()) {
+    /// **The pose this container was showing before the artist moved it between two keyframe marks**
+    /// — §2.27's *"the previous value is held"*, in the container channel's own currency, and nil on
+    /// a container with nothing held.
+    ///
+    /// **A field here rather than an entry in `Layer.pendingBaselines`**, which is where a *grade's*
+    /// held values live. That dictionary is `[String: Double]` keyed by `EffectParameter.id`, and a
+    /// pose is neither a `Double` nor addressed by a parameter id; widening it would make every
+    /// effect writer that walks it (`Effect.channelEntriesAddressed(by:from:)` prunes it against the
+    /// grade's descriptors) either see an entry it cannot name or throw one away it should not. It
+    /// is nested beside the track for `LayerPose`'s own stated reason — there is exactly one
+    /// container channel and its shape never varies, so "a baseline never outlives the thing it
+    /// addresses" stays structural.
+    ///
+    /// **Persisted, and that is §2.27's own ruling rather than a convenience**: the gap between
+    /// keyframe A and keyframe B can span a save, and losing the held pose across a reopen makes
+    /// placing B write two identical keys and produce no animation — a wrong result with nothing on
+    /// screen to explain it.
+    var baseline: PoseQuad? = nil
+
+    init(pose: PoseQuad, track: TransformTrack = TransformTrack(), baseline: PoseQuad? = nil) {
         self.pose = pose
         self.track = track
+        self.baseline = baseline
     }
 
     /// A container that shows its contents exactly where they are — what a freshly created
@@ -364,12 +384,13 @@ struct LayerPose: Equatable {
 
 extension LayerPose: Codable {
 
-    private enum CodingKeys: String, CodingKey { case pose, track }
+    private enum CodingKeys: String, CodingKey { case pose, track, baseline }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         pose = try c.decode(PoseQuad.self, forKey: .pose)
         track = try c.decodeIfPresent(TransformTrack.self, forKey: .track) ?? TransformTrack()
+        baseline = try c.decodeIfPresent(PoseQuad.self, forKey: .baseline)
     }
 }
 

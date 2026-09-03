@@ -1057,6 +1057,16 @@ struct LayerRowModel: Equatable {
     /// name so the cell can derive both the display name and `effectMenuSlug`'s stable test value
     /// without the two being kept in step by hand here.
     var effect: Effect? = nil
+
+    /// **Whether this row is a transformation layer** — §4.4's third payload, on the same footing as
+    /// `effect` above and for its stated reason: the row is the only place an artist checks a stack at
+    /// a glance, and a layer named "Sky" that is silently moving everything under it is exactly the
+    /// state that stays invisible until the options panel is opened on the right row.
+    ///
+    /// A `Bool` rather than the pose, because unlike a grade there is nothing to name: every
+    /// transformation layer says the same word. `Layer.layerTransform`, never `transform`, for
+    /// `effect`'s reason one field up.
+    var isTransform: Bool = false
     /// Which input of its parent node this row is, if its parent is one — **0 is the backdrop**.
     /// Carried for the cell's test probe, since input index is now position and nothing else, so
     /// "which operand is this" is otherwise only readable by comparing row frames.
@@ -1126,6 +1136,7 @@ struct LayerRowModel: Equatable {
             // is decided (a `.raster` layer that once carried a grade still has the field set), and
             // the row must say what the renderer does rather than what the storage holds.
             effect = layer?.layerEffect
+            isTransform = layer?.layerTransform != nil
             isFillReference = layer?.isFillReference ?? false
             thumbnail = layer?.thumbnail
             folderName = manager.folders.first { $0.id == layer?.parentFolderID }?.name

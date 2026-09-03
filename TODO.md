@@ -46,10 +46,22 @@ app, and whoever notices that should come back and say so rather than assuming i
   Stage 5 is the transform channel: a cel or an animation group carries a track of quad poses, ink is
   posed through `mapping(_:throughStretch:)`'s `sqrt(|det|)` width rule, and the blend is factored so
   the endpoints come back bit-exact. **A pose channel has a graph-editor band now** (§11.7): six
-  decomposed curves — X, Y, Scale X, Scale Y, Rotation, Skew — grouped, foldable, and **read-only**, with
-  a click on a row raising the Move box over the drawing that channel moves. What it does not have is
-  write-back, because a node's frame is shared by all six sub-curves and retiming one is retiming the
-  key; §11.7 says what that would need. **Animation groups still have no UI of their own.**
+  decomposed curves — X, Y, Scale X, Scale Y, Rotation, Skew — grouped, foldable and draggable, with
+  a click on a row raising the Move box over the drawing that channel moves. **The read-only clause this
+  paragraph carried is stale**: `writeGraphBandPoseEdits` is the write-back, and a node drags as the one
+  key its six rows are.
+  **A transformation layer is reachable**: the value layer's menu is relabelled to follow what is set
+  — Blend Mode / Effect / Transform, §2.6 — and a Transform entry there makes the layer one, on the
+  same presence-is-the-discriminant recipe the grade and the flat colour already use. Move on such a
+  layer raises the canvas frame as a box, previews by writing the pose the render path actually reads,
+  and commits through `commitContainerPose`, which is `KeyframeControl.write`'s same five arms in the
+  container's currency. **`LayerFolder.transform` still has no entry** — the model and the render treat
+  it identically (§2.21), so it is a row in the folder options menu and a box, not new machinery.
+  **Animation groups can be named**: the channel list draws each group's tag colour, which §3.4
+  specified and nothing had ever drawn, and a long press on the header renames it. **Membership editing
+  — adding to and removing from a group — is not built and needs a design conversation**: §2.29 rules
+  that splitting one animated group into two is *"a different feature"*, and retagging an element is
+  that question from the other side, since every key on both groups' tracks changes meaning.
   **A Move at a posed in-between works**: it measures
   its box, its loop and its drag in the space the artist is looking at, and commits by conjugating the
   delta onto the channel, which is §2.27's `.key` arm.
@@ -59,8 +71,9 @@ app, and whoever notices that should come back and say so rather than assuming i
   **Stage 4, the rest-space dab bake, is merged**, and its tests reach the shipped dispatch now rather
   than an algebraic consequence of `DabPose.applied(to:)`. That unblocks **5b**, animated Distort — the
   projective case where no single scalar is the right width, wrong by 15% to 315% across one quad —
-  because `DabPose` answers `localScale` per dab. **What remains is stages 5b, 6, 7, 8 and 10, plus the
-  three gaps above**, and which goes first is an owner question rather than a settled order.
+  because `DabPose` answers `localScale` per dab. **What remains is stages 5b, 6, 7 and 10, plus the
+  gaps above**, and which goes first is an owner question rather than a settled order. Stage 8, the
+  transformation layer, is merged — model, render, cache safety and now the artist's entry.
 
 ## How a brush stroke is stored — one feature in five items, and all five are merged
 
@@ -117,8 +130,10 @@ LAYER_TRANSFORM.md.
       shimmer *and* the per-sample-width problem at once; and **bake is an authoring feature, never a
       performance instruction** — smooth playback comes from a cache.
 
-      **What remains is stages 4, 5b, 6, 7, 8 and 10.** Stage 6b is not among them: §4.6's playback cache
-      is delivered by (29)'s frame store, and that row is a cross-reference now rather than work.
+      **What remains is stages 5b, 6, 7 and 10.** Stage 6b is not among them: §4.6's playback cache
+      is delivered by (29)'s frame store, and that row is a cross-reference now rather than work; nor
+      are 4 and 8, both merged — the rest-space dab bake and the transformation layer, the latter
+      including the artist's entry to it.
 
 ### (26) Import videos — designed, spec at [VIDEO.md](VIDEO.md)
 

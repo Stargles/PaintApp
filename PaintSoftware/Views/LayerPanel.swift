@@ -336,7 +336,13 @@ struct LayerOptionsPanel: View {
             // stamps one — would answer nil to both and fall into the effect branch with no effect to
             // edit. Effect mode *is* `layerEffect != nil`; everything else is flat colour, including
             // the layer that has not been given a colour yet, which is what the swatch is for.
-            if let effect = canvasManager.layers[index].layerEffect {
+            if canvasManager.layers[index].layerTransform != nil {
+                // Transform mode has no row of its own: the pose is authored with the Move box on the
+                // canvas, not with a slider, and a row that opened an empty settings sheet would be a
+                // control that does nothing. The swatch is absent for `valueColorRow`'s own reason —
+                // in this mode the fill is inert storage the render never reads.
+                EmptyView()
+            } else if let effect = canvasManager.layers[index].layerEffect {
                 // Effect mode: the grade's knobs, behind a row rather than inline. Levels alone is
                 // five sliders and Gradient Map is a list, which is the same argument the Mask row
                 // made first — hence the same shape, the same chevron and the same Back button.
@@ -419,8 +425,18 @@ struct LayerOptionsPanel: View {
     /// Full `BlendMode.menuGroups`, unlike `compositorOpModeGroups`: Clip to Below is meaningless on a
     /// node whose operands are named slots, but a value layer sits in an ordinary stack with something
     /// under it, so the implicit source resolves and the mode means what it says.
+    ///
+    /// **The row's title follows what is set — Blend Mode / Effect / Transform** — which is §2.6's
+    /// ruling in the owner's own words: *"that 'blend mode' is very vague since effects, blend modes,
+    /// and now the transform will be added to it."* One question, three kinds of answer, and the
+    /// label says which kind is live rather than naming only the one that usually is.
+    ///
+    /// **Transform is a section of one, and it is a section rather than a fourth arm of the effect
+    /// list**, because it is not a grade: `Layer.transform` is a third payload on the same
+    /// presence-is-the-discriminant recipe (§4.4), and `setLayerTransform` is what writes it.
     private func valueBlendModeRow(index: Int) -> some View {
         let effect = canvasManager.layers[index].layerEffect
+        let transform = canvasManager.layers[index].layerTransform
         let blend = canvasManager.layers[index].blendMode
         return Menu {
             ForEach(BlendMode.menuGroups.indices, id: \.self) { groupIndex in
@@ -433,7 +449,7 @@ struct LayerOptionsPanel: View {
                             // last picked underneath an effect, and a checkmark beside a mode the
                             // renderer is currently ignoring would be the panel disagreeing with the
                             // canvas — `nodeOperationRow` makes this same argument about `compositorOp`.
-                            if effect == nil, mode == blend {
+                            if effect == nil, transform == nil, mode == blend {
                                 Label(mode.displayName, systemImage: "checkmark")
                             } else {
                                 Text(mode.displayName)
@@ -446,11 +462,30 @@ struct LayerOptionsPanel: View {
             effectMenuSections(current: effect, identifierPrefix: "layerOptions.blendMode") { picked in
                 canvasManager.setLayerEffect(layerIndex: index, to: picked)
             }
+            Section {
+                Button {
+                    // Toggling, like every other entry in this list: picking the mode the layer is
+                    // already in is the way *out* of it, and the only other way out is picking a
+                    // blend or a grade. Nil restores flat colour, keeping the fill
+                    // (`setLayerTransform` argues the asymmetry).
+                    canvasManager.setLayerTransform(layerIndex: index,
+                                                    to: transform == nil
+                                                        ? canvasManager.restingContainerPose : nil)
+                } label: {
+                    if transform != nil {
+                        Label("Transform", systemImage: "checkmark")
+                    } else {
+                        Text("Transform")
+                    }
+                }
+                .accessibilityIdentifier("layerOptions.blendMode.transform")
+            }
         } label: {
             HStack(spacing: 8) {
-                Text("Blend Mode").foregroundColor(.white)
+                Text(effect != nil ? "Effect" : (transform != nil ? "Transform" : "Blend Mode"))
+                    .foregroundColor(.white)
                 Spacer()
-                Text(effect?.displayName ?? blend.displayName)
+                Text(effect?.displayName ?? (transform != nil ? "Transform" : blend.displayName))
                     .font(.caption)
                     .foregroundColor(.gray)
                     .lineLimit(1)
@@ -463,9 +498,10 @@ struct LayerOptionsPanel: View {
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("layerOptions.blendModeButton")
-        // The grade's slug while grading, the blend's raw value otherwise — the same two-vocabulary
-        // value `nodeOperationRow` reports, so a test can read which of the two answers is live.
-        .accessibilityValue(effect.map(effectMenuSlug) ?? blend.rawValue)
+        // The grade's slug while grading, "transform" while posing, the blend's raw value otherwise —
+        // the same multi-vocabulary value `nodeOperationRow` reports, so a test can read which of the
+        // three answers is live. No `BlendMode.rawValue` and no `effectMenuSlug` is "transform".
+        .accessibilityValue(effect.map(effectMenuSlug) ?? (transform == nil ? blend.rawValue : "transform"))
     }
 
     /// §4.5's colour, on the layer that *is* one: a swatch that opens a picker — the same shape the

@@ -160,6 +160,17 @@ enum FloatingPieceKind {
     case move
     /// Target is a newly-inserted layer; the source layer is left untouched (a true copy).
     case duplicate
+    /// **A transformation layer's own pose** — KEYFRAMES.md §4.4, and the one kind that carries no
+    /// pixels at all.
+    ///
+    /// A transformation layer holds none (`leafSnapshots` elides it exactly as it does a grading
+    /// layer), so there is nothing to lift, nothing to leave a hole behind, and nothing to bake. The
+    /// piece is a **handle**: the canvas frame, drawn as a box the artist drags, whose pose is
+    /// written live onto `Layer.transform` so the content underneath moves through the real render
+    /// path rather than through a bitmap preview of it. That is what §2.3 asks for in the first
+    /// place — *"re-poses the vector objects below it, rather than resampling the composited pixels
+    /// below it"* — so a preview built by resampling would be a picture of the wrong feature.
+    case containerPose
 }
 
 /// A piece of pixel content lifted out for interactive move/resize/rotate, not yet committed back
@@ -211,6 +222,22 @@ struct FloatingPiece {
     /// Transient like everything else on this type — a floating piece is never persisted (see the
     /// type's own doc comment), so Distort owes no file-format change at all.
     var distortQuad: Quad?
+
+    /// **The container payload exactly as this box found it** — `.containerPose` only, nil on every
+    /// other kind.
+    ///
+    /// The **whole** `LayerPose` rather than the one quad the box composes onto, and that is the
+    /// field's second job rather than generosity. The live preview writes wherever the render reads —
+    /// the stored base on an unkeyed container, a key at the playhead on a keyed one — so putting the
+    /// preview back is putting a whole payload back. And it must be put back: `commitContainerPose`
+    /// reads the stored pose to take its undo baseline from, so without this the baseline would be
+    /// the *dragged* pose and one press of Undo would leave the drawing exactly where the artist had
+    /// just dragged it.
+    ///
+    /// **Resolved at the playhead, which cannot move under it**: `CanvasManager.commitFloatingPiece\
+    /// IfNeeded` is called *"whenever the layer/frame changes"* (this type's own doc), so a float
+    /// lifted at frame `n` is committed at frame `n` and there is no second frame to store.
+    var containerRest: LayerPose?
 
     /// The rectangle the piece's bitmap occupies in its own local space: `baseSize`, centred on the
     /// origin. `pieceImage`'s texel (0,0) is its `minX`/`minY` corner — which is the correspondence
@@ -650,6 +677,15 @@ extension CanvasManager {
     /// Begins transforming the current selection (or, if there isn't one, the whole current layer),
     /// in place: the source cel immediately shows a transparent hole where the piece was lifted from.
     func beginMove() {
+        // **A transformation layer is routed here rather than at the toolbar**, which is
+        // `TopToolbar.toggleMove`'s own founding lesson: a rule a view holds is a rule the fast tier
+        // cannot see, and the duplicate derived-frame guard that lived there is the one this file
+        // already points at. `layerTransform`, never the raw field — a `.raster` layer carrying a
+        // pose left behind by a kind change poses nothing, so Move on it is the ordinary pixel lift.
+        if layers.indices.contains(currentLayerIndex), layers[currentLayerIndex].layerTransform != nil {
+            beginContainerPoseMove()
+            return
+        }
         // Lifting pixels reads the cel's *flattened* content (`PixelOps.rasterize` below folds in
         // the transient fill preview), so anything still transient must be committed first — else
         // the fill is carried into the floating piece AND re-bakes into the source cel later, which
@@ -697,6 +733,76 @@ extension CanvasManager {
         // the piece came up and the artist had nothing on screen saying what was travelling. The ants
         // now travel with it; see `CanvasView.Coordinator.updateVectorFloat`.
     }
+
+    /// **Raises the Move box over a transformation layer's own pose** — KEYFRAMES.md §4.4's artist
+    /// entry, and the gesture `PoseChannelID.raisesMoveBox` was waiting for.
+    ///
+    /// **The box is the canvas frame, not the content.** A container holds no geometry, so there is
+    /// no ink to measure a box around and nothing under it belongs to this layer — the artist is
+    /// moving *the frame everything beneath is shown in*, and the canvas rect is what that frame is.
+    /// This is the same fallback `beginMove` already takes for a cel with no opaque pixels in it.
+    ///
+    /// **It lifts at rest and composes**, rather than starting the box at the pose already in force.
+    /// `FloatingTransform` is position + scale + rotation and cannot express a skew, so a box seeded
+    /// from a Freeform pose would have to go into `distortQuad` — which every other path in this file
+    /// treats as *"the projective residue"* of a live gesture and which `resetFloating` documents as
+    /// always nil at a lift. `containerRestPose` carries the pose instead and each nudge composes its
+    /// delta onto it, which gives the same answer with none of that reinterpretation.
+    ///
+    /// - Returns: whether a box came up. False when the current layer is not posing, or before the
+    ///   document has a canvas size to measure the frame against.
+    @discardableResult
+    func beginContainerPoseMove() -> Bool {
+        commitAllInteractiveState()
+        guard let canvasSize, layers.indices.contains(currentLayerIndex),
+              let pose = layers[currentLayerIndex].layerTransform,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame)
+        else { return false }
+
+        let canvasRect = CGRect(origin: .zero, size: canvasSize)
+        let lift = FloatingTransform(position: CGPoint(x: canvasRect.midX, y: canvasRect.midY),
+                                     scaleX: 1, scaleY: 1, rotation: 0)
+        let layerID = layers[currentLayerIndex].id
+        floatingPiece = FloatingPiece(
+            kind: .containerPose,
+            sourceLayerID: layerID, sourceCelID: layers[currentLayerIndex].cels[celIndex].id,
+            targetLayerID: layerID, targetCelID: layers[currentLayerIndex].cels[celIndex].id,
+            // A clear pixel, because the box has no bitmap and the overlay wants one. The content it
+            // appears to hold is the real composite underneath, moving through the render path.
+            pieceImage: Self.clearPixel, baseSize: canvasRect.size,
+            remainderPreview: nil,
+            transform: lift, liftTransform: lift,
+            mode: transformMode,
+            containerRest: pose)
+        return true
+    }
+
+    /// **The pose a container float is showing right now** — the rest pose it came up on, carried
+    /// through the delta the box has travelled.
+    ///
+    /// **The affine delta, so the projective residue of a Distort drag is dropped rather than stored.**
+    /// A container pose can hold a projective quad — `PoseQuad` is four corners — but nothing renders
+    /// one properly yet: `PoseQuad.affineOrLinearised` falls back to the linearisation at the box
+    /// centre, which KEYFRAMES §4.2 names as an honest artifact and §8 measures as wrong by 315% at
+    /// the far end of a strong keystone. Stage 5b is where a projective container pose belongs, and
+    /// `distortUnavailableReason` is where the bar says so.
+    /// **The delta acts on the corners, not on the box**, which is what makes composition a
+    /// one-liner: a pose *is* "these four corners for that box", so carrying the corners through the
+    /// gesture's canvas-space delta and leaving the box alone is exactly "what was posed here is now
+    /// posed there". Nothing has to be decomposed and nothing is re-derived, so a second Move on an
+    /// already-posed layer cannot lose the first one to a factoring step.
+    static func containerPose(_ rest: PoseQuad, movedBy piece: FloatingPiece) -> PoseQuad? {
+        guard let liftInverse = CanvasManager.invertedAffine(piece.liftTransform.affineTransform)
+        else { return nil }
+        let delta = liftInverse.concatenating(piece.transform.affineTransform)
+        return PoseQuad(box: rest.box, corners: rest.corners.mapped(by: delta))
+    }
+
+    /// One clear pixel, made once. `UIGraphicsImageRenderer` is the app's usual way to a bitmap and
+    /// this is the smallest one it can produce; the overlay scales it to `baseSize` and it shows
+    /// nothing, which is the point.
+    static let clearPixel: UIImage = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1))
+        .image { _ in }
 
     /// Copies the current selection onto a brand-new layer above the current one, immediately
     /// entering the same interactive move/resize/rotate state as `beginMove()`. The source layer is
@@ -766,6 +872,44 @@ extension CanvasManager {
     func updateFloatingPose(transform: FloatingTransform, distortQuad: Quad?) {
         floatingPiece?.transform = transform
         floatingPiece?.distortQuad = distortQuad
+        showContainerPoseLive()
+    }
+
+    /// **The container float's preview: write the pose the box is at, and let the canvas draw it.**
+    ///
+    /// A raster piece previews itself — it is a bitmap and the overlay holds it — and a vector float
+    /// previews through a latched `CATransform3D`. A transformation layer can do neither, because
+    /// what it moves is other layers' content and the whole point of §2.3 is that the content is
+    /// *re-posed* rather than resampled. So the preview is the real thing: the stored pose is written
+    /// on every tick and the ordinary render path composites through it.
+    ///
+    /// **It records no undo step**, deliberately, which is the raster Move's rule (one step, at the
+    /// bake) rather than the vector float's (one per nudge). `containerRestPose` is what makes that
+    /// safe: the commit puts the stored pose back to it before routing, so the step the writer
+    /// records restores the pose the drag *started* from and not the one it was standing on.
+    private func showContainerPoseLive() {
+        guard let piece = floatingPiece, piece.kind == .containerPose,
+              let restState = piece.containerRest,
+              let index = layers.firstIndex(where: { $0.id == piece.targetLayerID }),
+              layers[index].layerTransform != nil,
+              let posed = Self.containerPose(restState.resolvedPose(atFrame: currentFrame),
+                                             movedBy: piece)
+        else { return }
+        // **Written wherever `resolvedPose` reads**, or the preview shows nothing on exactly the
+        // documents this feature is for: that accessor is *"the track when it holds keys, the stored
+        // base otherwise"*, so writing the base under a keyed container would move a value the render
+        // never consults and the canvas would sit still under the artist's finger.
+        //
+        // Composed onto the **lift** state rather than onto the live one, so a hundred ticks of a
+        // drag leave one key rather than a hundred baselines of drift.
+        var live = restState
+        if live.track.isEmpty {
+            live.pose = posed
+        } else {
+            live.track.setKey(TransformTrack.Key(frame: currentFrame, pose: posed))
+        }
+        guard layers[index].transform != live else { return }
+        layers[index].transform = live
     }
 
     /// Why **Distort** cannot act on what is floating, or nil when it can. One line under the Move
@@ -793,6 +937,17 @@ extension CanvasManager {
     /// shape — but a float carrying one almost always carries ink beside it, and a per-kind refusal
     /// is exactly what stage 3c deleted. So the refusal is per *float*, once, with one sentence.
     var distortUnavailableReason: String? {
+        // **The container float refuses it for a different reason and says a different sentence.**
+        // Nothing here is missing a pixel selection — a container pose is four corners and could hold
+        // a keystone perfectly well. What cannot hold one is the *render*: `PoseQuad.affineOrLinearised`
+        // falls back to the linearisation at the box centre, which §8 measures as wrong by 315% at the
+        // far end of a strong keystone, so a Distort here would look right in the box and wrong on the
+        // canvas. That is KEYFRAMES §2.13's *"keyframes ship with Uniform and Freeform working and
+        // Distort still greyed exactly as it is today"*, arriving at the one surface that could have
+        // offered it early.
+        if transformMode == .distort, floatingPiece?.kind == .containerPose {
+            return "Distort is not available on a transformation layer yet — Move, scale and turn are."
+        }
         guard transformMode == .distort, vectorFloat != nil else { return nil }
         // **"Not yet" in the artist's words as well as in this file's.** §5.14's rule is that a
         // reader must be able to tell a deferral from a refusal, and the artist is a reader too: a
@@ -891,6 +1046,10 @@ extension CanvasManager {
     func mirrorFloating(horizontal: Bool) {
         if floatingPiece != nil {
             if horizontal { floatingPiece!.transform.flipH.toggle() } else { floatingPiece!.transform.flipV.toggle() }
+            // The container float's preview lives in the document rather than in the overlay, so every
+            // site that moves a piece has to end here — `updateFloatingPose`'s tail. Free on a raster
+            // piece: the first guard fails and nothing is read.
+            showContainerPoseLive()
             return
         }
         guard let float = vectorFloat else { return }
@@ -911,6 +1070,7 @@ extension CanvasManager {
             floatingPiece!.transform.rotation = FixedAngleRotation.stepped(from: piece.transform.rotation,
                                                                           lift: piece.liftTransform.rotation,
                                                                           eighths: eighths)
+            showContainerPoseLive()
             return
         }
         guard let float = vectorFloat else { return }
@@ -995,6 +1155,10 @@ extension CanvasManager {
             // the *same value* an unlifted one is, and every `distortQuad != nil` question above
             // answers the way it did before the drag.
             floatingPiece!.distortQuad = nil
+            // The container float's preview lives in the document, not in the overlay, so snapping
+            // the box back has to snap the pose back with it — `updateFloatingPose`'s tail, reached
+            // from the one other place that moves a piece without going through it.
+            showContainerPoseLive()
             return
         }
         guard let float = vectorFloat else { return }
@@ -1012,6 +1176,13 @@ extension CanvasManager {
     func commitFloatingPieceIfNeeded() -> Bool {
         guard let piece = floatingPiece, let canvasSize else { return false }
         floatingPiece = nil
+        // **The container float bakes nothing and returns here**, before a single line of the pixel
+        // path below. It has no `pieceImage` worth rendering, no remainder to composite against and
+        // no cel to write into — the whole of its commit is one routed write onto `Layer.transform`.
+        if piece.kind == .containerPose {
+            commitContainerFloat(piece)
+            return true
+        }
         // §5.6, and since 2026-08-22 the raster tool's rule as well as the vector one: the ants clear
         // when the piece bakes, not when it lifts. `.duplicate` cleared its own at lift and is
         // untouched — a copy is not a region the artist is still holding.
@@ -1023,6 +1194,11 @@ extension CanvasManager {
         let targetCel = layers[targetLayerIndex].cels[targetCelIndex]
 
         switch piece.kind {
+        case .containerPose:
+            // Unreachable: the early return above takes this kind before a pixel is touched. Spelled
+            // out rather than folded into a `default:`, so the next kind to arrive is a compiler
+            // error here instead of a silent bake into somebody's cel.
+            break
         case .move:
             // remainderPreview was rendered from PixelOps.rasterize (see beginMove), which already
             // folds fillImage/bakedImage/the old raster strokes into it — so the result lands purely
@@ -1041,6 +1217,32 @@ extension CanvasManager {
             registerUndoableLayerInsertion(layerIndex: targetLayerIndex, finalImage: newImage, label: .duplicatePiece)
         }
         return true
+    }
+
+    /// **A container float's whole commit** — put the pose back where the drag found it, then route
+    /// the move through `commitContainerPose`.
+    ///
+    /// **The restore is not a no-op and it is not cosmetic.** `showContainerPoseLive` has been
+    /// writing the stored pose on every tick, so by the time this runs the model already holds the
+    /// dragged pose; `commitContainerPose` reads the stored pose to take its undo baseline from, and
+    /// without this line that baseline would *be* the drag — one press of Undo would put the drawing
+    /// back exactly where the artist had just dragged it, which is a control that appears not to
+    /// work. Writing the field directly rather than through `writeContainerPose` is what keeps the
+    /// restore off the history: it is undoing a preview, not an edit.
+    ///
+    /// **A move that ended where it began writes nothing at all** — including no undo step — which is
+    /// the raster arm's own behaviour reached by comparing poses rather than pixels.
+    private func commitContainerFloat(_ piece: FloatingPiece) {
+        guard let restState = piece.containerRest,
+              let index = layers.firstIndex(where: { $0.id == piece.targetLayerID }),
+              layers[index].layerTransform != nil
+        else { return }
+        let rest = restState.resolvedPose(atFrame: currentFrame)
+        guard let posed = Self.containerPose(rest, movedBy: piece) else { return }
+        layers[index].transform = restState
+        guard posed != rest else { return }
+        commitContainerPose(layerID: piece.targetLayerID, restingAt: rest, movedTo: posed,
+                            atFrame: currentFrame)
     }
 
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)
