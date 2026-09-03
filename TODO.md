@@ -268,30 +268,6 @@ LAYER_TRANSFORM.md.
 - [ ] > "Right now when you import images they appear in the center of the canvas with no move box. Make them
       > have the move box. You likely can reuse the move code, this should be a simple fix."
 
-### (38) The timeline and the graph editor should read as one thing
-
-Four asks from the owner, 2026-09-03, on one surface. **(a) and (c) are merged**; (b) and (d) remain,
-and both sit on the model (c) settled.
-
-**What (c) turned out to be, because it changes what (b) is building on.** §2.28 was fully built and
-neither surface bypassed its accessor — the divergence was one level below, in §2.28's own closing rule
-that let an explicit mark and a curve key both live at one frame. The graph editor could not repair it,
-so dragging a node left its mark behind as an indicator with no node. That rule is superseded: a mark a
-key lands on is now dropped. **A key and a node are the same thing.**
-
-- [ ] **(b) The graph is bezier, and a node's tap opens its curve rather than deleting it.**
-      > "The graph should be bezier curved. Right now clicking on a node in it deletes it. Instead, when
-      > you click on it it should open the adjust bezier curve from that node menu, the one with the line
-      > and two nodes. Clicking on a node twice just like clicking on a cel twice brings up the menu and
-      > the option to delete it."
-
-      A single tap currently deletes, which is a destructive default; the ask makes single-tap open the
-      handle editor and double-tap the menu that carries Delete, matching what a double-tap on a cel
-      already does.
-
-- [ ] **(d) A dragged node shows its value.** > "There should be a numerical indicator whenever a node is
-      dragged up or down for the value that the node is controlling in the graph editor."
-
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and

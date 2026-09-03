@@ -1650,10 +1650,36 @@ assert and this is a decision made by eye, as D2's was.
 a drag in empty space rubber-bands, a grab on a member carries the set — is the one a cel marquee
 would copy.
 
-**Not in this stage and deliberately: bezier tangent handles.** `AnimationCurve` already carries
-`inHandle`/`outHandle` and five tangent modes and decision 1 makes an unclamped overshoot real, so the
-model is ready; what is missing is the second hit target per key and the arbitration between grabbing
-a handle and grabbing the key it belongs to, which is a stage rather than an afternoon.
+**Bezier tangent handles — done 2026-09-03, TODO (38)(b).** The curve was already bezier in the model
+*and drawn as one*: `AnimationCurve.Key.interpolation` defaults to `.bezier`, every construction site
+takes that default, and `TimelineGraphBandView.draw` samples `evaluate` once per point of width. **What
+was missing was the authoring, and not for the reason this paragraph gave.** Every key shipped
+`.autoClamped`, and `effectiveHandles(at:)` *derives* the pair and discards the stored one — so an
+authored handle changed nothing at all. Taking a handle therefore has to move the key to `.free` **and
+seed both derived handles into the stored pair in the same write**; doing it the other way round snaps
+the segment straight at touch-down.
+
+The arbitration this paragraph named is resolved by nearest-wins (`TimelineGraphBand.grab`): a handle
+takes the grab only when it is nearer than its own node. **Dragging sets `.free`, by owner ruling** —
+what you drag is what moves, rather than `.aligned` swinging the far handle under the finger — and the
+way back is the node menu's **Reset Curve**. Nothing is clamped on the way in; that is decision 3
+already, not an omission.
+
+**The tap grammar changed with it and the old one is superseded.** It was *on a key it removes, on empty
+graph it adds*; a single tap deleting was a destructive default. It is now: on a node it **focuses**
+(which is what draws the handles), on the already-focused node it opens a **menu** carrying Reset Curve
+and Delete Keyframe, and on empty graph it still adds. That second stage is `handleTapOnCel`'s existing
+two-stage contract — the app has no double-tap recogniser anywhere, and "clicking twice" means a second
+tap that lands where the selection already is — so `MenuRequest` gained a `.graphNode` case and reuses
+the one `timelineMenu` state and anchor path. Delete funnels through
+`CanvasManager.removeEffectParameterKey` to the *same* writer the old tap used, so it is still one undo
+step and it still drops a mark through `marks(_:droppingKeyed:)`. No third writer.
+
+**A dragged node reads its own value (TODO (38)(d))** in `EffectParameter.format` verbatim — the exact
+string that parameter's own settings-bar slider prints, so the two can never disagree about a number.
+It sits above the node, beside it when there is no room above, clamped to the *visible* window rather
+than the band's bounds, and appears only when the drag has changed the node's **value**, so a pure
+retiming drag shows nothing by construction rather than by a threshold.
 
 ### 11.5 Stage D4 — the channel list is a filter, not a navigator — **done 2026-08-29**
 

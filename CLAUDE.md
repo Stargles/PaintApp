@@ -304,6 +304,13 @@ And `CompositeProbe` counts calls to `Compositor.composite`, which since chunkin
 frames**. Pin "one small frame is one composite" as its own test rather than assuming it inside five
 others.
 
+**And an expectation can be unevaluatable during the very action it is timed against.** An
+`XCTNSPredicateExpectation` built before an XCUITest drag cannot fire during it, because XCUITest's drag
+is synchronous — so the affirmative test times out, and its **inverted twin passes unconditionally**,
+whatever the app does. That is how a "no readout appears on a sideways drag" test can be green against
+an app that shows one on every drag. If an assertion's window closes before the behaviour it names can
+occur, it is measuring the harness.
+
 ### A static that writes through to `UserDefaults` outlives the test that set it
 
 `CanvasManager.renderResolution` persists on every set, so it is process-wide **and survives into the

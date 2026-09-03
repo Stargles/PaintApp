@@ -10,9 +10,8 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first
 
-**Nothing is owed before you start.** The fast tier is **2683 / 2680 passed / 0 failed / 3 skipped**,
-taken at `f16d958`; it was 2678 after this pass's first four branches and TODO (38)(a) and (c) added the
-rest. The last full run was at `04099a9` — 2759
+**Nothing is owed before you start.** The fast tier is **2698 / 2695 passed / 0 failed / 3 skipped**,
+taken at `c7e843d`; it was 2657 at the start of this pass and TODO (38)'s four asks are the last +20. The last full run was at `04099a9` — 2759
 tests, one environmental failure clean in isolation — and it now predates two passes that changed the
 compositing sweep, the export driver and the cel-copy verbs, so **a full run is the first thing worth
 twenty-two minutes** if you are about to close a phase. It is not owed before ordinary work.
@@ -40,13 +39,14 @@ and animation groups have no UI — which are more visible to the artist day to 
 
 **Nothing is in flight. No worktrees, no `tmp/*` branches, nothing uncommitted.**
 
-**Fast tier: 2683 total / 2680 passed / 0 failed / 3 skipped.** It was 2657 at the start of this pass.
+**Fast tier: 2698 total / 2695 passed / 0 failed / 3 skipped.** It was 2657 at the start of this pass.
 
-**TODO (38)(b) and (d) are the obvious next pickup** — a tap on a graph node should open its bezier
-handles rather than delete it, and a dragged node should show the value it is driving. Both sit on the
-model (38)(c) just settled, which is why they were held rather than built beside it.
+**TODO (38) is fully merged** — frame gridlines, a keyframe and a graph node being one thing, bezier
+tangent handles with the tap grammar that goes with them, and a value readout on a node drag. The one
+thing to know: **the handle control the owner named did not exist** and was built to their confirmation
+(in place on the graph, `.free` tangents, Reset Curve as the way back).
 
-**Three owner rulings landed this pass and are recorded where they act**, not here: a node on the
+**Five owner rulings landed this pass and are recorded where they act**, not here: a node on the
 graph and an indicator on the cel are **one thing**, which supersedes KEYFRAMES §2.28's closing rule; §2.16's grain-on-Move
 decline **stands** and belongs to the brush overhaul, TODO (37); and a copy of an in-between is **a
 flattened still**, which duplicate, copy and split now implement.
