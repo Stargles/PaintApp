@@ -65,13 +65,15 @@ the main actor.
 
 **Small things stage 4 left behind**, each a few minutes:
 
-- `FrameBaker.reset()` and `markEverythingDirty()` have tests and **no app caller** — confirmed, the
-  only callers are `FrameBakerLogicTests`. `markEverythingDirty` is redundant by its own doc comment
-  (the structural sweep already carries `maskTuningGeneration` and `backend`, its two named inputs), so
-  it is a straight delete. **`reset()` is the one to think about rather than delete reflexively**: it
-  covers document close and a store purged underneath, and it is dead only because a re-root discards
-  the whole baker. Whether that discard is the right lifecycle is the actual question — answer it, then
-  wire or delete.
+- **`FrameBaker.reset()` is wired**, to `CanvasManager.closeFrameBaker()` from
+  `ContentView.returnToGallery` — the document-closing case its doc comment named. `ContentView` keeps
+  the `CanvasManager` in `@State` across a return to the gallery, so the baker's bookkeeping and its
+  decoded-frame ring, up to 96 MiB, sat resident for a document nobody was looking at.
+  **`markEverythingDirty()` stays, and "a straight delete" was wrong.** It is redundant for the app,
+  confirmed — but `bakeQueue` is `private(set)`, so it is the only way anything outside `FrameBaker`
+  can force a worst-case dirty mark whose *key is unchanged*, which is exactly the scenario
+  `testAScrubThroughAHoldCostsNoComposites` pins. Both of its inputs are folded into `FrameBakeKey`, so
+  triggering either for real forces a genuine recompute rather than the dedupe that test measures.
 - The compression ratio on the owner's own **"UI Test"** document, and a decode against a frame the
   *compositor* produced rather than one drawn for the purpose. PERFORMANCE §10.4 records both as owed.
 - **Nobody has looked at the timeline's amber strip on a screen.** Its tests assert the encoded

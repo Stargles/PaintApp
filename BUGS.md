@@ -58,23 +58,25 @@ It was retired into `testGrainTravelsWithTheInkUnderAPose` when the stage landed
 comparing `grainAlphaMultiplier` at two positions is the definition of a noise field and could not have
 gone red. Its replacement had the *other* hole and is now on the probe.
 
-Two smaller ones from the same reading: `DistortLogicTests.swift:285`'s "the drag is a function of its final point alone" is enforced by
-`FloatingDistortDrag` being a struct of four `let`s with a non-`mutating` accessor, so the defect it
-argues against would fail to build rather than fail the test; and the `resolvedBackend(for:) == .metal`
-premise asserted in three Metal suites is a tautology of their own `setUp`, which sets
-`Compositor.backend = .metal` — the line at `LiveHalvesStripMetalLogicTests.swift:201` claims to show a
-GPU walk and would pass on a document with no leaves. The suites' real evidence is `MetalCompositor.-
-attempt` returning `.image`, which is sound.
+The two smaller ones are fixed. `DistortLogicTests`' "the drag is a function of its final point alone"
+is deleted: `FloatingDistortDrag` is four `let`s over value types with a non-`mutating` accessor, so the
+defect it argued against would fail to build, and the corner-drag and undrawable-quad tests already
+cover the real behaviour. The `resolvedBackend(for:) == .metal` premise was a tautology of `setUp` in
+only **one** of the three Metal suites — `ChunkedCompositeMetalLogicTests` and
+`StripedCompositeMetalLogicTests` already pair it with `MetalCompositor.attempt(...) == .image`, which
+is sound — and `LiveHalvesStripMetalLogicTests`' `testTwoStripsOfOneHalfDoNotShareAnUploadedTexture` now
+carries its sibling's "at least one leaf must have pixels" premise. **`.attempt == .image` is not on its
+own the witness it looks like**: it comes back `.image` for an empty half too, and an empty half has no
+uploaded texture for two strips to collide over.
 
 **Read clean**: `BakeQueueLogicTests`, `DecodedFrameRingLogicTests`, `FrameExportLogicTests`,
 `TimelineBakeBarLogicTests`, `FrameBakeStoreLogicTests`, `ChunkedCompositeLogicTests`,
 `ChunkedCompositeMetalLogicTests`, `LiveHalvesStripLogicTests`, `TransformTrackLogicTests`,
 `PoseInterpolationLogicTests`, `StripedCompositeLogicTests`. Both `CompositeProbe` uses assert per-chunk
 counts rather than treating a chunk count as a frame count, and every suite that sets
-`Compositor.backend` restores `Compositor.defaultBackend` rather than the literal. Seven striping
-fixtures do not assert their plan actually cut into more than one strip; all seven do today, so they are
-not vacuous — but the premise their siblings state explicitly is missing, and a fixture edit could make
-them one-strip silently.
+`Compositor.backend` restores `Compositor.defaultBackend` rather than the literal. The striping premise was worse than seven and is fixed: **eleven**
+call sites across four suites discarded the strip count `assertStrippedMatchesWhole` already returns,
+over seven distinct fixtures. All eleven assert `> 1` now.
 
 ## `duplicateCel`, `splitCel` and `pasteCel` drop a cel's interpolation recipe
 
