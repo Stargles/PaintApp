@@ -261,6 +261,33 @@ before something was deleted will silently resurrect it, and the count is the on
   the test names against the value it reports — that is thirty seconds and it settles which of the
   two you are looking at. Use plain `test` (which builds) unless you have a reason not to.
 
+**MEASURED at `8a4f156` — 3048 tests, 3042 passed, 0 failed, 6 skipped, and no environmental red at all**,
+which is rare enough here to be worth stating. The wall clock was 24.9 min but **that number is not a
+measurement**: two logic-tier runs were queued alongside it under `simlock`. Per this section's own 2026-08-29
+finding, contention costs wall clock through scheduling and leaves per-test durations almost untouched, so
+the class table below is usable and the headline is not.
+
+| class | seconds | tests |
+|---|---|---|
+| `SandwichCompositingUITests` | 343 | 10 |
+| `SelectionAndMoveUITests` | 285 | 10 |
+| `BlendModesAndCompositorUITests` | 265 | 8 |
+| `PerfBaselineTests` | 228 | 56 |
+| `EraserAndPersistenceUITests` | 197 | 7 |
+| `GraphEditorGestureUITests` | 196 | 4 |
+| `LayerFolderAndMaskMenuUITests` | 192 | 7 |
+| `LayerPanelControlsUITests` | 184 | 7 |
+| `CuttingModesUITests` | 160 | 4 |
+| `GraphEditorUITests` | 158 | 7 |
+
+**4,238 class-seconds across 149 classes**, against 4,206 across 129 at `04099a9` — so ~290 new tests cost
+about 30 class-seconds, which is close to free per test and the same conclusion that measurement reached.
+**The top three are still within 80 s of each other**, so the "one indivisible class sets the floor" story
+that held from 2026-08-15 to 2026-08-29 remains dead: splitting the longest just promotes the second. Four
+clones hold 17.7 min of ideal work. **`GraphEditorGestureUITests` is the one to watch** — 196 s across only
+**4** tests, the worst seconds-per-test on the board, and this file has twice recorded a graph-editor class
+growing past the floor while nobody looked.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
