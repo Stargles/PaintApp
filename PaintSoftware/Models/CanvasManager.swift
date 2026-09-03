@@ -1081,34 +1081,32 @@ final class CanvasManager: ObservableObject {
         let lossKind: MergeLossKind
     }
 
-    /// What a pinch-merge would lose, as answered by `mergeLossKind`. Two cases because they are
-    /// genuinely different losses, not two phrasings of one — a `Bool` here is what forced an earlier
-    /// version of this fix to exclude `.value` layers from the gesture rather than warn about them,
-    /// which traded one silent-failure shape (a lossy merge with no warning) for another (a pinch that
-    /// does nothing, on a layer combination that looked mergeable). Neither is acceptable on its own;
-    /// this is what lets both be handled the same way — a confirmation whose wording matches the loss.
+    /// What a pinch-merge would lose, as answered by `mergeLossKind`.
+    ///
+    /// **One case where there were two, because EFFECT_BACKDROP.md §2.3's ruling took both of the old
+    /// ones away.** A blend mode and a `.value` layer's grade or colour are baked into the merged result now
+    /// (`CoreGraphicsCompositor.mergedDown`), so neither is a loss to warn about. What is left is the
+    /// one reading `mergeContribution` answers `.nothing` for.
+    ///
+    /// A confirmation rather than a silent refusal, which is the part of the earlier design that
+    /// survives: refusing the gesture on a pair that looks mergeable is the same "control that does
+    /// nothing" shape the owner has flagged elsewhere.
     enum MergeLossKind: Equatable {
-        /// Either layer's blend mode is not Normal. `PixelOps.flatten` always composites with
-        /// `.normal` (see `mergeLayers`), so the mode is silently reset — the owner's own described
-        /// case, and the mildest of the two: content is unaffected, only how it combines with what
-        /// was under it.
-        case blendMode
-        /// Either layer is `.value` (§4.4's grade or §4.5's flat colour) — a layer that holds no
-        /// pixels of its own. `mergeLayers` rasterizes its cel, which is blank, so the merge discards
-        /// the grade or colour entirely rather than merely re-blending it. Worse than `.blendMode`,
-        /// and checked first by `mergeLossKind` for that reason: a pair with both problems reports
-        /// the one the artist needs told about more urgently.
-        case valueLayerContent
+        /// A layer with no pixels of its own whose contribution a pixel bake cannot express: §4.4's
+        /// grade in the **lower** position, whose backdrop is everything beneath the pair and so
+        /// outside the merge; or a transformation layer in either position, whose contribution is a
+        /// pose on the layers beneath rather than anything to composite.
+        ///
+        /// A grade in the *upper* position is deliberately not here: that is the owner's own reported
+        /// case, and it is baked.
+        case unbakeableLayer
 
-        /// The confirmation's message — worded to the actual loss, not to a generic "blend mode"
-        /// guess. `CanvasNotice.message`'s pattern: wording lives with the case it belongs to, one
-        /// place, rather than duplicated at every presenting call site.
+        /// The confirmation's message. `CanvasNotice.message`'s pattern: wording lives with the case
+        /// it belongs to, one place, rather than duplicated at every presenting call site.
         var confirmationMessage: String {
             switch self {
-            case .blendMode:
-                return "One of these layers uses a blend mode other than Normal. Merging will apply Normal blend mode to the result instead."
-            case .valueLayerContent:
-                return "One of these layers is a colour or adjustment layer with no pixels of its own. Merging will flatten it into the layer below, and it will no longer be editable as its own colour or adjustment."
+            case .unbakeableLayer:
+                return "One of these layers has no pixels of its own — an adjustment layer whose effect is on the layers underneath the pair, or a transformation layer. Merging cannot bake that in, so it will be discarded."
             }
         }
     }

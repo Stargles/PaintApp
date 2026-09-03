@@ -396,12 +396,11 @@ struct LayerStackListView: UIViewRepresentable {
                 // Only two plain layers merge — folders would need their contents flattened first.
                 // A `.value` layer (§4.4's grade, §4.5's flat colour) is still a plain layer here and
                 // pinches like any other; it is not excluded. An earlier version of this fix did
-                // exclude it, on the reasoning that merging one discards a whole grade/colour rather
-                // than merely a blend mode — true, but the remedy made the pinch a silent no-op on a
-                // pair that looks perfectly mergeable, which is the exact "control that does nothing
-                // with no feedback" shape this owner has flagged repeatedly elsewhere in this pass.
-                // `mergeLossKind` below still catches it; it just answers with a confirmation instead
-                // of with silence.
+                // exclude it, on the reasoning that merging one discards a whole grade/colour — true
+                // then, no longer true now the merge bakes it, and the remedy was wrong either way:
+                // it made the pinch a silent no-op on a pair that looks perfectly mergeable, which is
+                // the exact "control that does nothing with no feedback" shape this owner has flagged
+                // repeatedly elsewhere.
                 guard let picked = PinchMergeGate.pair(firstY: firstY, secondY: secondY, rows: layout) else { return }
                 pinchPair = (rows[picked.upper].id, rows[picked.lower].id)
                 // The same touch-down positions the pair was picked from, kept as the baseline the
@@ -424,13 +423,13 @@ struct LayerStackListView: UIViewRepresentable {
                     setPinchHighlight(false)
                     pinchPair = nil
                     pinchStartVerticalGap = nil
-                    // A pair with no blend mode and no `.value` layer stays lossless —
-                    // `mergeLayers` is exactly what "Merge Down" already calls. One `mergeLossKind`
-                    // flags (a blend mode `PixelOps.flatten` would silently reset to Normal, or a
-                    // `.value` layer whose grade/colour would be discarded entirely) is routed through
-                    // a confirmation instead of applied silently — the owner's own ask: "if so then
-                    // just throw a prompt telling the user" what will happen, worded to which of the
-                    // two it actually is (`MergeLossKind.confirmationMessage`).
+                    // Almost every pair merges outright — `mergeLayers` is exactly what "Merge Down"
+                    // already calls, and it bakes a blend mode and a `.value` layer's grade or
+                    // colour rather than dropping them (EFFECT_BACKDROP.md §2.3), so neither is a
+                    // loss to ask about any more. What `mergeLossKind` still flags is a layer it
+                    // cannot express at all, and that one is routed through a confirmation rather
+                    // than applied silently — the owner's own ask: "if so then just throw a prompt
+                    // telling the user" what will happen (`MergeLossKind.confirmationMessage`).
                     if let loss = canvasManager.mergeLossKind(pair.0, pair.1) {
                         canvasManager.pendingMergeConfirmation = .init(firstID: pair.0, secondID: pair.1, lossKind: loss)
                     } else {

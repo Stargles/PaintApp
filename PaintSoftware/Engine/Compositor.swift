@@ -999,8 +999,20 @@ enum CoreGraphicsCompositor {
                                 context: UIGraphicsImageRendererContext, width: Int, height: Int) {
         // Same resolution the GPU path uploads, for `MaskResolver`'s reason — the threshold is a step
         // function and the two backends cannot be allowed to land on opposite sides of it.
-        let coverage = node.masks.isEmpty ? nil : MaskResolver.coverage(for: node.masks, of: request)
-        let opacity = Float(node.opacity)
+        mixBack(graded, over: backdrop,
+                opacity: node.opacity,
+                coverage: node.masks.isEmpty ? nil : MaskResolver.coverage(for: node.masks, of: request),
+                in: bounds, context: context, width: width, height: height)
+    }
+
+    /// `mixBack` with the amount stated rather than looked up — **the arithmetic half, split out so
+    /// `mergedDown` can reach it without inventing a `RenderNode` and a `RenderRequest` to carry two
+    /// numbers.** A merge has no mask to resolve (`CanvasManager.mergeLayers` drops one, and says so),
+    /// so it passes nil coverage and the layer's own opacity.
+    static func mixBack(_ graded: [UInt8], over backdrop: [UInt8], opacity opacityValue: Double,
+                        coverage: ResolvedMask?, in bounds: CGRect,
+                        context: UIGraphicsImageRendererContext, width: Int, height: Int) {
+        let opacity = Float(opacityValue)
 
         var result = backdrop
         for pixel in 0..<(width * height) {
@@ -1118,8 +1130,13 @@ enum CoreGraphicsCompositor {
 
     /// One image onto the current context, at `opacity`, in `mode` — the single place this backend
     /// applies a blend, for leaves and for assembled groups alike.
-    private static func draw(_ image: UIImage, mode: BlendMode, opacity: Double,
-                             in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+    ///
+    /// **Internal rather than private since `mergedDown` joined the walk as a caller**, and that is
+    /// the whole of why merging a blend layer now bakes its mode: the merge used to spell its own
+    /// composite in `PixelOps` with `.normal` hard-coded, which is 25 modes' worth of arithmetic
+    /// this backend already owns and a second implementation this file's header rejects on sight.
+    static func draw(_ image: UIImage, mode: BlendMode, opacity: Double,
+                     in bounds: CGRect, context: UIGraphicsImageRendererContext) {
         if let cgMode = mode.coreGraphicsBlendMode {
             // Via `UIImage` rather than `CGContext.draw` so the top-left origin and the alpha
             // application are literally the same call the deleted flat walk made. A byte-identical
@@ -1238,5 +1255,114 @@ enum CoreGraphicsCompositor {
                        bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+}
+
+// MARK: - Merging one layer into the one below it
+
+/// **What a single layer contributes to a merge** — the same three shapes
+/// `CanvasManager.leafSnapshots` already resolves a layer into at a frame, with the render request
+/// left behind.
+///
+/// A merge is not a composite of a document: it has no paper, no layers beneath, no mask stacks and
+/// no tree, so `Compositor.composite` is the wrong shape for it (a `RenderRequest` would have to be
+/// invented, and its `sources` array is indexed by the document's layer indices). What it *does*
+/// share with a composite is the arithmetic — 25 blend modes and 13 grades — and that is what
+/// `CoreGraphicsCompositor.mergedDown` reaches for rather than re-spelling.
+enum MergeContribution {
+    /// Pixels, blended in `mode` at `opacity`. A raster or vector layer's flattened cel, or §4.5's
+    /// flat-colour value layer resolved into the canvas-sized sheet it is.
+    case pixels(UIImage, mode: BlendMode, opacity: Double)
+    /// §4.4's grade over whatever is beneath it, crossfaded back by `opacity`.
+    ///
+    /// No blend mode travels with it, and the omission is `RenderTree.renderNodes`' rule rather than
+    /// a field dropped on the way: a leaf in effect mode is pinned to `.normal` whatever it stores,
+    /// because a grade replaces the pixels it graded and there are not two things to compose.
+    case grade(Effect, opacity: Double)
+    /// Nothing this merge can bake — a layer that holds no pixels *and* has nothing inside the merge
+    /// to act on. §4.4's transformation layer, and a grading layer in the *lower* position, whose
+    /// backdrop is everything the merge deliberately excludes.
+    case nothing
+}
+
+extension CoreGraphicsCompositor {
+
+    /// **One layer baked into the layer directly below it, and nothing else** — the pixel side of
+    /// `CanvasManager.mergeLayers`, and EFFECT_BACKDROP.md §2.3's ruling expressed as a function.
+    ///
+    /// EFFECT_BACKDROP.md §1 makes an adjustment layer grade, and a blend mode blend against, the
+    /// whole accumulator: the paper and every layer beneath. A merge reaches one layer, so the merged
+    /// result **cannot** be the picture the artist was looking at. The owner chose Photoshop's answer
+    /// over reproducing that picture: *"The merged layer is that one layer's colours, transformed."*
+    /// Gaps where paper or another drawing showed through change appearance, because the paper stops
+    /// being graded once the adjustment layer is gone, and that is accepted. The rejected alternative
+    /// — baking the paper and the stack below into the result — makes the merged layer opaque and
+    /// hides everything under it.
+    ///
+    /// So the backdrop here is `bottom` alone, on transparency. Which is also why an `.ink` effect
+    /// needs no re-walk: EFFECT_BACKDROP.md §3's whole reason for one is that the accumulator holds
+    /// the paper and its alpha has stopped meaning coverage. There is no paper in this buffer, so
+    /// `.ink` and `.backdrop` are the same image — exactly the `paperInBackdrop: false` arm the walk
+    /// itself takes inside every buffered scope.
+    ///
+    /// **`bottom` is drawn `.normal` whatever mode the lower layer stores**, and that is not a mode
+    /// being dropped: the survivor keeps its own `blendMode`, so it goes on blending against what is
+    /// under it exactly as it did. The mode being *baked* is the upper layer's, which is the one with
+    /// nothing left to blend against once its layer is gone.
+    ///
+    /// **A mask on either layer is not applied and not preserved**, which is unchanged from before
+    /// this function existed. `AlphaMask` names other layers by id and resolving one needs a whole
+    /// `RenderRequest`; `mergeLayers` says so at its own call site.
+    ///
+    /// **CoreGraphics, deliberately, and there is no Metal twin to keep in step.** The GPU backend's
+    /// whole surface is `MetalCompositor.composite(_:)`/`attempt(_:)` — both take a `RenderRequest`,
+    /// so a merge would have to invent a document to reach either. Its one genuinely equivalent path
+    /// is `MetalEffects.apply(_:to:width:height:)`, the grade over a byte buffer, and the road is not
+    /// taken for the reason `EffectParityLogicTests` exists: the two implementations agree to within a
+    /// byte rather than exactly, and this result is written into the artist's document rather than
+    /// onto a frame that is redrawn. Two further reasons point the same way — `Compositor.composite`
+    /// may answer nil when `CompositorBudget` declines, which is fine for a frame that retries and not
+    /// for a destructive one-shot; and the GPU's win is "every frame after the first", where a merge is
+    /// cold by definition. `MergeBakeLogicTests.testMergingIsUnaffectedByWhichBackendTheCanvasIsUsing`
+    /// holds this to it.
+    static func mergedDown(bottom: MergeContribution, top: MergeContribution,
+                           canvasSize: CGSize) -> UIImage {
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        return UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
+            .image { context in
+                // The lower layer is a backdrop, so only its pixels can reach the result: a grade
+                // there has nothing inside the merge to grade, and `MergeContribution.nothing` is
+                // what `CanvasManager.mergeLossKind` warns about before the artist gets here.
+                if case .pixels(let image, _, let opacity) = bottom {
+                    image.draw(in: bounds, blendMode: .normal, alpha: CGFloat(opacity))
+                }
+                switch top {
+                case .pixels(let image, let mode, let opacity):
+                    draw(image, mode: mode, opacity: opacity, in: bounds, context: context)
+                case .grade(let effect, let opacity):
+                    grade(effect, opacity: opacity, in: bounds, context: context)
+                case .nothing:
+                    break
+                }
+            }
+    }
+
+    /// `grade(_:by:of:in:context:inkBelow:)` with the node and the request left out — the same two
+    /// calls in the same order (`EffectReference.apply`, then `mixBack`), over the backdrop the
+    /// caller has accumulated, which for a merge is the lower layer alone.
+    ///
+    /// Not a second implementation of grading: `EffectReference.apply` is the one CPU reference and
+    /// `mixBack` is the one crossfade, both shared verbatim with the walk. What is absent is only
+    /// what a merge does not have — a mask to resolve, and an `.ink` re-walk with no paper to escape.
+    private static func grade(_ effect: Effect, opacity: Double, in bounds: CGRect,
+                              context: UIGraphicsImageRendererContext) {
+        let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
+        guard width > 0, height > 0,
+              let backdropImage = context.currentImage.cgImage,
+              let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
+        else { return }
+        let graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
+        mixBack(graded, over: backdrop, opacity: opacity, coverage: nil,
+                in: bounds, context: context, width: width, height: height)
     }
 }

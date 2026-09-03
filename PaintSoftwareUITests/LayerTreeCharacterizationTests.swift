@@ -701,50 +701,83 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         XCTAssertNil(manager.mergeLossKind(bottom, top), "Both Normal, both raster: nothing would be lost")
     }
 
-    func testMergeLossKindReportsBlendModeWhenEitherLayerIsNotNormal() {
+    /// **This test asserted the opposite until EFFECT_BACKDROP.md §2.3, and its old caption — "Top's
+    /// Multiply never survives the merge's hard-coded Normal" — was the defect written down as a
+    /// feature.**
+    /// A blend mode is baked into the merged pixels now (`CoreGraphicsCompositor.mergedDown`, pinned
+    /// byte for byte in `MergeBakeLogicTests`), and the lower layer's own mode is carried on the
+    /// survivor, so neither is a loss and neither raises a prompt.
+    func testMergeLossKindIsNilForABlendModeNowThatOneIsBaked() {
         let manager = namedManager(["Bottom", "Top"])
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
 
         manager.layers[1].blendMode = .multiply
-        XCTAssertEqual(manager.mergeLossKind(bottom, top), .blendMode,
-                       "Top's Multiply never survives `PixelOps.flatten`'s hard-coded Normal")
+        XCTAssertNil(manager.mergeLossKind(bottom, top), "Top's Multiply is baked into the merged pixels")
 
         manager.layers[1].blendMode = .normal
         manager.layers[0].blendMode = .screen
-        XCTAssertEqual(manager.mergeLossKind(bottom, top), .blendMode, "Bottom's mode is lost exactly the same way")
+        XCTAssertNil(manager.mergeLossKind(bottom, top), "Bottom's mode rides on the survivor, unchanged")
     }
 
-    /// The coordinator's correction to the first pass of this fix: a `.value` layer is not excluded
-    /// from the pinch, it is confirmed — silently refusing the gesture on a pair that looks perfectly
-    /// mergeable is the same "control that does nothing" shape the owner has flagged elsewhere.
-    func testMergeLossKindReportsValueLayerContentForAGradeOrFlatColourLayer() {
+    /// **Also inverted by TODO (32).** A grade above the layer it grades is the owner's own reported
+    /// case and is exactly what the merge now bakes, so it must not raise a prompt — a confirmation
+    /// here would be telling the artist they are about to lose the thing they are about to get.
+    func testMergeLossKindIsNilForAGradeOrFlatColourLayerAboveTheLayerItActsOn() {
         let manager = CanvasFixture.manager()
         manager.layers.removeAll()
         manager.addLayer(name: "Bottom")
         manager.addValueLayer(name: "Top")   // lands above Bottom — insertNewLayer's rule
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
-        XCTAssertEqual(manager.layers[1].kind, .value, "Setup: Top is the value layer")
+        XCTAssertEqual(manager.layers[1].kind, .value, "Setup: Top is the value layer, in flat-colour mode")
 
-        XCTAssertEqual(manager.mergeLossKind(bottom, top), .valueLayerContent,
-                       "A grade/flat-colour layer holds no pixels — merging discards its content, not just a blend mode")
+        XCTAssertNil(manager.mergeLossKind(bottom, top), "A flat colour above is composited into the merge")
+
+        manager.setLayerEffect(layerIndex: 1, to: .hsvShift(.init(hueDegrees: 120)))
+        XCTAssertNotNil(manager.layers[1].layerEffect, "Setup: Top is now grading")
+        XCTAssertNil(manager.mergeLossKind(bottom, top), "…and a grade above is applied to the layer below")
     }
 
-    /// A `.value` layer with a non-Normal blend mode set on it (inert today, but still stored — see
-    /// `Layer.blendMode`'s doc) reports the content loss, not the blend-mode loss: losing the whole
-    /// layer is the more urgent thing to tell the artist, and reporting both would need a second UI
-    /// this predicate has no reason to grow.
-    func testMergeLossKindPrefersValueLayerContentOverBlendModeWhenBothApply() {
+    /// The loss that is left: a grade in the **lower** position. What it acts on is everything beneath
+    /// the pair, which the owner's ruling deliberately excludes from a merge, so there is nothing
+    /// inside the merge for it to grade and it is discarded.
+    ///
+    /// The pair is stated in both orders because `mergeLossKind` resolves positions rather than
+    /// trusting its argument order — the pinch hands it (upper, lower) and "Merge Down" the reverse.
+    func testMergeLossKindReportsAGradeInTheLowerPositionWhicheverOrderThePairArrivesIn() {
+        let manager = CanvasFixture.manager()
+        manager.layers.removeAll()
+        manager.addValueLayer(name: "Bottom")
+        manager.addLayer(name: "Top")
+        manager.setLayerEffect(layerIndex: 0, to: .hsvShift(.init(hueDegrees: 120)))
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+        XCTAssertNotNil(manager.layers[0].layerEffect, "Setup: the *lower* layer is the grading one")
+
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .unbakeableLayer)
+        XCTAssertEqual(manager.mergeLossKind(top, bottom), .unbakeableLayer,
+                       "The predicate resolves positions; it does not read the argument order as the stack order")
+    }
+
+    /// A transformation layer (§4.4's third payload) is a pose on the layers beneath it, which a pixel
+    /// bake cannot express — so it is the one `.value` mode that is still reported in *either*
+    /// position.
+    func testMergeLossKindReportsATransformationLayerInEitherPosition() {
         let manager = CanvasFixture.manager()
         manager.layers.removeAll()
         manager.addLayer(name: "Bottom")
         manager.addValueLayer(name: "Top")
-        manager.layers[1].blendMode = .multiply
-        let bottom = manager.layers[0].id
-        let top = manager.layers[1].id
+        manager.layers[1].transform = LayerPose(restingIn: CGRect(origin: CGPoint(x: 8, y: 0), size: CanvasFixture.canvasSize))
+        XCTAssertNotNil(manager.layers[1].layerTransform, "Setup: Top is in transform mode")
 
-        XCTAssertEqual(manager.mergeLossKind(bottom, top), .valueLayerContent)
+        XCTAssertEqual(manager.mergeLossKind(manager.layers[0].id, manager.layers[1].id), .unbakeableLayer)
+
+        manager.layers[1].transform = nil
+        manager.layers[0].kind = .value
+        manager.layers[0].transform = LayerPose(restingIn: CGRect(origin: CGPoint(x: 8, y: 0), size: CanvasFixture.canvasSize))
+        XCTAssertEqual(manager.mergeLossKind(manager.layers[0].id, manager.layers[1].id), .unbakeableLayer,
+                       "…and in the lower position too, where a grade is also unbakeable")
     }
 
     func testMergeLossKindIsNilForAnUnknownPair() {
@@ -754,39 +787,23 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     }
 
     func testConfirmingAPendingMergeRunsItAndClearsThePrompt() {
-        let manager = namedManager(["Bottom", "Top"])
-        manager.layers[1].blendMode = .multiply
+        let manager = CanvasFixture.manager()
+        manager.layers.removeAll()
+        manager.addValueLayer(name: "Bottom")
+        manager.addLayer(name: "Top")
+        manager.setLayerEffect(layerIndex: 0, to: .hsvShift(.init(hueDegrees: 120)))
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
 
-        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .blendMode)
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .unbakeableLayer)
         manager.confirmPendingMerge()
 
         XCTAssertNil(manager.pendingMergeConfirmation, "The prompt clears itself once answered")
         XCTAssertEqual(manager.layers.count, 1, "…and the merge it was holding actually ran")
-        XCTAssertEqual(manager.layers[0].blendMode, .normal,
-                       "The owner's own wording: proceeding applies Normal blend mode to the result")
-    }
-
-    /// The `.value` case, confirmed through: proceeding on a graded/flat-colour layer bakes a blank
-    /// cel into the survivor, exactly as `mergeLayers` already does for any `.value` layer merged
-    /// through the "Merge Down" button — the confirmation changes whether the artist is asked, not
-    /// what the merge itself does.
-    func testConfirmingAPendingMergeOfAValueLayerFlattensItAsMergeLayersAlwaysHas() {
-        let manager = CanvasFixture.manager()
-        manager.layers.removeAll()
-        manager.addLayer(name: "Bottom")
-        manager.addValueLayer(name: "Top")
-        let bottom = manager.layers[0].id
-        let top = manager.layers[1].id
-
-        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .valueLayerContent)
-        manager.confirmPendingMerge()
-
-        XCTAssertNil(manager.pendingMergeConfirmation)
-        XCTAssertEqual(manager.layers.count, 1)
-        XCTAssertEqual(manager.layers[0].id, bottom, "The lower layer survives — Top, the value layer, is the one absorbed")
-        XCTAssertEqual(manager.layers[0].kind, .raster, "The survivor is never left `.value` — same rule as any other merge")
+        XCTAssertEqual(manager.layers[0].id, bottom, "The lower layer survives, as in any other merge")
+        XCTAssertEqual(manager.layers[0].kind, .raster,
+                       "…and comes out `.raster`: the grade it could not bake is gone rather than left grading")
+        XCTAssertNil(manager.layers[0].effect, "The payload goes with the kind — nothing left to resurrect")
     }
 
     func testCancellingAPendingMergeLeavesBothLayersUntouched() {
@@ -795,7 +812,7 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
 
-        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .blendMode)
+        manager.pendingMergeConfirmation = .init(firstID: bottom, secondID: top, lossKind: .unbakeableLayer)
         manager.cancelPendingMerge()
 
         XCTAssertNil(manager.pendingMergeConfirmation)

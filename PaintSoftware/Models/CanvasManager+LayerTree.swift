@@ -427,28 +427,56 @@ extension CanvasManager {
     /// of applying it silently — `mergeLayers` has no notion of "ask first" and should not grow one
     /// just for its one UI caller.
     ///
-    /// `.value` checked before blend mode, so a layer that is both (a graded/flat-colour layer with a
-    /// non-Normal mode set on it, which does nothing today but is still stored) reports the loss that
-    /// actually matters more. See `CanvasManager.MergeLossKind` for what each case means and why a
-    /// `.value` layer is answered here rather than excluded from the gesture — merging one is
-    /// undoable through the same `withStructureUndo` every merge already uses, so a confirmation is
-    /// something the artist can act on, where a silent refusal would just be a pinch that does
-    /// nothing.
+    /// **Both of the cases this used to answer are gone, and EFFECT_BACKDROP.md §2.3 is why.** It
+    /// reported a loss for any non-Normal blend mode and for any `.value` layer, because the merge
+    /// baked neither — and both are baked now, so warning about them would be a prompt about a loss
+    /// that no longer happens. What is left is the one shape `CanvasManager.mergeLayers` still cannot
+    /// express, which `MergeLossKind` names.
+    ///
+    /// **Ordered rather than unordered, which it was not**: the two ids are resolved to positions,
+    /// because a grading layer is baked in the *upper* position and discarded in the *lower* one
+    /// (`mergeContribution`'s `isBackdrop`), and a predicate that could not tell those apart would
+    /// warn about the owner's own HSV case — the one this pass exists to make work.
+    ///
+    /// A confirmation rather than a refusal, unchanged: merging is undoable through the same
+    /// `withStructureUndo` every merge already uses, so a prompt is something the artist can act on
+    /// where a pinch that silently does nothing is not.
     func mergeLossKind(_ firstID: UUID, _ secondID: UUID) -> MergeLossKind? {
-        guard let first = layers.first(where: { $0.id == firstID }),
-              let second = layers.first(where: { $0.id == secondID }) else { return nil }
-        if first.kind == .value || second.kind == .value { return .valueLayerContent }
-        if first.blendMode != .normal || second.blendMode != .normal { return .blendMode }
+        guard firstID != secondID,
+              let firstIndex = layers.firstIndex(where: { $0.id == firstID }),
+              let secondIndex = layers.firstIndex(where: { $0.id == secondID }) else { return nil }
+        let bottom = layers[min(firstIndex, secondIndex)], top = layers[max(firstIndex, secondIndex)]
+        // The three readings `mergeContribution` answers `.nothing` for. Visibility is deliberately
+        // not one of them: a hidden layer contributing nothing is what hiding it means, and every
+        // merge has always behaved that way.
+        if bottom.layerEffect != nil || bottom.layerTransform != nil || top.layerTransform != nil {
+            return .unbakeableLayer
+        }
         return nil
     }
 
     /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer
-    /// panel. The lower of the two survives (keeping its name and folder) as a `.raster` layer; the
-    /// upper is removed and its pixels are baked down with both layers' opacities applied. If either
-    /// layer is `.vector`, it's fully rasterized first (every cel, not just the merged one — see
+    /// panel, and "Merge Down". The lower of the two survives (keeping its name and folder) as a
+    /// `.raster` layer; the upper is removed and **its whole contribution is baked down** — its
+    /// pixels, its blend mode, or its grade — with both layers' opacities applied. If either layer is
+    /// `.vector`, it's fully rasterized first (every cel, not just the merged one — see
     /// `rasterizeLayer`) so it never comes out of this still labeled `.vector`. One undo step
     /// covering the rasterize(s) + the flatten + the deletion together (nested `withStructureUndo`
     /// calls, including the one inside `deleteLayer`, all coalesce into this outer scope).
+    ///
+    /// **The blend and the grade are baked, and until EFFECT_BACKDROP.md §2.3's ruling neither was.**
+    /// The old pixel side of this method composited `.normal` unconditionally and read a layer's
+    /// pixels out of its *cel*, which a `.value` layer's content is not — so the owner's report was
+    /// two halves of one cause: an HSV Shift merged down did nothing at all, and a Screen layer merged
+    /// down gave Normal's answer. `CoreGraphicsCompositor.mergedDown` is where both now come from.
+    ///
+    /// **Two things are still dropped, and they are named rather than silently lost.** An `AlphaMask`
+    /// on either layer is not applied and not preserved — it names other layers by id and resolving
+    /// one needs a whole `RenderRequest`, which a merge does not build. And a contribution the merge
+    /// cannot bake at all (`MergeContribution.nothing`: a transformation layer, or a grading layer in
+    /// the *lower* position, whose backdrop is everything this merge deliberately excludes) reaches
+    /// the result as nothing. `mergeLossKind` is the predicate that warns about the second before the
+    /// artist gets here.
     @discardableResult
     func mergeLayers(_ firstID: UUID, _ secondID: UUID) -> Bool {
         guard let canvasSize, firstID != secondID,
@@ -469,14 +497,11 @@ extension CanvasManager {
             guard let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
                   let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame) else { return }
 
-            // No `ContentProvider` here on purpose: both layers went through `rasterizeLayer` two
-            // lines up, which flattens every derived cel *through* the seam and then clears both the
-            // geometry and the recipe. By this point neither cel can derive anything.
-            let flattened = PixelOps.flatten(
-                bottom: PixelOps.rasterize(cel: layers[bottomIndex].cels[bottomCel], canvasSize: canvasSize),
-                bottomOpacity: layers[bottomIndex].isVisible ? layers[bottomIndex].opacity : 0,
-                top: PixelOps.rasterize(cel: layers[topIndex].cels[topCel], canvasSize: canvasSize),
-                topOpacity: layers[topIndex].isVisible ? layers[topIndex].opacity : 0,
+            let flattened = CoreGraphicsCompositor.mergedDown(
+                bottom: mergeContribution(ofLayer: bottomIndex, celIndex: bottomCel,
+                                          canvasSize: canvasSize, isBackdrop: true),
+                top: mergeContribution(ofLayer: topIndex, celIndex: topCel,
+                                       canvasSize: canvasSize, isBackdrop: false),
                 canvasSize: canvasSize
             )
 
@@ -486,6 +511,24 @@ extension CanvasManager {
             layers[bottomIndex].cels[bottomCel].bakedImage = nil
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
+            // **The survivor comes out `.raster`, which for a `.value` lower layer it did not.**
+            // `rasterizeLayer` above only converts `.vector`, so a flat-colour or grading layer in the
+            // lower position kept its kind — and `leafSnapshots` elides a `.value` layer's cel, so the
+            // pixels this method had just baked into it rendered nowhere at all. That is the same
+            // "merging a value layer does nothing" the owner reported, reached from the other side of
+            // the pair. The three payloads go with the kind for `Layer.effect`'s reason: presence is
+            // the discriminant, so one left behind is a layer that reads as `.raster` here and as an
+            // adjustment layer to the next thing that flips its kind. The animation trio goes with
+            // them for `duplicateLayer`'s reason read backwards — `effectTracks`, `keyframeMarks` and
+            // `pendingBaselines` are one feature, and marks with no channel left to key are exactly
+            // KEYFRAMES.md §2.28's divergence: an indicator in the timeline with nothing behind it.
+            layers[bottomIndex].kind = .raster
+            layers[bottomIndex].effect = nil
+            layers[bottomIndex].transform = nil
+            layers[bottomIndex].fill = nil
+            layers[bottomIndex].effectTracks = [:]
+            layers[bottomIndex].keyframeMarks = []
+            layers[bottomIndex].pendingBaselines = [:]
 
             deleteLayer(at: topIndex)
             if let survivor = layers.firstIndex(where: { $0.id == survivorID }) {
@@ -496,6 +539,52 @@ extension CanvasManager {
             }
         }
         return true
+    }
+
+    /// **What one layer of a merging pair contributes, resolved exactly as `leafSnapshots` resolves a
+    /// leaf** — the same accessors, asked in the same order, at the same frame.
+    ///
+    /// That mirroring is the whole of the fix on this side. The old pixel side read a
+    /// layer's content out of `PixelOps.rasterize(cel:)` alone, and a `.value` layer's content is not
+    /// in its cel: §4.4's grade and §4.5's flat colour live on the `Layer`, so rasterizing the blank
+    /// cel a value layer carries for the timeline's sake produced a transparent image and the merge
+    /// discarded the layer. Asking `layerEffect(atFrame:)`, `layerTransform` and `valueFill` — the
+    /// three accessors that decide what a `.value` layer *is* — is what makes a merge and the canvas
+    /// read the same layer the same way.
+    ///
+    /// **`isBackdrop` is the one asymmetry, and it is the owner's ruling rather than a limitation of
+    /// this function.** A grade in the lower position has nothing inside the merge to grade: what it
+    /// acts on is everything beneath the pair, which the ruling excludes. So it resolves to `.nothing`
+    /// there and to `.grade` above.
+    private func mergeContribution(ofLayer index: Int, celIndex: Int, canvasSize: CGSize,
+                                   isBackdrop: Bool) -> MergeContribution {
+        let layer = layers[index]
+        // A hidden layer contributes nothing — said once here rather than as the `isVisible ?
+        // opacity : 0` ternary this used to spell at each of two call sites.
+        guard layer.isVisible else { return .nothing }
+        if let effect = layer.layerEffect(atFrame: currentFrame) {
+            return isBackdrop ? .nothing : .grade(effect, opacity: layer.opacity)
+        }
+        // §4.4's transformation layer poses the layers beneath it, which is not something a pixel
+        // bake can express; `mergeLossKind` warns before the artist reaches this.
+        if layer.layerTransform != nil { return .nothing }
+        // `compositedMode` throughout, so `.clipToBelow` arrives as the `.normal` it always resolves
+        // to. **Its mask half is not baked**, which is unchanged from before this function existed
+        // and is the same gap `mergedDown` names for a declared `AlphaMask`: clipping is the mask
+        // machinery with an implicit source (`BlendMode.clipToBelow`), and resolving one needs a
+        // `RenderRequest` a merge does not build.
+        let mode = layer.blendMode.compositedMode
+        if let fill = layer.valueFill {
+            guard let solid = LayerRenderSource.solid(.init(fill.resolvedColor(atFrame: currentFrame)),
+                                                      canvasSize: canvasSize) else { return .nothing }
+            return .pixels(UIImage(cgImage: solid, scale: 1, orientation: .up),
+                           mode: mode, opacity: layer.opacity)
+        }
+        // No `ContentProvider` here on purpose: both layers went through `rasterizeLayer` in
+        // `mergeLayers`, which flattens every derived cel *through* the seam and then clears both the
+        // geometry and the recipe. By this point neither cel can derive anything.
+        return .pixels(PixelOps.rasterize(cel: layer.cels[celIndex], canvasSize: canvasSize),
+                       mode: mode, opacity: layer.opacity)
     }
 
     /// Copies a layer — content, cels, folder, and settings — in place above the original.

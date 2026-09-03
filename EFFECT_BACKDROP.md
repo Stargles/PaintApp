@@ -63,10 +63,11 @@ and found to render nothing on a white canvas and nothing on black line art (§2
 fixed `.ink` and Bloom's artist-facing one are what the rescue amounts to; Sobel does not need one,
 because the alpha rule alone gives it the look the owner asked for.
 
-## §2 — The two consequences are inherent, not incidental
+## §2 — The consequences are inherent, not incidental
 
-Both were found by review before any code was written. Neither is a tuning problem, and it is worth
-being precise about *why*, because the instinct is to treat them as bugs in the fix.
+The first two were found by review before any code was written; the third arrived on 2026-09-03 as a
+device report and is the same rule reached from a place nobody had looked. None is a tuning problem,
+and it is worth being precise about *why*, because the instinct is to treat them as bugs in the fix.
 
 ### 2.1 Once an effect grades the paper, the composite is opaque from that node up
 
@@ -217,6 +218,48 @@ Outline, Sobel and Bloom do not read colour, they read **shape**:
 The alpha channel of the accumulator *was* the ink coverage, and filling paper into it destroys that
 information. **Rescuing these three means preserving the coverage somewhere.** The three shaders
 themselves need no change under any option below — what changes is which image they are handed.
+
+### 2.3 A merged adjustment layer cannot reproduce the picture it was part of
+
+§1 says an adjustment layer grades — and a blend mode blends against — **the whole accumulator**: the
+paper and every layer beneath it. A merge reaches exactly one layer. So the two cannot both be
+honoured, and the merged result is necessarily a different picture from the one the artist was looking
+at when they merged. That is arithmetic, not a bug in the merge.
+
+**RULED 2026-09-03**, on the owner's report that a value layer set to HSV merged down into a vector
+layer *"does nothing"*, and that *"this may be an issue other blend modes"* — it was both, and both had
+one cause. The owner, shown the two shapes an answer could take:
+
+> **The merged layer is that one layer's colours, transformed — Photoshop's answer.** The grade or
+> blend is applied to the layer directly below and baked into it. Gaps where paper or another drawing
+> showed through **do change appearance**, because the paper stops being graded once the adjustment
+> layer is gone. That is accepted.
+
+The rejected alternative was reproducing the picture exactly, which means baking the paper and the
+whole stack beneath into the merged layer — and that makes it **opaque**, hiding everything under it.
+That is §2.1 arriving in the layer panel: any design that reproduces the correct picture produces an
+opaque one, and here the opacity is not confined to the canvas, it is written into the artist's
+document.
+
+**Where it acts**: `CoreGraphicsCompositor.mergedDown` (the composite: the lower layer alone as the
+backdrop, on transparency, no `RenderBackground` parameter to pass a paper through even by accident),
+`CanvasManager.mergeContribution` (what each layer of the pair *is*, resolved through the same three
+accessors `leafSnapshots` reads), and `MergeBakeLogicTests`, whose
+`testALayerBeneathThePairChangesNothingAboutTheMergedResult` is the ruling stated as an independence
+and whose `testAMergedGradeLeavesTheUpperLayersGapsTransparent` is the assertion the rejected option
+would have broken.
+
+**One case stays a loss, and it is the mirror image**: a grading layer in the *lower* position acts on
+everything beneath the pair, which the ruling excludes, so there is nothing inside the merge for it to
+grade. `CanvasManager.MergeLossKind.unbakeableLayer` is the confirmation that warns about it — and the
+two cases that predicate used to carry, a non-Normal blend mode and a `.value` layer in the upper
+position, are gone, because both are baked now.
+
+**An `.ink` effect needs no re-walk here**, which is worth stating because §3 exists entirely to give
+one. The whole reason an ink-only input is needed is that the accumulator holds the paper and its alpha
+has stopped meaning coverage (§2.2). A merge's backdrop is one layer on transparency, so `.ink` and
+`.backdrop` are the same image — the same `paperInBackdrop: false` arm the walk itself takes inside
+every buffered scope.
 
 ## §3 — Options for the ink-only input, with costs
 
