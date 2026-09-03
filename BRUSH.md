@@ -6,7 +6,7 @@ artist-facing brush editor that makes every parameter sensor-driven.
 [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the assessment that preceded this and
 is still accurate about the seams; where the two differ, this document is the specification and that one
 is the survey. Its ordering — image primitive, then tip enum, then grouping, then parsers — survives
-into §11 with one stage added in front of it.
+into §12 with one stage added in front of it.
 
 ---
 
@@ -67,7 +67,7 @@ correctness requirement.
 
 **2.4 Grain is deleted in full.** Owner: *"Delete all of grain."* Including canvas-anchored paper
 texture, which a sprite cannot reproduce — a sprite travels with the stroke, paper does not. Removal is
-total: no vestigial field, no disabled control, no "this used to be" comment. §8 is the inventory.
+total: no vestigial field, no disabled control, no "this used to be" comment. §9 is the inventory.
 
 **2.5 KEYFRAMES §2.16 is discharged by §2.4, not implemented.** That ruling — *"a stroke you Move keeps
 its grain instead of re-sampling"* — was declined and inherited by this item on the reasoning that grain
@@ -109,11 +109,18 @@ and it answers three more the brief did not raise.
 legacy code. Everything currently on the ipad is expendable, so we don't need backwards compatibility, and
 no traces should remain from the previous version of the brush engine. If by any chance future
 modifications to the brush engine are to be added, the architecture should be easily flexible as it is
-clean."* §9 is what this means concretely, and it governs every stage of §11.
+clean."* §10 is what this means concretely, and it governs every stage of §12.
 
 **2.15 Rotation and scale are never stored per point or per dab.** They are derived. Storing them would
 freeze the brush into the stroke, which contradicts §2.10's apply-to-existing verb and the whole reason
 a vector layer is worth having.
+
+**2.16 The shipped brushes are replaced wholesale, organised into groups, and the artist can make their
+own.** Owner: *"all the current brushes should be removed and replaced with these as current brushes are a
+legacy feature. Ideally it contains: round brush (soft and hard), square brush, some pencil and pen
+brushes, and some other brushes. I also like the idea of having a brush which is like an ink pen and is
+rough, almost giving it a sort of slightly rough blotchy sketchy feel to the lineart. A lot of brushes
+would be nice, organized into groups, with the option to make my own."* §8.
 
 ---
 
@@ -337,7 +344,96 @@ minting is what makes an edit persist.
 
 ---
 
-## 8. Grain — the deletion
+## 8. The library, the groups, and the default set
+
+§2.16.
+
+### 8.1 Two collections, and they are not the same thing
+
+The **library** is app-level: the brushes the artist can pick, their groups, and the ones they make. It
+persists across documents. The **document table** (§5.4) is per-document: the brushes the strokes in *this*
+file were actually drawn with.
+
+Both are needed, and the pair buys something neither does alone. Because a stroke is frozen to the brush it
+was drawn with (§2.10), **a document that carries its own table is self-contained** — it opens correctly on
+a device whose library has never held that brush. That falls out of §2.9 and §2.10 rather than costing
+anything.
+
+### 8.2 Groups are the layer tree again
+
+`BrushLibrary` is a flat array of presets plus a custom-brushes directory; there is no folder concept. The
+layer tree is already a complete, tested, persisted, ordered hierarchy with folders, and it is the third
+feature to want that shape — TODO (30) makes the same observation about organising documents. **Reuse it
+rather than hand-rolling a third tree.**
+
+### 8.3 What may be shipped, and it rules out most of what is on the internet
+
+**Artist brush packs cannot be redistributed inside this app** — Procreate `.brushset` packs, free `.abr`
+packs, anything from Gumroad, Patreon, DeviantArt or ArtStation. They are near-universally licensed to make
+*artwork* with, not to embed in software. Two representative EULAs say so in as many words: *"You do not
+have the right to redistribute, resell, loan, rent, or lease my resources, modified versions or parts
+thereof"*, and a second permitting use only where the brush is *"part of a finished, flattened original
+artwork"*. "Free to download" is not a licence to ship. **This is what the artist's own import path exists
+for** (§12 stage 10): a pack the artist buys is theirs to use, it simply does not travel inside the binary.
+
+**Sources that are genuinely clear:**
+- **GIMP's `data/brushes`.** GIMP's own `LICENSE` states that data used in artworks — brushes, patterns —
+  *"should be under a CC0 license"*, separately from the GPLv3 covering the program. Its own caveat is that
+  this is the policy for contributions and older files predate it, so it is strong but not airtight
+  file-by-file.
+- **David Revoy's Krita brush bundles**, released by their author as explicit CC0.
+- **OpenGameArt's ~100-piece grunge brushstroke and splatter set**, explicitly CC0 — scanned real
+  brushstrokes and splatters, genuinely tip-shaped rather than tileable material.
+
+**Not clear, and not to be assumed:** **Krita's own bundled default presets.** Krita is GPLv3 and its
+licence page does not carve out the resource bundle, which is a multi-contributor patchwork with no
+top-level statement. "It ships with Krita" is not evidence.
+
+**Every licence claim above is verified before an asset is committed, not once here.** Third-party hosting
+gets relicensed and pulled; a dedication true when this was written is not a dedication at ship time.
+
+### 8.4 Generate the core, source only the organics
+
+Most of what §2.16 asks for is procedural and therefore has clean provenance by construction: a hard round is
+a disc, a soft round a falloff, a square a square, a technical pen a small hard shape, a chisel an
+anisotropic mask, a pencil a mid-frequency noise threshold.
+
+**Including the one the owner singled out.** The rough blotchy ink line is a **tip** effect, not a dynamics
+effect: jitter and scatter on a clean disc read as *wobbly* or *dotty*, never as *rough*. It needs an
+irregular alpha edge — a disc whose boundary is eroded by high-frequency noise. Generating it is also
+strictly better than scanning one, because the roughness becomes a parameter the artist can tune rather than
+a fixed picture.
+
+So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
+and splatter are genuinely hard to fake.
+
+### 8.5 One texture per tip, and what that costs
+
+Procreate builds a brush from two textures — a Shape Source and a Grain Source stamped through it. **This
+engine takes one**, because §2.4 deleted grain and a second per-brush texture reintroduces it under a new
+name.
+
+The honest cost is **stamp repetition**: one tip means every dab of a stroke is the same shape, and a long
+line can read as a pattern. The answer stays inside one concept — **a tip is a small set of variants, and
+§4's hash picks one per dab.** Order-independent by construction, so it survives a split, a refit and a
+spacing edit like every other random draw, and it needs no second texture kind.
+
+### 8.6 The set
+
+Five groups; **24–30 brushes**, which is the scale Photoshop now ships by default and well inside Clip
+Studio's 42. Not Procreate's 200+, which is a decade of accretion.
+
+| group | holds |
+|---|---|
+| **Basics** | round soft, round hard, square, chisel |
+| **Sketching** | pencils — hard, soft, blunt, textured |
+| **Inking** | technical pens, brush pen, and **the rough ink nib** §8.4 names |
+| **Painting** | opaque round, flat, bristle, blender |
+| **Texture** | grunge, splatter, stipple, chalk — the CC0 group |
+
+Erasers are not a group: the eraser *is* a brush (§11), so every one of these erases already.
+
+## 9. Grain — the deletion
 
 §2.4. Delete, do not disable.
 
@@ -363,9 +459,9 @@ effect, a different feature that shares a word. Four test suites reference it.
 
 ---
 
-## 9. The deletion ledger, and what makes the result flexible
+## 10. The deletion ledger, and what makes the result flexible
 
-§2.14. **Every stage of §11 deletes its predecessor in the same change that replaces it.** A removal
+§2.14. **Every stage of §12 deletes its predecessor in the same change that replaces it.** A removal
 deferred to a cleanup pass is exactly how legacy accumulates, and there is no cleanup pass scheduled.
 
 ### 9.1 What must not exist afterwards
@@ -374,13 +470,14 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 |---|---|---|
 | `StrokeSampleGate` | the refit — §3.3, §5.3 | 0 |
 | `DiscardedDabTarget` | hashed randomness has no stream to keep in phase — §4 | 1 |
-| `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §8 | 2 |
+| `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §9 | 2 |
 | `stampApproximateSquare` | `stampImage`; `.square` becomes a texture — §3.5 | 3 |
 | `PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag | the channel set, which absorbs the width choice — §5.5 | 4 |
 | `BrushShape` + `customTextureFileName` as a separable pair | `BrushTip`, one payload-carrying enum — §6 | 5 |
 | `VectorStroke`'s by-value `Brush` | a table index — §5.4 | 6 |
 | `BrushDynamics.sizeFraction` / `.opacityFraction`, the two hardcoded linear pressure blends | the modulation matrix — §6 | 7 |
 | `Brush`'s flat scalars | grouped sub-structs with defaulted decode — §6 | 7 |
+| `BrushLibrary.defaults` — softRound, hardRound, pencil, pen, square | the generated and sourced set, in groups — §8 | 5 |
 
 **No decode defaults for fields that stopped existing, no format version, no migration, no compatibility
 shim, and no "this used to be" comments.** Documents on the device are expendable, so the format simply
@@ -406,9 +503,9 @@ Flexibility here is not an extra layer. It is what falls out of §2.14 being obe
   decode-compatibility question — which is what `Brush`'s synthesized `Codable` makes every flat key today.
 
 Each of those is a deletion doing double duty. None of them is speculative generality, and none should be
-built beyond what §11's stages need.
+built beyond what §12's stages need.
 
-## 10. What the current engine already gives this for free
+## 11. What the current engine already gives this for free
 
 Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) argues each at length.
 
@@ -426,7 +523,7 @@ Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md
 
 ---
 
-## 11. Build order
+## 12. Build order
 
 Stages 1–4 are worth doing on their own merits with no file format involved, which is the test of whether
 the ordering is honest.
@@ -436,7 +533,7 @@ the ordering is honest.
    spacing change, which is the thing the gate made impossible.
 1. **Randomness by hash.** §4. Delete `DiscardedDabTarget`. Pin the split case the brief names — a stroke
    split in two stamps the same ink as the stroke it came from.
-2. **Delete grain.** §8. Independent of everything else, and it shrinks the surface every later stage
+2. **Delete grain.** §9. Independent of everything else, and it shrinks the surface every later stage
    touches.
 3. **`stampImage` on `DabTarget`** + the tinted rotation-bucketed cache + its hit-rate test. `.square`
    becomes a texture; `stampApproximateSquare` goes. `BakedDab` gains an angle and `DabPose` rotates it.
@@ -449,19 +546,32 @@ the ordering is honest.
 7. **The modulation matrix** — `Brush` regrouped, every parameter `base + [modulation]`. §6.
 8. **Opacity and Flow**, and the per-stroke buffer. §2.11. Late, because it changes the live drawing path
    and wants the rest settled around it.
-9. **The editor.** §7, reusing (38)'s curve control.
-10. **`.abr`, then Procreate `.brush`.** Last. A parser with no image primitive behind it shapes its model
+9. **The library: groups, and the tip generator.** §8. The group tree reusing the layer tree's; the
+   procedural tips for Basics, Sketching, Inking and Painting; the variant set §8.5 needs. **`BrushLibrary`'s
+   five presets are deleted here, not deprecated.** The generator is a build-time tool whose output is
+   committed, not a runtime cost — a tip is a small alpha bitmap and generating it per launch buys nothing.
+10. **The editor.** §7, reusing (38)'s curve control. After the library, because a brush the artist makes has
+    to land in a group.
+11. **The Texture group's CC0 assets.** §8.3 and §8.4 — last of the shipped set, because it is the only part
+    with a licensing step, and §8.3's verification happens at this point rather than earlier.
+12. **`.abr`, then Procreate `.brush`.** Last. A parser with no image primitive behind it shapes its model
     around the wrong renderer.
 
 ---
 
-## 12. Open
+## 13. Open
 
 - **Where the brush table lives** — the project package beside `brushes/`, or inside the document — is
   unsettled, and interacts with §2.10's minting and with a brush imported into one document and used in
   another.
 - **What the per-stroke buffer costs at the owner's canvas size** is unmeasured. §2.11 accepts the cost;
   nobody has taken the number, and PERFORMANCE.md's rule is that a figure carries MEASURED or INFERRED.
+- **Every CC0 claim in §8.3 needs re-checking against its source before an asset is committed**, and
+  nobody has done that yet. The two that matter are GIMP's `data/brushes` — whose own licence file admits
+  older files predate its CC0 policy, so it is a per-file question — and the OpenGameArt set, hosted by a
+  third party that can relicense or pull it.
+- **Whether the Texture group is worth its licensing step at all.** If §8.4's generator turns out to make
+  credible grunge, the CC0 dependency disappears and §12 stage 11 with it. Nobody has tried.
 - **Whether the refit tolerance is one constant or scales with zoom** — a stroke drawn at 8x zoom holds
   detail a 0.3 pt tolerance discards. Related to the deferred zoom-scaled sample gate in HANDOFF's last
   paragraph, which this stage's deletion of the gate makes moot in its original form.
