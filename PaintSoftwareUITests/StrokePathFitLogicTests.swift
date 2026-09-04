@@ -337,11 +337,16 @@ final class StrokePathFitLogicTests: XCTestCase {
         let size: CGFloat = 20
         let canvas = CGSize(width: 700, height: 800)
 
-        for speed in [400 as CGFloat, 120, 40] {
-            let samples = drag(length: 400, speed: speed)
+        var cases: [(String, [VectorSample])] = []
+        for speed in [400 as CGFloat, 120, 40] { cases.append(("line at \(speed)pt/s", drag(length: 400, speed: speed))) }
+        // A curve as well as a line: the interpolant only has anything to do where the path bends,
+        // and a straight fixture would leave the whole of `StrokePath` unexercised by this bar.
+        for speed in [120 as CGFloat, 40] { cases.append(("circle at \(speed)pt/s", circle(radius: 120, speed: speed, tremor: 0.4))) }
+
+        for (speed, samples) in cases {
             let knots = stored(samples)
             XCTAssertLessThan(knots.count, samples.count / 2,
-                              "at \(speed)pt/s the fit kept \(knots.count) of \(samples.count)")
+                              "\(speed): the fit kept \(knots.count) of \(samples.count)")
 
             func render(_ input: [VectorSample]) -> UIImage? {
                 let texture = RasterLayerTexture.empty(size: canvas)
@@ -353,13 +358,13 @@ final class StrokePathFitLogicTests: XCTestCase {
             }
             guard let a = render(samples), let b = render(knots),
                   let report = RasterVectorParity.report(raster: a, vector: b, size: canvas, tolerance: 8) else {
-                return XCTFail("could not render at \(speed)pt/s")
+                return XCTFail("could not render \(speed)")
             }
             // The stroke covers roughly 400 × 20 points of the canvas; anything beyond a fraction of
             // a percent of the whole canvas would be the line having actually moved.
             let differingFraction = Double(report.differingPixelCount) / Double(report.totalPixelCount)
             XCTAssertLessThan(differingFraction, 0.004,
-                              "at \(speed)pt/s: \(report.diagnostic)")
+                              "\(speed): \(report.diagnostic)")
         }
     }
 }
