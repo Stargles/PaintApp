@@ -2181,3 +2181,223 @@ moment the iPad is unlocked. Queue it and leave it; do not diagnose it as a dead
   is the before-and-after rather than a proposal. What is left on that path is the LZ4 decompress itself,
   which at 4096² on a hold is 23.9 ms — the largest single number remaining anywhere in this section, and
   the one to look at if a 4K document ever needs more than 1.7× of play headroom.
+
+## 11. How many brush strokes a vector cel holds before drawing stops feeling instant (2026-09-04)
+
+The owner's ask, verbatim: *"one concern i have is how heavy will reconstructing all the brushstrokes
+be? say for instance there are 1000 brushstrokes, i can potentially see it causing lagspikes or
+crashes due to memory overflow if its not built properly. … The design requirement is this: keep the
+brush UX responsive to the user (no lagspike, no latency), while being able to accomidate a lot of
+brushstrokes. … I'd estimate the high end to be a couple thousand."*
+
+Measured with `StrokeDensityBench` on `tmp/strokebench`. **That branch is a throwaway and is not
+merged**; it is minutes of wall clock and its last test times a render path the app does not have.
+
+**Provenance for everything below.** Device rows: **MEASURED on the owner's iPad 9 (`iPad12,1`, A13,
+3 GB), iOS 26.5.2, Release**, one test class at a time, `-parallel-testing-enabled NO`. Simulator
+rows: **MEASURED on an iPad Pro 13-inch M4 simulator, iOS 26.5, Release**, on this Mac at **85.4%
+idle with no other `xcodebuild` running** (checked immediately before the run and again after, 78.0%).
+Canvas is the owner's **2048×1024** throughout. Fixture: a 400 pt arc, 40 samples, `softRound`
+brush at size 18 — `stampSpacing` 1.8 pt, so **236 dabs a stroke**, which the tests report rather
+than assume.
+
+### 11.1 The hypothesis is confirmed, and demonstrated rather than read
+
+*A vector cel's memo is all-or-nothing and every edit drops it, so committing one stroke to a layer
+holding n re-walks all n and re-stamps every dab.* `VectorCanvas.rasterizations` says whether a call
+missed the memo; `lastRenderDabCount` says how much it stamped. Both, on a 40-stroke cel — **identical
+on the device and the simulator**:
+
+| operation | re-walks? | dabs stamped |
+|---|---|---|
+| the layer at rest | — | 9,440 |
+| a second `render()` of an untouched cel | **no** | (memo hit) |
+| **committing a new stroke at pen-up** | **yes** | **9,676** = 9,440 + one stroke's 236 |
+| an eraser stroke | yes | 10,157 |
+| undo (`elements = snapshot` + `bumpVersion()`) | yes | 9,440 |
+| a layer transform (`setTransform`) | yes | 9,440 |
+| cache eviction (`dropCachedImage`) | yes | 9,440 |
+| a freshly loaded cel | cold by construction — `.needsRasterize` | n/a |
+| **a zoom** | **no** — `VectorCanvas` has no input a pinch reaches; `render()` is canvas-native | 0 |
+| **a render-resolution change** | **no** — `version` and `rasterizations` both unmoved | 0 |
+
+The append row is the whole finding: **9,676, not 236.** A layer transform is the one that costs a
+full re-stamp to produce a picture it then merely translates (`invalidateRenderOnly`).
+
+### 11.2 The curve — linear in **dabs**, and the stroke count is not the variable
+
+| n strokes | dabs | iPad 9 re-walk | µs/dab | iPad peak | simulator re-walk | µs/dab | device ÷ sim |
+|---|---|---|---|---|---|---|---|
+| 100 | 23,600 | 135.0 ms | 5.72 | 18.9 MB | 59.4 ms | 2.52 | (warm-up) |
+| 250 | 59,000 | 256.7 ms | 4.35 | 19.4 MB | 154.6 ms | 2.62 | (warm-up) |
+| 500 | 118,000 | 376.7 ms | 3.19 | 19.4 MB | 295.3 ms | 2.50 | 1.28 |
+| **1000** | 236,000 | **744.8 ms** | 3.16 | 19.7 MB | 568.7 ms | 2.41 | **1.31** |
+| **2000** | 472,000 | **1489.4 ms** | 3.16 | 20.2 MB | 1132.3 ms | 2.40 | **1.32** |
+| 4000 | 944,000 | 2976.8 ms | 3.15 | 22.9 MB | 2263.5 ms | 2.40 | 1.32 |
+| 8000 | 1,888,000 | 5949.1 ms | 3.15 | 26.5 MB | 4513.0 ms | 2.39 | 1.32 |
+| 16000 | 3,776,000 | 11,912.8 ms | 3.15 | 41.3 MB | — | | |
+| 32000 | 7,552,000 | 24,042.8 ms | 3.18 | 71.1 MB | — | | |
+| 48000 | 11,328,000 | 35,846.0 ms | 3.16 | 80.1 MB | — | | |
+
+**It is a straight line, on both machines, over a 480× range of n.** 3.15–3.18 µs a dab on the iPad
+from n = 500 to n = 48,000; the first two rows are one-off allocation faulting, not curvature. Nothing
+departs from linear and nothing is superlinear anywhere.
+
+**§1's ~1.3× device multiplier holds on this path too, and tightly: 1.31–1.32 for every n ≥ 1000**
+(1.28 at 500). That is worth having beyond this task — §1 established it for *compositing* and §10.2
+found it inverted for the bake codec, so this is a third path and it agrees with the first.
+
+**The owner's unit is strokes; the machine's unit is dabs, and only dabs.** MEASURED on the device:
+**3,200 zig-zag strokes carrying 7,667,200 dabs cost 23.52 s (3.07 µs/dab)** against **32,000 strokes
+carrying 7,552,000 dabs at 24.04 s (3.18 µs/dab)** — a tenth as many strokes, the same ink, the same
+time. There is no meaningful per-stroke fixed cost. So *"how many strokes can I have"* has no answer
+on its own; **at this brush, one stroke is 236 dabs and 0.75 ms on the iPad**, and halving the brush
+size doubles the strokes that fit in any budget.
+
+*A refutation this section nearly published.* The first attempt at that experiment used a single
+straight 8,000 pt path on a 2,048 pt canvas. Most of its dabs fall off-canvas, where CoreGraphics
+rejects them nearly free: it read 15.1 M dabs at **0.59 µs** and looked like proof of a large
+per-stroke fixed cost. The ratio was the clipping. The corrected fixture zig-zags inside the canvas
+and lands on 3.07. `PerfBaselineTests.syntheticStroke` already carries a `passes` knob for exactly
+this reason.
+
+### 11.3 The upper bound: nothing breaks, and memory is not the story
+
+**Memory is a non-issue at every n the owner will reach.** Stroke geometry is
+`samples × 24 bytes` — **0.9 MB at 1,000 strokes, 7.3 MB at 8,000, 29.3 MB at 32,000** — against one
+canvas-sized bitmap at 8 MB. The iPad's whole footprint holding a 48,000-stroke cel *and* rendering
+it is **80 MB**, on a device whose undo budget alone is 192 MiB (`UndoBudget`, §9). The render adds
+essentially nothing: peak tracks the geometry.
+
+**The largest display list actually rendered on the owner's device is 64,000 elements at 103.7 MB**
+(64,000 short strokes, 320,000 dabs, 1.52 s). So a 64,000-element display list is not too big; it is
+only too slow when its strokes are full length.
+
+**The one SIGKILL is the test harness, not the app**, and the evidence is the point rather than the
+conclusion. `testHowFarItGoesBeforeSomethingBreaks` was killed at n = 64,000 (`Test crashed with
+signal kill`), which reads as jetsam. Three measurements say it is not:
+
+* 64,000 elements at **103.7 MB** rendered fine when the strokes were short (1.52 s) — so it is not
+  the size of the display list;
+* 48,000 full-length strokes rendered fine at **80.1 MB** in **35.85 s** — so it is not 80 MB;
+* the 23.5 s corrected-arm-B test **passes alone and is killed when it follows a 35.8 s test in the
+  same process** — so the kill tracks *cumulative CPU-bound wall clock in the runner*, not the work.
+
+Every kill is on the far side of ~45 s of unyielding CPU in one XCTest process; every run whose
+cumulative blocking work stayed under ~36 s passed. **No number here is a memory ceiling, and the app
+was never the thing killed.** A run that intends to go past ~30 s of synchronous work should be split
+across test methods and processes.
+
+**So the honest answer to "what is the upper bound": there isn't a crash to find.** The cel degrades
+linearly and becomes unusable to draw on long before anything runs out.
+
+### 11.4 The number the requirement is written in: pen-up to pixels
+
+The shipped sequence is `endVectorStroke` → `addStroke` → `refreshDisplay` → `startVectorRender` on
+`StrokeCanvasView.renderQueue`, so the re-walk is **off the main thread** (RENDER.md §2.13). Both
+halves, MEASURED at each n:
+
+| n strokes | main thread at pen-up (iPad 9) | background re-walk (iPad 9) | main thread (sim) | background (sim) |
+|---|---|---|---|---|
+| 100 | 1.205 ms* | 76.7 ms | 0.087 ms | 62.2 ms |
+| 250 | 0.075 ms | 187.0 ms | 0.062 ms | 142.7 ms |
+| 500 | 0.152 ms | 372.9 ms | 0.120 ms | 283.3 ms |
+| **1000** | **0.302 ms** | **744.6 ms** | 0.198 ms | 564.8 ms |
+| **2000** | **0.568 ms** | **1488.8 ms** | 0.405 ms | 1134.7 ms |
+| 4000 | 1.138 ms | 2977.2 ms | 0.830 ms | 2261.7 ms |
+| 8000 | 2.646 ms | 5955.1 ms | 2.062 ms | 4561.6 ms |
+
+*\*first row of the run; the 250-row's 0.075 ms is the settled figure.*
+
+**There is no main-thread lag spike, at any n the owner will reach.** Committing a stroke to a
+4,000-stroke layer costs the main thread **1.1 ms**. The app does not freeze, and it will not; the
+2026-08-20 work (items 9(b), 11) and RENDER §2.13 already took that cost off the main thread. **Two
+thirds of this question is already answered in the app's favour and the owner should be told so.**
+
+**What is left is latency, and it is entirely the background re-walk.** At the owner's *current*
+190 strokes a cel (§3 item 14, the cel read off their device) that is **~142 ms** (INFERRED at the
+measured 3.16 µs/dab, 236 dabs a stroke). In their own terms, on their own device:
+
+| budget | dabs | strokes at this brush |
+|---|---|---|
+| one 60 Hz frame, 16.7 ms | 5,285 | **~22** |
+| one 24 fps frame, 41.6 ms | 13,165 | **~56** |
+| "instant", 100 ms | 31,646 | **~134** |
+| 250 ms | 79,114 | ~335 |
+| 500 ms | 158,228 | ~670 |
+| **1 s** | 316,456 | **~1,340** |
+| 2 s | 632,911 | ~2,680 |
+
+(INFERRED from the MEASURED 3.16 µs/dab; each row is arithmetic over it.)
+
+**And the artist sees that latency as their ink disappearing, not as a slow refresh.** READ from
+`StrokeCanvasView`, not measured, and it wants a minute on the device to confirm: at pen-up the
+finished stroke stays visible as the `scratch` overlay while the re-walk runs
+(`scratchIsHeldForRerender`), which is correct. But `scratch`'s `didSet` releases that hold when a
+*new* scratch is made — deliberately, and the doc comment says why. So if the artist starts stroke
+n+1 before stroke n's re-walk has landed, **stroke n is not on screen at all** until it does: the base
+slot still holds the pre-stroke picture and the scratch now shows only the new stroke. The window is
+exactly the re-walk above — **0.74 s at 1,000 strokes, 3.0 s at 4,000** — and a person inking line art
+puts strokes down far faster than that. **This is what "lagspike" will mean to the owner even though
+no thread ever blocks**, and it is invisible to every timing in this section.
+
+### 11.5 The other half of "memory overflow": undo, which does scale with n
+
+`StrokeCanvasView.registerVectorUndo` retains the display list twice per stroke and charges the
+history `(from.count + to.count) * 512` bytes, so both grow linearly with the strokes already there.
+MEASURED on the iPad 9, 30 undo steps deep, against `UndoBudget.maxCostBytes` = **192 MiB** there:
+
+| n strokes | really retained, per step | *charged*, per step | undo steps inside the budget |
+|---|---|---|---|
+| 190 (the owner's density) | ~0.003 MB | 0.19 MB | **1,032** |
+| 500 | 0.05 MB | 0.49 MB | 392 |
+| 1000 | 0.30 MB | 0.98 MB | **196** |
+| 2000 | 0.55 MB | 1.95 MB | **98** |
+| 4000 | 0.71 MB | 3.91 MB | **49** |
+
+**The charge is 3–6× what an entry really holds**, because consecutive snapshots share every stroke's
+`samples` array by copy-on-write and only the element array is duplicated. So undo depth is trimmed
+harder than the memory warrants — at 4,000 strokes the artist gets **49 undo steps** where the bytes
+would allow a few hundred. Nothing overflows; the depth quietly shortens. The `512` is a per-element
+proxy nobody has ever measured against the thing it proxies, and this is the measurement.
+
+### 11.6 What making the append incremental would buy — a throwaway spike, not a proposal
+
+On a layer of n strokes: (a) the shipped full re-walk of n+1, against (b) stamping only the appended
+element through `renderIsolated(ids:)` and drawing it over the standing cached image. **The two arms
+were compared pixel for pixel** — mean channel difference **0.0001–0.0002 of 255** — because a spike
+whose pixels differ is measuring two different things.
+
+| n strokes | full re-walk (iPad 9) | incremental (iPad 9) | prize | simulator |
+|---|---|---|---|---|
+| 500 | 373.9 ms | **9.8 ms** | **38×** | 288.8 → 6.6 ms, 44× |
+| 2000 | 1491.6 ms | **7.3 ms** | **206×** | 1661.0 → 9.4 ms, 177× |
+| 4000 | 2985.6 ms | **7.9 ms** | **377×** | 3157.4 → 15.1 ms, 209× |
+
+**The incremental arm is flat in n** — about 8 ms, which is two canvas-sized blits (8 MB apiece) plus
+the new stroke's own 236 dabs. So the prize is not a constant factor, it is the removal of the slope:
+pen-up-to-pixels would stop depending on how much is already on the layer, and the 1,340-stroke
+"one second" line in §11.4 would move out to wherever the artist's document ends.
+
+**Nothing here was merged and the shipped render path is unchanged.** The constraint that makes this a
+spike rather than a patch: the display list is **not associative in general**. An `.erase` stroke
+composites `destinationOut` against everything beneath it and a run of blend-mode strokes is wrapped
+in one transparency layer, so an element appended into or after either is not equivalent to
+compositing it over the finished picture. It is equivalent exactly under source-over — which
+`renderLocalContent`'s own rule 2 already states — and that is the case timed above. A real
+implementation needs the memo to record *what it is a picture of*, and to fall back to the full walk
+whenever the appended element is an eraser, carries a blend mode, or lands anywhere but the end.
+
+### 11.7 The short answer for the owner
+
+* **No lag spike.** Committing a stroke to a 4,000-stroke layer costs the main thread 1.1 ms on their
+  iPad. The app does not freeze at any density measured.
+* **No crash, and no memory problem.** 48,000 strokes render in 80 MB. Geometry is ~0.9 MB per
+  thousand strokes. The one SIGKILL is the test runner's, and the evidence for that is in §11.3.
+* **There is latency, it is entirely the re-walk, and it starts biting far below "a couple
+  thousand".** Their current 190-stroke cel is already ~142 ms behind the pen; 1,000 strokes is
+  0.74 s and 2,000 is 1.5 s, on their own hardware.
+* **Strokes are the wrong unit.** 3.16 µs a dab is the whole cost model; at their brush that is
+  236 dabs and 0.75 ms per stroke, and a smaller brush buys proportionally more strokes.
+* **If they want the architecture answer: the slope is removable and it is worth 38–377×.** §11.6.
+
