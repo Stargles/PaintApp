@@ -3,6 +3,29 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A project's brush textures are copied by the palette, not by what is drawn (2026-09-04)
+
+`ProjectStore.copyCustomBrushTexturesIntoProject` and `restoreCustomBrushTexturesFromProject`
+(`Services/ProjectStore.swift:90-122`, called at `:740` on save and `:1408` on load) claim in their own
+doc comments to make a saved project self-contained against the shared
+`BrushLibrary.customBrushesDirectory` entry being renamed or deleted. What they actually walk is
+`[selectedBrush] + customBrushes` — **the picker list**. They never look at any stroke's own embedded
+`Brush`.
+
+**It is correct today for a reason that is about to stop being true.** `CanvasManager.addCustomBrush`
+(`Models/CanvasManager.swift:772`) only appends and no removal UI exists, so the palette is a superset of
+every custom-shaped brush a stroke could reference — by accident of the current feature set rather than by
+design. BRUSH.md §2.10 breaks that on purpose: an edit **mints a new table entry** rather than mutating
+one, so a document will routinely hold brushes that no palette lists. At that point a project saved after
+editing away from a custom brush silently loses the texture file for a brush its strokes still visibly use.
+
+This is the "the two operands cannot currently differ" family CLAUDE.md's green-assertion section
+describes, reached from the other side: the code passes for a narrower reason than its comment claims.
+**The fix belongs to §12 stage 6** — once the brush table exists, "which textures does this document use"
+has one honest answer (the referenced entries), which is the same population as that stage's save-time
+sweep of unreferenced ones. Fixing it before the table exists means walking every cel's elements on every
+save, which is the cost the table is there to remove.
+
 ## Three more silent refusals, swept for after the transformation layer's (2026-09-03)
 
 The transform-layer entry defect (KEYFRAMES §4.4) was a control that did nothing and said nothing. These

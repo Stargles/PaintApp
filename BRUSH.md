@@ -346,7 +346,14 @@ was half a dab spacing and so 0.5 pt on a 5 pt brush and 3 pt on a 60 pt one.
 
 `VectorStroke` stores a whole `Brush` by value today. §6's `Brush` is substantially larger, and a cel
 shaped like real artwork holds ~190 strokes. A document-level table with strokes holding an index turns
-~500 bytes a stroke into ~2 — §2.9.
+**~330-390 bytes a stroke into ~2** — §2.9. That figure is MEASURED against `Brush`'s synthesized
+`Codable` as it stands, compact-encoded the way `ProjectStore` writes it: 333 bytes for a stock preset and
+386 for a custom-shaped one carrying a `custom-<UUID>.png` filename, against ~150-160 bytes resident. §6
+makes `Brush` substantially larger, so the saving grows rather than shrinks.
+
+**Stage 6 also owns a defect the table is the honest fix for**: the project's brush-texture copy walks the
+palette rather than the drawing, and is correct today only because a custom brush can never leave the
+palette — which §2.10's minting ends. [BUGS.md](BUGS.md) carries it.
 
 **§2.10 makes the table grow**: an edit mints an entry rather than mutating one. A sweep on save drops
 entries no stroke references, or a heavily tuned document accumulates dead brushes forever.
