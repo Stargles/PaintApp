@@ -738,7 +738,7 @@ final class CanvasManager: ObservableObject {
     }
 
     /// The full brush preset currently active (shape, hardness, spacing, stabilization, dynamics,
-    /// scatter/rotation jitter, grain, blend mode). `brushSize`/`brushOpacity` above stay separate
+    /// scatter/rotation jitter, blend mode). `brushSize`/`brushOpacity` above stay separate
     /// published properties rather than folded into this because `SideToolbar`'s sliders bind
     /// directly to them and can move independently of whichever preset is selected — nudging a
     /// brush's size doesn't become a new saved preset.
@@ -774,7 +774,7 @@ final class CanvasManager: ObservableObject {
         selectBrush(brush)
     }
 
-    // MARK: - Eraser (functions like the brush tool — same shape/dynamics/spacing/grain — but
+    // MARK: - Eraser (functions like the brush tool — same shape/dynamics/spacing — but
     // `BrushStamper` composites its stamps with `.destinationOut` instead of painting `brushColor`.
     // Kept as entirely separate published state from the paint brush's, so adjusting the eraser
     // never disturbs the paint brush, and switching tools never clobbers either one's settings.)

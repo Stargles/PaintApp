@@ -2,26 +2,27 @@ import XCTest
 import UIKit
 import CoreGraphics
 
-/// **KEYFRAMES.md stage 4 — the rest-space dab bake, and §2.16's grain.**
+/// **KEYFRAMES.md stage 4 — the rest-space dab bake.**
 ///
 /// The stage's whole content is one sentence: a posed stroke's dab walk happens where the artist
 /// drew it, and the pose touches nothing but each finished dab's centre and radius. Everything
 /// asserted here follows from that, and each test names which artifact it is the death of.
 ///
-/// **What these tests compare, said out loud, because two obvious comparisons measure nothing.**
+/// **What these tests compare, said out loud, because an obvious comparison measures nothing.**
 ///
-/// The artifact is not "the noise field differs at two positions" — it always does, that is what a
-/// noise field is. The artifact is that *the ink's own alphas change from frame to frame*, and the
-/// only place that is expressible is the dab record.
+/// The artifact is not "the walk looks different at two positions" in the abstract — the artifact is
+/// that a walk re-derived at *posed* geometry can shift its own dab **count** or **phase** from frame
+/// to frame, purely from floors in `stampSpacing`/`stampApproximateSquare` that do not scale linearly
+/// with size. The only place that is expressible is the dab record.
 ///
 /// And the dab record has to be the **renderer's**. `BrushStamper.DabPose.applied(to:)` copies
-/// `alpha` verbatim and multiplies `radius` by a scale, so "the alphas are preserved", "the dab
-/// counts are equal" and "the radius is `radius × scale`" are algebraic consequences of that one
-/// function and hold under an implementation that walks in posed space and reintroduces the boil
-/// this stage exists to remove. A test-local reimplementation of `VectorCanvas.stamp`'s dispatch has
-/// the same hole one door over: it pins the copy. So every claim about *which walk runs* is asserted
-/// on `DabProbe`, the seam on `CGContextDabTarget` that records what `VectorCanvas.renderLocalContent`
-/// stamped, or on the rendered pixels themselves.
+/// `alpha` verbatim and multiplies `radius` by a scale, so "the dab counts are equal" and "the radius
+/// is `radius × scale`" are algebraic consequences of that one function and hold under an
+/// implementation that walks in posed space and reintroduces the re-phase this stage exists to
+/// remove. A test-local reimplementation of `VectorCanvas.stamp`'s dispatch has the same hole one
+/// door over: it pins the copy. So every claim about *which walk runs* is asserted on `DabProbe`, the
+/// seam on `CGContextDabTarget` that records what `VectorCanvas.renderLocalContent` stamped, or on
+/// the rendered pixels themselves.
 ///
 /// The tests that remain on `DabPose` and `BrushStamper` directly are the ones whose subject really
 /// is that arithmetic — the area root under an affine, the per-dab scale under a homography, the
@@ -52,12 +53,6 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
                       size: CGFloat = 24) -> [BrushStamper.BakedDab] {
         BrushStamper.bake(samples: samples, brush: brush, color: .black,
                           brushSize: size, brushOpacity: 1, seed: seed)
-    }
-
-    /// Nine decimal places, because a grain multiplier that re-samples a few points along a noise
-    /// field moves the alpha in the third and a `Set<[CGFloat]>` would compare bit patterns.
-    private func alphas(_ dabs: [DabProbe.Dab]) -> [String] {
-        dabs.map { String(format: "%.9f", $0.alpha) }
     }
 
     // MARK: - The shipped render path
@@ -120,99 +115,6 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - §2.16 — grain travels with the ink
-
-    /// **The stage's headline, the one the artist can see, and the one assertion in this file that
-    /// dies if `VectorCanvas.stamp` stops running the rest walk.**
-    ///
-    /// `grainAlphaMultiplier` reads an absolute canvas-position noise field. Walk a *posed* copy of a
-    /// stroke and every dab lands on different tooth on every frame — the texture crawling across the
-    /// ink at 24 fps, which is §4.2's *"grain is the real one"*. Walking in rest space and mapping only
-    /// each finished dab gives one texture for the whole animation.
-    ///
-    /// **The operands are the dabs the renderer stamped, and that is the point.** `DabPose.applied(to:)`
-    /// copies `alpha` verbatim, so *any* assertion built on it reports "one texture" under an
-    /// implementation that re-samples the grain on every frame; and a test-local copy of `stamp`'s
-    /// dispatch pins the copy. This reads `DabProbe`, which sits on `CGContextDabTarget` — the sink
-    /// `renderLocalContent` draws into — so the array below is what became pixels.
-    /// MEASURED: reverting `stamp`'s three rest-space arms turns this red.
-    func testTheRenderedGrainIsOneTextureAcrossEveryFrameOfAPose() throws {
-        let brush = BrushLibrary.pencil
-        XCTAssertTrue(brush.grain.isEnabled, "Setup: the pencil is the one built-in that grains")
-        let ink = stroke(brush)
-
-        var sequences = Set<[String]>(), counts = Set<Int>()
-        for frame in 0..<24 {
-            let t = CGAffineTransform(translationX: CGFloat(frame) * 3.7, y: CGFloat(frame) * 1.3)
-            let dabs = stampedPosed(ink, through: t)
-            counts.insert(dabs.count)
-            sequences.insert(alphas(dabs))
-        }
-        XCTAssertEqual(sequences.count, 1,
-                       "the grain is baked at the rest stamp point, so 24 frames are one texture")
-        XCTAssertEqual(counts.count, 1, "and one walk, so the dab lattice does not re-phase either")
-
-        // Both operand checks, because "one sequence" is satisfied by a sequence of one constant and
-        // "one count" by a stroke that stamps nothing.
-        let rest = stamped([.stroke(ink)])
-        XCTAssertGreaterThan(rest.count, 100, "Setup: a walk long enough for a re-phase to show")
-        XCTAssertGreaterThan(Set(alphas(rest)).count, 10,
-                             "Setup: the pencil's grain varies dab to dab, or there is nothing to hold still")
-        XCTAssertEqual(counts, [rest.count], "and the posed frames are that same walk")
-    }
-
-    /// Grain travels **with** the ink rather than merely being stable: the dabs move by exactly the
-    /// pose and their alphas do not move at all. Without the second half a pose that moved nothing
-    /// would satisfy the first, and without the first the pose could be applied to the wrong end.
-    ///
-    /// The centres are compared at zero tolerance against the rest walk plus the translation, which is
-    /// the arithmetic statement of "the pose touches nothing but each finished dab's centre".
-    func testARenderedPosedDabKeepsItsAlphaAndMovesByExactlyThePose() throws {
-        let ink = stroke(BrushLibrary.pencil)
-        let rest = stamped([.stroke(ink)])
-        let moved = stampedPosed(ink, through: CGAffineTransform(translationX: 61, y: -23))
-
-        XCTAssertEqual(moved.count, rest.count)
-        XCTAssertEqual(alphas(moved), alphas(rest), "the texture is part of the mark")
-        XCTAssertGreaterThan(Set(alphas(rest)).count, 10, "Setup: the grain varies dab to dab")
-        for (index, dab) in rest.enumerated() {
-            XCTAssertEqual(moved[index].center.x, dab.center.x + 61, accuracy: 0)
-            XCTAssertEqual(moved[index].center.y, dab.center.y - 23, accuracy: 0)
-            XCTAssertEqual(moved[index].radius, dab.radius, accuracy: 0, "a translation is scale 1")
-        }
-    }
-
-    /// **The pixels, because every claim above is a claim about pixels.** Two frames of a pure
-    /// integer slide are the same ink in two places, so cropping each to its own opaque bounds has to
-    /// give byte-identical images.
-    ///
-    /// This is the one witness here that needs no probe at all — `VectorCanvas.render` in, `CGImage`
-    /// bytes out — so it stands even if `DabProbe` were wired to something other than the render path.
-    /// Under a posed-space walk the grain multiplier is read 60 pt further along the noise field and
-    /// the two crops differ.
-    func testTwoPosedFramesOfOneStrokeAreTheSameBytesInTwoPlaces() throws {
-        let ink = stroke(BrushLibrary.pencil)
-        let near = VectorCanvas(size: canvas,
-                                elements: [VectorCanvas.posing(.stroke(ink),
-                                                               through: CGAffineTransform(translationX: 40, y: 0))])
-            .render(quality: .full)
-        let far = VectorCanvas(size: canvas,
-                               elements: [VectorCanvas.posing(.stroke(ink),
-                                                              through: CGAffineTransform(translationX: 100, y: 0))])
-            .render(quality: .full)
-
-        let nearBounds = try XCTUnwrap(PixelOps.opaqueContentBounds(near))
-        let farBounds = try XCTUnwrap(PixelOps.opaqueContentBounds(far))
-        XCTAssertEqual(farBounds.minX - nearBounds.minX, 60, accuracy: 1,
-                       "Setup: the ink moved by the pose and by nothing else")
-        XCTAssertEqual(farBounds.size, nearBounds.size, "Setup: and kept its size")
-
-        let a = try XCTUnwrap(rgbaBytes(of: try XCTUnwrap(PixelOps.copiedSubimage(of: near, in: nearBounds))))
-        let b = try XCTUnwrap(rgbaBytes(of: try XCTUnwrap(PixelOps.copiedSubimage(of: far, in: farBounds))))
-        XCTAssertGreaterThan(a.count, 4000, "Setup: there are pixels to disagree about")
-        XCTAssertEqual(a, b, "one mark drawn twice, so the two crops are the same bytes")
-    }
-
     // MARK: - The walk itself
 
     /// **A Uniform shrink re-phases a posed-space walk, and that surprised §8 too.**
@@ -250,10 +152,10 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// and emits ordinary `stampCircle` calls the pose maps like any other.
     ///
     /// **It also refutes half of §4.2's framing, and the refutation is why the sweep below goes as
-    /// deep as it does.** §4.2 names Square's sub-lattice beside Pencil's grain as the two non-round-dab
-    /// cases that shimmer. Pencil's does, on 24 frames of 24. Square's does *not* over an ordinary
-    /// shrink: its `spacingFraction` is **0.15**, three times Hard Round's, so `24 × 0.15 = 3.6` pt
-    /// stays clear of `stampSpacing`'s 1 pt floor all the way down to scale 0.278, and
+    /// deep as it does.** §4.2 names Square's sub-lattice as a non-round-dab case that can shimmer.
+    /// It does *not* over an ordinary shrink: its `spacingFraction` is **0.15**, three times Hard
+    /// Round's, so `24 × 0.15 = 3.6` pt stays clear of `stampSpacing`'s 1 pt floor all the way down
+    /// to scale 0.278, and
     /// `stampApproximateSquare`'s own two 1 pt floors are clear at 0.3 too. Under a uniform map with no
     /// floor binding, a posed-space walk is *similar to itself* and nothing shimmers — MEASURED: a
     /// 1.0 → 0.3 sweep is green with every one of `stamp`'s rest-space arms reverted, which is a test
@@ -508,7 +410,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     }
 
     /// A fill carries no dab walk because it has none — one `CGPath` through one map, with no lattice
-    /// to re-phase and no grain field to re-sample. Pinned so a later reader does not add one.
+    /// to re-phase. Pinned so a later reader does not add one.
     func testAFillIsPosedWithNoWalkBecauseItHasNone() throws {
         let path = CGPath(rect: CGRect(x: 0, y: 0, width: 10, height: 10), transform: nil)
         let fill = VectorFillElement(path: path, color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1),

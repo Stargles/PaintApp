@@ -78,9 +78,9 @@ struct FontDescriptor: Codable, Equatable, Hashable {
 /// Every knob the settings panel exposes that is about *type*, in one defaulted sub-struct.
 ///
 /// Grouped from day one rather than flattened onto `TextRecipe`, which is the generalizable lesson
-/// BRUSH_ENGINE_EXTENSIBILITY.md extracts from `Brush`'s `dynamics`/`grain`/`taper`: every flat
-/// scalar is a Codable-compatibility question later, and a sub-struct answers it once for the whole
-/// group. `outline` and `shadow`, when they arrive, are their own structs beside this one.
+/// BRUSH_ENGINE_EXTENSIBILITY.md extracts from `Brush`'s `dynamics`: every flat scalar is a
+/// Codable-compatibility question later, and a sub-struct answers it once for the whole group.
+/// `outline` and `shadow`, when they arrive, are their own structs beside this one.
 struct Typography: Codable, Equatable {
 
     /// Where each line sits inside the box's width. A segmented `Picker` in the panel

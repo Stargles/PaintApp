@@ -44,9 +44,8 @@ final class InterpolationRenderLogicTests: XCTestCase {
     private static let celARef = CelRef(layerID: ID.layer, celID: ID.celA)
     private static let celCRef = CelRef(layerID: ID.layer, celID: ID.celC)
 
-    /// Hard-edged, fully opaque, no grain and no jitter. Every assertion below is about *where* ink
-    /// landed, and a soft or textured brush turns each of them into a question about a gradient's
-    /// tail instead.
+    /// Hard-edged, fully opaque, no jitter. Every assertion below is about *where* ink landed, and a
+    /// soft or textured brush turns each of them into a question about a gradient's tail instead.
     private static let brush = BrushLibrary.hardRound
 
     private func stroke(_ points: [CGPoint], id: UUID, size: CGFloat = 14,

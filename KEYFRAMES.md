@@ -52,10 +52,11 @@ pose channel and its bake, which is why item (2) is stated to require item (1).
 
 ## 2. Rulings — settled 2026-08-28 and 2026-08-29, do not re-litigate
 
-**Three of these are superseded, and they are kept rather than deleted.** §2.1, §2.23 and §2.24 were
+**Four of these are superseded, and they are kept rather than deleted.** §2.1, §2.23 and §2.24 were
 overtaken by §2.26 and §2.27 later on 2026-08-29 — the owner reversing their own ruling, which is not a
-re-litigation. Each is marked in place with the date and the reason, because the reasoning is what stops
-a later session reinstating it by rediscovering the argument that produced it.
+re-litigation. §2.16 was overtaken by BRUSH.md §2.4/§2.5 on 2026-09-03, the brush overhaul it said would
+inherit grain deleting grain instead. Each is marked in place with the date and the reason, because the
+reasoning is what stops a later session reinstating it by rediscovering the argument that produced it.
 
 1. ~~**Tap the keyframe button inserts a key. Hold it 0.8 s enters or exits Animate mode.** In Animate
    mode any non-destructive change at the playhead writes a key on exactly the channel touched. The
@@ -118,9 +119,16 @@ a later session reinstating it by rediscovering the argument that produced it.
 15. **Two poses are interpolated through their factored form** — affine × pure-projective — not by
     lerping matrix entries and **not** by lerping corners. See §4.3 for why corner-lerp is not the safe
     alternative it looks like.
-16. **Brush grain travels with the ink.** Each dab's grain value is baked when the stroke is drawn, so
+16. ~~**Brush grain travels with the ink.** Each dab's grain value is baked when the stroke is drawn, so
     the texture is part of the mark. Accepted consequence: a stroke you Move keeps its grain instead of
-    re-sampling, which is a visible change to how existing artwork behaves under Move.
+    re-sampling, which is a visible change to how existing artwork behaves under Move.~~
+    **SUPERSEDED 2026-09-03 by BRUSH.md §2.4/§2.5.** Stage 4 below delivered this ruling's headline and
+    declined its parenthetical, on the reasoning that grain was *"expected to change with the brush
+    overhaul that makes brushes importable, so TODO (37) inherits it."* TODO (37) is that overhaul, and
+    the owner's ruling there was *"Delete all of grain"* — not carry it forward changed. §2.4/§2.5:
+    *"§2.16 is discharged by §2.4, not implemented... It changes by ceasing to exist."* `BrushGrain`,
+    `noiseValue` and `grainAlphaMultiplier` are gone, and the tests that pinned grain-travels-with-
+    posed-ink are deleted with the feature rather than rewritten.
 17. **The graph editor is a drawer that grows the timeline upward**, sharing the timeline's frame ruler
     and playhead, so a curve sits literally above the frames it controls — not a popover and not a
     full-screen sheet.

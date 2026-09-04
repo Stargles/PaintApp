@@ -243,7 +243,7 @@ final class CanvasDisplayScale: ObservableObject {
 ///
 /// **This is `BrushStamper.stampDab` itself, not an approximation of it** — the same call the canvas
 /// makes, through the same `CGContextDabTarget` `VectorCanvas.renderLocalContent` renders strokes
-/// with. Shape, hardness, flow, opacity, colour, grain, scatter and the square brush's dab lattice
+/// with. Shape, hardness, flow, opacity, colour, scatter and the square brush's dab lattice
 /// therefore all come out right for free, and stay right when the brush engine changes.
 enum SizePreviewStampRenderer {
 

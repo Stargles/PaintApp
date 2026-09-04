@@ -343,6 +343,41 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         }
     }
 
+    /// **BRUSH.md §9's one behaviour change: the grain veto is gone, and shape `.pencil` is no longer
+    /// special-cased out of `supportsCleanCut`.**
+    ///
+    /// Before BRUSH.md §12 stage 2, `supportsCleanCut` carried an extra `guard !brush.grain.isEnabled`
+    /// beside the hardness/opacity/dynamics/scatter gates above — and the shipped `BrushLibrary.pencil`
+    /// preset had grain enabled, so a pencil-*shaped* eraser could never take the clean-cut path no
+    /// matter how hard, opaque or steady it was tuned. There is no `grain` field left to check, so that
+    /// extra veto is simply gone: `.pencil` is judged on exactly the same four gates as `.softRound`,
+    /// `.hardRound` and `.pen`, with nothing held against its shape.
+    ///
+    /// `BrushLibrary.pencil`'s own hardness (0.7) still fails the unrelated hardness gate on its own, so
+    /// this pins the shape in isolation against a brush tuned to clear every *other* gate — the only way
+    /// to isolate what the grain veto used to cost it, now that grain cannot be toggled to show the
+    /// same brush passing and failing.
+    func testAHardOpaquePencilShapedEraserCleanCutsWhereGrainUsedToVetoIt() {
+        var pencilEraser = BrushLibrary.pencil
+        pencilEraser.hardness = 1
+        XCTAssertEqual(pencilEraser.shape, .pencil, "Setup: still the shape the grain veto used to single out")
+
+        let along = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 120, y: 64), count: 15,
+                              from: 1, to: 1)
+        let scene = scenario(brush: BrushLibrary.hardRound, eraserBrush: pencilEraser, eraserSize: Self.wideNib,
+                             eraserSamples: along,
+                             backdrop: .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),
+                                             CGRect(x: 8, y: 40, width: 112, height: 48)))
+        let (canvas, _, changed) = erased(scene)
+        XCTAssertTrue(changed)
+        XCTAssertEqual(strokes(canvas, .paint).count, 0,
+                       "A hard, opaque, steady pencil-shaped eraser now deletes what it fully covers")
+        XCTAssertEqual(strokes(canvas, .erase).count, 1,
+                       "The fill beneath still needs the punch, or the hole in it reappears")
+        guard let report = parityOfHybrid(scene) else { return XCTFail("Could not read back both tiers") }
+        XCTAssertTrue(report.isExact, "Deleting a covered stroke must not move a pixel: \(report.diagnostic)")
+    }
+
     /// The other half of the gate. A *paint* stroke that scatters throws dabs off its own centreline,
     /// so the capsule chain the coverage test measures against does not bound its ink and "covered" is
     /// a claim about the wrong shape. Such a stroke is never deleted, only punched.

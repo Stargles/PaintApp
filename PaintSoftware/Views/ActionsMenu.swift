@@ -571,7 +571,7 @@ struct CanvasResizeSheet: View {
 
                 if scaleContent, let map = previewMap, floorSurvey.isCrossed(byScaling: map.scale) {
                     Text("Brush textures will re-stamp at the new size, so some strokes will be "
-                         + "grained or shaded slightly differently.")
+                         + "shaded slightly differently.")
                         .font(.caption).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("resizeCanvas.brushFloorNotice")

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Built-in brush presets, and the on-disk home for user-imported custom brushes. Real pressure-
-/// curve tuning, grain texture generation, and the import flow are filled in going forward; the
-/// preset values here are reasonable starting points, not final-tuned.
+/// curve tuning and the import flow are filled in going forward; the preset values here are
+/// reasonable starting points, not final-tuned.
 enum BrushLibrary {
     static let softRound = Brush(
         name: "Soft Round", shape: .softRound, size: 18,
@@ -19,8 +19,7 @@ enum BrushLibrary {
     static let pencil = Brush(
         name: "Pencil", shape: .pencil, size: 6,
         opacity: 0.9, spacingFraction: 0.04, hardness: 0.7, stabilization: 0.15,
-        dynamics: BrushDynamics(sizePressure: 0.3, opacityPressure: 0.5, minSizeFraction: 0.5),
-        grain: BrushGrain(isEnabled: true, scale: 1.2, rotation: 0, depth: 0.55, textureName: nil)
+        dynamics: BrushDynamics(sizePressure: 0.3, opacityPressure: 0.5, minSizeFraction: 0.5)
     )
 
     static let pen = Brush(

@@ -62,7 +62,7 @@ final class VideoElementLogicTests: XCTestCase {
     private func stroke() -> VectorStroke {
         VectorStroke(brush: Brush(name: "Test", shape: .hardRound, size: 8, opacity: 1, flow: 1,
                                   spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
-                                  rotationJitter: 0, dynamics: .fixed, grain: .disabled,
+                                  rotationJitter: 0, dynamics: .fixed,
                                   blendMode: .normal),
                      color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                      size: 8, opacity: 1,

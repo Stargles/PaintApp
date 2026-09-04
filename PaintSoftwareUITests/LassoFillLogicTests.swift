@@ -1291,7 +1291,7 @@ final class LassoFillLogicTests: XCTestCase {
         manager.layers[0].kind = .vector
         let brush = Brush(name: "Test", shape: .hardRound, size: 20, opacity: 1, flow: 1,
                           spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
-                          rotationJitter: 0, dynamics: .fixed, grain: .disabled, blendMode: .normal)
+                          rotationJitter: 0, dynamics: .fixed, blendMode: .normal)
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 20, opacity: 1,
                                   samples: [VectorSample(x: 32, y: 32, pressure: 1),

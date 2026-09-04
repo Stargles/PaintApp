@@ -28,7 +28,7 @@ final class TextHitTestLogicTests: XCTestCase {
     private static func testBrush() -> Brush {
         Brush(name: "Test", shape: .hardRound, size: 10, opacity: 1, flow: 1,
               spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
-              rotationJitter: 0, dynamics: .fixed, grain: .disabled, blendMode: .normal)
+              rotationJitter: 0, dynamics: .fixed, blendMode: .normal)
     }
 
     private func stroke() -> VectorStroke {

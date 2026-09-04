@@ -8,7 +8,7 @@ toolset, and a frame-by-frame animation timeline.
 
 - **Drawing engine**: native-resolution raster strokes (own engine, not PencilKit — stays crisp at
   any zoom), plus resolution-independent vector layers that can be moved/rotated/scaled losslessly
-- **Brushes**: a brush library (shape, hardness, spacing, stabilization, pressure dynamics, grain) with
+- **Brushes**: a brush library (shape, hardness, spacing, stabilization, pressure dynamics) with
   custom brush import, and a matching Eraser tool with its own settings
 - **Fill**: GPU (Metal) colour-based flood fill with adjustable threshold/gap-closing/edge-overlap,
   live drag-to-adjust before committing, and per-layer "fill reference" boundaries
@@ -70,7 +70,7 @@ PaintSoftware/
 ├── Engine/                      # Drawing engine
 │   ├── RasterLayerTexture.swift #   persistent per-cel raster bitmap (stamp-based, thread-safe)
 │   ├── VectorLayer.swift        #   resolution-independent vector layer content
-│   ├── BrushStamper.swift       #   shared stamp pipeline (shape/dynamics/grain)
+│   ├── BrushStamper.swift       #   shared stamp pipeline (shape/dynamics)
 │   ├── Brush.swift / BrushLibrary.swift
 │   ├── StrokeInput.swift / StrokeStabilizer.swift
 │   ├── StrokeSampleGate.swift   #   which input samples become stored geometry (distance, not time)
@@ -149,7 +149,7 @@ xcodebuild -project PaintSoftware.xcodeproj -scheme PaintSoftware \
 ### Drawing
 1. Pick Pen/Pencil, Eraser, Fill, or Select/Move from the top toolbar.
 2. Adjust size/opacity (or a tool-specific setting) from the side rail sliders, or open the tool's
-   panel for its full settings (shape, stabilization, grain, etc.).
+   panel for its full settings (shape, stabilization, etc.).
 3. Pick a color from the color picker, or a saved palette swatch. **There is one picker**: the same
    panel drives the brush, the canvas background, a value layer's colour, an effect's colour and a
    gradient stop, differing only in whether it offers opacity.

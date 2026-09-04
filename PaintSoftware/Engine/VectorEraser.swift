@@ -249,7 +249,6 @@ enum VectorEraser {
         case .softRound, .hardRound, .pen, .pencil: break
         }
         guard brush.hardness >= 0.95 else { return false }
-        guard !brush.grain.isEnabled else { return false }
         guard opacity * brush.flow >= 0.999 else { return false }
         guard brush.dynamics.opacityFraction(forPressure: Double(minPressure)) >= 0.999 else { return false }
         guard brush.scatter <= 0, brush.rotationJitter <= 0 else { return false }

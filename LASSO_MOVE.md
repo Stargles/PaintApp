@@ -404,8 +404,8 @@ be**. That is why both eraser modes that remove geometry set `piece.lattice = ni
 (`VectorLayer.swift:1150` and `:1237`).
 
 Nil-ing it is the wrong fix here, because it throws away the thing the lattice exists for: a piece
-that re-anchors its own lattice re-phases every dab along its whole length, and for a scattering or
-grainy brush re-rolls the pattern. The artist would move one half of a stroke and watch the *other*
+that re-anchors its own lattice re-phases every dab along its whole length, and for a scattering
+brush re-rolls the pattern. The artist would move one half of a stroke and watch the *other*
 half's texture change — the exact defect `DabLattice` was built to prevent.
 
 **The rule:**
@@ -441,8 +441,7 @@ this is not only a hairline case), `stampDab`'s 0.5 pt diameter minimum, and
 `stampApproximateSquare`'s dab/step minimums. Below them a scaled stroke gets a different *number* of
 dabs — never a different weight, because dab diameter still scales, and never anything visible,
 because the RNG re-roll only matters to a brush with `scatter` or `rotationJitter` above zero and all
-five built-ins have neither. Pencil grain is an absolute noise field keyed on canvas position and
-re-samples under any map, as it already did for a translation.
+five built-ins have neither.
 `VectorCanvas.mapping(_:throughSimilarity:)`'s doc comment carries this; `LassoMoveLogicTests`
 `testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt` pins the exactness and
 `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount` pins the boundary.
@@ -829,7 +828,7 @@ it a vector arm (§0).
 **Build the whole thing on `CGPath` booleans, strokes included.** Attractive: one algorithm for
 both kinds. It fails because a `VectorStroke` is not a region — it is a centreline plus a brush, and
 its ink is produced by re-stamping (`VectorLayer.swift:16-19`). Converting a stroke to an outline
-path to intersect it discards pressure, dynamics, grain, scatter, the dab lattice and the brush
+path to intersect it discards pressure, dynamics, scatter, the dab lattice and the brush
 itself; the piece that came back could never be re-cut, re-warped by interpolation, or re-rendered
 at another resolution. That is "convert to outlines", which `ADD_TEXT.md` §3 stage 6 correctly files
 as a *deliberate, one-way, opt-in* operation.

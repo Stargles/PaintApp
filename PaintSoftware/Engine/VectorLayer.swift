@@ -154,8 +154,8 @@ struct DabLattice: Codable, Equatable {
 ///
 /// A posed stroke is a throwaway copy whose `samples`, `lattice` and `size` have all been mapped
 /// into destination space, and until this existed that copy was what `BrushStamper` walked: the dab
-/// spacing, the grain field and the square brush's sub-lattice were all re-derived per frame at the
-/// posed geometry. This carries the **pre-image** of that copy — the artist's own numbers — so the
+/// spacing and the square brush's sub-lattice were both re-derived per frame at the posed geometry.
+/// This carries the **pre-image** of that copy — the artist's own numbers — so the
 /// walk happens once, where the stroke was drawn, and the pose touches nothing but each finished
 /// dab's centre and radius.
 ///
@@ -711,7 +711,7 @@ enum LassoMembership: String, CaseIterable, Identifiable {
 
 /// How much fidelity a render is asked for. `.preview` stamps one stroked `CGPath` per stroke instead
 /// of hundreds of dabs — ~100x cheaper, which is what makes scrubbing usable — at the cost of per-dab
-/// pressure ramping, grain, scatter, rotation jitter, and dab alpha build-up. Shape, position, colour,
+/// pressure ramping, scatter, rotation jitter, and dab alpha build-up. Shape, position, colour,
 /// blend mode and the eraser's punch are preserved.
 enum RenderQuality {
     case full
@@ -2530,18 +2530,6 @@ final class VectorCanvas {
     ///    built-ins. `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount` pins the boundary.
     ///  * **`stampDab`'s 0.5 pt diameter floor** and `stampApproximateSquare`'s 1 pt dab/step floors,
     ///    for the same reason at heavy shrink.
-    ///  * **Pencil grain** is an absolute noise field keyed on canvas position, so it re-samples under
-    ///    any map — as it already does for a plain translation, so a scale is no regression. **That
-    ///    sentence is true here and was wrong where it was being read**, which is the correction
-    ///    KEYFRAMES.md §4.2 names by line number. This function is a *commit*: the map is baked into
-    ///    the artist's own geometry and is over, so the stroke's rest space itself moved and one
-    ///    re-sample is exactly what a one-off Move should cost. A *pose* is a view of a stroke that
-    ///    is re-resolved on every frame, and there the same re-sample is the texture crawling across
-    ///    the ink at 24 fps. Stage 4 fixed the second and deliberately left the first — see
-    ///    `VectorCanvas.posing` and `StrokeRestWalk`. §2.16's parenthetical *"a stroke you Move keeps
-    ///    its grain"* is therefore **not** delivered, and doing so would mean persisting a
-    ///    per-dab multiplier: a derivable value at roughly eight floats per stored sample, which is
-    ///    `precise`'s own argument against a second copy of a fact the geometry already states.
     ///
     /// Under rotation the dabs are exact too, with one cosmetic caveat: per-dab rotation jitter and
     /// scatter offsets are drawn in absolute angles, so a square-tipped or scattering brush keeps its
@@ -2762,7 +2750,7 @@ final class VectorCanvas {
     ///
     /// **Only strokes carry a walk, because only strokes have one.** A fill is a `CGPath` and a
     /// placed image is a rectangle of pixels — both are drawn through the map directly with no dab
-    /// lattice to re-phase and no grain field to re-sample. Text is already four corners.
+    /// lattice to re-phase. Text is already four corners.
     static func posing(_ element: VectorElement, through t: CGAffineTransform) -> VectorElement {
         guard !t.isIdentity else { return element }
         let moved = mapping(element, throughStretch: t)
@@ -3938,7 +3926,6 @@ final class VectorCanvas {
     /// lives inside that call and is now invariant across frames by construction: `stampSpacing` is
     /// computed from the rest size, so its 1 pt floor cannot re-phase the walk under an animated
     /// scale (§8 measures that floor re-phasing a *Uniform* shrink on 19 of 24 frames);
-    /// `grainAlphaMultiplier` is read at the rest stamp point, so §2.16's grain travels with the ink;
     /// `stampApproximateSquare` builds its sub-lattice from the rest diameter against its own 1 pt
     /// floors; and the seeded `DabRNG` sees an identical dab count and so draws an identical
     /// sequence.

@@ -365,7 +365,7 @@ enum StrokeGeometry {
     /// Mode 1's clean-cut decision. `1` means the stroke is severed at this sample as far as geometry
     /// is concerned; anything less is a partial-width shave that only the alpha-punch path can express.
     ///
-    /// Geometry only: the alpha gate (hardness, grain, opacity × flow) is the caller's, deliberately,
+    /// Geometry only: the alpha gate (hardness, opacity × flow) is the caller's, deliberately,
     /// because it is a property of the eraser brush rather than of the two footprints.
     static func coverage(ofSampleAt index: Int, in samples: [VectorSample], brush: Brush, size: CGFloat,
                          by erasers: [Capsule], scratch: inout [ClosedRange<CGFloat>]) -> CGFloat {

@@ -196,13 +196,14 @@ site then must state every field. Nine call sites to update; no behaviour change
   `PERFORMANCE.md` §5 both rule on this. 16 MiB at the owner's canvas; the admission valve never fires.
 - **Do not build a dirty-tracking save.** `PERFORMANCE.md` §5, settled for good 2026-08-21, with the
   owner's own "leaving the gallery is instant". Nothing found here reopens it.
-- **Do not chase dead fields with a tool.** `Sweep.mode` was real, and a 30-line scan finds two more of
+- **Do not chase dead fields with a tool.** `Sweep.mode` was real, and a 30-line scan finds one more of
   the same shape — `LatticeExpansion.originalRows` (`Lattice.swift:662`, assigned at `:371`, read
-  nowhere; its `originalCols` sibling *is* read) and `BrushGrain.textureName` (`Brush.swift:89`, always
-  nil, never read; `BRUSH_ENGINE_EXTENSIBILITY.md` already rules imported grain a future field). But the
-  same scan flags four false positives — `InterpolationPreviewKey`'s fields, which are read only by a
-  synthesized `==`. There is no linter and no warnings-as-errors here, and a check that cannot tell a
-  cache-key field from a dead one would be noise. Delete the two; do not automate.
+  nowhere; its `originalCols` sibling *is* read). (A second, `BrushGrain.textureName`, was found the
+  same way; it is moot now — BRUSH.md §12 stage 2 deleted `BrushGrain` in full, not just the unread
+  field.) The same scan flags four false positives — `InterpolationPreviewKey`'s fields, which are
+  read only by a synthesized `==`. There is no linter and no warnings-as-errors here, and a check that
+  cannot tell a cache-key field from a dead one would be noise. Delete the one that remains; do not
+  automate.
 
 ## 4. The owner's question, answered
 

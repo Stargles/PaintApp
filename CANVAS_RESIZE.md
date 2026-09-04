@@ -410,8 +410,8 @@ as well as a downscale. While the floor holds at both sizes, spacing stays 1 pt 
 `S → kS`, so **the number of dabs covering any one pixel changes by exactly `k`**. For a dab whose
 alpha is 1 that is invisible (opaque over opaque is opaque). For a dab whose alpha is below 1 it is a
 change in apparent opacity — which means every pressure-tapered stroke end, every light-pressure
-passage, the whole of a Pencil stroke (`opacity: 0.9` plus grain at `depth: 0.55`), and any brush the
-artist has given a `flow` below 1.
+passage, the whole of a Pencil stroke (`opacity: 0.9`), and any brush the artist has given a `flow`
+below 1.
 
 **What the spec does about it: nothing, knowingly, and it says so out loud.**
 
@@ -425,10 +425,10 @@ artist has given a `flow` below 1.
   and pinned by `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount`. This feature inherits an
   existing, documented, tested limitation rather than introducing one.
 - The floor's siblings inherit the same way: `stampDab`'s **0.5 pt** diameter floor
-  (`BrushStamper.swift:237`), `stampApproximateSquare`'s two **1 pt** floors (`:280`, `:282`), and pencil
-  grain, which samples an absolute canvas-position noise field (`grainAlphaMultiplier`, `:269-273`) and
-  therefore re-samples under a translation as much as under a scale — so a scale is no regression
-  there either.
+  (`BrushStamper.swift:237`) and `stampApproximateSquare`'s two **1 pt** floors (`:280`, `:282`).
+  (Brush grain used to sit beside these — an absolute canvas-position noise field that re-sampled
+  under a translation as much as under a scale, so a scale was no regression there either — but
+  BRUSH.md §12 stage 2 deleted grain in full, so this sibling no longer exists.)
 
 What the spec *does* do: **name the effect in the dialog** when the scale factor would move a stroke
 across a floor. One sentence, once, at the moment the artist chooses — *"Brush textures will re-stamp
@@ -972,8 +972,9 @@ mapper.
     interactive state baked before the audit, which every save bakes too.
 12. **No disk write happens during a resize, and no save may start during one.** **Shipped in stage 3**
     as `ScenePhaseSaveGate.mayStartSave`.
-13. **The dab-spacing floor, the dab-diameter floor and pencil grain are inherited, knowingly.** The
-    dialog says once that brush texture re-stamps at the new size; nothing in the engine changes.
+13. **The dab-spacing floor and the dab-diameter floor are inherited, knowingly.** (Pencil grain used
+    to be a third; BRUSH.md §12 stage 2 deleted it.) The dialog says once that brush texture re-stamps
+    at the new size; nothing in the engine changes.
     **Shipped in stage 2** as `SpacingFloorSurvey`: one walk when the sheet opens collecting
     `size × spacingFraction` per stroke, and a binary search per keystroke, because a stroke crosses at
     factor `k` exactly when its threshold lies in `[min(1, 1/k), max(1, 1/k))`. The sentence is

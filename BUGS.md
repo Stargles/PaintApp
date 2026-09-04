@@ -120,7 +120,9 @@ blind on §2.16's own case.
 `testGrainReSamplesUnderAPoseWhichIsTheArtifactStageFourRemoves` no longer exists and needs no action.
 It was retired into `testGrainTravelsWithTheInkUnderAPose` when the stage landed, correctly, because
 comparing `grainAlphaMultiplier` at two positions is the definition of a noise field and could not have
-gone red. Its replacement had the *other* hole and is now on the probe.
+gone red. Its replacement had the *other* hole and is now on the probe. (`testGrainTravelsWithTheInkUnderAPose`
+itself no longer exists either, as of BRUSH.md §12 stage 2 — grain is deleted in full, per §2.4/§2.5,
+and the tests that pinned grain-travels-with-posed-ink went with it rather than being rewritten.)
 
 The two smaller ones are fixed. `DistortLogicTests`' "the drag is a function of its final point alone"
 is deleted: `FloatingDistortDrag` is four `let`s over value types with a non-`mutating` accessor, so the

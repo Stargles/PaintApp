@@ -16,7 +16,7 @@ Nothing derived is stored: not glyph positions, not measured bounds, not a warpe
 
 Storing `size` and `corners` separately is not "two transforms." They are the domain and the codomain of one map. Collapsing them into a bare quad forces an invented rule for what happens to the quad when the text grows — and "the quad grows along its top and bottom edges" is not a well-defined operation on a projected quad, since the whole point of perspective is that those edges are not parallel and do not scale alike.
 
-Fields are grouped into defaulted sub-structs from day one (`Typography`, and later `outline`/`shadow` as their own), which is the generalizable lesson [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) extracts from `dynamics`/`grain`/`taper`: every flat scalar is a Codable-compatibility question later.
+Fields are grouped into defaulted sub-structs from day one (`Typography`, and later `outline`/`shadow` as their own), which is the generalizable lesson [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) extracts from `dynamics`: every flat scalar is a Codable-compatibility question later.
 
 `TextFrame.mode` is an enum (`.affine`, `.projective`) from the first commit even though only two cases exist, so a later `.mesh(Lattice)` — Photoshop's Warp Text, which a homography cannot express — is an additive case rather than a Codable migration. Nothing in this project builds it.
 

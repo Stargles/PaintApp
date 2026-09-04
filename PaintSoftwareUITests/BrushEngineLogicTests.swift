@@ -17,9 +17,9 @@ import XCTest
 /// sources shared with PaintSoftwareUITests" group and this target's Sources build phase) — both
 /// files are pure Foundation/CoreGraphics with no UIKit or other app dependency, so that's a
 /// harmless, ordinary multi-target-membership source file, not a fork of the logic. Their types
-/// (`Brush`, `BrushDynamics`, `BrushGrain`, `StrokeStabilizer`) are consequently local to this
-/// module already — no import needed (and no `@testable import PaintSoftware` either, which would
-/// make every one of those names ambiguous between the two copies).
+/// (`Brush`, `BrushDynamics`, `StrokeStabilizer`) are consequently local to this module already —
+/// no import needed (and no `@testable import PaintSoftware` either, which would make every one of
+/// those names ambiguous between the two copies).
 final class BrushEngineLogicTests: XCTestCase {
 
     // MARK: - BrushDynamics.sizeFraction
@@ -71,22 +71,6 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertEqual(dynamics.opacityFraction(forPressure: 0), 0, accuracy: 0.0001)
         XCTAssertEqual(dynamics.opacityFraction(forPressure: 0.4), 0.4, accuracy: 0.0001)
         XCTAssertEqual(dynamics.opacityFraction(forPressure: 1), 1, accuracy: 0.0001)
-    }
-
-    // MARK: - BrushGrain.noiseValue
-
-    func testGrainNoiseValueIsDeterministicForSamePoint() {
-        let a = BrushGrain.noiseValue(atX: 42.5, y: 17.25, scale: 1.2, rotation: 0)
-        let b = BrushGrain.noiseValue(atX: 42.5, y: 17.25, scale: 1.2, rotation: 0)
-        XCTAssertEqual(a, b, "The same position must always yield the same grain value, or grain would flicker stamp to stamp")
-    }
-
-    func testGrainNoiseValueStaysWithinUnitRange() {
-        for i in stride(from: 0, to: 500, by: 7) {
-            let value = BrushGrain.noiseValue(atX: Double(i) * 3.1, y: Double(i) * -1.7, scale: 1.0, rotation: 0.3)
-            XCTAssertGreaterThanOrEqual(value, -0.01, "noiseValue drifted below the expected ~0...1 range at sample \(i)")
-            XCTAssertLessThanOrEqual(value, 1.01, "noiseValue drifted above the expected ~0...1 range at sample \(i)")
-        }
     }
 
     // MARK: - StrokeStabilizer
@@ -332,12 +316,12 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertLessThan(r, 0.2)
     }
 
-    /// A fully deterministic, fully opaque brush: no pressure dynamics, no grain, no scatter, no
+    /// A fully deterministic, fully opaque brush: no pressure dynamics, no scatter, no
     /// rotation jitter, hard edge. Any of those would make a single-pixel colour assertion flaky.
     private static func opaqueTestBrush(blendMode: BrushBlendMode) -> Brush {
         Brush(name: "Test", shape: .hardRound, size: 20, opacity: 1, flow: 1,
               spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
-              rotationJitter: 0, dynamics: .fixed, grain: .disabled, blendMode: blendMode)
+              rotationJitter: 0, dynamics: .fixed, blendMode: blendMode)
     }
 
     private func rgbaPixels(of image: UIImage, width: Int, height: Int) -> (bytes: [UInt8], width: Int, height: Int)? {

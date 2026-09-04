@@ -23,9 +23,9 @@ protocol DabTarget: AnyObject {
 /// arguments `stampCircle` received while `VectorCanvas.renderLocalContent` was drawing. Everything
 /// short of that is a re-derivation — a test-local copy of `VectorCanvas.stamp`'s dispatch pins the
 /// copy, and `BrushStamper.DabPose.applied(to:)` copies `alpha` verbatim, so an assertion built on it
-/// holds under an implementation that walks in posed space and re-samples the grain on every frame.
-/// KEYFRAMES.md §4.2 is a claim about which walk the renderer runs, and this is where that claim is
-/// observable.
+/// holds under an implementation that walks in posed space and re-derives per-dab alpha on every
+/// frame instead of baking it once in rest space. KEYFRAMES.md §4.2 is a claim about which walk the
+/// renderer runs, and this is where that claim is observable.
 ///
 /// **Off by default and nearly free when off**: one relaxed `Bool` load per dab, after the guard that
 /// already decides whether the dab costs a gradient at all. The lock is taken only while armed.
@@ -84,10 +84,9 @@ enum DabProbe {
 /// while drawing.
 ///
 /// **The key deliberately excludes `alpha`, and that is the whole reason the cache works.** `alpha`
-/// is `brushOpacity × flow × opacityFraction(pressure)` times a per-position grain multiplier — a
-/// different float on essentially every dab, since pressure varies continuously. Keying on it would
-/// hit approximately never. Instead the entry is built at full alpha and the per-dab alpha is applied
-/// by `CGContext.setAlpha`.
+/// is `brushOpacity × flow × opacityFraction(pressure)` — a different float on essentially every dab,
+/// since pressure varies continuously. Keying on it would hit approximately never. Instead the entry
+/// is built at full alpha and the per-dab alpha is applied by `CGContext.setAlpha`.
 ///
 /// That substitution is exact, not an approximation: all three stops carry the *same* RGB and differ
 /// only in alpha, so the gradient never interpolates colour. Baking `α` into the stops yields alpha
@@ -540,8 +539,8 @@ final class RasterLayerTexture: DabTarget {
 
     /// Stamps a single round dot at `point` (canvas point space) directly into the persistent
     /// bitmap — the one shared primitive every built-in brush shape stamps with today. Per-shape
-    /// differentiation (square, textured/custom stamps) and grain modulation are layered on top of
-    /// this by the brush engine (Worker B) and the real renderer (Worker A), not implemented here.
+    /// differentiation (square, textured/custom stamps) is layered on top of this by the brush engine
+    /// (Worker B) and the real renderer (Worker A), not implemented here.
     ///
     /// - Parameters:
     ///   - color: the brush's pure color; any alpha on `color` itself is ignored in favor of `alpha`.

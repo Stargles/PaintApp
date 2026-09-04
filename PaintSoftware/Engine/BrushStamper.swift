@@ -4,7 +4,7 @@ import CoreGraphics
 /// The single source of truth for turning brush + input samples into stamps on a
 /// `RasterLayerTexture`. Both live raster drawing (`StrokeCanvasView`) and vector re-rendering
 /// (`VectorCanvas.render`) go through here, so a vector stroke rasterizes identically to how it
-/// would have been drawn live — same shape/hardness/dynamics/grain/scatter/spacing.
+/// would have been drawn live — same shape/hardness/dynamics/scatter/spacing.
 enum BrushStamper {
     struct Sample {
         var point: CGPoint
@@ -211,11 +211,11 @@ enum BrushStamper {
         raster.endStroke()
     }
 
-    /// Stamps one dab, honoring the brush's shape/hardness/pressure dynamics/scatter/grain. Ported
+    /// Stamps one dab, honoring the brush's shape/hardness/pressure dynamics/scatter. Ported
     /// verbatim from `StrokeCanvasView.stampOne` so live and replayed strokes match exactly.
     ///
     /// The eraser reuses this exact pipeline rather than a special-cased hard circle: it "paints"
-    /// with the same shape/dynamics/spacing/grain as any other brush, just composited with
+    /// with the same shape/dynamics/spacing as any other brush, just composited with
     /// `.destinationOut` instead of the brush's own blend mode — i.e. painting with 0 opacity as the
     /// color, so its stamp punches a hole instead of adding color. `color` is irrelevant under
     /// `.destinationOut` (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
@@ -244,11 +244,8 @@ enum BrushStamper {
         let blendMode = isEraser ? CGBlendMode.destinationOut : brush.blendMode.cgBlendMode
 
         switch brush.shape {
-        case .softRound, .hardRound, .pen:
+        case .softRound, .hardRound, .pen, .pencil:
             raster.stampCircle(at: stampPoint, radius: radius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
-        case .pencil:
-            let grainMultiplier = brush.grain.isEnabled ? grainAlphaMultiplier(at: stampPoint, grain: brush.grain) : 1
-            raster.stampCircle(at: stampPoint, radius: radius, color: color, alpha: alpha * grainMultiplier, hardness: hardness, blendMode: blendMode)
         case .square, .custom:
             let rotation: CGFloat = brush.rotationJitter > 0
                 ? rng.signedUnit() * .pi * CGFloat(brush.rotationJitter)
@@ -264,12 +261,6 @@ enum BrushStamper {
         let angle = rng.unit() * 2 * .pi
         let distance = rng.unit() * maxOffset
         return CGPoint(x: point.x + cos(angle) * distance, y: point.y + sin(angle) * distance)
-    }
-
-    static func grainAlphaMultiplier(at point: CGPoint, grain: BrushGrain) -> CGFloat {
-        let noise = BrushGrain.noiseValue(atX: Double(point.x), y: Double(point.y), scale: grain.scale, rotation: grain.rotation)
-        let depth = CGFloat(max(0, min(grain.depth, 1)))
-        return (1 - depth) + depth * CGFloat(noise)
     }
 
     static func stampApproximateSquare(into raster: DabTarget, at center: CGPoint, diameter: CGFloat,
@@ -298,11 +289,7 @@ enum BrushStamper {
 
 extension BrushStamper {
 
-    /// **One dab, in the space its stroke was drawn in.** KEYFRAMES.md §4.2's *"dab record"*, and
-    /// §2.16's *"each dab's grain value is baked… so the texture is part of the mark"* — the
-    /// multiplier is already folded into `alpha`, because `stampDab` multiplies it in before the dab
-    /// ever reaches a `DabTarget`. **That is the whole of the grain fix**: nothing here samples a
-    /// noise field, so nothing downstream can re-sample it at a posed position.
+    /// **One dab, in the space its stroke was drawn in.** KEYFRAMES.md §4.2's *"dab record"*.
     ///
     /// It carries the dab's **radius**, not its diameter, and its **centre**, not its position along
     /// the path — those are the only two things a pose has to touch.
@@ -382,11 +369,11 @@ extension BrushStamper {
     /// bake-then-replay, and what the render path uses.
     ///
     /// Wrapping the sink rather than the walk is the whole trick, and it is what makes this stage
-    /// small: `stampStroke`, `stampDab`, `applyScatter`, `grainAlphaMultiplier` and
-    /// `stampApproximateSquare` all run **unchanged, in rest space**, so the dab count, the dab
-    /// phase, the seeded `DabRNG` draws, the grain multiplier and the square brush's sub-lattice are
-    /// invariant across every frame of an animation *by construction* rather than by arithmetic that
-    /// happens to agree. Only the two numbers a pose can legitimately change — where the dab is and
+    /// small: `stampStroke`, `stampDab`, `applyScatter` and `stampApproximateSquare` all run
+    /// **unchanged, in rest space**, so the dab count, the dab phase, the seeded `DabRNG` draws, and
+    /// the square brush's sub-lattice are invariant across every frame of an animation *by
+    /// construction* rather than by arithmetic that happens to agree. Only the two numbers a pose can
+    /// legitimately change — where the dab is and
     /// how big it is — are touched, and they are touched last.
     ///
     /// `beginStroke`/`endStroke` forward, because the wrapped target may be a `RasterLayerTexture`

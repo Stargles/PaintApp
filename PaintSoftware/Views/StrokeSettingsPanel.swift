@@ -21,7 +21,7 @@ struct StrokeSettingsSpec {
 
 /// Procreate-style stroke settings: a horizontally-scrolling preset picker and sliders for every
 /// `Brush` setting expected to be user-tunable day to day (size, opacity, pressure dynamics,
-/// stabilization, spacing, and — only for the Pencil preset — grain depth).
+/// stabilization, spacing).
 ///
 /// `accessory` is extra content placed between the sliders and the preview (the paint brush's
 /// custom-texture import; the eraser has none), and `preview` is the panel's own swatch, which
@@ -91,16 +91,6 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
                     range: 0.02...0.5,
                     idSuffix: "spacingSlider"
                 )
-
-                if brush.shape == .pencil {
-                    sliderRow(
-                        title: "Grain Depth",
-                        valueText: "\(Int(brush.grain.depth * 100))%",
-                        value: grainDepthBinding,
-                        range: 0...1,
-                        idSuffix: "grainDepthSlider"
-                    )
-                }
 
                 accessory()
 
@@ -218,13 +208,4 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
         )
     }
 
-    private var grainDepthBinding: Binding<Double> {
-        Binding(
-            get: { brush.grain.depth },
-            set: {
-                canvasManager[keyPath: spec.selectedBrush].grain.depth = $0
-                canvasManager[keyPath: spec.selectedBrush].grain.isEnabled = $0 > 0
-            }
-        )
-    }
 }

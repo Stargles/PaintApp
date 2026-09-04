@@ -79,43 +79,8 @@ struct BrushDynamics: Codable, Equatable {
     }
 }
 
-/// Textured "tooth" modulation applied per-stamp (e.g. the Pencil brush's grain). `textureName`
-/// nil means a built-in procedural noise texture rather than an imported image.
-struct BrushGrain: Codable, Equatable {
-    var isEnabled: Bool
-    var scale: Double
-    var rotation: Double // radians
-    var depth: Double // 0...1, how strongly the grain modulates opacity
-    var textureName: String?
-
-    static let disabled = BrushGrain(isEnabled: false, scale: 1, rotation: 0, depth: 0, textureName: nil)
-
-    /// Deterministic procedural value noise standing in for a scanned "tooth" texture (no bundled
-    /// image asset needed, per this engine's no-bundled-textures constraint) — the same canvas
-    /// point always yields the same 0...1 value, scaled/rotated by `scale`/`rotation`, via a classic
-    /// cheap hash-based value-noise construction (bilinear-interpolated hashed lattice corners).
-    /// That's more than enough smoothness for a per-stamp opacity modulator; real Perlin/simplex
-    /// noise would be needless precision here. `CGPoint`/`CGFloat`-free (plain `Double` in, `Double`
-    /// out) so it's exercisable in a plain unit test.
-    static func noiseValue(atX x: Double, y: Double, scale: Double, rotation: Double) -> Double {
-        let s = max(scale, 0.001)
-        let cosR = cos(rotation), sinR = sin(rotation)
-        let nx = (x * cosR - y * sinR) / (20 * s)
-        let ny = (x * sinR + y * cosR) / (20 * s)
-        func hash(_ hx: Double, _ hy: Double) -> Double {
-            let v = sin(hx * 127.1 + hy * 311.7) * 43758.5453
-            return v - v.rounded(.down)
-        }
-        let ix = nx.rounded(.down), iy = ny.rounded(.down)
-        let fx = nx - ix, fy = ny - iy
-        let a = hash(ix, iy), b = hash(ix + 1, iy), c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1)
-        let ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy)
-        return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy
-    }
-}
-
 /// A brush preset: shape/texture plus every Procreate-style adjustable setting (size, opacity,
-/// spacing, pressure dynamics, stabilization, scatter, grain, blend mode). Value-typed and
+/// spacing, pressure dynamics, stabilization, scatter, blend mode). Value-typed and
 /// `Codable` so it can be edited via simple bindings and persisted (built-ins in `BrushLibrary`,
 /// user imports under `Documents/Brushes`).
 struct Brush: Identifiable, Codable, Equatable {
@@ -141,7 +106,6 @@ struct Brush: Identifiable, Codable, Equatable {
     var rotationJitter: Double // 0...1 random per-stamp rotation
 
     var dynamics: BrushDynamics
-    var grain: BrushGrain
     var blendMode: BrushBlendMode
 
     init(
@@ -158,7 +122,6 @@ struct Brush: Identifiable, Codable, Equatable {
         scatter: Double = 0,
         rotationJitter: Double = 0,
         dynamics: BrushDynamics = .default,
-        grain: BrushGrain = .disabled,
         blendMode: BrushBlendMode = .normal
     ) {
         self.id = id
@@ -174,7 +137,6 @@ struct Brush: Identifiable, Codable, Equatable {
         self.scatter = scatter
         self.rotationJitter = rotationJitter
         self.dynamics = dynamics
-        self.grain = grain
         self.blendMode = blendMode
     }
 }

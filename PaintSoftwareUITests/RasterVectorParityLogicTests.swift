@@ -274,7 +274,7 @@ enum RasterVectorParity {
     /// element in the display list at all, against the same raster ground truth. That is the number
     /// a "clean cut" gate would need to be tuned against — a span may only be resolved geometrically
     /// when the split's own parity is good enough to be invisible, and the threshold varies with
-    /// hardness/opacity/grain.
+    /// hardness/opacity.
     ///
     /// No assertion ships with it: the split is expected to be *bad* for a soft brush, for
     /// `eraserOpacity < 1`, and for anything grazing the stroke rather than crossing it, and that

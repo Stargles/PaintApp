@@ -36,9 +36,9 @@ the reason is the blocker above. A circle has no orientation and no interior, so
 differences in centre and radius that a re-derived dab walk produces are close to invisible; a stamp
 image has both, and the same jitter reads as texture crawl. So **whoever builds stamp-image dabs
 inherits [KEYFRAMES.md](KEYFRAMES.md) §4.2's rest-space dab bake as a dependency**, not as an
-optimisation — and §2.16's ruling that grain is baked per dab when the stroke is drawn is the same
-argument arriving one step earlier. Nothing is scheduled; this is a seam to keep open, like the rest of
-this document.
+optimisation — the same rest-space-bake requirement §4.2 already shipped for the dab lattice's own
+count and phase, arriving one step earlier for a shape with orientation to lose. Nothing is scheduled;
+this is a seam to keep open, like the rest of this document.
 
 ---
 
@@ -91,7 +91,7 @@ the model to copy if a brush ever needs more than a file name.
 ### 4. The eraser degrades gracefully by construction
 
 `VectorEraser.supportsCleanCut` and `supportsSplitting` gate geometric cutting on shape, hardness,
-grain, opacity and jitter. A typical imported brush — textured, scattered, angle-jittered — fails
+opacity and jitter. A typical imported brush — textured, scattered, angle-jittered — fails
 those gates automatically and falls back to the retained alpha punch, which is pixel-exact whatever
 the dabs did. **No eraser code has to learn about imported brushes.** That is the payoff of having
 written those gates as properties of the brush rather than as a list of known-good presets.
@@ -150,16 +150,15 @@ exhaustive, which is what turns "add a brush format" into a compile-error-guided
 
 ### `Brush` will need grouping before it needs fields
 
-`Brush` is a flat struct of ~14 scalars plus three grouped sub-structs (`dynamics`, `grain`,
-`blendMode`). ABR and Procreate carry far more: angle and roundness jitter, tilt and azimuth response,
-taper, per-dab flow jitter, dual-brush/wet-mix, texture depth curves. Adding those flat means every
-one is a new key in `Brush`'s `Codable` surface, and every key is a decode-compatibility question —
-`VectorStroke.init(from:)` already exists as a hand-written decoder precisely because a synthesized
-one throws `keyNotFound` on a field added later.
+`Brush` is a flat struct of ~14 scalars plus two grouped sub-structs (`dynamics`, `blendMode`). ABR and
+Procreate carry far more: angle and roundness jitter, tilt and azimuth response, taper, per-dab flow
+jitter, dual-brush/wet-mix, texture depth curves. Adding those flat means every one is a new key in
+`Brush`'s `Codable` surface, and every key is a decode-compatibility question — `VectorStroke.init(from:)`
+already exists as a hand-written decoder precisely because a synthesized one throws `keyNotFound` on a
+field added later.
 
-Group them the way `dynamics` and `grain` already are (`BrushTipDynamics`, `BrushTextureSettings`,
-`BrushTaper`), each with a `static let default` and its own defaulted decode. Then a new setting is
-one nested field, not a migration.
+Group them the way `dynamics` already is (`BrushTipDynamics`, `BrushTaper`), each with a `static let
+default` and its own defaulted decode. Then a new setting is one nested field, not a migration.
 
 ### Two smaller notes
 
@@ -168,10 +167,6 @@ one nested field, not a migration.
   path — but a new tip kind must be considered at both, and the eraser one should default to
   *refusing* to cut. Conservative in the safe direction: a false "clean" claim is a visible artefact,
   a false "residue" claim is only a retained element.
-- **Grain is procedural and position-based** (`BrushGrain.noiseValue` over canvas coordinates). ABR and
-  Procreate grain is an imported tiling texture, usually with its own scale/rotation/depth and a
-  choice of *rolling* with the stroke or being *anchored* to the canvas. The current model only
-  expresses anchored, which is the right default; rolling grain is a new field, not a new subsystem.
 
 ---
 
