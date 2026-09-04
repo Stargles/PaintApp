@@ -362,6 +362,38 @@ LAYER_TRANSFORM.md.
       on one clock. **Ask the owner to leave "Record My Actions" running during an ordinary working session and
       to stop it once the freeze happens** — the file is the diagnosis. Do not spend runs guessing first.
 
+### (41) A middle-of-list edit re-stamps the whole cel
+
+- [ ] > "The want is that they all stand reasonably real time in terms of performance no matter the
+      amount of strokes for UX."
+
+      **The append half is done; this is the rest of it.** MEASURED on the owner's iPad 9
+      ([PERFORMANCE.md](PERFORMANCE.md) §11): a vector cel re-stamps every dab it holds whenever its memo
+      is missed, at **3.16 µs a dab and no per-stroke term at all** — 3,200 strokes carrying 7.67 M dabs
+      cost 23.52 s against 32,000 strokes carrying 7.55 M dabs at 24.04 s. Adding a stroke is now
+      incremental, so what remains is every edit that is **not** an append: the vector eraser's cut and
+      split modes (`splitStroke`, `piece(of:samples:parameters:)`), select-and-move, Clear, and recolour.
+      Each rewrites elements in place, so each still costs the whole cel — 745 ms at 1,000 strokes, 2.98 s
+      at 4,000.
+
+      **The design, and the one that was rejected.** Bound the work by the **area the edit touched**, not
+      by where it sits in the stack: copy the standing memo, clip to the changed rectangle, and re-walk
+      only the elements crossing it. `StrokeSpatialIndex` already answers exactly that query and was
+      written to be reused by callers other than the eraser. A ladder of prefix checkpoints was considered
+      and is worse on both counts — it costs a canvas-sized image apiece (8 MB at the owner's size) and
+      bounds by stack position, so an erase near the bottom of a tall stack stays expensive.
+
+      **Three constraints that are not optional.** An eraser composites `destinationOut` against
+      everything beneath it, so inside the rectangle the redraw starts from the bottom of the stack rather
+      than from the edit. A run of non-normal blend-mode strokes is wrapped in a transparency layer
+      (`VectorCanvas.renderLocalContent`), so whole runs re-run rather than single strokes. And a
+      selection dragged across the canvas has a canvas-sized rectangle and costs a full re-walk — **the
+      honest guarantee is that cost scales with the area touched, not that it is always small**, which is
+      the guarantee the ask is really after.
+
+      **The seam is already built**, so this is no longer a refactor: invalidation carries what changed,
+      and a case naming a rectangle is addable without revisiting the mutation sites again.
+
 ### (40) Onion skin z-order, and what Behind should mean
 
 - [ ] > "onion skin z ordering is broken, it shows behind videos or photos even if the video layer is behind

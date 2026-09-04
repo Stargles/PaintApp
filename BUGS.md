@@ -3,6 +3,21 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Undo charges 3-6x what a vector edit retains, and the depth shortens as the drawing grows (2026-09-04)
+
+`registerVectorUndo` charges an entry `(from.count + to.count) * 512` bytes. Copy-on-write means the two
+element arrays **share their sample storage**, so an entry retains a fraction of that — MEASURED at
+**3-6x overcharged** ([PERFORMANCE.md](PERFORMANCE.md) §11).
+
+The consequence is that undo depth falls as the drawing fills up, against the iPad's 192 MiB budget:
+**~1,032 steps at the owner's current 190-stroke density, 196 at 1,000 strokes, and 49 at 4,000.** Some of
+that is real — an entry over a bigger cel genuinely holds more — but most of the shrinkage at the top end
+is the accounting rather than the memory, and the artist loses history they had room for.
+
+Charging what an entry actually retains buys most of the depth back. The measurement is already taken;
+what is missing is a decision about how to compute retained size honestly for a COW-shared array, which
+is why this is filed rather than fixed.
+
 ## A project's brush textures are copied by the palette, not by what is drawn (2026-09-04)
 
 `ProjectStore.copyCustomBrushTexturesIntoProject` and `restoreCustomBrushTexturesFromProject`
