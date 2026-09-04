@@ -141,7 +141,9 @@ struct Brush: Identifiable, Codable, Hashable {
     /// The preset's default stroke diameter, in canvas points. Copied into the toolbar's own size
     /// when the preset is picked; the *dab's* size is `dab.size` times whatever the stroke carries.
     var size: CGFloat
-    /// The preset's default stroke opacity, `0…1`. Same relationship to `dab.opacity`.
+    /// The preset's default stroke opacity, `0…1` — **BRUSH.md §2.11's cap**, and it has no per-dab
+    /// counterpart on `BrushDabSettings`. What one stamp lays down is `dab.flow`; this is the most
+    /// all of them together may reach, applied once when the stroke merges.
     var opacity: Double
 
     /// Every dab output's base value — §6.
