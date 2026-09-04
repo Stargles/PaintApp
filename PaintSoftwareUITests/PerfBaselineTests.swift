@@ -1451,6 +1451,70 @@ final class PerfBaselineTests: XCTestCase {
                              "The cache exists to serve the overwhelming majority of dabs; a rate this far below 100% means it is not doing its job")
     }
 
+    /// **The image dab's cache, and it is worth strictly more than the gradient cache above.** A
+    /// gradient entry is three colours and a `CGGradient`; a tinted-tip entry is a whole bitmap
+    /// build at the mask's resolution, MEASURED at 96.6% of a 16 pt image dab's total cost and 37.7%
+    /// of a 200 pt one. So a key that silently stops matching is not a slow path here, it is a
+    /// different program.
+    ///
+    /// The key is the tip and the colour, and **neither the dab's size nor its angle is in it** —
+    /// both vary per dab, so either would collapse this number the way alpha would collapse the
+    /// gradient cache's. BRUSH.md §3.5 asked for the angle to be *bucketed* into the key; that was
+    /// refuted by measurement (see `DabImageCache`) and the angle is applied by the CTM instead.
+    /// This test is what stops either term coming back.
+    func testDabImageCacheHitRate() {
+        let manager = perfManager()
+        manager.selectedBrush = BrushLibrary.square
+        let texture = manager.layers[0].cels[0].raster
+        let samples = syntheticStroke(sampleCount: Self.sampleCount)
+
+        let firstStart = Date()
+        stamp(samples, into: manager)
+        let firstSeconds = -firstStart.timeIntervalSinceNow
+        let hitsAfterFirst = texture.dabImageCacheHits
+        let missesAfterFirst = texture.dabImageCacheMisses
+
+        let secondStart = Date()
+        stamp(samples, into: manager)
+        let secondSeconds = -secondStart.timeIntervalSinceNow
+        let secondStrokeHits = texture.dabImageCacheHits - hitsAfterFirst
+        let secondStrokeMisses = texture.dabImageCacheMisses - missesAfterFirst
+
+        let total = texture.dabImageCacheHits + texture.dabImageCacheMisses
+        let rate = total > 0 ? Double(texture.dabImageCacheHits) / Double(total) : 0
+        let dabsPerStroke = max(secondStrokeHits + secondStrokeMisses, 1)
+
+        // The round dab the same walk lays, for scale: an image dab is intrinsically dearer than a
+        // disc and the point of the cache is to keep that ratio small rather than to erase it.
+        let round = perfManager()
+        round.selectedBrush = BrushLibrary.hardRound
+        let roundStart = Date()
+        stamp(samples, into: round)
+        let roundSeconds = -roundStart.timeIntervalSinceNow
+        let roundDabs = max(round.layers[0].cels[0].raster.dabGradientCacheHits
+                            + round.layers[0].cels[0].raster.dabGradientCacheMisses, 1)
+
+        report("dab image cache", [
+            ("dabsTotal", "\(total)"),
+            ("hits", "\(texture.dabImageCacheHits)"),
+            ("misses", "\(texture.dabImageCacheMisses)"),
+            ("hitRate", String(format: "%.1f%%", rate * 100)),
+            ("firstStrokeMisses", "\(missesAfterFirst)"),
+            ("secondStrokeMisses", "\(secondStrokeMisses)"),
+            ("coldStrokeMs", String(format: "%.1f", firstSeconds * 1000)),
+            ("warmStrokeMs", String(format: "%.1f", secondSeconds * 1000)),
+            ("usPerImageDab", String(format: "%.2f", secondSeconds * 1_000_000 / Double(dabsPerStroke))),
+            ("usPerRoundDab", String(format: "%.2f", roundSeconds * 1_000_000 / Double(roundDabs))),
+        ])
+
+        XCTAssertEqual(missesAfterFirst, 1,
+                       "A stroke is one tip at one colour, so it should miss exactly once — on its first dab — and hit for every dab after that. More than one miss means a per-dab term (size, angle, alpha, position) has leaked into the cache key.")
+        XCTAssertEqual(secondStrokeMisses, 0,
+                       "A second stroke with identical brush settings must not rebuild the tinted tip at all")
+        XCTAssertGreaterThan(rate, 0.99,
+                             "The cache exists to serve the overwhelming majority of dabs; a rate this far below 100% means it is not doing its job")
+    }
+
     // MARK: - The compositor (LAYER_COMPOSITING.md §5.3)
 
     /// A stack of `layerCount` layers, each carrying one canvas-sized baked image at a different

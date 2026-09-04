@@ -256,15 +256,72 @@ faithful to the drawn path (0.250 pt against 0.391 pt), because the fit is defin
 curve is for the tangent, and for not polygonising a stroke walked at a spacing wider than it was drawn
 at. The first dab sits on the first stored point and takes the outgoing tangent.
 
-### 3.5 Stamp
+### 3.5 Stamp — built, §12 stage 3
 
-`DabTarget` gains an image primitive beside `stampCircle`. `stampApproximateSquare` — sixteen
-gradient-filled circles faking one square dab — is deleted and `.square` becomes a built-in texture. The
-primitive needs a tinted, rotation-bucketed image cache with a hit-rate test written in the same change,
-the way `DabGradientCache` has one; per-dab `CGImage` construction otherwise dominates everything.
+`DabTarget` has an image primitive beside `stampCircle`:
 
-**`BakedDab` gains an angle**, and `DabPose` must rotate it. Without that, a sprite brush under a
-rotating keyframe keeps its stamps upright while the stroke turns.
+```swift
+func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode)
+```
+
+`stampApproximateSquare` — sixteen gradient-filled circles faking one square dab — is gone, and
+`.square` is a committed 256² alpha PNG loaded by the same route a user's import will take. There is no
+`hardness` on this arm: a picture's edge is in its pixels.
+
+**A tip's mask is square, by ruling.** One scalar for the dab's size keeps `DabPose` at one multiply,
+`BakedDab` at one number and the dirty-rect bound at one `abs`; a non-square import is letterboxed into
+a square mask at import time, which is also what Procreate's square Shape Sources do. Nothing downstream
+of the primitive ever asks a tip how wide it is.
+
+**The cache is keyed on the tip and the colour, and this section's original "rotation-bucketed" was
+wrong.** Bucketing the angle is worse on both counts, MEASURED:
+
+- *Accuracy.* A bucket's worst error is `π/N`, and the corner of the largest dab the app allows sits
+  `141.4` px from its centre (the size slider tops out at 200 pt and the raster tier is 1 px per canvas
+  point). Holding that corner inside half a pixel needs **889 buckets**.
+- *Cost, at any N.* A rotated-CTM draw of one cached entry beats a pre-rotated bucket blitted
+  axis-aligned at every size and every interpolation quality — 5.35 vs 122 µs at a 16 pt dab and 485 vs
+  1082 at 200 pt on `.high`. A pre-rotated bucket must be `√2` larger to hold the turned square, so it
+  covers twice the pixels, and N entries per colour also defeat CoreGraphics' own per-image downsample
+  cache.
+
+So the angle is applied exactly by the CTM, and §7's direction-follow inherits a primitive with no
+quantisation in it to remove. **Size is out of the key too**: an entry is built at the mask's native
+resolution and CoreGraphics scales it, which MEASURED within noise of a power-of-two ladder of pre-scaled
+entries at three of four dab sizes. What is left is one entry per stroke, which the hit-rate test in
+`PerfBaselineTests` pins at one miss and the rest hits — and one that names the *tip* rather than only
+its dimensions, which is the assertion RENDER.md §3.8 says nobody wrote for the three size-keyed memos
+already in this repo.
+
+The cache is what makes the primitive affordable at all: building a tinted stamp is a bitmap build at
+the mask's resolution, MEASURED at **162 µs** per 16 pt dab against **5.5 µs** when it is cached, and
+814 vs 508 at 200 pt. For scale, a round dab of 16 pt is 2.4 µs, so an image dab is ~2.3× a round one
+with the cache and ~68× without it.
+
+**`BakedDab` carries a tip rather than a flat `hardness`**, because `hardness` is meaningless on a
+picture and `angle` is meaningless on a disc:
+
+```swift
+enum Tip: Equatable {
+    case round(hardness: CGFloat)
+    case image(BrushTextureRef, angle: CGFloat)
+}
+```
+
+**`DabPose` turns an image dab by its Jacobian's polar rotation**, `atan2(b - c, a + d)` — the rotation
+closest to the Jacobian, so the square the primitive can draw is the closest one to the parallelogram
+the pose really makes of the dab. The obvious alternative, the angle of the mapped x-axis, agrees on
+every rotation and fails on every shear. `DabPose.constantRotation` is nil exactly when
+`constantScale` is: an affine's Jacobian is one matrix everywhere so both are one number, and **under a
+projective pose the turn genuinely differs from dab to dab**, which is why the whole stroke cannot share
+one. Without any of this, a sprite brush under a rotating keyframe keeps its stamps upright while the
+stroke turns.
+
+**A `.high`-interpolated image dab paints past its own quad**, MEASURED at up to **2.39 px**, worst at
+exactly the downscales an artist draws at. So the bound `StrokeScratch` grows its window to and the one
+`strokeDirtyRect` accumulates both carry a spill allowance — a bound one pixel short does not look
+soft, it deletes that edge of the stroke and then leaves it behind on undo.
 
 ---
 
@@ -703,7 +760,7 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | ~~`BrushStamper.seed(for:)`~~ **moved** to `DabRandom`, and no longer how a stroke gets its seed | `VectorStroke.seed`, minted and inherited — §4.2 | 1 |
 | ~~`DabLattice.seedID`~~ **gone** | the stroke's own `seed`, which a piece inherits by being a copy — §4.2 | 1 |
 | `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §9 | 2 |
-| `stampApproximateSquare` | `stampImage`; `.square` becomes a texture — §3.5 | 3 |
+| ~~`stampApproximateSquare`~~ **gone**, and with it `Brush.hardness` reaching a square dab at all | `stampImage`; `.square` is a committed alpha mask — §3.5 | 3 |
 | `PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag | the channel set, which absorbs the width choice — §5.5 | 4 |
 | `BrushShape` + `customTextureFileName` as a separable pair | `BrushTip`, one payload-carrying enum — §6 | 5 |
 | `VectorStroke`'s by-value `Brush` | a table index — §5.4 | 6 |
@@ -787,8 +844,12 @@ first, which cleanly replaces the old one."*
    `DiscardedDabTarget` existed to protect was green against fixtures that could not have moved.
 2. **Delete grain.** §9. Independent of everything else, and it shrinks the surface every later stage
    touches.
-3. **`stampImage` on `DabTarget`** + the tinted rotation-bucketed cache + its hit-rate test. `.square`
-   becomes a texture; `stampApproximateSquare` goes. `BakedDab` gains an angle and `DabPose` rotates it.
+3. **DONE — `stampImage` on `DabTarget`**, the tinted cache and its hit-rate test. `.square` is a
+   committed alpha mask and `stampApproximateSquare` is gone; `BakedDab` carries a tip with an angle
+   and `DabPose` turns it by its Jacobian's polar rotation. Two of this section's instructions were
+   **refuted by measurement and §3.5 records both**: the cache is keyed on tip, colour and size octave
+   rather than rotation-bucketed, and the size term was in turn added only after an in-app measurement
+   contradicted the microbenchmark that had said it was worthless.
 4. **The sample record** — the channel set, struct-of-arrays, Δt, velocity as a sensor, and **tilt**
    (§2.7): altitude and azimuth as two more channels, azimuth converted to canvas space at capture, wired
    through §5.5's funnel with its neutral. §5.1 carries the widths, both settled. The funnel's neutral is not optional and not

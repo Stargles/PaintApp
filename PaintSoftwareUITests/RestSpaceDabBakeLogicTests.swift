@@ -147,50 +147,53 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         }
     }
 
-    /// **The square brush's sub-lattice is baked with everything else** — §4.2's second named
-    /// artifact, and it comes free because `stampApproximateSquare` runs inside the rest-space walk
-    /// and emits ordinary `stampCircle` calls the pose maps like any other.
+    /// **The square brush is baked at rest and posed per frame, like everything else** — §4.2's
+    /// second named artifact.
     ///
-    /// **It also refutes half of §4.2's framing, and the refutation is why the sweep below goes as
-    /// deep as it does.** §4.2 names Square's sub-lattice as a non-round-dab case that can shimmer.
-    /// It does *not* over an ordinary shrink: its `spacingFraction` is **0.15**, three times Hard
-    /// Round's, so `24 × 0.15 = 3.6` pt stays clear of `stampSpacing`'s 1 pt floor all the way down
-    /// to scale 0.278, and
-    /// `stampApproximateSquare`'s own two 1 pt floors are clear at 0.3 too. Under a uniform map with no
-    /// floor binding, a posed-space walk is *similar to itself* and nothing shimmers — MEASURED: a
-    /// 1.0 → 0.3 sweep is green with every one of `stamp`'s rest-space arms reverted, which is a test
-    /// that cannot see the bug it is named for. Below 0.278 both floors bind and it can.
+    /// **§4.2's framing of that artifact is now wrong twice over, and the second correction is this
+    /// stage's.** It named Square's *sub-lattice* — sixteen gradient discs faking one square — as the
+    /// non-round-dab case that can shimmer. The first correction was measurement: the sub-lattice did
+    /// not shimmer under an ordinary shrink, because a uniform map scales its step and its sub-dab
+    /// radius by the same number and a similar copy of itself has no gaps. The second is that
+    /// **BRUSH.md §12 stage 3 deleted the sub-lattice**: a square dab is now one `stampImage` of a
+    /// committed alpha mask, so there is no sub-grid left to shimmer and the count is one dab per
+    /// stamp rather than sixteen.
     ///
-    /// **Coverage is preserved under a uniform scale and this is why**: the grid's step and its sub-dab
-    /// radius are both rest-space numbers multiplied by the same local scale, so the overlap ratio is
-    /// invariant and no gaps open. Under a strongly *non*-uniform map they can, because a round dab at
-    /// the local area root is not the ellipse the map really wants — the approximation §4.2 names in
-    /// its own third bullet.
-    func testTheRenderedSquareBrushSubLatticeIsBakedToo() throws {
+    /// What survives is the claim that mattered — the walk happens **once, at rest**, and a frame is
+    /// that walk posed — plus a new operand the sub-lattice never had: an image dab carries an
+    /// **angle**, and a pose has to turn it. A pure scale turns nothing, which is what the angles
+    /// below pin; `BrushTipLogicTests` pins the rotating case at the level of `DabPose` itself.
+    func testTheRenderedSquareBrushIsWalkedOnceAtRestAndPosedPerFrame() throws {
         let brush = BrushLibrary.square
         XCTAssertEqual(brush.shape, .square, "Setup: the one built-in that is not a round dab")
         let ink = stroke(brush)
         let rest = stamped([.stroke(ink)])
-        XCTAssertGreaterThan(rest.count, 100, "Setup: a sub-lattice per stamp, so the count is large")
+        XCTAssertGreaterThan(rest.count, 5, "Setup: the stroke put down dabs at all")
 
         var counts = Set<Int>()
         for frame in 0..<24 {
             let k = 1.0 - 0.95 * CGFloat(frame) / 23.0
             counts.insert(stampedPosed(ink, through: CGAffineTransform(scaleX: k, y: k)).count)
         }
-        XCTAssertEqual(counts, [rest.count], "one grid, walked once at rest, scaled 24 ways")
+        XCTAssertEqual(counts, [rest.count], "one walk, scaled 24 ways")
 
         let k: CGFloat = 0.3
         let shrunk = stampedPosed(ink, through: CGAffineTransform(scaleX: k, y: k))
-        XCTAssertEqual(shrunk.count, rest.count, "the sub-lattice is walked once, at rest")
+        XCTAssertEqual(shrunk.count, rest.count, "the walk is run once, at rest")
+        for (index, dab) in rest.enumerated() {
+            XCTAssertEqual(shrunk[index].radius, dab.radius * k, accuracy: 1e-12)
+            XCTAssertEqual(shrunk[index].angle, dab.angle, accuracy: 1e-12,
+                           "a uniform scale has no rotation in it, so the stamps do not turn")
+        }
 
-        // Step-to-radius is the same number at rest and at 0.3x: the whole grid is one scaled copy.
+        // Spacing-to-size is the same number at rest and at 0.3x: the chain is one scaled copy, so
+        // a shrink opens no gaps between consecutive stamps.
         let restGap = hypot(rest[1].center.x - rest[0].center.x, rest[1].center.y - rest[0].center.y)
         let movedGap = hypot(shrunk[1].center.x - shrunk[0].center.x,
                              shrunk[1].center.y - shrunk[0].center.y)
-        XCTAssertGreaterThan(restGap, 0, "Setup: the sub-dabs are distinct points")
+        XCTAssertGreaterThan(restGap, 0, "Setup: consecutive stamps are distinct points")
         XCTAssertEqual(movedGap / shrunk[0].radius, restGap / rest[0].radius, accuracy: 1e-9,
-                       "the sub-lattice scales as one piece, so a shrink opens no gaps")
+                       "the chain scales as one piece")
     }
 
     /// **A pure translation moves a posed-space walk's dab count too** — 110 dabs on some frames and
@@ -304,10 +307,11 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         let vanishing = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: -0.01, h: 0, i: 1)
         let pose = BrushStamper.DabPose(vanishing)
         let dab = BrushStamper.BakedDab(center: CGPoint(x: 100, y: 0), radius: 3, color: .black,
-                                        alpha: 1, hardness: 1, blendMode: .normal)
+                                        alpha: 1, blendMode: .normal, tip: .round(hardness: 1))
         XCTAssertNil(pose.applied(to: dab))
         XCTAssertNotNil(pose.applied(to: BrushStamper.BakedDab(center: .zero, radius: 3, color: .black,
-                                                               alpha: 1, hardness: 1, blendMode: .normal)))
+                                                               alpha: 1, blendMode: .normal,
+                                                               tip: .round(hardness: 1))))
     }
 
     // MARK: - The two targets agree, and the unposed path is untouched

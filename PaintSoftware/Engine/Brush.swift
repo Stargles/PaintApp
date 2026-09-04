@@ -1,8 +1,10 @@
 import CoreGraphics
 import Foundation
 
-/// The stamp shape a brush lays down. Built-in shapes are generated procedurally (no bundled
-/// texture assets); `.custom` uses an imported image (see `Brush.customTextureFileName`).
+/// The stamp shape a brush lays down. The round family is procedural — a hardness gradient;
+/// `.square` stamps a committed alpha mask through `BrushTextureRef.builtIn(.square)`. `.custom`
+/// stamps the square too until §12 stage 5 points it at `Brush.customTextureFileName`, which is
+/// also the stage that collapses this enum and that field into one `BrushTip`.
 enum BrushShape: String, Codable, CaseIterable, Identifiable {
     case softRound
     case hardRound
@@ -95,9 +97,10 @@ struct Brush: Identifiable, Codable, Equatable {
     var opacity: Double // 0...1, overall stroke opacity
     var flow: Double // 0...1, per-stamp opacity multiplier (build-up as stamps overlap)
     var spacingFraction: Double // distance between stamps, as a fraction of the current stamp size
-    /// 0...1, edge falloff passed through to `RasterLayerTexture.stampCircle(hardness:)` (and used
-    /// as the falloff of each small dab in the square-brush approximation, see `StrokeCanvasView.
-    /// stampApproximateSquare`) — 0 is fully soft/feathered, 1 is a hard, crisp edge.
+    /// 0...1, edge falloff passed through to `RasterLayerTexture.stampCircle(hardness:)` — 0 is
+    /// fully soft/feathered, 1 is a hard, crisp edge. **A procedural-tip parameter only**: a tip
+    /// that is a picture carries its own edge in its pixels, so an image dab has no `hardness` at
+    /// all and a brush whose shape is `.square` or `.custom` does not read this.
     var hardness: Double
     /// 0...1 — how strongly raw input is smoothed before it reaches the canvas (see
     /// `StrokeStabilizer`); 0 draws exactly at the raw touch position.

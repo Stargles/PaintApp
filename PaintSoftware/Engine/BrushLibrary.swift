@@ -28,9 +28,12 @@ enum BrushLibrary {
         dynamics: BrushDynamics(sizePressure: 0.15, opacityPressure: 0.05, minSizeFraction: 0.85)
     )
 
+    /// No `hardness`: a square dab is a picture and its edge is in the tip's own pixels. The field
+    /// still exists on `Brush` for the procedural tips, and naming it here would say this brush
+    /// reads something it does not.
     static let square = Brush(
         name: "Square", shape: .square, size: 16,
-        spacingFraction: 0.15, hardness: 1.0, stabilization: 0.2,
+        spacingFraction: 0.15, stabilization: 0.2,
         dynamics: BrushDynamics(sizePressure: 0.3, opacityPressure: 0.2, minSizeFraction: 0.5)
     )
 

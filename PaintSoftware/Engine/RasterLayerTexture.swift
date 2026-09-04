@@ -9,11 +9,58 @@ import CoreGraphics
 /// 4000²) per visible vector layer per invalidation just to stamp into it and copy the result out.
 /// A thin wrapper over the renderer's own context removes that allocation and copy while keeping
 /// `BrushStamper` the single source of truth for how a stroke rasterizes.
+/// **Two primitives, and no default implementation for either.** A tip is procedural or it is a
+/// picture, and BRUSH.md §6's `BrushTip` makes exactly that split; a target that grew a default
+/// `stampImage` would silently drop every square-brush dab, which is the failure this protocol is
+/// shaped to make impossible to write by accident.
 protocol DabTarget: AnyObject {
     func beginStroke()
     func endStroke()
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode)
+
+    /// **One oriented, tinted alpha stamp** — BRUSH.md §3.5's image primitive.
+    ///
+    /// - `texture` is *which mask*, and it is the cache key's content term. RENDER.md §3.8's trap is
+    ///   three memos in this repo keyed on a buffer's size alone; naming the tip is what keeps
+    ///   `DabImageCache` from being the fourth.
+    /// - `diameter` is the side of the square the mask fills, before `angle` turns it — the same
+    ///   number `stampCircle` receives halved, and the same number `stampApproximateSquare` took.
+    ///   One scalar and not a `CGSize` because a tip's mask is square by ruling; see
+    ///   `BuiltInBrushTexture`.
+    /// - `angle` turns the mask about `point`, in radians, in the target's own y-down space — the
+    ///   convention `CGContext.rotate(by:)` and `CGAffineTransform(rotationAngle:)` already use, and
+    ///   the one `stampApproximateSquare`'s `cos`/`sin` lattice used before it. It is not optional
+    ///   and not deferrable: `Brush.rotationJitter` drives it today and §6's direction-follow drives
+    ///   it in stage 7.
+    /// - `color`, `alpha` and `blendMode` mean exactly what they mean on `stampCircle`. There is no
+    ///   `hardness`: a picture's edge is in its pixels, and hardness is the round tip's procedural
+    ///   falloff.
+    func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                    angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode)
+}
+
+/// The pixels an image dab of `diameter` turned by `angle` about `point` can touch.
+///
+/// The geometric half-extent on each axis is `(d/2)(|cos θ| + |sin θ|)` — exactly `d/2` unrotated
+/// and `d·√2/2` at 45°, rather than the conservative `d·√2/2` everywhere. Shared, because the dirty
+/// rect a stroke reports and the window a `StrokeScratch` grows both have to contain what the draw
+/// actually painted, and two copies of this arithmetic are two chances for them not to.
+///
+/// **`resampleSpill` is why this is not just the geometry, and it is measured rather than assumed.**
+/// `.high` interpolation reconstructs from a kernel wider than one texel, so CoreGraphics paints
+/// past the quad's own edge. MEASURED over ten dab sizes × 24 angles, at a fractional centre, as the
+/// furthest non-zero pixel beyond the exact bound: **2.39 px** at 16 pt, 2.38 at 40, 1.99 at 64,
+/// 0.89 at 128 and 0.00 at 300 — worst where the tip is being *downscaled*, which is every dab an
+/// artist actually draws. Three points covers it with the pixel-containment rounding on top.
+///
+/// A bound one pixel short is not a cosmetic error: `StrokeScratch` clips the stroke to its window,
+/// so the dab would lose that edge outright, and `strokeDirtyRect` sizes the undo patch, so undo
+/// would leave the edge behind on the canvas.
+func dabImageBounds(at point: CGPoint, diameter: CGFloat, angle: CGFloat) -> CGRect {
+    let resampleSpill: CGFloat = 3
+    let half = diameter / 2 * (abs(cos(angle)) + abs(sin(angle))) + resampleSpill
+    return CGRect(x: point.x - half, y: point.y - half, width: half * 2, height: half * 2)
 }
 
 /// **The dabs the render path actually put down** — `CompositeProbe` one level lower, for the same
@@ -31,12 +78,18 @@ protocol DabTarget: AnyObject {
 /// already decides whether the dab costs a gradient at all. The lock is taken only while armed.
 enum DabProbe {
 
-    /// The three numbers a pose can move. `color`, `hardness` and `blendMode` are carried through
+    /// The four numbers a pose can move. `color`, `hardness` and `blendMode` are carried through
     /// untouched by every path here, so recording them would only make a failure harder to read.
+    ///
+    /// `angle` defaults to zero because a round dab is rotation-invariant and has none to record —
+    /// it is what an image dab was turned by, and it is here for the same reason `radius` is: a pose
+    /// changes it, so a test that wants to know whether a posed sprite stroke turns with the stroke
+    /// has to be able to see it.
     struct Dab: Equatable {
         var center: CGPoint
         var radius: CGFloat
         var alpha: CGFloat
+        var angle: CGFloat = 0
     }
 
     private static let lock = NSLock()
@@ -167,6 +220,128 @@ final class DabGradientCache {
     }
 }
 
+/// Memoized tinted tips for image dabs, plus the drawing itself — `DabGradientCache`'s twin, and
+/// deliberately its twin down to which terms are in the key and which are applied at draw time.
+///
+/// Building a tinted stamp is a bitmap context, a draw, a `.sourceIn` fill and a `makeImage()` at
+/// the *mask's* resolution, so it costs about the same whatever the dab it is for. MEASURED on
+/// CoreGraphics with the 256² square tip, per dab, both arms at `.high`:
+///
+/// | dab | tint per dab + draw | cached, draw only | saved |
+/// |---|---|---|---|
+/// | 16 pt | 162.3 µs | 5.5 µs | 96.6% |
+/// | 24 pt | 170.3 µs | 10.8 µs | 93.6% |
+/// | 32 pt | 191.5 µs | 18.0 µs | 90.6% |
+/// | 64 pt | 248.0 µs | 62.2 µs | 74.9% |
+/// | 200 pt | 814.3 µs | 507.6 µs | 37.7% |
+///
+/// A 1000 pt stroke at the square preset's 15% spacing and 16 pt is ~417 dabs, so the cache is the
+/// difference between 68 ms and 2.3 ms of stamping for one stroke — and a vector layer re-runs that
+/// walk on every invalidation. For scale, a *round* dab of the same 16 pt costs 2.4 µs, so an image
+/// dab is ~2.3× a round one and the cache is what keeps that ratio from being 68×.
+///
+/// **The key names the tip and the colour, and nothing else — not the size, and not the angle.**
+///
+/// *Size is out because it buys nothing.* An entry is built once at the mask's native resolution and
+/// CoreGraphics scales it at draw time. MEASURED against the obvious alternative — a power-of-two
+/// ladder of pre-scaled entries, sized per dab — over a stroke whose size varies continuously with
+/// pressure: 5.89 vs 5.93 µs at 16 pt, 18.80 vs 18.85 at 32, 83.3 vs 71.5 at 64, 624 vs 623 at 200.
+/// Within noise at three of four sizes, and a ladder would put a per-dab term in the key for it.
+///
+/// *Angle is out because bucketing it is worse on **both** counts, which refutes BRUSH.md §3.5's
+/// "rotation-bucketed" as written.* On accuracy: a bucket's worst angular error is `π/N`, and the
+/// corner of the largest dab the app allows sits `100·√2 = 141.4` px from its centre (the size
+/// slider tops out at 200 pt and `RasterLayerTexture` is 1 px per canvas point), so holding that
+/// corner inside half a pixel needs `N ≥ π·141.4/0.5 = 889` buckets. On cost, at any N at all:
+/// MEASURED, a rotated-CTM draw of one cached entry beats a pre-rotated bucket blitted axis-aligned
+/// at every size and every interpolation quality — 5.35 vs 122 µs at 16 pt and 485 vs 1082 at 200 pt
+/// on `.high`, 4.75 vs 5.07 and 339 vs 431 on `.none`. A pre-rotated bucket has to be `√2` larger to
+/// hold the turned square, so it covers twice the pixels, and N entries per colour also defeat
+/// CoreGraphics' own per-image downsample cache. So the angle is applied by the CTM, exactly, and
+/// stage 7's direction-follow inherits a primitive with no quantisation in it to remove.
+///
+/// **`alpha` is out for `DabGradientCache`'s reason, and it is exact for `DabGradientCache`'s
+/// argument.** The entry is premultiplied colour × mask alpha; `CGContext.setAlpha` scales source
+/// alpha, so drawing it at `α` yields `α · colour × mask`, which is what baking `α` into the entry
+/// would have produced. It holds under `.destinationOut` too, where only the source alpha is read.
+///
+/// **Not thread-safe, by design** — the same contract `DabGradientCache` has, and the same owners.
+final class DabImageCache {
+    private var tinted: [Key: CGImage] = [:]
+    private(set) var hits = 0
+    private(set) var misses = 0
+
+    /// Ceiling on distinct entries, as on `DabGradientCache` and for the same reason: colour and tip
+    /// change at human speed, so this is never approached, and something pathological degrades to
+    /// "rebuild sometimes" rather than growing without bound. An entry is one 256² bitmap — 256 KB —
+    /// so 32 of them is 8 MB at the ceiling and one is the steady state.
+    private static let limit = 32
+
+    /// The tip, then the colour. **The tip is in here because RENDER.md §3.8 says what happens when
+    /// it is not**: `PixelOps.RasterizeKey`, `MaskResolver.CacheKey` and `MetalCompositor`'s
+    /// `UploadCache.Key` are all keyed on a buffer's size, so two contents at one size collide and
+    /// the second silently gets the first's pixels. `BrushTipLogicTests` pins that two different
+    /// tips at one size do not.
+    private struct Key: Hashable {
+        let texture: BrushTextureRef
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+    }
+
+    /// Paints one image dab into `ctx`, at `point` in the context's current user space.
+    ///
+    /// A dab whose tip has no mask draws nothing — see `BrushTextureStore.mask(for:)` for why that
+    /// is the honest answer rather than a substituted shape.
+    func stamp(into ctx: CGContext, texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+               angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
+        // Same contract as `DabGradientCache.stamp` — see there.
+        color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
+        guard let entry = entry(texture: texture, red: r, green: g, blue: b) else { return }
+
+        ctx.saveGState()
+        ctx.setBlendMode(blendMode)
+        ctx.setAlpha(alpha)
+        // `.high` and not `.low`: a tip is cached at its native size and a dab is usually far
+        // smaller, and MEASURED, `.low` point-samples that downscale — a 16 pt dab from a 256² mask
+        // comes back 255 across its whole edge, i.e. aliased, where `.high` gives 142 and 237. It
+        // costs 8% at 16 pt and 19% at 200 pt, which is what a visible edge is worth.
+        ctx.interpolationQuality = .high
+        ctx.translateBy(x: point.x, y: point.y)
+        ctx.rotate(by: angle)
+        ctx.draw(entry, in: CGRect(x: -diameter / 2, y: -diameter / 2, width: diameter, height: diameter))
+        ctx.restoreGState()
+    }
+
+    private func entry(texture: BrushTextureRef, red: CGFloat, green: CGFloat, blue: CGFloat) -> CGImage? {
+        let key = Key(texture: texture, red: red, green: green, blue: blue)
+        if let cached = tinted[key] {
+            hits += 1
+            return cached
+        }
+        misses += 1
+        guard let mask = BrushTextureStore.mask(for: texture) else { return nil }
+        let width = mask.width, height = mask.height
+        guard width > 0, height > 0,
+              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: PixelOps.deviceRGBColorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        // The mask's alpha becomes the destination's; `.sourceIn` then keeps that alpha and takes
+        // the fill's colour, which is premultiplied colour × coverage — the entry, in one pass.
+        ctx.draw(mask, in: rect)
+        ctx.setBlendMode(.sourceIn)
+        ctx.setFillColor(UIColor(red: red, green: green, blue: blue, alpha: 1).cgColor)
+        ctx.fill(rect)
+        guard let image = ctx.makeImage() else { return nil }
+        if tinted.count >= Self.limit { tinted.removeAll(keepingCapacity: true) }
+        tinted[key] = image
+        return image
+    }
+}
+
 /// A `DabTarget` that stamps into a `CGContext` it does not own — used by
 /// `VectorCanvas.renderLocalContent` to stamp into a `UIGraphicsImageRenderer`'s own context.
 ///
@@ -180,6 +355,7 @@ final class DabGradientCache {
 final class CGContextDabTarget: DabTarget {
     private let ctx: CGContext
     private let gradients = DabGradientCache()
+    private let images = DabImageCache()
 
     /// Dabs actually rasterized (i.e. that passed the guard below) — read by `VectorCanvas` after a
     /// render to populate `lastRenderDabCount`. A skipped stamp does no gradient work, so it is
@@ -198,6 +374,17 @@ final class CGContextDabTarget: DabTarget {
         DabProbe.record(DabProbe.Dab(center: point, radius: radius, alpha: alpha))
         gradients.stamp(into: ctx, at: point, radius: radius, color: color,
                         alpha: alpha, hardness: hardness, blendMode: blendMode)
+    }
+
+    func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                    angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+        guard diameter > 0, alpha > 0 else { return }
+        dabCount += 1
+        // `radius` is half the tip's side, so `DabProbe`'s two dab kinds report the same quantity:
+        // the half-extent a pose scales.
+        DabProbe.record(DabProbe.Dab(center: point, radius: diameter / 2, alpha: alpha, angle: angle))
+        images.stamp(into: ctx, texture: texture, at: point, diameter: diameter, angle: angle,
+                     color: color, alpha: alpha, blendMode: blendMode)
     }
 }
 
@@ -538,9 +725,7 @@ final class RasterLayerTexture: DabTarget {
     private var _strokeDirtyRect: CGRect?
 
     /// Stamps a single round dot at `point` (canvas point space) directly into the persistent
-    /// bitmap — the one shared primitive every built-in brush shape stamps with today. Per-shape
-    /// differentiation (square, textured/custom stamps) is layered on top of this by the brush engine
-    /// (Worker B) and the real renderer (Worker A), not implemented here.
+    /// bitmap — the procedural half of the pair, `stampImage` below being the other.
     ///
     /// - Parameters:
     ///   - color: the brush's pure color; any alpha on `color` itself is ignored in favor of `alpha`.
@@ -557,6 +742,21 @@ final class RasterLayerTexture: DabTarget {
         // `options: []` on the radial gradient paints nothing past `radius`, so the dab's bounding
         // box is exactly this — no need to pad for spill.
         let dab = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        _strokeDirtyRect = _strokeDirtyRect?.union(dab) ?? dab
+        cachedImage = nil
+        version += 1
+    }
+
+    /// Stamps one oriented, tinted alpha stamp — `stampCircle`'s twin, and the same bookkeeping.
+    func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                    angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+        guard diameter > 0, alpha > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = ensureContext() else { return }
+        dabImages.stamp(into: ctx, texture: texture, at: point, diameter: diameter, angle: angle,
+                        color: color, alpha: alpha, blendMode: blendMode)
+        let dab = dabImageBounds(at: point, diameter: diameter, angle: angle)
         _strokeDirtyRect = _strokeDirtyRect?.union(dab) ?? dab
         cachedImage = nil
         version += 1
@@ -616,6 +816,16 @@ final class RasterLayerTexture: DabTarget {
     /// cache whose key silently stops matching is indistinguishable from no cache at all.
     var dabGradientCacheHits: Int { lock.lock(); defer { lock.unlock() }; return dabGradients.hits }
     var dabGradientCacheMisses: Int { lock.lock(); defer { lock.unlock() }; return dabGradients.misses }
+
+    /// This texture's tinted-tip cache, on the same contract as `dabGradients` above.
+    private let dabImages = DabImageCache()
+
+    /// Instrumentation for the tinted-tip cache, read by `PerfBaselineTests`. It is worth strictly
+    /// more than the gradient cache's: a tinted entry costs a whole bitmap build, MEASURED at 96.6%
+    /// of a 16 pt image dab's total cost, so a key that stops matching is not a slow path but a
+    /// different program.
+    var dabImageCacheHits: Int { lock.lock(); defer { lock.unlock() }; return dabImages.hits }
+    var dabImageCacheMisses: Int { lock.lock(); defer { lock.unlock() }; return dabImages.misses }
 
     func endStroke() {
         guard isMidStroke else { return }

@@ -41,6 +41,41 @@ has one honest answer (the referenced entries), which is the same population as 
 sweep of unreferenced ones. Fixing it before the table exists means walking every cel's elements on every
 save, which is the cost the table is there to remove.
 
+## A hard round dab has a fully aliased edge, and it starts well below hardness 1.0 (2026-09-04)
+
+**Found while measuring `DabGradientCache` for BRUSH.md §12 stage 3's image primitive. Reported, not
+fixed** — the fix moves pixels under `RasterVectorParityLogicTests` and a dozen others, and which way to
+fix it is a separate decision.
+
+`DabGradientCache.gradient` builds three stops — opaque, opaque, clear — at `locations: [0,
+coreFraction, 1]`, and draws them with `options: []`, which paints nothing past `endRadius`. At
+`coreFraction == 1` the last two locations coincide, so the falloff band has **zero width** and the disc
+has a step edge; `options: []` then means CoreGraphics does no coverage antialiasing of the boundary
+either. **MEASURED** by reproducing the cache's exact stops and draw, over a 20 px dab, counting the
+distinct alpha values in the whole dab:
+
+| `hardness` | distinct alphas in the dab | centre row across the edge |
+|---|---|---|
+| **1.00** | **2** — `0, 255` | `… 255 255 255 0 0 0 …` |
+| **0.99** | **2** — `0, 255` | `… 255 255 255 0 0 0 …` |
+| 0.95 | 3 — `0, 85, 255` | `… 255 255 85 0 0 …` |
+| 0.80 | 14 | `… 255 234 149 107 21 0 …` |
+
+**The interesting half is that it is not a knife edge at exactly 1.0.** 0.99 is just as aliased, and 0.95
+— which is `BrushLibrary.hardRound`'s own hardness *and* the threshold `VectorEraser.supportsCleanCut`
+requires — gets one intermediate grey. So this is the whole top of the hardness range, not one endpoint.
+
+**It hides today because dabs overlap about ten to one**: at `hardRound`'s 0.05 spacing a stroke lays ~20
+dabs per dab-width, and twenty jagged discs union into a smooth ribbon. It stops hiding the moment a
+brush's edge is meant to be *seen* rather than accumulated — a single tap, a wide-spacing stamp brush, or
+`Brush.flow` low enough that one dab is visible on its own. BRUSH.md §8.6's Basics group has both.
+
+Not the image primitive's problem — an image dab's edge is in its tip's pixels and is antialiased by the
+draw (MEASURED at edge alphas of 142 and 237 where the round dab gives 255/0). It is the procedural tip's,
+and §12 stage 9's tip generator is the natural place to settle it: either give the round tip a
+sub-pixel falloff floor so `hardness == 1` still lands one antialiased ring, or draw the disc as a filled
+path with `shouldAntialias` instead of a gradient with a degenerate stop.
+
 ## Three more silent refusals, swept for after the transformation layer's (2026-09-03)
 
 The transform-layer entry defect (KEYFRAMES §4.4) was a control that did nothing and said nothing. These

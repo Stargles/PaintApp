@@ -4977,6 +4977,12 @@ final class LassoMoveLogicTests: XCTestCase {
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
             dabs.append((point, radius))
         }
+        // An image dab's half-extent is the same quantity a round dab's radius is, so both
+        // primitives land in one list and a walk stays one walk.
+        func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                        angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+            dabs.append((point, diameter / 2))
+        }
     }
 
     /// Mirrors `VectorCanvas.stamp(stroke:into:isEraser:)`, which is private to that class. **The

@@ -179,11 +179,18 @@ enum BrushStamper {
         case .softRound, .hardRound, .pen, .pencil:
             raster.stampCircle(at: stampPoint, radius: radius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
         case .square, .custom:
+            // §4: the jitter is `hash(seed, arcLength)` on its own channel, so it is the same
+            // value whichever piece of a split stroke this dab lands in and whatever the refit did
+            // to the point count. The `> 0` test is an early-out and nothing more — unlike the
+            // sequential stream it replaced, not drawing shifts nothing after it.
             let rotation: CGFloat = brush.rotationJitter > 0
                 ? random.signedUnit(.rotation, at: arcWidths) * .pi * CGFloat(brush.rotationJitter)
                 : 0
-            stampApproximateSquare(into: raster, at: stampPoint, diameter: diameter, rotation: rotation,
-                                   color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
+            // `.custom` still stamps the square: §12 stage 5 is what points it at
+            // `Brush.customTextureFileName`, and doing it here would change what a custom brush
+            // draws in a stage whose subject is the primitive.
+            raster.stampImage(.builtIn(.square), at: stampPoint, diameter: diameter, angle: rotation,
+                              color: color, alpha: alpha, blendMode: blendMode)
         }
     }
 
@@ -200,26 +207,6 @@ enum BrushStamper {
         return CGPoint(x: point.x + cos(angle) * distance, y: point.y + sin(angle) * distance)
     }
 
-    static func stampApproximateSquare(into raster: DabTarget, at center: CGPoint, diameter: CGFloat,
-                                       rotation: CGFloat, color: UIColor, alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
-        guard diameter > 0 else { return }
-        let half = diameter / 2
-        let dabDiameter = max(diameter * 0.42, 1)
-        let dabRadius = dabDiameter / 2
-        let step = max(dabDiameter * 0.65, 1)
-        let cosR = cos(rotation), sinR = sin(rotation)
-        var y = -half
-        while y <= half {
-            var x = -half
-            while x <= half {
-                let rx = x * cosR - y * sinR
-                let ry = x * sinR + y * cosR
-                raster.stampCircle(at: CGPoint(x: center.x + rx, y: center.y + ry), radius: dabRadius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
-                x += step
-            }
-            y += step
-        }
-    }
 }
 
 // MARK: - KEYFRAMES.md §4.2 — the rest-space dab bake
@@ -229,14 +216,32 @@ extension BrushStamper {
     /// **One dab, in the space its stroke was drawn in.** KEYFRAMES.md §4.2's *"dab record"*.
     ///
     /// It carries the dab's **radius**, not its diameter, and its **centre**, not its position along
-    /// the path — those are the only two things a pose has to touch.
+    /// the path — a pose touches the centre, the radius, and (for an image tip) the angle, and
+    /// nothing else.
     struct BakedDab: Equatable {
         var center: CGPoint
+        /// Half the dab's extent: the circle's radius for a round tip, half the mask's side for an
+        /// image one. One quantity, so `DabPose` scales it with one multiply whichever tip it is.
         var radius: CGFloat
         var color: UIColor
         var alpha: CGFloat
-        var hardness: CGFloat
         var blendMode: CGBlendMode
+        var tip: Tip
+
+        /// **Which primitive draws the dab, carrying exactly what that primitive needs.**
+        ///
+        /// `hardness` and `angle` used to be candidates for flat fields beside `radius`, and both
+        /// would have been meaningless on the other arm — a picture has no falloff parameter and a
+        /// disc has no orientation. BRUSH.md §9.2 asks for payload-carrying enums for precisely
+        /// this, so the illegal states are unrepresentable and `replay`'s switch stays exhaustive
+        /// when §12 stage 5 adds a case.
+        enum Tip: Equatable {
+            case round(hardness: CGFloat)
+            /// `angle` turns the mask about the dab's centre, radians, in the rest space the walk
+            /// ran in — BRUSH.md §3.5's *"`BakedDab` gains an angle"*. A pose composes its own
+            /// rotation onto it; see `DabPose.applied(to:)`.
+            case image(BrushTextureRef, angle: CGFloat)
+        }
     }
 
     /// **The pose a baked dab is replayed through — a point map, not a `CGAffineTransform`.**
@@ -251,16 +256,49 @@ extension BrushStamper {
     /// bit for bit, rather than merely to within a `linearised` round trip. It is a homography whose
     /// `|det J|` varies across the stroke that has no scalar answer, and that is the only case that
     /// pays per dab.
+    ///
+    /// **`constantRotation` is the same fact about the same case, and it is not an extension by
+    /// analogy.** A dab is drawn as a *similarity* — one uniform scale and one angle — so a pose's
+    /// effect on it is that pose's Jacobian projected onto the similarity group. An affine's
+    /// Jacobian is one matrix everywhere, so both halves of that projection are one number for the
+    /// whole stroke; a projective map's Jacobian genuinely varies with position, so both halves
+    /// genuinely vary. The angle is *not* deferrable to the same reasoning being redone later,
+    /// because a pose that turned a stroke and left its stamps upright is BRUSH.md §3.5's named
+    /// failure.
     struct DabPose: Equatable {
         let map: Homography
         /// Nil exactly when the map is projective and the scale has to be asked per dab.
         let constantScale: CGFloat?
+        /// Nil exactly when the map is projective and the rotation has to be asked per dab. Same
+        /// test, same case, same reason.
+        let constantRotation: CGFloat?
 
         init(_ map: Homography) {
             self.map = map
             // `affine(tolerance: 0)` is a decision, not a threshold — see its own doc comment. A
             // homography built from a `CGAffineTransform` has `g == h == 0` exactly.
-            constantScale = map.affine().map { sqrt(abs($0.a * $0.d - $0.b * $0.c)) }
+            let affine = map.affine()
+            constantScale = affine.map { sqrt(abs($0.a * $0.d - $0.b * $0.c)) }
+            constantRotation = affine.map(Self.polarRotation)
+        }
+
+        /// **The rotation of a Jacobian's polar factor** — the rotation closest to `j` in the
+        /// Frobenius sense, so the square this primitive can draw is the closest one to the
+        /// parallelogram `j` actually makes of the dab.
+        ///
+        /// `atan2(b - c, a + d)` is the closed form for a 2×2, and it is the right operand rather
+        /// than the obvious alternative: the angle of the *mapped x-axis*, `atan2(b, a)`, agrees on
+        /// every rotation and disagrees on every shear — under `[[1, s], [0, 1]]` it reports zero
+        /// turn while the tip's own body is visibly leaning. `ARAPRegistration` fits rotations the
+        /// same way, for the same reason.
+        ///
+        /// **A mirroring pose is the stated limit.** With `det j < 0` the polar factor is a
+        /// reflection, and a similarity stamp cannot express one; this returns the closest rotation
+        /// and the tip comes out unmirrored. That is exactly what the sixteen-circle approximation
+        /// this replaces did — it never mirrored either — and for the one shipped tip, a square, a
+        /// reflection is a rotation anyway.
+        static func polarRotation(_ j: CGAffineTransform) -> CGFloat {
+            atan2(j.b - j.c, j.a + j.d)
         }
 
         init(_ transform: CGAffineTransform) { self.init(Homography(transform)) }
@@ -273,12 +311,28 @@ extension BrushStamper {
         /// line, where the dab has no image at all.
         func scale(at point: CGPoint) -> CGFloat? { constantScale ?? map.localScale(at: point) }
 
+        /// How much this pose turns a tip at `point`. Nil on the vanishing line, as above.
+        ///
+        /// **Under a projective pose this is a different number at every dab, and that is correct
+        /// rather than a cost to be optimised away.** A homography's local rotation genuinely varies
+        /// across the plane — it is what makes a receding checkerboard's squares lean differently at
+        /// the near and far edges — so any single angle for a whole stroke would be wrong somewhere
+        /// along it, and wrong by more the longer the stroke.
+        func rotation(at point: CGPoint) -> CGFloat? {
+            if let constantRotation { return constantRotation }
+            return map.linearised(at: point).map(Self.polarRotation)
+        }
+
         /// One rest-space dab where this pose puts it. Nil where the pose has no image for it.
         func applied(to dab: BakedDab) -> BakedDab? {
             guard let center = map.map(dab.center), let k = scale(at: dab.center) else { return nil }
             var moved = dab
             moved.center = center
             moved.radius = dab.radius * k
+            if case .image(let texture, let angle) = dab.tip {
+                guard let turn = rotation(at: dab.center) else { return nil }
+                moved.tip = .image(texture, angle: angle + turn)
+            }
             return moved
         }
     }
@@ -295,8 +349,14 @@ extension BrushStamper {
         func endStroke() {}
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
-            dabs.append(BakedDab(center: point, radius: radius, color: color,
-                                 alpha: alpha, hardness: hardness, blendMode: blendMode))
+            dabs.append(BakedDab(center: point, radius: radius, color: color, alpha: alpha,
+                                 blendMode: blendMode, tip: .round(hardness: hardness)))
+        }
+
+        func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                        angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+            dabs.append(BakedDab(center: point, radius: diameter / 2, color: color, alpha: alpha,
+                                 blendMode: blendMode, tip: .image(texture, angle: angle)))
         }
     }
 
@@ -304,11 +364,12 @@ extension BrushStamper {
     /// bake-then-replay, and what the render path uses.
     ///
     /// Wrapping the sink rather than the walk is the whole trick, and it is what makes this stage
-    /// small: `stampStroke`, `stampDab`, `applyScatter` and `stampApproximateSquare` all run
-    /// **unchanged, in rest space**, so the dab count, the dab phase, the arc lengths the random field
-    /// is addressed at, and the square brush's sub-lattice are invariant across every frame of an
-    /// animation *by construction* rather than by arithmetic that happens to agree. Only the two
-    /// numbers a pose can legitimately change — where the dab is and how big it is — are touched, and
+    /// small: `stampStroke`, `stampDab` and `applyScatter` all run **unchanged, in rest space**, so
+    /// the dab count, the dab phase and the arc lengths the random field is addressed at — including
+    /// the rotation jitter an image dab draws — are invariant across every frame of an animation *by
+    /// construction* rather than by arithmetic that happens to agree. Only the three numbers a pose
+    /// can legitimately change — where the dab is, how big it is, and which way a picture faces — are
+    /// touched, and
     /// they are touched last.
     ///
     /// `beginStroke`/`endStroke` forward, because the wrapped target may be a `RasterLayerTexture`
@@ -330,6 +391,16 @@ extension BrushStamper {
             guard let center = pose.map.map(point), let k = pose.scale(at: point) else { return }
             inner.stampCircle(at: center, radius: radius * k, color: color,
                               alpha: alpha, hardness: hardness, blendMode: blendMode)
+        }
+
+        /// The image arm asks the pose for one thing more than the round arm does, because there is
+        /// one thing more that a pose can change about a picture and cannot change about a disc.
+        func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                        angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+            guard let center = pose.map.map(point), let k = pose.scale(at: point),
+                  let turn = pose.rotation(at: point) else { return }
+            inner.stampImage(texture, at: center, diameter: diameter * k, angle: angle + turn,
+                             color: color, alpha: alpha, blendMode: blendMode)
         }
     }
 
@@ -355,8 +426,14 @@ extension BrushStamper {
         target.beginStroke()
         for dab in dabs {
             guard let moved = pose.applied(to: dab) else { continue }
-            target.stampCircle(at: moved.center, radius: moved.radius, color: moved.color,
-                               alpha: moved.alpha, hardness: moved.hardness, blendMode: moved.blendMode)
+            switch moved.tip {
+            case .round(let hardness):
+                target.stampCircle(at: moved.center, radius: moved.radius, color: moved.color,
+                                   alpha: moved.alpha, hardness: hardness, blendMode: moved.blendMode)
+            case .image(let texture, let angle):
+                target.stampImage(texture, at: moved.center, diameter: moved.radius * 2, angle: angle,
+                                  color: moved.color, alpha: moved.alpha, blendMode: moved.blendMode)
+            }
         }
         target.endStroke()
     }

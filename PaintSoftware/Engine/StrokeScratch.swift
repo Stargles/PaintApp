@@ -126,6 +126,20 @@ final class StrokeScratch: DabTarget {
                            blendMode: blendMode)
     }
 
+    func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
+                    angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+        guard diameter > 0, alpha > 0 else { return }
+        // A turned square reaches further than an unturned one — up to `diameter · √2 / 2` at 45° —
+        // and the window has to contain the pixels, not the nominal size. `dabImageBounds` is the
+        // same function `RasterLayerTexture.stampImage` accumulates its dirty rect with, so the
+        // window and the dirty rect cannot disagree about what a dab covered.
+        let dab = dabImageBounds(at: point, diameter: diameter, angle: angle)
+        guard let window = window(containing: dab) else { return }
+        window.stampImage(texture, at: CGPoint(x: point.x - windowRect.minX, y: point.y - windowRect.minY),
+                          diameter: diameter, angle: angle, color: color, alpha: alpha,
+                          blendMode: blendMode)
+    }
+
     // MARK: - Selection clip
 
     /// Drops everything this stroke put outside `path` (canvas space), restoring what was there

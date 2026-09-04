@@ -276,6 +276,9 @@
 		B8A5DD0102BDACA3A23BC250 /* TransformLayerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02EE822138323F2A3396ECDA /* TransformLayerLogicTests.swift */; };
 		DA9ECCF21516B85B900DD6B0 /* TransformLayerEntryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFD59AD138269743C2C0767 /* TransformLayerEntryLogicTests.swift */; };
 		FE657AE13CD7BCA9E8958121 /* RestSpaceDabBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421945649EEC2FF716D56C0D /* RestSpaceDabBakeLogicTests.swift */; };
+		E83DDD42000B6D7FCD422333 /* PaintSoftware/Engine/BrushTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89D44EB9460EE82F85D8C0E /* PaintSoftware/Engine/BrushTexture.swift */; };
+		D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */; };
+		156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */ = {isa = PBXBuildFile; fileRef = 3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -560,6 +563,9 @@
 		02EE822138323F2A3396ECDA /* TransformLayerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformLayerLogicTests.swift; sourceTree = "<group>"; };
 		FFFD59AD138269743C2C0767 /* TransformLayerEntryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TransformLayerEntryLogicTests.swift; sourceTree = "<group>"; };
 		421945649EEC2FF716D56C0D /* RestSpaceDabBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RestSpaceDabBakeLogicTests.swift; sourceTree = "<group>"; };
+		F89D44EB9460EE82F85D8C0E /* PaintSoftware/Engine/BrushTexture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushTexture.swift; sourceTree = "<group>"; };
+		FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTipLogicTests.swift; sourceTree = "<group>"; };
+		3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-square.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -628,6 +634,7 @@
 		7DD8CAB96CBC75B388C33457 /* PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
+				FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */,
 				8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */,
 				20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */,
 				01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */,
@@ -770,6 +777,8 @@
 		C3D4E5F6001122334455A1B2 /* App sources shared with PaintSoftwareUITests */ = {
 			isa = PBXGroup;
 			children = (
+				F89D44EB9460EE82F85D8C0E /* PaintSoftware/Engine/BrushTexture.swift */,
+				3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */,
 				63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */,
 				DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */,
 				010800B9CD3634A04604AA7D /* PaintSoftware/Views/TimelineGraphChannelList.swift */,
@@ -990,6 +999,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1007,6 +1017,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E83DDD42000B6D7FCD422333 /* PaintSoftware/Engine/BrushTexture.swift in Sources */,
+				D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */,
 				A4690E8C20463AC5A565BA29 /* PaintSoftware/Views/TimelineGraphBand.swift in Sources */,
 				79EBF29EEADB4D5CA3903B81 /* PaintSoftware/Models/PoseComponents.swift in Sources */,
 				14B663FBCF7D75D535E037FD /* PoseComponentsLogicTests.swift in Sources */,
