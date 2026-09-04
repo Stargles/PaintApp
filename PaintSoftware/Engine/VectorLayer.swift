@@ -3814,6 +3814,13 @@ final class VectorCanvas {
     ///   already is.
     /// - **Nothing suppressed**, so `prefixCount` counts the same elements the base was drawn from.
     ///
+    /// **The transform and suppression tests are deliberately made twice** — here, and again where
+    /// `renderLocked` decides whether to *take* a base at all — and mutation testing says each alone
+    /// is sufficient: removing either one on its own changes no behaviour and fails no test. Removing
+    /// **both** fails `testAnAppendOntoATransformedLayerFallsBackToTheFullWalk`, which is what says
+    /// the pair is load-bearing. Keep both: this guard is what makes the method's own contract
+    /// readable without chasing where the base came from.
+    ///
     /// and then `appendPreservesTheWalk(after:)`, which is the interesting one.
     ///
     /// Caller must hold `lock`.

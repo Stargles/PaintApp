@@ -3,6 +3,46 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## Starting a stroke before the last one has rendered leaves the last one off screen (2026-09-04)
+
+**Confirmed by tracing every path that repaints the base, not measured** — `StrokeCanvasView` is not
+in the test target, so no logic test can reach the private state this turns on, and the sequence is
+too fast to catch by hand in the simulator. PERFORMANCE.md §11.4 recorded it as a suspicion; this is
+the reading, and it holds.
+
+At pen-up the finished stroke stays visible as the `scratch` overlay while the layer re-renders off
+the main thread, because `scratchIsHeldForRerender` stops `endScratch()` running until the new base
+lands (`StrokeCanvasView.swift:1216`, `:527`, `:568`). That is correct and deliberate. But `scratch`'s
+`didSet` (`:266`) releases the hold whenever a **new** scratch is made — also deliberate, and its own
+comment says why: the incoming stroke's window would otherwise be torn out from under it when the
+previous render arrives and ends the scratch.
+
+So for stroke *n* and stroke *n+1* started before *n* has rendered:
+
+* the base slot holds the picture from **before** stroke *n* (`refreshDisplay`'s `.wait` and
+  `.rasterize` arms both return without touching `imageView.image` — `:509-519`);
+* `beginVectorStroke` (`:1060`) replaces `scratch`, which clears the hold, and its own
+  `refreshDisplay()` puts the *new* scratch's pixels in `scratchView`;
+* nothing else writes `imageView.image` until `finishVectorRender` (`:567`).
+
+**So stroke *n* is on screen nowhere at all** from stroke *n+1*'s first refresh until stroke *n*'s
+render lands. No thread blocks and no assertion in the suite can see it; the artist sees a stroke
+they have already finished disappear and come back.
+
+**The window is the re-walk, and the 2026-09-04 incremental append shrank it by two orders of
+magnitude rather than closing it** — MEASURED on the simulator, PERFORMANCE.md §11.8: a pen-up on a
+2,000-stroke cel went from **1129.6 ms to 2.57 ms**, so a person would now have to start the next
+stroke inside about 3 ms to see it. That is below what a pencil-down can reach in practice, but it is
+not zero, and what remains scales with canvas *area* (two canvas-sized copies) rather than with
+stroke count — so a bigger canvas widens it again.
+
+**Not fixed, because no small fix closes it.** The hold cannot simply be kept: there is one
+`scratchView`, so holding the old scratch does not display it — the new stroke's pixels have already
+replaced it. Genuinely closing it needs either a second overlay for un-landed ink, or compositing the
+appended element into the base **synchronously** at pen-up. The second is now affordable for the
+first time (2.6 ms rather than 1.1 s) but it is a deliberate reversal of RENDER.md §2.13, which moved
+this cost off the main thread on purpose, and it is the owner's trade rather than one to slip in.
+
 ## Undo charges 3-6x what a vector edit retains, and the depth shortens as the drawing grows (2026-09-04)
 
 `registerVectorUndo` charges an entry `(from.count + to.count) * 512` bytes. Copy-on-write means the two

@@ -44,10 +44,16 @@ final class StrokeDensityBench: XCTestCase {
     /// and dies when it follows a 35.8 s one in the same process, so these would not merely be slow
     /// in a full run, they would be an intermittent red that looks environmental.
     ///
-    /// Re-measure deliberately:
+    /// Re-measure deliberately — and note the **`TEST_RUNNER_` prefix**, which is not decoration:
     /// ```
-    /// PAINTAPP_BENCH=1 xcodebuild test … -only-testing:PaintSoftwareUITests/StrokeDensityBench
+    /// TEST_RUNNER_PAINTAPP_BENCH=1 xcodebuild test -configuration Release … \
+    ///   -only-testing:PaintSoftwareUITests/StrokeDensityBench
     /// ```
+    /// A bare `PAINTAPP_BENCH=1` sets it for **`xcodebuild`**, not for the runner process on the
+    /// device, so `setUpWithError` skips every test and the run reports `** TEST SUCCEEDED **` with
+    /// two skips — CLAUDE.md's banner-versus-count trap wearing one more costume. `xcodebuild`
+    /// forwards `TEST_RUNNER_`-prefixed variables to the runner with the prefix stripped. Read the
+    /// `STROKE BENCH |` lines, not the banner: no lines means nothing ran.
     override func setUpWithError() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] != nil,
                           "StrokeDensityBench is opt-in; set PAINTAPP_BENCH=1 to re-measure.")

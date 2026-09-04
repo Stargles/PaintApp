@@ -2190,8 +2190,11 @@ crashes due to memory overflow if its not built properly. … The design require
 brush UX responsive to the user (no lagspike, no latency), while being able to accomidate a lot of
 brushstrokes. … I'd estimate the high end to be a couple thousand."*
 
-Measured with `StrokeDensityBench` on `tmp/strokebench`. **That branch is a throwaway and is not
-merged**; it is minutes of wall clock and its last test times a render path the app does not have.
+Measured with `StrokeDensityBench`, which **is merged** and is opt-in behind `PAINTAPP_BENCH` because
+it is minutes of wall clock, not because it is disposable — it is the only harness that measures the
+render's cost model, and every figure here came out of it. **§11.8 is the answer to this section and
+it shipped on 2026-09-04**; §11.1 through §11.6 are the measurement that argued for it, kept in the
+form they were taken, with the two rows that moved struck rather than rewritten.
 
 **Provenance for everything below.** Device rows: **MEASURED on the owner's iPad 9 (`iPad12,1`, A13,
 3 GB), iOS 26.5.2, Release**, one test class at a time, `-parallel-testing-enabled NO`. Simulator
@@ -2212,8 +2215,8 @@ on the device and the simulator**:
 |---|---|---|
 | the layer at rest | — | 9,440 |
 | a second `render()` of an untouched cel | **no** | (memo hit) |
-| **committing a new stroke at pen-up** | **yes** | **9,676** = 9,440 + one stroke's 236 |
-| an eraser stroke | yes | 10,157 |
+| **committing a new stroke at pen-up** | yes | ~~**9,676** = 9,440 + one stroke's 236~~ → **236** since §11.8 |
+| an eraser stroke | yes | ~~10,157~~ → **481**, the punch's own dabs, since §11.8 |
 | undo (`elements = snapshot` + `bumpVersion()`) | yes | 9,440 |
 | a layer transform (`setTransform`) | yes | 9,440 |
 | cache eviction (`dropCachedImage`) | yes | 9,440 |
@@ -2223,6 +2226,11 @@ on the device and the simulator**:
 
 The append row is the whole finding: **9,676, not 236.** A layer transform is the one that costs a
 full re-stamp to produce a picture it then merely translates (`invalidateRenderOnly`).
+
+**That finding was acted on and the two struck rows are the result** — §11.8. Every other row still
+re-walks and is meant to: undo, a layer transform and an eviction cannot say what moved, so they pay
+the full walk. The table is kept in its measured form because *which* edits still cost the whole
+layer is the next question anyone asks.
 
 ### 11.2 The curve — linear in **dabs**, and the stroke count is not the variable
 
@@ -2341,6 +2349,11 @@ exactly the re-walk above — **0.74 s at 1,000 strokes, 3.0 s at 4,000** — an
 puts strokes down far faster than that. **This is what "lagspike" will mean to the owner even though
 no thread ever blocks**, and it is invisible to every timing in this section.
 
+**That suspicion was chased down and it is real** — [BUGS.md](BUGS.md), 2026-09-04, where the reading
+is completed by tracing every path that repaints the base rather than only the one that releases the
+hold. §11.8 shrank the window it opens from 1.1 s to 2.6 ms at 2,000 strokes and did not close it,
+and no small fix does: there is one scratch view, so holding the old scratch does not display it.
+
 ### 11.5 The other half of "memory overflow": undo, which does scale with n
 
 `StrokeCanvasView.registerVectorUndo` retains the display list twice per stroke and charges the
@@ -2379,8 +2392,11 @@ the new stroke's own 236 dabs. So the prize is not a constant factor, it is the 
 pen-up-to-pixels would stop depending on how much is already on the layer, and the 1,340-stroke
 "one second" line in §11.4 would move out to wherever the artist's document ends.
 
-**Nothing here was merged and the shipped render path is unchanged.** The constraint that makes this a
-spike rather than a patch: the display list is **not associative in general**. An `.erase` stroke
+**This was merged on 2026-09-04 and §11.8 re-measures it on the render the app actually has.** Read
+this section for the constraint, not for the numbers — the shipped path is 2.4-5.6x *faster* than the
+spike arm above and byte-identical rather than 0.0001-of-255 away, because it stamps the new dabs
+straight into a copy of the standing picture instead of into a bitmap of their own. The constraint
+that made this a spike rather than a patch: the display list is **not associative in general**. An `.erase` stroke
 composites `destinationOut` against everything beneath it and a run of blend-mode strokes is wrapped
 in one transparency layer, so an element appended into or after either is not equivalent to
 compositing it over the finished picture. It is equivalent exactly under source-over — which
@@ -2394,10 +2410,81 @@ whenever the appended element is an eraser, carries a blend mode, or lands anywh
   iPad. The app does not freeze at any density measured.
 * **No crash, and no memory problem.** 48,000 strokes render in 80 MB. Geometry is ~0.9 MB per
   thousand strokes. The one SIGKILL is the test runner's, and the evidence for that is in §11.3.
-* **There is latency, it is entirely the re-walk, and it starts biting far below "a couple
-  thousand".** Their current 190-stroke cel is already ~142 ms behind the pen; 1,000 strokes is
-  0.74 s and 2,000 is 1.5 s, on their own hardware.
+* **There was latency, it was entirely the re-walk, and it started biting far below "a couple
+  thousand".** Their 190-stroke cel was ~142 ms behind the pen; 1,000 strokes was 0.74 s and 2,000
+  was 1.5 s, on their own hardware. **Fixed on 2026-09-04 — §11.8.** Committing a stroke now costs
+  what that one stroke costs and nothing for the ones already on the layer, so every row of the
+  budget table above stops depending on n. The edits that still pay the full walk are undo, a layer
+  transform, an eviction and anything inserted into the middle.
 * **Strokes are the wrong unit.** 3.16 µs a dab is the whole cost model; at their brush that is
-  236 dabs and 0.75 ms per stroke, and a smaller brush buys proportionally more strokes.
-* **If they want the architecture answer: the slope is removable and it is worth 38–377×.** §11.6.
+  236 dabs and 0.75 ms per stroke, and a smaller brush buys proportionally more strokes. **This is
+  now the whole of what a pen-up costs**, rather than the slope on top of it.
+* **The one thing they may still see is a finished stroke blinking out** if they start the next one
+  before the first has rendered — [BUGS.md](BUGS.md). The window is 2.6 ms rather than 1.1 s now, so
+  in practice it should be unreachable, but it is not closed.
 
+### 11.8 What it bought, measured on the shipped path (2026-09-04)
+
+§11.6 priced a spike. This is the same measurement against the render that merged —
+`VectorCanvas.Damage`, which is what each of the sixteen mutation sites now says about itself, and
+`appendableBase(quality:)`, which is what `renderLocked` does with it. Arm (a) is a full re-walk of
+*n+1* forced with `bumpVersion()`, which is what an **undo** still costs; arm (b) is the shipped
+pen-up, `addStroke` then `render()`, median of three consecutive appends.
+
+**MEASURED on an iPad Pro 13-inch M4 simulator, iOS 26.5, Release, 2048x1024**, on this Mac at 93.1%
+idle with no other `xcodebuild` running (checked immediately before). `StrokeDensityBench`'s
+`testWhatTheIncrementalAppendBought`.
+
+| n strokes | full re-walk | shipped append | prize | dabs stamped, full | dabs stamped, append | same bytes? |
+|---|---|---|---|---|---|---|
+| 500 | 283.6 ms | **2.71 ms** | **105x** | 118,236 | **236** | yes |
+| **2000** | 1129.6 ms | **2.57 ms** | **439x** | 472,236 | **236** | yes |
+| 4000 | 2252.6 ms | **2.71 ms** | **832x** | 944,236 | **236** | yes |
+
+**Flat at 2.6-2.7 ms across an 8x range of n, and it beats the spike it was priced from** - 6.6, 9.4
+and 15.1 ms for the same three rows in §11.6, and the spike's own figure *grew* with n while this one
+does not. The reason is allocation: the spike stamped the new element into its own canvas-sized
+bitmap through `renderIsolated(ids:)` and then composited two full images into a third, which is
+three canvas-sized buffers and two full-canvas draws. The shipped path draws the standing picture
+into one new context and stamps the new dabs straight in - one buffer, one draw.
+
+**The dab column is the honest one and it is what the logic tier asserts**, because milliseconds are
+about this Mac and 236 is about the algorithm: a stroke's own 236 dabs, whatever the cel already holds.
+
+**Byte-identical, at zero tolerance, against a canvas that cannot have taken the fast path** - not
+the spike's 0.0001-0.0002 of 255. There is nowhere for a rounding difference to enter when the new
+dabs go into a copy of the standing bitmap rather than through an isolated layer, and
+`IncrementalAppendLogicTests` pins that at 128x96 and again at the owner's own 2048x1024.
+
+**No device row, and the reason is not technical.** The iPad refused the test run with *"Unlock
+Kevin's iPad to Continue"* - the lock screen, which no amount of Mac-side work gets past. What can be
+said about the device without measuring it is the dab count, which is hardware-independent: the
+append stamps **236 dabs where it stamped 472,236**, and §11.2's own MEASURED 3.16 us/dab puts those
+236 at **0.75 ms of stamping on their iPad 9**. What is *not* known there is the cost of the two
+canvas-sized copies, and it must not be inferred from the simulator - §10.2 already found the
+device/simulator ratio inverted on a memory-bandwidth-bound path. To take it, unlock the iPad and:
+
+```bash
+TEST_RUNNER_PAINTAPP_BENCH=1 xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+  -configuration Release -destination 'platform=iOS,id=E3B83820-DF74-5042-B52B-0D5BA17E4877' \
+  -only-testing:PaintSoftwareUITests/StrokeDensityBench/testWhatTheIncrementalAppendBought \
+  -parallel-testing-enabled NO -allowProvisioningUpdates -derivedDataPath build/DerivedDataDevice
+```
+**The `TEST_RUNNER_` prefix is load-bearing** and cost this section a run: a bare `PAINTAPP_BENCH=1`
+sets the variable for `xcodebuild`, not for the runner process, so every test skips and the run
+reports `** TEST SUCCEEDED **` with two skips and no `STROKE BENCH |` lines. The banner-versus-count
+trap in one more costume.
+
+**What still costs the whole layer, deliberately.** Undo and redo, a layer transform, a cache
+eviction, an element inserted anywhere but the end, a suppressed element, and an appended stroke
+carrying a blend mode. The first three cannot say what moved; the last three *can* and are still
+wrong to fast-path, because the display list is not associative - §11.6. Middle-of-list edits (the
+eraser's cut and split modes, a lasso move, Clear, Recolour) are the dirty-rect version and are their
+own item in [TODO.md](TODO.md); `Damage` is shaped so a `case region(CGRect)` can be added without
+revisiting a single mutation site.
+
+**One cost, and it is transient.** Between an append and the render that consumes it the cel holds the
+standing picture alone - 8 MB at 2048x1024 - where the shipped code held nothing. It is the bitmap the
+old path was about to allocate anyway, it is released the moment the render lands, and `hasCachedImage`
+counts it so eviction can see it. The window it is held for shrank from 1.1 s to 2.6 ms at n = 2000,
+so this is strictly less memory-over-time than before.
