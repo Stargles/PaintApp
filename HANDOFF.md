@@ -14,11 +14,13 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 re-deriving them**, §11 is what the current engine gives free, §12 is the build order and carries a
 DONE marker per stage.
 
-**Stages 0, 1, 2 and 3 are merged.** The path is a refit at a fixed 0.25 pt tolerance and no brush
+**Stages 0 through 5 are merged.** The path is a refit at a fixed 0.25 pt tolerance and no brush
 decides its density; per-dab randomness is `hash(seed, arcLength)` measured in **brush widths**; grain
-does not exist; and `DabTarget` has an image primitive with a tinted size-keyed cache. **Stage 4 — the
-sample record — was in flight when this was written**: `git worktree list` and `git branch -a` before
-trusting that, and `git fetch` first, because `origin/main` is a shared ref.
+does not exist; `DabTarget` has an image primitive with a tinted size-keyed cache; a sample run is a **channel set**
+carrying Δt and **tilt**, read through `StrokeSensors`' one funnel with a derived neutral; and `BrushTip`
+has replaced the shape/filename pair, so an imported PNG stamps. **Stage 6 — the brush table — was in
+flight when this was written**: `git worktree list` and `git branch -a` before trusting that, and
+`git fetch` first, because `origin/main` is a shared ref.
 
 **The owner ruled the build order stands** and will not have the rough ink brush pulled forward:
 *"The brush will get done once the brush engine which allows it to exist is done, along with the other
@@ -34,12 +36,15 @@ effect** — §8.4, refuted by measurement, which is what §2.17's wavelength an
 
 ## State
 
-**`main` is `eeefdee`. Fast tier: 2968 total / 2965 passed / 0 failed / 3 skipped.** It was 2919 at the
+**`main` is `77430e1`. Fast tier: 3006 total / 3003 passed / 0 failed / 3 skipped.** It was 2919 at the
 start of the pass.
 
-**No full suite was run this pass, and the render path changed — the next session owes one.** The
-incremental append rewrote how a vector cel reaches its pixels; that is exactly the kind of change
-CLAUDE.md says to run the full suite behind. Erase the simulator immediately before it.
+**The full suite is green and was run this pass, after the render path changed: 3159 tests, 3139 passed,
+1 failed, 19 skipped, 24:47 on an idle machine with the simulator erased first.** The one failure,
+`InterpolationWorkflowUITests`' `testInterpolateModeEndToEndFromGestureToScrub`, **passed clean in
+isolation** and is environmental — it is the suite's longest single test and lives in a class whose name
+differs from its file, which is the profile of a test that reds under parallel clones. Its class table is
+re-taken in CLAUDE.md.
 
 **A Release build of `2bef347` is on the owner's iPad and is now many merges stale.**
 

@@ -288,6 +288,34 @@ clones hold 17.7 min of ideal work. **`GraphEditorGestureUITests` is the one to 
 **4** tests, the worst seconds-per-test on the board, and this file has twice recorded a graph-editor class
 growing past the floor while nobody looked.
 
+**MEASURED at `77430e1` on an idle machine with the simulator erased first — 3159 tests, 3139 passed, 1
+failed, 19 skipped, 24:47.** The one failure, `InterpolationWorkflowUITests`'
+`testInterpolateModeEndToEndFromGestureToScrub`, passed clean in isolation and is environmental; it is
+this file's own longest-single-test at ~150 s and lives in a class whose name differs from its file.
+
+| class | seconds | tests |
+|---|---|---|
+| `SelectionAndMoveUITests` | 335 | 10 |
+| `BlendModesAndCompositorUITests` | 295 | 8 |
+| `LayerFolderAndMaskMenuUITests` | 273 | 7 |
+| `SandwichCompositingUITests` | 246 | 10 |
+| `PerfBaselineTests` | 235 | 57 |
+| **`GraphEditorGestureUITests`** | **217** | **4** |
+| `LayerPanelControlsUITests` | 213 | 8 |
+| `CuttingModesUITests` | 165 | 4 |
+| `EraserAndPersistenceUITests` | 162 | 7 |
+| `LayerStackUITests` | 160 | 5 |
+
+**4,283 class-seconds across 155 classes**, against 4,238 across 149 at `8a4f156` — so ~190 new tests cost
+about 45 class-seconds, the fourth consecutive run to find a new test close to free. Four clones hold 17.8
+min of ideal work against 24.8 min of wall clock, and **the top four classes are spread across 90 seconds**,
+so there is still no single long class to split and the 2026-08-15 lever remains dead.
+
+**`GraphEditorGestureUITests` is the one to watch and is now the worst seconds-per-test on the board** —
+217 s across **four** tests, 54 s each. This file has twice recorded a graph-editor class growing past the
+floor while nobody looked, and this is the third time it has drifted up. It is not the critical path, so
+splitting it buys nothing today; re-take this table when the next graph-editor test is added.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
