@@ -1093,7 +1093,7 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
     ///    green, wrong. The count does not care what colour anything is.
     ///
     /// **The picking gesture is a press-and-drag, not a tap**, because a drag is what a stroke
-    /// unambiguously is: it crosses `StrokeSampleGate`'s travel threshold, and it holds the touch
+    /// unambiguously is: it crosses `StrokePathFit`'s deviation tolerance, and it holds the touch
     /// down across the pick's off-main-thread composite — the window in which the revert used to
     /// land, which is the second door `handleEyedropperPress` closes. XCUITest cannot synthesise a
     /// pencil, so this is a finger: the same path, with pencil-only drawing off (the default).

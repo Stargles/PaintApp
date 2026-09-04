@@ -1653,8 +1653,9 @@ menu's keyframe items, and deliberately not fixed there.
   100pt whether it takes 0.3 s or 10 s. What is left is hand tremor, not the clock — at a slow speed
   the aim from the last dab to the sample that finally clears the spacing carries proportionally more
   noise, so the chain wanders: 100.0 → 106.0 dabs per 100pt from 800 to 40 pt/s at 0.4pt of tremor,
-  100.5 → 149.2 at a shaky 0.8pt. `StrokeSampleGate` halves the residue as a side effect. Removing it
-  outright is a stabilizer question, not a sampling one.
+  100.5 → 149.2 at a shaky 0.8pt. Removing that residue is a stabilizer question, not a sampling one —
+  and it is a *raster* number: on a vector layer the stored path is a refit at a fixed tolerance
+  (`StrokePathFit`, BRUSH.md §3.3) and the walk no longer follows the tremor that produced it.
 
 ## Cleanup opportunities
 

@@ -8,7 +8,7 @@ import CoreGraphics
 /// headless: XCUITest cannot synthesize a *vertical* two-finger pinch landing on two specific table
 /// rows at all (there is no API for it), so a pure function is the only path a regression test for
 /// this gesture can actually take. Pure `CoreGraphics` — no UIKit — the same bargain
-/// `StrokeSampleGate` makes.
+/// `StrokePathFit` makes.
 ///
 /// ## The bug this was written to pin down
 ///

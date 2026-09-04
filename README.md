@@ -73,7 +73,7 @@ PaintSoftware/
 │   ├── BrushStamper.swift       #   shared stamp pipeline (shape/dynamics)
 │   ├── Brush.swift / BrushLibrary.swift
 │   ├── StrokeInput.swift / StrokeStabilizer.swift
-│   ├── StrokeSampleGate.swift   #   which input samples become stored geometry (distance, not time)
+│   ├── StrokePath.swift         #   the refit (which samples are stored) and the curve every tier walks
 │   ├── StrokeGeometry.swift / VectorEraser.swift  # vector eraser geometry + the three modes
 │   ├── Eyedropper.swift         #   which pixel a canvas point names, and its colour (pure)
 │   ├── InterpolationEvaluator.swift / GuidePath.swift

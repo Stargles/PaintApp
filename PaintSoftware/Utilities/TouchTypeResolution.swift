@@ -14,7 +14,7 @@ import UIKit
 /// Pulled out as its own file, as a function of bare `UITouch.TouchType` values rather than `UITouch`
 /// itself, purely so it is unit-testable: nothing outside UIKit can construct a `UITouch`, so a
 /// function that needed the touches themselves could only be exercised by a live gesture — the same
-/// limitation `StrokeSampleGateLogicTests` notes for its own domain. Living in its own
+/// limitation `StrokePathFitLogicTests` notes for its own domain. Living in its own
 /// UIKit-only/CoreGraphics-only file (no `View`, no `App`) is what lets it join the "App sources
 /// shared with PaintSoftwareUITests" group in the project file and be tested headlessly, the same
 /// arrangement `StrokeGeometry.swift`/`VectorEraser.swift` use — see `BrushEngineLogicTests`'s doc

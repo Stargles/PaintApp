@@ -19,8 +19,9 @@ import UIKit
 /// from the last dab to the sample that finally clears the spacing carries proportionally more noise,
 /// so the dab chain wanders and lays a few percent more ink over the same ground. Measured on a 400pt
 /// line, dabs per 100pt from 800pt/s down to 40pt/s: 100.0 → 106.0 at 0.4pt of tremor, 100.5 → 149.2
-/// at a shaky 0.8pt. `StrokeSampleGate` roughly halves the residue (→ 103.2 and → 136.8) as a side
-/// effect; removing it outright is a stabilizer question, not a sampling one.
+/// at a shaky 0.8pt. That residue is a stabilizer question, not a sampling one, and it is a *raster*
+/// number: on a vector layer the stored path is a refit at a fixed tolerance (`StrokePathFit`), so
+/// the walk no longer follows the tremor that produced it.
 final class StrokeCanvasView: UIView {
     /// Undo/redo registrations go through the single global `CanvasManager.history`, not a
     /// per-view stack.
@@ -170,14 +171,10 @@ final class StrokeCanvasView: UIView {
     /// raw touch-down position at the start of every stroke so the first stamp lands under the
     /// touch rather than smoothing in from an earlier stroke's trailing point.
     private var stabilizer = StrokeStabilizer(stabilization: 0.2)
-    /// Decides which touch samples become stored geometry on a vector layer. Re-armed with the
-    /// brush's own travel threshold at the start of every vector stroke, since it scales with brush
-    /// size. See `StrokeSampleGate`; the raster path deliberately does not use it (see `stampPath`).
-    ///
-    /// A zero threshold admits everything, so the value here before the first stroke arms it is the
-    /// pre-gate behaviour rather than an arbitrary one — a missed re-arm would store too much, never
-    /// too little.
-    private var sampleGate = StrokeSampleGate(minimumTravel: 0)
+    /// Decides which touch samples become stored geometry on a vector layer. **Reset per stroke, not
+    /// re-armed**: its thresholds are fixed geometry and owe nothing to the brush, which is the whole
+    /// of BRUSH.md §5.3. See `StrokePathFit`; the raster path does not use it (see `stampPath`).
+    private var pathFit = StrokePathFit()
 
     /// When non-nil, this is a vector layer: strokes are recorded as geometry into this
     /// `VectorCanvas` rather than stamped into `raster`.
@@ -991,10 +988,12 @@ final class StrokeCanvasView: UIView {
     /// are pixel-identical. Stays a separate entry point from `BrushStamper.stampStroke` because
     /// this one carries `lastStampPoint` across per-sample calls, keeping dab rhythm continuous.
     ///
-    /// **Not gated by `sampleGate`, and that is deliberate.** A raster layer stores pixels, not
-    /// samples, so there is no geometry to conserve on this path — filtering its input would buy
-    /// nothing and would change the ink a raster stroke lays down, which is the one thing this work
-    /// is not allowed to do. The gate belongs where samples are kept: `recordVectorSample`.
+    /// **Fed every input sample, and that is deliberate.** A raster layer stores pixels, not samples,
+    /// so there is no geometry to conserve on this path — thinning its input would buy nothing and
+    /// would change the ink a raster stroke lays down. The refit belongs where samples are kept:
+    /// `recordVectorSample`. At input density the straight line between two samples and
+    /// `StrokePath`'s curve through them are the same line to well under a pixel, which is why this
+    /// walk stays straight while `BrushStamper.stampStroke`'s does not.
     private func stampPath(to point: CGPoint, pressure: CGFloat, into target: DabTarget) {
         guard let last = lastStampPoint else {
             BrushStamper.stampDab(into: target, at: point, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
@@ -1043,9 +1042,7 @@ final class StrokeCanvasView: UIView {
         lastPreviewSample = nil
         previewCuts = [:]
         livePreviewFrames = 0
-        // Re-armed per stroke, not per brush change: the threshold is a function of the size and
-        // spacing this stroke is being drawn at, and both can move between strokes.
-        sampleGate = StrokeSampleGate(minimumTravel: BrushStamper.recordSpacing(brushSize: brushSize, brush: brush))
+        pathFit.reset()
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
         recordVectorSample(at: input.position, pressure: input.pressure)
@@ -1114,11 +1111,18 @@ final class StrokeCanvasView: UIView {
             return
         }
         guard let vectorCanvas, scratch != nil else { return }
-        // The lift point bypasses both the stabilizer (`handleEnd` explains why) and the sample
-        // gate. Artists decelerate into the end of a stroke, so its last samples each fail the
-        // travel test on their own; without this the stroke would stop short of where the pen did.
+        // The lift point bypasses the stabilizer (`handleEnd` explains why) and closes the fit.
+        // Artists decelerate into the end of a stroke, so its last samples each fail the deviation
+        // test on their own; without this the stroke would stop short of where the pen did.
+        //
+        // **An interrupted stroke still has to close the fit**, with no lift point to close it on: a
+        // knot is committed only once the sample after it proves it was needed, so whatever arrived
+        // since the last one is held, and dropping it would end the stroke up to a whole
+        // `StrokePathFit.maximumKnotSpacing` short of the last position UIKit delivered.
         if let finalSample {
             recordVectorSample(at: finalSample.position, pressure: finalSample.pressure, force: true)
+        } else {
+            currentVectorSamples.append(contentsOf: pathFit.finish(nil))
         }
         let before = vectorElementsBeforeSnapshot ?? vectorCanvas.elements
 
@@ -1279,34 +1283,33 @@ final class StrokeCanvasView: UIView {
         ring.isHidden = false
     }
 
-    /// One touch sample offered to the vector tier. `force` marks a sample that is not optional
-    /// geometry whatever `sampleGate` says — see `StrokeSampleGate.admits`.
+    /// One touch sample offered to the vector tier. `force` marks the lift point, which closes the
+    /// fit and is stored whatever the thresholds say — see `StrokePathFit.finish`.
     ///
-    /// The gate covers storage **and** the live preview together, deliberately. Preview and commit
-    /// are two different renderers of the same gesture (`stampPath` into the scratch now,
-    /// `BrushStamper.stampStroke` over the stored samples at lift), and driving them from different
-    /// point sets makes the line move under the artist's hand at the moment they lift off. One
-    /// decision, both consumers.
+    /// **The preview does not wait for the fit, and that is the change §12 stage 0 makes here.** The
+    /// old sample gate covered storage and the live preview together, so both were driven by the same
+    /// admitted points. The fit commits a knot only once the sample after it proves it was needed, so
+    /// driving the preview from its output would hang the ink up to a whole `maximumKnotSpacing`
+    /// behind the pen. It is driven from the samples instead — which is what the raster tier has
+    /// always done, and what Mode 3's resolve below already did — and the two agree to within the
+    /// fit's own tolerance, a quarter of a point. That is far tighter than the gate's agreement with
+    /// the *pen*, which was half a dab spacing and so 3 pt on a 60 pt brush.
     private func recordVectorSample(at point: CGPoint, pressure: CGFloat, force: Bool = false) {
-        // Ungated, like Mode 3's own resolve below: the ring is where the finger is, not where the
-        // last stored sample was.
+        // The ring is where the finger is, not where the last stored knot was.
         updateEraserFootprint(at: point)
-        let stored = sampleGate.admits(point, pressure: pressure, unconditionally: force)
-        if stored {
-            currentVectorSamples.append(VectorSample(x: point.x, y: point.y, pressure: pressure))
-        }
+        let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
+        let admitted = force ? pathFit.finish(sample) : pathFit.offer(sample)
+        currentVectorSamples.append(contentsOf: admitted)
         // Mode 3 is off at an in-between: it cuts stored geometry, and a derived frame has none.
         //
-        // It also runs on **every** sample, gated or not. `resolveIntersectionCut` is a per-sample
-        // state machine — `IntersectionDriver` arms and disarms on entering and leaving ink — not a
-        // shape assembled at lift, so a dropped sample would change *where the eraser cuts*, not how
-        // much is stored. There is nothing to save here anyway: Mode 3 commits during the drag and
+        // `resolveIntersectionCut` is a per-sample state machine — `IntersectionDriver` arms and
+        // disarms on entering and leaving ink — not a shape assembled at lift, so it has to see every
+        // sample. There is nothing to save here anyway: Mode 3 commits during the drag and
         // `endVectorStroke` never reads `currentVectorSamples` for it.
         if let vectorCanvas, isEraser, vectorEraserMode == .cutToIntersection, inBetweenCelID == nil {
             resolveIntersectionCut(at: point, in: vectorCanvas)
             return
         }
-        guard stored else { return }
         // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) a
         // `.destinationOut` punch into a copy of the layer, or (Mode 2) the doomed spans punched out
         // of that same copy. Mode 3 has no scratch content — it has already cut for real.

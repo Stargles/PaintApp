@@ -49,7 +49,9 @@
 		C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */; };
 		B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */; };
 		B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */; };
-		B2C3D4E5F6001122334455F2 /* PaintSoftware/Engine/StrokeSampleGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */; };
+		A61918E30F864A7807D4D71F /* PaintSoftware/Engine/StrokePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */; };
+		E6E1FC8A9DC5311E20FCD0E9 /* StrokePathFitLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */; };
+		0EF703537241022611DD32A7 /* StrokePathWalkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */; };
 		A1544B279B52D0EE5E4CFCF2 /* PaintSoftware/Engine/PinchMergeGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */; };
 		B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */; };
 		B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */; };
@@ -79,7 +81,6 @@
 		1AF01A67236BA1C7ECC0BBAE /* PaintSoftware/Models/ActivePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */; };
 		F9E5BC5EB116BE33DAFE44A1 /* CanvasTouchOwnerLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */; };
 		9E0C9B47A45D91C37016E4EC /* SelectionPersistenceLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */; };
-		9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */; };
 		1CE28FAC5767D1E837AE0778 /* CanvasGeometryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */; };
 		E82EF68FE2640F73C71F65B7 /* CanvasResizeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */; };
 		7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */; };
@@ -329,7 +330,9 @@
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Brush.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeStabilizer.swift; sourceTree = "<group>"; };
-		B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeSampleGate.swift; sourceTree = "<group>"; };
+		84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokePath.swift; sourceTree = "<group>"; };
+		946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokePathFitLogicTests.swift; sourceTree = "<group>"; };
+		CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokePathWalkLogicTests.swift; sourceTree = "<group>"; };
 		E538EEE418EF6AE18A4361C1 /* PaintSoftware/Engine/PinchMergeGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PinchMergeGate.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455C1 /* PaintSoftware/Engine/ShapeGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeGeometry.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455D1 /* PaintSoftware/Engine/ShapeDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ShapeDetector.swift; sourceTree = "<group>"; };
@@ -359,7 +362,6 @@
 		9C06C5B61B4249FBB9276708 /* PaintSoftware/Models/ActivePanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ActivePanel.swift; sourceTree = "<group>"; };
 		A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasTouchOwnerLogicTests.swift; sourceTree = "<group>"; };
 		E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionPersistenceLogicTests.swift; sourceTree = "<group>"; };
-		9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeSampleGateLogicTests.swift; sourceTree = "<group>"; };
 		EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasGeometryLogicTests.swift; sourceTree = "<group>"; };
 		56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasResizeLogicTests.swift; sourceTree = "<group>"; };
 		7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorMathOklabLogicTests.swift; sourceTree = "<group>"; };
@@ -652,6 +654,8 @@
 				CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */,
 				37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
+				946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */,
+				CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */,
 				40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */,
 				F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */,
 				71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */,
@@ -700,7 +704,6 @@
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
 				A0E0398AFE293479E4E56FFC /* CanvasTouchOwnerLogicTests.swift */,
 				E3910EAE6C2F876E57DF8D40 /* SelectionPersistenceLogicTests.swift */,
-				9A7B5C3D1E2F000000000F01 /* StrokeSampleGateLogicTests.swift */,
 				EE8F5545244553CBE8D16114 /* CanvasGeometryLogicTests.swift */,
 				56718914B3E73B368BA7C95F /* CanvasResizeLogicTests.swift */,
 				7FFC62A97115CE97BB27F1A5 /* ColorMathOklabLogicTests.swift */,
@@ -774,7 +777,7 @@
 				31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */,
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
-				B2C3D4E5F6001122334455F1 /* PaintSoftware/Engine/StrokeSampleGate.swift */,
+				84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */,
 				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
 				9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */,
 				CAB2314E50FF4A5681DF648F /* PaintSoftware/Views/TimelineBakeBar.swift */,
@@ -1053,7 +1056,9 @@
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
 				B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */,
-				B2C3D4E5F6001122334455F2 /* PaintSoftware/Engine/StrokeSampleGate.swift in Sources */,
+				A61918E30F864A7807D4D71F /* PaintSoftware/Engine/StrokePath.swift in Sources */,
+				E6E1FC8A9DC5311E20FCD0E9 /* StrokePathFitLogicTests.swift in Sources */,
+				0EF703537241022611DD32A7 /* StrokePathWalkLogicTests.swift in Sources */,
 				A1544B279B52D0EE5E4CFCF2 /* PaintSoftware/Engine/PinchMergeGate.swift in Sources */,
 				B2C3D4E5F6001122334455C2 /* PaintSoftware/Engine/ShapeGeometry.swift in Sources */,
 				B2C3D4E5F6001122334455D2 /* PaintSoftware/Engine/ShapeDetector.swift in Sources */,
@@ -1084,7 +1089,6 @@
 				1AF01A67236BA1C7ECC0BBAE /* PaintSoftware/Models/ActivePanel.swift in Sources */,
 				F9E5BC5EB116BE33DAFE44A1 /* CanvasTouchOwnerLogicTests.swift in Sources */,
 				9E0C9B47A45D91C37016E4EC /* SelectionPersistenceLogicTests.swift in Sources */,
-				9A7B5C3D1E2F000000000F02 /* StrokeSampleGateLogicTests.swift in Sources */,
 				1CE28FAC5767D1E837AE0778 /* CanvasGeometryLogicTests.swift in Sources */,
 				E82EF68FE2640F73C71F65B7 /* CanvasResizeLogicTests.swift in Sources */,
 				7FA9E87CE7CF8FB9B6487BF5 /* ColorMathOklabLogicTests.swift in Sources */,

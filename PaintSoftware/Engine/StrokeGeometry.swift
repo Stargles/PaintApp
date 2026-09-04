@@ -434,16 +434,28 @@ enum StrokeGeometry {
                                     halfWidth: radius, by: erasers, scratch: &scratch)
     }
 
-    /// Unit tangent at a parametric position: the direction of the segment the position falls inside,
-    /// which is what the renderer actually walks between two samples, falling back to the neighbouring
-    /// sample's tangent when that segment is degenerate (a stationary finger emits coincident samples).
+    /// Unit tangent at a parametric position, read off **the curve the renderer actually walks** —
+    /// `StrokePath`, the interpolant through the stored points — falling back to the neighbouring
+    /// sample's tangent where the derivative vanishes (a stationary finger emits coincident samples).
+    ///
+    /// It used to be the direction of the chord the position falls inside, and that stopped being
+    /// what the renderer walks when the stored path became a refit at a fixed tolerance: the chord is
+    /// a step function of the parameter, so the eraser's cross-section swung by the whole turn angle
+    /// as a probe crossed a stored point. Reading the curve makes the normal continuous, which is
+    /// what a cross-section wants.
+    ///
+    /// Evaluated through `StrokePath`'s statics rather than by building one, because this runs once
+    /// per coverage probe and a probe walk is hundreds of them.
     static func tangent(atParameter parameter: CGFloat, in samples: [VectorSample]) -> CGPoint {
         guard samples.count > 1 else { return CGPoint(x: 1, y: 0) }
         let domainEnd = CGFloat(samples.count - 1)
         let clamped = min(max(parameter, 0), domainEnd)
         let index = min(Int(clamped.rounded(.down)), samples.count - 2)
-        let a = samples[index].point, b = samples[index + 1].point
-        if let unit = normalized(CGPoint(x: b.x - a.x, y: b.y - a.y)) { return unit }
+        let (m1, m2) = StrokePath.tangents(segment: index, count: samples.count) { samples[$0].point }
+        let derivative = StrokePath.hermiteDerivative(p1: samples[index].point,
+                                                      p2: samples[index + 1].point,
+                                                      m1: m1, m2: m2, u: clamped - CGFloat(index))
+        if let unit = normalized(derivative) { return unit }
         return tangent(ofSampleAt: index, in: samples)
     }
 

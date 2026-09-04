@@ -68,49 +68,18 @@ enum BrushStamper {
         max(brushSize * CGFloat(brush.spacingFraction), 1)
     }
 
-    /// How far the pen must travel before another input sample is worth *storing* as geometry —
-    /// `StrokeSampleGate.minimumTravel`. Lives here, beside the dab spacing, because it is derived
-    /// from it rather than tuned against it.
-    ///
-    /// **Half a dab.** The recorded path is what `advance` walks, so a sample dropped from it moves
-    /// the walk by at most this much; at half a spacing no dab can shift by as much as the gap it
-    /// already leaves to its neighbour, and the ink chain keeps its order and its position to within
-    /// less than the engine's own resolution.
-    ///
-    /// Measured across five stroke shapes × three brush sizes × three speeds, jitter 0.4pt, comparing
-    /// dab centre-lines before and after: at half a spacing every stroke at 400pt/s is **bit-identical**
-    /// (the pen already outruns the gate) and the worst deviation anywhere is 1.15pt — on a 20pt brush,
-    /// i.e. under 6% of the stroke's own width, and dominated by hand tremor rather than by the gate.
-    ///
-    /// A **whole** spacing was measured too and rejected: it doubles the saving but chamfers a slow
-    /// 90° corner by 0.7 × the gate, which on a 60pt brush is a 3.5pt cut across the corner. A
-    /// one-sample lookahead to rescue the corner vertex was built and refuted — at a slow corner the
-    /// vertex sits in the middle of the rejected run, not at its end, so holding only the most recent
-    /// rejected sample misses exactly the point it was written to save (measured: identical 3.512pt
-    /// deviation with and without it). Rescuing it properly means a streaming max-deviation
-    /// simplifier, which is a different piece of work from a gate.
-    ///
-    /// A perpendicular-deviation rule (Douglas-Peucker and relatives) was rejected for a different
-    /// reason: it collapses a straight run to its two endpoints, and interpolation deforms a stroke by
-    /// warping its stored samples, so a 400pt line stored as two points bends as a straight line under
-    /// a warp that should curve it. A radial gate can never leave samples further apart than the input
-    /// already had them plus one threshold, so it only ever makes a slow stroke as coarse as a fast
-    /// one already is today.
-    static func recordSpacing(brushSize: CGFloat, brush: Brush) -> CGFloat {
-        stampSpacing(brushSize: brushSize, brush: brush) / 2
-    }
-
     /// Walks from `last` toward `point`, invoking `body` at each `spacing`-sized step along the way,
     /// and returns the position of the final stamp — the carry point the next walk continues from.
     /// When the two points are closer together than one spacing, nothing is stamped and `last` comes
     /// straight back, so the leftover distance accumulates into the next call instead of being
     /// stamped short (which is what keeps a slow drag from bunching dabs up at the start).
     ///
-    /// This is the arithmetic both callers share, and all they share: `stampStroke` below replays a
-    /// whole finished stroke in one call and holds the carry point in a local, while
-    /// `StrokeCanvasView.stampPath` is called once per incoming touch sample and holds it in a
-    /// property across calls. Returning the carry point rather than storing it is what lets one
-    /// helper serve both.
+    /// **The live preview's walk, and only the live preview's.** `stampStroke` below replays a
+    /// *stored* stroke, whose points are a refit at a fixed tolerance rather than the input, and so
+    /// walks `StrokePath`'s curve instead — see there. This one is called once per incoming touch
+    /// sample, at input density, where the straight line between two consecutive samples and the
+    /// curve through them are the same line to well under a pixel; it holds its carry point in a
+    /// property across calls, which is why the carry is returned rather than stored.
     static func advance(from last: CGPoint, to point: CGPoint, spacing: CGFloat,
                         _ body: (CGPoint) -> Void) -> CGPoint {
         advance(from: last, to: point, spacing: spacing) { dab, _ in body(dab) }
@@ -160,6 +129,18 @@ enum BrushStamper {
     ///
     /// Skipped dabs still go through `stampDab` so they consume the RNG exactly as they would have —
     /// otherwise a piece of a scattering stroke would re-roll every dab after the first skipped one.
+    ///
+    /// ## The walk follows the curve, not the samples
+    ///
+    /// BRUSH.md §3.4. The stored points are a refit at a fixed geometric tolerance
+    /// (`StrokePathFit`), so consecutive ones sit up to 12 pt apart rather than at input density, and
+    /// two things that used to be indistinguishable no longer are. Walking the chords would
+    /// polygonise a curve, and — the reason this is not merely cosmetic — the walk used to hop
+    /// *from the last dab to the next sample*, cutting the corner at every stored point. At input
+    /// density that cut was a fraction of a pixel. At the fit's spacing it would be the whole
+    /// tolerance, and it would grow every time a brush's spacing was widened. `StrokePath.advance`
+    /// marches the interpolant through the stored points instead, so a stroke's ink is a function of
+    /// its geometry and not of the spacing it happens to be walked at.
     static func stampStroke(into raster: DabTarget, samples: [Sample], brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
                             seed: UInt64? = nil, visibleRange: ClosedRange<CGFloat>? = nil) {
@@ -167,46 +148,32 @@ enum BrushStamper {
         raster.beginStroke()
         let spacing = stampSpacing(brushSize: brushSize, brush: brush)
         var rng = seed.map { DabRNG(seed: $0) } ?? DabRNG()
-        var last: CGPoint?
-        var lastPressure: CGFloat = samples[0].pressure
-        // The carry point's parameter — a dab position, not a sample, whenever the previous segment
-        // placed one. Tracked alongside `last` so a dab's parameter is exact: within a segment,
-        // position is affine in parameter, so the same `t` that ramps pressure maps the parameter too.
-        var lastParameter: CGFloat = 0
+        let path = StrokePath(points: samples.map(\.point))
 
         func sink(at parameter: CGFloat) -> DabTarget {
             guard let visibleRange else { return raster }
             return visibleRange.contains(parameter) ? raster : DiscardedDabTarget.shared
         }
 
-        for (index, sample) in samples.enumerated() {
-            let point = sample.point
-            guard let lastPoint = last else {
-                stampDab(into: sink(at: 0), at: point, pressure: sample.pressure, brush: brush, color: color,
-                         brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser, rng: &rng)
-                last = point
-                lastPressure = sample.pressure
-                lastParameter = 0
-                continue
-            }
-            // Pressure ramps across the dabs bridging two input samples rather than every one of them
-            // taking the destination sample's value. At the sampling rates a fast drag produces, one
-            // segment can span many dabs, and holding pressure flat across them turned a smooth press
-            // into a visible staircase in both width and opacity.
-            let p0 = lastPressure, p1 = sample.pressure
-            let q0 = lastParameter, q1 = CGFloat(index)
-            var finalT: CGFloat?
-            last = advance(from: lastPoint, to: point, spacing: spacing) { dab, t in
-                finalT = t
-                let parameter = q0 + (q1 - q0) * t
-                stampDab(into: sink(at: parameter), at: dab, pressure: p0 + (p1 - p0) * t, brush: brush,
-                         color: color, brushSize: brushSize, brushOpacity: brushOpacity,
+        // The first dab sits on the first stored point — the anchor the whole lattice hangs from, and
+        // what `visibleRange` counts from.
+        stampDab(into: sink(at: 0), at: samples[0].point, pressure: samples[0].pressure, brush: brush,
+                 color: color, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
+                 rng: &rng)
+        // Distance walked since the last dab. A segment too short to place one hands its length to
+        // the next instead of stamping short, which is what keeps a slow drag from bunching dabs up.
+        var carried: CGFloat = 0
+        for index in 0..<max(samples.count - 1, 0) {
+            // Pressure ramps across the dabs bridging two stored points rather than every one of them
+            // taking the destination point's value. One segment can span many dabs, and holding
+            // pressure flat across them turned a smooth press into a visible staircase in both width
+            // and opacity.
+            let p0 = samples[index].pressure, p1 = samples[index + 1].pressure
+            carried = path.advance(segment: index, spacing: spacing, carried: carried) { dab, u in
+                stampDab(into: sink(at: CGFloat(index) + u), at: dab, pressure: p0 + (p1 - p0) * u,
+                         brush: brush, color: color, brushSize: brushSize, brushOpacity: brushOpacity,
                          isEraser: isEraser, rng: &rng)
             }
-            // `advance` returns the last dab's position, or `lastPoint` unchanged when the segment was
-            // too short to place one — in which case the carry point, and so its parameter, is unmoved.
-            if let finalT { lastParameter = q0 + (q1 - q0) * finalT }
-            lastPressure = sample.pressure
         }
         raster.endStroke()
     }

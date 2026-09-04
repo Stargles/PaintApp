@@ -4,7 +4,7 @@ import UIKit
 /// Pure-logic coverage for the pencil-only-mode fix to `SelectionOverlayView`'s lasso/rectangle/
 /// automatic-selection gestures (the third hole `CanvasView`'s gesture doc comment references —
 /// after `fillPress` and `catchAll`). The touch-routing itself needs a live `UITouch`, which nothing
-/// outside UIKit can construct (see `StrokeSampleGateLogicTests`'s doc comment for the same limit),
+/// outside UIKit can construct (see `StrokePathFitLogicTests`'s doc comment for the same limit),
 /// so this exercises the one piece of that fix which *is* plain logic:
 /// `resolvedLastTouchType(from:)`, the pencil-wins tie-break `TouchTypePanGestureRecognizer` and
 /// `TouchTypeTapGestureRecognizer` use in `touchesBegan` to decide whether a gesture sequence counts

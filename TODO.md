@@ -172,9 +172,11 @@ LAYER_TRANSFORM.md.
       **[BRUSH.md](BRUSH.md) is the specification** — §1 the ask verbatim, **§2 fourteen owner rulings**, §10
       the build order. [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the survey that
       preceded it and is still accurate about the seams.
-      The rulings that shape everything else: the stored path becomes a **refit of the drawn curve at a fixed
-      tolerance** independent of any brush, which deletes `StrokeSampleGate` and is a correctness requirement
-      rather than a saving; **per-dab randomness is hashed from the stroke's seed and the dab's arc length**
+      **Stage 0 is done**: the stored path is a **refit at a fixed tolerance** independent of any brush
+      (`StrokePathFit`, 0.25 pt deviation plus a 12 pt cap), the walk marches `StrokePath`'s curve, and
+      `StrokeSampleGate` is deleted. §3.3 was rewritten by building it — it had specified cubic control points
+      as the stored record and the point list survived instead.
+      The rulings that shape the rest: **per-dab randomness is hashed from the stroke's seed and the dab's arc length**
       rather than drawn from a sequential stream, which is what survives a split, a refit, a spacing edit and
       an eraser punch alike, and which deletes `DiscardedDabTarget`; brushes are **deduplicated into a
       document-level table**, frozen per stroke with an explicit apply-to-existing verb; and **grain is

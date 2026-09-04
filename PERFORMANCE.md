@@ -1845,11 +1845,16 @@ headless can see any of that, and nothing on the device has been asked**: `Canva
 pins the property, not the pixels and not the frame time. **This is the artist-visible one**: it is the
 whole of "the brushstroke disappears when you draw" and it was not confined to 16k.
 
-**3. The sample gate and the dab spacing are in canvas points, so zooming out multiplies both.** The
+**3. The refit tolerance and the dab spacing are in canvas points, so zooming out multiplies both.** The
 owner's own theory of the lag, and it is right. `BrushStamper.stampSpacing = max(brushSize × spacingFraction, 1)`
-and `recordSpacing` is half of it, both in canvas points; the artist works at `fitScale`, so one screen
-inch is `132 / fitScale` canvas points. MEASURED at the default brush (Soft Round, size 5 → 1.0 pt stamp
-spacing, 0.5 pt record spacing):
+is in canvas points; the artist works at `fitScale`, so one screen inch is `132 / fitScale` canvas points.
+The table below was taken against `StrokeSampleGate`, whose `recordSpacing` was half the dab spacing —
+**that gate is gone** (BRUSH.md §12 stage 0), and its replacement moves the *shape* of this item without
+removing it: `StrokePathFit`'s 0.25 pt deviation tolerance is also in canvas points, so at `fitScale` 0.047
+a tenth of a screen point of input jitter is 2 canvas points, eight times the tolerance, and the fit stops
+compressing anything at all. INFERRED from the rule and `fitScale`; nobody has drawn on a 16k canvas and
+counted. MEASURED at the default brush (Soft Round, size 5 → 1.0 pt stamp spacing, 0.5 pt record spacing,
+**as the gate behaved**):
 
 | canvas | fit | canvas pt per screen inch | dabs per screen inch | stored samples per screen inch |
 |---|---|---|---|---|
@@ -1860,8 +1865,8 @@ spacing, 0.5 pt record spacing):
 | 16383² | 0.047 | 2815 | **2815** | **5631** |
 
 Eight times the dabs and eight times the stored geometry at 16383² for the same gesture, and the stroke is
-sub-pixel while it happens (item 2). Smarter: derive `minimumTravel` from the live canvas scale at
-`StrokeCanvasView.swift:906`, which already runs once per stroke — one multiplication. The dab *spacing*
+sub-pixel while it happens (item 2). Smarter: derive the **refit tolerance** from the live canvas scale
+once per stroke — one multiplication, and `StrokePathFit` is reset per stroke already. The dab *spacing*
 must stay in canvas points or the ink itself changes. **Cost the owner should weigh rather than a free
 win**: a stroke laid down zoomed out is then stored coarser and stays coarser when zoomed in, and
 interpolation registration and the vector eraser's capsule chain read the same samples. The owner has

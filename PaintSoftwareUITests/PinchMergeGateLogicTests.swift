@@ -18,7 +18,7 @@ final class PinchMergeGateLogicTests: XCTestCase {
     /// Two plain layers (62pt each) and a folder (40pt) below them, stacked top to bottom the way
     /// `LayerStackListView.Coordinator.rows` already is. Mirrors `LayerStackCell.layerHeight`/
     /// `folderHeight` as literals rather than importing UIKit, keeping this tier's dependency on the
-    /// view layer at zero — same bargain `StrokeSampleGate`'s tests make.
+    /// view layer at zero — same bargain `StrokePathFit`'s tests make.
     private func threeRowLayout() -> [PinchMergeGate.RowLayout] {
         PinchMergeGate.layout(heights: [
             (height: 62, isFolder: false),  // row 0: layer,  y  0..<62

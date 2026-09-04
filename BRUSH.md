@@ -152,20 +152,56 @@ being consumed, for §2.8's velocity.
 `StrokeStabilizer` is unchanged — an exponential follow whose strength is the brush's `stabilization`.
 §2.12.
 
-### 3.3 Refit
+### 3.3 Refit — BUILT, and not the way this section first described it
 
-**New, and it replaces `StrokeSampleGate` entirely.** The stabilized samples are fit to a chain of cubic
-segments at a fixed geometric tolerance, and the fitted control points — not the input samples — are
-what `PackedSampleRun` encodes. Sensor readings are resampled onto the fitted points.
+**`StrokePathFit` replaces `StrokeSampleGate` entirely, and the gate is deleted.** The stored record
+stays a list of **on-curve points** — `VectorSample`, position and pressure, exactly as before — and
+what changed is *which* samples become points. A sample is kept when dropping it would move the stored
+polyline further than a fixed tolerance from the path the pen drew, plus a cap on how far apart two
+stored points may be. Nothing consults the brush. §5.3 is why the gate could not survive.
 
-`StrokeSampleGate` is deleted, not kept alongside. §5.3 is why it cannot survive.
+**This section used to say the fit produced cubic *control points* and that `PackedSampleRun` encoded
+those. That was wrong on three counts and building it settled all three.**
 
-### 3.4 Walk
+1. **Blast radius, for no gain.** `[VectorSample]` is read by `StrokeGeometry.capsuleChain`, the vector
+   eraser's parametric cut, `DabLattice`, lasso membership, the spatial index, the packer and
+   interpolation's registration — every one of them a polyline consumer. Changing the *stored type* to
+   cubics rewrites all of them in stage 0; changing the *density* of a point list touches none.
+2. **It would create two representations that can disagree.** The renderer walks a curve either way, so
+   what matters is that the fit's error bound and the walk's geometry are the same geometry. Fitting the
+   chord bounds both: MEASURED, the stored polyline stays within **0.250 pt** of the drawn path by
+   construction and the curve through it within **0.391 pt**. Fitting the *curve* instead would let the
+   chord — which is what every polyline consumer above sees — drift by the whole sagitta, several points
+   on a tight arc.
+3. **A cubic fit inherits the exact objection that killed Douglas-Peucker here.** Interpolation deforms a
+   stroke by warping its stored points, so a straight run collapsed to two knots bends as a straight line
+   under a warp that should curve it. Cubics collapse a straight run the same way. **The answer is a
+   maximum knot spacing alongside the tolerance**, and it is load-bearing rather than belt-and-braces:
+   MEASURED, a finger-drawn 400 pt line at constant pressure stores **2 points uncapped and 36 at a 12 pt
+   cap**, and the warped path falls **1.14 pt** from the truth uncapped against **0.08 pt** capped.
+
+The record is therefore unchanged by this stage — §5.1 still describes it — and the tolerance is one
+`PackedSampleRun.quantum`, so the fit is exactly as true as the format can store.
+
+### 3.4 Walk — BUILT
 
 Arc-length march along the fitted curve at `spacing`, which is itself a sensor-driven parameter (§6) and
-so may vary along the stroke. The tangent at each step comes from **the fitted curve**, never from a
-difference of consecutive raw samples: two samples 0.1 pt apart yield a random angle, and direction-follow
-built on that is noise. The first dab has no incoming tangent and takes the outgoing one.
+so may vary along the stroke. The interpolant is a **centripetal Catmull-Rom** chain through the stored
+points, evaluated as a cubic Hermite per segment (`StrokePath`), and it creases rather than smooths at a
+knot the path turns through more than 60° — without which a traced right angle loses a MEASURED 0.868 pt
+across the corner.
+
+The tangent at each step comes from **the fitted curve**, never from a difference of consecutive stored
+points: at the fit's knot spacing the chord direction is a *step function* of the parameter, so
+direction-follow built on it would rotate in visible jumps. `StrokeGeometry.tangent(atParameter:in:)` is
+the one consumer that exists today — it gives the eraser its cross-section normal — and it reads the
+curve now.
+
+**Positionally the curve buys nothing at this tolerance and costs a little**, which is worth stating
+plainly because the obvious reading of §2.3 is that it buys fidelity. It does not: the chord is *more*
+faithful to the drawn path (0.250 pt against 0.391 pt), because the fit is defined against the chord. The
+curve is for the tangent, and for not polygonising a stroke walked at a spacing wider than it was drawn
+at. The first dab sits on the first stored point and takes the outgoing tangent.
 
 ### 3.5 Stamp
 
@@ -235,6 +271,10 @@ property the grain boil needed and never had.
 **Six bytes a point against five**, and `PackedSampleRun`'s `.float32` mode for `precise` strokes widens
 the same way.
 
+**The refit (§3.3) does not change this record, and that is a decision rather than an omission.** The
+stored thing stays a list of on-curve points; only their placement moved. §3.3 carries the three reasons
+the cubic-control-point alternative was refused.
+
 **The record is not fixed — it is a channel set.** §5.5.
 
 ### 5.2 Nothing else is stored
@@ -249,13 +289,34 @@ middle one is the load-bearing one:
 
 ### 5.3 The refit is a correctness requirement, not a saving
 
-`StrokeSampleGate` admits a sample once it has travelled **half the current dab spacing**. So *the stored
-path's density is a function of the brush it was drawn with.* That is tolerable while brushes are fixed
-presets. It is not tolerable once a brush editor exists: retune a wide-spaced brush to a tight spacing and
-there is no longer enough path to walk, and the samples are gone.
+`StrokeSampleGate` admitted a sample once it had travelled **half the current dab spacing**. So *the
+stored path's density was a function of the brush it was drawn with.* That is tolerable while brushes are
+fixed presets. It is not tolerable once a brush editor exists: retune a wide-spaced brush to a tight
+spacing and there is no longer enough path to walk, and the samples are gone.
 
 **The stored path must be a fit of the drawn curve at a fixed geometric tolerance, independent of any
 brush.** That is what §3.3 is, and the memory win is a side effect of it rather than its justification.
+
+**BUILT.** `StrokePathFit`: a fixed 0.25 pt deviation tolerance, a 12 pt cap on the gap between two stored
+points, and the gate's own pressure escape kept unchanged at 0.02 — the one threshold that never was a
+function of the brush. MEASURED at 120 Hz over a 400 pt line and circles of radius 60 and 15, at 900 /
+400 / 120 / 40 pt/s, hand tremor 0.4 pt:
+
+| | raw | gate, 5 pt brush | gate, 20 pt brush | fit |
+|---|---|---|---|---|
+| line at 40 pt/s | 1201 | 603 | 419 | **204** |
+| circle r=60 at 40 pt/s | 1131 | 561 | 393 | **189** |
+| line at 120 pt/s | 401 | 401 | 361 | **73** |
+| circle r=60 at 120 pt/s | 377 | 377 | 347 | **64** |
+| circle r=15 at 120 pt/s | 95 | 95 | 87 | **23** |
+| anything at 900 pt/s | 54 | 54 | 54 | 54 |
+
+The saving is 2–5.5× against the gate and 3–5.9× against the input, and it **vanishes at 900 pt/s in every
+row** — the pen already outruns both rules, which is the honest shape of this and was true of the gate too.
+
+**The number that is not a saving is the one that matters**: the *fidelity* column is now a constant.
+Every row's stored path sits within 0.250 pt of the drawing whatever brush was selected, where the gate's
+was half a dab spacing and so 0.5 pt on a 5 pt brush and 3 pt on a 60 pt one.
 
 ### 5.4 The brush table
 
@@ -468,7 +529,7 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 
 | gone | replaced by | stage |
 |---|---|---|
-| `StrokeSampleGate` | the refit — §3.3, §5.3 | 0 |
+| ~~`StrokeSampleGate`~~ **gone** | `StrokePathFit` + `StrokePath` — §3.3, §5.3 | 0 |
 | `DiscardedDabTarget` | hashed randomness has no stream to keep in phase — §4 | 1 |
 | `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §9 | 2 |
 | `stampApproximateSquare` | `stampImage`; `.square` becomes a texture — §3.5 | 3 |
@@ -528,9 +589,16 @@ Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md
 Stages 1–4 are worth doing on their own merits with no file format involved, which is the test of whether
 the ordering is honest.
 
-0. **The path: refit, and delete `StrokeSampleGate`.** §3.3 and §5.3. Arc-length walk and curve tangent
-   fall out of it, and every later stage reads from it. Pin that a stroke re-renders identically after a
-   spacing change, which is the thing the gate made impossible.
+0. **DONE — the path: refit, and `StrokeSampleGate` deleted.** §3.3 and §5.3. `StrokePathFit` decides what
+   is stored and `StrokePath` is the curve every tier walks; the arc-length march and the curve tangent
+   came with it, and `StrokeGeometry.tangent(atParameter:)` reads the curve rather than a chord. Pinned by
+   `StrokePathWalkLogicTests` (a stored stroke is true to the drawing under brushes whose spacings differ
+   forty-fold — the thing the gate made impossible) and `StrokePathFitLogicTests` (the tolerance, the cap
+   against a warp, the pressure escape, the lift point, and the ink unchanged).
+   **The live preview stopped being gated with it.** The fit commits a knot only once the sample after it
+   proves it was needed, so driving the preview from its output would hang the ink a whole cap behind the
+   pen; it is driven from the samples instead, as the raster tier and Mode 3's resolve already were, and
+   the two agree to within the fit's 0.25 pt.
 1. **Randomness by hash.** §4. Delete `DiscardedDabTarget`. Pin the split case the brief names — a stroke
    split in two stamps the same ink as the stroke it came from.
 2. **Delete grain.** §9. Independent of everything else, and it shrinks the surface every later stage
@@ -572,6 +640,16 @@ the ordering is honest.
   third party that can relicense or pull it.
 - **Whether the Texture group is worth its licensing step at all.** If §8.4's generator turns out to make
   credible grunge, the CC0 dependency disappears and §12 stage 11 with it. Nobody has tried.
-- **Whether the refit tolerance is one constant or scales with zoom** — a stroke drawn at 8x zoom holds
-  detail a 0.3 pt tolerance discards. Related to the deferred zoom-scaled sample gate in HANDOFF's last
-  paragraph, which this stage's deletion of the gate makes moot in its original form.
+- **Whether the refit tolerance is one constant or scales with zoom.** Still open, and stage 0 sharpened
+  it rather than answering it. The tolerance is in canvas points, so zooming *out* is the dangerous
+  direction, not in: at 16383² the artist works at `fitScale` 0.047, one screen point is 21 canvas points,
+  and input jitter of a tenth of a screen point is 2 canvas points — eight times the tolerance, so the fit
+  stops compressing anything at all. PERFORMANCE.md item 3 is the same finding wearing the gate's clothes.
+  INFERRED from the fit's rule and `fitScale`; nobody has drawn on a 16k canvas and counted.
+- **What per-sample noise the digitiser actually delivers.** Stage 0 turned out to depend on it and
+  nothing in the repo measures it. A deviation fit compresses *correlated* tremor (a hand) and cannot
+  compress white noise (a bad digitiser), where the sample gate — a distance rule — could not tell the
+  two apart. MEASURED on the test fixture: the same 0.4 pt amplitude stores 193 of 1201 samples when it is
+  spread over ten samples and **877** when it is drawn independently per sample. Physiological tremor is
+  8–12 Hz against a 120 Hz sampler, so the first is the right model, but that is a physics argument rather
+  than a measurement of this hardware.

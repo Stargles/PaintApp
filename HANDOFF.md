@@ -19,9 +19,12 @@ owner rulings — read them rather than re-deriving them**, §9 is the deletion 
 order. [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the survey that preceded it and
 is still accurate about the seams.
 
-**Start at §11 stage 0** — the path refit, which deletes `StrokeSampleGate`. §5.3 is why it is a
-correctness requirement and not an optimisation: the gate ties the stored path's density to the brush it
-was drawn with, which stops being tolerable the moment a brush editor exists.
+**§12 stage 0 is done** — the path refit landed and `StrokeSampleGate` is deleted. `StrokePathFit`
+decides what is stored (a fixed 0.25 pt deviation tolerance and a 12 pt cap, no brush anywhere) and
+`StrokePath` is the curve every tier walks. **§3.3 was rewritten by building it**: it had specified
+cubic control points as the stored record, and the point list survived instead — read §3.3's three
+reasons before reopening that. **Start at §12 stage 1**, randomness by hash, which deletes
+`DiscardedDabTarget`.
 
 **Four rulings shape everything and are the ones a session will otherwise re-derive.** Per-dab randomness
 is `hash(strokeSeed, arcLength)` and never a sequential stream — §4, and it is what survives a split, a
