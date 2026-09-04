@@ -360,6 +360,30 @@ LAYER_TRANSFORM.md.
       on one clock. **Ask the owner to leave "Record My Actions" running during an ordinary working session and
       to stop it once the freeze happens** — the file is the diagnosis. Do not spend runs guessing first.
 
+### (40) Onion skin z-order, and what Behind should mean
+
+- [ ] > "onion skin z ordering is broken, it shows behind videos or photos even if the video layer is behind
+      it. Onion skin should be in front of everything"
+
+      **A fix was built, proved and deliberately dropped unmerged.** `CanvasView.reconcileLayers` fronts the
+      onion view and *then* fronts every layer host over it, so on Core Animation's path `.behind` means under
+      all the artwork, including artwork on layers *below* the active one. **Not a video regression — a photo
+      has always done this**; both are opaque pixels in the same layer host, and video merely supplied a
+      rectangle large enough to notice. **[TODO](TODO.md) item (30) already stated the mechanism verbatim**,
+      filed as a hypothetical cost of a different feature and never recognised as live.
+
+      **Why it was dropped**: honouring the ruling literally makes Behind and In Front pixel-identical in
+      every document, so the picker becomes a control whose two settings draw the same picture — too large a
+      consequence to take in passing.
+
+      **The owner's clarification, which is the design to build**: *"In behind mode it should be behind the
+      current layer, not everything."*
+
+      **And the objection to exactly that, which must be answered rather than ignored**: at rest with the
+      compositor engaged there is no active-layer ink to sit under, so `.behind` would mean one thing on one
+      rendering path and another on the other — which is the shape of this defect rather than a fix for it.
+      [EFFECT_BACKDROP.md](EFFECT_BACKDROP.md) §2.1 records the option and the scope that shipped the bug.
+
 ### (10) Linear light as an option on the blend mode — deprioritised by the owner
 
 - [ ] The owner's original ask: *"I also want the option in actions to switch the color storage and
