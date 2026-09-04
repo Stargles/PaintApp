@@ -1457,11 +1457,13 @@ final class PerfBaselineTests: XCTestCase {
     /// of a 200 pt one. So a key that silently stops matching is not a slow path here, it is a
     /// different program.
     ///
-    /// The key is the tip and the colour, and **neither the dab's size nor its angle is in it** —
-    /// both vary per dab, so either would collapse this number the way alpha would collapse the
-    /// gradient cache's. BRUSH.md §3.5 asked for the angle to be *bucketed* into the key; that was
-    /// refuted by measurement (see `DabImageCache`) and the angle is applied by the CTM instead.
-    /// This test is what stops either term coming back.
+    /// The key is the tip, the colour and the dab's size **octave** — a power of two, not the size
+    /// itself, which varies per dab and would collapse this number the way alpha would collapse the
+    /// gradient cache's. The octave is what keeps the draw within 2:1 of the entry, MEASURED at 14.2
+    /// µs a dab against 76.3 with one native-resolution entry per tip. The angle is in no form at
+    /// all: BRUSH.md §3.5 asked for it to be bucketed, and that was refuted by measurement (see
+    /// `DabImageCache`). This test is what stops the angle coming back, and what catches the size
+    /// being keyed exactly rather than by octave.
     func testDabImageCacheHitRate() {
         let manager = perfManager()
         manager.selectedBrush = BrushLibrary.square
@@ -1508,7 +1510,7 @@ final class PerfBaselineTests: XCTestCase {
         ])
 
         XCTAssertEqual(missesAfterFirst, 1,
-                       "A stroke is one tip at one colour, so it should miss exactly once — on its first dab — and hit for every dab after that. More than one miss means a per-dab term (size, angle, alpha, position) has leaked into the cache key.")
+                       "A stroke is one tip at one colour inside one size octave, so it should miss exactly once — on its first dab — and hit for every dab after that. More than one miss means a per-dab term (the exact size, the angle, alpha, position) has leaked into the cache key. A stroke whose pressure ramp really did cross an octave would legitimately miss twice; this one does not, because the square preset's minSizeFraction of 0.5 with sizePressure 0.3 spans 0.85…1.0 of its base size.")
         XCTAssertEqual(secondStrokeMisses, 0,
                        "A second stroke with identical brush settings must not rebuild the tinted tip at all")
         XCTAssertGreaterThan(rate, 0.99,

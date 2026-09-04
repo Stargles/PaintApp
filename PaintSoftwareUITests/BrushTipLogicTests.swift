@@ -193,7 +193,11 @@ final class BrushTipLogicTests: XCTestCase {
                            color: .black, alpha: 1, blendMode: .normal)
         let pixels = try XCTUnwrap(Self.rgba(of: texture))
         XCTAssertFalse(pixels.bytes.contains { $0 != 0 }, "A missing tip leaves the canvas alone")
-        XCTAssertEqual(texture.dabImageCacheMisses, 1, "…and it did try, rather than being skipped upstream")
+        // Neither a hit nor a miss: the entry's size term comes from the mask's own resolution, so
+        // the cache cannot form a key for a tip it could not load, and a broken import therefore
+        // does not enter the counters at all. `BrushTextureStore` caches the failed read.
+        XCTAssertEqual(texture.dabImageCacheMisses, 0)
+        XCTAssertEqual(texture.dabImageCacheHits, 0)
     }
 
     // MARK: - `BakedDab`'s angle, and what a pose does to it

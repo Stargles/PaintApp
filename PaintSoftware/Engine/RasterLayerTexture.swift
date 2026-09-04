@@ -9,6 +9,7 @@ import CoreGraphics
 /// 4000²) per visible vector layer per invalidation just to stamp into it and copy the result out.
 /// A thin wrapper over the renderer's own context removes that allocation and copy while keeping
 /// `BrushStamper` the single source of truth for how a stroke rasterizes.
+///
 /// **Two primitives, and no default implementation for either.** A tip is procedural or it is a
 /// picture, and BRUSH.md §6's `BrushTip` makes exactly that split; a target that grew a default
 /// `stampImage` would silently drop every square-brush dab, which is the failure this protocol is
@@ -237,16 +238,29 @@ final class DabGradientCache {
 ///
 /// A 1000 pt stroke at the square preset's 15% spacing and 16 pt is ~417 dabs, so the cache is the
 /// difference between 68 ms and 2.3 ms of stamping for one stroke — and a vector layer re-runs that
-/// walk on every invalidation. For scale, a *round* dab of the same 16 pt costs 2.4 µs, so an image
-/// dab is ~2.3× a round one and the cache is what keeps that ratio from being 68×.
+/// walk on every invalidation.
 ///
-/// **The key names the tip and the colour, and nothing else — not the size, and not the angle.**
+/// **The key names the tip, the colour and the dab's size *octave* — and not its angle.**
 ///
-/// *Size is out because it buys nothing.* An entry is built once at the mask's native resolution and
-/// CoreGraphics scales it at draw time. MEASURED against the obvious alternative — a power-of-two
-/// ladder of pre-scaled entries, sized per dab — over a stroke whose size varies continuously with
-/// pressure: 5.89 vs 5.93 µs at 16 pt, 18.80 vs 18.85 at 32, 83.3 vs 71.5 at 64, 624 vs 623 at 200.
-/// Within noise at three of four sizes, and a ladder would put a per-dab term in the key for it.
+/// *Size is in, as a power of two, and the number that settled it was taken in the app rather than
+/// in a microbenchmark.* An entry is built at the smallest power of two that covers the dab, so the
+/// draw resamples by at most 2:1 and `.high` interpolation is cheap; a stroke's continuously varying
+/// dab size still collapses to one entry, or two where it crosses an octave. A microbenchmark on
+/// macOS CoreGraphics said this ladder was worth nothing — 5.89 vs 5.93 µs at a 16 pt dab, 624 vs
+/// 623 at 200 — and **that measurement was misleading**, because macOS CG absorbs a large downscale
+/// far more cheaply than the simulator's does. MEASURED in the app, over a 500-sample stroke with
+/// the square preset, per dab:
+///
+/// | entry built at | µs / image dab | µs / round dab |
+/// |---|---|---|
+/// | the mask's native 256², `.high` | **76.3** | 5.6 |
+/// | the mask's native 256², `.none` | 6.9 | 6.4 |
+/// | **the power-of-two ladder, `.high`** | **14.2** | 6.7 |
+///
+/// So the ladder buys 5.4× and keeps the antialiasing that `.none` throws away. The one expensive
+/// resample of the mask happens once per entry — i.e. once per stroke — instead of once per dab,
+/// which is the whole of the difference. An image dab then costs about **2.1× a round one**, which
+/// is what an oriented picture ought to cost against a radial gradient.
 ///
 /// *Angle is out because bucketing it is worse on **both** counts, which refutes BRUSH.md §3.5's
 /// "rotation-bucketed" as written.* On accuracy: a bucket's worst angular error is `π/N`, and the
@@ -271,22 +285,38 @@ final class DabImageCache {
     private(set) var hits = 0
     private(set) var misses = 0
 
-    /// Ceiling on distinct entries, as on `DabGradientCache` and for the same reason: colour and tip
-    /// change at human speed, so this is never approached, and something pathological degrades to
-    /// "rebuild sometimes" rather than growing without bound. An entry is one 256² bitmap — 256 KB —
-    /// so 32 of them is 8 MB at the ceiling and one is the steady state.
+    /// Ceiling on distinct entries, as on `DabGradientCache` and for the same reason: tip, colour and
+    /// size octave all change at human speed, so this is never approached, and something pathological
+    /// degrades to "rebuild sometimes" rather than growing without bound. An entry is at most one
+    /// 256² bitmap — 256 KB — so 32 of them is 8 MB at the ceiling, and one or two is the steady
+    /// state for a stroke.
     private static let limit = 32
 
-    /// The tip, then the colour. **The tip is in here because RENDER.md §3.8 says what happens when
-    /// it is not**: `PixelOps.RasterizeKey`, `MaskResolver.CacheKey` and `MetalCompositor`'s
-    /// `UploadCache.Key` are all keyed on a buffer's size, so two contents at one size collide and
-    /// the second silently gets the first's pixels. `BrushTipLogicTests` pins that two different
-    /// tips at one size do not.
+    /// The tip, the colour, and the entry's own pixel side. **The tip is in here because RENDER.md
+    /// §3.8 says what happens when it is not**: `PixelOps.RasterizeKey`, `MaskResolver.CacheKey` and
+    /// `MetalCompositor`'s `UploadCache.Key` are all keyed on a buffer's size *alone*, so two
+    /// contents at one size collide and the second silently gets the first's pixels. This key has a
+    /// size term too — and is not that bug, precisely because the size is not the whole key.
+    /// `BrushTipLogicTests` pins that two different tips at one size are two entries.
     private struct Key: Hashable {
         let texture: BrushTextureRef
         let red: CGFloat
         let green: CGFloat
         let blue: CGFloat
+        let side: Int
+    }
+
+    /// The pixel side an entry is built at for a dab of `diameter`: the smallest power of two that
+    /// is at least the dab's own size, capped at the mask's own resolution and floored at 8.
+    ///
+    /// **A power of two rather than the dab's exact size, because dab size varies per dab and an
+    /// exact key would hit approximately never** — it is `brushSize × sizeFraction(pressure)`, which
+    /// is the same continuously-varying quantity that keeps `alpha` out of `DabGradientCache`'s key.
+    /// A power-of-two ladder collapses a stroke to one entry, or two where it crosses an octave.
+    static func entrySide(forDiameter diameter: CGFloat, nativeSide: Int) -> Int {
+        var side = 8
+        while CGFloat(side) < diameter && side < nativeSide { side *= 2 }
+        return min(side, max(nativeSide, 1))
     }
 
     /// Paints one image dab into `ctx`, at `point` in the context's current user space.
@@ -298,7 +328,7 @@ final class DabImageCache {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
         // Same contract as `DabGradientCache.stamp` — see there.
         color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
-        guard let entry = entry(texture: texture, red: r, green: g, blue: b) else { return }
+        guard let entry = entry(texture: texture, red: r, green: g, blue: b, diameter: diameter) else { return }
 
         ctx.saveGState()
         ctx.setBlendMode(blendMode)
@@ -314,23 +344,27 @@ final class DabImageCache {
         ctx.restoreGState()
     }
 
-    private func entry(texture: BrushTextureRef, red: CGFloat, green: CGFloat, blue: CGFloat) -> CGImage? {
-        let key = Key(texture: texture, red: red, green: green, blue: blue)
+    private func entry(texture: BrushTextureRef, red: CGFloat, green: CGFloat, blue: CGFloat,
+                       diameter: CGFloat) -> CGImage? {
+        // Probing needs the mask's resolution, and the store answers from a dictionary after the
+        // first dab of the process — see `BrushTextureStore`, which is where the file read lives.
+        guard let mask = BrushTextureStore.mask(for: texture), mask.width > 0 else { return nil }
+        let side = Self.entrySide(forDiameter: diameter, nativeSide: mask.width)
+        let key = Key(texture: texture, red: red, green: green, blue: blue, side: side)
         if let cached = tinted[key] {
             hits += 1
             return cached
         }
         misses += 1
-        guard let mask = BrushTextureStore.mask(for: texture) else { return nil }
-        let width = mask.width, height = mask.height
-        guard width > 0, height > 0,
-              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
                                   bytesPerRow: 0, space: PixelOps.deviceRGBColorSpace,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         else { return nil }
-        let rect = CGRect(x: 0, y: 0, width: width, height: height)
+        let rect = CGRect(x: 0, y: 0, width: side, height: side)
         // The mask's alpha becomes the destination's; `.sourceIn` then keeps that alpha and takes
-        // the fill's colour, which is premultiplied colour × coverage — the entry, in one pass.
+        // the fill's colour, which is premultiplied colour × coverage — the entry, in one pass. The
+        // one expensive resample of the mask happens here, once per stroke, rather than per dab.
+        ctx.interpolationQuality = .high
         ctx.draw(mask, in: rect)
         ctx.setBlendMode(.sourceIn)
         ctx.setFillColor(UIColor(red: red, green: green, blue: blue, alpha: 1).cgColor)

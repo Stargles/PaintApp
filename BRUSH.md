@@ -287,17 +287,26 @@ wrong.** Bucketing the angle is worse on both counts, MEASURED:
   cache.
 
 So the angle is applied exactly by the CTM, and §7's direction-follow inherits a primitive with no
-quantisation in it to remove. **Size is out of the key too**: an entry is built at the mask's native
-resolution and CoreGraphics scales it, which MEASURED within noise of a power-of-two ladder of pre-scaled
-entries at three of four dab sizes. What is left is one entry per stroke, which the hit-rate test in
-`PerfBaselineTests` pins at one miss and the rest hits — and one that names the *tip* rather than only
-its dimensions, which is the assertion RENDER.md §3.8 says nobody wrote for the three size-keyed memos
-already in this repo.
+quantisation in it to remove.
+
+**The dab's size *octave* is in the key, and the measurement that settled it is the one taken in the
+app.** A microbenchmark on macOS CoreGraphics said a power-of-two ladder of pre-scaled entries was worth
+nothing against one native-resolution entry per tip — 5.89 vs 5.93 µs at 16 pt, 624 vs 623 at 200 — and
+that was **misleading**, because macOS CG absorbs a large downscale far more cheaply than the simulator's
+does. MEASURED in the app over a 500-sample stroke, per dab: **76.3 µs** with one native 256² entry at
+`.high`, **6.9 µs** with the same entry at `.none` (which throws the antialiasing away), and **14.2 µs**
+with the ladder at `.high`. So the ladder buys 5.4× and keeps the edge. The expensive resample of the
+mask then happens once per entry — once per stroke — rather than once per dab, and an image dab settles
+at about **2.1× a round one** (14.2 against 6.7).
+
+That still leaves one entry per stroke, which the hit-rate test in `PerfBaselineTests` pins at one miss
+and the rest hits; a stroke whose pressure ramp crossed an octave would legitimately miss twice. And the
+key names the **tip** rather than only its dimensions, which is the assertion RENDER.md §3.8 says nobody
+wrote for the three size-keyed memos already in this repo.
 
 The cache is what makes the primitive affordable at all: building a tinted stamp is a bitmap build at
-the mask's resolution, MEASURED at **162 µs** per 16 pt dab against **5.5 µs** when it is cached, and
-814 vs 508 at 200 pt. For scale, a round dab of 16 pt is 2.4 µs, so an image dab is ~2.3× a round one
-with the cache and ~68× without it.
+the entry's resolution, MEASURED at **162 µs** per 16 pt dab against **5.5 µs** when it is cached, and
+814 vs 508 at 200 pt.
 
 **`BakedDab` carries a tip rather than a flat `hardness`**, because `hardness` is meaningless on a
 picture and `angle` is meaningless on a disc:
