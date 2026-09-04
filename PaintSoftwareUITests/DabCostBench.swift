@@ -76,6 +76,59 @@ final class DabCostBench: XCTestCase {
         XCTAssertGreaterThan(dabs, 0)
     }
 
+    /// **What BRUSH.md §2.11's per-stroke buffer costs**, which §13 recorded as unmeasured.
+    ///
+    /// Two arms over the *same* dabs, into the *same* kind of canvas-sized `RasterLayerTexture`: one
+    /// through `stampStroke`, which brackets the walk in a group and so merges it through one
+    /// transparency layer; one replaying the dabs it laid, straight in, with no group at all. The
+    /// difference between the two is the whole of what the ruling costs — a `CGContext` buffer the
+    /// size of the stroke's own painted box, plus the collection of a few hundred `BakedDab`s.
+    ///
+    /// It is printed rather than asserted against a threshold, for the reason the file header gives:
+    /// a timing gate on a shared machine is a flake, and the finding is the *ratio*.
+    func testWhatTheStrokeGroupCosts() {
+        let brush = BrushLibrary.hardRound
+        let corpus = (0..<200).map { Self.stroke(index: $0) }
+
+        func time(grouped: Bool) -> (seconds: Double, dabs: Int) {
+            var dabs = 0
+            let start = CFAbsoluteTimeGetCurrent()
+            for samples in corpus {
+                autoreleasepool {
+                    let texture = RasterLayerTexture(size: Self.canvas)
+                    if grouped {
+                        BrushStamper.stampStroke(into: texture, samples: samples, brush: brush,
+                                                 color: .black, brushSize: 20, brushOpacity: 0.5,
+                                                 random: DabRandom(seed: 7))
+                    } else {
+                        let walk = BrushStamper.bake(samples: samples, brush: brush, color: .black,
+                                                     brushSize: 20, brushOpacity: 0.5,
+                                                     random: DabRandom(seed: 7))
+                        for dab in walk.dabs {
+                            guard case .round(let hardness) = dab.tip else { continue }
+                            texture.stampCircle(at: dab.center, radius: dab.radius, color: dab.color,
+                                                alpha: dab.alpha, hardness: hardness,
+                                                blendMode: dab.blendMode)
+                        }
+                        dabs += walk.dabs.count
+                    }
+                }
+            }
+            return (CFAbsoluteTimeGetCurrent() - start, dabs)
+        }
+
+        _ = time(grouped: true)          // warm
+        let direct = time(grouped: false)
+        let grouped = time(grouped: true)
+        let strokes = Double(corpus.count)
+        print("DABCOST stroke group: \(corpus.count) strokes at \(direct.dabs / corpus.count) dabs each — "
+              + "direct \(String(format: "%.1f", direct.seconds * 1000)) ms, "
+              + "grouped \(String(format: "%.1f", grouped.seconds * 1000)) ms, "
+              + "overhead \(String(format: "%.1f", (grouped.seconds - direct.seconds) / strokes * 1_000_000)) µs a stroke "
+              + "(\(String(format: "%.0f", (grouped.seconds / direct.seconds - 1) * 100))%)")
+        XCTAssertGreaterThan(direct.dabs, 0)
+    }
+
     /// The shipped preset, walked as the app walks it. **This is the number to compare across builds**:
     /// two rows of §6's matrix, resolved per dab, where before §12 stage 7 there were two hardcoded
     /// linear blends.
