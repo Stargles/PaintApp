@@ -239,14 +239,14 @@ rotating keyframe keeps its stamps upright while the stroke turns.
 
 ---
 
-## 4. Randomness — hashed by arc length, never a stream
+## 4. Randomness — hashed by arc length, never a stream — BUILT
 
-The brief's constraint is that splitting a stroke must not restart its randomness. Today's engine is a
-sequential `splitmix64` seeded per stroke, kept in phase by `DiscardedDabTarget`, which **computes dabs
-outside a piece's visible range and throws them away** so the sequence does not shift. That works, and it
-carries two implicit rules: every draw comes from the passed-in RNG, and a dab draws the same *number* of
-values whether or not it is drawn. A single conditional draw desynchronises everything after it, and the
-symptom is not a crash — it is half a split stroke's ink moving.
+The brief's constraint is that splitting a stroke must not restart its randomness. The engine this
+replaced was a sequential `splitmix64` seeded per stroke, kept in phase by `DiscardedDabTarget`, which
+computed dabs outside a piece's visible range and threw them away so the sequence did not shift. That
+worked, and it carried two implicit rules: every draw came from the passed-in RNG, and a dab drew the
+same *number* of values whether or not it was drawn. A single conditional draw desynchronised everything
+after it, and the symptom was not a crash — it was half a split stroke's ink moving.
 
 **Splitting is one of four ways that stream goes out of phase, and this overhaul adds the other three.**
 
@@ -259,18 +259,78 @@ symptom is not a crash — it is half a split stroke's ink moving.
 
 No seed-inheritance rule survives all four. So:
 
-> **Every per-dab random value is `hash(strokeSeed, arcLength)`.** There is no sequence and no phase.
+> **Every per-dab random value is `hash(strokeSeed, channel, arcLength)`.** There is no sequence and no
+> phase.
 
-A dab 43.2 pt along the stroke draws the same scatter, angle jitter and flow jitter forever — whichever
-half of a split it lands in, whatever the refit did to the point count, whether it is dab #200 or #150.
+A dab 43.2 brush widths along the stroke draws the same scatter and angle jitter forever — whichever half
+of a split it lands in, whatever the refit did to the point count, whether it is dab #200 or #150.
+`Engine/DabRandom.swift` is the whole of it.
 
-**Two fields on the stroke, both per-stroke rather than per-sample**: a `seed` that is **inherited on
-split rather than regenerated**, and the `arcOffset` of this piece from the original stroke's origin.
-`DabLattice`'s existing parent-seed propagation is the same idea and becomes a two-field copy.
+**A `channel` is what replaces "the next draw off the stream", and it is not optional.** Scatter angle and
+scatter distance are two values at one arc length; a stream told them apart by *order*, and with no order
+the channel has to be in the hash or they would be the same number. §6's matrix adds a row per modulation
+on top of the three that exist (`scatterAngle`, `scatterDistance`, `rotation`). Raw values are hash input,
+so they are stable: add cases, never renumber.
 
-**`DiscardedDabTarget` is deleted.** It exists only to keep a sequential RNG in phase; with no stream
-there is nothing to keep. Dabs outside a piece's range are skipped outright. Confirm nothing else leans
-on it before removing — its `DabTarget` conformance may be load-bearing for a test double.
+**The hash is splitmix64 addressed rather than stepped.** That generator is `state += golden;
+avalanche(state)`, so its n-th output from a base state is `avalanche(base + n · golden)` — which is
+exactly what a lattice point costs here. The statistical quality of a dab's jitter is therefore not merely
+comparable to what the stream gave, it is the same generator's same output, indexed by *where the dab is*
+instead of by how many dabs came before it.
+
+### 4.1 The coordinate is arc length in **brush widths**, and that is a ruling
+
+§2.17 already states λ in brush widths, and measuring the whole field in that unit buys the one invariance
+canvas points do not have: **a uniform scale of a stroke changes nothing at all.** A dab sits at
+`n · spacing / brushSize` widths, and a lasso resize, a canvas resize and a layer transform all scale
+`spacing` and `brushSize` by one factor. MEASURED: `(k·size·fraction)/(k·size)` and `(size·fraction)/size`
+are the *same* `Double` across every scale, size and fraction tried, so 60,000 accumulated dabs disagree
+by exactly zero. In points, every scattering stroke an artist picked up with the lasso would re-roll, and
+the Mode 2 cut preview — which walks canvas space while the render walks the layer's own — would sit on
+different dabs from the thing it previews.
+
+**The lattice quantum is 1/4096 of a brush width**, and both bounds on it are measured.
+
+- *Fine enough that two dabs never share a cell.* The Spacing slider's range is `0.02...0.5` of a width and
+  `stampSpacing`'s 1 pt floor only ever widens the gap, so the tightest walk the app can produce steps
+  **82 quanta** at a time — four doublings of headroom below anything an artist can dial in.
+- *Coarse enough that two routes to one arc length land in the same cell.* Arc length is accumulated one
+  step per dab, so a dab that survives a spacing edit is reached by a different sum. MEASURED over every
+  such coincidence inside a 5,000-width stroke (a 20,000 pt line drawn with a 4 pt brush) across eight
+  spacings: the worst disagreement is **6.6e-8 widths, 2.7e-4 of one quantum**, and that is the extreme.
+
+**λ is not a second arm.** A wavelength of zero quantises to a lattice step of *one quantum*, at which
+every dab has its own cell, the interpolation fraction is zero, and the answer is that cell's hash — a
+fresh draw per dab. So §2.17's two behaviours are one code path and cannot drift apart.
+
+### 4.2 The two fields, and what carries them
+
+**Two fields on the stroke, both per-stroke rather than per-sample**: a `seed` that is **inherited on split
+rather than regenerated**, and the `arcOffset` of this piece from the original stroke's origin. Every
+cutter here derives a piece by *copying* the stroke and replacing what the cut changed, so both travel by
+default and losing one takes a deliberate act — the lasso split, the eraser's three modes, an
+interpolation in-between and every `VectorCanvas.mapping` copy are all the same `var piece = stroke`.
+
+**`arcOffset` is zero except where a piece re-anchors its own walk.** A `DabLattice` carrier replays the
+parent's whole walk, so it already starts at the field's origin; the eraser's Modes 2 and 3 remove
+geometry and cannot, so they record how far along the parent the survivor begins.
+`VectorCanvas.detachedArcOffset` is the one function that answers it, shared by the cut and by its
+preview.
+
+**`DabLattice.seedID` is gone with it.** It carried the parent's id so the RNG could be re-seeded off it;
+that is what "becomes a two-field copy" means. The lattice is now about dab *geometry* only — where a
+piece's dabs land — and the stroke's own seed is about their randomness. Separating the two is what lets a
+piece that *had* to re-anchor its walk keep its randomness anyway.
+
+**`DiscardedDabTarget` is deleted**, along with `BrushStamper.DabRNG` and its non-deterministic
+initialiser. A dab outside a piece's range is skipped outright and the walk's arc length advances over it,
+because arc length is a property of the walk rather than of what came out of it.
+
+**The seed is minted at pen-down, not at commit**, which is a strengthening the old engine could not have.
+Live drawing used an unseeded generator on the reasoning that raster dabs are baked as they land and never
+replayed — true of the raster tier, and beside the point on the vector one, where the scratch showed a
+scattering stroke under the pen and the stored stroke re-rolled it at lift. The two now address the same
+field; what is left between them is the refit's 0.25 pt of geometry, not the randomness.
 
 **What is not preserved, correctly**: editing a brush's spacing changes which arc lengths carry a dab, so
 different randoms land. Those are different dabs. What is preserved is that no *existing* dab's randomness
@@ -279,6 +339,12 @@ moves.
 **Arc length is measured in rest space**, so this composes with KEYFRAMES §4.2's rest-space dab bake
 rather than fighting it: a posed or keyframed stroke's randomness is frozen by construction, which is the
 property the grain boil needed and never had.
+
+**One consequence for documents written before this**: a stroke with no stored seed decodes to
+`DabRandom.seed(for: id)`, which is the value its dabs were actually drawn with, so its ink does not move.
+A *cut piece* saved by the old engine kept its parent's seed on its lattice, and that key is gone — such a
+piece re-rolls once, on the first load. §2.14's expendable documents make that the right price for not
+keeping a second definition of the seed alive.
 
 ---
 
@@ -590,7 +656,10 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | gone | replaced by | stage |
 |---|---|---|
 | ~~`StrokeSampleGate`~~ **gone** | `StrokePathFit` + `StrokePath` — §3.3, §5.3 | 0 |
-| `DiscardedDabTarget` | hashed randomness has no stream to keep in phase — §4 | 1 |
+| ~~`DiscardedDabTarget`~~ **gone** | hashed randomness has no stream to keep in phase — §4 | 1 |
+| ~~`BrushStamper.DabRNG`~~ **gone**, both initialisers | `DabRandom` — §4 | 1 |
+| ~~`BrushStamper.seed(for:)`~~ **moved** to `DabRandom`, and no longer how a stroke gets its seed | `VectorStroke.seed`, minted and inherited — §4.2 | 1 |
+| ~~`DabLattice.seedID`~~ **gone** | the stroke's own `seed`, which a piece inherits by being a copy — §4.2 | 1 |
 | `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §9 | 2 |
 | `stampApproximateSquare` | `stampImage`; `.square` becomes a texture — §3.5 | 3 |
 | `PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag | the channel set, which absorbs the width choice — §5.5 | 4 |
@@ -665,8 +734,14 @@ first, which cleanly replaces the old one."*
    proves it was needed, so driving the preview from its output would hang the ink a whole cap behind the
    pen; it is driven from the samples instead, as the raster tier and Mode 3's resolve already were, and
    the two agree to within the fit's 0.25 pt.
-1. **Randomness by hash.** §4. Delete `DiscardedDabTarget`. Pin the split case the brief names — a stroke
-   split in two stamps the same ink as the stroke it came from.
+1. **DONE — randomness by hash.** §4. `DabRandom` is the field; `DiscardedDabTarget`, `DabRNG` and
+   `DabLattice.seedID` are gone. Pinned by `DabRandomLogicTests`: a lassoed split of a **scattering**
+   stroke moves no pixel; the live walk and the refitted replay draw the same values; halving the spacing
+   leaves the dabs that still land on the same arc length alone; a Mode 2 punch leaves the ink in front of
+   it bit-identical and the tail does not repeat the head's pattern; a uniform scale draws the identical
+   values. **Every one of those is the first test in the repo to set `scatter` above zero** — before this
+   stage nothing in the suite exercised the random path at all, so the mechanism `DiscardedDabTarget`
+   existed to protect was green against a fixture that could not have moved.
 2. **Delete grain.** §9. Independent of everything else, and it shrinks the surface every later stage
    touches.
 3. **`stampImage` on `DabTarget`** + the tinted rotation-bucketed cache + its hit-rate test. `.square`

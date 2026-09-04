@@ -80,8 +80,11 @@ final class InterpolationModelLogicTests: XCTestCase {
     /// not exist. `encodeIfPresent` on a nil optional writes no key at all — this is what says so.
     func testUntaggedStrokeEncodesWithoutAnyInterpolationKeys() throws {
         let keys = try topLevelKeys(try encoded(sampleStroke()))
-        XCTAssertEqual(keys, ["id", "brush", "color", "size", "opacity", "samples", "composite"],
-                       "An ordinary stroke's payload must be exactly what it was before interpolation fields existed")
+        // `seed` joined the unconditional set with BRUSH.md §4: it is minted per stroke rather than
+        // derived from anything else on the wire, so there is nowhere else for it to live. Every
+        // interpolation key is still absent, which is what this test is about.
+        XCTAssertEqual(keys, ["id", "brush", "color", "size", "opacity", "samples", "composite", "seed"],
+                       "An ordinary stroke's payload must carry no interpolation key")
     }
 
     /// The decode half: a payload written before these fields existed still loads, with all three

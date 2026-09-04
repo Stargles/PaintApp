@@ -34,6 +34,17 @@ final class DabRandomLogicTests: XCTestCase {
 
     private static let seed: UInt64 = 0x5EED_1234_ABCD_0001
 
+    /// **The floor two *different* walks can be compared at, and it is a property of the measurement
+    /// rather than of the field.**
+    ///
+    /// `offsets` reads a draw out as `scattered.center − clean.center`, and two walks over different
+    /// geometry subtract different bases, so the difference of two identical offsets comes back a few
+    /// ulps apart — MEASURED at 3 ulps of a 5 pt offset. The field itself is bit-identical: both walks
+    /// add the same `step` the same number of times and hash the same integer. A re-rolled draw moves a
+    /// dab by a whole radius, so this margin is six orders of magnitude inside the effect being
+    /// refuted, and comparisons *within* one walk are still made at zero.
+    private static let cancellation: CGFloat = 1e-9
+
     /// The dabs one walk lays down, and the same walk with scatter turned off — so a caller can
     /// difference them and read out *the random draw itself* rather than the dab's position.
     ///
@@ -193,12 +204,16 @@ final class DabRandomLogicTests: XCTestCase {
 
         // A loop over the right-hand half of the line, so the split falls in the middle of the walk.
         let loop = CGPath(rect: CGRect(x: 120, y: 0, width: 200, height: 120), transform: nil)
-        canvas.splitForLassoMove(insideLocalPath: loop)
-        XCTAssertEqual(canvas.strokes.count, 2, "the lasso must actually have cut the stroke in two")
-        XCTAssertEqual(Set(canvas.strokes.map(\.seed)), [Self.seed],
+        guard let split = canvas.splitForLassoMove(insideLocalPath: loop) else {
+            return XCTFail("the lasso should have caught the stroke")
+        }
+        let pieces = split.elements.compactMap(\.stroke)
+        XCTAssertEqual(pieces.count, 2, "the lasso must actually have cut the stroke in two")
+        XCTAssertEqual(Set(pieces.map(\.seed)), [Self.seed],
                        "both pieces inherit the parent's seed rather than minting one")
 
-        guard let report = RasterVectorParity.report(raster: before, vector: canvas.render(),
+        let after = VectorCanvas(size: CGSize(width: 260, height: 120), elements: split.elements).render()
+        guard let report = RasterVectorParity.report(raster: before, vector: after,
                                                      size: CGSize(width: 260, height: 120)) else {
             return XCTFail("both renders should be readable")
         }
@@ -270,7 +285,7 @@ final class DabRandomLogicTests: XCTestCase {
         let shared = min(live.count, replayed.count)
         XCTAssertGreaterThan(shared, 60, "both walks should lay plenty of dabs")
         for index in 0..<shared {
-            Self.assertEqual(live[index], replayed[index],
+            Self.assertEqual(live[index], replayed[index], accuracy: Self.cancellation,
                              "dab \(index) draws a different random live than replayed")
         }
     }
@@ -284,7 +299,10 @@ final class DabRandomLogicTests: XCTestCase {
     /// stream this is **false by construction** — dab `2k` is twice as far into the sequence — so this
     /// is the assertion that separates a hash of position from a hash of index.
     func testHalvingTheSpacingLeavesTheDabsThatStillLandOnTheSameArcLengthAlone() {
-        let size: CGFloat = 10
+        // 40 pt, not the fixture's 10: `stampSpacing` floors the gap at 1 pt, and at size 10 both
+        // 0.1 and 0.05 land on that floor and lay the *same* walk. The fixture would have measured
+        // nothing, and said so only through a dab count.
+        let size: CGFloat = 40
         let random = DabRandom(seed: Self.seed)
         let path = Self.samples(count: 5)
         let loose = Self.offsets(samples: path, brush: Self.scatteringBrush(spacingFraction: 0.1),
@@ -293,7 +311,7 @@ final class DabRandomLogicTests: XCTestCase {
                                  size: size, random: random)
         XCTAssertGreaterThan(tight.count, loose.count + 10, "the tighter spacing must lay more dabs")
         for k in 0..<loose.count where 2 * k < tight.count {
-            Self.assertEqual(loose[k], tight[2 * k],
+            Self.assertEqual(loose[k], tight[2 * k], accuracy: Self.cancellation,
                              "dab \(k) at 0.1 spacing and dab \(2 * k) at 0.05 sit at one arc length and must draw one value")
         }
     }
