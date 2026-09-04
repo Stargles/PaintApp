@@ -167,7 +167,7 @@ final class BrushTipLogicTests: XCTestCase {
     }
 
     /// **Alpha is deliberately *out* of the key**, exactly as it is out of `DabGradientCache`'s: it
-    /// is `brushOpacity × flow × opacityFraction(pressure)` and varies per dab, so keying on it
+    /// is the matrix's `flow` output and varies per dab, so keying on it
     /// would hit approximately never. The entry is built at full alpha and `CGContext.setAlpha`
     /// scales it — so the second dab here shares the first's entry, and must not share its opacity.
     func testACacheHitDoesNotReuseThePreviousDabsAlpha() throws {

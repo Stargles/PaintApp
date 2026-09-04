@@ -1411,9 +1411,8 @@ final class PerfBaselineTests: XCTestCase {
 
     /// `stampCircle` memoizes its radial gradient instead of building one per dab. A cache is only
     /// worth having if it actually hits, and the hit rate here is not self-evident: the naive key
-    /// (colour *and* per-dab alpha) would hit essentially never, because alpha is
-    /// `brushOpacity × flow × opacityFraction(pressure)` and pressure varies continuously along a
-    /// stroke. The implementation therefore keys on colour and hardness only and applies alpha via
+    /// (colour *and* per-dab alpha) would hit essentially never, because alpha is the matrix's
+    /// `flow` output and pressure varies continuously along a stroke. The implementation therefore keys on colour and hardness only and applies alpha via
     /// `CGContext.setAlpha`. This test measures the rate rather than trusting that reasoning — a
     /// future change that puts a per-dab term back into the key would leave every other test passing
     /// and show up only as the number printed here collapsing.
