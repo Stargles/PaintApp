@@ -26,15 +26,19 @@ re-deriving them**, §12 is the build order and carries a DONE marker per stage,
 2. **Stage 9 is driven by contact sheet.** Render candidates through the real stamper, put them in front
    of the owner, build only what they pick. This is the loop that settled §8.4 and it is now the
    instruction for the whole ~24-30 brush set.
-3. **The aliased dab edge is with the owner, and it may be a parameter rather than a defect.** BUGS.md
-   carries the measurement — a hard round dab has only two or three distinct alphas at hardness 0.95,
-   which is `hardRound`'s own setting *and* `VectorEraser.supportsCleanCut`'s threshold. **A before/after
-   contact sheet was rendered for them at the end of the pass, and it was briefed as a defect before the
-   owner said otherwise**: they observe that some versions of the rough ink nib are *heavily aliased and
-   that this is part of the rough look*, and are considering **shipping more than one version of that
-   brush**. So do not read the sheet as fix-or-don't. The live question is whether **edge softness is a
-   brush-level choice** — §6 already has `hardness` as an output — and a blanket antialiasing pass would
-   remove a texture the owner wants. If this file is being read before they ruled, ask; do not assume.
+3. **The aliased dab edge is ruled and nothing is owed on it now.** The owner wants **edge softness as a
+   slider or toggle in the brush editor**, so it is one field on `BrushDabSettings` built with stage 10.
+   [BUGS.md](BUGS.md) carries the whole measurement — the mechanism, why hardness 1.00 is a legitimate
+   deterministic aliased look while 0.93-0.99 wanders with the size slider, the repair's zero
+   re-baselining cost, and the field's +0.09-0.18 µs. **Do not take the repair on its own and do not
+   antialias globally.**
+
+**And the sequencing instruction behind that ruling matters more than the ruling.** The owner:
+*"I think these brush decisions are best done when i get it physically on my ipad, and i can edit aspects
+of it myself to see which settings are good."* So **the editor and a device build are what unblock the
+brush set, not more offline rendering**. §12 stage 10 is the editor; a Release build has not reached the
+iPad since `2bef347`. Getting stage 10 onto the device is worth more than any number of contact sheets,
+and the contact-sheet loop ruled for stage 9 is the fallback for decisions that cannot wait for it.
 
 ## Ask the owner these
 

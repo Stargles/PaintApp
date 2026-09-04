@@ -970,8 +970,13 @@ there being multiple versions of this brush."* [BUGS.md](BUGS.md) records that a
 aliased at hardness 0.95 and reads that as a defect; against a nib whose edge is *meant* to be seen it is at
 least as likely to be an ingredient. §6 already carries `hardness` as an output, so the mechanism exists —
 what is unsettled is whether the rough ink family ships as one brush or several, and that is a contact-sheet
-question rather than an argument. **Do not antialias the dab globally before it is answered**, because that
-decides it in one direction with no way back short of a second dab path, which §10 forbids.
+question rather than an argument. **It is answered, and the answer is a control**: the owner ruled that edge
+softness belongs in the brush editor as a slider or a toggle, so it is one field on `BrushDabSettings`
+built with §12 stage 10 — not a repair taken beforehand. [BUGS.md](BUGS.md) carries the measurement, the
+mechanism (CoreGraphics spends its band budget in proportion to the gradient's extent, so hardness 1.00 is
+a *deterministic* two-alpha edge while 0.93-0.99 wanders with the size slider) and the field's cost.
+**Do not antialias the dab globally**, and do not take the repair on its own: softness 0 is today's hard
+edge, and the repair is only what makes the values between it and a clean ramp mean anything.
 
 ### 8.5 One texture per tip, and what that costs
 

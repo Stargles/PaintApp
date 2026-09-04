@@ -80,6 +80,14 @@ display lists is a memory-budget question before it is an undo question.
 
 ## A hard round dab has a fully aliased edge, and it starts well below hardness 1.0 (2026-09-04)
 
+**RULED: this becomes a brush control, and nothing is fixed until it does.** The owner: *"Honestly this
+aliasing thing should be a slider option in the brush edit menu if possible... I think these brush
+decisions are best done when i get it physically on my ipad, and i can edit aspects of it myself to see
+which settings are good."* So **edge softness is a parameter of the brush**, offered as a slider or a
+toggle in the editor (§12 stage 10), and the repair below lands **as part of that field rather than
+before it** — softness 0 *is* today's hard edge, and the repair is only what makes the values between
+meaningful. Do not take the repair on its own, and do not antialias the dab globally.
+
 **Read the owner's ruling below before treating this as a defect to fix.** They observed that some
 versions of the rough ink nib are *heavily aliased and that the aliasing is part of what makes them look
 rough*: **"i've noticed that some versions of it are heavily aliased thus adding to the rough look. I'll
@@ -108,6 +116,48 @@ distinct alpha values in the whole dab:
 | **0.99** | **2** — `0, 255` | `… 255 255 255 0 0 0 …` |
 | 0.95 | 3 — `0, 85, 255` | `… 255 255 85 0 0 …` |
 | 0.80 | 14 | `… 255 234 149 107 21 0 …` |
+
+**The mechanism is not the degenerate stop, and the correction is what makes this a parameter rather than
+a bug.** MEASURED against `RasterLayerTexture.ensureContext()`'s own `CGGradient` call, with macOS and the
+iOS 26.5 Simulator agreeing byte for byte: **CoreGraphics rasterises a radial gradient as concentric
+constant-alpha bands, and the band budget is a function of the gradient's *extent*.** A falloff occupying
+5% of the radius therefore gets 5% of the budget — one band, or six, depending on how big the dab is.
+
+Two consequences, and they point in opposite directions:
+
+- **Hardness 1.00 is a deterministic aliased look**: exactly **2** distinct alphas at every radius. That is
+  stable enough to build a brush on, which is what the owner's observation is about.
+- **Hardness 0.93-0.99 is not a look at all.** Its character moves with the size slider — MEASURED at
+  hardness 0.95, **3 / 4 / 4 / 3 / 6** distinct alphas at radius 2.5 / 5.5 / 10 / 20 / 40, flipping regime
+  between radius 14 and 15; across a *stroke*, **5 / 7 / 9 / 8** at 5 / 11 / 24 / 48 pt. Nobody chose that.
+
+**The repair, measured and ready but deliberately not taken.** Two gradient stops instead of three, the
+geometry moved into the draw (`startRadius = hardness·R`, `endRadius = R`, `.drawsBeforeStartLocation`,
+clipped to the dab's box — the clip is not cosmetic, without it a dab costs ~1000 µs instead of ~1).
+CoreGraphics then spends its whole budget on the falloff. **Zero tests need re-baselining**: there is one
+round-dab rasteriser and both tiers reach it through `DabGradientCache.stamp`, so all 26
+`RasterVectorParityLogicTests` cases and ~45 test methods besides compare two operands that move
+identically — *provided the change lands inside `DabGradientCache`*; at a `stampCircle` call site instead
+it breaks the symmetry and reds all of them. Painted extent is unchanged (+0.37 px overshoot on both
+arms), the cache key loses `coreFraction` and keeps only colour, hit rate holds at 1 miss / 119, and
+**hardness 1.00 falls through to today's exact draw, byte-identical and free**. Cost, MEASURED on the
+simulator and INFERRED to the owner's iPad at §11.2's 1.31x: **+0.76 µs/dab on Hard Round**, zero on the
+Pen, ~+1.4 on a 24 pt dab.
+
+**And the field the ruling asks for is cheap**: edge softness in device pixels as one number on
+`BrushDabSettings`, same single draw, same colour-only cache key, **+0.09 to +0.18 µs between settings**.
+Softness 0 is today's hard edge; softness 1 is a coverage ramp matching `CGContext.fillEllipse`'s own
+antialiasing to a mean of 0.14-0.57/255. That is a field, not the second dab path §10 forbids.
+
+**What it is worth, honestly.** On a straight line at 5 or 11 pt the 10:1 dab overlap hides the difference
+completely. **On a slow curve it is visible**: RMS distance from the drawn edge to the true arc is
+**0.280 px today against 0.179 px repaired** — and 0.280 is essentially 1/√12 = 0.289, the RMS of
+quantising to whole pixels, i.e. today's edge carries no sub-pixel information at all.
+
+**The one-pixel floor is a different change and is refused for now**, since it antialiases hardness 1.00
+too: it breaks two exact dirty-rect assertions, needs `StrokeScratch`'s window padded or it silently clips
+half a pixel of ink off every stroke, and shrinks a hardness-1.00 eraser's full-alpha core in a way
+`cleanCutCapsules` does not know about.
 
 **The interesting half is that it is not a knife edge at exactly 1.0.** 0.99 is just as aliased, and 0.95
 — which is `BrushLibrary.hardRound`'s own hardness *and* the threshold `VectorEraser.supportsCleanCut`
