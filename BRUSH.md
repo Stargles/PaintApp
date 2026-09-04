@@ -116,6 +116,13 @@ level table is preferred."* A stroke holds a small index, not a `Brush` by value
 to them.** Editing mints a new table entry; existing strokes keep the entry they were drawn with. A
 separate command re-points a selection, a layer, or the document at the edited brush, as one undo step.
 
+**That verb is one arm of a tool the owner has asked for**, which also changes a selection's brush *kind*,
+size and colour with the result visible live while it is being adjusted — [TODO.md](TODO.md) (42). Two
+things follow for the stages before it. The table (§12 stage 6) is what makes re-pointing cheap, since it
+is an index write rather than a per-stroke `Brush` rewrite. And **live adjustment is a middle-of-list edit
+on every tick**, which is the case TODO (41) exists for: at the owner's measured density a whole-cel
+re-walk is ~142 ms, so a slider driving one would be unusable long before the drawing is large.
+
 **2.11 Opacity and Flow are separate controls, and the per-stroke buffer they require is accepted.**
 Opacity caps what the whole stroke can reach however often it crosses itself; Flow is what one stamp
 lays down. The stroke composites into its own buffer and merges at pen-up.
@@ -380,16 +387,17 @@ keeping a second definition of the seed alive.
 | pressure | 1 | unchanged |
 | Δt from the previous point | 1 | **new** — the only cost of §2.8's velocity, and it buys retiming later |
 | tilt altitude | 1 | **new** — §2.7. 0…π/2 in a byte is 0.35° a step, far finer than a shading ramp resolves |
-| tilt azimuth | 1 or 2 | **new** — §2.7, and **the one width in this table that is a hypothesis rather than a decision** |
+| tilt azimuth | 1 | **new** — §2.7. 1.4° a step over a full turn, ruled sufficient |
 
-**Eight or nine bytes a point against five**, and `PackedSampleRun`'s `.float32` mode for `precise` strokes
+**Eight bytes a point against five**, and `PackedSampleRun`'s `.float32` mode for `precise` strokes
 widens the same way. Against the MEASURED 0.9 MB a thousand strokes ([PERFORMANCE.md](PERFORMANCE.md) §11),
 that is ~1.3 MB — which is why §2.7 was reversed on seeing the number.
 
-**Azimuth's width is the one thing here to settle by experiment.** A byte over a full turn is 1.4° a step,
-and azimuth drives a nib angle *directly* rather than through a ramp, so a chisel turned slowly could show
-the steps as faceting where altitude never would. Draw that stroke and look at it before choosing; two
-bytes buys 0.0055°, which is certainly enough and probably wasteful.
+**Azimuth is a byte, and that is settled rather than assumed.** It works out at 1.4° a step over a full
+turn. The case against it was that azimuth drives a nib angle *directly* rather than through a ramp, so a
+chisel turned slowly might show the steps as faceting; the owner ruled that *"1.4 degrees is more than
+enough, the hypothetical chisel turning slowly is not a concern."* Two bytes would buy 0.0055° and is not
+being spent.
 
 **The refit (§3.3) does not change this record, and that is a decision rather than an omission.** The
 stored thing stays a list of on-curve points; only their placement moved. §3.3 carries the three reasons
@@ -783,8 +791,7 @@ first, which cleanly replaces the old one."*
    becomes a texture; `stampApproximateSquare` goes. `BakedDab` gains an angle and `DabPose` rotates it.
 4. **The sample record** — the channel set, struct-of-arrays, Δt, velocity as a sensor, and **tilt**
    (§2.7): altitude and azimuth as two more channels, azimuth converted to canvas space at capture, wired
-   through §5.5's funnel with its neutral. §5.1 carries the widths, and azimuth's is the one to settle by
-   drawing a slowly-turned chisel rather than by choosing. The funnel's neutral is not optional and not
+   through §5.5's funnel with its neutral. §5.1 carries the widths, both settled. The funnel's neutral is not optional and not
    deferrable: a finger carries no tilt, so a brush reading a channel a stroke does not have is the
    ordinary case rather than the legacy one.
 5. **`BrushTip`**, and the renderer finally reads `customTextureFileName`. User PNG stamps work: the first

@@ -394,6 +394,41 @@ LAYER_TRANSFORM.md.
       **The seam is already built**, so this is no longer a refactor: invalidation carries what changed,
       and a case naming a rectangle is addable without revisiting the mutation sites again.
 
+### (42) Editing the strokes inside a selection, not just their colour
+
+- [ ] > "i plan to replace the change color of selection into a better tool where you can also change the
+      brush type, size, etc. of the strokes inside the selection. The color changer also shouldnt be the
+      current selected color, but instead show the color picker menu defaulting to the current color. all
+      changes able to be seen live in the drawing."
+
+      **Scheduled after the brush overhaul**, by the owner: *"You dont nessesarely have to do this task this
+      session as saving context is preferable, but of course build the architecture so that major refactors
+      wont be needed for this."*
+
+      **Half of it is already ruled.** [BRUSH.md](BRUSH.md) §2.10 requires a verb that re-points a
+      selection, a layer or the document at a brush **as one undo step**, and §12 stage 6's table is what
+      makes that an index write rather than a per-stroke rewrite. What this item adds on top: brush *kind*
+      and *size* alongside colour, a colour **picker** defaulting to the strokes' current colour rather
+      than applying the palette's current one blindly, and live feedback while adjusting.
+
+      **The live requirement is the load-bearing one and it has a prerequisite.** Adjusting a selection
+      rewrites elements in place, so every tick of a slider is a middle-of-list edit — TODO (41). MEASURED
+      on the owner's iPad ([PERFORMANCE.md](PERFORMANCE.md) §11): a whole-cel re-walk is ~142 ms at their
+      current 190-stroke density and 745 ms at 1,000, so a slider driving one is unusable. **(41) is a
+      prerequisite for this item rather than an optimisation of it.**
+
+      **Three things already exist to build on rather than beside.** `SelectionModels.recolorSelection`
+      is the tool being replaced and already rewrites N strokes across one cel as one undo step — including
+      the explicit version bump its own comment warns is not optional, since the `elements` setter
+      deliberately does not invalidate. `registerVectorElementsUndo` is that one-step mechanism. And the
+      preview-then-commit lifecycle the Move tool and the cut preview both use is the shape live adjustment
+      wants, so that a drag previews without pushing an undo entry per tick and commits once at the end.
+
+      **One known gap, from the stage 4/6 survey.** Nothing today batches per-cel content restores across
+      *several* cels into one undo `Action` — `withStructureUndo` does not reach cel content except through
+      a bespoke keyed field, of which `videoCrops` is the working precedent. A selection lives in one cel so
+      this item does not need it, but §2.10's layer and document scopes do.
+
 ### (40) Onion skin z-order, and what Behind should mean
 
 - [ ] > "onion skin z ordering is broken, it shows behind videos or photos even if the video layer is behind
