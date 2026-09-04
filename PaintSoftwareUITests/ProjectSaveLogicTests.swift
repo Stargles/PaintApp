@@ -1694,9 +1694,12 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// The second half is what stops it being "copy everything": a built-in tip lives in the app
     /// bundle, and copying it into every project would be a megabyte a document of the same asset.
     ///
-    /// **What this deliberately does not pin is *which* brushes get walked.** It is the palette, not
-    /// the drawing, which BUGS.md files against §12 stage 6 — the brush table is what makes "which
-    /// textures does this document use" answerable without a per-save walk of every cel.
+    /// **What this pins is the palette arm of the population**, which is one of the two halves the copy
+    /// now takes (§8.1): a brush the artist imported and has *not* drawn with is in no stroke's table
+    /// and still has to travel, or the picker comes back on another device naming a file that is not
+    /// there. The other half — a tip the ink uses that no palette entry names, which is what BUGS.md
+    /// filed against §12 stage 6 — is `BrushTableLogicTests`'
+    /// `testAnImportedTipTheInkUsesTravelsEvenWhenNoPaletteEntryNamesIt`.
     func testSavingCopiesAnImportedTipIntoThePackageAndLeavesTheBuiltInsAlone() throws {
         let withImport = CanvasFixture.manager()
         let format = UIGraphicsImageRendererFormat.preferred()

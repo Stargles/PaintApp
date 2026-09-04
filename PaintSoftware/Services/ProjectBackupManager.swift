@@ -460,6 +460,11 @@ nonisolated enum ProjectBackupManager {
     private struct ManifestSkeleton: Decodable {
         var id: UUID
         var layers: [Layer]
+        /// Mirrors `ProjectManifest.brushTableFileName` — BRUSH.md §5.4. It is checked for the reason
+        /// `vectorFileName` is: without it every stroke in the package names a brush that cannot be
+        /// resolved, so the package's ink is gone. Unlike the recipe sidecar this is not a link whose
+        /// loss costs only the link, which is why it is validated on day one.
+        var brushTableFileName: String?
         struct Layer: Decodable {
             var cels: [Cel]
         }
@@ -511,6 +516,11 @@ nonisolated enum ProjectBackupManager {
             guard let head else { return false }
             return head.count == pngMagic.count && [UInt8](head) == pngMagic
         }
+
+        // In the package root beside `brushes/`, not in `images/`, so it gets its own existence check
+        // rather than `fileIntact`'s.
+        if let brushTable = skeleton.brushTableFileName,
+           !fm.fileExists(atPath: url.appendingPathComponent(brushTable).path) { return false }
 
         for layer in skeleton.layers {
             for cel in layer.cels {

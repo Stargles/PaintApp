@@ -58,36 +58,25 @@ Charging what an entry actually retains buys most of the depth back. The measure
 what is missing is a decision about how to compute retained size honestly for a COW-shared array, which
 is why this is filed rather than fixed.
 
-## A project's brush textures are copied by the palette, not by what is drawn (2026-09-04)
+## Nothing batches per-cel content restores across several cels into one undo step (2026-09-04)
 
-`ProjectStore.copyCustomBrushTexturesIntoProject` and `restoreCustomBrushTexturesFromProject`
-(`Services/ProjectStore.swift:100-131`, called at `:748` on save and `:1416` on load) claim in their own
-doc comments to make a saved project self-contained against the shared
-`BrushLibrary.customBrushesDirectory` entry being renamed or deleted. What they actually walk is
-`[selectedBrush] + customBrushes` — **the picker list**. They never look at any stroke's own embedded
-`Brush`.
+**Filed rather than built, by BRUSH.md §12 stage 6.** `registerVectorElementsUndo`
+(`Models/CanvasManager+Text.swift`) rewrites N elements on **one** cel as one `Action`, which is what
+`recolorSelection` and now `applyBrushToSelection` are built on. `withStructureUndo`
+(`Models/CanvasManager+Undo.swift`) covers the layer *tree* as one step, and reaches cel content only
+through a bespoke keyed field — `StructureSnapshot.videoCrops` is the working precedent, and it is one
+dictionary hand-carried for one feature.
 
-**§12 stage 5 fixed the filter and left the population, which is the half this entry is about.** The pair
-`shape == .custom` plus a nil-able `customTextureFileName` — which could disagree with itself in both
-directions — is one `BrushTip.importedTextureFileName`, so *which files* a given list of brushes needs is
-now exact and a built-in tip is correctly not copied. *Which brushes get listed* is unchanged and is the
-defect.
+So an edit that has to rewrite the display lists of **several** cels at once has no mechanism, and every
+such feature either invents another `videoCrops`-shaped field or costs the artist one undo press per cel.
+BRUSH.md §2.10 names two of them directly: its apply-to-existing verb is specified for *"a selection, a
+layer, or the document"*, and a selection lives in one cel, so **only the selection arm is built**. Layer
+scope means every cel of one layer and document scope means every cel of every layer.
 
-**It is correct today for a reason that is about to stop being true.** `CanvasManager.addCustomBrush`
-(`Models/CanvasManager.swift:776`) only appends and no removal UI exists, so the palette is a superset of
-every imported tip a stroke could reference — by accident of the current feature set rather than by
-design. BRUSH.md §2.10 breaks that on purpose: an edit **mints a new table entry** rather than mutating
-one, so a document will routinely hold brushes that no palette lists. At that point a project saved after
-editing away from a custom brush silently loses the texture file for a brush its strokes still visibly use.
-
-This is the "the two operands cannot currently differ" family CLAUDE.md's green-assertion section
-describes, reached from the other side: the code passes for a narrower reason than its comment claims.
-`ProjectSaveLogicTests.testSavingCopiesAnImportedTipIntoThePackageAndLeavesTheBuiltInsAlone` pins what
-the sweep *does* do — nothing tested it at all before stage 5 — and says in its own comment that the
-population is out of its scope. **The fix belongs to §12 stage 6** — once the brush table exists, "which textures does this document use"
-has one honest answer (the referenced entries), which is the same population as that stage's save-time
-sweep of unreferenced ones. Fixing it before the table exists means walking every cel's elements on every
-save, which is the cost the table is there to remove.
+What it needs is not obvious, which is why this is a note rather than a task: an `Action` that restores a
+list of `(VectorCanvas, [VectorElement])` pairs is easy, but the cost accounting `recordUndo` charges is
+per-step and `MemoryBudgetLogicTests` pins how a step's cost is read, so a step that holds a thousand cels'
+display lists is a memory-budget question before it is an undo question.
 
 ## A hard round dab has a fully aliased edge, and it starts well below hardness 1.0 (2026-09-04)
 

@@ -39,6 +39,11 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// picked colour, whole. Named apart from `.fill` for the reason `.lassoFill` is: an artist who
     /// wants their old colours back reads "undo fill" as the wrong thing having gone.
     case recolorSelection
+    /// BRUSH.md §2.10's apply-to-existing verb on a selection — every stroke the loop caught is
+    /// re-pointed at the brush now selected. Named apart from `.recolorSelection` because the two
+    /// change different things about the same strokes and an artist reaching for undo needs to see
+    /// which one is coming back.
+    case applyBrushToSelection
     /// Baking a floating Move piece into its target cel.
     case move
     /// Baking a floating Duplicate piece — distinct from `.duplicateLayer`/`.duplicateFrame`/
@@ -189,6 +194,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .lassoFill: return "lasso fill"
         case .clearSelection: return "clear selection"
         case .recolorSelection: return "recolour selection"
+        case .applyBrushToSelection: return "apply brush to selection"
         case .move: return "move"
         case .duplicatePiece: return "duplicate"
         case .insertImage: return "insert image"

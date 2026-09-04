@@ -17,7 +17,7 @@ import Foundation
 /// `.custom` names a PNG under `BrushLibrary.customBrushesDirectory`. Both are `stampImage` of a
 /// `BrushTextureRef`, so they are the other, and the difference between "a shipped tip" and "the
 /// artist's own" is now a case of `BrushTextureRef` rather than a case of the brush's shape.
-enum BrushTip: Equatable {
+enum BrushTip: Hashable {
     /// Procedural — a radial gradient whose falloff is `Brush.hardness`. No orientation: a disc
     /// turned is the same disc, which is why `Brush.rotationJitter` reaches only the other arm.
     case round
@@ -95,7 +95,7 @@ enum BrushBlendMode: String, Codable, CaseIterable, Identifiable {
 
 /// How strongly Apple Pencil pressure affects a stamp's size and opacity. All fields are 0...1;
 /// 0 means pressure has no effect at all (the brush behaves like a fixed-width pen).
-struct BrushDynamics: Codable, Equatable {
+struct BrushDynamics: Codable, Hashable {
     var sizePressure: Double
     var opacityPressure: Double
     /// Stamp size at zero pressure, as a fraction of `Brush.size` — keeps light touches from
@@ -131,7 +131,13 @@ struct BrushDynamics: Codable, Equatable {
 /// spacing, pressure dynamics, stabilization, scatter, blend mode). Value-typed and
 /// `Codable` so it can be edited via simple bindings and persisted (built-ins in `BrushLibrary`,
 /// user imports under `Documents/Brushes`).
-struct Brush: Identifiable, Codable, Equatable {
+///
+/// **`Hashable` is what `BrushPool` addresses an entry by**, so every field here is part of a brush's
+/// identity — including `id`, which keeps two presets that happen to carry identical settings apart.
+/// A stroke stores a `BrushRef` into that pool rather than a `Brush` (BRUSH.md §2.9), and it is the
+/// hash of the *whole value* that makes §2.10 fall out with no rule to enforce: an edited brush is a
+/// different value, so it interns to a different ref, so the ink already on the canvas is untouched.
+struct Brush: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
     /// Which mask a dab stamps — see `BrushTip`. One field, because the pair it replaced could

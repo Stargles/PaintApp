@@ -178,9 +178,13 @@ LAYER_TRANSFORM.md.
       as the stored record and the point list survived instead.
       The rulings that shape the rest: **per-dab randomness is hashed from the stroke's seed and the dab's arc length**
       rather than drawn from a sequential stream, which is what survives a split, a refit, a spacing edit and
-      an eraser punch alike, and which deletes `DiscardedDabTarget`; brushes are **deduplicated into a
-      document-level table**, frozen per stroke with an explicit apply-to-existing verb; and **grain is
+      an eraser punch alike, and which deletes `DiscardedDabTarget`; and **grain is
       deleted entirely**, canvas-anchored paper texture included.
+      **Stage 6 is done**: a stroke holds a `BrushRef` rather than a `Brush`, the document's table is
+      `brushtable.json` beside `brushes/`, the sweep is the table's definition rather than a pass over it,
+      and §2.10's apply-to-existing verb is the Select panel's **Brush** button at selection scope. Layer and
+      document scope are filed in [BUGS.md](BUGS.md) rather than built — nothing batches per-cel content
+      restores across several cels into one undo step.
       **Tilt does not ship and the architecture must accommodate it** — §5.5 is a build requirement of this
       item, not of the one that adds tilt, and it names the `StrokeInput` capture as an explicit exception to
       the standing delete-what-is-unused rule.

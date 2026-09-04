@@ -1696,6 +1696,122 @@ extension CanvasManager {
                                        celID: layers[currentLayerIndex].cels[celIndex].id)
     }
 
+    /// Why Apply Brush is unavailable, in the artist's terms, or nil when it is. Word for word
+    /// `recolorUnavailableReason`'s rule with the control's own name in it: both rewrite a stored
+    /// field on the elements a loop caught, so both want a vector cel that is not derived, and a
+    /// refusal that names the wrong button is a refusal the artist has to translate.
+    var applyBrushUnavailableReason: String? {
+        guard layers.indices.contains(currentLayerIndex) else { return nil }
+        guard layers[currentLayerIndex].kind == .vector,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              layers[currentLayerIndex].cels[celIndex].vector != nil else {
+            return "Apply Brush works on vector layers only."
+        }
+        if activeCelIsInBetween { return "Apply Brush can't edit an in-between frame." }
+        return nil
+    }
+
+    /// **BRUSH.md §2.10's apply-to-existing verb, at selection scope.** Every stroke the loop caught
+    /// is re-pointed at the brush now selected, as one undo step.
+    ///
+    /// > *"A brush edit does not change strokes already drawn, and there is an explicit verb that
+    /// > applies it to them."* — §2.10.
+    ///
+    /// **It is an index write, which is the whole reason the table exists** (§5.4). Re-pointing N
+    /// strokes copies N four-byte refs; before the table it would have copied N whole `Brush` values,
+    /// 333–386 bytes each on the wire and ~150–160 resident, and the undo step would have carried both
+    /// sets. Nothing here touches geometry, so the walk, the dab lattice and §4's randomness are all
+    /// untouched: the same dabs land in the same places drawn with a different tip.
+    ///
+    /// **`size`, `opacity` and `color` are deliberately not touched.** A stored stroke's width is
+    /// `VectorStroke.size`, not the brush's, and its colour is its own field — so this changes the tip,
+    /// hardness, spacing, scatter, dynamics and blend mode and nothing else. Changing size and colour
+    /// live beside it is [TODO.md](TODO.md) (42), a tool this verb is one arm of; doing it here would
+    /// be deciding (42)'s behaviour without asking.
+    ///
+    /// **Erasers are re-pointed too**, unlike `recolorSelection`'s. That function skips them because
+    /// recolouring one changes no pixel and would be an undo step that lies; re-pointing one changes
+    /// the shape of the hole it punches, which is a visible edit and the only way an artist can change
+    /// an eraser mark's tip at all. LASSO_MOVE.md §5.7's *"an eraser mark is an ordinary element"*.
+    ///
+    /// Membership is the selection's, with no exception — LASSO_MOVE.md §5.26. This is a fourth
+    /// consumer of the same rule, reading it through the same two doors `recolorSelection` does.
+    func applyBrushToSelection() {
+        let requested = selection
+        // `commitAllInteractiveState`, not `beginCanvasEdit`, for `recolorSelection`'s reason: a
+        // selection outlives a Move lift, and a float still up would bake its own strokes over the top
+        // carrying the brush this is replacing.
+        commitAllInteractiveState()
+        guard applyBrushUnavailableReason == nil,
+              let selection = requested,
+              layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].id == selection.layerID,
+              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              layers[currentLayerIndex].cels[celIndex].id == selection.celID,
+              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return }
+
+        let drawn = vectorCanvas.localPath(fromCanvas: selection.path)
+                                .normalized(using: VectorCanvas.lassoFillRule)
+        let loops = CanvasManager.lassoLoops(
+            drawn, posedBy: celPoseMaps(vectorCanvas.elements,
+                                        layerID: layers[currentLayerIndex].id,
+                                        celID: layers[currentLayerIndex].cels[celIndex].id,
+                                        atFrame: currentFrame))
+
+        let membership = selectionMembership
+        let elementsBefore = vectorCanvas.elements
+        let working: [VectorElement]
+        let caught: Set<UUID>
+        if membership.cutsAtTheBoundary {
+            guard let split = vectorCanvas.splitForLassoMove(insideLoops: loops,
+                                                             membership: membership) else { return }
+            working = split.elements
+            caught = split.insideIDs
+        } else {
+            working = elementsBefore
+            caught = vectorCanvas.elementIDs(insideLoops: loops, membership: membership)
+            guard !caught.isEmpty else {
+                // LASSO_MOVE.md §5.24 — a rule the artist has just picked, a loop full of ink and a
+                // button that does nothing and says nothing reads as broken.
+                noteALassoThatCaughtNothing(vector: vectorCanvas, loops: loops)
+                return
+            }
+        }
+
+        // Interned once rather than per stroke: `BrushPool.intern` is a lock and a hash, and every
+        // stroke here is being pointed at the same brush.
+        let ref = BrushPool.intern(selectedBrush)
+        var newElements = working
+        var changed = 0
+        for (index, element) in working.enumerated() {
+            guard case .stroke(var stroke) = element,
+                  caught.contains(stroke.id), stroke.brushRef != ref else { continue }
+            stroke.brushRef = ref
+            newElements[index] = .stroke(stroke)
+            changed += 1
+        }
+        // A loop that caught only fills, text and photos, or only strokes already drawn with this
+        // brush, costs no undo press for an edit the artist cannot see — and under Cut it throws the
+        // split away with it, because nothing has been assigned to the canvas yet.
+        guard changed > 0 else { return }
+
+        vectorCanvas.elements = newElements
+        // **Not optional**, for the reason `recolorSelection` states in full: the `elements` setter
+        // deliberately does not invalidate, and both `PixelOps.RasterizeKey` and `LayerContentVersion`
+        // key on `vectorVersion`, so without this the re-point happens in the model and nothing on
+        // screen changes.
+        vectorCanvas.bumpVersion()
+        // A stale pre-apply fill preview would composite over the top, exactly as it would a recolour.
+        setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
+        registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                   newElements: vectorCanvas.elements,
+                                   layerID: layers[currentLayerIndex].id,
+                                   celID: layers[currentLayerIndex].cels[celIndex].id,
+                                   label: .applyBrushToSelection)
+        celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id,
+                                       celID: layers[currentLayerIndex].cels[celIndex].id)
+    }
+
     // `clipPath(_:excluding:)` lived here until 2026-08-28 and is deliberately **gone** rather than
     // left for a future caller. It concatenated two paths and leaned on even-odd at render time to
     // make the overlap read as a hole, which LASSO_MOVE.md §1 already ruled *"is not a boolean …

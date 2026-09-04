@@ -37,6 +37,16 @@ struct ProjectManifest: Codable {
     /// The keyframe feature's own group registry — KEYFRAMES.md §2.11. Beside `motionGroups` and
     /// written only when non-empty, the same absence-is-the-migration idiom every field here follows.
     var animationGroups: [AnimationGroup] = []
+    /// **The document's brush table** — BRUSH.md §5.4, and the file every stroke's `brush` number is
+    /// redeemed against. A sidecar in the package root beside `brushes/` rather than a key here, for
+    /// the reason `CelManifest` pulls per-cel vector data out: this manifest is decoded in full for
+    /// every gallery tile, and §2.10 makes the table grow with every brush the artist edits and draws
+    /// with. Named here rather than assumed by filename so `ProjectBackupManager.validateProject` can
+    /// refuse a package whose ink has lost the only thing that says what it was drawn with.
+    ///
+    /// Nil for a document with no vector ink at all, which is the one case where there is nothing to
+    /// redeem.
+    var brushTableFileName: String? = nil
 
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
          layers: [LayerManifest], modifiedAt: Date,
@@ -45,7 +55,7 @@ struct ProjectManifest: Codable {
          vectorEraserMode: VectorEraserMode = .erase,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
          motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
-         animationGroups: [AnimationGroup] = []) {
+         animationGroups: [AnimationGroup] = [], brushTableFileName: String? = nil) {
         self.id = id
         self.name = name
         self.canvasWidth = canvasWidth
@@ -65,6 +75,7 @@ struct ProjectManifest: Codable {
         self.motionGroups = motionGroups
         self.guideStrokes = guideStrokes
         self.animationGroups = animationGroups
+        self.brushTableFileName = brushTableFileName
     }
 
     // Custom decoding so projects saved before backgroundColor/isBackgroundVisible (or, more
@@ -95,6 +106,7 @@ struct ProjectManifest: Codable {
         guideStrokes = try container.decodeIfPresent([GuideStroke].self, forKey: .guideStrokes) ?? []
         animationGroups = try container.decodeIfPresent([AnimationGroup].self,
                                                         forKey: .animationGroups) ?? []
+        brushTableFileName = try container.decodeIfPresent(String.self, forKey: .brushTableFileName)
     }
 
     /// Written explicitly so the two interpolation registries can be *omitted* when empty — a
@@ -120,13 +132,16 @@ struct ProjectManifest: Codable {
         if !motionGroups.isEmpty { try container.encode(motionGroups, forKey: .motionGroups) }
         if !guideStrokes.isEmpty { try container.encode(guideStrokes, forKey: .guideStrokes) }
         if !animationGroups.isEmpty { try container.encode(animationGroups, forKey: .animationGroups) }
+        // Absent means "this document has no vector ink", the same absence-is-the-meaning idiom every
+        // optional key here follows.
+        try container.encodeIfPresent(brushTableFileName, forKey: .brushTableFileName)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, canvasWidth, canvasHeight, canvasPadding, fps, sceneFrameCount, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
              vectorEraserMode, folders, viewPresets, motionGroups, guideStrokes,
-             animationGroups
+             animationGroups, brushTableFileName
     }
 }
 

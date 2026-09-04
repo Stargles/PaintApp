@@ -82,23 +82,32 @@ enum ProjectStore {
         return try? JSONDecoder().decode(ProjectManifest.self, from: data)
     }
 
-    /// Copies every imported stamp texture the given brushes name from the shared
+    /// **Which imported tip files a saved package has to carry**, and it is two populations rather
+    /// than one — BUGS.md's *"copied by the palette, not by what is drawn"*, fixed here.
+    ///
+    ///   * **The document's brush table** — every brush the ink in this file is actually made of. This
+    ///     is the half that was missing. It was invisible while `addCustomBrush` only ever appended,
+    ///     because the palette was then a superset of what any stroke could reference; BRUSH.md §2.10
+    ///     ends that on purpose by minting a table entry per edit, so a document routinely holds
+    ///     brushes no picker lists.
+    ///   * **The palette** — `selectedBrush` and `customBrushes`, which `manifest.json` persists in
+    ///     their own right (§8.1: the library and the table are different collections). A custom brush
+    ///     the artist has imported but not yet drawn with is in no stroke's table and still has to
+    ///     travel, or the picker comes back on another device pointing at a file that is not there.
+    ///
+    /// Neither subsumes the other, which is why this takes the union rather than choosing. What the
+    /// two have in common is the *filter*, and that has one statement: `BrushTip.importedTextureFileName`
+    /// is nil for a built-in tip (it travels inside the binary) and for a round one (it is arithmetic).
+    private static func importedTextureFileNames(table: BrushTable, palette: [Brush]) -> Set<String> {
+        table.importedTextureFileNames.union(palette.compactMap(\.tip.importedTextureFileName))
+    }
+
+    /// Copies every imported stamp texture the given file names refer to from the shared
     /// `BrushLibrary.customBrushesDirectory` into this project's own `brushes/` folder, so a saved
     /// project is self-contained: its custom brushes still render correctly even if the global
     /// library entry is later renamed/deleted, or the project is moved to another device. Best
-    /// effort — a brush with no matching source file is silently skipped, and a built-in tip is not
-    /// copied at all because it travels inside the binary.
-    ///
-    /// **Which brushes get walked is still the palette, and that is filed rather than fixed.** The
-    /// caller passes `[selectedBrush] + customBrushes`; no stroke's own `Brush` is consulted. It is
-    /// correct today only because `addCustomBrush` never removes, so the palette is a superset of
-    /// what any stroke can reference — BUGS.md carries it, and BRUSH.md §5.4 assigns the fix to §12
-    /// stage 6, where the document's brush table makes "which textures does this document use" one
-    /// question with one answer. `BrushTip.importedTextureFileName` is the whole of what changed
-    /// here: the pair `shape == .custom` + a nil-able file name became one accessor that cannot
-    /// disagree with itself, so the *filter* is now exact even though the *population* is not.
-    private static func copyCustomBrushTexturesIntoProject(_ brushes: [Brush], projectURL: URL) {
-        let fileNames = Set(brushes.compactMap(\.tip.importedTextureFileName))
+    /// effort — a brush with no matching source file is silently skipped.
+    private static func copyCustomBrushTexturesIntoProject(_ fileNames: Set<String>, projectURL: URL) {
         guard !fileNames.isEmpty else { return }
         let fm = FileManager.default
         let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
@@ -115,9 +124,9 @@ enum ProjectStore {
     /// The inverse of the above, run on load: if a custom brush's texture file is missing from the
     /// shared `BrushLibrary.customBrushesDirectory` (project moved to another device, or the
     /// global entry was deleted since this project was last saved), restore it from this
-    /// project's own `brushes/` copy so the brush still renders correctly.
-    private static func restoreCustomBrushTexturesFromProject(_ brushes: [Brush], projectURL: URL) {
-        let fileNames = Set(brushes.compactMap(\.tip.importedTextureFileName))
+    /// project's own `brushes/` copy so the brush still renders correctly. Same union as the save
+    /// side, from the same one function, so the two cannot walk different populations again.
+    private static func restoreCustomBrushTexturesFromProject(_ fileNames: Set<String>, projectURL: URL) {
         guard !fileNames.isEmpty else { return }
         let fm = FileManager.default
         let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
@@ -742,10 +751,57 @@ enum ProjectStore {
             ))
         }
 
+        // **The document's brush table, and the sweep that keeps it honest** — BRUSH.md §5.4.
+        //
+        // Collected from this snapshot's own content, so what gets written is exactly the brushes the
+        // ink references and an entry nothing references is never offered a slot. That is the whole of
+        // §5.4's *"a sweep on save drops entries no stroke references"*: there is no stored numbering
+        // to renumber and no second pass to half-apply, because a stroke's number is a `BrushRef` into
+        // the process pool and this table is the list of the ones this document redeems.
+        //
+        // Both element sources are walked. A cel's display list is the obvious one; a derived cel's
+        // `InterpolationRecipe` carries `LocalEdit` strokes that are reachable from nothing else, and
+        // a table missing those would fail that recipe's decode on the next load.
+        var collector = BrushTable.Collector()
+        for layer in snapshot.layers {
+            for cel in layer.cels {
+                if let vector = cel.vector { collector.add(elements: vector.elements) }
+                collector.add(recipe: cel.interpolation)
+            }
+        }
+        let brushTable = collector.table
+        var brushTableFileName: String?
+        if !brushTable.isEmpty {
+            // Beside `brushes/` in the package root rather than inside `manifest.json`: the manifest is
+            // decoded in full for every gallery tile, and §2.10 makes this the least bounded thing that
+            // could live there — it grows with every brush the artist edits and then draws with. The
+            // same argument `CelManifest` already makes about per-cel vector data. §13's first open
+            // item, settled.
+            //
+            // Not `try?`, for `writeCel`'s reason wearing a worse consequence: a table that failed to
+            // encode and said nothing would leave `brushTableFileName` nil, the package would validate,
+            // and **every stroke in the document** would fail to resolve on the next load. Nothing here
+            // throws today; the point is that if something starts to, it says so.
+            do {
+                let name = "brushtable.json"
+                try JSONEncoder().encode(brushTable).write(to: url.appendingPathComponent(name))
+                brushTableFileName = name
+            } catch {
+                log.error("""
+                    The brush table for \(snapshot.projectName, privacy: .public) could not be written, \
+                    so this package's strokes name brushes nothing can resolve: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
+
         // Persist the user's actual brush choice + imported custom brushes (Worker B's brush engine
-        // owns these on CanvasManager) so they survive a save/reload, and copy any custom-brush
-        // stamp textures into the project package for self-containment.
-        copyCustomBrushTexturesIntoProject([snapshot.selectedBrush] + snapshot.customBrushes, projectURL: url)
+        // owns these on CanvasManager) so they survive a save/reload, and copy the stamp textures
+        // both the drawing and the palette need into the project package for self-containment.
+        copyCustomBrushTexturesIntoProject(
+            importedTextureFileNames(table: brushTable,
+                                     palette: [snapshot.selectedBrush] + snapshot.customBrushes),
+            projectURL: url)
 
         let manifest = ProjectManifest(
             id: snapshot.projectID,
@@ -766,7 +822,8 @@ enum ProjectStore {
             viewPresets: snapshot.viewPresets,
             motionGroups: snapshot.motionGroups,
             guideStrokes: snapshot.guideStrokes,
-            animationGroups: snapshot.animationGroups
+            animationGroups: snapshot.animationGroups,
+            brushTableFileName: brushTableFileName
         )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: url.appendingPathComponent("manifest.json"))
@@ -1159,13 +1216,19 @@ enum ProjectStore {
         // sometimes for a pool thread, and the question is about the caller.
         let startedOnMainThread = Thread.isMainThread
         let imagesDir = projectURL.appendingPathComponent("images", isDirectory: true)
+        // Read once, before the fan-out, and interned into this process's pool here rather than in
+        // each worker: `BrushPool.intern` is lock-guarded, and a hundred cels racing to intern the
+        // same five brushes would be a hundred acquires for one answer. What travels to the workers is
+        // the finished `Remap`, which is immutable.
+        let brushTable = loadBrushTable(manifest: manifest, projectURL: projectURL)
+        let brushes = brushTable.resolvingIntoPool()
         let jobs: [(layerIndex: Int, cel: CelManifest, kind: LayerKind)] =
             manifest.layers.enumerated().flatMap { layerIndex, layerManifest in
                 layerManifest.cels.map { (layerIndex, $0, layerManifest.kind) }
             }
         let decoded = PixelOps.parallelMap(jobs.count) { index in
             decodeCel(jobs[index].cel, layerKind: jobs[index].kind,
-                      imagesDir: imagesDir, canvasSize: canvasSize)
+                      imagesDir: imagesDir, canvasSize: canvasSize, brushes: brushes)
         }
         var celsByLayer = [[Cel]](repeating: [], count: manifest.layers.count)
         // **The layer's name is attached here, not in `decodeCel`.** A cel does not know which layer
@@ -1185,7 +1248,8 @@ enum ProjectStore {
             layerDamage.layerName = layerManifest.name
             damage.add(layerDamage)
         }
-        return DecodedCels(celsByLayer: celsByLayer, damage: damage, startedOnMainThread: startedOnMainThread)
+        return DecodedCels(celsByLayer: celsByLayer, damage: damage,
+                           startedOnMainThread: startedOnMainThread, brushTable: brushTable)
     }
 
     /// What `decodeCels` hands back: the cels, what the decode could not read, and which thread asked
@@ -1197,6 +1261,10 @@ enum ProjectStore {
         /// for why it now travels.
         let damage: ProjectLoadDamage
         let startedOnMainThread: Bool
+        /// This document's brush table, carried rather than re-read: `assemble` needs it to know which
+        /// imported tip files the *drawing* depends on, and reading the file twice would be two answers
+        /// to one question with a window between them.
+        let brushTable: BrushTable
     }
 
     /// One decoded cel and what decoding it cost. A pair rather than two parallel returns because the
@@ -1212,9 +1280,40 @@ enum ProjectStore {
     /// Reads files and builds objects; touches no `CanvasManager`, no `@Published` state and nothing
     /// another iteration can see. That is what makes `decodeCels` safe to fan out, and it is why this
     /// is a free function over a manifest entry rather than a method on anything.
+    /// This package's brush table — BRUSH.md §5.4. Empty when the manifest names none, which is a
+    /// document with no vector ink.
+    ///
+    /// **A named-but-unreadable table is loud and costs the ink**, deliberately. Every stroke's brush
+    /// is a number redeemed against this file; with the file gone there is no honest answer, and the
+    /// alternative — substituting a default brush — would put the artist's line back in a brush they
+    /// never chose with nothing saying so. `validateProject` refuses such a package before a normal
+    /// open reaches here; this is the path for a load that skipped it.
+    private static func loadBrushTable(manifest: ProjectManifest, projectURL: URL) -> BrushTable {
+        guard let fileName = manifest.brushTableFileName else { return BrushTable() }
+        guard let data = try? Data(contentsOf: projectURL.appendingPathComponent(fileName)),
+              let table = try? JSONDecoder().decode(BrushTable.self, from: data) else {
+            log.error("""
+                Brush table \(fileName, privacy: .public) is missing or unreadable — every stroke in \
+                this project names a brush that can no longer be resolved, and the cels load empty
+                """)
+            return BrushTable()
+        }
+        return table
+    }
+
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
-                                  imagesDir: URL, canvasSize: CGSize) -> DecodedCel {
+                                  imagesDir: URL, canvasSize: CGSize,
+                                  brushes: BrushTable.Remap) -> DecodedCel {
         var damage = ProjectLoadDamage.LayerDamage()
+        /// Every decoder this cel uses, so none of them can be built without the brush table. The key
+        /// is set even when the remap is empty, and that is the point: with it absent a stroke's stored
+        /// number would be read as an address into *this process's* pool — right for an in-memory round
+        /// trip and silently wrong for a file an earlier launch wrote. See `BrushPool.resolve`.
+        func decoder() -> JSONDecoder {
+            let decoder = JSONDecoder()
+            decoder.userInfo[.brushTable] = brushes
+            return decoder
+        }
         // **Three ways to end up with a blank raster tier, and only one of them touches the disk.**
         //
         //  * `rasterOmitted` — this save knew the tier held nothing and wrote no PNG. Straight to
@@ -1280,7 +1379,7 @@ enum ProjectStore {
             let vectorURL = imagesDir.appendingPathComponent(vectorFileName)
             if let data = try? Data(contentsOf: vectorURL) {
                 do {
-                    let payload = try JSONDecoder().decode(VectorCanvasData.self, from: data)
+                    let payload = try decoder().decode(VectorCanvasData.self, from: data)
                     // A placed image whose PNG is not in the package is dropped by
                     // `canvasSpaceElements(resolvingImages:)` and always has been. It is counted here
                     // rather than there because the resolver is the one place that knows a ref failed,
@@ -1361,7 +1460,7 @@ enum ProjectStore {
         var interpolation: InterpolationRecipe?
         if let interpolationFileName = celManifest.interpolationFileName,
            let data = try? Data(contentsOf: imagesDir.appendingPathComponent(interpolationFileName)) {
-            interpolation = try? JSONDecoder().decode(InterpolationRecipe.self, from: data)
+            interpolation = try? decoder().decode(InterpolationRecipe.self, from: data)
         }
 
         // The pose channels. A cel whose animation file is missing or unreadable loads with its ink
@@ -1370,7 +1469,7 @@ enum ProjectStore {
         var animation = CelAnimationData()
         if let animationFileName = celManifest.animationFileName,
            let data = try? Data(contentsOf: imagesDir.appendingPathComponent(animationFileName)),
-           let decoded = try? JSONDecoder().decode(CelAnimationData.self, from: data) {
+           let decoded = try? decoder().decode(CelAnimationData.self, from: data) {
             animation = decoded
         }
 
@@ -1413,7 +1512,10 @@ enum ProjectStore {
         // Restore this project's own custom-brush texture copies into the shared library if a
         // referenced file is missing there (project moved to another device, or the global entry
         // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
-        restoreCustomBrushTexturesFromProject([manifest.selectedBrush] + manifest.customBrushes, projectURL: url)
+        restoreCustomBrushTexturesFromProject(
+            importedTextureFileNames(table: decoded.brushTable,
+                                     palette: [manifest.selectedBrush] + manifest.customBrushes),
+            projectURL: url)
         manager.customBrushes = manifest.customBrushes
         manager.selectBrush(manifest.selectedBrush)
         // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser

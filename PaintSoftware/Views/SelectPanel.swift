@@ -3,9 +3,15 @@ import SwiftUI
 /// The Select tool's bottom-docked bar (Procreate reference: mode tabs across the top of the bar,
 /// action icons across the bottom), shown whenever the Select tool is engaged — see `DrawingView`,
 /// which docks this near the bottom the same way `MoveTransformBottomBar` docks for Move. The action
-/// row (Duplicate/Fill/Recolour/Clear/Deselect) is disabled until a selection actually exists; the
+/// row (Duplicate/Fill/Recolour/Brush/Clear/Deselect) is disabled until a selection actually exists; the
 /// mode tabs and the outside-interaction toggle are available immediately so a mode can be picked
 /// before the first selection is drawn.
+///
+/// **Brush is BRUSH.md §2.10's apply-to-existing verb** — every stroke the loop caught is re-pointed
+/// at the brush now selected, which is the only door in the app to *"the brush I just edited, on the
+/// line I already drew"*. It sits beside Recolour because the two are the pair that push the current
+/// tool settings onto ink that already exists, and it is captioned in one word for the reason
+/// Recolour is: six tabs now share the 360 pt bar.
 ///
 /// **Recolour sits beside Fill** rather than at the end of the row, because the two are the pair
 /// that apply the currently picked colour and reading them together is what tells them apart. It is
@@ -18,7 +24,7 @@ import SwiftUI
 /// "draw a selection" hint rather than stacking under it.
 ///
 /// **"What the loop catches" sits directly above the action row** (TODO item (23)), because that row
-/// is what obeys it: Move — reached from the toolbar, not from here — and Recolour both read
+/// is what obeys it: Move — reached from the toolbar, not from here — Recolour and Brush all read
 /// `CanvasManager.selectionMembership`, so the artist should be able to read the rule and the buttons
 /// in one glance. It is above rather than below because it is chosen *first*: the panel's order is
 /// how you select (the mode tabs), what the loop then catches, and what to do with it.
@@ -30,6 +36,11 @@ struct SelectPanel: View {
     /// Why Change Colour is off, or nil. Read once per body pass and used twice — to gate the button
     /// and to caption it — so the two can never disagree.
     private var recolorReason: String? { canvasManager.recolorUnavailableReason }
+
+    /// Why Apply Brush is off, or nil — read once and used twice, exactly as `recolorReason` is.
+    /// BRUSH.md §2.10's verb refuses on the same cels a recolour does, so today these two are never
+    /// independently non-nil; reading both is what keeps that a fact rather than an assumption.
+    private var applyBrushReason: String? { canvasManager.applyBrushUnavailableReason }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +77,9 @@ struct SelectPanel: View {
                 actionTab(icon: "paintpalette.fill", title: "Recolour",
                           enabled: recolorReason == nil) { canvasManager.recolorSelection() }
                     .accessibilityIdentifier("selectPanel.recolorButton")
+                actionTab(icon: "paintbrush.pointed.fill", title: "Brush",
+                          enabled: applyBrushReason == nil) { canvasManager.applyBrushToSelection() }
+                    .accessibilityIdentifier("selectPanel.applyBrushButton")
                 actionTab(icon: "xmark.square", title: "Clear") { canvasManager.clearSelectionPixels() }
                     .accessibilityIdentifier("selectPanel.clearButton")
                 actionTab(icon: "rectangle.badge.xmark", title: "Deselect") { canvasManager.deselect() }
@@ -206,7 +220,7 @@ struct SelectPanel: View {
         if !hasSelection {
             return "Draw a selection on the canvas with the mode above, or tap Move to transform the whole layer."
         }
-        return recolorReason
+        return recolorReason ?? applyBrushReason
     }
 
     /// `enabled` is *additional* to `hasSelection`, never instead of it — every tab in this row is

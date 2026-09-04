@@ -20,7 +20,13 @@ enum StrokeComposite: String, Codable {
 /// `BrushStamper`), so a stroke can be moved/scaled and re-rasterized with no quality loss.
 struct VectorStroke: Identifiable, Codable {
     var id: UUID = UUID()
-    var brush: Brush
+    /// **The brush this stroke was drawn with, by reference** — BRUSH.md §2.9 and §5.4. Four bytes
+    /// where a `Brush` by value was 333–386 on the wire and ~150–160 resident, and §6 grows the gap.
+    ///
+    /// Assign through `brush` below to set it from a value; assign this directly to re-point a stroke
+    /// at a brush it is already sharing with another, which is what §2.10's apply-to-existing verb
+    /// does and what makes that verb an index write rather than a per-stroke `Brush` rewrite.
+    var brushRef: BrushRef
     var color: CodableColor
     var size: CGFloat
     var opacity: Double
@@ -120,6 +126,50 @@ struct VectorStroke: Identifiable, Codable {
     /// walk could only ever be a second copy of something the tracks already say — `precise`'s
     /// argument about derivable data, one level up.
     var restWalk: StrokeRestWalk? = nil
+
+    /// The brush `brushRef` names. A `BrushPool` entry is never mutated, so this is a read of a value
+    /// that cannot change underneath a caller holding it; the setter interns, which is where a brush
+    /// the process has not seen before gets its ref.
+    ///
+    /// **An accessor rather than a rename at ~25 call sites**, and that is a design decision rather
+    /// than an economy: what those sites want is the brush, and none of them wants to know that the
+    /// stroke stores a reference. `stroke.brush.blendMode` reads the same as it did, and a mutating
+    /// `stroke.brush.size = 6` still means *"give me the brush that is this one with a different
+    /// size"* — get, modify, intern — which is the only thing it could honestly mean once entries are
+    /// immutable.
+    var brush: Brush {
+        get { BrushPool.brush(brushRef) }
+        set { brushRef = BrushPool.intern(newValue) }
+    }
+
+    /// Spelled out because declaring `brushRef` as the stored property and `brush` as an accessor
+    /// suppresses nothing on its own — but `init(from:)` in the extension below does, and every
+    /// construction site here builds a stroke from a `Brush` value rather than from a ref. Same
+    /// parameter order and same defaults as the memberwise initialiser this replaces, so the four
+    /// sites that mint a stroke are unchanged.
+    init(id: UUID = UUID(), brush: Brush, color: CodableColor, size: CGFloat, opacity: Double,
+         samples: StrokeSamples, precise: Bool = false, composite: StrokeComposite = .paint,
+         lattice: DabLattice? = nil, seed: UInt64 = DabRandom.freshSeed(), arcOffset: CGFloat = 0,
+         motionGroupID: UUID? = nil, animationGroupID: UUID? = nil,
+         visibilityThreshold: CGFloat? = nil, sampleVisibilityThresholds: [Int: CGFloat]? = nil,
+         restWalk: StrokeRestWalk? = nil) {
+        self.id = id
+        self.brushRef = BrushPool.intern(brush)
+        self.color = color
+        self.size = size
+        self.opacity = opacity
+        self.samples = samples
+        self.precise = precise
+        self.composite = composite
+        self.lattice = lattice
+        self.seed = seed
+        self.arcOffset = arcOffset
+        self.motionGroupID = motionGroupID
+        self.animationGroupID = animationGroupID
+        self.visibilityThreshold = visibilityThreshold
+        self.sampleVisibilityThresholds = sampleVisibilityThresholds
+        self.restWalk = restWalk
+    }
 
     var uiColor: UIColor { color.uiColor }
 
@@ -260,7 +310,10 @@ extension VectorStroke {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
-        brush = try c.decode(Brush.self, forKey: .brush)
+        // A number, redeemed against whatever table this decode was given — BRUSH.md §5.4. A file's
+        // number is meaningless without its document's `BrushTable`, and `BrushPool.resolve` is where
+        // that is said out loud rather than assumed.
+        brushRef = try BrushPool.resolve(try c.decode(BrushRef.self, forKey: .brush), in: decoder)
         color = try c.decode(CodableColor.self, forKey: .color)
         size = try c.decode(CGFloat.self, forKey: .size)
         opacity = try c.decode(Double.self, forKey: .opacity)
@@ -289,7 +342,7 @@ extension VectorStroke {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
-        try c.encode(brush, forKey: .brush)
+        try c.encode(brushRef, forKey: .brush)
         try c.encode(color, forKey: .color)
         try c.encode(size, forKey: .size)
         try c.encode(opacity, forKey: .opacity)

@@ -551,21 +551,43 @@ row** — the pen already outruns both rules, which is the honest shape of this 
 Every row's stored path sits within 0.250 pt of the drawing whatever brush was selected, where the gate's
 was half a dab spacing and so 0.5 pt on a 5 pt brush and 3 pt on a 60 pt one.
 
-### 5.4 The brush table
+### 5.4 The brush table — BUILT, §12 stage 6
 
-`VectorStroke` stores a whole `Brush` by value today. §6's `Brush` is substantially larger, and a cel
-shaped like real artwork holds ~190 strokes. A document-level table with strokes holding an index turns
-**~330-390 bytes a stroke into ~2** — §2.9. That figure is MEASURED against `Brush`'s synthesized
-`Codable` as it stands, compact-encoded the way `ProjectStore` writes it: 333 bytes for a stock preset and
-386 for a custom-shaped one carrying a `custom-<UUID>.png` filename, against ~150-160 bytes resident. §6
-makes `Brush` substantially larger, so the saving grows rather than shrinks.
+`VectorStroke` stored a whole `Brush` by value. It now stores a `BrushRef`, four bytes, and §2.9's index.
+The old figure was MEASURED against `Brush`'s synthesized `Codable` compact-encoded the way `ProjectStore`
+writes it: **333 bytes for a stock preset and 386 for a custom-shaped one** carrying a `custom-<UUID>.png`
+filename, against ~150-160 resident. What replaces it is MEASURED too — **`"brush":N`, 9 to 13 bytes on the
+wire** including the key, and 4 resident. §6 makes `Brush` larger, so the gap grows rather than shrinks.
 
-**Stage 6 also owns a defect the table is the honest fix for**: the project's brush-texture copy walks the
-palette rather than the drawing, and is correct today only because a custom brush can never leave the
-palette — which §2.10's minting ends. [BUGS.md](BUGS.md) carries it.
+**There are two tables, and the split is the whole design.** `BrushPool` is the *process's*, addressed by
+the brush's **value**: interning gives §2.9's deduplication for free and makes §2.10 fall out with no rule
+to enforce, because an edited brush is a different value and therefore a different ref, so ink already
+drawn cannot move. `BrushTable` is the *document's*, written to **`brushtable.json` in the package root
+beside `brushes/`** — §13's first open item, settled there rather than in `manifest.json` for the reason
+`CelManifest` already pulls per-cel vector data out of it: the manifest is decoded in full for every
+gallery tile, and §2.10 makes the table the least bounded thing that could go back in.
 
-**§2.10 makes the table grow**: an edit mints an entry rather than mutating one. A sweep on save drops
-entries no stroke references, or a heavily tuned document accumulates dead brushes forever.
+**The sweep is the table's definition, not a pass over it, and that is what makes it unable to
+half-apply.** A save collects the refs its own snapshot references — every cel's display list *and* every
+derived cel's `InterpolationRecipe` local edits, which are reachable from no display list — and writes each
+beside the brush it names. An entry nothing references is not deleted; it is never collected. **Nothing is
+ever renumbered**, because the number a stroke holds is a pool ref rather than a position in the file, so
+there is no stored numbering for a sweep to shift under a stroke that a later save has to keep in step.
+
+**A ref is meaningless without saying which table**, and the one crossing between the two is
+`BrushPool.resolve(_:in:)`. A decode given a `BrushTable.Remap` in `userInfo` redeems the stored number
+against the file and **throws** on one the table does not carry — a corrupt payload, not an old one
+(§2.14), counted as a malformed element and reported. A decode given none takes the number as this
+process's own, which is right for an undo snapshot or a defensive copy and would be silently wrong for a
+file. `ProjectStore` therefore sets the key on **every** decoder it points at a package, even when the
+table is empty; that is what makes the ambient path unreachable for anything read off disk.
+
+**The defect the table was the honest fix for is fixed.** `ProjectStore`'s brush-texture copy walked the
+palette while claiming to make a package self-contained. It now walks the **union** of the document's table
+and the palette, from one function used by both the save and the load, because neither population subsumes
+the other: a brush the ink is made of may be in no picker (§2.10 mints those in bulk), and a brush the
+artist imported but has not drawn with is in no stroke's table and still has to travel or the picker comes
+back pointing at a missing file.
 
 ### 5.5 The channel set, the funnel, and the neutral
 
@@ -749,6 +771,12 @@ was drawn with (§2.10), **a document that carries its own table is self-contain
 a device whose library has never held that brush. That falls out of §2.9 and §2.10 rather than costing
 anything.
 
+**Neither population subsumes the other, and `ProjectStore`'s texture copy takes the union** — §5.4. The
+table holds brushes no picker lists, because §2.10 mints one per edit; the palette holds brushes no stroke
+uses, because an artist can import a tip and not draw with it yet. A copy that walked either alone loses
+something: the first case loses the ink's own tip, which is the defect BUGS.md carried, and the second
+loses the picker's.
+
 ### 8.2 Groups are the layer tree again
 
 `BrushLibrary` is a flat array of presets plus a custom-brushes directory; there is no folder concept. The
@@ -891,7 +919,7 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | ~~`BrushStamper.Sample`~~ **gone** | `StrokeSamples`; the stamper walks the stroke's own storage — §5.5 | 4 |
 | ~~`VectorSample`'s `Codable`, and `decodeRun`'s `[VectorSample]` fallback~~ **gone** | one way to write a sample, and it is `PackedSampleRun` — §2.14 | 4 |
 | ~~`BrushShape` + `customTextureFileName` as a separable pair~~ **gone**, and with it `BrushShape.displayName` | `BrushTip`, one payload-carrying enum — §6 | 5 |
-| `VectorStroke`'s by-value `Brush` | a table index — §5.4 | 6 |
+| ~~`VectorStroke`'s by-value `Brush`~~ **gone** | `BrushRef` into `BrushPool`, redeemed against the document's `BrushTable` — §5.4 | 6 |
 | `BrushDynamics.sizeFraction` / `.opacityFraction`, the two hardcoded linear pressure blends | the modulation matrix — §6 | 7 |
 | `Brush`'s flat scalars | grouped sub-structs with defaulted decode — §6 | 7 |
 | `BrushLibrary.defaults` — softRound, hardRound, pencil, pen, square | the generated and sourced set, in groups — §8 | 9 |
@@ -1010,7 +1038,30 @@ first, which cleanly replaces the old one."*
    life of a process and encode-then-decode inside it preserves whatever that was. The id has to come
    from *outside* the process to mean anything; the test decodes a manifest written down in the source
    instead. CLAUDE.md's assertion-true-of-mathematics, in this document's own back yard.
-6. **The brush table** — §5.4, §2.9, the save-time sweep, and §2.10's apply-to-existing verb.
+6. **DONE — the brush table.** §5.4, §2.9, the sweep, and §2.10's apply-to-existing verb at selection
+   scope. `VectorStroke.brushRef` is four bytes; `BrushPool` is the process's value-addressed table and
+   `BrushTable` the document's, written to `brushtable.json` beside `brushes/` and named by the manifest so
+   `validateProject` refuses a package whose ink has lost the only thing that says what it was drawn with.
+   `ProjectStore`'s texture copy walks the union of the table and the palette, which closes BUGS.md's
+   *"copied by the palette, not by what is drawn"*. Pinned by `BrushTableLogicTests`: **one set of bytes and
+   two tables mapping the same stored number to two different brushes give two different answers** — the one
+   assertion an in-process round trip cannot make, and the direct answer to stage 5's *"and one of this
+   stage's own assertions was measuring `JSONDecoder`"*; a stored number with no table refuses rather than
+   guessing; a reopened document renders identically **after its stored numbers have been shifted out from
+   under it**, which is what a launch with a differently-populated pool sees and what a test without the
+   shift cannot distinguish from an implementation that ignores the table; the sweep drops an interned brush
+   nothing references and keeps one only a recipe's local edit does; an imported tip **no palette entry
+   names** still travels; a brush edit moves no pixel of ink already drawn; and the verb is one undo step
+   across every stroke it touched.
+   **Two of this section's instructions did not survive contact.** *"A stroke holds a small index"* is right
+   about the size and wrong about the kind — a *position* in the document's table is what would have forced
+   the sweep to renumber every stroke in every cel in one operation, which is precisely what §5.4 said must
+   not half-apply; a pool ref is not a position and there is nothing to renumber. And *"a sweep on save
+   drops entries"* describes a pass that deletes; what shipped never collects them, which is the same
+   outcome reached by having no intermediate state at all.
+   **What is deliberately not built**: layer and document scope for the verb, and the reason is filed rather
+   than hidden — nothing in the repo batches per-cel content restores across *several* cels into one undo
+   `Action`, and a selection lives in one cel. [BUGS.md](BUGS.md) carries it.
 7. **The modulation matrix** — `Brush` regrouped, every parameter `base + [modulation]`. §6.
 8. **Opacity and Flow**, and the per-stroke buffer. §2.11. Late, because it changes the live drawing path
    and wants the rest settled around it.
@@ -1029,9 +1080,12 @@ first, which cleanly replaces the old one."*
 
 ## 13. Open
 
-- **Where the brush table lives** — the project package beside `brushes/`, or inside the document — is
-  unsettled, and interacts with §2.10's minting and with a brush imported into one document and used in
-  another.
+- **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
+  (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
+  but the *shared* library is still a flat directory: two documents that import the same PNG under different
+  generated file names carry two copies, and a document opened on a second device restores its tips into
+  that shared directory by file name with no check that the name means the same picture. Nobody has hit it,
+  and §12 stage 9's group tree is where the library stops being flat.
 - **What the per-stroke buffer costs at the owner's canvas size** is unmeasured. §2.11 accepts the cost;
   nobody has taken the number, and PERFORMANCE.md's rule is that a figure carries MEASURED or INFERRED.
 - **Every CC0 claim in §8.3 needs re-checking against its source before an asset is committed**, and
