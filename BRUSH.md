@@ -574,6 +574,14 @@ beside the brush it names. An entry nothing references is not deleted; it is nev
 ever renumbered**, because the number a stroke holds is a pool ref rather than a position in the file, so
 there is no stored numbering for a sweep to shift under a stroke that a later save has to keep in step.
 
+**The save does walk every element, and BUGS.md's entry said the table was there to remove that walk.**
+That was wrong, and it is worth writing down rather than quietly dropping: collecting the referenced refs
+is one `UInt32` read per stroke over the snapshot the save already holds, against a save that PNG-encodes
+and writes every cel — INFERRED from the shapes rather than measured, because it is not separable from the
+save at the resolution `SaveProfile` reports. What the table actually removes is the *per-brush* work the
+old shape would have needed: the walk answers "which files does this document need" with a set lookup
+instead of decoding a `Brush` out of every stroke.
+
 **A ref is meaningless without saying which table**, and the one crossing between the two is
 `BrushPool.resolve(_:in:)`. A decode given a `BrushTable.Remap` in `userInfo` redeems the stored number
 against the file and **throws** on one the table does not carry — a corrupt payload, not an old one
