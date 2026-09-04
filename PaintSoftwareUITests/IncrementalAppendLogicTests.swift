@@ -29,7 +29,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     private static let canvasSize = CGSize(width: 128, height: 96)
 
     private static func brush(_ blend: BrushBlendMode = .normal) -> Brush {
-        Brush(name: "Append", tip: .round, size: 6, spacingFraction: 0.3, blendMode: blend)
+        Brush(name: "Append", tip: .round, size: 6, dab: BrushDabSettings(spacing: 0.3), stroke: BrushStrokeSettings(blendMode: blend))
     }
 
     /// A short deterministic arc, placed so that strokes overlap each other — overlap is what makes
@@ -597,7 +597,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let library = BrushLibrary.defaults
         XCTAssertFalse(library.isEmpty, "setup: the app must ship brushes")
         for brush in library {
-            XCTAssertEqual(brush.blendMode, .normal,
+            XCTAssertEqual(brush.stroke.blendMode, .normal,
                            "\(brush.name) is not `.normal`, so strokes made with it can no longer "
                            + "append incrementally — see appendPreservesTheWalk")
         }

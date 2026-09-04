@@ -30,7 +30,7 @@ extension CanvasManager {
     /// Spacing between stamps along the shape outline — the same brush-diameter fraction live
     /// drawing uses, so a collapsed shape is stamped exactly as densely as a freehand stroke.
     private var shapeStampSpacing: CGFloat {
-        max(shapeGestureStrokeWidth * CGFloat(shapeGestureBrush.spacingFraction), 1)
+        max(shapeGestureStrokeWidth * CGFloat(shapeGestureBrush.dab.spacing), 1)
     }
 
     /// The stroke `commitInteractiveShape` will lay down: the freehand samples collapsed onto the

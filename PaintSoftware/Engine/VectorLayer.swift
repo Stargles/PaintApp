@@ -2757,7 +2757,7 @@ final class VectorCanvas {
         for (index, element) in elements.enumerated() where movedIDs.contains(element.id) {
             lowestMoved = min(lowestMoved, index)
             guard let stroke = element.stroke else { continue }
-            if stroke.composite == .erase || stroke.brush.blendMode != .normal { return true }
+            if stroke.composite == .erase || stroke.brush.stroke.blendMode != .normal { return true }
         }
         guard lowestMoved < elements.count else { return false }
         for index in (lowestMoved + 1)..<elements.count {
@@ -2811,11 +2811,11 @@ final class VectorCanvas {
     /// Three floors break the similarity, and they are inherited knowingly rather than fixed:
     ///
     ///  * **`stampSpacing`'s 1 pt floor** (`BrushStamper.stampSpacing`). Below
-    ///    `brushSize * spacingFraction == 1` the spacing stops scaling with the size, so the scaled
+    ///    `brushSize * the spacing output == 1` the spacing stops scaling with the size, so the scaled
     ///    stroke gets a different dab count. That binds at ordinary sizes, not only at hairlines —
     ///    under 20 pt for Hard Round, under 33 pt for the Pen. It costs no ink: dab diameter still
     ///    scales, so the stroke is the right weight and still solid. It re-rolls the dab RNG, which is
-    ///    invisible on every brush whose `scatter` and `rotationJitter` are zero — which is all five
+    ///    invisible on every brush whose `scatter` and angle jitter are zero — which is all five
     ///    built-ins. `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount` pins the boundary.
     ///  * **`stampDab`'s 0.5 pt diameter floor** and `stampApproximateSquare`'s 1 pt dab/step floors,
     ///    for the same reason at heavy shrink.
@@ -3922,12 +3922,12 @@ final class VectorCanvas {
         guard Self.paintStroke(at: prefixCount, in: _elements) != nil else { return true }
         var index = prefixCount
         while let stroke = Self.paintStroke(at: index, in: _elements) {
-            if stroke.brush.blendMode != .normal { return false }
+            if stroke.brush.stroke.blendMode != .normal { return false }
             index += 1
         }
         index = prefixCount - 1
         while index >= 0, let stroke = Self.paintStroke(at: index, in: _elements) {
-            if stroke.brush.blendMode != .normal { return false }
+            if stroke.brush.stroke.blendMode != .normal { return false }
             index -= 1
         }
         return true
@@ -4080,7 +4080,7 @@ final class VectorCanvas {
                     var end = index
                     var needsIsolation = false
                     while let stroke = Self.paintStroke(at: end, in: elements) {
-                        if stroke.brush.blendMode != .normal { needsIsolation = true }
+                        if stroke.brush.stroke.blendMode != .normal { needsIsolation = true }
                         end += 1
                     }
                     if needsIsolation { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
@@ -4263,7 +4263,7 @@ final class VectorCanvas {
     }
 
     /// Replays one stored stroke. Its dabs come from `VectorStroke.dabRandom`, a hash of the stroke's
-    /// own stored seed and each dab's arc length, so a `scatter`/`rotationJitter` brush lands the same
+    /// own stored seed and each dab's arc length, so a scattering or jittering brush lands the same
     /// ink across invalidations and save/load — see `DabRandom`.
     ///
     /// The one place a stroke's `lattice` is read: a piece is stamped by replaying its **parent's**
@@ -4289,7 +4289,11 @@ final class VectorCanvas {
         guard let first = stroke.samples.first else { return }
         let meanPressure = Double(stroke.samples.reduce(0) { $0 + $1.pressure })
             / Double(stroke.samples.count)
-        let width = max(stroke.size * CGFloat(stroke.brush.dynamics.sizeFraction(forPressure: meanPressure)), 0.5)
+        // The matrix at the mean pressure with every other sensor at its neutral — the same
+        // approximation this tier already makes of the pressure ramp, one level up. §6's other
+        // sensors would each need a walk this tier exists not to do.
+        let meanValues = stroke.brush.dabValues(atPressure: CGFloat(meanPressure))
+        let width = max(stroke.size * CGFloat(meanValues.size), 0.5)
 
         let path = CGMutablePath()
         path.move(to: first.point)
@@ -4312,10 +4316,9 @@ final class VectorCanvas {
             cg.setBlendMode(.destinationOut)
             cg.setStrokeColor(UIColor.black.cgColor)
         } else {
-            cg.setBlendMode(stroke.brush.blendMode.cgBlendMode)
+            cg.setBlendMode(stroke.brush.stroke.blendMode.cgBlendMode)
             cg.setStrokeColor(stroke.uiColor.cgColor)
-            cg.setAlpha(CGFloat(stroke.opacity
-                                * stroke.brush.dynamics.opacityFraction(forPressure: meanPressure)))
+            cg.setAlpha(CGFloat(stroke.opacity * meanValues.opacity))
         }
         cg.addPath(path)
         cg.strokePath()

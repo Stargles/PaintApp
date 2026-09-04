@@ -11,42 +11,77 @@ import Foundation
 /// preset's identity a fact about the preset. §12 stage 9 replaces this list with the generated set
 /// in groups; these ids belong to the presets, so they go when the presets do.
 enum BrushLibrary {
+    /// **BRUSH.md §12 stage 7: the dynamics are rows now, and the ink did not move.**
+    ///
+    /// Every preset below used to carry a `BrushDynamics(sizePressure: k, opacityPressure: o,
+    /// minSizeFraction: m)`, and §10's ledger deletes that type's two blends outright rather than
+    /// keeping them as a fast path beside the general one. What each preset carries instead is the
+    /// same statement as two rows of §6's matrix:
+    ///
+    /// - `dab.size` is `1 - k` and one `size ← pressure` row of amount `k` ramps from `m` to 1. Read
+    ///   plainly: *that fraction of the width is fixed, the rest comes from the pen.*
+    /// - `dab.opacity` is `1 - o` and one `opacity ← pressure` row of amount `o` runs straight through.
+    ///
+    /// **Byte-identical, not merely equivalent** — the association and the order of operations are
+    /// preserved exactly, and `ResponseCurve.scale`'s power of two is what makes the curve half exact.
+    /// `BrushModulationLogicTests` renders all five before and after and asserts zero difference,
+    /// which is the assertion that says the matrix subsumes what it replaced.
     static let softRound = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000001")!,
         name: "Soft Round", tip: .round, size: 18,
-        spacingFraction: 0.08, hardness: 0.15, stabilization: 0.25,
-        dynamics: BrushDynamics(sizePressure: 0.5, opacityPressure: 0.6, minSizeFraction: 0.2)
+        dab: BrushDabSettings(size: 0.5, opacity: 0.4, spacing: 0.08, hardness: 0.15),
+        stroke: BrushStrokeSettings(stabilization: 0.25),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.5, atZero: 0.2),
+            .opacityFromPressure(amount: 0.6)
+        ])
     )
 
     static let hardRound = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000002")!,
         name: "Hard Round", tip: .round, size: 10,
-        spacingFraction: 0.05, hardness: 0.95, stabilization: 0.1,
-        dynamics: BrushDynamics(sizePressure: 0.4, opacityPressure: 0.1, minSizeFraction: 0.4)
+        dab: BrushDabSettings(size: 0.6, opacity: 0.9, spacing: 0.05, hardness: 0.95),
+        stroke: BrushStrokeSettings(stabilization: 0.1),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.4, atZero: 0.4),
+            .opacityFromPressure(amount: 0.1)
+        ])
     )
 
     static let pencil = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000003")!,
-        name: "Pencil", tip: .round, size: 6,
-        opacity: 0.9, spacingFraction: 0.04, hardness: 0.7, stabilization: 0.15,
-        dynamics: BrushDynamics(sizePressure: 0.3, opacityPressure: 0.5, minSizeFraction: 0.5)
+        name: "Pencil", tip: .round, size: 6, opacity: 0.9,
+        dab: BrushDabSettings(size: 0.7, opacity: 0.5, spacing: 0.04, hardness: 0.7),
+        stroke: BrushStrokeSettings(stabilization: 0.15),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.3, atZero: 0.5),
+            .opacityFromPressure(amount: 0.5)
+        ])
     )
 
     static let pen = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000004")!,
-        name: "Pen", tip: .round, size: 4,
-        opacity: 1, spacingFraction: 0.03, hardness: 1.0, stabilization: 0.4,
-        dynamics: BrushDynamics(sizePressure: 0.15, opacityPressure: 0.05, minSizeFraction: 0.85)
+        name: "Pen", tip: .round, size: 4, opacity: 1,
+        dab: BrushDabSettings(size: 0.85, opacity: 0.95, spacing: 0.03, hardness: 1.0),
+        stroke: BrushStrokeSettings(stabilization: 0.4),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.15, atZero: 0.85),
+            .opacityFromPressure(amount: 0.05)
+        ])
     )
 
     /// No `hardness`: a square dab is a picture and its edge is in the tip's own pixels. The field
-    /// still exists on `Brush` for the `.round` tip, and naming it here would say this brush reads
-    /// something it does not.
+    /// still exists on `BrushDabSettings` for the `.round` tip, and naming it here would say this
+    /// brush reads something it does not.
     static let square = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000005")!,
         name: "Square", tip: .stamp(.builtIn(.square)), size: 16,
-        spacingFraction: 0.15, stabilization: 0.2,
-        dynamics: BrushDynamics(sizePressure: 0.3, opacityPressure: 0.2, minSizeFraction: 0.5)
+        dab: BrushDabSettings(size: 0.7, opacity: 0.8, spacing: 0.15),
+        stroke: BrushStrokeSettings(stabilization: 0.2),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.3, atZero: 0.5),
+            .opacityFromPressure(amount: 0.2)
+        ])
     )
 
     /// Order shown in the brush picker.

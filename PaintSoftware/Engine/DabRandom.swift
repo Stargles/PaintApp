@@ -47,11 +47,24 @@ struct DabRandom: Equatable {
     /// is the reason this is an identifier folded into the hash rather than three separate seeds.
     ///
     /// Raw values are the hash's input and are therefore **stable**: renumbering one re-rolls every
-    /// stroke drawn with it. Add cases, never renumber them.
-    enum Channel: UInt64 {
-        case scatterAngle = 1
-        case scatterDistance = 2
-        case rotation = 3
+    /// stroke drawn with it. Add channels, never renumber them.
+    ///
+    /// **A struct rather than an enum since §12 stage 7**, because the matrix mints a channel per
+    /// modulation row and there is no fixed list of those — `DabRandom.Channel.modulation(_:row:)`
+    /// (`BrushModulation.swift`) is the minting rule, kept there so this type stays free of `Brush`.
+    /// The four named below are the intrinsic draws, and their raw values are exactly the enum's.
+    /// 0–15 are reserved for them; the matrix starts at 16.
+    struct Channel: Hashable {
+        let rawValue: UInt64
+        init(rawValue: UInt64) { self.rawValue = rawValue }
+
+        static let scatterAngle = Channel(rawValue: 1)
+        static let scatterDistance = Channel(rawValue: 2)
+        /// The tip's per-dab angle jitter — `BrushAngleSettings.jitter`.
+        static let rotation = Channel(rawValue: 3)
+        /// **BRUSH.md §2.18's dropout draw.** The value a dab's `density` is compared against, and
+        /// the one whose wavelength is carried by the density row itself.
+        static let density = Channel(rawValue: 4)
     }
 
     /// The stroke's own seed. **Inherited on split rather than regenerated** — that is the property

@@ -192,10 +192,16 @@ enum StrokeGeometry {
     /// Mirrors `BrushStamper.stampDab` exactly, including its `max(..., 0.5)` diameter floor: if the
     /// two drifted apart, Mode 1 would decide a span was fully covered at a width the renderer never
     /// actually drew, and leave a fringe of ink behind at the cut.
+    ///
+    /// **It resolves §6's matrix at a bare pressure, with every other sensor at its neutral, and that
+    /// is the true answer only for a brush `BrushModulations.isPressureOnly` accepts.** There is no
+    /// walk here — no arc length, so no random field; no curve, so no direction; no clock, so no
+    /// velocity — and inventing one would be a second definition of the walk to keep in step. So the
+    /// limit is stated and gated instead: `VectorEraser.supportsSplitting` refuses a brush whose ink
+    /// this cannot bound, and such a stroke is erased by the exact alpha punch, which is right
+    /// whatever its dabs did.
     static func stampRadius(forPressure pressure: CGFloat, brush: Brush, size: CGFloat) -> CGFloat {
-        let clamped = Double(max(0, min(pressure, 1)))
-        let fraction = brush.dynamics.sizeFraction(forPressure: clamped)
-        return max(size * CGFloat(fraction), 0.5) / 2
+        max(size * CGFloat(brush.dabValues(atPressure: pressure).size), 0.5) / 2
     }
 
     /// A stroke's footprint as a capsule chain: one capsule per segment, radii taken from the two

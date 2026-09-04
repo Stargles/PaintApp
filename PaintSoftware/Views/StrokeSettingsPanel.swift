@@ -65,29 +65,29 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
                 )
                 sliderRow(
                     title: "Pressure → Size",
-                    valueText: "\(Int(brush.dynamics.sizePressure * 100))%",
-                    value: brushBinding(\.dynamics.sizePressure),
+                    valueText: "\(Int(pressureAmount(.size) * 100))%",
+                    value: pressureAmountBinding(.size),
                     range: 0...1,
                     idSuffix: "pressureSizeSlider"
                 )
                 sliderRow(
                     title: "Pressure → Opacity",
-                    valueText: "\(Int(brush.dynamics.opacityPressure * 100))%",
-                    value: brushBinding(\.dynamics.opacityPressure),
+                    valueText: "\(Int(pressureAmount(.opacity) * 100))%",
+                    value: pressureAmountBinding(.opacity),
                     range: 0...1,
                     idSuffix: "pressureOpacitySlider"
                 )
                 sliderRow(
                     title: "Stabilization",
-                    valueText: "\(Int(brush.stabilization * 100))%",
-                    value: brushBinding(\.stabilization),
+                    valueText: "\(Int(brush.stroke.stabilization * 100))%",
+                    value: brushBinding(\.stroke.stabilization),
                     range: 0...1,
                     idSuffix: "stabilizationSlider"
                 )
                 sliderRow(
                     title: "Spacing",
-                    valueText: "\(Int(brush.spacingFraction * 100))%",
-                    value: brushBinding(\.spacingFraction),
+                    valueText: "\(Int(brush.dab.spacing * 100))%",
+                    value: brushBinding(\.dab.spacing),
                     range: 0.02...0.5,
                     idSuffix: "spacingSlider"
                 )
@@ -155,7 +155,7 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
     private static func icon(for brush: Brush) -> String {
         switch brush.tip {
         case .round:
-            return brush.hardness >= 0.5 ? "circle.fill" : "circle"
+            return brush.dab.hardness >= 0.5 ? "circle.fill" : "circle"
         case .stamp(.builtIn(let tip)):
             switch tip {
             case .square: return "square.fill"
@@ -188,7 +188,7 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
 
     // MARK: - Bindings
 
-    /// Drives both the live size (what the toolbar's own size slider and `stampOne` read) and
+    /// Drives both the live size (what the toolbar's own size slider and `stampPath` read) and
     /// `selectedBrush.size`, so this slider and the toolbar's stay in lockstep no matter which one
     /// the user last touched. Note this only tweaks the *active* brush in place — tapping away to
     /// another preset and back re-copies that preset's original values from `BrushLibrary`/
@@ -210,6 +210,36 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
             set: { newValue in
                 canvasManager[keyPath: spec.opacity] = newValue
                 canvasManager[keyPath: spec.selectedBrush].opacity = newValue
+            }
+        )
+    }
+
+    /// **"Pressure → Size" and "Pressure → Opacity", in BRUSH.md §6's matrix.**
+    ///
+    /// The slider is the **amount** of a `size ← pressure` / `opacity ← pressure` row, and what is
+    /// left over is the output's base: `base + amount == 1` is what makes a full press reach full
+    /// width and full opacity. That pairing is *this panel's* convention rather than a rule of the
+    /// model — the matrix is perfectly happy with a brush that never reaches full width, and §12
+    /// stage 10's editor is where an artist gets to say so — so it lives here and not on `Brush`.
+    ///
+    /// The row's **curve** is untouched. A preset's size row ramps from its own floor (what
+    /// the width a feather-light touch keeps), and moving this slider must not flatten it.
+    private func pressureAmount(_ output: BrushOutput) -> Double {
+        brush.modulations.amount(for: output, from: .pressure)
+    }
+
+    private func pressureAmountBinding(_ output: BrushOutput) -> Binding<Double> {
+        Binding(
+            get: { pressureAmount(output) },
+            set: { newValue in
+                var edited = canvasManager[keyPath: spec.selectedBrush]
+                edited.modulations.setAmount(newValue, for: output, from: .pressure)
+                switch output {
+                case .size: edited.dab.size = 1 - newValue
+                case .opacity: edited.dab.opacity = 1 - newValue
+                default: break
+                }
+                canvasManager[keyPath: spec.selectedBrush] = edited
             }
         )
     }

@@ -151,7 +151,7 @@ struct SizePreviewGeometry: Equatable {
     /// tool will leave on the artwork as the artist is currently looking at it.
     ///
     /// Matches `StrokeGeometry.stampRadius(forPressure: 1, brush:, size:)` doubled — at full
-    /// pressure every `BrushDynamics.sizeFraction` is exactly 1, so the stamp is the brush's own
+    /// pressure the matrix's `size` output is exactly 1, so the stamp is the brush's own
     /// `size`, which `Brush.size` documents as "base stamp diameter, in canvas points, at full
     /// pressure". Multiplying by the canvas scale converts that to what the eye sees.
     var stampDiameter: CGFloat { max(toolSize, 0) * max(canvasScale, 0) }
@@ -289,8 +289,11 @@ enum SizePreviewStampRenderer {
             let target = CGContextDabTarget(cg)
             BrushStamper.stampDab(into: target,
                                   at: CGPoint(x: side / 2, y: side / 2),
-                                  pressure: 1,
                                   brush: brush,
+                                  // §6's matrix at a full press with every other sensor at its
+                                  // neutral — this preview is one dab with no stroke around it, so
+                                  // there is no walk to read a direction or a speed off.
+                                  values: brush.dabValues(atPressure: 1),
                                   color: color,
                                   brushSize: geometry.stampDiameter,
                                   brushOpacity: opacity,

@@ -257,7 +257,7 @@ extension InterpolationRecipe {
 /// spec does anything at all about the floor.
 ///
 /// The floor is absolute in canvas points and does not scale: below
-/// `size × spacingFraction == 1` the dab spacing stops tracking the brush size, so the scaled stroke
+/// `size × the spacing output == 1` the dab spacing stops tracking the brush size, so the scaled stroke
 /// gets a different dab count for the same ink. Three of the five built-ins are already inside it at
 /// their shipping default size (Hard Round below 20 pt, Pencil below 25, Pen below 33.3), so this is
 /// the ordinary case rather than a hairline one, and it binds on an upscale as much as on a shrink.
@@ -271,7 +271,7 @@ extension InterpolationRecipe {
 /// one half-open interval, whichever side of 1 the scale is on.
 struct SpacingFloorSurvey: Equatable {
 
-    /// `size × spacingFraction` for every re-stamped stroke in the document, ascending.
+    /// `size × the spacing output` for every re-stamped stroke in the document, ascending.
     let thresholds: [CGFloat]
 
     init(thresholds: [CGFloat]) { self.thresholds = thresholds.sorted() }
@@ -476,11 +476,11 @@ extension CanvasManager {
                 if let vector = cel.vector {
                     for element in vector.elements {
                         guard case .stroke(let stroke) = element else { continue }
-                        thresholds.append(stroke.size * CGFloat(stroke.brush.spacingFraction))
+                        thresholds.append(stroke.size * CGFloat(stroke.brush.dab.spacing))
                     }
                 }
                 for edit in cel.interpolation?.localEdits ?? [] {
-                    thresholds.append(edit.stroke.size * CGFloat(edit.stroke.brush.spacingFraction))
+                    thresholds.append(edit.stroke.size * CGFloat(edit.stroke.brush.dab.spacing))
                 }
             }
         }

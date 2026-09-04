@@ -32,8 +32,8 @@ protocol DabTarget: AnyObject {
     /// - `angle` turns the mask about `point`, in radians, in the target's own y-down space — the
     ///   convention `CGContext.rotate(by:)` and `CGAffineTransform(rotationAngle:)` already use, and
     ///   the one `stampApproximateSquare`'s `cos`/`sin` lattice used before it. It is not optional
-    ///   and not deferrable: `Brush.rotationJitter` drives it today and §6's direction-follow drives
-    ///   it in stage 7.
+    ///   and not deferrable: §6's `angle` output drives it — a base tilt, direction-follow and the
+    ///   per-dab jitter, summed.
     /// - `color`, `alpha` and `blendMode` mean exactly what they mean on `stampCircle`. There is no
     ///   `hardness`: a picture's edge is in its pixels, and hardness is the round tip's procedural
     ///   falloff.
@@ -144,7 +144,7 @@ enum DabProbe {
 /// while drawing.
 ///
 /// **The key deliberately excludes `alpha`, and that is the whole reason the cache works.** `alpha`
-/// is `brushOpacity × flow × opacityFraction(pressure)` — a different float on essentially every dab,
+/// is `brushOpacity × flow × the matrix's opacity output` — a different float on essentially every dab,
 /// since pressure varies continuously. Keying on it would hit approximately never. Instead the entry
 /// is built at full alpha and the per-dab alpha is applied by `CGContext.setAlpha`.
 ///
@@ -316,7 +316,7 @@ final class DabImageCache {
     /// is at least the dab's own size, capped at the mask's own resolution and floored at 8.
     ///
     /// **A power of two rather than the dab's exact size, because dab size varies per dab and an
-    /// exact key would hit approximately never** — it is `brushSize × sizeFraction(pressure)`, which
+    /// exact key would hit approximately never** — it is `brushSize × the matrix's size output`, which
     /// is the same continuously-varying quantity that keeps `alpha` out of `DabGradientCache`'s key.
     /// A power-of-two ladder collapses a stroke to one entry, or two where it crosses an octave.
     static func entrySide(forDiameter diameter: CGFloat, nativeSide: Int) -> Int {

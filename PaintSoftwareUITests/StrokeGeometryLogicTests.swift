@@ -22,10 +22,11 @@ final class StrokeGeometryLogicTests: XCTestCase {
         }, channels: .pressureOnly)
     }
 
-    /// A fixed-width brush: `BrushDynamics.fixed` makes `sizeFraction` exactly 1 at any pressure, so
+    /// A fixed-width brush: with no rows and both bases at 1 the matrix's `size` output is exactly 1
+    /// at any pressure, so
     /// the expected radius in a test is just `size / 2` and a failure can only come from the geometry.
     private var fixedBrush: Brush {
-        Brush(name: "test", tip: .round, size: 10, dynamics: .fixed)
+        Brush(name: "test", tip: .round, size: 10)
     }
 
     /// Compares a run's x coordinates with a tolerance. Interpolated boundary samples land on values
@@ -116,9 +117,8 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     // MARK: - Capsule chain
 
-    func testStampRadiusMirrorsBrushDynamics() {
-        let brush = Brush(name: "dyn", tip: .round, size: 20,
-                          dynamics: BrushDynamics(sizePressure: 1, opacityPressure: 0, minSizeFraction: 0.5))
+    func testStampRadiusMirrorsTheMatrixsSizeOutput() {
+        let brush = Brush(name: "dyn", tip: .round, size: 20, dab: BrushDabSettings(size: 1 - (1)), modulations: BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.5)]))
         // sizeFraction spans 0.5...1 across pressure, so the radius spans 5...10.
         XCTAssertEqual(StrokeGeometry.stampRadius(forPressure: 0, brush: brush, size: 20), 5, accuracy: 1e-9)
         XCTAssertEqual(StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: 20), 10, accuracy: 1e-9)
@@ -129,8 +129,7 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     func testCapsuleChainTakesRadiiFromNeighbouringPressures() {
         let run = samples([(0, 0), (10, 0), (20, 0)], pressures: [0, 0.5, 1])
-        let brush = Brush(name: "dyn", tip: .round, size: 20,
-                          dynamics: BrushDynamics(sizePressure: 1, opacityPressure: 0, minSizeFraction: 0.5))
+        let brush = Brush(name: "dyn", tip: .round, size: 20, dab: BrushDabSettings(size: 1 - (1)), modulations: BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.5)]))
         let chain = StrokeGeometry.capsuleChain(samples: run, brush: brush, size: 20)
         XCTAssertEqual(chain.count, 2)
         XCTAssertEqual(chain[0].ra, 5, accuracy: 1e-9)

@@ -6,7 +6,7 @@ import UIKit
 struct StrokeInput {
     var position: CGPoint
     /// 0...1. Always 1 for a non-Pencil touch (finger or synthetic XCUITest touch), which makes a
-    /// stroke fixed-width/fixed-opacity whenever the brush's `sizePressure`/`opacityPressure` are 0.
+    /// stroke fixed-width/fixed-opacity whenever the brush carries no `size`/`opacity` pressure row.
     var pressure: CGFloat
     /// Radians: 0 is the pencil flat against the surface, pi/2 is perpendicular (no tilt). pi/2 for
     /// any non-Pencil touch.

@@ -14,10 +14,14 @@ final class StrokePathWalkLogicTests: XCTestCase {
 
     private func inkBrush(spacing: Double = 0.08) -> Brush {
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = spacing
-        brush.scatter = 0
-        brush.rotationJitter = 0
-        brush.dynamics = BrushDynamics(sizePressure: 0, opacityPressure: 0, minSizeFraction: 1)
+        brush.dab.spacing = spacing
+        brush.dab.scatter = 0
+        brush.dab.angle.jitter = 0
+        // Fixed width and full coverage: no rows, and both bases back at 1 — clearing the rows alone
+        // would leave the preset's own `1 - amount` bases behind.
+        brush.dab.size = 1
+        brush.dab.opacity = 1
+        brush.modulations = BrushModulations()
         return brush
     }
 
@@ -166,7 +170,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
         let arc = length(of: curve(through: knots))
         for spacing in [2 as CGFloat, 5, 12, 30] {
             var brush = inkBrush()
-            brush.spacingFraction = Double(spacing) / 100
+            brush.dab.spacing = Double(spacing) / 100
             let marks = dabs(knots, brush: brush, size: 100)
             let expected = arc / spacing
             XCTAssertEqual(Double(marks.count), Double(expected), accuracy: Double(expected) * 0.03 + 2,

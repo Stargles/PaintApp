@@ -35,9 +35,9 @@ final class StrokePathFitLogicTests: XCTestCase {
     /// A brush that leaves a visible, pressure-driven mark, at the spacing the ink-pen preset uses.
     private func inkBrush() -> Brush {
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = 0.08
-        brush.scatter = 0
-        brush.rotationJitter = 0
+        brush.dab.spacing = 0.08
+        brush.dab.scatter = 0
+        brush.dab.angle.jitter = 0
         return brush
     }
 
@@ -257,7 +257,8 @@ final class StrokePathFitLogicTests: XCTestCase {
         for i in 1...200 { raw.append(VectorSample(x: 300 + CGFloat(i), y: 300, pressure: 0.9)) }
 
         var brush = inkBrush()
-        brush.dynamics = BrushDynamics(sizePressure: 1, opacityPressure: 0, minSizeFraction: 0.1)
+        brush.dab.size = 0
+        brush.modulations = BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.1)])
 
         func firstDabRadiusAfterTheHold(_ knots: [VectorSample]) -> CGFloat? {
             BrushStamper.bake(samples: StrokeSamples(knots, channels: .pressureOnly),

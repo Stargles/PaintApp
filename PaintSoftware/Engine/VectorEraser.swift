@@ -227,7 +227,7 @@ enum VectorEraser {
     /// "residue" is only a retained element — so every condition below is checked in the strict
     /// direction.
     ///
-    /// `scatter` and `rotationJitter` are here because the capsule chain models the *un-scattered*
+    /// `scatter` and the angle's jitter are here because the capsule chain models the *un-scattered*
     /// sweep. `BrushStamper.applyScatter` displaces each dab by up to `radius · 2 · scatter` off the
     /// centreline, so the chain is wrong in both directions at once: it claims coverage where a
     /// displaced dab left a gap, and misses coverage where one landed outside. Neither is a margin that
@@ -243,8 +243,8 @@ enum VectorEraser {
     /// and now rests on the tip's own pixels.)
     ///
     /// `minPressure` is the **lightest pressure the gesture actually carried**, not a property of the
-    /// brush — judging `opacityPressure` against pressure 0 instead would bottom `opacityFraction` out
-    /// at `1 - opacityPressure` and reject every pressure-reactive brush, including both built-in
+    /// brush — judging the `opacity ← pressure` row against pressure 0 instead would bottom the output
+    /// out at its base and reject every pressure-reactive brush, including both built-in
     /// defaults, making the split path unreachable. Dab pressure interpolates linearly, so the minimum
     /// over the dabs is the minimum over the samples; a finger or mouse drag reports full pressure
     /// throughout, which is the common case the split exists for.
@@ -253,10 +253,16 @@ enum VectorEraser {
         case .stamp: return false
         case .round: break
         }
-        guard brush.hardness >= 0.95 else { return false }
-        guard opacity * brush.flow >= 0.999 else { return false }
-        guard brush.dynamics.opacityFraction(forPressure: Double(minPressure)) >= 0.999 else { return false }
-        guard brush.scatter <= 0, brush.rotationJitter <= 0 else { return false }
+        guard brush.dab.hardness >= 0.95 else { return false }
+        // §12 stage 7: the eraser's geometry can only read a brush at a bare pressure, so a brush
+        // whose coverage depends on anything else is not one it may reason about. `density` is the
+        // sharpest case — a dropout brush stamps *gaps*, so "this cross-section was covered" is false
+        // of ink the capsule chain says is solid.
+        guard brush.modulations.isPressureOnly, brush.dab.density >= 1 else { return false }
+        let values = brush.dabValues(atPressure: minPressure)
+        guard opacity * values.flow >= 0.999 else { return false }
+        guard values.opacity >= 0.999 else { return false }
+        guard values.scatter <= 0, brush.dab.angle.jitter <= 0 else { return false }
         return true
     }
 
@@ -271,21 +277,27 @@ enum VectorEraser {
     /// The *other* reason this used to exist is gone: a piece inherits `VectorStroke.seed` and its dabs
     /// hash on arc length, so a split cannot re-roll where any of them lands (BRUSH.md §4). Relaxing
     /// this gate is therefore purely a question of teaching the coverage test about scattered ink.
+    /// **§12 stage 7 widens this from two fields to the matrix.** `stampRadius` resolves a brush at a
+    /// bare pressure with every other sensor at its neutral, so a stroke whose *width* answers to
+    /// velocity, tilt, taper or the random field is not bounded by the capsule chain either — the same
+    /// objection scatter always raised, reached through §6's own door. And a `density` brush stamps
+    /// gaps, so the chain claims coverage over paper. All of them fall back to the exact alpha punch.
     static func supportsSplitting(strokeBrush: Brush) -> Bool {
-        strokeBrush.scatter <= 0 && strokeBrush.rotationJitter <= 0
+        strokeBrush.dab.scatter <= 0 && strokeBrush.dab.angle.jitter <= 0
+            && strokeBrush.dab.density >= 1 && strokeBrush.modulations.isPressureOnly
     }
 
     /// The eraser footprint the clean-cut test is allowed to rely on: the sweep's capsules with every
     /// radius pulled in by the deepest gap between consecutive dabs.
     ///
     /// A capsule chain is the region the eraser sweeps only if its dabs actually overlap. `BrushStamper`
-    /// spaces them `max(size · spacingFraction, 1)` apart, so a wide-spacing brush paints a row of
+    /// spaces them `max(size · the spacing output, 1)` apart, so a wide-spacing brush paints a row of
     /// beads whose union falls short of the capsule by the scallop depth `r - √(r² - (s/2)²)`. Pulling
     /// the radii in by exactly that is what stops such a brush claiming a clean cut through the gaps it
     /// left. Capsules that vanish entirely are dropped — that eraser cannot cleanly cut anything.
     static func cleanCutCapsules(_ capsules: [StrokeGeometry.Capsule], brush: Brush,
                                  size: CGFloat) -> [StrokeGeometry.Capsule] {
-        let spacing = BrushStamper.stampSpacing(brushSize: size, brush: brush)
+        let spacing = BrushStamper.stampSpacing(brushSize: size, fraction: brush.dab.spacing)
         var result: [StrokeGeometry.Capsule] = []
         result.reserveCapacity(capsules.count)
         for capsule in capsules {

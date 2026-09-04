@@ -46,8 +46,7 @@ final class BrushTableLogicTests: XCTestCase {
     /// stamp visibly different ink and an assertion about "which brush" cannot pass by coincidence.
     private func brush(_ name: String, size: CGFloat, hardness: Double = 0.8,
                        spacing: Double = 0.1) -> Brush {
-        Brush(id: UUID(), name: name, tip: .round, size: size,
-              spacingFraction: spacing, hardness: hardness)
+        Brush(id: UUID(), name: name, tip: .round, size: size, dab: BrushDabSettings(spacing: spacing, hardness: hardness))
     }
 
     private func stroke(_ brush: Brush, from a: CGPoint, to b: CGPoint,
@@ -471,8 +470,8 @@ final class BrushTableLogicTests: XCTestCase {
 
         // The same brush, edited — same `id`, a different value.
         var edited = asDrawn
-        edited.hardness = 0.05
-        edited.spacingFraction = 0.4
+        edited.dab.hardness = 0.05
+        edited.dab.spacing = 0.4
         manager.selectBrush(edited)
 
         XCTAssertEqual(try XCTUnwrap(vector.strokes.first).brushRef, drawnRef,

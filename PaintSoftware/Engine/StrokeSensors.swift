@@ -6,9 +6,9 @@ import Foundation
 /// Four of them read a stored channel (`backingChannel`) and three are derived from the walk itself.
 /// The difference matters in exactly one place: a stroke can be missing a *channel*, and then the
 /// funnel answers the input's `neutral`. Nothing can be missing a geometry.
-enum BrushInput: Equatable {
+enum BrushInput: Hashable {
     /// How hard the pen was pressed, `0…1`. Neutral **1** — full press, which is what a finger
-    /// reports and what `BrushDynamics`' blends already treat as "no thinning".
+    /// reports and the reading at which a preset's `size ← pressure` row reaches full width.
     case pressure
     /// How far the Pencil is leaned over, `0` upright to `1` flat against the glass. Neutral **0**.
     case tiltAngle
@@ -57,6 +57,54 @@ enum BrushInput: Equatable {
         case .taper: return 1
         case .velocity: return 0
         case .random: return 0
+        }
+    }
+}
+
+extension BrushInput: Codable {
+    private enum CodingKeys: String, CodingKey { case kind, wavelength }
+    private enum Kind: String, Codable {
+        case pressure, tiltAngle, tiltDirection, direction, taper, velocity, random
+    }
+
+    /// **Written out rather than synthesized, and the channel is deliberately off the wire.**
+    ///
+    /// A synthesized codec for an enum with a payload spells it `_0`, which is a compiler artifact in
+    /// a file an artist's brushes live in. And `random`'s channel is *derived* from where its row sits
+    /// (`BrushModulations`), so writing it down would create a second, authoritative-looking copy of a
+    /// fact the matrix owns — the exact shape of the `BrushShape` + `customTextureFileName` pair §12
+    /// stage 5 deleted. Only λ, the authored half, is stored.
+    ///
+    /// Strict on an unrecognised `kind`, per §2.14: the documents on the device are expendable, so
+    /// there is no earlier spelling to accept and an unknown sensor is a corrupt brush rather than an
+    /// old one.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .pressure: try c.encode(Kind.pressure, forKey: .kind)
+        case .tiltAngle: try c.encode(Kind.tiltAngle, forKey: .kind)
+        case .tiltDirection: try c.encode(Kind.tiltDirection, forKey: .kind)
+        case .direction: try c.encode(Kind.direction, forKey: .kind)
+        case .taper: try c.encode(Kind.taper, forKey: .kind)
+        case .velocity: try c.encode(Kind.velocity, forKey: .kind)
+        case .random(_, let wavelength):
+            try c.encode(Kind.random, forKey: .kind)
+            try c.encode(wavelength, forKey: .wavelength)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .pressure: self = .pressure
+        case .tiltAngle: self = .tiltAngle
+        case .tiltDirection: self = .tiltDirection
+        case .direction: self = .direction
+        case .taper: self = .taper
+        case .velocity: self = .velocity
+        case .random:
+            // The channel is re-derived by `BrushModulations`; anything here would be overwritten.
+            self = .random(.scatterAngle, wavelength: try c.decode(CGFloat.self, forKey: .wavelength))
         }
     }
 }

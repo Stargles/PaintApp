@@ -159,8 +159,9 @@ final class MaskParityLogicTests: XCTestCase {
             return XCTFail("Fixture needs a cel to stamp into")
         }
         BrushStamper.stampDab(into: manager.layers[0].cels[celIndex].raster,
-                              at: CGPoint(x: 32, y: 32), pressure: 1,
-                              brush: BrushLibrary.softRound, color: .black,
+                              at: CGPoint(x: 32, y: 32),
+                              brush: BrushLibrary.softRound,
+                              values: BrushLibrary.softRound.dabValues(atPressure: 1), color: .black,
                               brushSize: 40, brushOpacity: 1, isEraser: false,
                               random: DabRandom(seed: 0), arcWidths: 0)
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
@@ -592,8 +593,9 @@ final class MaskParityLogicTests: XCTestCase {
         // whose alpha actually ramps (§6.3) — a hard-edged shape would resolve the same either side
         // of any threshold in range and the test would pass by accident.
         BrushStamper.stampDab(into: manager.layers[0].cels[celIndex].raster,
-                              at: CGPoint(x: 32, y: 32), pressure: 1,
-                              brush: BrushLibrary.softRound, color: .black,
+                              at: CGPoint(x: 32, y: 32),
+                              brush: BrushLibrary.softRound,
+                              values: BrushLibrary.softRound.dabValues(atPressure: 1), color: .black,
                               brushSize: 40, brushOpacity: 1, isEraser: false,
                               random: DabRandom(seed: 0), arcWidths: 0)
         manager.layers[0].isVisible = false

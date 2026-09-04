@@ -7,10 +7,16 @@ import CoreGraphics
 /// would have been drawn live — same tip/hardness/dynamics/scatter/spacing.
 enum BrushStamper {
 
-    /// Distance between consecutive stamps along a path. The 1pt floor keeps thin or tight-spacing
-    /// brushes continuous even at `spacingFraction` ~= 0.
-    static func stampSpacing(brushSize: CGFloat, brush: Brush) -> CGFloat {
-        max(brushSize * CGFloat(brush.spacingFraction), 1)
+    /// Distance between consecutive stamps along a path. The 1 pt floor keeps thin or tight-spacing
+    /// brushes continuous even at a spacing fraction of ~0.
+    ///
+    /// **It takes the fraction rather than the brush, because since §12 stage 7 there are two places
+    /// the fraction can come from** — `Brush.dab.spacing`, and the `spacing` output resolved at a dab,
+    /// which may differ from it anywhere along a stroke. §10's own warning is that two ways to compute
+    /// one dab number is two ways for it to be wrong, so there is one function and the caller says
+    /// which fraction it is asking about.
+    static func stampSpacing(brushSize: CGFloat, fraction: Double) -> CGFloat {
+        max(brushSize * CGFloat(fraction), 1)
     }
 
     /// Walks from `last` toward `point`, invoking `body` at each `spacing`-sized step along the way,
@@ -25,27 +31,34 @@ enum BrushStamper {
     /// sample, at input density, where the straight line between two consecutive samples and the
     /// curve through them are the same line to well under a pixel; it holds its carry point in a
     /// property across calls, which is why the carry is returned rather than stored.
+    /// Each callback receives the dab's normalised position `t ∈ (0, 1]` along the `last`→`point`
+    /// segment, so the caller can resolve §6's matrix per dab across the pair of samples this walk
+    /// bridges instead of applying one endpoint's reading to all of them.
+    ///
+    /// **`spacing` is `inout` and the body answers with the next one**, exactly as
+    /// `StrokePath.advance` does and for the same reason: BRUSH.md §6 makes spacing a sensor-driven
+    /// output, so the gap between two dabs belongs to the dab the walk is leaving. It is `inout` so
+    /// the value survives across the per-touch-sample calls this walk is made of, alongside the caller's
+    /// own carry point.
     static func advance(from last: CGPoint, to point: CGPoint, spacing: CGFloat,
-                        _ body: (CGPoint) -> Void) -> CGPoint {
-        advance(from: last, to: point, spacing: spacing) { dab, _ in body(dab) }
-    }
-
-    /// As above, but each callback also receives the dab's normalised position `t ∈ (0, 1]` along the
-    /// `last`→`point` segment, so a caller can interpolate per-sample attributes across the dabs it
-    /// generates instead of applying one endpoint's value to all of them (see `stampStroke`, which
-    /// uses it to ramp pressure).
-    static func advance(from last: CGPoint, to point: CGPoint, spacing: CGFloat,
-                        _ body: (CGPoint, CGFloat) -> Void) -> CGPoint {
+                        _ body: (CGPoint, CGFloat, CGFloat) -> CGFloat) -> (carry: CGPoint, spacing: CGFloat) {
         let dx = point.x - last.x, dy = point.y - last.y
         let distance = hypot(dx, dy)
-        guard spacing > 0, distance >= spacing else { return last }
-        let steps = Int(distance / spacing)
-        for i in 1...steps {
-            let t = (CGFloat(i) * spacing) / distance
-            body(CGPoint(x: last.x + dx * t, y: last.y + dy * t), t)
+        var spacing = spacing
+        guard spacing > 0, distance > 0 else { return (last, spacing) }
+        var travelled: CGFloat = 0
+        while travelled + spacing <= distance {
+            travelled += spacing
+            let t = travelled / distance
+            let walked = spacing
+            spacing = max(body(CGPoint(x: last.x + dx * t, y: last.y + dy * t), t, walked),
+                          StrokePath.minimumDabSpacing)
         }
-        let coveredT = (CGFloat(steps) * spacing) / distance
-        return CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT)
+        // Nothing placed: the leftover distance accumulates into the next call instead of being
+        // stamped short, which is what keeps a slow drag from bunching dabs up at the start.
+        guard travelled > 0 else { return (last, spacing) }
+        let coveredT = travelled / distance
+        return (CGPoint(x: last.x + dx * coveredT, y: last.y + dy * coveredT), spacing)
     }
 
     /// Replays a whole stroke (spacing-interpolated between samples, exactly like
@@ -98,103 +111,158 @@ enum BrushStamper {
     /// tolerance, and it would grow every time a brush's spacing was widened. `StrokePath.advance`
     /// marches the interpolant through the stored points instead, so a stroke's ink is a function of
     /// its geometry and not of the spacing it happens to be walked at.
+    ///
+    /// ## The spacing is read at every dab, drawn or not — §12 stage 7
+    ///
+    /// `spacing` is one of §6's outputs, so it may vary along a stroke. The gap leading *away* from a
+    /// dab is resolved **at that dab**, which is the only causal choice: the walk has to know how far
+    /// to travel before it arrives anywhere to ask.
+    ///
+    /// It is resolved for a dab the walk **skips** as well as one it draws — whether skipped by
+    /// `visibleRange` or by §2.18's density — for exactly the reason arc length advances over a
+    /// skipped dab: the lattice is a property of the walk, not of what came out of it. A cut piece and
+    /// the uncut stroke march identically or the zero-tolerance parity net fails on the first dab past
+    /// the cut.
     static func stampStroke(into raster: DabTarget, samples: StrokeSamples, brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
                             random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
-        let spacing = stampSpacing(brushSize: brushSize, brush: brush)
-        // One dab's worth of arc length, in brush widths. A zero-width brush has no width to measure
-        // against and falls back to points, which keeps the degenerate case addressing distinct cells
-        // instead of collapsing every dab onto one.
-        let step = brushSize > 0 ? spacing / brushSize : spacing
         let path = StrokePath(points: samples.positions)
+        // **BRUSH.md §13's open question, answered by §12 stage 7: a *replay* knows how long the
+        // stroke is, and a live walk does not.** This one is replaying stored geometry, so the length
+        // is measurable — and is measured, once, only when a row actually asks for `taper`, because
+        // it is a second flattening pass over the curve and no other brush should pay for it. The
+        // live walk (`StrokeCanvasView.stampPath`) stamps as the pen moves and genuinely cannot know,
+        // so `taper` answers its neutral there; that asymmetry is real, is confined to a brush that
+        // tapers, and is written down rather than papered over.
+        let totalArcWidths: CGFloat? = brush.modulations.readsTaper && brushSize > 0
+            ? path.arcLength(to: path.domainEnd) / brushSize : nil
         // BRUSH.md §5.5: every sensor this walk reads resolves here, and a channel the stroke does not
         // carry answers a defined neutral rather than whatever a field defaulted to.
-        let sensors = StrokeSensors(samples: samples, path: path, random: random, brushSize: brushSize)
+        let sensors = StrokeSensors(samples: samples, path: path, random: random,
+                                    brushSize: brushSize, totalArcWidths: totalArcWidths)
 
         func draws(at parameter: CGFloat) -> Bool { visibleRange?.contains(parameter) ?? true }
+
+        /// §6's matrix at one site, through §5.5's funnel — the one place this walk resolves anything.
+        func values(at site: DabSite) -> BrushDabValues {
+            brush.dabValues { sensors.value(of: $0, at: site) }
+        }
 
         // The first dab sits on the first stored point — the anchor the whole lattice hangs from, what
         // `visibleRange` counts from, and arc length zero.
         var arcWidths: CGFloat = 0
+        var resolved = values(at: DabSite(parameter: 0, arcWidths: 0))
         if draws(at: 0) {
-            stampDab(into: raster, at: samples.positions[0],
-                     pressure: sensors.value(of: .pressure, at: DabSite(parameter: 0, arcWidths: 0)),
-                     brush: brush,
+            stampDab(into: raster, at: samples.positions[0], brush: brush, values: resolved,
                      color: color, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
                      random: random, arcWidths: arcWidths)
         }
-        // Distance walked since the last dab. A segment too short to place one hands its length to
-        // the next instead of stamping short, which is what keeps a slow drag from bunching dabs up.
-        var carried: CGFloat = 0
+        var carry = WalkCarry(spacing: stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
         for index in 0..<max(samples.count - 1, 0) {
-            carried = path.advance(segment: index, spacing: spacing, carried: carried) { dab, u in
-                // Advances over a skipped dab as well as a drawn one: the field is addressed by where
-                // the walk got to, not by how many dabs came out of it.
-                arcWidths += step
+            carry = path.advance(segment: index, carry: carry) { dab, u, walked in
+                // One dab's worth of arc length, in brush widths, taken from the spacing this step
+                // actually walked. A zero-width brush has no width to measure against and falls back
+                // to points, which keeps the degenerate case addressing distinct cells instead of
+                // collapsing every dab onto one. Accumulated rather than multiplied out, because the
+                // step is not a constant once §6's spacing is sensor-driven.
+                arcWidths += brushSize > 0 ? walked / brushSize : walked
                 let site = DabSite(parameter: CGFloat(index) + u, arcWidths: arcWidths)
-                guard draws(at: site.parameter) else { return }
-                // Pressure ramps across the dabs bridging two stored points rather than every one of
-                // them taking the destination point's value. One segment can span many dabs, and
-                // holding pressure flat across them turned a smooth press into a visible staircase in
-                // both width and opacity. The ramp is the funnel's, so a stroke with no pressure
+                resolved = values(at: site)
+                // Every parameter ramps across the dabs bridging two stored points rather than every
+                // one of them taking the destination point's value. One segment can span many dabs,
+                // and holding pressure flat across them turned a smooth press into a visible staircase
+                // in both width and opacity. The ramp is the funnel's, so a stroke with no pressure
                 // channel gets the neutral here and nowhere else.
-                stampDab(into: raster, at: dab, pressure: sensors.value(of: .pressure, at: site),
-                         brush: brush, color: color, brushSize: brushSize, brushOpacity: brushOpacity,
-                         isEraser: isEraser, random: random, arcWidths: arcWidths)
+                if draws(at: site.parameter) {
+                    stampDab(into: raster, at: dab, brush: brush, values: resolved,
+                             color: color, brushSize: brushSize, brushOpacity: brushOpacity,
+                             isEraser: isEraser, random: random, arcWidths: arcWidths)
+                }
+                return stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
         }
         raster.endStroke()
     }
 
-    /// Stamps one dab, honoring the brush's tip/hardness/pressure dynamics/scatter. Ported
-    /// verbatim from `StrokeCanvasView.stampOne` so live and replayed strokes match exactly.
+    /// **Turns one dab's resolved §6 outputs into one stamp.** The other half of the matrix: `values`
+    /// is what `Brush.dabValues` computed at this site, and this is where those numbers become a
+    /// diameter, an alpha, an angle and a colour.
+    ///
+    /// **The split is values against draws.** Everything in `values` is a pure function of the brush
+    /// and the sensors; the three things that additionally need a *draw* from the stroke's own random
+    /// field are taken here, because here is where `random` and `arcWidths` are — §2.18's density
+    /// dropout, the scatter offset, and the angle's jitter. That is what lets `BrushDabValues` be
+    /// answerable by a caller with a pressure and no stroke (`Brush.dabValues(atPressure:)`).
     ///
     /// The eraser reuses this exact pipeline rather than a special-cased hard circle: it "paints"
-    /// with the same tip/dynamics/spacing as any other brush, just composited with
-    /// `.destinationOut` instead of the brush's own blend mode — i.e. painting with 0 opacity as the
-    /// color, so its stamp punches a hole instead of adding color. `color` is irrelevant under
-    /// `.destinationOut` (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
+    /// with the same tip/matrix/spacing as any other brush, just composited with `.destinationOut`
+    /// instead of the brush's own blend mode — i.e. painting with 0 opacity as the color, so its
+    /// stamp punches a hole instead of adding color. `color` is irrelevant under `.destinationOut`
+    /// (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
     ///
     /// `random` and `arcWidths` say **where in the stroke's random field** this dab sits — the field,
     /// and how far along the stroke it is in brush widths. There is one entry point rather than a
     /// seeded and an unseeded one: BRUSH.md §4 leaves nothing that a live dab could roll differently
     /// from a replayed one, and the seed exists at pen-down.
-    static func stampDab(into raster: DabTarget, at point: CGPoint, pressure: CGFloat,
-                         brush: Brush, color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool,
+    static func stampDab(into raster: DabTarget, at point: CGPoint, brush: Brush,
+                         values: BrushDabValues, color: UIColor, brushSize: CGFloat,
+                         brushOpacity: Double, isEraser: Bool,
                          random: DabRandom, arcWidths: CGFloat) {
-        let pressureValue = Double(max(0, min(pressure, 1)))
-        let sizeFraction = brush.dynamics.sizeFraction(forPressure: pressureValue)
-        let opacityFraction = brush.dynamics.opacityFraction(forPressure: pressureValue)
-        let diameter = max(brushSize * CGFloat(sizeFraction), 0.5)
+        // **BRUSH.md §2.18 — the dab is skipped when its draw exceeds its density.**
+        //
+        // A skip disturbs nothing, and that is §4's design rather than care taken here: there is no
+        // sequence and no phase, so not drawing shifts no value anywhere. The walk's arc length and
+        // its spacing are resolved outside this function and advance over a skip exactly as they
+        // advance over a `visibleRange` one. The `< 1` guard is an early-out only — a density of 1 is
+        // never exceeded by a draw in `0..<1`, so taking the draw would change nothing but the clock.
+        if values.density < 1 {
+            let draw = random.unit(.density, at: arcWidths, wavelength: brush.dab.densityWavelength)
+            guard Double(draw) <= values.density else { return }
+        }
+        let diameter = max(brushSize * CGFloat(values.size), 0.5)
         let radius = diameter / 2
-        let alpha = CGFloat(brushOpacity) * CGFloat(brush.flow) * CGFloat(opacityFraction)
+        let alpha = CGFloat(brushOpacity) * CGFloat(values.flow) * CGFloat(values.opacity)
         guard alpha > 0, radius > 0 else { return }
 
-        let stampPoint = applyScatter(to: point, radius: radius, scatter: brush.scatter,
+        let stampPoint = applyScatter(to: point, radius: radius, scatter: values.scatter,
                                       random: random, arcWidths: arcWidths)
-        let hardness = CGFloat(brush.hardness)
-        let blendMode = isEraser ? CGBlendMode.destinationOut : brush.blendMode.cgBlendMode
+        let hardness = CGFloat(values.hardness)
+        let blendMode = isEraser ? CGBlendMode.destinationOut : brush.stroke.blendMode.cgBlendMode
+        // §6's hue/saturation/brightness outputs. Guarded rather than always applied: both dab caches
+        // are keyed on the colour, so a per-dab colour is `DabGradientCache`'s own named pathological
+        // case. A brush that asks for colour jitter pays for it; one that does not pays a comparison.
+        let inkColor = (values.hueShift != 0 || values.saturationShift != 0 || values.brightnessShift != 0)
+            ? BrushColorShift.apply(to: color, hue: values.hueShift,
+                                    saturation: values.saturationShift, brightness: values.brightnessShift)
+            : color
 
         // Exhaustive with no `default:`, which is the whole point of `BrushTip` being a
         // payload-carrying enum: a third tip kind is a compile error here rather than a search.
         switch brush.tip {
         case .round:
-            raster.stampCircle(at: stampPoint, radius: radius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
+            // A disc turned is the same disc, so §6's `angle` output reaches only the other arm —
+            // which is why `BakedDab.Tip` carries an angle on one case and a hardness on the other.
+            raster.stampCircle(at: stampPoint, radius: radius, color: inkColor, alpha: alpha, hardness: hardness, blendMode: blendMode)
         case .stamp(let texture):
             // §4: the jitter is `hash(seed, arcLength)` on its own channel, so it is the same
             // value whichever piece of a split stroke this dab lands in and whatever the refit did
             // to the point count. The `> 0` test is an early-out and nothing more — unlike the
             // sequential stream it replaced, not drawing shifts nothing after it.
-            let rotation: CGFloat = brush.rotationJitter > 0
-                ? random.signedUnit(.rotation, at: arcWidths) * .pi * CGFloat(brush.rotationJitter)
+            //
+            // §6: "Angle has three contributions that sum." The first two are in `values.angleTurns`
+            // (turns, so `direction` — which is a fraction of a turn — reaches it with no conversion);
+            // the jitter is a draw and is added here, in radians, at ±half a turn when it is 1.
+            let jitter: CGFloat = brush.dab.angle.jitter > 0
+                ? random.signedUnit(.rotation, at: arcWidths) * .pi * CGFloat(brush.dab.angle.jitter)
                 : 0
+            let rotation = CGFloat(values.angleTurns) * 2 * .pi + jitter
             // The tip carries which mask, so the artist's own PNG reaches the primitive by the
             // route the committed square already took. There is nothing to resolve here and no
             // second arm: `BrushTextureRef` is the only thing that names a mask.
             raster.stampImage(texture, at: stampPoint, diameter: diameter, angle: rotation,
-                              color: color, alpha: alpha, blendMode: blendMode)
+                              color: inkColor, alpha: alpha, blendMode: blendMode)
         }
     }
 

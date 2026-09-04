@@ -163,7 +163,7 @@ rough, almost giving it a sort of slightly rough blotchy sketchy feel to the lin
 would be nice, organized into groups, with the option to make my own."* §8.
 
 **2.17 Every `random` modulation carries a wavelength, and the rough ink's dropout ships at three to four
-brush widths.** §2.13 rules that a per-dab random is `hash(strokeSeed, arcLength)`; the wavelength makes that
+brush widths.** BUILT, §12 stage 7. §2.13 rules that a per-dab random is `hash(strokeSeed, arcLength)`; the wavelength makes that
 value band-limited rather than white — it interpolates between hashed lattice points λ of arc length apart,
 and λ = 0 is a fresh draw per dab. Nothing about §4 changes: there is still no sequence and no phase, so a
 value survives a split, a refit, a spacing edit and an eraser punch for the same reason. **λ is what
@@ -173,14 +173,16 @@ long arcs the owner picked out of the comparison sheet. One output may carry sev
 different λ, which is how a rough nib gets slow thick/thin variation and fine edge fuzz out of one input
 with no spectral-slope parameter.
 
-**2.18 `density` is an output — the probability that a dab is stamped at all.** The dab is skipped when its
+**2.18 `density` is an output — the probability that a dab is stamped at all.** BUILT, §12 stage 7 —
+`BrushDabSettings.density` and `.densityWavelength`, drawn on `DabRandom.Channel.density`. The dab is skipped when its
 random draw exceeds it. Nothing special-cases pressure: the owner's *"at very low pressure, segments of the
 brush aren't painted (its noisy), creating a sort of segmented lineart filled with gaps"* is `density ←
 pressure`, one row of §6's matrix like any other. **The coherence lives in the draw, not in the value
 compared against** — modulating `density` by a coherent random while drawing white noise gives a thinned
 speckle rather than gaps — so λ sits on the `density` row itself.
 
-**2.19 A taper is low pressure, so `density ← pressure` is a threshold curve rather than a ramp.** Density
+**2.19 A taper is low pressure, so `density ← pressure` is a threshold curve rather than a ramp.** BUILT —
+`ResponseCurve.threshold(knee:low:high:)` and `BrushModulation.densityFromPressure(knee:floor:)`. Density
 holds flat at 1 above about a third of full pressure and falls below it. Without that the dropout eats the
 point of every tapered stroke and a hair spike ends in gaps; with it a taper keeps its point while a stroke
 drawn genuinely light breaks up along its whole length. That is the shape of the curve §6 already gives
@@ -676,10 +678,16 @@ a decision could have preserved.
 
 ---
 
-## 6. The brush model — a modulation matrix
+## 6. The brush model — a modulation matrix — BUILT, §12 stage 7
 
 Every parameter is `base value + [modulation]`, where a modulation is **(input, curve, amount)**. That is
 the brief's *"every parameter should be able to be sensor driven"*, and it is the CSP model.
+
+**What shipped**: `BrushOutput`, `BrushModulation`, `BrushModulations` and `ResponseCurve` in
+`Engine/BrushModulation.swift` and `Engine/ResponseCurve.swift`; `Brush` regrouped into `dab`, `stroke`
+and `modulations`; `BrushDynamics` **deleted in full**. `Brush.dabValues(_:)` is the evaluator and
+`BrushStamper.stampDab` turns its answer into a stamp. Every sentence below that is not marked
+otherwise describes what is there.
 
 **Inputs** (§2.8): `pressure` · `tiltAngle` · `tiltDirection` · `direction` · `taper` (distance along the
 stroke, from either end) · `velocity` · `random`.
@@ -692,28 +700,65 @@ whose run does not carry the channel.
 any size** — §2.17. Its value interpolates between hashed lattice points λ of arc length apart, which is
 still exactly §4's `hash(strokeSeed, arcLength)`; λ = 0 is a fresh draw per dab.
 
-**Outputs**: `size` · `opacity` · `flow` · `angle` · `roundness` · `spacing` · `scatter` · `density` ·
-`hue` / `saturation` / `brightness` shift · `hardness` (procedural tips only).
+**Outputs**: `size` · `opacity` · `flow` · `angle` · ~~`roundness`~~ · `spacing` · `scatter` ·
+`density` · `hue` / `saturation` / `brightness` shift · `hardness` (procedural tips only).
+
+**`roundness` is the one output stage 7 did not ship, and it is a decision rather than an omission.** A
+non-circular dab contradicts §3.5's ruling that *"a tip's mask is square, by ruling. One scalar for the
+dab's size keeps `DabPose` at one multiply, `BakedDab` at one number and the dirty-rect bound at one
+`abs`."* Shipping it means a second extent through both `DabTarget` primitives, `BakedDab`,
+`DabPose.applied(to:)`, `dabBounds`, `StrokeScratch`'s window and the dirty rect every compositor
+accumulates — i.e. reversing a stage-3 ruling and touching the zero-tolerance parity net and
+KEYFRAMES' pose path in the same change. Nothing before §12 stage 9's **chisel** and **flat** brushes
+needs it, and those are what should carry it: it belongs with the tips that are anisotropic, not with
+the matrix. Declaring the output and leaving the renderer not reading it would have been worse than its
+absence — this document's own §12 stage 5 note and CLAUDE.md's *"a feature is not finished because its
+model is correct"* are both about exactly that.
+
+**The bases are grouped, `size` and `opacity` are not, and that pair is not an exception.** `Brush.size`
+and `Brush.opacity` are the *stroke's* diameter and opacity: `BrushStamper` takes both as arguments
+because the toolbar drives them and a lasso resize scales the first, and what the preset holds is the
+value copied into `CanvasManager.brushSize` when it is picked. `BrushDabSettings.size` and `.opacity`
+are the matrix's own outputs — the fractions those are multiplied by — and live with the rest.
 
 `density` (§2.18) is the probability that a dab is stamped at all, and it is the one output whose λ belongs
 to the **row** rather than to a modulation entry, because what has to be coherent is the draw.
 
 Angle has three contributions that sum: a base angle, direction-follow as a 0–100% amount, and jitter.
+Measured in **turns**, so `direction` — which the funnel answers as a fraction of a turn — reaches it
+with no conversion. The jitter is a *draw* rather than a value, so `BrushDabValues` carries the first
+two and `stampDab` adds the third, which is the same line that keeps the scatter offset and §2.18's
+dropout out of the evaluator.
+
+**Direction-follow *is* also expressible as a row** — `angle ← direction` at amount 1, since the output
+is in turns and the funnel answers direction in turns — and that would ordinarily be §10's
+two-ways-to-compute trap. It is not, because the two forms are **pinned equal**:
+`BrushModulationLogicTests` renders a turning stroke both ways and asserts the dabs match, and asserts
+that neither matches a brush with no follow at all. A redundancy that is asserted is a tested identity;
+the one §10 warns about is the unasserted kind. The named field survives because §6 names it and
+because an artist sets a follow as a percentage rather than by drawing a curve.
+
+**Jitter is not a row wearing a different hat, and that is worth being exact about.** It draws from
+`DabRandom.Channel.rotation` — one of the four intrinsic draws, not a matrix channel — and it is
+*signed*, `±j/2` of a turn about the base rather than `0…j` above it. An `angle ← random` row is a
+different value from a different cell, so the two coexist rather than duplicate; a brush can carry both
+and they do not cancel.
 
 `BrushShape` + `customTextureFileName` — a case and a parallel optional field that could disagree —
 are **one payload-carrying enum since §12 stage 5**, so the illegal states are not representable and
 `stampDab`'s switch is exhaustive with no `default:`:
 
 ```swift
-enum BrushTip: Codable, Equatable {
+enum BrushTip: Codable, Hashable {
     case round                    // procedural, hardness gradient
     case stamp(BrushTextureRef)   // a committed tip, or the artist's own PNG
 }
 ```
 
 **Five shapes became two cases and no ink moved.** `.softRound`, `.hardRound`, `.pen` and `.pencil` all
-called `stampCircle` and differed only in the `hardness`, `spacingFraction` and `dynamics` their presets
-carried, every one of which is still a `Brush` field. `.square` and `.custom` are both `stampImage` of a
+called `stampCircle` and differed only in the hardness, spacing and pressure response their presets
+carried — `dab.hardness`, `dab.spacing` and two rows of the matrix since stage 7, and every one of them
+still a `Brush` field. `.square` and `.custom` are both `stampImage` of a
 `BrushTextureRef`, so the difference between a shipped tip and the artist's own is a case of *that* type
 rather than a case of the brush's shape — which is what makes an imported PNG reach the renderer by the
 route the committed square already took.
@@ -743,9 +788,62 @@ a PNG that is already a mask keeps its alpha and cannot be inverted. A picture t
 at all is refused by name (`Failure.blankMask`) rather than becoming a brush that paints air, which is the
 failure a renderer bug looks exactly like.
 
-`Brush`'s flat scalars group into sub-structs the way `dynamics` and `blendMode` already are, each with a
-`static let default` and defaulted decode. `Brush`'s `Codable` is compiler-synthesized today, so every
-new flat key is a decode-compatibility question; a nested field with a default is not.
+`Brush`'s flat scalars group into sub-structs the way `dynamics` and `blendMode` already did, each with a
+`static let default` and defaulted decode. `Brush`'s `Codable` was compiler-synthesized, so every new
+flat key was a decode-compatibility question; a nested field with a default is not. **Three groups
+shipped**: `dab` (`BrushDabSettings` — every output's base, plus `densityWavelength` and the angle's
+three contributions), `stroke` (`BrushStrokeSettings` — `stabilization` and `blendMode`, the two
+settings that are not dab outputs and could not be), and `modulations` (`BrushModulations` — the rows).
+
+### 6.1 The curve is `AnimationCurve`, over a different axis
+
+§7 asks that reusing TODO (38)'s bezier control *"keeps this from being a second curve
+implementation"*, and `ResponseCurve` is that taken literally: it **stores an `AnimationCurve`** and
+does one thing to it — maps the sensor's `0…1` onto that curve's integer-frame axis. No bezier
+arithmetic, no second tangent grammar, no second answer to what `.autoClamped` means. `ResponseCurve
+.curve` is the binding stage 10's editor drives.
+
+**The scale is 1024 and that is load-bearing, not tidy.** `value(at:)` multiplies by it and
+`AnimationCurve`'s linear segment divides by it, so the round trip must be the identity or a straight
+ramp is not straight. MEASURED over 200,000 random inputs: **0** disagreements at 1024 and **6,909** at
+1000. One disagreement is one ulp of dab diameter, which is exactly what the preset pin and
+`RasterVectorParityLogicTests` are unwilling to spend.
+
+`AnimationCurve` gained `Hashable` (and `Key`, `Handle`, `Interpolation`, `TangentMode` with it),
+because `Brush` is `Hashable` and `BrushPool` addresses an entry by its whole value.
+
+**The identity is the *empty* curve**, which is what almost every row carries and what all five presets
+use — a `guard`, not a binary search and a Newton solve per dab per row. It is also why this cannot
+simply forward to `AnimationCurve.evaluate`, which answers **0** for an empty curve: correct for a
+channel, and here it would silently delete the row.
+
+### 6.2 A `random` row's channel is derived, never authored
+
+§4 rules that a channel has to be in the hash or two draws at one arc length would be the same number,
+and §8.4's rough nib is *built* from several `random` rows at different λ. So `DabRandom.Channel` is a
+struct now rather than an enum — the three intrinsic draws keep their raw values 1–3, §2.18's dropout
+takes 4, and `DabRandom.Channel.modulation(_:row:)` mints one per *(output, position)* from 16 up.
+
+**Derived rather than stored** is what makes "no two rows share a channel" a fact instead of an
+invariant somebody maintains, and `BrushInput`'s codec leaves the channel off the wire entirely so a
+stale one cannot contradict the matrix — the same defect as the `BrushShape` + `customTextureFileName`
+pair stage 5 deleted. The stated cost: inserting a row *before* another on the same output re-rolls
+that one's draws, which is the same class of change as editing a brush's spacing (§4: *"those are
+different dabs"*) and is confined to one output's rows.
+
+### 6.3 The consumers that have a pressure and no walk
+
+Three places resolve a brush with no stroke around them — `StrokeGeometry.stampRadius` (the eraser's
+capsule chain), `VectorEraser.supportsCleanCut`, and `VectorCanvas.strokePolyline` (the `.preview`
+tier, which already approximates the pressure ramp by its mean). `Brush.dabValues(atPressure:)` is what
+they call: the matrix with every other sensor at its §5.5 neutral.
+
+**That answer is only *true* for a brush whose rows are all pressure-driven**, so the eraser's two
+gates ask. `supportsSplitting` and `supportsCleanCut` now refuse a brush with any non-pressure row, and
+refuse any `density < 1` outright — a dropout brush stamps *gaps*, so "the eraser covered this
+cross-section" is a claim about paper. Both fall back to the exact alpha punch, which is right whatever
+the dabs did. That is §11's *"gate on brush properties, not on a list of known brushes"* reached
+through §6's door.
 
 ---
 
@@ -758,7 +856,27 @@ pick an input, draw a curve, set an amount.
 timeline's graph band; a pressure curve is the same control over a different domain, and reusing it is
 what keeps this from being a second curve implementation.
 
-Parameters with no UI at all today — `scatter`, `rotationJitter`, `hardness`, `blendMode` — get one here.
+**§12 stage 7 built the model half of that and left the editor exactly one job.** `ResponseCurve` holds
+an `AnimationCurve` (§6.1) — the same type `TimelineGraphBand` already draws and drags — so the editor
+does **not** need a new curve type, new handle modes, new tangent maths or a new codec. What it has to
+do:
+
+1. **Bind to `modulation.curve.curve`**, an `AnimationCurve`, and re-plot the band's axes: x is the
+   sensor's `0…1` mapped through `ResponseCurve.scale` (0…1024 in the curve's own units), y is the
+   output's own range. `TimelineGraphBand`'s x axis is frames off `TimelineLayoutKey` and its y axis
+   auto-ranges to the channel's live key values, so both are substitutions rather than rewrites — and
+   the auto-range is the one to be careful with, because it is the defect the owner found on the device
+   in TODO (38) (a node that wrote the right number and did not move, because with two keys both are
+   extremes). A response curve's y axis should be **fixed**, not auto-ranged.
+2. **Offer the row grammar**: pick an output, pick an input, set an amount, optionally draw a curve.
+   `BrushModulations.setAmount(_:for:from:)` is there for the amount; adding and removing rows wants
+   one more accessor of the same shape.
+3. **Show λ on a `random` row and on the `density` row**, which are two different places by ruling
+   (§2.18) and should not look like one control.
+4. **Not offer the channel.** It is derived from where the row sits (§6.2) and is off the wire.
+
+Parameters with no UI at all today — `scatter`, the angle's three contributions, `hardness`, `density`
+and its λ, `blendMode` and the three HSB shifts — get one here.
 Edits currently apply to a live copy and are lost when the preset changes; §2.9's table plus §2.10's
 minting is what makes an edit persist.
 
@@ -928,18 +1046,30 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | ~~`VectorSample`'s `Codable`, and `decodeRun`'s `[VectorSample]` fallback~~ **gone** | one way to write a sample, and it is `PackedSampleRun` — §2.14 | 4 |
 | ~~`BrushShape` + `customTextureFileName` as a separable pair~~ **gone**, and with it `BrushShape.displayName` | `BrushTip`, one payload-carrying enum — §6 | 5 |
 | ~~`VectorStroke`'s by-value `Brush`~~ **gone** | `BrushRef` into `BrushPool`, redeemed against the document's `BrushTable` — §5.4 | 6 |
-| `BrushDynamics.sizeFraction` / `.opacityFraction`, the two hardcoded linear pressure blends | the modulation matrix — §6 | 7 |
-| `Brush`'s flat scalars | grouped sub-structs with defaulted decode — §6 | 7 |
+| ~~`BrushDynamics`~~ **gone in full**, both blends and the type | §6's matrix: two rows per preset — §12 stage 7 | 7 |
+| ~~`Brush`'s flat scalars~~ **gone** | `dab` / `stroke` / `modulations`, each with a defaulted decode — §6 | 7 |
 | `BrushLibrary.defaults` — softRound, hardRound, pencil, pen, square | the generated and sourced set, in groups — §8 | 9 |
 
 **No decode defaults for fields that stopped existing, no format version, no migration, no compatibility
 shim, and no "this used to be" comments.** Documents on the device are expendable, so the format simply
 changes. The one place history is kept is this document and `git log`.
 
-**`BrushDynamics`' two blends are the trap on that list**, because they are correct and cheap and there
-will be a reason to keep them as a fast path beside the general one. Two ways to compute a dab's size is
-two ways for it to be wrong, and the parity test compares tiers rather than paths, so it would not catch
-the divergence.
+**`BrushDynamics`' two blends were the trap on that list**, because they are correct and cheap and there
+would have been a reason to keep them as a fast path beside the general one. Two ways to compute a dab's
+size is two ways for it to be wrong, and the parity test compares tiers rather than paths, so it would
+not catch the divergence.
+
+**They are gone, and the assertion that says the deletion cost nothing is the one to keep.**
+`BrushModulationLogicTests.testTheFivePresetsRenderIdenticallyToTheDynamicsTheyReplaced` renders all
+five presets both ways at **zero tolerance** — once through the matrix, once through the deleted
+arithmetic *transcribed into the test* rather than called, since calling a surviving copy would be the
+second path this paragraph forbids. Mutation-tested: moving one preset's row amount by 0.02 reds it.
+
+The exactness is not luck. Each preset's `dab.size` is `1 - k` and its row is a `ResponseCurve.ramp`
+from `m` to 1 at amount `k`, so the expression evaluated is `(1 - k) + k · (m + (1 - m) · p)` — the same
+association, in the same order, as `sizeFraction`'s `(1 - k) * 1 + k * pressureDriven`, and `x * 1` is
+exact. §6.1's power-of-two scale is what makes the curve half exact; `1 - k == ` the literal base was
+checked for all five, and `m + (1 - m) == 1` for all five values of `m`.
 
 ### 9.2 What makes it flexible, which is a property of the same decisions
 
@@ -1070,7 +1200,31 @@ first, which cleanly replaces the old one."*
    **What is deliberately not built**: layer and document scope for the verb, and the reason is filed rather
    than hidden — nothing in the repo batches per-cel content restores across *several* cels into one undo
    `Action`, and a selection lives in one cel. [BUGS.md](BUGS.md) carries it.
-7. **The modulation matrix** — `Brush` regrouped, every parameter `base + [modulation]`. §6.
+7. **DONE — the modulation matrix.** §6. Every dab parameter is `base + Σ amount · curve(input)`,
+   resolved once per dab through §5.5's funnel by `Brush.dabValues(_:)`; `BrushDynamics` is deleted
+   whole and the five presets carry two rows each instead. `density` (§2.18) skips a dab whose draw
+   exceeds it, with λ on the row; `spacing` is read at **every** dab, drawn or skipped, which is what
+   `StrokePath.advance`'s `WalkCarry` is for. Pinned by `BrushModulationLogicTests` — the five presets
+   byte-identical to the arithmetic they replaced, every output reaching a dab and every input reaching
+   an output, density at 1 bit-identical to no density row, a lower density removing dabs and moving
+   none of the survivors, λ turning isolated skips into runs (measured as **mean run length over eight
+   seeds**, not as "a noise field differs at two positions", which is true of any implementation), and
+   the eraser refusing a brush whose ink the capsule chain cannot bound.
+   **Four of this section's instructions did not survive contact.**
+   - **`roundness` is not shipped** and §6 carries the reason: it contradicts §3.5's square-mask ruling
+     and belongs to stage 9's chisel and flat brushes, which are the tips that need it.
+   - **The live tier had to be taught the matrix**, which this stage did not anticipate. On a raster
+     layer the dabs the pen lays down *are* the cel's pixels — nothing is re-stamped at lift — so a
+     walk that could not read §6 would have left half the app without the feature.
+     `StrokeCanvasView.stampPath` builds a two-sample `StrokeSensors` over the segment it is bridging.
+     One behaviour change rides along and it removes a divergence: **live pressure now ramps across a
+     walk** instead of being flat at the destination sample. A finger reports a constant 1, so nothing
+     an XCUITest can draw is affected.
+   - **§13's taper question is answered, and the answer is asymmetric.** A *replay* can measure the
+     stroke, so `stampStroke` does — once, and **only when a row asks for taper**, because it is a
+     second flattening pass. The live walk genuinely cannot and answers the neutral.
+   - **`BrushDabValues` had to be answerable without a walk.** Three consumers have a pressure and no
+     stroke; §6.3 is what they call and what the eraser's widened gates protect.
 8. **Opacity and Flow**, and the per-stroke buffer. §2.11. Late, because it changes the live drawing path
    and wants the rest settled around it.
 9. **The library: groups, and the tip generator.** §8. The group tree reusing the layer tree's; the
@@ -1102,16 +1256,33 @@ first, which cleanly replaces the old one."*
   third party that can relicense or pull it.
 - **Whether the Texture group is worth its licensing step at all.** If §8.4's generator turns out to make
   credible grunge, the CC0 dependency disappears and §12 stage 11 with it. Nobody has tried.
-- **What the live tier does about `taper`.** `StrokeSensors.totalArcWidths` is nil for the live raster
-  walk, which stamps as the pen moves and genuinely cannot know how long the stroke will be, so `taper`
-  answers its neutral there and the full value on replay. Nothing reads taper yet; §12 stage 7 has to
-  decide, and until it does `RasterVectorParityLogicTests` would catch a taper modulation as a divergence
-  rather than as the design question it is.
+- ~~**What the live tier does about `taper`.**~~ **Answered by §12 stage 7, and the answer is
+  asymmetric.** A replay measures the stroke's own length and `stampStroke` passes it, so a taper row
+  works there; it is measured **only when a row asks for it**, because it is a second flattening pass
+  over the curve and no other brush should pay. The live walk stamps as the pen moves and genuinely
+  cannot know, so `taper` answers its neutral — which is 1, *mid-stroke*, so a tapering brush draws its
+  live preview un-tapered and the committed vector stroke tapers. `RasterVectorParityLogicTests`
+  compares two replays, so it does not see this; the divergence is between the pen and the ink, it is
+  confined to brushes that taper, and on a **raster** layer it is permanent because the live dabs are
+  the cel. Nothing in the shipped set tapers yet. The fix, when one does, is not to guess a length
+  live: it is to re-stamp a raster stroke from its fitted samples at lift, which is a change to the
+  raster commit path rather than to the funnel.
 - **How an angle channel travels through a map that is not an affine.** `StrokeSamples.transformed(by:)`
   turns azimuth by an affine's polar rotation, but an interpolation lattice warp has no single rotation
   and would need the *local* Jacobian per sample. It carries the angle unchanged today, which is stated at
-  both call sites rather than defaulted. Nothing reads azimuth until stage 7's angle output, so the cost
-  of being wrong is currently zero and the cost of guessing now is a second definition to keep in step.
+  both call sites rather than defaulted. **Stage 7 shipped the reader** — a `tiltDirection` row on the
+  `angle` output — so the cost of being wrong is no longer zero for a brush that uses one. It is still
+  zero for every brush in the shipped set, and the cost of guessing is still a second definition to keep
+  in step, so this stays open rather than being answered on no evidence.
+- **What §6's colour outputs cost the dab caches, unmeasured.** `DabGradientCache` is keyed on the
+  dab's RGB and holds 32 entries; `DabImageCache` on the tip, the colour and the size octave, and a miss
+  there is a MEASURED 162 µs bitmap build against 5.5 µs for a hit (§3.5). A hue/saturation/brightness
+  row changes the colour per dab, which is precisely the *"rainbow brush stamping a new colour per dab"*
+  `DabGradientCache`'s own doc names as its pathological case. `BrushStamper` guards the shift on a
+  comparison, so a brush that does not ask pays nothing — but nobody has taken the number for one that
+  does, and PERFORMANCE.md's rule is that a figure carries MEASURED or INFERRED. The obvious mitigation
+  if it bites is to quantise the shifted colour so consecutive dabs share cache entries; it is not built,
+  because a mechanism nobody has measured a need for is the thing §9.2 says not to add.
 - **Whether the refit tolerance is one constant or scales with zoom.** Still open, and stage 0 sharpened
   it rather than answering it. The tolerance is in canvas points, so zooming *out* is the dangerous
   direction, not in: at 16383² the artist works at `fitScale` 0.047, one screen point is 21 canvas points,

@@ -67,13 +67,13 @@ import Foundation
 ///
 ///    A zero-length segment is the thing this rule exists to prevent: it divides by zero in the bezier
 ///    parameterisation and has no defensible value at its own frame.
-struct AnimationCurve: Codable, Equatable {
+struct AnimationCurve: Codable, Hashable {
 
     // MARK: - Pieces
 
     /// How the segment *beginning* at a key is interpolated. Carried on the earlier key, which is what
     /// lets a hold sit between two eases without a second per-segment table to keep in step.
-    enum Interpolation: String, Codable {
+    enum Interpolation: String, Codable, Hashable {
         /// Hold: the segment is the start key's value throughout, and steps at the next key.
         case constant
         case linear
@@ -83,7 +83,7 @@ struct AnimationCurve: Codable, Equatable {
     /// Where a key's two handles come from. `.autoClamped` is the default for the reason it is
     /// Blender's: it is what stops a value that must not overshoot — an opacity, an intensity, a
     /// blur radius — from overshooting between two keys, without the artist having to notice.
-    enum TangentMode: String, Codable {
+    enum TangentMode: String, Codable, Hashable {
         /// A smooth tangent through the key, taken from the secant between its two neighbours. Free to
         /// overshoot, which is sometimes exactly right and sometimes an opacity of 1.15.
         case auto
@@ -104,7 +104,7 @@ struct AnimationCurve: Codable, Equatable {
     /// One handle, as an offset from its key in (frame, value) space. `outHandle` points forward in
     /// time so its `deltaFrames` is normally positive; `inHandle` points backward so its is normally
     /// negative. Both are stored unclamped — see decision 3.
-    struct Handle: Codable, Equatable {
+    struct Handle: Codable, Hashable {
         var deltaFrames: Double
         var deltaValue: Double
 
@@ -132,7 +132,7 @@ struct AnimationCurve: Codable, Equatable {
         var negated: Handle { Handle(deltaFrames: -deltaFrames, deltaValue: -deltaValue) }
     }
 
-    struct Key: Codable, Equatable {
+    struct Key: Codable, Hashable {
         /// Integer, because every timeline in the document is. The *curve* is continuous; the keys are
         /// not, and there is nothing an artist can do in the timeline to land one between two frames.
         var frame: Int

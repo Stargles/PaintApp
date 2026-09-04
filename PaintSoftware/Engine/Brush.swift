@@ -11,15 +11,15 @@ import Foundation
 /// so a third tip kind is a compile error at every dispatch rather than a search.
 ///
 /// **Five shapes collapsed into two cases and no ink moved.** `.softRound`, `.hardRound`, `.pen` and
-/// `.pencil` all called `stampCircle` and differed only in the `hardness`, `spacingFraction` and
-/// `dynamics` their presets carried — every one of which is still a `Brush` field, so the four are
+/// `.pencil` all called `stampCircle` and differed only in the hardness, spacing and pressure response
+/// their presets carried — every one of which is still a `Brush` field, so the four are
 /// one case. `.square` stopped being procedural in §12 stage 3 and became a committed alpha mask;
 /// `.custom` names a PNG under `BrushLibrary.customBrushesDirectory`. Both are `stampImage` of a
 /// `BrushTextureRef`, so they are the other, and the difference between "a shipped tip" and "the
 /// artist's own" is now a case of `BrushTextureRef` rather than a case of the brush's shape.
 enum BrushTip: Hashable {
     /// Procedural — a radial gradient whose falloff is `Brush.hardness`. No orientation: a disc
-    /// turned is the same disc, which is why `Brush.rotationJitter` reaches only the other arm.
+    /// turned is the same disc, which is why §6's `angle` output reaches only the other arm.
     case round
     /// A picture. Its edge is in its own pixels, so `Brush.hardness` does not reach it, and it
     /// carries an angle because a turned square is not the same square.
@@ -93,50 +93,44 @@ enum BrushBlendMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// How strongly Apple Pencil pressure affects a stamp's size and opacity. All fields are 0...1;
-/// 0 means pressure has no effect at all (the brush behaves like a fixed-width pen).
-struct BrushDynamics: Codable, Hashable {
-    var sizePressure: Double
-    var opacityPressure: Double
-    /// Stamp size at zero pressure, as a fraction of `Brush.size` — keeps light touches from
-    /// vanishing to a zero-width point when `sizePressure` is high.
-    var minSizeFraction: Double
 
-    static let `default` = BrushDynamics(sizePressure: 0.6, opacityPressure: 0.3, minSizeFraction: 0.3)
-    static let fixed = BrushDynamics(sizePressure: 0, opacityPressure: 0, minSizeFraction: 1)
-
-    /// Fraction (0...1, or slightly above if `minSizeFraction` > 1) of the brush's base size to use
-    /// at a given 0...1 pressure sample. At `sizePressure == 0` this is always 1 (fixed-width,
-    /// pressure has no effect); at `sizePressure == 1` it ranges from `minSizeFraction` at zero
-    /// pressure up to 1 at full pressure. Intermediate `sizePressure` blends linearly between the
-    /// two. Pure math — no UIKit/CoreGraphics dependency beyond `Double` — so it can be unit tested
-    /// without a simulator.
-    func sizeFraction(forPressure pressure: Double) -> Double {
-        let p = max(0, min(pressure, 1))
-        let pressureDriven = minSizeFraction + (1 - minSizeFraction) * p
-        return (1 - sizePressure) * 1 + sizePressure * pressureDriven
-    }
-
-    /// Fraction (0...1) of the brush's base opacity to use at a given 0...1 pressure sample. At
-    /// `opacityPressure == 0` this is always 1 (fixed opacity); at `opacityPressure == 1` it equals
-    /// `pressure` itself (a feather-light touch is nearly invisible). Intermediate values blend
-    /// linearly between the two, same shape as `sizeFraction`.
-    func opacityFraction(forPressure pressure: Double) -> Double {
-        let p = max(0, min(pressure, 1))
-        return (1 - opacityPressure) * 1 + opacityPressure * p
-    }
-}
-
-/// A brush preset: the tip it stamps plus every Procreate-style adjustable setting (size, opacity,
-/// spacing, pressure dynamics, stabilization, scatter, blend mode). Value-typed and
-/// `Codable` so it can be edited via simple bindings and persisted (built-ins in `BrushLibrary`,
-/// user imports under `Documents/Brushes`).
+/// A brush preset: the tip it stamps, the stroke-level settings, and **BRUSH.md §6's modulation
+/// matrix** — every parameter as `base value + [modulation]`, where a modulation is
+/// *(input, curve, amount)*. That is the brief's *"every parameter should be able to be sensor
+/// driven"*.
+///
+/// ## The flat scalars are gone, and so are the two pressure blends
+///
+/// §12 stage 7's row of §10's deletion ledger, in full: `BrushDynamics.sizeFraction` and
+/// `.opacityFraction` — the two hardcoded linear pressure blends — are **deleted, not kept as a fast
+/// path**, and the rest of the flat scalars are grouped into `dab` and `stroke`. §10 names the first
+/// as its own trap: *"they are correct and cheap and there will be a reason to keep them as a fast
+/// path beside the general one. Two ways to compute a dab's size is two ways for it to be wrong, and
+/// the parity test compares tiers rather than paths, so it would not catch the divergence."*
+///
+/// What replaces them is a *row*: every preset's old dynamics are now `size ← pressure` and
+/// `opacity ← pressure` with an explicit curve, and `BrushModulationLogicTests` pins that the five
+/// shipped presets render **byte-identical** to what they rendered before. That pin is the assertion
+/// that the matrix subsumes what it replaces; without it this is a rewrite with an opinion.
+///
+/// The grouping's reason is §6's: `Brush`'s `Codable` decides what a document can be read back from,
+/// so every new *flat* key is a decode-compatibility question and a nested field with a default is
+/// not. `dab`, `stroke` and `modulations` each carry a `static let default` and a defaulted decode.
+///
+/// **`size` and `opacity` stay flat, and that is not an exception to the grouping.** They are not dab
+/// parameters at all: `BrushStamper` takes the stroke's own `brushSize` and `brushOpacity` as
+/// arguments, because a lasso resize scales the first and the toolbar drives both. What these two
+/// hold is the *preset's* default, copied into `CanvasManager.brushSize` / `.brushOpacity` when the
+/// preset is picked. The matrix's `size` and `opacity` outputs are the fractions those are multiplied
+/// by, and they live in `dab` with the rest.
 ///
 /// **`Hashable` is what `BrushPool` addresses an entry by**, so every field here is part of a brush's
 /// identity — including `id`, which keeps two presets that happen to carry identical settings apart.
 /// A stroke stores a `BrushRef` into that pool rather than a `Brush` (BRUSH.md §2.9), and it is the
 /// hash of the *whole value* that makes §2.10 fall out with no rule to enforce: an edited brush is a
 /// different value, so it interns to a different ref, so the ink already on the canvas is untouched.
+/// Every sub-struct is `Hashable` for that reason, and a row of the matrix is part of the identity
+/// exactly as a scalar was.
 struct Brush: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
@@ -144,23 +138,18 @@ struct Brush: Identifiable, Codable, Hashable {
     /// contradict itself.
     var tip: BrushTip
 
-    var size: CGFloat // base stamp diameter, in canvas points, at full pressure
-    var opacity: Double // 0...1, overall stroke opacity
-    var flow: Double // 0...1, per-stamp opacity multiplier (build-up as stamps overlap)
-    var spacingFraction: Double // distance between stamps, as a fraction of the current stamp size
-    /// 0...1, edge falloff passed through to `RasterLayerTexture.stampCircle(hardness:)` — 0 is
-    /// fully soft/feathered, 1 is a hard, crisp edge. **A `.round` tip's parameter only**: a tip
-    /// that is a picture carries its own edge in its pixels, so a `.stamp` dab has no `hardness` at
-    /// all and does not read this.
-    var hardness: Double
-    /// 0...1 — how strongly raw input is smoothed before it reaches the canvas (see
-    /// `StrokeStabilizer`); 0 draws exactly at the raw touch position.
-    var stabilization: Double
-    var scatter: Double // 0...1 random position jitter, as a fraction of size
-    var rotationJitter: Double // 0...1 random per-stamp rotation
+    /// The preset's default stroke diameter, in canvas points. Copied into the toolbar's own size
+    /// when the preset is picked; the *dab's* size is `dab.size` times whatever the stroke carries.
+    var size: CGFloat
+    /// The preset's default stroke opacity, `0…1`. Same relationship to `dab.opacity`.
+    var opacity: Double
 
-    var dynamics: BrushDynamics
-    var blendMode: BrushBlendMode
+    /// Every dab output's base value — §6.
+    var dab: BrushDabSettings
+    /// What the brush does to the gesture rather than to a dab.
+    var stroke: BrushStrokeSettings
+    /// §6's matrix: the rows, each *(output, input, curve, amount)*.
+    var modulations: BrushModulations
 
     init(
         id: UUID = UUID(),
@@ -168,27 +157,39 @@ struct Brush: Identifiable, Codable, Hashable {
         tip: BrushTip,
         size: CGFloat,
         opacity: Double = 1,
-        flow: Double = 1,
-        spacingFraction: Double = 0.1,
-        hardness: Double = 0.8,
-        stabilization: Double = 0.2,
-        scatter: Double = 0,
-        rotationJitter: Double = 0,
-        dynamics: BrushDynamics = .default,
-        blendMode: BrushBlendMode = .normal
+        dab: BrushDabSettings = .default,
+        stroke: BrushStrokeSettings = .default,
+        modulations: BrushModulations = .default
     ) {
         self.id = id
         self.name = name
         self.tip = tip
         self.size = size
         self.opacity = opacity
-        self.flow = flow
-        self.spacingFraction = spacingFraction
-        self.hardness = hardness
-        self.stabilization = stabilization
-        self.scatter = scatter
-        self.rotationJitter = rotationJitter
-        self.dynamics = dynamics
-        self.blendMode = blendMode
+        self.dab = dab
+        self.stroke = stroke
+        self.modulations = modulations
+    }
+}
+
+extension Brush {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, tip, size, opacity, dab, stroke, modulations
+    }
+
+    /// **Written out so the three sub-structs decode to their defaults**, which is the property §6
+    /// asks the grouping for: a setting added inside one of them later is one field rather than a
+    /// decode-compatibility question. `id`, `name`, `tip` and the two stroke-level numbers are strict
+    /// — a brush without them is not a brush.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        tip = try c.decode(BrushTip.self, forKey: .tip)
+        size = try c.decode(CGFloat.self, forKey: .size)
+        opacity = try c.decode(Double.self, forKey: .opacity)
+        dab = try c.decodeIfPresent(BrushDabSettings.self, forKey: .dab) ?? .default
+        stroke = try c.decodeIfPresent(BrushStrokeSettings.self, forKey: .stroke) ?? .default
+        modulations = try c.decodeIfPresent(BrushModulations.self, forKey: .modulations) ?? .default
     }
 }

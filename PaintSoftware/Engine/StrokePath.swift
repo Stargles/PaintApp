@@ -17,6 +17,23 @@ import CoreGraphics
 /// and MEASURED costs a little — see `StrokePathFit.tolerance`.
 ///
 /// Pure `CoreGraphics` — no UIKit, no `Brush` — so the geometry can be exercised headless.
+/// **Where a dab march left off** — the two numbers that cross a segment boundary together.
+///
+/// `since` is how far the path has travelled with no dab placed: the leftover a segment too short to
+/// place one hands to the next, which is what keeps a slow drag from bunching dabs up at the start.
+/// `spacing` is the gap the last dab asked for, in canvas points — BRUSH.md §6's `spacing` output
+/// resolved there. They are one value because a walk that carried one and not the other would place
+/// its first dab of a segment at the wrong distance.
+struct WalkCarry: Equatable {
+    var since: CGFloat
+    var spacing: CGFloat
+
+    init(since: CGFloat = 0, spacing: CGFloat) {
+        self.since = since
+        self.spacing = spacing
+    }
+}
+
 struct StrokePath {
 
     /// The stored knots, in the order they were drawn.
@@ -261,13 +278,25 @@ struct StrokePath {
     /// density. `u` is the curve parameter, which on a straight segment is exactly the fraction of
     /// the distance travelled, and on a curved one differs from it by well under a percent over a
     /// segment the fit's cap keeps to 12 pt.
-    func advance(segment index: Int, spacing: CGFloat, carried: CGFloat,
-                 _ body: (CGPoint, CGFloat) -> Void) -> CGFloat {
-        guard spacing > 0, index >= 0, index + 1 < points.count else { return carried }
+    /// **The spacing varies along the stroke, and the body is what says how** — BRUSH.md §6 makes
+    /// spacing a sensor-driven output, so the gap between two dabs is a property of the dab the walk
+    /// is *leaving* rather than a constant for the stroke.
+    ///
+    /// `carry.spacing` going in is the gap leading to the first dab this segment places (resolved at
+    /// the previous dab, or at the anchor for the very first one). Each callback is handed the gap it
+    /// just travelled — which is what a caller accumulating arc length needs — and answers with the
+    /// gap leading away from the dab. Both halves of the walk's state come back out together, because
+    /// they cross a segment boundary together.
+    ///
+    /// A returned spacing of zero or less would not terminate, so it is floored the way
+    /// `BrushStamper.stampSpacing` floors its own — one guard, honoured here rather than trusted.
+    func advance(segment index: Int, carry: WalkCarry,
+                 _ body: (CGPoint, CGFloat, CGFloat) -> CGFloat) -> WalkCarry {
+        var carry = carry
+        guard carry.spacing > 0, index >= 0, index + 1 < points.count else { return carry }
         let p1 = points[index], p2 = points[index + 1]
         let (m1, m2) = tangents(segment: index)
         let steps = StrokePath.subdivisions(p1: p1, p2: p2, m1: m1, m2: m2)
-        var since = carried
         var from = p1
         for step in 1...steps {
             let uEnd = CGFloat(step) / CGFloat(steps)
@@ -276,18 +305,25 @@ struct StrokePath {
             let length = hypot(dx, dy)
             guard length > 0 else { from = to; continue }
             var offset: CGFloat = 0
-            while since + (length - offset) >= spacing {
-                offset += spacing - since
+            while carry.since + (length - offset) >= carry.spacing {
+                offset += carry.spacing - carry.since
                 let fraction = offset / length
                 let u = (CGFloat(step - 1) + fraction) / CGFloat(steps)
-                body(CGPoint(x: from.x + dx * fraction, y: from.y + dy * fraction), u)
-                since = 0
+                let walked = carry.spacing
+                carry.spacing = max(
+                    body(CGPoint(x: from.x + dx * fraction, y: from.y + dy * fraction), u, walked),
+                    StrokePath.minimumDabSpacing)
+                carry.since = 0
             }
-            since += length - offset
+            carry.since += length - offset
             from = to
         }
-        return since
+        return carry
     }
+
+    /// The floor a dab spacing is held to, in canvas points — the same 1 pt
+    /// `BrushStamper.stampSpacing` applies, named here because a march cannot terminate below it.
+    static let minimumDabSpacing: CGFloat = 1
 
     private static func normalized(_ v: CGPoint) -> CGPoint? {
         let length = hypot(v.x, v.y)

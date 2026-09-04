@@ -1,6 +1,6 @@
 import XCTest
 
-/// Pure-logic tests for the brush engine's math — `BrushDynamics` pressure curves and
+/// Pure-logic tests for the brush engine's math — BRUSH.md §6's pressure rows and
 /// `StrokeStabilizer`'s smoothing — run as plain `XCTestCase` methods (no `XCUIApplication`, no
 /// simulator gestures) so they exercise exactly the same code the app draws with, without needing a
 /// real touch/pencil.
@@ -17,60 +17,78 @@ import XCTest
 /// sources shared with PaintSoftwareUITests" group and this target's Sources build phase) — both
 /// files are pure Foundation/CoreGraphics with no UIKit or other app dependency, so that's a
 /// harmless, ordinary multi-target-membership source file, not a fork of the logic. Their types
-/// (`Brush`, `BrushDynamics`, `StrokeStabilizer`) are consequently local to this module already —
+/// (`Brush`, `BrushModulations`, `StrokeStabilizer`) are consequently local to this module already —
 /// no import needed (and no `@testable import PaintSoftware` either, which would make every one of
 /// those names ambiguous between the two copies).
 final class BrushEngineLogicTests: XCTestCase {
 
-    // MARK: - BrushDynamics.sizeFraction
+    // MARK: - BRUSH.md §6 — the pressure rows that replaced `BrushDynamics`
 
-    func testSizeFractionIsFixedWhenSizePressureIsZero() {
-        let dynamics = BrushDynamics(sizePressure: 0, opacityPressure: 0, minSizeFraction: 0.2)
-        // sizePressure == 0 means pressure has no effect at all: fraction should be 1 regardless
-        // of how light or hard the touch is.
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 0), 1, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 0.5), 1, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 1), 1, accuracy: 0.0001)
+    /// The two rows every shipped preset carries, as a brush. `size`'s base is `1 - amount` and
+    /// `opacity`'s is too, which is the pairing that makes a full press reach full width — see
+    /// `BrushLibrary` and `StrokeSettingsPanel.pressureAmountBinding`.
+    private func pressureBrush(size: Double, atZero: Double, opacity: Double) -> Brush {
+        Brush(name: "fixture", tip: .round, size: 10,
+              dab: BrushDabSettings(size: 1 - size, opacity: 1 - opacity),
+              modulations: BrushModulations([
+                .sizeFromPressure(amount: size, atZero: atZero),
+                .opacityFromPressure(amount: opacity)
+              ]))
     }
 
-    func testSizeFractionSpansMinSizeFractionToOneWhenSizePressureIsMax() {
-        let dynamics = BrushDynamics(sizePressure: 1, opacityPressure: 0, minSizeFraction: 0.3)
-        // sizePressure == 1: at zero pressure the stamp should shrink to exactly minSizeFraction,
-        // and grow linearly up to the full 1.0 at maximum pressure.
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 0), 0.3, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 1), 1.0, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 0.5), 0.65, accuracy: 0.0001)
+    private func sizeFraction(_ brush: Brush, _ pressure: CGFloat) -> Double {
+        brush.dabValues(atPressure: pressure).size
+    }
+
+    private func opacityFraction(_ brush: Brush, _ pressure: CGFloat) -> Double {
+        brush.dabValues(atPressure: pressure).opacity
+    }
+
+    func testSizeFractionIsFixedWhenSizePressureIsZero() {
+        let brush = pressureBrush(size: 0, atZero: 0.2, opacity: 0)
+        // A `size ← pressure` row at amount 0 means pressure has no effect at all: the fraction is
+        // the base, 1, regardless of how light or hard the touch is.
+        XCTAssertEqual(sizeFraction(brush, 0), 1, accuracy: 0.0001)
+        XCTAssertEqual(sizeFraction(brush, 0.5), 1, accuracy: 0.0001)
+        XCTAssertEqual(sizeFraction(brush, 1), 1, accuracy: 0.0001)
+    }
+
+    func testSizeFractionSpansTheRampFloorToOneWhenTheRowIsFullAmount() {
+        let brush = pressureBrush(size: 1, atZero: 0.3, opacity: 0)
+        // Amount 1: at zero pressure the stamp shrinks to exactly the ramp's floor, and grows
+        // linearly to the full 1.0 at maximum pressure.
+        XCTAssertEqual(sizeFraction(brush, 0), 0.3, accuracy: 0.0001)
+        XCTAssertEqual(sizeFraction(brush, 1), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(sizeFraction(brush, 0.5), 0.65, accuracy: 0.0001)
     }
 
     func testSizeFractionIncreasesMonotonicallyWithPressure() {
-        let dynamics = BrushDynamics(sizePressure: 0.7, opacityPressure: 0, minSizeFraction: 0.25)
-        var previous = dynamics.sizeFraction(forPressure: 0)
+        let brush = pressureBrush(size: 0.7, atZero: 0.25, opacity: 0)
+        var previous = sizeFraction(brush, 0)
         for step in stride(from: 0.1, through: 1.0, by: 0.1) {
-            let value = dynamics.sizeFraction(forPressure: step)
-            XCTAssertGreaterThanOrEqual(value, previous, "sizeFraction should never decrease as pressure increases")
+            let value = sizeFraction(brush, CGFloat(step))
+            XCTAssertGreaterThanOrEqual(value, previous, "the size row should never decrease as pressure increases")
             previous = value
         }
     }
 
     func testSizeFractionClampsOutOfRangePressure() {
-        let dynamics = BrushDynamics.default
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: -5), dynamics.sizeFraction(forPressure: 0), accuracy: 0.0001)
-        XCTAssertEqual(dynamics.sizeFraction(forPressure: 5), dynamics.sizeFraction(forPressure: 1), accuracy: 0.0001)
+        let brush = BrushLibrary.softRound
+        XCTAssertEqual(sizeFraction(brush, -5), sizeFraction(brush, 0), accuracy: 0.0001)
+        XCTAssertEqual(sizeFraction(brush, 5), sizeFraction(brush, 1), accuracy: 0.0001)
     }
 
-    // MARK: - BrushDynamics.opacityFraction
-
     func testOpacityFractionIsFixedWhenOpacityPressureIsZero() {
-        let dynamics = BrushDynamics(sizePressure: 0, opacityPressure: 0, minSizeFraction: 1)
-        XCTAssertEqual(dynamics.opacityFraction(forPressure: 0), 1, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.opacityFraction(forPressure: 1), 1, accuracy: 0.0001)
+        let brush = pressureBrush(size: 0, atZero: 1, opacity: 0)
+        XCTAssertEqual(opacityFraction(brush, 0), 1, accuracy: 0.0001)
+        XCTAssertEqual(opacityFraction(brush, 1), 1, accuracy: 0.0001)
     }
 
     func testOpacityFractionTracksPressureDirectlyWhenOpacityPressureIsMax() {
-        let dynamics = BrushDynamics(sizePressure: 0, opacityPressure: 1, minSizeFraction: 1)
-        XCTAssertEqual(dynamics.opacityFraction(forPressure: 0), 0, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.opacityFraction(forPressure: 0.4), 0.4, accuracy: 0.0001)
-        XCTAssertEqual(dynamics.opacityFraction(forPressure: 1), 1, accuracy: 0.0001)
+        let brush = pressureBrush(size: 0, atZero: 1, opacity: 1)
+        XCTAssertEqual(opacityFraction(brush, 0), 0, accuracy: 0.0001)
+        XCTAssertEqual(opacityFraction(brush, 0.4), 0.4, accuracy: 0.0001)
+        XCTAssertEqual(opacityFraction(brush, 1), 1, accuracy: 0.0001)
     }
 
     // MARK: - StrokeStabilizer
@@ -319,9 +337,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// A fully deterministic, fully opaque brush: no pressure dynamics, no scatter, no
     /// rotation jitter, hard edge. Any of those would make a single-pixel colour assertion flaky.
     private static func opaqueTestBrush(blendMode: BrushBlendMode) -> Brush {
-        Brush(name: "Test", tip: .round, size: 20, opacity: 1, flow: 1,
-              spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
-              rotationJitter: 0, dynamics: .fixed, blendMode: blendMode)
+        Brush(name: "Test", tip: .round, size: 20, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, scatter: 0, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: blendMode))
     }
 
     private func rgbaPixels(of image: UIImage, width: Int, height: Int) -> (bytes: [UInt8], width: Int, height: Int)? {
@@ -1040,9 +1056,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// real brush at the real size. Rendered at 4x zoom and read back in pixels — at 1x a point 15
     /// away from a 10-point brush's centre would be blank, and here it must be inked.
     func testSizePreviewStampRendersARealDabAtItsRealScreenSize() {
-        let brush = Brush(name: "Preview", tip: .round, size: 10, opacity: 1,
-                          spacingFraction: 0.1, hardness: 1, stabilization: 0,
-                          dynamics: .fixed)
+        let brush = Brush(name: "Preview", tip: .round, size: 10, opacity: 1, dab: BrushDabSettings(spacing: 0.1, hardness: 1), stroke: BrushStrokeSettings(stabilization: 0))
         let geometry = SizePreviewGeometry(toolSize: 10, canvasScale: 4)
         XCTAssertEqual(geometry.stampDiameter, 40, accuracy: 0.0001)
 
@@ -1066,9 +1080,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The eraser preview shows a removal, not eraser-coloured ink: the dab is composited
     /// `.destinationOut` through a patch of ink, so it comes back as a hole.
     func testSizePreviewEraserStampPunchesAHoleRatherThanPainting() {
-        let brush = Brush(name: "Preview", tip: .round, size: 10, opacity: 1,
-                          spacingFraction: 0.1, hardness: 1, stabilization: 0,
-                          dynamics: .fixed)
+        let brush = Brush(name: "Preview", tip: .round, size: 10, opacity: 1, dab: BrushDabSettings(spacing: 0.1, hardness: 1), stroke: BrushStrokeSettings(stabilization: 0))
         let geometry = SizePreviewGeometry(toolSize: 10, canvasScale: 2)
         let image = SizePreviewStampRenderer.stampImage(geometry: geometry, brush: brush, tool: .eraser,
                                                         color: .black, opacity: 1)

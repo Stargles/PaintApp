@@ -791,7 +791,7 @@ final class CanvasManager: ObservableObject {
     func importCustomBrush(from image: UIImage) throws -> Brush {
         let brush = Brush(name: "Custom \(customBrushes.count + 1)",
                           tip: try BrushTipImport.importTip(from: image),
-                          size: 24, spacingFraction: 0.12)
+                          size: 24, dab: BrushDabSettings(spacing: 0.12))
         addCustomBrush(brush)
         return brush
     }

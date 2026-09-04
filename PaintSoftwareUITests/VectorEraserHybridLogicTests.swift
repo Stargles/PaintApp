@@ -312,13 +312,13 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// condition fails on that row alone.
     func testDeletionIsSkippedWhereverTheAlphaGateFails() {
         var scattering = BrushLibrary.hardRound
-        scattering.scatter = 0.4
+        scattering.dab.scatter = 0.4
         var jittering = BrushLibrary.hardRound
-        jittering.rotationJitter = 0.5
+        jittering.dab.angle.jitter = 0.5
         var square = BrushLibrary.hardRound
         square.tip = .stamp(.builtIn(.square))
         var soft = BrushLibrary.hardRound
-        soft.hardness = 0.5
+        soft.dab.hardness = 0.5
 
         let along = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 120, y: 64), count: 15,
                               from: 1, to: 1)
@@ -363,7 +363,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// same brush passing and failing.
     func testAHardOpaquePencilShapedEraserCleanCutsWhereGrainUsedToVetoIt() {
         var pencilEraser = BrushLibrary.pencil
-        pencilEraser.hardness = 1
+        pencilEraser.dab.hardness = 1
         XCTAssertTrue(BrushLibrary.isPencilPreset(pencilEraser),
                       "Setup: still the preset the grain veto used to single out")
 
@@ -388,7 +388,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// a claim about the wrong shape. Such a stroke is never deleted, only punched.
     func testAScatteringPaintStrokeIsNeverDeleted() {
         var scattering = BrushLibrary.hardRound
-        scattering.scatter = 0.5
+        scattering.dab.scatter = 0.5
         let along = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 120, y: 64), count: 15,
                               from: 1, to: 1)
         let scene = scenario(brush: scattering, eraserBrush: BrushLibrary.hardRound,
@@ -761,7 +761,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// hybrid is broken.
     func testAScatteringEraserPunchIsANewStrokeRatherThanTheGesture() {
         var scattering = BrushLibrary.hardRound
-        scattering.scatter = 0.5
+        scattering.dab.scatter = 0.5
         let scene = scenario(brush: BrushLibrary.hardRound, eraserBrush: scattering)
         let (canvas, _, _) = erased(scene)
         let punches = strokes(canvas, .erase)

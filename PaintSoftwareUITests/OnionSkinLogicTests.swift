@@ -21,7 +21,7 @@ import CoreGraphics
 final class OnionSkinLogicTests: XCTestCase {
 
     private func fixedBrush(size: CGFloat = 10) -> Brush {
-        Brush(name: "test", tip: .round, size: size, dynamics: .fixed)
+        Brush(name: "test", tip: .round, size: size)
     }
 
     private func opaqueRedStroke() -> VectorStroke {

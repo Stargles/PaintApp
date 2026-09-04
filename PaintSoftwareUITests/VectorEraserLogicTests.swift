@@ -26,10 +26,10 @@ final class VectorEraserLogicTests: XCTestCase {
         samples((0...10).map { (CGFloat($0) * 10, 0) })
     }
 
-    /// `BrushDynamics.fixed` makes `sizeFraction` exactly 1 at any pressure, so the eraser's radius
+    /// With no rows and both bases at 1 the matrix's `size` output is exactly 1 at any pressure, so the eraser's radius
     /// is exactly `size / 2` and a failure can only come from the geometry under test.
     private func fixedBrush(size: CGFloat = 10) -> Brush {
-        Brush(name: "test", tip: .round, size: size, dynamics: .fixed)
+        Brush(name: "test", tip: .round, size: size)
     }
 
     private func sweep(_ points: [(CGFloat, CGFloat)], size: CGFloat) -> VectorEraser.Sweep {
@@ -576,9 +576,7 @@ final class VectorEraserLogicTests: XCTestCase {
         // At half pressure this brush stamps a dab 0.6x its nominal size — radius 6, not 10. The
         // centrelines below sit 8 points from the tip: inside the size-derived radius, outside the
         // pressure-derived one, so the two rules give opposite answers on every stroke here.
-        let dynamic = Brush(name: "pressure-sensitive", tip: .round, size: 20,
-                            dynamics: BrushDynamics(sizePressure: 1, opacityPressure: 0,
-                                                    minSizeFraction: 0.2))
+        let dynamic = Brush(name: "pressure-sensitive", tip: .round, size: 20, dab: BrushDabSettings(size: 1 - (1)), modulations: BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.2)]))
         XCTAssertEqual(StrokeGeometry.stampRadius(forPressure: 1, brush: dynamic, size: 20), 10, accuracy: 1e-9)
         XCTAssertEqual(StrokeGeometry.stampRadius(forPressure: 0.5, brush: dynamic, size: 20), 6, accuracy: 1e-9)
 

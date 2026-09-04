@@ -2277,6 +2277,63 @@ per-stroke fixed cost. The ratio was the clipping. The corrected fixture zig-zag
 and lands on 3.07. `PerfBaselineTests.syntheticStroke` already carries a `passes` knob for exactly
 this reason.
 
+### 11.2a BRUSH.md §12 stage 7 put a modulation matrix on this path, and it cost 35%
+
+**MEASURED on this Mac's simulator, same fixture, same brush, same day, `origin/main` at `bc9982f`
+against `tmp/matrix`** — `PaintSoftwareUITests/DabCostBench`, which exists so this can be re-taken
+rather than re-derived:
+
+| | walk only | whole re-walk, rasterization included |
+|---|---|---|
+| before — `BrushDynamics`' two blends | **0.845 µs/dab** | **4.018 µs/dab** |
+| after — §6's matrix, the same preset as two rows | **2.122 µs/dab** | **5.437 µs/dab** |
+| | **+1.28** | **+1.42, or +35%** |
+
+**Say it plainly: this is a regression to the constant §11.2 is built on, and it is a finding rather
+than a failure.** The incremental append's whole justification rests on 3.16 µs/dab being flat and
+small; INFERRED from §1's 1.3× device multiplier holding on this path, the owner's iPad now pays
+about **4.3 µs a dab** for a two-row preset. At their measured 236 dabs a stroke that is 1.01 ms a
+stroke against 0.75.
+
+**It is attributed, not guessed** — the same bench, one row at a time:
+
+| brush | µs/dab (walk only) | marginal |
+|---|---|---|
+| no rows at all | 0.308 | — |
+| one row, no curve | 1.099 | **+0.79 a row** |
+| two rows, no curves | 1.892 | +0.79 |
+| two rows, one carrying a ramp (`hardRound`) | 2.122 | +0.23 for `AnimationCurve.evaluate` |
+| three rows including §2.18's dropout | 3.19 | +1.07 (a draw and a skip test) |
+| six rows across five sensors | 5.44 | +0.85 a row |
+
+**So the cost is per *row*, ~0.79 µs, and the curve is only a quarter of it.** Two things make up the
+rest, and the split between them is INFERRED from the shape rather than profiled: a `.random` row costs
+**+0.49** against a `.pressure` row's **+0.79**, and the difference is the funnel's channel read —
+`StrokeSensors.channelValue` interpolates two stored samples, and a two-row preset now does that
+**twice a dab** where the old path did it once. The remaining ~0.5 µs is ARC: `BrushModulation` owns a
+`ResponseCurve` owns an `AnimationCurve` owns a `[Key]`, so materialising one row out of the array in
+the hot loop is a retain/release pair per row per dab.
+
+**Two candidate fixes, neither built, and the reason is a decision rather than an oversight.**
+
+1. *Memoise the funnel per dab.* Rows sharing an input would read the channel once. Bounded saving —
+   about 0.3 µs on a two-row preset, since it removes one of the two reads and nothing else.
+2. *Take the heap array off the hot row.* Storing a small curve inline would remove the ARC, and it is
+   the larger term. It also un-does BRUSH.md §7's *"reusing it is what keeps this from being a second
+   curve implementation"*, which is the property the owner asked for first: *"I want a clean and well
+   designed architecture first, which cleanly replaces the old one."* Trading it for ~0.5 µs a row is
+   their call, not a worker's.
+
+**And one micro-optimisation was tried and refuted, which is worth not re-trying.** `@inline(__always)`
+on `dabValues`, `contribution` and `ResponseCurve.value(at:)`, plus iterating the rows by index instead
+of `for row in`, made **every** row of the table 8–10% *worse* — including the zero-row case, which
+those annotations cannot reach. That uniformity is the tell that it was machine noise on top of no
+gain, and it is why the numbers above were taken on an idle machine under `simlock`.
+
+**The bench's own numbers are not §11.2's**, and that is deliberate rather than sloppy: it walks a
+different corpus into a 2048² canvas, so 4.018 is not the 2.40 §11.2 measured. What is comparable is
+the **ratio between two builds of the same bench**, which is what the table reports.
+
 ### 11.3 The upper bound: nothing breaks, and memory is not the story
 
 **Memory is a non-issue at every n the owner will reach.** Stroke geometry is

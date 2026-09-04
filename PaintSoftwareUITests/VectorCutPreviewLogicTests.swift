@@ -32,7 +32,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// statement about geometry rather than about alpha arithmetic. A semi-transparent stroke leaves
     /// a faint ghost under the preview — see the note on `testASemiTransparentStroke…`.
     private func opaqueBrush(size: CGFloat) -> Brush {
-        Brush(name: "test", tip: .round, size: size, hardness: 1, dynamics: .fixed)
+        Brush(name: "test", tip: .round, size: size, dab: BrushDabSettings(hardness: 1))
     }
 
     private func line(y: CGFloat, from x0: CGFloat, to x1: CGFloat, count: Int = 17) -> StrokeSamples {

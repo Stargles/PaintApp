@@ -23,9 +23,7 @@ final class DabRandomLogicTests: XCTestCase {
     /// rounding difference. Round rather than square: `stampApproximateSquare` puts sixteen dabs down
     /// per stamp and the arithmetic below wants one.
     private static func scatteringBrush(spacingFraction: Double = 0.1, scatter: Double = 0.6) -> Brush {
-        Brush(name: "scatter", tip: .round, size: 10, opacity: 1, flow: 1,
-              spacingFraction: spacingFraction, hardness: 1, stabilization: 0, scatter: scatter,
-              rotationJitter: 0, dynamics: .fixed, blendMode: .normal)
+        Brush(name: "scatter", tip: .round, size: 10, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: spacingFraction, hardness: 1, scatter: scatter, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
     }
 
     private static func samples(count: Int, from x0: CGFloat = 20, to x1: CGFloat = 220,
@@ -59,7 +57,7 @@ final class DabRandomLogicTests: XCTestCase {
                                 random: DabRandom) -> [CGPoint] {
         let stamperSamples = StrokeSamples(samples, channels: .pressureOnly)
         var clean = brush
-        clean.scatter = 0
+        clean.dab.scatter = 0
         let scattered = BrushStamper.bake(samples: stamperSamples, brush: brush, color: .black,
                                           brushSize: size, brushOpacity: 1, random: random)
         let straight = BrushStamper.bake(samples: stamperSamples, brush: clean, color: .black,
@@ -256,30 +254,33 @@ final class DabRandomLogicTests: XCTestCase {
         // one carry point, one arc-length accumulator.
         func liveOffsets(scatter: Double) -> [CGPoint] {
             var live = brush
-            live.scatter = scatter
+            live.dab.scatter = scatter
             let collector = BrushStamper.CollectingDabTarget()
-            let spacing = BrushStamper.stampSpacing(brushSize: size, brush: live)
-            let step = spacing / size
+            let values = live.dabValues(atPressure: 1)
+            var spacing = BrushStamper.stampSpacing(brushSize: size, fraction: values.spacing)
             var arc: CGFloat = 0
             var last: CGPoint?
             for sample in raw {
                 guard let previous = last else {
-                    BrushStamper.stampDab(into: collector, at: sample.point, pressure: 1, brush: live,
+                    BrushStamper.stampDab(into: collector, at: sample.point, brush: live, values: values,
                                           color: .black, brushSize: size, brushOpacity: 1,
                                           isEraser: false, random: random, arcWidths: arc)
                     last = sample.point
                     continue
                 }
-                last = BrushStamper.advance(from: previous, to: sample.point, spacing: spacing) { dab in
-                    arc += step
-                    BrushStamper.stampDab(into: collector, at: dab, pressure: 1, brush: live,
+                let walk = BrushStamper.advance(from: previous, to: sample.point, spacing: spacing) { dab, _, walked in
+                    arc += walked / size
+                    BrushStamper.stampDab(into: collector, at: dab, brush: live, values: values,
                                           color: .black, brushSize: size, brushOpacity: 1,
                                           isEraser: false, random: random, arcWidths: arc)
+                    return spacing
                 }
+                last = walk.carry
+                spacing = walk.spacing
             }
             return collector.dabs.map(\.center)
         }
-        let liveScattered = liveOffsets(scatter: brush.scatter)
+        let liveScattered = liveOffsets(scatter: brush.dab.scatter)
         let liveClean = liveOffsets(scatter: 0)
         let live = zip(liveScattered, liveClean).map {
             CGPoint(x: $0.x - $1.x, y: $0.y - $1.y)

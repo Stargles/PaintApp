@@ -855,7 +855,7 @@ final class LassoMoveLogicTests: XCTestCase {
         // of `stampSpacing`'s 1 pt floor, which is the one thing that breaks the similarity. See
         // `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount`.
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = 0.25
+        brush.dab.spacing = 0.25
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 32), to: CGPoint(x: 58, y: 32),
                                 size: 8, brush: brush))
         let loopRect = CGRect(x: 30, y: 16, width: 28, height: 32)
@@ -904,7 +904,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// arbitrary choice.
     func testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount() {
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = 0.05
+        brush.dab.spacing = 0.05
         let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
             let target = RecordingDabTarget()
@@ -942,7 +942,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// test. `testAScaleOutAndBackIsPixelIdentical` is the same finding one level up, in pixels.
     func testTheSpacingFloorSurvivesAScaleRoundTrip() {
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = 0.05
+        brush.dab.spacing = 0.05
         let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
             let target = RecordingDabTarget()

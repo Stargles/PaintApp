@@ -391,17 +391,23 @@ final class SampleRecordLogicTests: XCTestCase {
     /// constant full press, and `StrokeSamples(points:)` is what the intersection eraser probes with.
     ///
     /// It can go red: a funnel that answered `0` for a missing channel would make the first render a
-    /// tapered hairline against the second's full-width line. `BrushDynamics.sizeFraction(forPressure:
-    /// 1)` is exactly 1 for every `sizePressure`, which is why "the modulation removed" and "the
-    /// modulation reading the neutral" have the same answer and the comparison is at zero tolerance.
+    /// tapered hairline against the second's full-width line. At pressure 1 — the neutral — a preset's
+    /// `size ← pressure` row reaches the top of its ramp and the output is exactly 1 whatever the row's
+    /// amount, which is why "the modulation removed" and "the modulation reading the neutral" have the
+    /// same answer and the comparison is at zero tolerance.
     func testABrushReadingAChannelTheStrokeDoesNotCarryDrawsWhatTheSameBrushWithoutThatModulationDraws() {
         let bare = StrokeSamples(points: (0..<6).map { CGPoint(x: 20 + CGFloat($0) * 18, y: 60) })
         XCTAssertFalse(bare.carries(.pressure), "Setup: this run must genuinely lack the channel")
 
         var reading = BrushLibrary.hardRound
-        reading.dynamics = BrushDynamics(sizePressure: 1, opacityPressure: 1, minSizeFraction: 0.1)
+        reading.dab.size = 0
+        reading.dab.opacity = 0
+        reading.modulations = BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.1),
+                                                .opacityFromPressure(amount: 1)])
         var removed = reading
-        removed.dynamics = .fixed
+        removed.dab.size = 1
+        removed.dab.opacity = 1
+        removed.modulations = BrushModulations()
 
         let withModulation = BrushStamper.bake(samples: bare, brush: reading, color: .black,
                                                brushSize: 20, brushOpacity: 1, random: DabRandom(seed: 11))

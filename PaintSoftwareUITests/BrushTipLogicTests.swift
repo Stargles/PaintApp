@@ -271,7 +271,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// both `PosedDabTarget` and `replay`, and this is the operand that catches one of them alone.
     func testAPosedImageWalkStreamsAndReplaysToTheSameDabs() {
         var jittering = BrushLibrary.square
-        jittering.rotationJitter = 0.8
+        jittering.dab.angle.jitter = 0.8
         let samples = StrokeSamples((0..<14).map {
             VectorSample(point: CGPoint(x: CGFloat($0) * 9, y: CGFloat($0) * 5), pressure: 0.4 + CGFloat($0) * 0.04)
         }, channels: .pressureOnly)
@@ -689,13 +689,24 @@ final class BrushTipLogicTests: XCTestCase {
     func testAPresetSavedByAnEarlierLaunchIsStillRecognisedAsThatPreset() throws {
         let asSavedByAnEarlierLaunch = """
         {"id":"B7051000-0000-4000-A000-000000000003","name":"Pencil","tip":{"kind":"round"},
-         "size":6,"opacity":0.9,"flow":1,"spacingFraction":0.04,"hardness":0.7,
-         "stabilization":0.15,"scatter":0,"rotationJitter":0,"blendMode":"normal",
-         "dynamics":{"sizePressure":0.3,"opacityPressure":0.5,"minSizeFraction":0.5}}
+         "size":6,"opacity":0.9,
+         "dab":{"size":0.7,"opacity":0.5,"spacing":0.04,"hardness":0.7},
+         "stroke":{"stabilization":0.15,"blendMode":"normal"},
+         "modulations":[
+           {"output":"size","input":{"kind":"pressure"},"amount":0.3,
+            "curve":{"step":1,"keys":[
+              {"frame":0,"value":0.5,"interpolation":"linear","tangentMode":"vector"},
+              {"frame":1024,"value":1,"interpolation":"linear","tangentMode":"vector"}]}},
+           {"output":"opacity","input":{"kind":"pressure"},"amount":0.5}]}
         """
         let decoded = try JSONDecoder().decode(Brush.self, from: Data(asSavedByAnEarlierLaunch.utf8))
         XCTAssertEqual(decoded.id, BrushLibrary.pencil.id,
                        "the id in a saved document has to name the preset this launch is running")
+        // And the *whole* brush, which is what makes this a pin on BRUSH.md §6's grouped encoding as
+        // well as on the id: every sub-struct and every row of the matrix has to come back off a
+        // document written outside this process, or a saved brush is not the brush that was saved.
+        XCTAssertEqual(decoded, BrushLibrary.pencil,
+                       "a preset written to a document decodes to that preset, matrix and all")
         XCTAssertTrue(BrushLibrary.isPencilPreset(decoded),
                       "…which is what keeps picking Pencil selecting the pencil tool")
         XCTAssertFalse(BrushLibrary.isPencilPreset(BrushLibrary.pen),
@@ -711,11 +722,16 @@ final class BrushTipLogicTests: XCTestCase {
     private static func dab(with tip: BrushTip) throws -> (bytes: [UInt8], width: Int, height: Int) {
         var brush = BrushLibrary.hardRound
         brush.tip = tip
-        brush.hardness = 1
-        brush.dynamics = .fixed
+        brush.dab.hardness = 1
+        // Fixed width and full coverage at any pressure: no rows *and* both bases at 1. Clearing the
+        // rows alone would leave the preset's own `1 - amount` bases behind and stamp a 60% dab.
+        brush.dab.size = 1
+        brush.dab.opacity = 1
+        brush.modulations = BrushModulations()
         let texture = RasterLayerTexture(size: CGSize(width: 128, height: 128))
         texture.beginStroke()
-        BrushStamper.stampDab(into: texture, at: CGPoint(x: 64, y: 64), pressure: 1, brush: brush,
+        BrushStamper.stampDab(into: texture, at: CGPoint(x: 64, y: 64), brush: brush,
+                              values: brush.dabValues(atPressure: 1),
                               color: .black, brushSize: 60, brushOpacity: 1, isEraser: false,
                               random: DabRandom(seed: 7), arcWidths: 0)
         texture.endStroke()

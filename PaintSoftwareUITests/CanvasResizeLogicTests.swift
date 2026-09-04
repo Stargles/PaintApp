@@ -649,7 +649,7 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// against the engine instead of against its own arithmetic.
     func testTheSpacingFloorIsWhereAResizeStopsBeingASimilarity() {
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = 0.05
+        brush.dab.spacing = 0.05
         let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
             let target = RecordingDabTarget()
@@ -693,7 +693,7 @@ final class CanvasResizeLogicTests: XCTestCase {
     func testTheFloorSurveyReadsVectorStrokesAndLocalEdits() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         var brush = BrushLibrary.hardRound
-        brush.spacingFraction = 0.05
+        brush.dab.spacing = 0.05
         manager.addVectorLayer()
         let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
         canvas.addStroke(Self.stroke(at: [CGPoint(x: 1, y: 1)], size: 40, brush: brush))   // s = 2

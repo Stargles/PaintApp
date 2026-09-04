@@ -23,9 +23,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
     // MARK: - Fixtures
 
     private static func testBrush() -> Brush {
-        Brush(name: "Test", tip: .round, size: 20, opacity: 1, flow: 1,
-              spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
-              rotationJitter: 0, dynamics: .fixed, blendMode: .normal)
+        Brush(name: "Test", tip: .round, size: 20, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, scatter: 0, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
     }
 
     private func stroke(_ red: Double, composite: StrokeComposite = .paint) -> VectorStroke {

@@ -560,7 +560,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// walk the identical samples; `DabRandomLogicTests` is where those live.
     func testAScatteringBrushMatchesBecauseBothTiersDrawFromOneField() {
         var scattering = BrushLibrary.hardRound
-        scattering.scatter = 0.5
+        scattering.dab.scatter = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)
         guard let report = RasterVectorParity.parityOfRetainedPunch(scene) else {
             return XCTFail("Could not read back both tiers")
@@ -574,7 +574,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// would look just as green.
     func testADifferentFieldOnTheRasterTierDoesDivergeSoTheFieldTestIsNotVacuous() {
         var scattering = BrushLibrary.hardRound
-        scattering.scatter = 0.5
+        scattering.dab.scatter = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)
         let paint = RasterVectorParity.paintStroke(scene)
         let erase = RasterVectorParity.eraseStroke(scene)

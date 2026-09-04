@@ -1221,18 +1221,22 @@ final class PerfBaselineTests: XCTestCase {
         let footprintScratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
         var footprint: [Double] = []
         var last: CGPoint?
-        let spacing = BrushStamper.stampSpacing(brushSize: size, brush: brush)
+        let footprintValues = brush.dabValues(atPressure: 1)
+        let spacing = BrushStamper.stampSpacing(brushSize: size, fraction: footprintValues.spacing)
         for point in points {
             autoreleasepool {
                 let start = CFAbsoluteTimeGetCurrent()
                 if let previous = last {
-                    last = BrushStamper.advance(from: previous, to: point, spacing: spacing) { dab in
-                        BrushStamper.stampDab(into: footprintScratch, at: dab, pressure: 1, brush: brush,
+                    last = BrushStamper.advance(from: previous, to: point, spacing: spacing) { dab, _, _ in
+                        BrushStamper.stampDab(into: footprintScratch, at: dab, brush: brush,
+                                              values: footprintValues,
                                               color: .black, brushSize: size, brushOpacity: 1,
                                               isEraser: true, random: DabRandom(seed: 0), arcWidths: 0)
-                    }
+                        return spacing
+                    }.carry
                 } else {
-                    BrushStamper.stampDab(into: footprintScratch, at: point, pressure: 1, brush: brush,
+                    BrushStamper.stampDab(into: footprintScratch, at: point, brush: brush,
+                              values: brush.dabValues(atPressure: 1),
                                           color: .black, brushSize: size, brushOpacity: 1, isEraser: true,
                                           random: DabRandom(seed: 0), arcWidths: 0)
                     last = point
@@ -1300,8 +1304,7 @@ final class PerfBaselineTests: XCTestCase {
                            VectorSample(x: 12, y: 4 + offset, pressure: 1)]
             return VectorCanvas.CutPreviewEdit(eraseWalk: samples, eraseRandom: DabRandom(seed: 0),
                                                eraseRanges: [0...1], restamps: [],
-                                               brush: Brush(name: "Probe", tip: .round, size: 4,
-                                                            hardness: 1),
+                                               brush: Brush(name: "Probe", tip: .round, size: 4, dab: BrushDabSettings(hardness: 1)),
                                                size: 4, opacity: 1, color: .black)
         }
     }
@@ -1315,14 +1318,13 @@ final class PerfBaselineTests: XCTestCase {
     /// Hard, opaque, unjittered — the gate `VectorEraser.supportsCleanCut` requires before any
     /// geometry is removed at all. A soft or partial-opacity eraser would exercise only the punch and
     /// measure none of what this test is about.
-    private static let eraseSceneEraserBrush = Brush(name: "PerfEraser", tip: .round, size: 32,
-                                                     hardness: 1)
+    private static let eraseSceneEraserBrush = Brush(name: "PerfEraser", tip: .round, size: 32, dab: BrushDabSettings(hardness: 1))
 
     /// 200 horizontal 24pt lines, in 4 columns of 50 rows 40pt apart. Wider than the rows are tall,
     /// so a vertical gesture crosses several of them squarely — the full-width crossing that
     /// `splitCleanlyErasedStrokes` cuts, rather than the shave that only the punch can express.
     private static func eraseScenePaintStrokes() -> [VectorStroke] {
-        let brush = Brush(name: "PerfPaint", tip: .round, size: 24, hardness: 1)
+        let brush = Brush(name: "PerfPaint", tip: .round, size: 24, dab: BrushDabSettings(hardness: 1))
         var strokes: [VectorStroke] = []
         strokes.reserveCapacity(eraseSceneStrokeCount)
         for i in 0..<eraseSceneStrokeCount {
@@ -3733,7 +3735,7 @@ final class PerfBaselineTests: XCTestCase {
         manager.canvasSize = canvas
         manager.fps = 24
         manager.sceneFrameCount = celsPerLayer * 2
-        let brush = Brush(name: "PerfVector", tip: .round, size: 12, hardness: 1)
+        let brush = Brush(name: "PerfVector", tip: .round, size: 12, dab: BrushDabSettings(hardness: 1))
         for layerIndex in 0..<layerCount {
             manager.addVectorLayer(name: "Vector \(layerIndex)")
             manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
