@@ -785,7 +785,11 @@ final class VectorCanvas {
     /// The display list itself. Existing code keeps using the three kind-filtered accessors below.
     var elements: [VectorElement] {
         get { lock.lock(); defer { lock.unlock() }; return _elements }
-        set { lock.lock(); defer { lock.unlock() }; _elements = newValue }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _elements = newValue
+        }
     }
 
     // MARK: - Kind-filtered compatibility accessors
@@ -897,7 +901,9 @@ final class VectorCanvas {
             defer { lock.unlock() }
             guard _suppressedElementIDs != newValue else { return }
             _suppressedElementIDs = newValue
-            invalidate()
+            // `.everything`: suppression changes which elements the walk *includes*, and the one it
+            // hides sits wherever it always sat rather than at the end.
+            invalidate(.everything)
         }
     }
 
@@ -1090,6 +1096,17 @@ final class VectorCanvas {
         elements.firstIndex { Self.kind(of: $0).rawValue > kind.rawValue } ?? elements.count
     }
 
+    /// What inserting one element at `index` did to `elements`, **read off the list afterwards**
+    /// rather than argued from the kind order.
+    ///
+    /// The three insert sites all go through `insertionIndex(forKind:in:)`, whose answer is the end
+    /// of the list for a stroke and not for an image; deriving the declaration from where the
+    /// element actually landed means neither a new `Kind` nor a renumbering of the existing ones can
+    /// turn a correct call site into a wrong `Damage`.
+    private static func damage(ofInsertAt index: Int, into elements: [VectorElement]) -> Damage {
+        index == elements.count - 1 ? .appended(count: 1) : .everything
+    }
+
     /// The `strokes`/`fills`/`images` setter contract — see the comment above those accessors.
     ///
     /// **Positional, not bucketed, and that is what makes it safe now that fills are appended.** The
@@ -1124,27 +1141,63 @@ final class VectorCanvas {
         return result
     }
 
+    /// **What an edit changed, in the only terms the render path can act on.**
+    ///
+    /// Every mutation below knows exactly what it did. Until 2026-09-04 all of them said the same
+    /// undifferentiated thing, so the render could only assume the worst — which is why committing
+    /// one stroke to a cel already holding a thousand re-stamped all 236,000 of its dabs and put the
+    /// artist's own mark 0.74 s behind their pen (PERFORMANCE.md §11.1, §11.4). This type is the
+    /// difference, and `renderLocked` is what spends it.
+    ///
+    /// **`.everything` is the default and a case has to earn its way out of it.** A mutation that is
+    /// not certain what it changed says `.everything` and pays the full walk; a mutation that
+    /// declares *less* than it changed draws the wrong picture and says nothing. So the rule for
+    /// anything added here later is slow-and-correct, never fast-and-wrong — and
+    /// `applyToIncrementalBase` cross-checks the element count against what was declared, so a site
+    /// that miscounts costs a re-walk rather than an artifact.
+    ///
+    /// **The case this deliberately does not have yet is a rectangle.** Middle-of-list edits — the
+    /// eraser's cut and split modes, a lasso move, Clear, Recolour — damage a *region* rather than a
+    /// suffix and are their own, larger change (TODO). Adding `case region(CGRect)` here needs no
+    /// second visit to the mutation sites, which is the whole reason this is a type rather than a
+    /// `Bool`; building it now would be machinery with no consumer.
+    enum Damage: Equatable {
+        /// Nothing may be assumed about the display list: the next render walks it whole.
+        case everything
+        /// The last `count` elements were **appended to the end** of the list, and nothing already
+        /// in it moved, changed, or went away.
+        case appended(count: Int)
+    }
+
+    /// What the most recent invalidation declared. A test seam in `rasterizations`' idiom: what each
+    /// mutation site *says* is a countable property, and `IncrementalAppendLogicTests` pins all
+    /// sixteen of them against it without rendering a pixel.
+    private(set) var lastDamage: Damage = .everything
+
     /// Caller must hold `lock`.
-    private func invalidate() {
+    private func invalidate(_ damage: Damage) {
         contentVersion += 1
-        invalidateRenderOnly()
+        invalidateRenderOnly(damage)
     }
 
     /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
     /// layer's own content changed. `setTransform` is the only caller and the only mutation for
     /// which that distinction is true. Caller must hold `lock`.
-    private func invalidateRenderOnly() {
+    private func invalidateRenderOnly(_ damage: Damage) {
         version += 1
         cachedImage = nil
         cachedPreviewImage = nil
+        lastDamage = damage
     }
 
     /// Invalidates the render cache after a direct mutation of `strokes`/`fills`/`images`/`elements`
     /// (e.g. undo/redo restoring a snapshot, which assigns the array wholesale).
+    /// **`.everything`, and it has to be**: this is the seam undo/redo and every wholesale
+    /// `elements =` assignment come through, none of which can say what moved.
     func bumpVersion() {
         lock.lock()
         defer { lock.unlock() }
-        invalidate()
+        invalidate(.everything)
     }
 
     /// True when a rendered image of either quality is memoized — what cache eviction counts. A cel
@@ -1170,8 +1223,12 @@ final class VectorCanvas {
     func addStroke(_ stroke: VectorStroke) {
         lock.lock()
         defer { lock.unlock() }
-        _elements.insert(.stroke(stroke), at: Self.insertionIndex(forKind: .stroke, in: _elements))
-        invalidate()
+        let index = Self.insertionIndex(forKind: .stroke, in: _elements)
+        _elements.insert(.stroke(stroke), at: index)
+        // `.stroke` is the highest kind, so this is always the end of the list — but the declaration
+        // is *derived* from where the element actually landed rather than asserted from that
+        // argument, so a kind numbered above `.stroke` later cannot turn it into a lie.
+        invalidate(Self.damage(ofInsertAt: index, into: _elements))
     }
 
     /// Adds a stroke whose samples were captured in canvas space — a live drag, or a smart shape's
@@ -1186,8 +1243,9 @@ final class VectorCanvas {
         // come back out N points wide after render() rescales it.
         let scale = Self.scale(of: _transform)
         if scale > 0 { mapped.size = stroke.size / scale }
-        _elements.insert(.stroke(mapped), at: Self.insertionIndex(forKind: .stroke, in: _elements))
-        invalidate()
+        let index = Self.insertionIndex(forKind: .stroke, in: _elements)
+        _elements.insert(.stroke(mapped), at: index)
+        invalidate(Self.damage(ofInsertAt: index, into: _elements))
     }
 
     /// Uniform scale factor of the overall `transform` (the overlay only ever produces
@@ -1233,8 +1291,12 @@ final class VectorCanvas {
     func addImage(_ element: VectorImageElement) {
         lock.lock()
         defer { lock.unlock() }
-        _elements.insert(.image(element), at: Self.insertionIndex(forKind: .image, in: _elements))
-        invalidate()
+        // An image goes *below* the first stroke, so on a cel with any line art on it this is a
+        // middle insert and declares `.everything`. It is an append on a cel that holds only images
+        // and fills, which is what an import onto a fresh layer is.
+        let index = Self.insertionIndex(forKind: .image, in: _elements)
+        _elements.insert(.image(element), at: index)
+        invalidate(Self.damage(ofInsertAt: index, into: _elements))
     }
 
     /// Canvas-point spacing between a freshly-imported image and the one before it — see
@@ -1275,8 +1337,9 @@ final class VectorCanvas {
         localPosition.y += cascade
         let element = VectorImageElement(image: image,
                                          transform: LayerTransform(position: localPosition, scale: localScale, rotation: 0))
-        _elements.insert(.image(element), at: Self.insertionIndex(forKind: .image, in: _elements))
-        invalidate()
+        let index = Self.insertionIndex(forKind: .image, in: _elements)
+        _elements.insert(.image(element), at: index)
+        invalidate(Self.damage(ofInsertAt: index, into: _elements))
         return element
     }
 
@@ -1299,7 +1362,7 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         _elements.append(.fill(element))
-        invalidate()
+        invalidate(.appended(count: 1))
     }
 
     /// Puts a text object into the display list: **replaced at its own index when one with that id is
@@ -1319,8 +1382,9 @@ final class VectorCanvas {
     func upsertText(_ element: VectorTextElement) {
         lock.lock()
         defer { lock.unlock() }
-        upsertTextLocked(element)
-        invalidate()
+        // A brand-new object appends; re-editing one replaces it at its own z-position, which is a
+        // middle-of-list edit however small the retype was.
+        invalidate(upsertTextLocked(element) ? .appended(count: 1) : .everything)
     }
 
     /// Drops a text object by id. What an edit session that ends with an empty string does to the
@@ -1331,7 +1395,7 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         guard removeTextLocked(id: id) else { return false }
-        invalidate()
+        invalidate(.everything)
         return true
     }
 
@@ -1351,25 +1415,36 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         var listChanged = false
+        var appended = false
         if let element {
-            upsertTextLocked(element)
+            appended = upsertTextLocked(element)
             listChanged = true
         } else if let editingID, removeTextLocked(id: editingID) {
             listChanged = true
         }
         let wasSuppressing = !_suppressedElementIDs.isEmpty
         _suppressedElementIDs = []
-        if listChanged || wasSuppressing { invalidate() }
+        // Un-suppressing is not an append: the element coming back into the walk is at the
+        // z-position it has always occupied, so the picture the memo holds is missing something in
+        // the *middle*. Only a session that placed a brand-new object with nothing suppressed —
+        // which is the commit of a box opened on empty paper — is a pure append.
+        if listChanged || wasSuppressing {
+            invalidate(appended && !wasSuppressing ? .appended(count: 1) : .everything)
+        }
         return listChanged
     }
 
     /// Caller must hold `lock`. See `upsertText(_:)` for the replace-in-place / append rule.
-    private func upsertTextLocked(_ element: VectorTextElement) {
+    /// Returns whether the element was **appended** rather than replaced in place, which is the
+    /// difference between the two `Damage` cases its callers declare.
+    @discardableResult
+    private func upsertTextLocked(_ element: VectorTextElement) -> Bool {
         if let index = _elements.firstIndex(where: { $0.id == element.id }) {
             _elements[index] = .text(element)
-        } else {
-            _elements.append(.text(element))
+            return false
         }
+        _elements.append(.text(element))
+        return true
     }
 
     /// Caller must hold `lock`.
@@ -1434,7 +1509,7 @@ final class VectorCanvas {
         let fill = VectorFillElement(path: Self.localPath(path, through: _transform), color: color,
                                      opacity: opacity, evenOddFill: evenOddFill)
         _elements.append(.fill(fill))
-        invalidate()
+        invalidate(.appended(count: 1))
     }
 
     /// Maps a canvas-space path into this canvas's local (pre-`transform`) space — see
@@ -1451,7 +1526,11 @@ final class VectorCanvas {
         _transform = t
         // `invalidateRenderOnly`, not `invalidate`: the display is stale, the local content is not.
         // See `contentVersion`.
-        invalidateRenderOnly()
+        //
+        // `.everything` even so, and for a reason the content version does not capture: the memo is
+        // the *transformed* picture, and resampling a composite is not compositing two resampled
+        // halves. There is nothing here to append to.
+        invalidateRenderOnly(.everything)
     }
 
     /// The overall transform expressed as a `LayerTransform` (position/uniform-scale/rotation) about
@@ -1590,10 +1669,13 @@ final class VectorCanvas {
                                              size: localSize) else { return false }
 
         let changed: Bool
+        // `.everything` unless Mode 1 says otherwise: Modes 2 and 3 both *replace* strokes with the
+        // pieces they cut them into, which is a middle-of-list edit wherever the artist swept.
+        var damage: Damage = .everything
         switch mode {
         case .erase:
-            changed = eraseHybrid(sweep: sweep, samples: localSamples, brush: brush, size: localSize,
-                                  opacity: opacity)
+            (changed, damage) = eraseHybrid(sweep: sweep, samples: localSamples, brush: brush,
+                                            size: localSize, opacity: opacity)
         case .cutPoints:
             changed = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
@@ -1606,7 +1688,7 @@ final class VectorCanvas {
             changed = cutToIntersection(sweep: sweep, near: localSamples[0].point,
                                         suppressing: []).outcome == .cut
         }
-        if changed { invalidate() }
+        if changed { invalidate(damage) }
         return changed
     }
 
@@ -1650,7 +1732,8 @@ final class VectorCanvas {
                                              size: localSize) else { return (.missed, []) }
 
         let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point, suppressing: suppressing)
-        if resolved.outcome == .cut { invalidate() }
+        // A cut splices pieces in at the parent's z-position, which is a middle-of-list edit.
+        if resolved.outcome == .cut { invalidate(.everything) }
         return resolved
     }
 
@@ -1665,9 +1748,17 @@ final class VectorCanvas {
     // keep the list from growing forever.
 
     /// Caller must hold `lock`.
+    ///
+    /// **Returns the damage as well as whether anything changed, because this method does two very
+    /// different things and only one of them is an append.** Steps 1 and 2 delete and split strokes
+    /// in the middle of the list; step 3 appends one `.erase` element to the end. A gesture that
+    /// only punches is therefore exactly as incremental as a paint stroke — which is the common
+    /// eraser gesture, since steps 1 and 2 only fire for a hard brush at full opacity and pressure.
     private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: [VectorSample],
-                             brush: Brush, size: CGFloat, opacity: Double) -> Bool {
+                             brush: Brush, size: CGFloat,
+                             opacity: Double) -> (changed: Bool, damage: Damage) {
         var changed = false
+        var damage: Damage = .appended(count: 0)
 
         // The lightest dab in the gesture: pressure interpolates linearly between samples, so the
         // minimum over samples is the minimum over every dab stamped.
@@ -1677,13 +1768,15 @@ final class VectorCanvas {
             if !erasers.isEmpty {
                 if removeFullyErasedStrokes(sweep: sweep, erasers: erasers) {
                     changed = true
+                    damage = .everything
                     // Bumps `version` so downstream rebuilds its index against the *survivors* —
                     // otherwise the split and residue query below address stale element indices.
-                    invalidate()
+                    invalidate(.everything)
                 }
                 if splitCleanlyErasedStrokes(sweep: sweep, erasers: erasers) {
                     changed = true
-                    invalidate()
+                    damage = .everything
+                    invalidate(.everything)
                 }
             }
         }
@@ -1701,10 +1794,15 @@ final class VectorCanvas {
                                      composite: .erase)
             _elements.append(.stroke(punch))
             changed = true
+            if case .appended(let count) = damage { damage = .appended(count: count + 1) }
         }
 
-        if collectResidueGarbage() { changed = true }
-        return changed
+        // Collecting a punch that no longer covers anything removes an element from wherever it sat.
+        if collectResidueGarbage() {
+            changed = true
+            damage = .everything
+        }
+        return (changed, damage)
     }
 
     /// Drops every candidate paint stroke the eraser covers **completely**. Caller must hold `lock`.
@@ -3596,6 +3694,7 @@ final class VectorCanvas {
 
         // 1. Content in local (untransformed) space. The suppressed elements are skipped, not removed
         //    — see `suppressedElementIDs`.
+        //
         let content = renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs),
                                          quality: quality)
 
