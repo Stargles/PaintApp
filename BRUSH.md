@@ -136,7 +136,22 @@ re-walk is ~142 ms, so a slider driving one would be unusable long before the dr
 
 **2.11 Opacity and Flow are separate controls, and the per-stroke buffer they require is accepted.**
 Opacity caps what the whole stroke can reach however often it crosses itself; Flow is what one stamp
-lays down. The stroke composites into its own buffer and merges at pen-up.
+lays down. The stroke composites into its own buffer and merges at pen-up. BUILT, §12 stage 8.
+
+**The two questions this left open were ruled on 2026-09-04, and both went the same way.**
+
+- **Pressure drives flow, not a per-dab ceiling.** *"A light pass is faint; go over it again and it
+  darkens, up to the stroke's opacity and no further."* The Photoshop-style per-dab ceiling — where a
+  stamp may not take a pixel past some fraction however many stamps land on it — was offered and
+  **declined**. So the `opacity` output is deleted outright rather than kept as a ceiling beside flow,
+  and every preset's `opacity ← pressure` row became `flow ← pressure` with its numbers untouched.
+- **The eraser obeys the same rule.** *"A 50% eraser removes exactly 50% wherever the stroke goes,
+  however often it crosses back over itself."* That is not what punching each dab produces — N punches
+  at `aᵢ` leave `∏(1 - aᵢ)`, which no cap can be applied to after the fact — so an eraser stroke
+  accumulates *coverage* and one `.destinationOut` merge takes it away at the stroke's opacity.
+  MEASURED on the owner's own gesture shape in the simulator: an eraser at 43% dragged over ink and
+  then retraced back along itself removed a median **0.436** of it, where punching per dab would have
+  removed `1 - 0.57² = 0.675`.
 
 **2.12 The lag-brush stabilization slider stays as it is, and the refit is always on.** The refit is a
 fixed low geometric tolerance, not a per-brush parameter.
@@ -1239,8 +1254,52 @@ first, which cleanly replaces the old one."*
      second flattening pass. The live walk genuinely cannot and answers the neutral.
    - **`BrushDabValues` had to be answerable without a walk.** Three consumers have a pressure and no
      stroke; §6.3 is what they call and what the eraser's widened gates protect.
-8. **Opacity and Flow**, and the per-stroke buffer. §2.11. Late, because it changes the live drawing path
-   and wants the rest settled around it.
+8. **DONE — Opacity and Flow, and the per-stroke buffer.** §2.11 and the two rulings under it. The
+   `opacity` *output* is deleted whole — `BrushOutput`, `BrushDabValues`, `BrushDabSettings` and the
+   `opacityFromPressure` factory — leaving `channelBase`'s number 2 unused, because that field's own
+   instruction is *add cases, never renumber* and a renumber re-rolls every randomised stroke.
+   `DabTarget` gains `beginStrokeGroup(opacity:blendMode:)` / `endStrokeGroup()`; `stampStroke`
+   brackets its whole walk in one, a dab inside lays down its `flow` at `.normal`, and the merge is a
+   CoreGraphics transparency layer composited under the stroke's own alpha and blend mode. The live
+   tier gets a third `StrokeScratch` role, `.subtractive`, whose window holds an eraser's **removal
+   coverage** rather than a punched picture; `.replacing` keeps its meaning and is the cut preview's
+   alone. `StrokeSettingsPanel` gains a **Flow** slider and *"Pressure → Opacity"* becomes
+   *"Pressure → Flow"*.
+   Pinned by `BrushEngineLogicTests`' six new tests — the crossing reads the cap and not `1 - (1-o)²`;
+   flow builds up where a stroke crosses itself while **every pixel** of a capped render is that
+   fraction of an uncapped one (which folding the cap into a stamp cannot do); a 50% eraser takes away
+   50% on the replay tier *and* on the live one; a scattering, size-modulated stroke loses no ink to
+   the merge; the clean-cut gate refuses a brush whose merged alpha is short of 1; and a `.multiply`
+   stroke blends once where it crosses itself. All six were mutation-tested against four separate
+   mutations before being trusted.
+   **Four of this section's instructions did not survive contact.**
+   - **The merge is given no bounds, and could not safely have been.** The design was to derive a
+     conservative box from the samples and the brush (`Brush.maximumDabExtent`). `ResponseCurve`
+     deliberately does not clamp its output — §6's own doc says so — so an overshooting handle on a
+     `size` row exceeds `Σ|amount|` and the box is not a bound at all; and a box that is too small does
+     not cost memory, it **clips ink**. What shipped collects the dabs and takes the union of the
+     rectangles they actually painted, which is exact by construction, needs no arithmetic in
+     `PosedDabTarget`, and costs ~100 bytes and one array append against ~5.5 µs of drawing per dab.
+   - **A fractional clip is not free, and that is where the whole change nearly went wrong.** Clipping
+     the layer to the dabs' exact union antialiases the group's outermost row of pixels — MEASURED at
+     alpha 193 where 255 was drawn, which four existing zero-tolerance parity tests caught as *ink lost
+     at a seam*. `.integral` on the clip fixes it, and with it a buffered stroke is **byte-identical**
+     to a directly stamped one at opacity 1 under `.normal`, which the design had expected to differ by
+     one or two LSB.
+   - **`VectorEraser.supportsCleanCut` needed a line deleted, not rewritten.** It already guarded on
+     `opacity · values.flow`, which *is* the merged alpha; the second guard, on the deleted output,
+     would have read a base that is now always 1 and passed unconditionally. `supportsSplitting` needed
+     nothing at all — it never read opacity.
+   - **No XCUITest named `pressureOpacitySlider`.** The identifier appeared once, in the panel that
+     defines it.
+   **One convention is broken on purpose**: the panel pairs a `Pressure → X` amount with a base of
+   `1 - amount`, and `flow` is exempt, because it now has a base slider of its own and the pairing
+   would silently overwrite what the artist just set. `StrokeSettingsPanel` carries the reason.
+   **Two divergences the `.preview` tier had are closed by the same change**: `strokePolyline`
+   multiplied in the per-dab `opacity` output that no longer exists, and its eraser arm punched at full
+   coverage whatever the eraser's opacity was. Both now read the stroke's own opacity, so the tier that
+   was *accidentally* already §2.11 — one `strokePath` call cannot double-darken — and the `.full` tier
+   agree.
 9. **The library: groups, and the tip generator.** §8. The group tree reusing the layer tree's; the
    procedural tips for Basics, Sketching, Inking and Painting; the variant set §8.5 needs. **`BrushLibrary`'s
    five presets are deleted here, not deprecated.** The generator is a build-time tool whose output is
@@ -1262,8 +1321,15 @@ first, which cleanly replaces the old one."*
   generated file names carry two copies, and a document opened on a second device restores its tips into
   that shared directory by file name with no check that the name means the same picture. Nobody has hit it,
   and §12 stage 9's group tree is where the library stops being flat.
-- **What the per-stroke buffer costs at the owner's canvas size** is unmeasured. §2.11 accepts the cost;
-  nobody has taken the number, and PERFORMANCE.md's rule is that a figure carries MEASURED or INFERRED.
+- ~~**What the per-stroke buffer costs at the owner's canvas size.**~~ **MEASURED, §12 stage 8.**
+  `DabCostBench.testWhatTheStrokeGroupCosts` stamps 200 strokes of 2,301 dabs each into a fresh
+  2048² `RasterLayerTexture` two ways — through `stampStroke`'s group, and by replaying the very same
+  dabs straight in with no group — and reports **852 µs a stroke, 6%** (2,643 ms against 2,813 ms) in
+  the simulator. That is 0.37 µs a dab on a stroke far longer than an artist draws, and it buys the
+  ruling; §2.11 accepted a cost and this is the number. The one term it does *not* bound is a stroke
+  whose painted box is the whole canvas — a corner-to-corner diagonal at 16383² makes the transparency
+  layer canvas-sized — which is inherent to a per-stroke buffer rather than to this implementation of
+  one, and nobody has drawn that stroke.
 - **Every CC0 claim in §8.3 needs re-checking against its source before an asset is committed**, and
   nobody has done that yet. The two that matter are GIMP's `data/brushes` — whose own licence file admits
   older files predate its CC0 policy, so it is a per-file question — and the OpenGameArt set, hosted by a

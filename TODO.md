@@ -164,7 +164,7 @@ LAYER_TRANSFORM.md.
       **A tripwire, still live**: `"video"` is the literal sentinel for an unimplemented element kind in
       `VectorCanvasDataLogicTests` and `SaveDamageGateLogicTests`. Implementing it takes the sentinel away.
 
-### (37) The brush engine overhaul — spec at [BRUSH.md](BRUSH.md), eight of twelve stages built
+### (37) The brush engine overhaul — spec at [BRUSH.md](BRUSH.md), nine of thirteen stages built
 
 - [ ] > "the ability to import paintbrushes would be nice. There is an md document which describes it, but don't
       > read it this session as this is a low priority task and can wait."
@@ -173,7 +173,7 @@ LAYER_TRANSFORM.md.
       the build order with a DONE marker per stage, §13 what is still open.
       [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the survey that preceded it.
 
-      **Stages 0 through 7 are merged.** The stored path is a refit at a fixed 0.25 pt tolerance with a 12 pt
+      **Stages 0 through 8 are merged.** The stored path is a refit at a fixed 0.25 pt tolerance with a 12 pt
       cap, independent of any brush, and `StrokeSampleGate` is deleted. Per-dab randomness is
       `hash(seed, arcLength)` **in brush widths**, which survives a split, a refit, a spacing edit and an
       eraser punch, and which deleted `DiscardedDabTarget` and `DabRNG`. Grain does not exist. `DabTarget`
@@ -185,10 +185,16 @@ LAYER_TRANSFORM.md.
       `brushes/`, and §2.10's apply-to-existing verb is the Select panel's **Brush** button at selection
       scope. And every brush parameter is now **a base plus its modulations** — *(input, curve, amount)*
       rows over the seven sensors — with `BrushDynamics` deleted rather than kept as a fast path.
+      And **Opacity and Flow are two controls now** (§2.11): a dab lays down its `flow` and nothing else,
+      the stroke merges once through its own buffer at its own opacity and blend mode, and so a stroke that
+      crosses itself reaches its opacity and stops — MEASURED at a flat 0.431 across a stroke drawn at 44%
+      that crosses itself five times, where the old engine would have read 0.676 at each crossing. The
+      eraser obeys the same rule by holding *coverage* and punching once. The `opacity` output is deleted,
+      the panel has a **Flow** slider, and the buffer costs a MEASURED 852 µs (6%) on a 2,301-dab stroke at
+      2048².
 
-      **What remains is stages 8 through 12**: opacity and flow as separate controls with the per-stroke
-      buffer §2.11 accepts; the library, the tip generator and the shipped brush set; the editor; the CC0
-      assets §8.3 gates on licensing; and the `.abr`/Procreate parsers.
+      **What remains is stages 9 through 12**: the library, the tip generator and the shipped brush set; the
+      editor; the CC0 assets §8.3 gates on licensing; and the `.abr`/Procreate parsers.
 
       **Three rulings shape what is left.** The rough ink nib is a **dynamics effect, not a tip effect** —
       §8.4, refuted by measurement — so it needs no texture and is built from §2.17's wavelength and §2.18's
