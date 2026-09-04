@@ -548,14 +548,17 @@ final class RasterVectorParityLogicTests: XCTestCase {
         XCTAssertLessThan(bytes[index], 255, "A 0.4-opacity eraser should still remove some of the ink")
     }
 
-    // MARK: - The seed
+    // MARK: - The random field
 
     /// Every brush in the matrix carries `scatter == 0` and `rotationJitter == 0`, so none of them can
-    /// catch the two tiers seeding their dab RNG differently — the failure mode `BrushStamper.DabRNG`
-    /// exists to prevent (plan §9). This does: a scattering brush places every dab through
-    /// `rng.unit()`, so identical output is only possible if both tiers derive the same seed from the
-    /// stroke's id.
-    func testAScatteringBrushMatchesBecauseBothTiersSeedFromTheStrokeID() {
+    /// catch the two tiers drawing from different randomness. This does: a scattering brush places
+    /// every dab through `DabRandom`, so identical output is only possible if both tiers address the
+    /// same field at the same arc lengths (BRUSH.md §4).
+    ///
+    /// **Two rasterizers, one walk** — which is the limit of what this file can say about randomness.
+    /// It cannot notice a split, a refit, a spacing edit or a punch moving a draw, because both sides
+    /// walk the identical samples; `DabRandomLogicTests` is where those live.
+    func testAScatteringBrushMatchesBecauseBothTiersDrawFromOneField() {
         var scattering = BrushLibrary.hardRound
         scattering.scatter = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)
@@ -566,10 +569,10 @@ final class RasterVectorParityLogicTests: XCTestCase {
                       "A scattering brush must replay to the same dabs on both tiers: \(report.diagnostic)")
     }
 
-    /// The negative control for the test above: hand the raster tier a different seed and the two
+    /// The negative control for the test above: hand the raster tier a different field and the two
     /// tiers must diverge. Without this, a harness that accidentally compared an image with itself
     /// would look just as green.
-    func testADifferentSeedOnTheRasterTierDoesDivergeSoTheSeedTestIsNotVacuous() {
+    func testADifferentFieldOnTheRasterTierDoesDivergeSoTheFieldTestIsNotVacuous() {
         var scattering = BrushLibrary.hardRound
         scattering.scatter = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)

@@ -752,11 +752,12 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertTrue(report.isExact, "Stacked punches must still be exact: \(report.diagnostic)")
     }
 
-    /// The seed restriction `parityOfHybrid` documents, made explicit: a scattering eraser is admitted
-    /// as a punch (it is only barred from *splitting*), and its punch mints a fresh id. Pinning the
-    /// split behaviour here is what stops someone later "fixing" the parity gap by comparing a
-    /// scattering eraser and concluding the hybrid is broken.
-    func testAScatteringEraserIsNotComparedBySeed() {
+    /// The restriction `parityOfHybrid` documents, made explicit: a scattering eraser is admitted as a
+    /// punch (it is only barred from *splitting*), and the punch is a **new stroke** with an id and a
+    /// random field of its own rather than the gesture's. Pinning the behaviour here is what stops
+    /// someone later "fixing" the parity gap by comparing a scattering eraser and concluding the
+    /// hybrid is broken.
+    func testAScatteringEraserPunchIsANewStrokeRatherThanTheGesture() {
         var scattering = BrushLibrary.hardRound
         scattering.scatter = 0.5
         let scene = scenario(brush: BrushLibrary.hardRound, eraserBrush: scattering)
@@ -764,7 +765,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let punches = strokes(canvas, .erase)
         XCTAssertEqual(punches.count, 1, "A scattering eraser still punches")
         XCTAssertNotEqual(punches.first?.id, Self.eraserID,
-                          "The punch mints its own id, so its dab scatter cannot be compared against a raster tier seeded from the gesture")
+                          "The punch is its own stroke, with its own random field, so its dab scatter cannot be compared against a raster tier drawing from the gesture's")
         XCTAssertEqual(strokes(canvas, .paint).count, 1, "…and it must not delete")
     }
 

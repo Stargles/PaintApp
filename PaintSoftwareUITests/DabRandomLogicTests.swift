@@ -5,12 +5,16 @@ import CoreGraphics
 /// **BRUSH.md §4 — per-dab randomness is a hash of the stroke's seed and the dab's arc length.**
 ///
 /// Everything here uses a brush with `scatter > 0`, and that is not incidental. Before this suite
-/// existed **not one test in the repo set `scatter` or `rotationJitter` above zero**: every fixture
-/// in `RasterVectorParityLogicTests`, `VectorEraserHybridLogicTests` and `BrushEngineLogicTests` used
-/// a round brush at scatter 0, where `BrushStamper.stampDab` never touches the random path at all. So
-/// the whole mechanism the old `DiscardedDabTarget` existed to protect — dab phase across a cut — was
-/// green against a fixture that could not have exercised it, which is CLAUDE.md's two-operands rule
-/// in its purest form. These tests are the first that would notice.
+/// **five tests in the repo touched the random path at all**, and none of them could have caught the
+/// thing §4 is about. Two are `RasterVectorParityLogicTests`' field tests, which hand *one walk* to two
+/// rasterizers — both sides step the same arc lengths, so a draw that moved under a split would move on
+/// both. The other three are `VectorEraserHybridLogicTests` gate tests, which assert that a scattering
+/// stroke is *refused* the split path. Every other fixture in the repo is `scatter: 0`, where
+/// `BrushStamper.stampDab` never reaches the random path at all.
+///
+/// So the mechanism the old `DiscardedDabTarget` existed to protect — a dab's randomness surviving a cut
+/// — was green against fixtures that could not have moved, which is CLAUDE.md's two-operands rule in its
+/// purest form. These are the first tests that would notice.
 final class DabRandomLogicTests: XCTestCase {
 
     // MARK: - Fixtures

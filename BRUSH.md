@@ -739,9 +739,10 @@ first, which cleanly replaces the old one."*
    stroke moves no pixel; the live walk and the refitted replay draw the same values; halving the spacing
    leaves the dabs that still land on the same arc length alone; a Mode 2 punch leaves the ink in front of
    it bit-identical and the tail does not repeat the head's pattern; a uniform scale draws the identical
-   values. **Every one of those is the first test in the repo to set `scatter` above zero** — before this
-   stage nothing in the suite exercised the random path at all, so the mechanism `DiscardedDabTarget`
-   existed to protect was green against a fixture that could not have moved.
+   values. **Five tests in the whole repo touched the random path before this stage and none of them could
+   have caught what §4 is about** — two hand one walk to two rasterizers, three assert a scattering stroke
+   is *refused* the split path, and every other fixture is `scatter: 0`. So the mechanism
+   `DiscardedDabTarget` existed to protect was green against fixtures that could not have moved.
 2. **Delete grain.** §9. Independent of everything else, and it shrinks the surface every later stage
    touches.
 3. **`stampImage` on `DabTarget`** + the tinted rotation-bucketed cache + its hit-rate test. `.square`
