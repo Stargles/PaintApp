@@ -1309,11 +1309,17 @@ final class BrushEngineLogicTests: XCTestCase {
     }
 
     /// **The window's pixels have to be the cel's pixels.** A paint stroke stamped into an
-    /// `.additive` scratch and committed must land byte-for-byte where the same dabs stamped
-    /// straight into the texture would have — that equality is the whole licence for the live stroke
-    /// to stop touching the cel, and it holds because the window's origin is integral (so the dab's
-    /// sub-pixel phase is unchanged) and source-over is associative (so compositing the window over
-    /// what is already there is the same as having stamped into it).
+    /// `.additive` scratch and committed must land where the same dabs stamped straight into the
+    /// texture would have — that equality is the whole licence for the live stroke to stop touching
+    /// the cel, and it holds because the window's origin is integral (so the dab's sub-pixel phase is
+    /// unchanged) and source-over is associative (so compositing the window over what is already
+    /// there is the same as having stamped into it).
+    ///
+    /// **To within `assertPixelsMatch`'s two bytes, not byte-for-byte**, which is what this comment
+    /// claimed and what the code has never asserted: all three callers take the default
+    /// `tolerance: 2`, and that helper's own doc explains why (compositing into an 8-bit scratch and
+    /// then over the layer rounds twice where stamping straight in rounds once). The slack is bounded
+    /// and does not grow with the stroke; a geometry mistake is not bounded like that.
     func testAnAdditiveScratchCommitsExactlyWhatDirectStampingWouldHave() {
         let size = CGSize(width: 256, height: 256)
         let dabs: [(CGPoint, CGFloat)] = [(CGPoint(x: 90, y: 100), 12), (CGPoint(x: 104, y: 108), 14),
@@ -1440,6 +1446,294 @@ final class BrushEngineLogicTests: XCTestCase {
                        "The dab inside the selection survives")
         XCTAssertEqual(alpha(pixels, x: 200, y: 128), 0, accuracy: 0.02,
                        "The dab outside it does not")
+    }
+
+    // MARK: - BRUSH.md §2.11 — Flow is what one stamp lays down, Opacity is what the stroke may reach
+
+    /// **A stroke that crosses itself, as one stroke.** Along `y = 32`, sharply back to the top
+    /// middle, then straight down through `x = 32` — so `(32, 32)` is covered by two passes of the
+    /// same stroke and `(14, 32)` by one. Both corners turn through 135°, which `StrokePath.isCorner`
+    /// takes as a crease, so both the horizontal and the vertical leg are straight chords and land on
+    /// the probe points exactly.
+    ///
+    /// Every probe is on `y = 32` of a 64-tall canvas and the figure is symmetric about it, so
+    /// nothing here can be an artefact of a y-flip in the read-back.
+    private static func crossingStroke() -> StrokeSamples {
+        StrokeSamples([VectorSample(x: 6, y: 32, pressure: 1),
+                       VectorSample(x: 58, y: 32, pressure: 1),
+                       VectorSample(x: 32, y: 6, pressure: 1),
+                       VectorSample(x: 32, y: 58, pressure: 1)], channels: .pressureOnly)
+    }
+
+    /// A brush with no rows at all, so every dab lays down exactly `flow` and nothing about these
+    /// tests depends on the matrix.
+    private static func flatBrush(flow: Double, spacing: Double,
+                                  blendMode: BrushBlendMode = .normal) -> Brush {
+        Brush(name: "flow fixture", tip: .round, size: 8, opacity: 1,
+              dab: BrushDabSettings(size: 1, flow: flow, spacing: spacing, hardness: 1),
+              stroke: BrushStrokeSettings(stabilization: 0, blendMode: blendMode),
+              modulations: BrushModulations())
+    }
+
+    /// The largest alpha in a square of side `2 · reach + 1` about `(x, y)` — used where a probe point
+    /// need not land on a dab centre, so the assertion is about how much ink the stroke put down near
+    /// there rather than about where the walk happened to place a dab.
+    private func maxAlpha(_ pixels: (bytes: [UInt8], width: Int, height: Int),
+                          around x: Int, _ y: Int, reach: Int = 5) -> CGFloat {
+        var worst: CGFloat = 0
+        for dy in -reach...reach where (0..<pixels.height).contains(y + dy) {
+            for dx in -reach...reach where (0..<pixels.width).contains(x + dx) {
+                worst = max(worst, alpha(pixels, x: x + dx, y: y + dy))
+            }
+        }
+        return worst
+    }
+
+    /// **The ruling, stated as a pixel fact: a stroke reaches its opacity at a crossing and no
+    /// further.** BRUSH.md §2.11 — *"Opacity caps what the whole stroke can reach however often it
+    /// crosses itself"*.
+    ///
+    /// The two operands are two pixels of **one** stroke: the point two passes covered and a point one
+    /// pass covered. Under the ruling they are the same number, because the cap is applied once to the
+    /// whole walk. Under the arithmetic this stage replaced they are 0.4 and `1 - 0.6² = 0.64`, and the
+    /// third assertion names that number so a regression cannot pass by making both pixels wrong
+    /// together — which comparing them alone would allow.
+    func testAStrokeThatCrossesItselfReachesItsOpacityAndNoFurther() {
+        let texture = RasterLayerTexture(size: Self.canvasSize)
+        // Dense spacing and full flow, so one pass alone already saturates the buffer's coverage:
+        // that is what makes "the crossing is capped" a statement about the cap rather than about
+        // how much ink two passes happen to lay.
+        BrushStamper.stampStroke(into: texture, samples: Self.crossingStroke(),
+                                 brush: Self.flatBrush(flow: 1, spacing: 0.15), color: .black,
+                                 brushSize: 8, brushOpacity: 0.4, random: DabRandom(seed: 7))
+        guard let pixels = rgbaPixels(of: texture) else {
+            return XCTFail("Could not read back the stamped texture")
+        }
+        let crossed = alpha(pixels, x: 32, y: 32)
+        let single = alpha(pixels, x: 14, y: 32)
+        XCTAssertEqual(single, 0.4, accuracy: 0.02, "one pass at 40% opacity reads 40%")
+        XCTAssertEqual(crossed, single, accuracy: 0.02,
+                       "the crossing must read exactly what a single pass reads — that is the cap")
+        XCTAssertLessThan(crossed, 0.5,
+                          "and it must not be 1 - 0.6² = 0.64, which is what stamping the cap into "
+                          + "every dab produced before §12 stage 8")
+    }
+
+    /// **Build-up still works, and opacity scales the finished stroke rather than each stamp.** The
+    /// owner's ruling: *"Pressure drives flow, not a per-dab ceiling. A light pass is faint; go over it
+    /// again and it darkens, up to the stroke's opacity and no further."*
+    ///
+    /// Wide spacing and a low flow, so a single pass genuinely does not saturate and the crossing has
+    /// somewhere to darken to. The second half is the sharper assertion: halving the stroke's opacity
+    /// must halve **every** pixel by the same factor, because opacity multiplies a finished coverage
+    /// map. Folding it into each dab instead does not scale uniformly — it would leave the crossing
+    /// proportionally darker than the single pass — so this cannot pass under the arithmetic it
+    /// replaced.
+    func testFlowBuildsUpWhereAStrokeCrossesItselfAndOpacityScalesTheWhole() {
+        func render(opacity: Double) -> (bytes: [UInt8], width: Int, height: Int)? {
+            let texture = RasterLayerTexture(size: Self.canvasSize)
+            BrushStamper.stampStroke(into: texture, samples: Self.crossingStroke(),
+                                     brush: Self.flatBrush(flow: 0.3, spacing: 1.0), color: .black,
+                                     brushSize: 8, brushOpacity: opacity, random: DabRandom(seed: 7))
+            return rgbaPixels(of: texture)
+        }
+        guard let full = render(opacity: 1), let half = render(opacity: 0.5) else {
+            return XCTFail("Could not read back the stamped textures")
+        }
+        let crossed = maxAlpha(full, around: 32, 32)
+        let single = maxAlpha(full, around: 12, 32)
+        XCTAssertGreaterThan(single, 0.2, "a single pass at flow 0.3 is faint but present")
+        XCTAssertLessThan(single, 0.45, "…and one pass of a 30% flow is not a solid line")
+        XCTAssertGreaterThan(crossed, single * 1.3,
+                             "going over it again has to darken it — that is what flow is for")
+        XCTAssertLessThanOrEqual(crossed, 1.0, "and nothing may exceed the stroke's own opacity")
+
+        for (label, x) in [("the crossing", 32), ("a single pass", 12)] {
+            XCTAssertEqual(maxAlpha(half, around: x, 32), maxAlpha(full, around: x, 32) / 2,
+                           accuracy: 0.02,
+                           "halving the stroke's opacity halves \(label) by the same factor: "
+                           + "opacity scales a finished stroke, it is not a ceiling on a stamp")
+        }
+    }
+
+    /// **A 50% eraser removes 50% wherever it goes, however often it crosses back over itself** — the
+    /// owner's second ruling, on both tiers that erase.
+    ///
+    /// The `.full` tier is `stampStroke` with `isEraser`, which is what a vector cel replays and what
+    /// the shape tool commits. The live tier is a `.subtractive` `StrokeScratch`, which is what the pen
+    /// draws into on a raster layer and in the vector eraser's Mode 1; it is fed the dabs `stampStroke`
+    /// itself would lay, `.normal`, exactly as `StrokeCanvasView.stampPath` feeds it.
+    ///
+    /// `1 - 0.5² = 0.75` removed — 25% of the ink left standing — is what punching each dab
+    /// separately produced, and the assertions name it so a regression cannot pass by darkening both
+    /// probes together.
+    func testAnEraserAtHalfOpacityTakesAwayHalfOnBothTiers() {
+        let eraser = Self.flatBrush(flow: 1, spacing: 0.15)
+        let samples = Self.crossingStroke()
+
+        func opaqueTexture() -> RasterLayerTexture {
+            let texture = RasterLayerTexture(size: Self.canvasSize)
+            texture.reset(to: Self.solidImage(.black, size: Self.canvasSize), strokeCount: 1)
+            return texture
+        }
+
+        // The replay tier.
+        let replayed = opaqueTexture()
+        BrushStamper.stampStroke(into: replayed, samples: samples, brush: eraser, color: .black,
+                                 brushSize: 8, brushOpacity: 0.5, isEraser: true,
+                                 random: DabRandom(seed: 7))
+
+        // The live tier: the same dabs, into the window the pen erases into.
+        let committed = opaqueTexture()
+        let scratch = StrokeScratch(canvasSize: Self.canvasSize,
+                                    role: .subtractive(backdrop: committed.renderToUIImage()),
+                                    opacity: 0.5)
+        let walk = BrushStamper.bake(samples: samples, brush: eraser, color: .black, brushSize: 8,
+                                     brushOpacity: 0.5, isEraser: true, random: DabRandom(seed: 7))
+        XCTAssertEqual(walk.opacity, 0.5, "the bake carries the stroke's cap, not each dab's")
+        XCTAssertEqual(walk.blendMode, .destinationOut, "…and the punch that cap is applied through")
+        for dab in walk.dabs {
+            guard case .round(let hardness) = dab.tip else { continue }
+            scratch.stampCircle(at: dab.center, radius: dab.radius, color: dab.color,
+                                alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
+        }
+        scratch.commit(into: committed)
+
+        for (tier, texture) in [("the replay tier", replayed), ("the live tier", committed)] {
+            guard let pixels = rgbaPixels(of: texture) else {
+                return XCTFail("Could not read back \(tier)")
+            }
+            let crossed = alpha(pixels, x: 32, y: 32)
+            let single = alpha(pixels, x: 14, y: 32)
+            XCTAssertEqual(single, 0.5, accuracy: 0.02,
+                           "\(tier): a 50% eraser leaves half the ink where it passed once")
+            XCTAssertEqual(crossed, single, accuracy: 0.02,
+                           "\(tier): and exactly the same half where it crossed back over itself")
+            XCTAssertGreaterThan(crossed, 0.35,
+                                 "\(tier): 0.25 is what punching every dab separately left — "
+                                 + "1 - 0.5² removed rather than 0.5")
+        }
+    }
+
+    /// **Nothing is clipped by the merge, under a brush that throws its dabs as far as this engine
+    /// allows.** The group opens its buffer over the union of the rectangles its dabs actually
+    /// painted, so this is the assertion that the union is right: heavy `size` and `scatter`
+    /// modulation puts dabs well off the centreline and at widely varying widths, and the same walk
+    /// drawn with no group at all must produce the same picture.
+    ///
+    /// The two operands are the shipped `stampStroke` and its own dabs replayed one at a time — the
+    /// bake, which is `stampStroke` into a collector. So the walk, the random field and every dab's
+    /// alpha are held identical by construction and the only difference between the arms is whether
+    /// the merge happened. At opacity 1 under `.normal` the merge is source-over into a transparent
+    /// buffer and then source-over onto the destination, which is associative, so the two agree; a
+    /// bound that fell short would take a dab's edge — or a whole dab — off one side.
+    func testAScatteringStrokeLosesNoInkToTheMerge() {
+        var brush = Self.flatBrush(flow: 0.7, spacing: 0.3)
+        brush.dab.scatter = 0.9
+        brush.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: -0.7),
+                                              BrushModulation(.scatter, .pressure, amount: 0.5)])
+        let samples = StrokeSamples((0..<12).map {
+            VectorSample(x: 8 + CGFloat($0) * 4, y: 14 + CGFloat($0) * 3,
+                         pressure: 0.12 + CGFloat($0) * 0.08)
+        }, channels: .pressureOnly)
+
+        let grouped = RasterLayerTexture(size: Self.canvasSize)
+        BrushStamper.stampStroke(into: grouped, samples: samples, brush: brush, color: .black,
+                                 brushSize: 14, brushOpacity: 1, random: DabRandom(seed: 4242))
+
+        let direct = RasterLayerTexture(size: Self.canvasSize)
+        let walk = BrushStamper.bake(samples: samples, brush: brush, color: .black, brushSize: 14,
+                                     brushOpacity: 1, random: DabRandom(seed: 4242))
+        XCTAssertGreaterThan(walk.dabs.count, 10, "Setup: there are dabs, at a range of widths")
+        XCTAssertGreaterThan(Set(walk.dabs.map(\.radius)).count, 5,
+                             "Setup: the size row is actually moving the dabs' widths")
+        for dab in walk.dabs {
+            guard case .round(let hardness) = dab.tip else { continue }
+            direct.stampCircle(at: dab.center, radius: dab.radius, color: dab.color,
+                               alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
+        }
+
+        assertPixelsMatch(grouped, direct,
+                          "the merge must not clip a scattered dab that landed off the centreline")
+    }
+
+    /// **The clean-cut gate still refuses a brush that would not remove the ink outright**, which is
+    /// the one guard §12 stage 8 could have turned into a tautology: it used to ask twice — once on
+    /// `opacity · flow` and once on the matrix's own `opacity` output — and that second output is gone,
+    /// so a guard left reading it would have been comparing a base that is now always 1.
+    ///
+    /// A false "clean cut" **deletes ink that should have faded**, which `supportsCleanCut`'s own doc
+    /// names as the asymmetric direction. Mutation-tested: relaxing the surviving guard to
+    /// `>= 0` makes the first two rows below pass, so this is looking at the product.
+    func testTheCleanCutGateReadsTheMergedAlphaRatherThanADeletedOutput() {
+        var solid = BrushLibrary.hardRound
+        solid.dab.hardness = 1
+        solid.dab.flow = 1
+        solid.dab.scatter = 0
+        solid.modulations = BrushModulations()
+
+        XCTAssertTrue(VectorEraser.supportsCleanCut(brush: solid, opacity: 1, minPressure: 1),
+                      "an opaque eraser at full flow removes the ink outright and may cut cleanly")
+
+        var faint = solid
+        faint.dab.flow = 0.8
+        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: faint, opacity: 1, minPressure: 1),
+                       "a brush laying 80% per stamp leaves ink behind — refuse the cut")
+
+        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: solid, opacity: 0.5, minPressure: 1),
+                       "and so does a full-flow brush the artist has set to half opacity")
+
+        // The gate reads the *product*, so a stroke can fail on either factor and on both together.
+        var pressureDriven = solid
+        pressureDriven.dab.flow = 0
+        pressureDriven.modulations = BrushModulations([.flowFromPressure(amount: 1)])
+        XCTAssertTrue(VectorEraser.supportsCleanCut(brush: pressureDriven, opacity: 1, minPressure: 1),
+                      "a `flow ← pressure` brush pressed hard reaches 1 and may cut")
+        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: pressureDriven, opacity: 1, minPressure: 0.9),
+                       "…and the same brush at the lightest pressure the gesture carried does not")
+    }
+
+    /// **A blend-mode stroke blends against what is under it once, not once per overlap.** BRUSH.md
+    /// §2.11's other half: the mode travels on the stroke's merge, so a `.multiply` stroke that crosses
+    /// itself is not darker at the crossing.
+    ///
+    /// Over an opaque mid grey, a `.multiply` stroke of the same grey lands `0.5 · 0.5` where it passed
+    /// once. Multiplying per dab lands `0.5³` at a crossing, which is a different colour by 60 counts —
+    /// so the third assertion names that number rather than only comparing the two probes, which a
+    /// regression that darkened both would satisfy.
+    ///
+    /// The existing blend-mode tests are all one-dab or comparative (`VectorCanvas`' isolation rules
+    /// compare a run against a run) and pin nothing about a stroke's overlap with itself.
+    func testAMultiplyStrokeBlendsOnceWhereItCrossesItself() {
+        let backdrop = UIColor(white: 0.5, alpha: 1)
+        let texture = RasterLayerTexture(size: Self.canvasSize)
+        texture.reset(to: Self.solidImage(backdrop, size: Self.canvasSize), strokeCount: 1)
+        BrushStamper.stampStroke(into: texture, samples: Self.crossingStroke(),
+                                 brush: Self.flatBrush(flow: 1, spacing: 0.15, blendMode: .multiply),
+                                 color: UIColor(white: 0.5, alpha: 1),
+                                 brushSize: 8, brushOpacity: 1, random: DabRandom(seed: 7))
+        guard let pixels = rgbaPixels(of: texture) else {
+            return XCTFail("Could not read back the stamped texture")
+        }
+        func red(_ x: Int, _ y: Int) -> Int { Int(pixels.bytes[(y * pixels.width + x) * 4]) }
+        let crossed = red(32, 32), single = red(14, 32), untouched = red(2, 2)
+
+        XCTAssertEqual(untouched, 128, accuracy: 2, "Setup: the backdrop is a mid grey")
+        XCTAssertEqual(single, 64, accuracy: 3, "one pass of a 50% multiply over 50% grey is 25%")
+        XCTAssertEqual(crossed, single, accuracy: 3,
+                       "the crossing must be the same colour — the mode belongs to the stroke")
+        XCTAssertGreaterThan(crossed, 45,
+                             "and not 0.5³ = 32, which is what multiplying once per dab produced")
+    }
+
+    /// A solid rectangle of `color`, for the tests above that need something to erase or to blend
+    /// against. `RasterLayerTexture` has no fill primitive of its own — it stamps dabs — so the
+    /// backdrop arrives the way an undo patch does, through `reset(to:strokeCount:)`.
+    private static func solidImage(_ color: UIColor, size: CGSize) -> UIImage {
+        UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
     }
 
     /// Whole-texture comparison at a tolerance of `tolerance` on every byte — the form the scratch's

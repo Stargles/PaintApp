@@ -494,7 +494,11 @@ final class CGContextDabTarget: DabTarget {
         self.group = nil
         guard !group.isEmpty, !group.bounds.isNull else { return }
         ctx.saveGState()
-        ctx.clip(to: group.bounds)
+        // **Integral, and that is not tidiness.** A clip on a fractional rectangle is antialiased, so
+        // the group's outermost row of pixels would come out at partial coverage — MEASURED at
+        // alpha 193 where 255 was drawn, which is ink lost at a seam rather than a rounding
+        // difference. Rounded out to the pixel grid the clip lands between pixels and takes nothing.
+        ctx.clip(to: group.bounds.integral)
         ctx.setAlpha(group.opacity)
         ctx.setBlendMode(group.blendMode)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
@@ -948,7 +952,11 @@ final class RasterLayerTexture: DabTarget {
         self.group = nil
         guard !group.isEmpty, !group.bounds.isNull, let ctx = ensureContext() else { return }
         ctx.saveGState()
-        ctx.clip(to: group.bounds)
+        // **Integral, and that is not tidiness.** A clip on a fractional rectangle is antialiased, so
+        // the group's outermost row of pixels would come out at partial coverage — MEASURED at
+        // alpha 193 where 255 was drawn, which is ink lost at a seam rather than a rounding
+        // difference. Rounded out to the pixel grid the clip lands between pixels and takes nothing.
+        ctx.clip(to: group.bounds.integral)
         ctx.setAlpha(group.opacity)
         ctx.setBlendMode(group.blendMode)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)

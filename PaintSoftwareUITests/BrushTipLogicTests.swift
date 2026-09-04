@@ -686,18 +686,24 @@ final class BrushTipLogicTests: XCTestCase {
     /// is CLAUDE.md's assertion-true-of-mathematics in this file's own back yard. The id has to come
     /// from outside the process to mean anything, and a document written down here is the only way
     /// to say "an earlier launch".
+    /// **The spelling below changed at §12 stage 8 and the fixture moved with it.** `dab.opacity` and
+    /// the `opacity` output are deleted, so a document carrying either is a *corrupt* manifest rather
+    /// than an old one — BRUSH.md §2.14 rules the documents on the device expendable and `BrushTip`'s
+    /// own decoder already takes that position for an unrecognised tip kind. Verified rather than
+    /// assumed: with `"output":"opacity"` this decode throws `Cannot initialize BrushOutput from
+    /// invalid String value opacity`, which is the honest answer and not a silently substituted brush.
     func testAPresetSavedByAnEarlierLaunchIsStillRecognisedAsThatPreset() throws {
         let asSavedByAnEarlierLaunch = """
         {"id":"B7051000-0000-4000-A000-000000000003","name":"Pencil","tip":{"kind":"round"},
          "size":6,"opacity":0.9,
-         "dab":{"size":0.7,"opacity":0.5,"spacing":0.04,"hardness":0.7},
+         "dab":{"size":0.7,"flow":0.5,"spacing":0.04,"hardness":0.7},
          "stroke":{"stabilization":0.15,"blendMode":"normal"},
          "modulations":[
            {"output":"size","input":{"kind":"pressure"},"amount":0.3,
             "curve":{"step":1,"keys":[
               {"frame":0,"value":0.5,"interpolation":"linear","tangentMode":"vector"},
               {"frame":1024,"value":1,"interpolation":"linear","tangentMode":"vector"}]}},
-           {"output":"opacity","input":{"kind":"pressure"},"amount":0.5}]}
+           {"output":"flow","input":{"kind":"pressure"},"amount":0.5}]}
         """
         let decoded = try JSONDecoder().decode(Brush.self, from: Data(asSavedByAnEarlierLaunch.utf8))
         XCTAssertEqual(decoded.id, BrushLibrary.pencil.id,
