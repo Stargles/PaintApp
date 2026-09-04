@@ -1533,27 +1533,37 @@ final class BrushEngineLogicTests: XCTestCase {
         func render(opacity: Double) -> (bytes: [UInt8], width: Int, height: Int)? {
             let texture = RasterLayerTexture(size: Self.canvasSize)
             BrushStamper.stampStroke(into: texture, samples: Self.crossingStroke(),
-                                     brush: Self.flatBrush(flow: 0.3, spacing: 1.0), color: .black,
+                                     brush: Self.flatBrush(flow: 0.25, spacing: 0.4), color: .black,
                                      brushSize: 8, brushOpacity: opacity, random: DabRandom(seed: 7))
             return rgbaPixels(of: texture)
         }
-        guard let full = render(opacity: 1), let half = render(opacity: 0.5) else {
+        let cap = 0.3
+        guard let full = render(opacity: 1), let capped = render(opacity: cap) else {
             return XCTFail("Could not read back the stamped textures")
         }
-        let crossed = maxAlpha(full, around: 32, 32)
-        let single = maxAlpha(full, around: 12, 32)
-        XCTAssertGreaterThan(single, 0.2, "a single pass at flow 0.3 is faint but present")
-        XCTAssertLessThan(single, 0.45, "…and one pass of a 30% flow is not a solid line")
+        let crossed = maxAlpha(full, around: 32, 32, reach: 3)
+        let single = maxAlpha(full, around: 12, 32, reach: 3)
+        XCTAssertGreaterThan(single, 0.3, "a single pass at flow 0.25 is faint but present")
+        XCTAssertLessThan(single, 0.7, "…and one pass of a 25% flow is not a solid line")
         XCTAssertGreaterThan(crossed, single * 1.3,
                              "going over it again has to darken it — that is what flow is for")
-        XCTAssertLessThanOrEqual(crossed, 1.0, "and nothing may exceed the stroke's own opacity")
+        XCTAssertLessThan(crossed, 0.95, "…and the fixture still has headroom to darken into")
 
-        for (label, x) in [("the crossing", 32), ("a single pass", 12)] {
-            XCTAssertEqual(maxAlpha(half, around: x, 32), maxAlpha(full, around: x, 32) / 2,
-                           accuracy: 0.02,
-                           "halving the stroke's opacity halves \(label) by the same factor: "
-                           + "opacity scales a finished stroke, it is not a ceiling on a stamp")
+        // **Opacity scales a finished stroke, so it scales every pixel of it by the same factor.**
+        // Folding the cap into each stamp instead cannot do that: `1 - (1 - o·f)ⁿ` is not
+        // `o · (1 - (1 - f)ⁿ)` for n > 1, and the two diverge exactly where the ink built up. Asserted
+        // over the whole canvas rather than at two probes, because the claim is about every pixel.
+        var worst: (delta: CGFloat, x: Int, y: Int) = (0, -1, -1)
+        for y in 0..<full.height {
+            for x in 0..<full.width {
+                let delta = abs(alpha(capped, x: x, y: y) - CGFloat(cap) * alpha(full, x: x, y: y))
+                if delta > worst.delta { worst = (delta, x, y) }
+            }
         }
+        XCTAssertLessThanOrEqual(worst.delta, 2.0 / 255,
+                                 "every pixel of the capped stroke must be \(cap) of the uncapped "
+                                 + "one, to within a byte of quantisation — worst was "
+                                 + "\(worst.delta * 255)/255 at (\(worst.x), \(worst.y))")
     }
 
     /// **A 50% eraser removes 50% wherever it goes, however often it crosses back over itself** — the
