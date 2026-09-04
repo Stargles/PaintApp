@@ -122,6 +122,30 @@ brushes, and some other brushes. I also like the idea of having a brush which is
 rough, almost giving it a sort of slightly rough blotchy sketchy feel to the lineart. A lot of brushes
 would be nice, organized into groups, with the option to make my own."* §8.
 
+**2.17 Every `random` modulation carries a wavelength, and the rough ink's dropout ships at three to four
+brush widths.** §2.13 rules that a per-dab random is `hash(strokeSeed, arcLength)`; the wavelength makes that
+value band-limited rather than white — it interpolates between hashed lattice points λ of arc length apart,
+and λ = 0 is a fresh draw per dab. Nothing about §4 changes: there is still no sequence and no phase, so a
+value survives a split, a refit, a spacing edit and an eraser punch for the same reason. **λ is what
+separates a stipple from a segmented line.** At λ = 0 ten overlapping dabs cover every point, so dropping
+half of them only roughens the edge; at λ ≈ 3–4 widths a contiguous run drops and the line breaks into the
+long arcs the owner picked out of the comparison sheet. One output may carry several `random` rows at
+different λ, which is how a rough nib gets slow thick/thin variation and fine edge fuzz out of one input
+with no spectral-slope parameter.
+
+**2.18 `density` is an output — the probability that a dab is stamped at all.** The dab is skipped when its
+random draw exceeds it. Nothing special-cases pressure: the owner's *"at very low pressure, segments of the
+brush aren't painted (its noisy), creating a sort of segmented lineart filled with gaps"* is `density ←
+pressure`, one row of §6's matrix like any other. **The coherence lives in the draw, not in the value
+compared against** — modulating `density` by a coherent random while drawing white noise gives a thinned
+speckle rather than gaps — so λ sits on the `density` row itself.
+
+**2.19 A taper is low pressure, so `density ← pressure` is a threshold curve rather than a ramp.** Density
+holds flat at 1 above about a third of full pressure and falls below it. Without that the dropout eats the
+point of every tapered stroke and a hair spike ends in gaps; with it a taper keeps its point while a stroke
+drawn genuinely light breaks up along its whole length. That is the shape of the curve §6 already gives
+every modulation, not a mechanism of its own.
+
 ---
 
 ## 3. The pipeline — four stages, one of them stored
@@ -368,8 +392,15 @@ the brief's *"every parameter should be able to be sensor driven"*, and it is th
 **Inputs** (§2.8): `pressure` · `direction` · `taper` (distance along the stroke, from either end) ·
 `velocity` · `random`.
 
-**Outputs**: `size` · `opacity` · `flow` · `angle` · `roundness` · `spacing` · `scatter` ·
+**Every `random` modulation carries a wavelength λ, expressed in brush widths so a brush looks the same at
+any size** — §2.17. Its value interpolates between hashed lattice points λ of arc length apart, which is
+still exactly §4's `hash(strokeSeed, arcLength)`; λ = 0 is a fresh draw per dab.
+
+**Outputs**: `size` · `opacity` · `flow` · `angle` · `roundness` · `spacing` · `scatter` · `density` ·
 `hue` / `saturation` / `brightness` shift · `hardness` (procedural tips only).
+
+`density` (§2.18) is the probability that a dab is stamped at all, and it is the one output whose λ belongs
+to the **row** rather than to a modulation entry, because what has to be coherent is the draw.
 
 Angle has three contributions that sum: a base angle, direction-follow as a 0–100% amount, and jitter.
 
@@ -459,11 +490,24 @@ Most of what §2.16 asks for is procedural and therefore has clean provenance by
 a disc, a soft round a falloff, a square a square, a technical pen a small hard shape, a chisel an
 anisotropic mask, a pencil a mid-frequency noise threshold.
 
-**Including the one the owner singled out.** The rough blotchy ink line is a **tip** effect, not a dynamics
-effect: jitter and scatter on a clean disc read as *wobbly* or *dotty*, never as *rough*. It needs an
-irregular alpha edge — a disc whose boundary is eroded by high-frequency noise. Generating it is also
-strictly better than scanning one, because the roughness becomes a parameter the artist can tune rather than
-a fixed picture.
+**Including the one the owner singled out — and it is a dynamics effect, not a tip effect.** MEASURED by an
+offline prototype running `BrushStamper`'s own walk arithmetic: a disc whose boundary is eroded by
+high-frequency noise measures 1.08% of a brush width of edge roughness as a lone dab, and **the stroke made
+of it at a 10% spacing measures 0.41%**. The walk unions about ten overlapping dabs, so the edge is a running
+maximum of the notch profile and a neighbour fills most of each notch. **Cranking the erosion does not rescue
+it and is not even monotonic**: a deeper tip renders a *smoother* line (0.262%) than a shallower one, and a
+tip with interior pits — 7.93% rough on its own — reaches the line at 0.304%. At the size a lineart nib is
+actually used, a 5 pt brush at 2× retina, the entire surviving effect is **0.06 px**. What does survive is a
+*periodic sawtooth* at the dab spacing, because every dab presents the same profile at an even interval; it
+reads as a rendering artifact rather than as ink.
+
+**The mechanisms that work are coherent along arc length**, because those move the envelope the union takes:
+`random → size` at ±30% measures 3.6% of a brush width — nine times the eroded tip — and coherent
+`random → scatter` 2.3%. So **the rough ink nib is generated from modulation on a clean round tip and needs
+no tip texture at all**, which is why §2.17 and §2.18 are where it lives. Two negative results from the same
+measurement, both worth not re-deriving: coherent `scatter` and a pure perpendicular offset are
+indistinguishable, so there is no `offset` output; and several `random` rows at different λ give multi-scale
+roughness, so there is no octave or spectral-slope parameter.
 
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
@@ -478,6 +522,15 @@ The honest cost is **stamp repetition**: one tip means every dab of a stroke is 
 line can read as a pattern. The answer stays inside one concept — **a tip is a small set of variants, and
 §4's hash picks one per dab.** Order-independent by construction, so it survives a split, a refit and a
 spacing edit like every other random draw, and it needs no second texture kind.
+
+**And the repetition is finer than "a long line can read as a pattern".** MEASURED: at a 10% spacing, one
+tip stamped every 0.1 widths puts a *regular sawtooth* on the stroke's edge — a comb at the dab period,
+rather than a texture. Rotating per dab breaks it, so the variant set is load-bearing rather than a nicety.
+But note what rotation does at that spacing: it presents a different boundary radius per dab, which **is** a
+per-dab size jitter. A clean disc with `random(λ = 0) → size` at ±6% measures the same character — 1.27% of a
+width against 1.25% for the rotated eroded tip — and needs no tip. **The variant set earns its keep for
+shaped tips (bristle, chalk, splatter) and not for a rough round, where §6's own modulation is the cheaper
+answer.**
 
 ### 8.6 The set
 
@@ -588,6 +641,12 @@ Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md
 
 Stages 1–4 are worth doing on their own merits with no file format involved, which is the test of whether
 the ordering is honest.
+
+**This order stands, and that is a decision rather than an oversight.** §8.4's refutation means the rough
+ink nib needs no tip texture, so it could be pulled in front of the library and the editor and drawn with
+early. It is not. Owner: *"The brush will get done once the brush engine which allows it to exist is done,
+along with the other brushes. Focus on the engine for now. I want a clean and well designed architecture
+first, which cleanly replaces the old one."*
 
 0. **DONE — the path: refit, and `StrokeSampleGate` deleted.** §3.3 and §5.3. `StrokePathFit` decides what
    is stored and `StrokePath` is the curve every tier walks; the arc-length march and the curve tangent
