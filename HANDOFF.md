@@ -26,12 +26,15 @@ re-deriving them**, §12 is the build order and carries a DONE marker per stage,
 2. **Stage 9 is driven by contact sheet.** Render candidates through the real stamper, put them in front
    of the owner, build only what they pick. This is the loop that settled §8.4 and it is now the
    instruction for the whole ~24-30 brush set.
-3. **The aliased dab edge is with the owner, not filed and not decided.** BUGS.md carries the
-   measurement — a hard round dab has only two or three distinct alphas at hardness 0.95, which is
-   `hardRound`'s own setting *and* `VectorEraser.supportsCleanCut`'s threshold. **A before/after contact
-   sheet was rendered for them at the end of the pass**; if this file is being read before they answered,
-   ask again rather than assuming. It matters because the rough ink nib specifies hardness 0.93 purely to
-   dodge the jaggies, and stage 9 builds two dozen brushes on top of this dab.
+3. **The aliased dab edge is with the owner, and it may be a parameter rather than a defect.** BUGS.md
+   carries the measurement — a hard round dab has only two or three distinct alphas at hardness 0.95,
+   which is `hardRound`'s own setting *and* `VectorEraser.supportsCleanCut`'s threshold. **A before/after
+   contact sheet was rendered for them at the end of the pass, and it was briefed as a defect before the
+   owner said otherwise**: they observe that some versions of the rough ink nib are *heavily aliased and
+   that this is part of the rough look*, and are considering **shipping more than one version of that
+   brush**. So do not read the sheet as fix-or-don't. The live question is whether **edge softness is a
+   brush-level choice** — §6 already has `hardness` as an output — and a blanket antialiasing pass would
+   remove a texture the owner wants. If this file is being read before they ruled, ask; do not assume.
 
 ## Ask the owner these
 

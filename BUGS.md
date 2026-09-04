@@ -80,6 +80,17 @@ display lists is a memory-budget question before it is an undo question.
 
 ## A hard round dab has a fully aliased edge, and it starts well below hardness 1.0 (2026-09-04)
 
+**Read the owner's ruling below before treating this as a defect to fix.** They observed that some
+versions of the rough ink nib are *heavily aliased and that the aliasing is part of what makes them look
+rough*: **"i've noticed that some versions of it are heavily aliased thus adding to the rough look. I'll
+have a look at the results from the agent and then decide, I may settle down on there being multiple
+versions of this brush."** So the question is not only *"is this edge wrong"* but **"is edge softness a
+brush-level parameter"** — and a global fix that antialiases every dab would delete a texture the owner
+wants rather than repairing one they do not. §6 already has `hardness` as an output; whether its top end
+should stay aliased on purpose, and whether the rough ink family ships in more than one version, is
+[BRUSH.md](BRUSH.md) §8.4's question rather than this entry's. **The measurement below stands either
+way** — what is in dispute is what to do about it, not what it is.
+
 **Found while measuring `DabGradientCache` for BRUSH.md §12 stage 3's image primitive. Reported, not
 fixed** — the fix moves pixels under `RasterVectorParityLogicTests` and a dozen others, and which way to
 fix it is a separate decision.

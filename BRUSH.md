@@ -964,6 +964,15 @@ roughness, so there is no octave or spectral-slope parameter.
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
+**Edge softness may be part of the nib rather than a fault in the dab.** The owner, on seeing rough ink
+references: *"some versions of it are heavily aliased thus adding to the rough look... I may settle down on
+there being multiple versions of this brush."* [BUGS.md](BUGS.md) records that a hard round dab is fully
+aliased at hardness 0.95 and reads that as a defect; against a nib whose edge is *meant* to be seen it is at
+least as likely to be an ingredient. §6 already carries `hardness` as an output, so the mechanism exists —
+what is unsettled is whether the rough ink family ships as one brush or several, and that is a contact-sheet
+question rather than an argument. **Do not antialias the dab globally before it is answered**, because that
+decides it in one direction with no way back short of a second dab path, which §10 forbids.
+
 ### 8.5 One texture per tip, and what that costs
 
 Procreate builds a brush from two textures — a Shape Source and a Grain Source stamped through it. **This
