@@ -673,21 +673,35 @@ final class BrushTipLogicTests: XCTestCase {
         }
     }
 
-    /// **A shipped preset's identity survives a save**, which is what lets the picker highlight the
-    /// brush a project was saved with and what `BrushLibrary.isPencilPreset` stands on. The ids used
-    /// to be `UUID()` in a `static let` — one value per *process* — so a decoded preset matched no
-    /// running copy of itself, and the pencil-selects-the-pencil rule would have inherited that hole
-    /// the moment it stopped asking about the shape.
-    func testAShippedPresetIsStillRecognisableAfterADocumentRoundTrip() throws {
-        for preset in BrushLibrary.defaults {
-            let decoded = try JSONDecoder().decode(Brush.self, from: try JSONEncoder().encode(preset))
-            XCTAssertEqual(decoded.id, preset.id, "\(preset.name) comes back as the same preset")
-        }
-        let pencil = try JSONDecoder().decode(Brush.self,
-                                              from: try JSONEncoder().encode(BrushLibrary.pencil))
-        XCTAssertTrue(BrushLibrary.isPencilPreset(pencil),
+    /// **A preset saved by an earlier launch is still the same preset**, which is what lets the
+    /// picker highlight the brush a project was saved with and what `BrushLibrary.isPencilPreset`
+    /// stands on now that no tip can say which preset is the pencil. The ids used to be `UUID()` in
+    /// a `static let` — one value per *process* — so a decoded preset matched no running copy of
+    /// itself.
+    ///
+    /// **The manifest below is a literal and that is the whole test.** The obvious version —
+    /// encode a preset, decode it, assert the ids match — was written first and **passed with the id
+    /// mutated back to `UUID()`**: a `static let` is one value for the life of a process, so a round
+    /// trip inside that process preserves it whatever it was. It was measuring `JSONDecoder`, which
+    /// is CLAUDE.md's assertion-true-of-mathematics in this file's own back yard. The id has to come
+    /// from outside the process to mean anything, and a document written down here is the only way
+    /// to say "an earlier launch".
+    func testAPresetSavedByAnEarlierLaunchIsStillRecognisedAsThatPreset() throws {
+        let asSavedByAnEarlierLaunch = """
+        {"id":"B7051000-0000-4000-A000-000000000003","name":"Pencil","tip":{"kind":"round"},
+         "size":6,"opacity":0.9,"flow":1,"spacingFraction":0.04,"hardness":0.7,
+         "stabilization":0.15,"scatter":0,"rotationJitter":0,"blendMode":"normal",
+         "dynamics":{"sizePressure":0.3,"opacityPressure":0.5,"minSizeFraction":0.5}}
+        """
+        let decoded = try JSONDecoder().decode(Brush.self, from: Data(asSavedByAnEarlierLaunch.utf8))
+        XCTAssertEqual(decoded.id, BrushLibrary.pencil.id,
+                       "the id in a saved document has to name the preset this launch is running")
+        XCTAssertTrue(BrushLibrary.isPencilPreset(decoded),
                       "…which is what keeps picking Pencil selecting the pencil tool")
-        XCTAssertFalse(BrushLibrary.isPencilPreset(BrushLibrary.pen))
+        XCTAssertFalse(BrushLibrary.isPencilPreset(BrushLibrary.pen),
+                       "…and it is a test rather than a constant `true`")
+        XCTAssertEqual(Set(BrushLibrary.defaults.map(\.id)).count, BrushLibrary.defaults.count,
+                       "the five presets are five identities, so the picker cannot highlight two")
     }
 
     // MARK: - Helpers

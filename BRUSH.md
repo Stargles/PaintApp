@@ -277,8 +277,9 @@ func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat
 ```
 
 `stampApproximateSquare` — sixteen gradient-filled circles faking one square dab — is gone, and
-`.square` is a committed 256² alpha PNG loaded by the same route a user's import will take. There is no
-`hardness` on this arm: a picture's edge is in its pixels.
+`.square` is a committed 256² alpha PNG loaded by the same route a user's import takes — one route, since
+stage 5, with the artist's own tip at the other end of it. There is no `hardness` on this arm: a picture's
+edge is in its pixels.
 
 **A tip's mask is square, by ruling.** One scalar for the dab's size keeps `DabPose` at one multiply,
 `BakedDab` at one number and the dirty-rect bound at one `abs`; a non-square import is letterboxed into
@@ -669,16 +670,48 @@ to the **row** rather than to a modulation entry, because what has to be coheren
 
 Angle has three contributions that sum: a base angle, direction-follow as a 0–100% amount, and jitter.
 
-`BrushShape` + `customTextureFileName` — a case and a parallel optional field that can disagree — collapse
-into one payload-carrying enum, so the illegal states stop being representable and `stampDab`'s switch
-stays exhaustive:
+`BrushShape` + `customTextureFileName` — a case and a parallel optional field that could disagree —
+are **one payload-carrying enum since §12 stage 5**, so the illegal states are not representable and
+`stampDab`'s switch is exhaustive with no `default:`:
 
 ```swift
 enum BrushTip: Codable, Equatable {
     case round                    // procedural, hardness gradient
-    case stamp(BrushTextureRef)   // imported, or a user PNG
+    case stamp(BrushTextureRef)   // a committed tip, or the artist's own PNG
 }
 ```
+
+**Five shapes became two cases and no ink moved.** `.softRound`, `.hardRound`, `.pen` and `.pencil` all
+called `stampCircle` and differed only in the `hardness`, `spacingFraction` and `dynamics` their presets
+carried, every one of which is still a `Brush` field. `.square` and `.custom` are both `stampImage` of a
+`BrushTextureRef`, so the difference between a shipped tip and the artist's own is a case of *that* type
+rather than a case of the brush's shape — which is what makes an imported PNG reach the renderer by the
+route the committed square already took.
+
+**Two readers of the old pair were not about the tip at all, and both had to be re-homed rather than
+translated.** `BrushShape.displayName` and `StrokeSettingsPanel.icon(for:)` were UI text with a case per
+*preset*: the icon gave the pencil a pencil and the pen a nib for four brushes that were one dab. The
+icon is derived from the tip now — a disc, filled or hollow by the falloff the artist will see, or the
+picture itself — and the preset's **name**, already rendered beneath it, is what tells Pencil from Pen;
+`displayName` is deleted. `CanvasManager.selectBrush` asked `shape == .pencil` to retarget `selectedTool`,
+which no tip can answer, so it asks `BrushLibrary.isPencilPreset` instead: **the affinity is to the
+preset, and that is a fact the library owns rather than a field on `Brush`** — a field would be the pair
+just removed wearing a tool's name. That in turn needed `BrushLibrary`'s five presets to carry written-down
+ids rather than `UUID()` in a `static let`, which is one value per *process*: a preset saved into a
+manifest came back matching no running copy of itself, so the picker's highlight found nothing after a
+reload. §12 stage 9 replaces the presets and the group tree answers both questions then.
+
+**What a tip file is, is `BrushTipImport`'s rule and nothing else's.** Everything below
+`BrushTextureRef` reads a mask's **alpha** as the dab's coverage, so an import is normalised on the way in
+rather than interpreted on the way out: letterboxed into a square (§3.5's ruling — a dab's size is one
+scalar everywhere below `stampImage`), 256² at a 2 px transparent border like the committed square, and —
+the one inference — **an opaque picture is read as `1 - luminance` rather than as alpha**. Without that
+the feature is unusable for the format artists' stamps arrive in: a scan, a `.abr` brush's pixels and
+anything picked out of Photos carry no alpha channel at all, so read as alpha every one of them is a
+filled square. The test is on the drawn pixels inside the letterbox rather than on the file's metadata, so
+a PNG that is already a mask keeps its alpha and cannot be inverted. A picture that normalises to nothing
+at all is refused by name (`Failure.blankMask`) rather than becoming a brush that paints air, which is the
+failure a renderer bug looks exactly like.
 
 `Brush`'s flat scalars group into sub-structs the way `dynamics` and `blendMode` already are, each with a
 `static let default` and defaulted decode. `Brush`'s `Codable` is compiler-synthesized today, so every
@@ -857,11 +890,11 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | ~~`PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag~~ **gone** | `SampleChannelSet`, one header byte, `preciseCoordinates` as bit 0 — §5.5 | 4 |
 | ~~`BrushStamper.Sample`~~ **gone** | `StrokeSamples`; the stamper walks the stroke's own storage — §5.5 | 4 |
 | ~~`VectorSample`'s `Codable`, and `decodeRun`'s `[VectorSample]` fallback~~ **gone** | one way to write a sample, and it is `PackedSampleRun` — §2.14 | 4 |
-| `BrushShape` + `customTextureFileName` as a separable pair | `BrushTip`, one payload-carrying enum — §6 | 5 |
+| ~~`BrushShape` + `customTextureFileName` as a separable pair~~ **gone**, and with it `BrushShape.displayName` | `BrushTip`, one payload-carrying enum — §6 | 5 |
 | `VectorStroke`'s by-value `Brush` | a table index — §5.4 | 6 |
 | `BrushDynamics.sizeFraction` / `.opacityFraction`, the two hardcoded linear pressure blends | the modulation matrix — §6 | 7 |
 | `Brush`'s flat scalars | grouped sub-structs with defaulted decode — §6 | 7 |
-| `BrushLibrary.defaults` — softRound, hardRound, pencil, pen, square | the generated and sourced set, in groups — §8 | 5 |
+| `BrushLibrary.defaults` — softRound, hardRound, pencil, pen, square | the generated and sourced set, in groups — §8 | 9 |
 
 **No decode defaults for fields that stopped existing, no format version, no migration, no compatibility
 shim, and no "this used to be" comments.** Documents on the device are expendable, so the format simply
@@ -898,8 +931,10 @@ Not to be lost — [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md
 - **The eraser is a stroke**, so an imported brush erases with no eraser work.
 - **`RasterVectorParityLogicTests` compares the two tiers at zero tolerance** and is the regression net for
   this whole item. It already exists.
-- **Imported-asset lifetime is solved** — `ProjectStore` copies a custom brush's texture into the project
-  and restores it on load.
+- **Imported-asset lifetime is half solved** — `ProjectStore` copies an imported tip's PNG into the
+  project and restores it on load, and since stage 5 the *filter* is exact (`BrushTip.importedTextureFileName`,
+  which cannot disagree with itself the way `shape == .custom` plus a nil-able name could). What it walks
+  is still the palette rather than the drawing; §5.4 and [BUGS.md](BUGS.md) carry that, and stage 6 owns it.
 - **`supportsCleanCut` / `supportsSplitting` gate on brush *properties*, not on a list of known brushes**,
   so a scattered, jittered imported brush falls back to the exact alpha punch automatically. Do not relax
   `supportsSplitting`: its coverage test measures against a capsule chain, and scattered ink is not bounded
@@ -956,8 +991,25 @@ first, which cleanly replaces the old one."*
    that modulation removed. **Two of this section's instructions were refuted and §2.7 and §5.5 record
    both**: the capture was already in canvas space (the conversion that was missing is the layer
    transform's), and the funnel needs two coordinates rather than an arc length.
-5. **`BrushTip`**, and the renderer finally reads `customTextureFileName`. User PNG stamps work: the first
-   artist-visible feature, and it exercises the whole path.
+5. **DONE — `BrushTip`, and the renderer reads the artist's own PNG.** §6. The pair is deleted, the
+   stamper resolves the tip's `BrushTextureRef`, and `BrushTipImport` is what an imported file has to
+   be. `CanvasManager.importCustomBrush` is the whole import, so `BrushSettingsPanel` holds none of the
+   rule and the path is drivable from a cold start. Pinned by `BrushTipLogicTests`: two brushes
+   differing *only* in which imported tip they name stamp different pixels (the narrow test tip is the
+   discriminating one — a tip that fills its mask is indistinguishable from the committed square, so an
+   assertion built on that arm alone would be green against a stamper that ignored the tip); the round
+   and stamp arms disagree at the corner; a fresh document imports, selects and draws in one call; and
+   an import is letterboxed, bordered, right way up, read by luminance only when it is opaque, and
+   refused when it is blank. **The one instruction this section gave that did not survive contact is
+   "the renderer finally reads `customTextureFileName`"** — reading it is not enough, because the file
+   an artist picks is an opaque photo and its alpha is all 255, so the stamp is a filled square however
+   faithfully the renderer resolves it. §6 carries the normalisation that makes the feature usable and
+   the reason it belongs at import time.
+   **And one of this stage's own assertions was measuring `JSONDecoder`.** "A preset's id survives a
+   round trip" passed with the id mutated back to `UUID()`, because a `static let` is one value for the
+   life of a process and encode-then-decode inside it preserves whatever that was. The id has to come
+   from *outside* the process to mean anything; the test decodes a manifest written down in the source
+   instead. CLAUDE.md's assertion-true-of-mathematics, in this document's own back yard.
 6. **The brush table** — §5.4, §2.9, the save-time sweep, and §2.10's apply-to-existing verb.
 7. **The modulation matrix** — `Brush` regrouped, every parameter `base + [modulation]`. §6.
 8. **Opacity and Flow**, and the per-stroke buffer. §2.11. Late, because it changes the live drawing path

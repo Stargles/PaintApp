@@ -131,10 +131,15 @@ rotation-bucketed `CGImage` cache — and it needs the same kind of test, or per
 construction will dominate everything. Build the cache and its hit-rate test in the same change as
 the primitive, not after.
 
-### `BrushShape` and `customTextureFileName` should become one thing
+### `BrushShape` and `customTextureFileName` should become one thing — **DONE, BRUSH.md §12 stage 5**
 
-Today `.custom` is a `BrushShape` case with a **parallel optional field** carrying the file name, and
-the two can disagree (`.custom` with a nil name, or `.hardRound` with a name set). More to the point:
+What follows is the state this survey found, kept because it is the argument rather than the news.
+`BrushTip` is the shipped answer and `BrushTipImport` is the part this section did not see coming: the
+renderer reading the file name is necessary and not sufficient, since an artist's stamp arrives opaque
+and its alpha is all 255. BRUSH.md §6 carries both.
+
+Then: `.custom` was a `BrushShape` case with a **parallel optional field** carrying the file name, and
+the two could disagree (`.custom` with a nil name, or `.hardRound` with a name set). More to the point:
 
 > **`customTextureFileName` is written by the UI and copied by the project store, but the renderer
 > never reads it.** `stampDab` routes `.custom` to `stampApproximateSquare`
@@ -194,8 +199,8 @@ default` and its own defaulted decode. Then a new setting is one nested field, n
 1. `stampImage` on `DabTarget` + its cache + a hit-rate test. `.square` becomes a texture; delete
    `stampApproximateSquare`. **No file formats involved** — this is the whole architectural change,
    and it is independently valuable (plan §9's deferred square-brush cost).
-2. `BrushTip` enum; wire `customTextureFileName` into the renderer it never had. User PNG stamps
-   start working — the first user-visible feature, and it exercises the whole path.
+2. **DONE.** `BrushTip` enum; the renderer reads the tip's own texture ref. User PNG stamps work — the
+   first user-visible feature, and it exercises the whole path.
 3. Group `Brush`'s settings into sub-structs, with defaulted decode.
 4. `.abr` parser → `Brush`. Then Procreate `.brush` (a ZIP: `Brush.archive` keyed-archive plist plus
    `Shape.png` / `Grain.png`), which maps onto the same model.

@@ -61,22 +61,30 @@ is why this is filed rather than fixed.
 ## A project's brush textures are copied by the palette, not by what is drawn (2026-09-04)
 
 `ProjectStore.copyCustomBrushTexturesIntoProject` and `restoreCustomBrushTexturesFromProject`
-(`Services/ProjectStore.swift:90-122`, called at `:740` on save and `:1408` on load) claim in their own
+(`Services/ProjectStore.swift:100-131`, called at `:748` on save and `:1416` on load) claim in their own
 doc comments to make a saved project self-contained against the shared
 `BrushLibrary.customBrushesDirectory` entry being renamed or deleted. What they actually walk is
 `[selectedBrush] + customBrushes` — **the picker list**. They never look at any stroke's own embedded
 `Brush`.
 
+**§12 stage 5 fixed the filter and left the population, which is the half this entry is about.** The pair
+`shape == .custom` plus a nil-able `customTextureFileName` — which could disagree with itself in both
+directions — is one `BrushTip.importedTextureFileName`, so *which files* a given list of brushes needs is
+now exact and a built-in tip is correctly not copied. *Which brushes get listed* is unchanged and is the
+defect.
+
 **It is correct today for a reason that is about to stop being true.** `CanvasManager.addCustomBrush`
-(`Models/CanvasManager.swift:772`) only appends and no removal UI exists, so the palette is a superset of
-every custom-shaped brush a stroke could reference — by accident of the current feature set rather than by
+(`Models/CanvasManager.swift:776`) only appends and no removal UI exists, so the palette is a superset of
+every imported tip a stroke could reference — by accident of the current feature set rather than by
 design. BRUSH.md §2.10 breaks that on purpose: an edit **mints a new table entry** rather than mutating
 one, so a document will routinely hold brushes that no palette lists. At that point a project saved after
 editing away from a custom brush silently loses the texture file for a brush its strokes still visibly use.
 
 This is the "the two operands cannot currently differ" family CLAUDE.md's green-assertion section
 describes, reached from the other side: the code passes for a narrower reason than its comment claims.
-**The fix belongs to §12 stage 6** — once the brush table exists, "which textures does this document use"
+`ProjectSaveLogicTests.testSavingCopiesAnImportedTipIntoThePackageAndLeavesTheBuiltInsAlone` pins what
+the sweep *does* do — nothing tested it at all before stage 5 — and says in its own comment that the
+population is out of its scope. **The fix belongs to §12 stage 6** — once the brush table exists, "which textures does this document use"
 has one honest answer (the referenced entries), which is the same population as that stage's save-time
 sweep of unreferenced ones. Fixing it before the table exists means walking every cel's elements on every
 save, which is the cost the table is there to remove.

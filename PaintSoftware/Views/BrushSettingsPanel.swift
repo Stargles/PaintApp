@@ -58,15 +58,14 @@ struct BrushSettingsPanel: View {
         .padding(.horizontal)
     }
 
-    /// Turns the picked image into a tip and registers a `Brush` that stamps it, then selects it —
-    /// so the artist's next stroke is drawn with what they just imported and there is no second step
-    /// to discover. `CanvasManager.addCustomBrush` keeps this in memory and `ProjectStore` writes it
-    /// into the project manifest on the next save.
+    /// Hands the picked image to `CanvasManager.importCustomBrush` and says what came back.
     ///
-    /// **The normalisation is `BrushTipImport`'s, not this view's.** What a tip file has to be — a
-    /// square straight-alpha mask, bordered, and read by luminance when the picture carries no alpha
-    /// of its own — is a fact about the renderer, and a copy of it here would be a second definition
-    /// to keep in step. All that is left is the three failures the artist can act on.
+    /// **Everything except the photo picker is on the other side of that call, deliberately.** What a
+    /// tip file has to be is `BrushTipImport`'s rule, and which brush stamps it and whether it becomes
+    /// the active one is the manager's; a copy of either here would be a second definition to keep in
+    /// step, and — the reason that matters — nothing in a `View` is reachable from the logic tier, so
+    /// a rule written here is a rule no test can drive. All that is left is the four failures the
+    /// artist can act on.
     private func importCustomBrush(_ item: PhotosPickerItem?) async {
         guard let item else { return }
         guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
