@@ -435,10 +435,11 @@ similarity cases (k ∈ [0.25, 8], θ ∈ [0, 2.1]): worst dab displacement **1.
 parameter error **8.9e-16**. Rotation was never in doubt and is exact for the same reason; the piece
 and the parent turn about the same pivot because they are the same array of points, mapped once.
 
-The exceptions are three floors, not a phase shift, and they are inherited knowingly:
+The exceptions are two floors, not a phase shift, and they are inherited knowingly:
 `stampSpacing`'s 1 pt minimum (which binds under 20 pt for Hard Round and under 33 pt for the Pen, so
-this is not only a hairline case), `stampDab`'s 0.5 pt diameter minimum, and
-`stampApproximateSquare`'s dab/step minimums. Below them a scaled stroke gets a different *number* of
+this is not only a hairline case) and `stampDab`'s 0.5 pt diameter minimum. (There were three: the
+square brush's sub-dab and step minimums were the other, and BRUSH.md §12 stage 3 deleted the
+sixteen-circle approximation that had them.) Below them a scaled stroke gets a different *number* of
 dabs — never a different weight, because dab diameter still scales, and never anything visible,
 because the RNG re-roll only matters to a brush with `scatter` or `rotationJitter` above zero and all
 five built-ins have neither.

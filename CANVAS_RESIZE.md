@@ -424,11 +424,12 @@ below 1.
 - The scale mode already carries the same three floors through the lasso move's scale grip, shipped
   and pinned by `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount`. This feature inherits an
   existing, documented, tested limitation rather than introducing one.
-- The floor's siblings inherit the same way: `stampDab`'s **0.5 pt** diameter floor
-  (`BrushStamper.swift:237`) and `stampApproximateSquare`'s two **1 pt** floors (`:280`, `:282`).
-  (Brush grain used to sit beside these — an absolute canvas-position noise field that re-sampled
-  under a translation as much as under a scale, so a scale was no regression there either — but
-  BRUSH.md §12 stage 2 deleted grain in full, so this sibling no longer exists.)
+- The floor's one surviving sibling inherits the same way: `stampDab`'s **0.5 pt** diameter floor.
+  (Two others used to sit beside it and neither exists now. Brush grain was an absolute
+  canvas-position noise field that re-sampled under a translation as much as under a scale, so a
+  scale was no regression there either — BRUSH.md §12 stage 2 deleted it in full. The square brush's
+  two **1 pt** sub-dab floors went with the sixteen-circle approximation that had them, in stage 3:
+  a square dab is one image stamp now, and an image stamp has no sub-lattice to floor.)
 
 What the spec *does* do: **name the effect in the dialog** when the scale factor would move a stroke
 across a floor. One sentence, once, at the moment the artist chooses — *"Brush textures will re-stamp

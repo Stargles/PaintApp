@@ -610,8 +610,10 @@ scale its radius by the local area root. It landed as `BrushStamper.DabPose` / `
 2. **Square is not the everyday second artifact; the Pencil is.** MEASURED over 24 frames of a
    uniform 1.0 → 0.3 shrink: `BrushLibrary.square` produces **one** sub-dab count *before* this stage
    as well as after, because its `spacingFraction` is **0.15** — 3.6 pt at 24 pt, clear of
-   `stampSpacing`'s 1 pt floor down to scale 0.278, and clear of `stampApproximateSquare`'s own two
-   floors at 0.3. The mechanism this section names is real; the exposure is not. The brush that
+   `stampSpacing`'s 1 pt floor down to scale 0.278, and clear of the sixteen-circle approximation's
+   own two floors at 0.3. (That approximation is gone — BRUSH.md §12 stage 3 — so the sub-lattice
+   half of this finding is now moot as well as false.) The mechanism this section names is real; the
+   exposure is not. The brush that
    re-phases on **24 frames of 24** is the Pencil (`spacingFraction` 0.04) — which is also the grain
    brush, so §4.2's two named non-round-dab cases are one brush. Hard Round (0.05) gives 19 of 24.
 3. **A *pure translation* re-phases the walk too**, which nothing here or in §8 predicted: 110 dabs
@@ -700,11 +702,13 @@ so it turns every round dab into an ellipse, contradicting the shipped ink-keeps
   re-sampling as "no regression" because it already happens under a plain translation; that reasoning
   holds for a one-off Move and fails completely at 24 fps. **The baked dab record carries the
   multiplier, not the position.**
-- **Square and custom brush shapes** re-derive a sub-dab grid from the posed diameter with 1 pt floors
-  (`BrushStamper.swift:275-294`), so they shimmer while the five round built-ins do not, unless their
-  sub-lattice is baked too. **Measured false for the shipped Square over an ordinary shrink** — see
-  finding 2 above. Baking it costs nothing extra either way, since `stampApproximateSquare` runs
-  inside the rest-space walk and emits ordinary `stampCircle` calls the pose maps like any other.
+- **Square and custom brush shapes** used to re-derive a sub-dab grid from the posed diameter with
+  1 pt floors, so they could shimmer where the round built-ins do not. **Measured false for the
+  shipped Square over an ordinary shrink** — see finding 2 above — and then **moot**: BRUSH.md §12
+  stage 3 replaced the grid with one `stampImage` of an alpha mask, so there is no sub-lattice left
+  to re-derive. What replaced it is baked the same way and needs no special case: the walk runs in
+  rest space and the pose maps the finished dab, turning its **angle** as well as moving and scaling
+  it, which the sub-lattice never had.
 - **Under Distort a dab is drawn as a circle at the local scale**, not the true projected ellipse — a
   sub-pixel error at reasonable distorts, and the same approximation `TextLayout.warpSourceScale`
   already makes.

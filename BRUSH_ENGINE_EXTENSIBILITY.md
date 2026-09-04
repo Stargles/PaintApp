@@ -7,6 +7,12 @@ code with it in mind?"
 **This is an assessment and a set of seams to preserve, not a plan to build anything.** Nothing here
 is scheduled. It exists so the next few sessions do not accidentally close a door.
 
+**It has since been overtaken, and [BRUSH.md](BRUSH.md) is the specification where the two differ.**
+Read this for the seams and the survey of the engine as it stood in July; read §12 there for what is
+being built and in what order. Its stage 3 has landed, so this document's step 1 — the image
+primitive, its cache, and the deletion of `stampApproximateSquare` — describes work that is done
+rather than work to do, and every mention of `stampApproximateSquare` below is history.
+
 ---
 
 ## Verdict
