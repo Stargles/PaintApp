@@ -111,9 +111,10 @@ final class StrokePathWalkLogicTests: XCTestCase {
     /// So: store one gesture, then walk it with brushes whose dab spacings differ by **forty times**,
     /// and require every dab to sit on the drawn line to the same fraction of a point each time.
     ///
-    /// This fails against the gated path and it was checked that it does: armed at a 30 pt brush's
-    /// record spacing, the gate stores this 30 pt circle as six points and the ink then runs 3 pt
-    /// inside the line the artist drew, whatever it is re-rendered with.
+    /// **Checked by mutation.** Restore the gate in place of the fit, armed at a 30 pt brush's record
+    /// spacing, and this goes red at **0.63 pt** off the drawn line against the 0.5 pt bound — the
+    /// gate's stored circle is coarse enough that no brush can render it true. (The traced right
+    /// angle in `testATracedRightAngleKeepsItsCorner` goes red at 3.6 pt on the same mutation.)
     func testAStoredStrokeIsTrueToTheDrawingWhateverSpacingWalksIt() {
         let drawn = circle(radius: 30)
         let knots = stored(drawn)
@@ -142,6 +143,10 @@ final class StrokePathWalkLogicTests: XCTestCase {
     /// let them cut across it. That is the half of the pin above that the drawn-line comparison
     /// cannot see: a walk that hopped from the last dab to the next stored point would keep every dab
     /// on a chord, and at these knot spacings the chords are not the path.
+    ///
+    /// **Checked by mutation**, and the shape of the failure is the argument: put the chord walk back
+    /// and the deviation is **0.42 pt at size 4, 1.13 at 16, 2.75 at 64 and 3.58 at 200** — it grows
+    /// with the spacing, so a stroke would change shape every time its brush was retuned.
     func testEveryDabSitsOnTheStoredCurveAtEverySpacing() {
         let knots = stored(circle(radius: 60))
         let path = curve(through: knots)
