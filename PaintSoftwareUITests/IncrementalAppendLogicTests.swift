@@ -39,11 +39,11 @@ final class IncrementalAppendLogicTests: XCTestCase {
                                composite: StrokeComposite = .paint) -> VectorStroke {
         let x = 16 + CGFloat((index * 13) % 84)
         let y = 20 + CGFloat((index * 29) % 52)
-        let samples = (0..<6).map { step -> VectorSample in
+        let samples = StrokeSamples((0..<6).map { step -> VectorSample in
             let t = CGFloat(step) / 5
             return VectorSample(x: x + t * 26, y: y + sin(t * .pi) * 14,
                                 pressure: 0.4 + 0.6 * t)
-        }
+        }, channels: .pressureOnly)
         return VectorStroke(brush: brush(blend),
                             color: CodableColor(red: Double((index % 3)) / 3,
                                                 green: 0.2, blue: 0.7, alpha: 1),
@@ -53,10 +53,10 @@ final class IncrementalAppendLogicTests: XCTestCase {
     }
 
     private static func eraserStroke() -> VectorStroke {
-        let samples = (0..<8).map { step -> VectorSample in
+        let samples = StrokeSamples((0..<8).map { step -> VectorSample in
             let t = CGFloat(step) / 7
             return VectorSample(x: 12 + t * 104, y: 48, pressure: 1)
-        }
+        }, channels: .pressureOnly)
         return VectorStroke(brush: brush(),
                             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                             size: 10, opacity: 1, samples: samples, composite: .erase)
@@ -236,7 +236,8 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// deletes and splits strokes in the middle of the list first.
     func testTheEraserDeclaresAnAppendOnlyWhenItMerelyPunches() {
         let soft = Self.canvas(4)
-        let path = (0..<6).map { VectorSample(x: 12 + CGFloat($0) * 18, y: 44, pressure: 0.5) }
+        let path = StrokeSamples((0..<6).map { VectorSample(x: 12 + CGFloat($0) * 18, y: 44, pressure: 0.5) },
+                                 channels: .pressureOnly)
         // Opacity below 1 forbids the clean cut (`VectorEraser.supportsCleanCut`), so this gesture
         // can only punch.
         XCTAssertTrue(soft.erase(alongPath: path, brush: Self.brush(), size: 12, opacity: 0.5,
@@ -394,7 +395,8 @@ final class IncrementalAppendLogicTests: XCTestCase {
         _ = canvas.render()
         let wholeLayerDabs = canvas.lastRenderDabCount
 
-        let path = (0..<6).map { VectorSample(x: 12 + CGFloat($0) * 18, y: 44, pressure: 0.5) }
+        let path = StrokeSamples((0..<6).map { VectorSample(x: 12 + CGFloat($0) * 18, y: 44, pressure: 0.5) },
+                                 channels: .pressureOnly)
         XCTAssertTrue(canvas.erase(alongPath: path, brush: Self.brush(), size: 12, opacity: 0.5,
                                    mode: .erase))
         let incremental = canvas.render()
@@ -630,9 +632,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let size = CGSize(width: 2048, height: 1024)
         func placed(_ index: Int) -> VectorStroke {
             var stroke = Self.stroke(index)
-            stroke.samples = stroke.samples.map {
-                VectorSample(x: $0.x * 14, y: $0.y * 9, pressure: $0.pressure)
-            }
+            stroke.samples = stroke.samples.transformed(by: CGAffineTransform(scaleX: 14, y: 9))
             stroke.size = 24
             stroke.brush.size = 24
             return stroke

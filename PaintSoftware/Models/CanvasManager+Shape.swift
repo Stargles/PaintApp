@@ -35,7 +35,7 @@ extension CanvasManager {
 
     /// The stroke `commitInteractiveShape` will lay down: the freehand samples collapsed onto the
     /// resolved shape's outline.
-    private func collapsedShapeSamples(for shape: ShapeGeometry) -> [VectorSample] {
+    private func collapsedShapeSamples(for shape: ShapeGeometry) -> StrokeSamples {
         ShapeDetector.collapseSamplesToShape(samples: shapeGestureSamples, shape: shape,
                                              spacing: shapeStampSpacing)
     }
@@ -73,9 +73,8 @@ extension CanvasManager {
             shapePreviewTexture = texture
         }
 
-        let samples = collapsedShapeSamples(for: shape)
-            .map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
-        BrushStamper.stampStroke(into: texture, samples: samples, brush: shapeGestureBrush,
+        BrushStamper.stampStroke(into: texture, samples: collapsedShapeSamples(for: shape),
+                                 brush: shapeGestureBrush,
                                  color: shapeGestureColor.uiColor, brushSize: shapeGestureStrokeWidth,
                                  brushOpacity: shapeGestureOpacity,
                                  random: DabRandom(seed: shapeGestureSeed))
@@ -203,13 +202,12 @@ extension CanvasManager {
 
     /// Stamps a collapsed shape stroke into a raster cel and registers its undo step. Kept separate
     /// so the vector and raster commit paths share one collapse and one set of brush settings.
-    private func stampShapeIntoRaster(_ samples: [VectorSample], raster: RasterLayerTexture,
+    private func stampShapeIntoRaster(_ samples: StrokeSamples, raster: RasterLayerTexture,
                                       brush: Brush, layerID: UUID, celID: UUID) {
         let before = raster.renderToUIImage()
         let strokeCountBefore = raster.strokeCount
         // stampStroke brackets itself in beginStroke/endStroke, so this is one undoable unit.
-        BrushStamper.stampStroke(into: raster,
-                                 samples: samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+        BrushStamper.stampStroke(into: raster, samples: samples,
                                  brush: brush, color: shapeGestureColor.uiColor,
                                  brushSize: shapeGestureStrokeWidth, brushOpacity: shapeGestureOpacity,
                                  random: DabRandom(seed: shapeGestureSeed))

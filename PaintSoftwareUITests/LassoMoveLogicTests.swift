@@ -905,14 +905,11 @@ final class LassoMoveLogicTests: XCTestCase {
     func testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount() {
         var brush = BrushLibrary.hardRound
         brush.spacingFraction = 0.05
-        let line = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
+        let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
             let target = RecordingDabTarget()
             BrushStamper.stampStroke(into: target,
-                                     samples: line.map {
-                                         BrushStamper.Sample(point: CGPoint(x: $0.x * k, y: $0.y * k),
-                                                             pressure: $0.pressure)
-                                     },
+                                     samples: line.transformed(by: CGAffineTransform(scaleX: k, y: k)),
                                      brush: brush, color: .black, brushSize: size * k,
                                      brushOpacity: 1, random: DabRandom(seed: 99))
             return target.dabs.count
@@ -946,14 +943,11 @@ final class LassoMoveLogicTests: XCTestCase {
     func testTheSpacingFloorSurvivesAScaleRoundTrip() {
         var brush = BrushLibrary.hardRound
         brush.spacingFraction = 0.05
-        let line = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
+        let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
             let target = RecordingDabTarget()
             BrushStamper.stampStroke(into: target,
-                                     samples: line.map {
-                                         BrushStamper.Sample(point: CGPoint(x: $0.x * k, y: $0.y * k),
-                                                             pressure: $0.pressure)
-                                     },
+                                     samples: line.transformed(by: CGAffineTransform(scaleX: k, y: k)),
                                      brush: brush, color: .black, brushSize: size * k,
                                      brushOpacity: 1, random: DabRandom(seed: 99))
             return target.dabs.count
@@ -2468,7 +2462,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertTrue((vector.strokes + second.strokes).allSatisfy { $0.lattice?.precise != true },
                       "and neither is any lattice — the invariant holds through the bake too")
         for stroke in vector.strokes + second.strokes where (stroke.samples.first?.x ?? 0) < 35 {
-            for sample in stroke.samples + (stroke.lattice?.samples ?? []) {
+            for sample in Array(stroke.samples) + Array(stroke.lattice?.samples ?? StrokeSamples()) {
                 XCTAssertEqual(sample.x.truncatingRemainder(dividingBy: PackedSampleRun.quantum), 0,
                                accuracy: 1e-9, "\(sample.x) is not on the quarter-pixel grid")
                 XCTAssertEqual(sample.y.truncatingRemainder(dividingBy: PackedSampleRun.quantum), 0,
@@ -3014,7 +3008,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// Every sample of every stroke is where it was. The assertion
     /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel` makes three times.
-    private func assertSamplesUnmoved(_ vector: VectorCanvas, _ before: [[VectorSample]],
+    private func assertSamplesUnmoved(_ vector: VectorCanvas, _ before: [StrokeSamples],
                                       _ note: String,
                                       file: StaticString = #filePath, line: UInt = #line) {
         let after = vector.elements.compactMap(\.stroke).map(\.samples)
@@ -3158,7 +3152,7 @@ final class LassoMoveLogicTests: XCTestCase {
                 let radius: CGFloat = 20, width: CGFloat = 2
                 let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound,
                                                        size: width)
-                var samples: [VectorSample] = []
+                var samples = StrokeSamples(channels: .pressureOnly)
                 for step in 0...256 {
                     let t = CGFloat(step) / 256 * 2 * .pi
                     samples.append(VectorSample(x: centre.x + radius * cos(t),
@@ -4994,7 +4988,7 @@ final class LassoMoveLogicTests: XCTestCase {
         let lattice = stroke.lattice.flatMap { $0.range == nil ? nil : $0 }
         let source = lattice?.samples ?? stroke.samples
         BrushStamper.stampStroke(into: target,
-                                 samples: source.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+                                 samples: StrokeSamples(source, channels: .pressureOnly),
                                  brush: stroke.brush, color: stroke.uiColor, brushSize: stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: stroke.composite == .erase,
                                  random: stroke.dabRandom,

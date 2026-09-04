@@ -598,9 +598,9 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     /// A short run of dabs, so a row can move a raster tier's version and nothing else about it.
     /// Deterministic, because two rows stamp the *same* run into two different textures in order to
     /// hold the version equal across a change of object.
-    private static func dabs(y: CGFloat) -> [BrushStamper.Sample] {
-        (0..<8).map { BrushStamper.Sample(point: CGPoint(x: 4 + CGFloat($0) * 3, y: y),
-                                          pressure: 0.9) }
+    private static func dabs(y: CGFloat) -> StrokeSamples {
+        StrokeSamples((0..<8).map { VectorSample(point: CGPoint(x: 4 + CGFloat($0) * 3, y: y),
+                                                pressure: 0.9) }, channels: .pressureOnly)
     }
 
     /// One vector stroke, at fixed values for `dabs`' reason: two canvases are given the same

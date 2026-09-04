@@ -97,7 +97,7 @@ final class StrokeDensityBench: XCTestCase {
         var ux = cos(angle), uy = sin(angle)
         if x0 + ux * length < inset || x0 + ux * length > canvas.width - inset { ux = -ux }
         if y0 + uy * length < inset || y0 + uy * length > canvas.height - inset { uy = -uy }
-        var samples: [VectorSample] = []
+        var samples = StrokeSamples(channels: .pressureOnly)
         samples.reserveCapacity(samplesPerStroke)
         for step in 0..<samplesPerStroke {
             let t = CGFloat(step) / CGFloat(samplesPerStroke - 1)
@@ -252,11 +252,11 @@ final class StrokeDensityBench: XCTestCase {
         // (b) An eraser stroke. A punch appends one `.erase` element, so it takes the same path;
         //     a clean cut would not, and this brush at full pressure could take either — so this
         //     row asserts only that it is no worse than the whole layer.
-        let erasePath = (0..<24).map { i -> VectorSample in
+        let erasePath = StrokeSamples((0..<24).map { i -> VectorSample in
             let t = CGFloat(i) / 23
             return VectorSample(x: 64 + t * (Self.canvasSize.width - 128),
                                 y: Self.canvasSize.height * 0.5, pressure: 1)
-        }
+        }, channels: .pressureOnly)
         let erase = step("erase") {
             _ = canvas.erase(alongPath: erasePath, brush: Self.benchBrush,
                              size: 40, mode: .erase)
@@ -540,7 +540,7 @@ final class StrokeDensityBench: XCTestCase {
         var ux = cos(angle), uy = sin(angle)
         if x0 + ux * lengthPoints < inset || x0 + ux * lengthPoints > canvas.width - inset { ux = -ux }
         if y0 + uy * lengthPoints < inset || y0 + uy * lengthPoints > canvas.height - inset { uy = -uy }
-        var samples: [VectorSample] = []
+        var samples = StrokeSamples(channels: .pressureOnly)
         samples.reserveCapacity(samplesPerStroke)
         for step in 0..<samplesPerStroke {
             let t = CGFloat(step) / CGFloat(samplesPerStroke - 1)
@@ -618,7 +618,7 @@ final class StrokeDensityBench: XCTestCase {
             corners.append(CGPoint(x: x, y: y0 + CGFloat(leg) * 8))
             corners.append(CGPoint(x: (leg % 2 == 0) ? x0 + legLength : x0, y: y0 + CGFloat(leg) * 8))
         }
-        var samples: [VectorSample] = []
+        var samples = StrokeSamples(channels: .pressureOnly)
         samples.reserveCapacity(sampleCount)
         for step in 0..<sampleCount {
             let t = CGFloat(step) / CGFloat(sampleCount - 1)

@@ -15,13 +15,14 @@ final class VectorEraserLogicTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func samples(_ points: [(CGFloat, CGFloat)], pressure: CGFloat = 0.5) -> [VectorSample] {
-        points.map { VectorSample(x: $0.0, y: $0.1, pressure: pressure) }
+    private func samples(_ points: [(CGFloat, CGFloat)], pressure: CGFloat = 0.5) -> StrokeSamples {
+        StrokeSamples(points.map { VectorSample(x: $0.0, y: $0.1, pressure: pressure) },
+                      channels: .pressureOnly)
     }
 
     /// A horizontal run from `(0, 0)` to `(100, 0)` sampled every 10 points, so parametric position
     /// `p` sits at `x == 10p` and an expected cut reads directly off the geometry.
-    private var horizontalRun: [VectorSample] {
+    private var horizontalRun: StrokeSamples {
         samples((0...10).map { (CGFloat($0) * 10, 0) })
     }
 
@@ -42,7 +43,7 @@ final class VectorEraserLogicTests: XCTestCase {
     /// `cutRanges` emits one range per segment it walks, so abutting pieces of a single cut arrive
     /// separately. Merging is what `splitStroke` does with them anyway, and it is the merged form a
     /// test can state an expectation about.
-    private func mergedCuts(in run: [VectorSample], _ sweep: VectorEraser.Sweep) -> [ClosedRange<CGFloat>] {
+    private func mergedCuts(in run: some SampleRun, _ sweep: VectorEraser.Sweep) -> [ClosedRange<CGFloat>] {
         StrokeGeometry.mergedCuts(VectorEraser.cutRanges(in: run, sweep: sweep),
                                   clampedTo: 0...CGFloat(run.count - 1))
     }

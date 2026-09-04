@@ -37,7 +37,8 @@ final class InterpolatedCelCopyLogicTests: XCTestCase {
         VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 6, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
     }
 
     /// Layer 1 (vector) with three cels: a bar at the left over frames 0..<4, **nothing at all** over

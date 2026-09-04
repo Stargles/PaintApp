@@ -708,11 +708,11 @@ final class BrushEngineLogicTests: XCTestCase {
         let brush = BrushLibrary.hardRound
         // Curved, with a pressure ramp: both the dab spacing carry across segments and the pressure
         // interpolation have to survive the filter, not just the positions.
-        let samples = (0..<9).map { i -> BrushStamper.Sample in
+        let samples = StrokeSamples((0..<9).map { i -> VectorSample in
             let t = CGFloat(i) / 8
-            return BrushStamper.Sample(point: CGPoint(x: 6 + 52 * t, y: 30 + 12 * sin(t * .pi)),
-                                       pressure: 0.35 + 0.65 * t)
-        }
+            return VectorSample(point: CGPoint(x: 6 + 52 * t, y: 30 + 12 * sin(t * .pi)),
+                                pressure: 0.35 + 0.65 * t)
+        }, channels: .pressureOnly)
         let cut: CGFloat = 3.37
 
         func stamp(into texture: RasterLayerTexture, visibleRange: ClosedRange<CGFloat>?) {
@@ -757,14 +757,16 @@ final class BrushEngineLogicTests: XCTestCase {
                                   // its tolerance to accommodate quantisation would have cost the
                                   // suite its only comparison of *pixels* across a save.
                                   // `SampleCodingLogicTests` is where lossy values are pinned.
-                                  samples: (0..<5).map { VectorSample(x: 8 + CGFloat($0) * 12, y: 32,
-                                                                      pressure: CGFloat(50 + $0 * 10) / 255) })
+                                  samples: StrokeSamples((0..<5).map {
+                                      VectorSample(x: 8 + CGFloat($0) * 12, y: 32,
+                                                   pressure: CGFloat(50 + $0 * 10) / 255)
+                                  }, channels: .pressureOnly))
         guard let run = StrokeGeometry.splitStrokeRuns(parent.samples, removing: [2.5...3.5]).first else {
             return XCTFail("Setup: cutting the middle out should leave a head run")
         }
         var piece = parent
         piece.id = UUID()
-        piece.samples = run.samples
+        piece.samples = parent.samples.replacingSamples(run.samples)
         piece.lattice = DabLattice(samples: parent.samples, parameters: run.parameters)
 
         // **Both operands of both assertions reach the in-memory original**, and that is deliberate

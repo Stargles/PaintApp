@@ -24,7 +24,11 @@ struct VectorStroke: Identifiable, Codable {
     var color: CodableColor
     var size: CGFloat
     var opacity: Double
-    var samples: [VectorSample]
+    /// **Struct-of-arrays** — BRUSH.md §5.5. Positions plus one parallel array per channel the stroke
+    /// carries, and an absent channel is an empty array that costs nothing. Every operation that
+    /// produces a new run from this one carries the channel set with it, which is why a lasso split,
+    /// a layer transform and an in-between no longer drop a channel each time one is added.
+    var samples: StrokeSamples
     /// Whether `samples` is **stored** at full precision rather than on the quarter-pixel grid —
     /// TODO item (14), and the owner's *"when the option is turned on, it gets stored as doubles"*.
     ///
@@ -146,7 +150,7 @@ struct VectorStroke: Identifiable, Codable {
 /// eraser's Modes 2 and 3) keep its randomness anyway, through `VectorStroke.arcOffset`.
 struct DabLattice: Codable, Equatable {
     /// The parent stroke's samples, whole — the walk that defines the lattice.
-    var samples: [VectorSample]
+    var samples: StrokeSamples
     /// Parameter in the parent's domain for each of the owning stroke's own samples, ascending.
     var parameters: [CGFloat]
     /// `VectorStroke.precise` for *this* walk — same field, same derivation, same reason. A piece's
@@ -195,11 +199,11 @@ struct DabLattice: Codable, Equatable {
 /// bounds and index reader believes; a stroke whose stored points disagree with where its ink lands
 /// is a trap for every later reader, and §4.2 itself says `resolveSources` *"hands the posed display
 /// list"* on. So the display list is posed and the rest walk rides beside it. The duplication is a
-/// retain, not a copy — `[VectorSample]` is copy-on-write and these are the same arrays the
+/// retain, not a copy — `StrokeSamples`' arrays are copy-on-write and these are the same arrays the
 /// unposed element already holds.
 struct StrokeRestWalk {
     /// The stroke's own samples, unposed.
-    var samples: [VectorSample]
+    var samples: StrokeSamples
     /// The stroke's own lattice, unposed — a cut piece still replays its parent's whole walk, and
     /// that walk is in rest space too.
     var lattice: DabLattice?
@@ -1322,25 +1326,21 @@ final class VectorCanvas {
 
     private static func scale(of t: CGAffineTransform) -> CGFloat { hypot(t.a, t.b) }
 
-    private static func localSamples(_ samples: [VectorSample], through t: CGAffineTransform) -> [VectorSample] {
+    /// Canvas-space geometry expressed in the layer's own space. **Channel-generic**: it is one
+    /// `transformed(by:)`, so every per-point channel rides through and the azimuth (BRUSH.md §2.7)
+    /// turns with the ink rather than staying pointed at the canvas.
+    private static func localSamples(_ samples: StrokeSamples, through t: CGAffineTransform) -> StrokeSamples {
         guard !t.isIdentity else { return samples }
-        let inverse = t.inverted()
-        return samples.map {
-            let p = $0.point.applying(inverse)
-            return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-        }
+        return samples.transformed(by: t.inverted())
     }
 
     /// The inverse of `localSamples`: stored, local-space geometry expressed back in canvas space, so
     /// it can be re-stamped into `StrokeCanvasView`'s scratch raster — which is a copy of `render()`
     /// and therefore already carries `transform`. Only `cutPreviewPieces` needs this; every other
     /// caller is going the other way.
-    private static func canvasSamples(_ samples: [VectorSample], through t: CGAffineTransform) -> [VectorSample] {
+    private static func canvasSamples(_ samples: StrokeSamples, through t: CGAffineTransform) -> StrokeSamples {
         guard !t.isIdentity else { return samples }
-        return samples.map {
-            let p = $0.point.applying(t)
-            return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-        }
+        return samples.transformed(by: t)
     }
 
     private static func localPath(_ path: CGPath, through t: CGAffineTransform) -> CGPath {
@@ -1714,7 +1714,7 @@ final class VectorCanvas {
     ///
     /// `.erase` strokes are skipped: cutting a span out of one would *restore* the ink beneath it.
     @discardableResult
-    func erase(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
+    func erase(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
                opacity: Double = 1, mode: VectorEraserMode) -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -1783,8 +1783,7 @@ final class VectorCanvas {
         defer { lock.unlock() }
         guard _elements.contains(where: { $0.stroke != nil }) else { return (.missed, []) }
 
-        let localSamples = Self.localSamples([VectorSample(x: canvasPoint.x, y: canvasPoint.y, pressure: 1)],
-                                             through: _transform)
+        let localSamples = Self.localSamples(StrokeSamples(points: [canvasPoint]), through: _transform)
         let scale = Self.scale(of: _transform)
         let localSize = scale > 0 ? size / scale : size
         // A one-sample sweep is the single dab stamped so far: `capsuleChain` yields one zero-length
@@ -1815,7 +1814,7 @@ final class VectorCanvas {
     /// in the middle of the list; step 3 appends one `.erase` element to the end. A gesture that
     /// only punches is therefore exactly as incremental as a paint stroke — which is the common
     /// eraser gesture, since steps 1 and 2 only fire for a hard brush at full opacity and pressure.
-    private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: [VectorSample],
+    private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: StrokeSamples,
                              brush: Brush, size: CGFloat,
                              opacity: Double) -> (changed: Bool, damage: Damage) {
         var changed = false
@@ -1978,7 +1977,10 @@ final class VectorCanvas {
         // BRUSH.md §4 — so `seed` and `arcOffset` travel by being copied above, and this piece keeps
         // its parent's walk, on which the parent's own `arcOffset` is still the right origin.
         piece.id = UUID()
-        piece.samples = samples
+        // `replacingSamples` keeps the parent's channel set: a cut run comes back as `VectorSample`s,
+        // which carry every channel, and the *set* is the parent's. Assigning a bare array here is
+        // what would silently demote a tilted stroke to a pressure-only one.
+        piece.samples = stroke.samples.replacingSamples(samples)
         let mapped = stroke.lattice.map { parameters.map($0.parentParameter(of:)) } ?? parameters
         piece.lattice = DabLattice(samples: stroke.lattice?.samples ?? stroke.samples,
                                    parameters: mapped)
@@ -2001,7 +2003,7 @@ final class VectorCanvas {
                                       startParameter: CGFloat) -> VectorStroke {
         var piece = stroke
         piece.id = UUID()
-        piece.samples = samples
+        piece.samples = stroke.samples.replacingSamples(samples)
         piece.lattice = nil
         piece.arcOffset = detachedArcOffset(of: stroke, startParameter: startParameter)
         return piece
@@ -2041,7 +2043,7 @@ final class VectorCanvas {
 
     /// Whether the eraser's dab at a parametric position along the gesture still has anything under it
     /// — the predicate behind residue trimming. Caller must hold `lock`.
-    private func hasContentBeneath(atParameter parameter: CGFloat, in samples: [VectorSample],
+    private func hasContentBeneath(atParameter parameter: CGFloat, in samples: some SampleRun,
                                    brush: Brush, size: CGFloat) -> Bool {
         guard let dab = StrokeGeometry.interpolatedSample(in: samples, at: parameter) else { return false }
         let radius = StrokeGeometry.stampRadius(forPressure: dab.pressure, brush: brush, size: size)
@@ -3051,15 +3053,11 @@ final class VectorCanvas {
         var transform = t
         switch element {
         case .stroke(var stroke):
-            stroke.samples = stroke.samples.map {
-                let p = $0.point.applying(t)
-                return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-            }
+            // One `transformed(by:)` for the stroke and one for its lattice — channel-generic, so a
+            // lasso resize or a canvas resize carries tilt and Δt and turns the azimuth with the ink.
+            stroke.samples = stroke.samples.transformed(by: t)
             if var lattice = stroke.lattice {
-                lattice.samples = lattice.samples.map {
-                    let p = $0.point.applying(t)
-                    return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-                }
+                lattice.samples = lattice.samples.transformed(by: t)
                 stroke.lattice = lattice
             }
             // The scalar `BrushStamper` actually stamps with. Guarded on `k != 1` so a pure
@@ -3135,7 +3133,7 @@ final class VectorCanvas {
     struct CutPreviewEdit {
         /// The dab-lattice walk to replay for the erase: the parent's samples for a piece carrying a
         /// `DabLattice`, the stroke's own otherwise. Canvas space.
-        var eraseWalk: [VectorSample]
+        var eraseWalk: StrokeSamples
         /// The random field `eraseWalk` is addressed in — the stroke's own, which a piece inherits
         /// from its parent — so the erase lands on the same dabs the render put down.
         var eraseRandom: DabRandom
@@ -3145,7 +3143,7 @@ final class VectorCanvas {
         /// are in any window: the rest of the piece was never erased, and re-painting it would put
         /// this stroke's colour over whatever crosses above it.
         struct Restamp {
-            var samples: [VectorSample]
+            var samples: StrokeSamples
             var range: ClosedRange<CGFloat>
             /// The field this piece will be drawn from once the cut commits — `detachedArcOffset`'s
             /// answer for the run this window belongs to.
@@ -3182,7 +3180,7 @@ final class VectorCanvas {
     ///
     /// A footprint punch is wrong in the same direction in both: it shows a nib-shaped bite that the
     /// lift has to hand back. This returns the actual difference instead.
-    func cutPreviewEdits(alongPath canvasSpaceSamples: [VectorSample], brush: Brush, size: CGFloat,
+    func cutPreviewEdits(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
                          accumulating accumulated: inout [UUID: [ClosedRange<CGFloat>]]) -> [CutPreviewEdit] {
         lock.lock()
         defer { lock.unlock() }
@@ -3255,7 +3253,8 @@ final class VectorCanvas {
             let reach = strokeRadius + nibRadius
             var restamps: [CutPreviewEdit.Restamp] = []
             for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: merged) {
-                let canvasRun = Self.canvasSamples(run.samples, through: _transform)
+                let canvasRun = Self.canvasSamples(stroke.samples.replacingSamples(run.samples),
+                                                   through: _transform)
                 guard let first = run.parameters.first, let last = run.parameters.last else { continue }
                 let startAbutsACut = first > StrokeGeometry.epsilon
                 let endAbutsACut = last < domainEnd - StrokeGeometry.epsilon
@@ -3286,7 +3285,7 @@ final class VectorCanvas {
     /// Walked by arc length for the same reason `endWindows` is, and rounded outward to a whole
     /// sample for the same reason: too generous by less than one segment is safe here, because the
     /// restamp that follows covers strictly more than this took away.
-    private static func extend(_ range: ClosedRange<CGFloat>, in samples: [VectorSample],
+    private static func extend(_ range: ClosedRange<CGFloat>, in samples: some SampleRun,
                                by arcLength: CGFloat,
                                clampedTo domain: ClosedRange<CGFloat>) -> ClosedRange<CGFloat> {
         guard samples.count > 1, arcLength > 0 else { return range }
@@ -3319,7 +3318,7 @@ final class VectorCanvas {
     /// beyond `reach` and keeps it whole rather than interpolating, so a window can only ever be too
     /// generous by less than one segment — and being too generous only means re-drawing ink that was
     /// never erased.
-    private static func endWindows(of samples: [VectorSample], reach: CGFloat,
+    private static func endWindows(of samples: some SampleRun, reach: CGFloat,
                                    fromStart: Bool, fromEnd: Bool) -> [ClosedRange<CGFloat>] {
         guard !samples.isEmpty, fromStart || fromEnd else { return [] }
         guard samples.count > 1 else { return [0...0] }
@@ -3354,19 +3353,17 @@ final class VectorCanvas {
     /// is why `stamp(stroke:into:isEraser: true)` above hands the *stroke's* colour through unchanged
     /// and is none the worse for it. The restamp's colour is not arbitrary and is the stroke's own.
     static func applyPreview(_ edit: CutPreviewEdit, into target: DabTarget) {
-        let walk = edit.eraseWalk.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
         for range in edit.eraseRanges {
-            BrushStamper.stampStroke(into: target, samples: walk, brush: edit.brush,
+            BrushStamper.stampStroke(into: target, samples: edit.eraseWalk, brush: edit.brush,
                                      color: .black, brushSize: edit.size,
                                      brushOpacity: edit.opacity, isEraser: true,
                                      random: edit.eraseRandom, visibleRange: range)
         }
         for restamp in edit.restamps {
-            let samples = restamp.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
             // The piece's own field, which the commit will give it too — BRUSH.md §4 took the seed off
             // the id, so the preview can now name the same random the cut is about to produce. It used
             // to be an approximation for a scattering brush and exact only for a round one.
-            BrushStamper.stampStroke(into: target, samples: samples, brush: edit.brush,
+            BrushStamper.stampStroke(into: target, samples: restamp.samples, brush: edit.brush,
                                      color: edit.color, brushSize: edit.size,
                                      brushOpacity: edit.opacity, isEraser: false,
                                      random: restamp.random, visibleRange: restamp.range)
@@ -3473,7 +3470,7 @@ final class VectorCanvas {
     /// single-sample run is exempt — its whole domain *is* `0...0`, and removing that is how a lone dab
     /// gets erased.
     private static func effectiveCuts(_ cuts: [ClosedRange<CGFloat>],
-                                      in samples: [VectorSample]) -> [ClosedRange<CGFloat>] {
+                                      in samples: some SampleRun) -> [ClosedRange<CGFloat>] {
         guard !samples.isEmpty else { return [] }
         let domainEnd = CGFloat(samples.count - 1)
         let merged = StrokeGeometry.mergedCuts(cuts, clampedTo: 0...domainEnd)
@@ -4290,8 +4287,7 @@ final class VectorCanvas {
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
         // than either option — so an unreadable one falls back to the stroke's own geometry.
         let lattice = (rest?.lattice ?? stroke.lattice).flatMap { $0.range == nil ? nil : $0 }
-        let source = lattice?.samples ?? rest?.samples ?? stroke.samples
-        let samples = source.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        let samples = lattice?.samples ?? rest?.samples ?? stroke.samples
         let sink: DabTarget = rest.map { BrushStamper.PosedDabTarget(target, pose: $0.pose) } ?? target
         BrushStamper.stampStroke(into: sink, samples: samples, brush: stroke.brush,
                                  color: stroke.uiColor, brushSize: rest?.size ?? stroke.size,

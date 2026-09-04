@@ -105,13 +105,13 @@ final class PerfBaselineTests: XCTestCase {
     /// without changing its sample count — the two turn out to be independent knobs on cost, which
     /// is what `testStrokeCostTracksPathLengthNotSampleCount` below is about.
     private func syntheticStroke(sampleCount: Int, passes: Int = 1,
-                                 stabilization: CGFloat = 0.5) -> [BrushStamper.Sample] {
+                                 stabilization: CGFloat = 0.5) -> StrokeSamples {
         let size = Self.canvasSize
         let inset: CGFloat = 128
         var stabilizer = StrokeStabilizer(stabilization: stabilization)
         stabilizer.reset(to: CGPoint(x: inset, y: inset))
 
-        var samples: [BrushStamper.Sample] = []
+        var samples: StrokeSamples = []
         samples.reserveCapacity(sampleCount)
         for step in 0..<sampleCount {
             let t = CGFloat(step) / CGFloat(max(sampleCount - 1, 1))
@@ -125,7 +125,7 @@ final class PerfBaselineTests: XCTestCase {
             // Pressure ramps up and back down across the stroke, so the size/opacity dynamics and
             // the spacing interpolation both get exercised rather than running at a constant stamp.
             let pressure = 0.15 + 0.85 * sin(t * .pi)
-            samples.append(BrushStamper.Sample(point: stabilizer.update(rawPoint: raw), pressure: pressure))
+            samples.append(VectorSample(point: stabilizer.update(rawPoint: raw), pressure: pressure))
         }
         return samples
     }
@@ -139,7 +139,7 @@ final class PerfBaselineTests: XCTestCase {
     /// method returns and "memory per stroke" reads as a linear leak that does not exist at
     /// runtime. Measured both ways while writing this: 20 strokes grew ~322 MB unpooled and ~0 MB
     /// pooled.
-    private func stamp(_ samples: [BrushStamper.Sample], into manager: CanvasManager, brushSize: CGFloat = 24) {
+    private func stamp(_ samples: StrokeSamples, into manager: CanvasManager, brushSize: CGFloat = 24) {
         autoreleasepool {
             BrushStamper.stampStroke(into: manager.layers[0].cels[0].raster,
                                      samples: samples,
@@ -404,8 +404,8 @@ final class PerfBaselineTests: XCTestCase {
                 // dozens of in a row. Each covers a tiny fraction of the 2048² canvas.
                 let y = 64 + CGFloat(i % 30) * 60
                 let x = 64 + CGFloat(i / 30) * 400
-                let samples = [BrushStamper.Sample(point: CGPoint(x: x, y: y), pressure: 0.8),
-                               BrushStamper.Sample(point: CGPoint(x: x + 60, y: y), pressure: 0.8)]
+                let samples: StrokeSamples = [VectorSample(point: CGPoint(x: x, y: y), pressure: 0.8),
+                               VectorSample(point: CGPoint(x: x + 60, y: y), pressure: 0.8)]
                 let before = strokeSnapshot(raster)
                 raster.beginStroke()
                 BrushStamper.stampStroke(into: raster, samples: samples, brush: manager.selectedBrush,
@@ -490,8 +490,8 @@ final class PerfBaselineTests: XCTestCase {
         // Lay down a first stroke and keep its pixels as the reference state to return to.
         raster.beginStroke()
         BrushStamper.stampStroke(into: raster,
-                                 samples: [BrushStamper.Sample(point: CGPoint(x: 200, y: 200), pressure: 1),
-                                           BrushStamper.Sample(point: CGPoint(x: 400, y: 260), pressure: 1)],
+                                 samples: [VectorSample(point: CGPoint(x: 200, y: 200), pressure: 1),
+                                           VectorSample(point: CGPoint(x: 400, y: 260), pressure: 1)],
                                  brush: manager.selectedBrush, color: .black,
                                  brushSize: 30, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
@@ -501,8 +501,8 @@ final class PerfBaselineTests: XCTestCase {
         let before = strokeSnapshot(raster)
         raster.beginStroke()
         BrushStamper.stampStroke(into: raster,
-                                 samples: [BrushStamper.Sample(point: CGPoint(x: 900, y: 700), pressure: 1),
-                                           BrushStamper.Sample(point: CGPoint(x: 1300, y: 1100), pressure: 1)],
+                                 samples: [VectorSample(point: CGPoint(x: 900, y: 700), pressure: 1),
+                                           VectorSample(point: CGPoint(x: 1300, y: 1100), pressure: 1)],
                                  brush: manager.selectedBrush, color: .black,
                                  brushSize: 30, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
@@ -533,8 +533,8 @@ final class PerfBaselineTests: XCTestCase {
         raster.beginStroke()
         // Starts off the top-left corner and runs inward, so the dab bounds go negative.
         BrushStamper.stampStroke(into: raster,
-                                 samples: [BrushStamper.Sample(point: CGPoint(x: -20, y: -20), pressure: 1),
-                                           BrushStamper.Sample(point: CGPoint(x: 120, y: 120), pressure: 1)],
+                                 samples: [VectorSample(point: CGPoint(x: -20, y: -20), pressure: 1),
+                                           VectorSample(point: CGPoint(x: 120, y: 120), pressure: 1)],
                                  brush: manager.selectedBrush, color: .black,
                                  brushSize: 40, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
@@ -659,12 +659,12 @@ final class PerfBaselineTests: XCTestCase {
                                      startPoint: CGPoint(x: 200, y: 200),
                                      endPoint: CGPoint(x: 800, y: 600),
                                      rotation: 0)
-        var samples: [VectorSample] = []
+        var samples = StrokeSamples(channels: .pressureOnly)
         for step in 0..<80 {
             let t = CGFloat(step) / 79
             samples.append(VectorSample(x: 200 + 600 * t, y: 200 + 400 * t, pressure: 1))
         }
-        manager.beginInteractiveShape(geometry, samples: samples)
+        manager.beginInteractiveShape(geometry, samples: Array(samples))
         XCTAssertTrue(manager.shapeGestureActive)
 
         // The snap engages, then the pen lifts. That is the state every real commit path finds a
@@ -791,9 +791,9 @@ final class PerfBaselineTests: XCTestCase {
     /// One short stroke — enough to make a canvas non-empty and force a real render, without the
     /// cost of the 20-stroke scene the measurement below uses.
     private static func emptyLayerProbeStroke() -> VectorStroke {
-        let samples = (0..<20).map { step in
+        let samples = StrokeSamples((0..<20).map { step in
             VectorSample(x: 128 + CGFloat(step) * 40, y: 128, pressure: 1)
-        }
+        }, channels: .pressureOnly)
         return VectorStroke(brush: Brush(name: "Probe", shape: .softRound, size: 24),
                             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                             size: 24, opacity: 1, samples: samples)
@@ -812,7 +812,7 @@ final class PerfBaselineTests: XCTestCase {
         var strokes: [VectorStroke] = []
         for i in 0..<strokeCount {
             let offset = CGFloat(i) * 90
-            var samples: [VectorSample] = []
+            var samples = StrokeSamples(channels: .pressureOnly)
             for step in 0..<60 {
                 let t = CGFloat(step) / 59
                 samples.append(VectorSample(x: 128 + t * 1700,
@@ -1180,8 +1180,8 @@ final class PerfBaselineTests: XCTestCase {
         var accumulated: [UUID: [ClosedRange<CGFloat>]] = [:]
         for point in points {
             autoreleasepool {
-                let increment = [previous, point].compactMap { $0 }
-                    .map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }
+                let increment = StrokeSamples([previous, point].compactMap { $0 }
+                    .map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }, channels: .pressureOnly)
                 previous = point
                 let geometryStart = CFAbsoluteTimeGetCurrent()
                 let edits = canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: size,
@@ -1296,7 +1296,7 @@ final class PerfBaselineTests: XCTestCase {
     /// texture between reads, or the memo hands back the same `UIImage` and the number is a lie.
     private enum CutPreviewProbe {
         static func edit(at offset: CGFloat) -> VectorCanvas.CutPreviewEdit {
-            let samples = [VectorSample(x: 4, y: 4 + offset, pressure: 1),
+            let samples: StrokeSamples = [VectorSample(x: 4, y: 4 + offset, pressure: 1),
                            VectorSample(x: 12, y: 4 + offset, pressure: 1)]
             return VectorCanvas.CutPreviewEdit(eraseWalk: samples, eraseRandom: DabRandom(seed: 0),
                                                eraseRanges: [0...1], restamps: [],
@@ -1328,7 +1328,7 @@ final class PerfBaselineTests: XCTestCase {
         for i in 0..<eraseSceneStrokeCount {
             let x0 = 100 + CGFloat(i / 50) * 480
             let y = 60 + CGFloat(i % 50) * 40
-            var samples: [VectorSample] = []
+            var samples = StrokeSamples(channels: .pressureOnly)
             samples.reserveCapacity(60)
             for step in 0..<60 {
                 samples.append(VectorSample(x: x0 + CGFloat(step) / 59 * 400, y: y, pressure: 1))
@@ -1344,12 +1344,12 @@ final class PerfBaselineTests: XCTestCase {
     /// Consecutive bands in a column abut rather than overlap, so the 50 gestures between them reach
     /// most of the layer instead of re-erasing one place — which would measure garbage collection and
     /// stacked punches rather than the split.
-    private static func eraseSceneGesture(_ g: Int) -> [VectorSample] {
+    private static func eraseSceneGesture(_ g: Int) -> StrokeSamples {
         let x = 100 + CGFloat(g % 4) * 480 + 200
         let y0 = 40 + CGFloat(g / 4) * 150
-        return (0..<9).map { step in
+        return StrokeSamples((0..<9).map { step in
             VectorSample(x: x, y: y0 + CGFloat(step) / 8 * 150, pressure: 1)
-        }
+        }, channels: .pressureOnly)
     }
 
     /// The debounce coalesces per *cel*, not down to a single cel.
@@ -2499,12 +2499,12 @@ final class PerfBaselineTests: XCTestCase {
 
     /// One long diagonal stroke as `VectorStroke`, for the committed half of the preview above.
     private static func previewStroke(in size: CGSize) -> VectorStroke {
-        let samples = (0..<60).map { step -> VectorSample in
+        let samples = StrokeSamples((0..<60).map { step -> VectorSample in
             let t = CGFloat(step) / 59
             return VectorSample(x: 128 + t * (size.width - 256),
                                 y: 128 + t * (size.height - 256),
                                 pressure: 0.2 + 0.8 * sin(t * .pi))
-        }
+        }, channels: .pressureOnly)
         return VectorStroke(brush: Brush(name: "Perf", shape: .softRound, size: 24),
                             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                             size: 24, opacity: 1, samples: samples)
@@ -3220,12 +3220,12 @@ final class PerfBaselineTests: XCTestCase {
     private func inkOneCel(_ raster: RasterLayerTexture, canvas: CGSize, brush: Brush, seed: Int) {
         for strokeIndex in 0..<3 {
             let baseline = canvas.height * CGFloat(strokeIndex + 1) / 4
-            let samples: [BrushStamper.Sample] = (0..<80).map { step in
+            let samples = StrokeSamples((0..<80).map { step in
                 let t = CGFloat(step) / 79
                 let y = baseline + sin(t * .pi * 3 + CGFloat(seed) * 0.7) * canvas.height * 0.15
-                return BrushStamper.Sample(point: CGPoint(x: canvas.width * t, y: y),
+                return VectorSample(point: CGPoint(x: canvas.width * t, y: y),
                                            pressure: 0.3 + 0.7 * sin(t * .pi))
-            }
+            }, channels: .pressureOnly)
             BrushStamper.stampStroke(into: raster, samples: samples, brush: brush,
                                      color: .black, brushSize: 18, brushOpacity: 1, random: DabRandom(seed: 0))
             raster.endStroke()
@@ -3700,7 +3700,7 @@ final class PerfBaselineTests: XCTestCase {
         for strokeIndex in 0..<ownersStrokesPerCel {
             let row = CGFloat((strokeIndex + seed) % 19) / 19
             let phase = CGFloat((strokeIndex * 7 + seed) % 23) / 23 * .pi * 2
-            var samples: [VectorSample] = []
+            var samples = StrokeSamples(channels: .pressureOnly)
             samples.reserveCapacity(ownersSamplesPerStroke)
             for step in 0..<ownersSamplesPerStroke {
                 let t = CGFloat(step) / CGFloat(ownersSamplesPerStroke - 1)
@@ -3900,9 +3900,7 @@ final class PerfBaselineTests: XCTestCase {
                                 guard let vector = cel.vector else { return }
                                 let moved = vector.elements.map { element -> VectorElement in
                                     guard case .stroke(var stroke) = element else { return element }
-                                    stroke.samples = stroke.samples.map {
-                                        VectorSample(x: $0.x, y: $0.y, pressure: $0.pressure)
-                                    }
+                                    stroke.samples = stroke.samples.transformed(by: .identity)
                                     return .stroke(stroke)
                                 }
                                 _ = VectorCanvas(size: size, elements: moved)
@@ -4480,7 +4478,7 @@ final class PerfBaselineTests: XCTestCase {
         var strokes: [VectorStroke] = []
         for row in 0..<12 {
             let y = 40 + CGFloat(row) * 80
-            var samples: [VectorSample] = []
+            var samples = StrokeSamples(channels: .pressureOnly)
             for step in 0..<80 {
                 let t = CGFloat(step) / 79
                 samples.append(VectorSample(x: 60 + t * (size.width - 120),
@@ -4652,7 +4650,7 @@ final class PerfBaselineTests: XCTestCase {
         var strokes: [VectorStroke] = []
         for row in 0..<120 {
             let y = 8 + CGFloat(row % 60) * 17
-            var samples: [VectorSample] = []
+            var samples = StrokeSamples(channels: .pressureOnly)
             for step in 0..<200 {
                 let t = CGFloat(step) / 199
                 samples.append(VectorSample(x: 60 + t * (canvasSize.width - 120),
@@ -4898,10 +4896,10 @@ final class PerfBaselineTests: XCTestCase {
                 VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
                              color: CodableColor(red: 0, green: 0.7, blue: 0.9, alpha: 1),
                              size: 18, opacity: 1,
-                             samples: stride(from: CGFloat(0), through: 600, by: 40).map {
+                             samples: StrokeSamples(stride(from: CGFloat(0), through: 600, by: 40).map {
                                  VectorSample(x: 300 + dx + $0, y: 300 + 180 * sin($0 / 190),
                                               pressure: 1)
-                             })
+                             }, channels: .pressureOnly))
             }
 
             let cels = (0..<(spanLength + 2)).map { index in
@@ -5128,11 +5126,11 @@ final class PerfBaselineTests: XCTestCase {
             VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
                          color: CodableColor(red: 0, green: 0.2, blue: 0.8, alpha: 1),
                          size: 14, opacity: 1,
-                         samples: stride(from: CGFloat(0), through: 1600, by: 40).map {
+                         samples: StrokeSamples(stride(from: CGFloat(0), through: 1600, by: 40).map {
                              VectorSample(x: 200 + $0,
                                           y: 500 + 300 * sin(($0 + CGFloat(index) * 60) / 240),
                                           pressure: 1)
-                         })
+                         }, channels: .pressureOnly))
         }
         for index in 0..<40 { canvas.addStroke(stroke(index)) }
 
@@ -5239,12 +5237,12 @@ final class PerfBaselineTests: XCTestCase {
         for contour in 0..<9 {
             let phase = CGFloat(contour) * 0.7
             let y0 = h * (0.08 + 0.095 * CGFloat(contour))
-            let samples = (0..<110).map { step -> VectorSample in
+            let samples = StrokeSamples((0..<110).map { step -> VectorSample in
                 let t = CGFloat(step) / 109
                 return VectorSample(x: w * (0.06 + 0.88 * t),
                                     y: y0 + h * 0.045 * sin(t * .pi * 2 + phase),
                                     pressure: 0.3 + 0.7 * sin(t * .pi))
-            }
+            }, channels: .pressureOnly)
             strokes.append(VectorStroke(brush: BrushLibrary.hardRound, color: ink,
                                         size: width, opacity: 1, samples: samples))
         }

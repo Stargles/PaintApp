@@ -102,7 +102,7 @@ enum ShapeDetector {
     /// shape (line endpoints, rect opposing corners, oval bounding-box corners), in the shape's own
     /// unrotated frame — paired with whatever `rotation` was detected for rect/oval candidates, so a
     /// shape drawn at an angle detects as a rotated rect/oval instead of always axis-aligned.
-    static func detect(from samples: [VectorSample]) -> ShapeGeometry? {
+    static func detect(from samples: some SampleRun) -> ShapeGeometry? {
         guard samples.count >= 3 else { return nil }
 
         let raw = samples.map(\.point)
@@ -613,10 +613,14 @@ enum ShapeDetector {
     /// closes by construction, and on a partial one it lands where the pen lifted. The bug the
     /// paragraph above records — projecting samples and re-sorting them into a chord — stays
     /// structurally impossible either way, because this still walks rather than projects.
-    static func collapseSamplesToShape(samples: [VectorSample], shape: ShapeGeometry,
-                                       spacing: CGFloat) -> [VectorSample] {
+    /// **The result carries pressure and nothing else**, and that is a fact about the geometry rather
+    /// than an omission: these points are not the ones the artist drew, they are a fresh walk of the
+    /// shape's outline, so there is no tilt reading or interval that belongs to any of them. BRUSH.md
+    /// §5.5's neutral is what a brush reading tilt gets from a shape, and it is the correct answer.
+    static func collapseSamplesToShape(samples: some SampleRun, shape: ShapeGeometry,
+                                       spacing: CGFloat) -> StrokeSamples {
         let length = shape.spanLength
-        guard length > 0 else { return [] }
+        guard length > 0 else { return StrokeSamples(channels: .pressureOnly) }
 
         let step = max(spacing, 1)
         let steps = max(Int((length / step).rounded()), minimumSteps(for: shape))
@@ -624,12 +628,12 @@ enum ShapeDetector {
         let rotation = shape.rotationTransform
         let period = shape.pressurePeriod
 
-        return (0...steps).map { i in
+        return StrokeSamples((0...steps).map { i in
             let s = CGFloat(i) / CGFloat(steps)
             let point = shape.pointOnSpan(at: s).applying(rotation)
             return VectorSample(x: point.x, y: point.y,
                                 pressure: pressure(at: s, in: profile, period: period))
-        }
+        }, channels: .pressureOnly)
     }
 
     /// The freehand stroke's pressure as a function of outline position, sorted by parameter.
@@ -640,7 +644,7 @@ enum ShapeDetector {
     /// Keyed on the *drawn* arc's own parameter, so a stroke that covered a quarter of the ellipse
     /// spreads its pressure over that quarter rather than over the whole figure. At the default
     /// whole span this is `outlineParameter` exactly.
-    private static func pressureProfile(samples: [VectorSample],
+    private static func pressureProfile(samples: some SampleRun,
                                         shape: ShapeGeometry) -> [(u: CGFloat, pressure: CGFloat)] {
         samples
             .map { (u: shape.spanParameter(of: $0.point), pressure: max(0, min(1, $0.pressure))) }

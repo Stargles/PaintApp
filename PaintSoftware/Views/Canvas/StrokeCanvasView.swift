@@ -316,7 +316,13 @@ final class StrokeCanvasView: UIView {
     /// which commits during the drag, so "did anything happen" can't be inferred at lift.
     private var vectorContentChanged = false
 
-    private var currentVectorSamples: [VectorSample] = []
+    /// The knots `StrokePathFit` has committed for this gesture, carrying every channel the
+    /// digitiser gave — BRUSH.md §5.1. `compacted()` at commit drops the ones that turned out to hold
+    /// nothing but neutrals, which is how a finger-drawn stroke ends up storing no tilt at all.
+    private var currentVectorSamples = StrokeSamples(channels: .captured)
+    /// `UITouch.timestamp` of the previous sample offered to the fit, for `SampleChannel.deltaTime`.
+    /// Nil at pen-down, where the first sample's interval is zero by definition.
+    private var lastVectorSampleTime: TimeInterval?
     /// The whole display list before this gesture — `[VectorElement]`, not `[VectorStroke]`, so
     /// undo restores z-position exactly rather than collapsing through the kind-filtered `strokes`
     /// accessor.
@@ -1063,7 +1069,8 @@ final class StrokeCanvasView: UIView {
             }
             return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive)
         }()
-        currentVectorSamples = []
+        currentVectorSamples = StrokeSamples(channels: .captured)
+        lastVectorSampleTime = nil
         lastStampPoint = nil
         lastPreviewSample = nil
         previewCuts = [:]
@@ -1071,7 +1078,7 @@ final class StrokeCanvasView: UIView {
         pathFit.reset()
         let input = StrokeInput(touch: touch, in: self)
         stabilizer.reset(to: input.position)
-        recordVectorSample(at: input.position, pressure: input.pressure)
+        recordVectorSample(input, at: input.position)
         refreshDisplay()
     }
 
@@ -1103,7 +1110,7 @@ final class StrokeCanvasView: UIView {
             // `VectorEraserMode.isStabilized`.
             let raw = isEraser && !vectorEraserMode.isStabilized
             let point = raw ? input.position : stabilizer.update(rawPoint: input.position)
-            recordVectorSample(at: point, pressure: input.pressure)
+            recordVectorSample(input, at: point)
             onStrokeMoved?(VectorSample(x: point.x, y: point.y, pressure: input.pressure), input.timestamp)
         }
         refreshDisplay()
@@ -1124,13 +1131,12 @@ final class StrokeCanvasView: UIView {
     }
 
     private func endVectorStroke(_ touch: UITouch) {
-        let input = StrokeInput(touch: touch, in: self)
-        commitVectorStroke(finalSample: (input.position, input.pressure))
+        commitVectorStroke(finalSample: StrokeInput(touch: touch, in: self))
     }
 
     /// The vector half of `commitRasterStroke`, and split out for the same reason: `finalSample` is
     /// nil for a stroke that was interrupted rather than lifted.
-    private func commitVectorStroke(finalSample: (position: CGPoint, pressure: CGFloat)?) {
+    private func commitVectorStroke(finalSample: StrokeInput?) {
         if shapeFollowingTouch {
             shapeFollowingTouch = false
             onStrokeEnded?()
@@ -1146,10 +1152,15 @@ final class StrokeCanvasView: UIView {
         // since the last one is held, and dropping it would end the stroke up to a whole
         // `StrokePathFit.maximumKnotSpacing` short of the last position UIKit delivered.
         if let finalSample {
-            recordVectorSample(at: finalSample.position, pressure: finalSample.pressure, force: true)
+            recordVectorSample(finalSample, at: finalSample.position, force: true)
         } else {
-            currentVectorSamples.append(contentsOf: pathFit.finish(nil))
+            for knot in pathFit.finish(nil) { currentVectorSamples.append(knot) }
         }
+        // BRUSH.md §5.5: a channel that turned out to hold nothing but its neutral is dropped, because
+        // the funnel answers the same value for an absent channel and an absent one costs no bytes.
+        // A finger reports π/2 and 0 for tilt, so this is where a finger-drawn stroke stops paying
+        // for a sensor it never had.
+        currentVectorSamples = currentVectorSamples.compacted()
         let before = vectorElementsBeforeSnapshot ?? vectorCanvas.elements
 
         // Selection clip: a stroke that exits the selection and re-enters must become two pieces,
@@ -1159,9 +1170,12 @@ final class StrokeCanvasView: UIView {
         // runs instead, each committed as its own stroke/erase/local-edit below. See its doc comment
         // for the sample-granularity-vs-pixel-exact trade-off against the raster path's
         // `PixelOps.maskedComposite`.
-        let sampleRuns: [[VectorSample]]
+        // `replacingSamples` puts the gesture's own channel set back on each clipped run — the split
+        // hands back `VectorSample`s, which carry every channel, and the *set* is this gesture's.
+        let sampleRuns: [StrokeSamples]
         if let clipPath = selectionClipPath {
             sampleRuns = StrokeGeometry.splitRuns(currentVectorSamples) { clipPath.contains($0) }
+                .map { currentVectorSamples.replacingSamples($0) }
         } else {
             sampleRuns = [currentVectorSamples]
         }
@@ -1214,7 +1228,8 @@ final class StrokeCanvasView: UIView {
         // worse thing to show the artist than the freeze it replaces. `refreshDisplay` releases it
         // in the same turn as the new base. See `scratchIsHeldForRerender`.
         scratchIsHeldForRerender = true
-        currentVectorSamples = []
+        currentVectorSamples = StrokeSamples(channels: .captured)
+        lastVectorSampleTime = nil
         lastStampPoint = nil
         refreshDisplay()
         // One undo entry for the whole gesture (Mode 3's `before` was snapshotted at touch-down);
@@ -1238,7 +1253,7 @@ final class StrokeCanvasView: UIView {
     ///
     /// Takes `samples` explicitly (rather than reading `currentVectorSamples`) so `endVectorStroke`
     /// can call this once per selection-clipped run — see `StrokeGeometry.splitRuns`.
-    private func recordLocalEdit(forCel celID: UUID, samples: [VectorSample]) {
+    private func recordLocalEdit(forCel celID: UUID, samples: StrokeSamples) {
         guard let canvasManager, let layerID, !samples.isEmpty else { return }
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -1324,12 +1339,17 @@ final class StrokeCanvasView: UIView {
     /// always done, and what Mode 3's resolve below already did — and the two agree to within the
     /// fit's own tolerance, a quarter of a point. That is far tighter than the gate's agreement with
     /// the *pen*, which was half a dab spacing and so 3 pt on a 60 pt brush.
-    private func recordVectorSample(at point: CGPoint, pressure: CGFloat, force: Bool = false) {
+    private func recordVectorSample(_ input: StrokeInput, at point: CGPoint, force: Bool = false) {
         // The ring is where the finger is, not where the last stored knot was.
         updateEraserFootprint(at: point)
-        let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
+        // Δt is measured between *offered* samples here; `StrokePathFit` re-bases it onto stored ones
+        // by absorbing the intervals of the samples it drops. See `StrokePathFit.offer`.
+        let seconds = lastVectorSampleTime.map { input.timestamp - $0 } ?? 0
+        lastVectorSampleTime = input.timestamp
+        let sample = input.sample(at: point, secondsSincePrevious: seconds)
+        let pressure = input.pressure
         let admitted = force ? pathFit.finish(sample) : pathFit.offer(sample)
-        currentVectorSamples.append(contentsOf: admitted)
+        for knot in admitted { currentVectorSamples.append(knot) }
         // Mode 3 is off at an in-between: it cuts stored geometry, and a derived frame has none.
         //
         // `resolveIntersectionCut` is a per-sample state machine — `IntersectionDriver` arms and
@@ -1379,6 +1399,8 @@ final class StrokeCanvasView: UIView {
         let sample = VectorSample(x: point.x, y: point.y, pressure: pressure)
         let previous = lastPreviewSample
         lastPreviewSample = sample
+        // Positions and pressure only: the preview is a footprint walk, and nothing it reaches asks
+        // for a channel. `pressureOnly` says so rather than leaving it to a default.
         let increment: [VectorSample]
         if let clipPath = selectionClipPath {
             guard clipPath.contains(point) else { return }
@@ -1386,7 +1408,8 @@ final class StrokeCanvasView: UIView {
         } else {
             increment = previous.map { [$0, sample] } ?? [sample]
         }
-        for edit in canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: brushSize,
+        for edit in canvas.cutPreviewEdits(alongPath: StrokeSamples(increment, channels: .pressureOnly),
+                                           brush: brush, size: brushSize,
                                            accumulating: &previewCuts) {
             VectorCanvas.applyPreview(edit, into: scratch)
         }

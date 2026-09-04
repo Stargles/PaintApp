@@ -1229,9 +1229,11 @@ anywhere is the lasso move (`CanvasManager+LassoMove.swift:758`). So a resize fo
 no decode, and it cannot change what an already-stored coordinate means — the next save writes
 different bytes only because the geometry genuinely moved, never because the format's domain did.
 *In memory* it is not right:
-`VectorSample` is three `CGFloat` (`ShapeGeometry.swift:5-10`) and always has been — item (8) never
-created a resident 16-bit form — so the display list a resize walks is doubles in canvas coordinates,
-and a translation touches every one of them. **The stored-integer intuition is about the file; the
+a sample's coordinates are resident as `CGFloat` (`StrokeSamples.positions`) — item (8) never created
+a resident 16-bit form — so the display list a resize walks is doubles in canvas coordinates, and a
+translation touches every one of them. (This line read *"`VectorSample` is three `CGFloat`
+(`ShapeGeometry.swift:5-10`) and always has been"* until BRUSH.md §12 stage 4 made the record a channel
+set; the coordinates are still doubles in memory, which is the part the argument rests on.) **The stored-integer intuition is about the file; the
 cost is in the tier above it.**
 
 **MEASURED 2026-08-28**, `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`.
@@ -2279,7 +2281,17 @@ this reason.
 
 **Memory is a non-issue at every n the owner will reach.** Stroke geometry is
 `samples × 24 bytes` — **0.9 MB at 1,000 strokes, 7.3 MB at 8,000, 29.3 MB at 32,000** — against one
-canvas-sized bitmap at 8 MB. The iPad's whole footprint holding a 48,000-stroke cel *and* rendering
+canvas-sized bitmap at 8 MB.
+
+**BRUSH.md §12 stage 4 widened the record and left that figure standing for most strokes.** A stroke's
+samples are struct-of-arrays now (`StrokeSamples`), so the resident cost is 16 bytes of position plus
+8 per channel the stroke actually carries: a pressure-only run is **24 bytes a sample, exactly what it
+was**, and a Pencil stroke carrying Δt and both tilt channels is **48**. A finger-drawn stroke keeps
+none of pressure or tilt — all three quantise to their neutrals and are dropped at commit — so the
+ceiling is 1.8 MB a thousand strokes and the common case has not moved. On disk it is 8 bytes a sample
+against 5 for a Pencil, and **5 for a finger, MEASURED off a saved project**: the run's channel-set byte
+comes back `0x04`, Δt alone. On the wire the full record is **10.785 B a sample against 6.743**; BRUSH.md
+§5.1 carries both. The iPad's whole footprint holding a 48,000-stroke cel *and* rendering
 it is **80 MB**, on a device whose undo budget alone is 192 MiB (`UndoBudget`, §9). The render adds
 essentially nothing: peak tracks the geometry.
 

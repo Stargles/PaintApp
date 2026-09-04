@@ -42,17 +42,17 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     private static let eraserID = UUID(uuidString: "B0000000-0000-4000-8000-000000000002")!
 
     private static func ramp(from start: CGPoint, to end: CGPoint, count: Int,
-                             from p0: CGFloat, to p1: CGFloat) -> [VectorSample] {
-        (0..<count).map { i in
+                             from p0: CGFloat, to p1: CGFloat) -> StrokeSamples {
+        StrokeSamples((0..<count).map { i in
             let t = CGFloat(i) / CGFloat(count - 1)
             return VectorSample(x: start.x + (end.x - start.x) * t,
                                 y: start.y + (end.y - start.y) * t,
                                 pressure: p0 + (p1 - p0) * t)
-        }
+        }, channels: .pressureOnly)
     }
 
     /// The line under the eraser: ink spans y ∈ [52, 76] at full pressure.
-    private static let paintSamples = ramp(from: CGPoint(x: 24, y: 64), to: CGPoint(x: 104, y: 64),
+    private static let paintSamples: StrokeSamples = ramp(from: CGPoint(x: 24, y: 64), to: CGPoint(x: 104, y: 64),
                                            count: 9, from: 0.45, to: 1)
 
     private enum Gesture: String, CaseIterable {
@@ -63,7 +63,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         /// Along the line, shaving its top edge — partial-width coverage, which only a punch can express.
         case edgeShave
 
-        var samples: [VectorSample] {
+        var samples: StrokeSamples {
             switch self {
             case .squareCut:
                 return ramp(from: CGPoint(x: 64, y: 24), to: CGPoint(x: 64, y: 104), count: 9, from: 1, to: 1)
@@ -85,7 +85,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     private func scenario(brush: Brush, eraserBrush: Brush? = nil, eraserOpacity: Double = 1,
                           eraserSize: CGFloat = 16, gesture: Gesture = .squareCut,
-                          eraserSamples: [VectorSample]? = nil,
+                          eraserSamples: StrokeSamples? = nil,
                           backdrop: ParityScenario.Backdrop = .none,
                           name: String = "") -> ParityScenario {
         ParityScenario(name: name,
@@ -444,14 +444,14 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let naive: [VectorElement] = runs.map { run in
             var piece = paint
             piece.id = UUID()
-            piece.samples = run.samples
+            piece.samples = paint.samples.replacingSamples(run.samples)
             return .stroke(piece)
         }
         // (b) The shipped way: same geometry, but the dabs come from the parent's walk.
         let shared: [VectorElement] = runs.map { run in
             var piece = paint
             piece.id = UUID()
-            piece.samples = run.samples
+            piece.samples = paint.samples.replacingSamples(run.samples)
             piece.lattice = DabLattice(samples: paint.samples, parameters: run.parameters)
             return .stroke(piece)
         }

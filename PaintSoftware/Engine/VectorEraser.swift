@@ -44,7 +44,7 @@ enum VectorEraser {
         /// running is the *caller's* branch (`VectorCanvas.erase`'s switch), and a footprint is a
         /// footprint whichever of them asked for it. Storing it invited a future reader to believe the
         /// sweep behaved differently per mode, which it never did.
-        init?(samples: [VectorSample], brush: Brush, size: CGFloat) {
+        init?(samples: some SampleRun, brush: Brush, size: CGFloat) {
             let capsules = StrokeGeometry.capsuleChain(samples: samples, brush: brush, size: size)
             guard let bounds = StrokeGeometry.bounds(of: capsules) else { return nil }
             var smallest = CGFloat.greatestFiniteMagnitude
@@ -89,7 +89,7 @@ enum VectorEraser {
     ///
     /// `StrokeGeometry.subdivided` stays as it is — liquify wants real densification, because there
     /// the extra samples are the deformation's degrees of freedom rather than scratch work.
-    static func cutRanges(in samples: [VectorSample], sweep: Sweep) -> [ClosedRange<CGFloat>] {
+    static func cutRanges(in samples: some SampleRun, sweep: Sweep) -> [ClosedRange<CGFloat>] {
         guard !samples.isEmpty else { return [] }
         // A lone dab has the degenerate domain `0...0`: it is either hit or it isn't.
         guard samples.count > 1 else {
@@ -116,7 +116,7 @@ enum VectorEraser {
     /// small nib on a long stroke from probing thousands of positions that cannot match. Callers whose
     /// predicate reaches beyond the eraser's own box — the clean-cut test does, by the stroke's
     /// half-width — must grow the rect to match.
-    private static func coveredSpans(in samples: [VectorSample], clipTo rect: CGRect, probeStep: CGFloat,
+    private static func coveredSpans(in samples: some SampleRun, clipTo rect: CGRect, probeStep: CGFloat,
                                      predicate: (CGFloat) -> Bool) -> [ClosedRange<CGFloat>] {
         guard !samples.isEmpty else { return [] }
         guard samples.count > 1 else { return predicate(0) ? [0...0] : [] }
@@ -316,7 +316,7 @@ enum VectorEraser {
     /// segment joins that are not coverage boundaries at all. A 24pt line sampled every 10pt turns one
     /// genuine 48pt clean span into six 10pt fragments, each of which then collapses under a 12pt
     /// inset, and the split silently never happens — which is precisely what it did.
-    static func cleanCutRanges(in samples: [VectorSample], brush: Brush, size: CGFloat,
+    static func cleanCutRanges(in samples: some SampleRun, brush: Brush, size: CGFloat,
                                by erasers: [StrokeGeometry.Capsule], sweep: Sweep) -> [ClosedRange<CGFloat>] {
         guard !erasers.isEmpty, !samples.isEmpty else { return [] }
         let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: brush, size: size) * (1 + cleanCutMargin)
@@ -341,7 +341,7 @@ enum VectorEraser {
     /// A single covered span reaching both ends, rather than a union of spans that happens to add up:
     /// `cleanCutRanges` merges before returning, so anything short of one full-domain span means there
     /// is a gap the eraser missed.
-    static func isEntirelyCovered(_ samples: [VectorSample], brush: Brush, size: CGFloat,
+    static func isEntirelyCovered(_ samples: some SampleRun, brush: Brush, size: CGFloat,
                                   by erasers: [StrokeGeometry.Capsule], sweep: Sweep) -> Bool {
         guard !samples.isEmpty, !erasers.isEmpty else { return false }
         let domainEnd = CGFloat(samples.count - 1)
@@ -378,7 +378,7 @@ enum VectorEraser {
     /// Without this a stroke scribbled out from end to end can never be deleted: both boundaries are
     /// pushed half a width inward, so two invisible stubs survive under the punch and keep it alive
     /// through garbage collection.
-    static func conservativeCuts(_ ranges: [ClosedRange<CGFloat>], in samples: [VectorSample],
+    static func conservativeCuts(_ ranges: [ClosedRange<CGFloat>], in samples: some SampleRun,
                                  brush: Brush, size: CGFloat,
                                  by erasers: [StrokeGeometry.Capsule]) -> [ClosedRange<CGFloat>] {
         guard samples.count > 1 else { return ranges }
@@ -403,7 +403,7 @@ enum VectorEraser {
 
     /// Whether the round cap the stroke renders at `parameter` is inside the eraser's footprint. The
     /// same `cleanCutMargin` the cross-section test uses, for the same anti-aliased fringe.
-    private static func capIsCovered(atParameter parameter: CGFloat, in samples: [VectorSample],
+    private static func capIsCovered(atParameter parameter: CGFloat, in samples: some SampleRun,
                                      brush: Brush, size: CGFloat,
                                      by erasers: [StrokeGeometry.Capsule]) -> Bool {
         guard let sample = StrokeGeometry.interpolatedSample(in: samples, at: parameter) else { return false }
@@ -411,9 +411,15 @@ enum VectorEraser {
         return StrokeGeometry.capsules(erasers, contain: sample.point, radius: radius)
     }
 
-    private static func halfWidth(at parameter: CGFloat, in samples: [VectorSample], brush: Brush,
+    /// **An empty run has no pressure to read, and the answer is the channel's neutral** — a full
+    /// press, which is what a finger reports and what BRUSH.md §5.5 defines. This line predates the
+    /// funnel and spelled the neutral as a literal `1`; it names the one definition now, so a run
+    /// that carries no pressure channel and a parameter that falls outside one agree by construction
+    /// rather than by two people having picked the same number.
+    private static func halfWidth(at parameter: CGFloat, in samples: some SampleRun, brush: Brush,
                                   size: CGFloat) -> CGFloat {
-        let pressure = StrokeGeometry.interpolatedSample(in: samples, at: parameter)?.pressure ?? 1
+        let pressure = StrokeGeometry.interpolatedSample(in: samples, at: parameter)?.pressure
+            ?? SampleChannel.pressure.neutral
         return StrokeGeometry.stampRadius(forPressure: pressure, brush: brush, size: size)
     }
 
@@ -437,7 +443,7 @@ enum VectorEraser {
     ///
     /// `hasBackdrop` is asked at a parametric position along the gesture and answers "is there anything
     /// beneath the dab there" — it needs the display list, so `VectorCanvas` supplies it.
-    static func hasResidue(in samples: [VectorSample], sweep: Sweep,
+    static func hasResidue(in samples: some SampleRun, sweep: Sweep,
                            hasBackdrop: (CGFloat) -> Bool) -> Bool {
         guard !samples.isEmpty else { return false }
         return !coveredSpans(in: samples, clipTo: sweep.bounds, probeStep: sweep.probeStep,
@@ -470,7 +476,7 @@ enum VectorEraser {
     /// is the zero-radius limit of the same rule and reproduces the old strictly-bracketing behaviour:
     /// a crossing sitting exactly under the touch is skipped rather than collapsing the span to
     /// nothing and silently erasing none of it.
-    static func cutToIntersection(in samples: [VectorSample], at hit: CGFloat,
+    static func cutToIntersection(in samples: some SampleRun, at hit: CGFloat,
                                   others: [(points: [CGPoint], tolerance: CGFloat)],
                                   footprint: Sweep? = nil)
         -> [ClosedRange<CGFloat>] {

@@ -11,9 +11,21 @@ struct StrokeInput {
     /// Radians: 0 is the pencil flat against the surface, pi/2 is perpendicular (no tilt). pi/2 for
     /// any non-Pencil touch.
     var altitude: CGFloat
-    /// Radians: compass direction of the tilt within the view's plane. 0 for any non-Pencil touch.
-    /// Not yet consumed by any `BrushDynamics` field, but cheap to carry through for a future
-    /// tilt-driven dynamic.
+    /// Radians: the compass direction the Pencil is leaned in, **in the coordinate space of the view
+    /// this input was taken in** — which is the space `position` is in, and therefore the space a
+    /// stored sample is in. 0 for any non-Pencil touch, which is `SampleChannel.tiltAzimuth`'s
+    /// neutral.
+    ///
+    /// **BRUSH.md §2.7 asks for azimuth in canvas space, and reading it from the same view as the
+    /// position is the whole of that conversion.** `UITouch.azimuthAngle(in:)` expresses the angle in
+    /// the given view's coordinate system exactly as `location(in:)` does the point, and the canvas's
+    /// zoom and rotation live on an ancestor of `StrokeCanvasView` (`CanvasView`'s `container`), so
+    /// both come back already undone. §2.7 supposed this value moved when the artist turned the
+    /// canvas; it does not, provided the two are read from one view, and that invariant is what this
+    /// initialiser's single `view` parameter enforces.
+    ///
+    /// What capture *cannot* know is the vector layer's own transform, or a lasso's, or a canvas
+    /// resize's. Those arrive at `StrokeSamples.transformed(by:)`, which turns the angle with the ink.
     var azimuth: CGFloat
     /// `UITouch.timestamp` — seconds on the system uptime clock, absolute rather than relative.
     ///
@@ -28,6 +40,17 @@ struct StrokeInput {
     /// Left absolute here because only the capture site knows where its gesture began;
     /// `TimedSample.time` is relative to the first sample, and subtracting is that site's job.
     var timestamp: TimeInterval
+
+    /// The stored sample this input becomes, at `point` — which is `position` for an unsmoothed
+    /// gesture and the stabilizer's output otherwise — and `seconds` after the previous one.
+    ///
+    /// Every channel BRUSH.md §5.1 names comes from here, so capture is one call rather than a list
+    /// of fields at three call sites that each remember a different subset of them.
+    func sample(at point: CGPoint, secondsSincePrevious seconds: TimeInterval) -> VectorSample {
+        VectorSample(x: point.x, y: point.y, pressure: pressure,
+                     deltaTime: max(CGFloat(seconds), 0),
+                     tiltAltitude: altitude, tiltAzimuth: azimuth)
+    }
 
     init(touch: UITouch, in view: UIView) {
         position = touch.location(in: view)

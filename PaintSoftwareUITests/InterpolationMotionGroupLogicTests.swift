@@ -93,7 +93,8 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
                         color: CodableColor = CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                         composite: StrokeComposite = .paint, id: UUID = UUID()) -> VectorStroke {
         VectorStroke(id: id, brush: Self.brush, color: color, size: 6, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly),
                      composite: composite)
     }
 

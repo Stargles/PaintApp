@@ -317,7 +317,8 @@ final class InterpolationGuideLogicTests: XCTestCase {
         VectorStroke(id: UUID(), brush: Self.brush,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 6, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
     }
 
     /// A bar at x = 10…30 in keyframe A and x = 34…54 in keyframe C, generated onto the middle cel.

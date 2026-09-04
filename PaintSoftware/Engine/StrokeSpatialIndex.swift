@@ -89,7 +89,7 @@ final class StrokeSpatialIndex {
     /// A single-sample run indexes one zero-length segment (`sampleIndex == 0`), matching the lone dab
     /// it renders as; a caller walking the returned refs must therefore tolerate
     /// `sampleIndex == samples.count - 1` for such runs.
-    func insert(samples: [VectorSample], elementIndex: Int, padding: CGFloat = 0) {
+    func insert(samples: some SampleRun, elementIndex: Int, padding: CGFloat = 0) {
         guard !samples.isEmpty else { return }
         guard samples.count > 1 else {
             insert(SegmentRef(elementIndex: elementIndex, sampleIndex: 0),

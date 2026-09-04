@@ -460,9 +460,11 @@ extension CanvasManager {
         else { return false }
 
         var stored = stroke
-        stored.samples = zip(stroke.samples, plan.restPoints).map {
-            VectorSample(x: $1.x, y: $1.y, pressure: $0.pressure)
-        }
+        // The rest-space map is a lattice warp like `InterpolationEvaluator.warped`'s, so the same
+        // `angleRotation: 0` claim applies and is made in the same words there.
+        var i = -1
+        stored.samples = stroke.samples.replacingPositions({ _ in i += 1; return plan.restPoints[i] },
+                                                           angleRotation: 0)
         // τ = `t`: enforced by the evaluator's `t >= τ` test, so sliding earlier than where it was
         // drawn hides the edit again.
         stored.visibilityThreshold = recipe.t

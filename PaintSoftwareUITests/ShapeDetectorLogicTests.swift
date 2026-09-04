@@ -20,8 +20,9 @@ final class ShapeDetectorLogicTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func samples(_ points: [CGPoint], pressure: CGFloat = 0.5) -> [VectorSample] {
-        points.map { VectorSample(x: $0.x, y: $0.y, pressure: pressure) }
+    private func samples(_ points: [CGPoint], pressure: CGFloat = 0.5) -> StrokeSamples {
+        StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: pressure) },
+                      channels: .pressureOnly)
     }
 
     /// A freehand-ish circle traced `coverage` of the way around.
@@ -89,7 +90,7 @@ final class ShapeDetectorLogicTests: XCTestCase {
     /// a closure whose result type the `??` still has to pin down is one of the expressions Swift
     /// 6.3's solver gives up on outright ("unable to type-check in reasonable time"), which fails the
     /// whole test target's build. Same arithmetic, no inference to do.
-    private func largestGap(_ samples: [VectorSample]) -> CGFloat {
+    private func largestGap(_ samples: some SampleRun) -> CGFloat {
         guard samples.count >= 2 else { return 0 }
         var largest: CGFloat = 0
         for index in 1..<samples.count {
@@ -1902,7 +1903,7 @@ final class ShapeDetectorLogicTests: XCTestCase {
             let t = CGFloat(i) / 48 * 2 * .pi - .pi
             return CGPoint(x: 24 + 16 * cos(t), y: 24 + 16 * sin(t))
         })
-        manager.beginInteractiveShape(shape, samples: traced)
+        manager.beginInteractiveShape(shape, samples: Array(traced))
         manager.endInteractiveShape()          // pen up: adjustable, handles and outline live
         let before = manager.history.undoStack.count
 

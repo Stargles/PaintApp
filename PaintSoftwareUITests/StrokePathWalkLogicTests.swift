@@ -22,33 +22,33 @@ final class StrokePathWalkLogicTests: XCTestCase {
     }
 
     /// A circle sampled at 120 Hz — curvature everywhere, and nowhere for a chamfer to hide.
-    private func circle(radius: CGFloat, speed: CGFloat = 90, pressure: CGFloat = 0.6) -> [VectorSample] {
+    private func circle(radius: CGFloat, speed: CGFloat = 90, pressure: CGFloat = 0.6) -> StrokeSamples {
         let count = max(8, Int((2 * .pi * radius / speed) * 120))
-        return (0...count).map { i in
+        return StrokeSamples((0...count).map { i in
             let angle = 2 * CGFloat.pi * CGFloat(i) / CGFloat(count)
             return VectorSample(x: 400 + radius * cos(angle), y: 400 + radius * sin(angle),
                                 pressure: pressure)
-        }
+        }, channels: .pressureOnly)
     }
 
     /// A right angle traced slowly: 200 pt right, then 200 pt down.
-    private func rightAngle() -> [VectorSample] {
-        var samples: [VectorSample] = []
+    private func rightAngle() -> StrokeSamples {
+        var samples = StrokeSamples(channels: .pressureOnly)
         for i in 0...400 { samples.append(VectorSample(x: 100 + CGFloat(i) / 2, y: 200, pressure: 1)) }
         for i in 1...400 { samples.append(VectorSample(x: 300, y: 200 + CGFloat(i) / 2, pressure: 1)) }
         return samples
     }
 
-    private func stored(_ samples: [VectorSample]) -> [VectorSample] {
+    private func stored(_ samples: StrokeSamples) -> StrokeSamples {
         var fit = StrokePathFit()
-        var knots: [VectorSample] = []
-        for sample in samples.dropLast() { knots.append(contentsOf: fit.offer(sample)) }
-        knots.append(contentsOf: fit.finish(samples.last))
+        var knots = StrokeSamples(channels: samples.channels)
+        for sample in samples.dropLast() { for knot in fit.offer(sample) { knots.append(knot) } }
+        for knot in fit.finish(samples.last) { knots.append(knot) }
         return knots
     }
 
-    private func dabs(_ knots: [VectorSample], brush: Brush, size: CGFloat) -> [BrushStamper.BakedDab] {
-        BrushStamper.bake(samples: knots.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+    private func dabs(_ knots: StrokeSamples, brush: Brush, size: CGFloat) -> [BrushStamper.BakedDab] {
+        BrushStamper.bake(samples: StrokeSamples(knots, channels: .pressureOnly),
                           brush: brush, color: .black, brushSize: size, brushOpacity: 1, random: DabRandom(seed: 31))
     }
 
@@ -77,7 +77,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
     }
 
     /// The stored path densely resampled — the curve the walk claims to follow.
-    private func curve(through knots: [VectorSample], perSegment: Int = 32) -> [CGPoint] {
+    private func curve(through knots: some SampleRun, perSegment: Int = 32) -> [CGPoint] {
         guard knots.count > 1 else { return knots.map(\.point) }
         let path = StrokePath(knots)
         var out = [knots[0].point]
@@ -118,7 +118,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
     func testAStoredStrokeIsTrueToTheDrawingWhateverSpacingWalksIt() {
         let drawn = circle(radius: 30)
         let knots = stored(drawn)
-        let reference = drawn.map(\.point)
+        let reference = drawn.map { $0.point }
 
         var worstAnywhere: CGFloat = 0
         var counts: [Int] = []
@@ -181,7 +181,8 @@ final class StrokePathWalkLogicTests: XCTestCase {
     /// case — most of any drawing — from paying anything for the interpolant, and it is the reason
     /// `RasterVectorParityLogicTests`' zero-tolerance comparison is unbothered by this change.
     func testAStraightRunIsWalkedExactlyAsAStraightLine() {
-        let knots = (0...8).map { VectorSample(x: 100 + CGFloat($0) * 12, y: 300, pressure: 1) }
+        let knots = StrokeSamples((0...8).map { VectorSample(x: 100 + CGFloat($0) * 12, y: 300, pressure: 1) },
+                                  channels: .pressureOnly)
         let marks = dabs(knots, brush: inkBrush(spacing: 0.3), size: 10)
         XCTAssertGreaterThan(marks.count, 20)
         for (index, mark) in marks.enumerated() {
@@ -233,7 +234,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
     /// across the corner — a sixth of a 5 pt line's own width.
     func testATracedRightAngleKeepsItsCorner() {
         let knots = stored(rightAngle())
-        let drawn = rightAngle().map(\.point)
+        let drawn = rightAngle().map { $0.point }
         let worst = worstDistance(of: curve(through: knots), from: drawn)
         XCTAssertLessThan(worst, 0.3, "the interpolant cut \(worst)pt across the corner")
 
@@ -251,7 +252,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
     /// spacing is the square root of the chord length — but a chord of exactly zero still has to be
     /// answered rather than divided by.
     func testCoincidentStoredPointsNeitherTrapNorMoveTheInk() {
-        var knots: [VectorSample] = [VectorSample(x: 100, y: 100, pressure: 0.2)]
+        var knots: StrokeSamples = [VectorSample(x: 100, y: 100, pressure: 0.2)]
         for i in 1...6 { knots.append(VectorSample(x: 100, y: 100, pressure: 0.2 + 0.1 * CGFloat(i))) }
         for i in 1...10 { knots.append(VectorSample(x: 100 + CGFloat(i) * 8, y: 100, pressure: 0.9)) }
 

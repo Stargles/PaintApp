@@ -16,10 +16,10 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func samples(_ points: [(CGFloat, CGFloat)], pressures: [CGFloat]? = nil) -> [VectorSample] {
-        points.enumerated().map { index, p in
+    private func samples(_ points: [(CGFloat, CGFloat)], pressures: [CGFloat]? = nil) -> StrokeSamples {
+        StrokeSamples(points.enumerated().map { index, p in
             VectorSample(x: p.0, y: p.1, pressure: pressures?[index] ?? 0.5)
-        }
+        }, channels: .pressureOnly)
     }
 
     /// A fixed-width brush: `BrushDynamics.fixed` makes `sizeFraction` exactly 1 at any pressure, so
@@ -474,16 +474,16 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     /// Five samples 10pt apart along x, with pressure ramping 0 → 1, so a boundary sample's
     /// interpolated pressure is checkable by eye.
-    private var ramp: [VectorSample] {
+    private var ramp: StrokeSamples {
         samples([(0, 0), (10, 0), (20, 0), (30, 0), (40, 0)], pressures: [0, 0.25, 0.5, 0.75, 1])
     }
 
     func testSplitWithNoCutsReturnsTheRunUnchanged() {
         let runs = StrokeGeometry.splitStroke(ramp, removing: [])
         XCTAssertEqual(runs.count, 1)
-        XCTAssertEqual(runs[0], ramp)
+        XCTAssertEqual(runs[0], Array(ramp))
         // A cut entirely outside the domain is the same as no cut.
-        XCTAssertEqual(StrokeGeometry.splitStroke(ramp, removing: [7...9]), [ramp])
+        XCTAssertEqual(StrokeGeometry.splitStroke(ramp, removing: [7...9]), [Array(ramp)])
     }
 
     func testSplitThroughTheMiddleYieldsTwoRunsWithInterpolatedBoundaries() {
@@ -551,11 +551,11 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     func testSplitOfASingleSampleRunIsAllOrNothing() {
         let lone = samples([(5, 5)], pressures: [0.7])
-        XCTAssertEqual(StrokeGeometry.splitStroke(lone, removing: []), [lone])
-        XCTAssertEqual(StrokeGeometry.splitStroke(lone, removing: [1...2]), [lone],
+        XCTAssertEqual(StrokeGeometry.splitStroke(lone, removing: []), [Array(lone)])
+        XCTAssertEqual(StrokeGeometry.splitStroke(lone, removing: [1...2]), [Array(lone)],
                        "a cut that misses the degenerate 0...0 domain leaves the dab alone")
         XCTAssertTrue(StrokeGeometry.splitStroke(lone, removing: [-0.5...0.5]).isEmpty)
-        XCTAssertTrue(StrokeGeometry.splitStroke([], removing: []).isEmpty)
+        XCTAssertTrue(StrokeGeometry.splitStroke(StrokeSamples(), removing: []).isEmpty)
     }
 
     func testSplitRunsStayInsideTheOriginalGeometry() {
@@ -595,7 +595,7 @@ final class StrokeGeometryLogicTests: XCTestCase {
     func testSplitRunsWithNothingOutsideReturnsOneRunUnchanged() {
         let runs = StrokeGeometry.splitRuns(ramp) { _ in true }
         XCTAssertEqual(runs.count, 1)
-        XCTAssertEqual(runs[0], ramp)
+        XCTAssertEqual(runs[0], Array(ramp))
     }
 
     func testSplitRunsWithEverythingOutsideReturnsNoRuns() {
@@ -640,9 +640,9 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     func testSplitRunsOfASingleSampleIsAllOrNothing() {
         let lone = samples([(5, 5)], pressures: [0.7])
-        XCTAssertEqual(StrokeGeometry.splitRuns(lone) { _ in true }, [lone])
+        XCTAssertEqual(StrokeGeometry.splitRuns(lone) { _ in true }, [Array(lone)])
         XCTAssertTrue(StrokeGeometry.splitRuns(lone) { _ in false }.isEmpty)
-        XCTAssertTrue(StrokeGeometry.splitRuns([]) { _ in true }.isEmpty)
+        XCTAssertTrue(StrokeGeometry.splitRuns(StrokeSamples()) { _ in true }.isEmpty)
     }
 
     /// Selection-clipped runs are what `endVectorStroke` hands to `VectorCanvas.addStroke` one at a
@@ -772,8 +772,8 @@ final class StrokeGeometryLogicTests: XCTestCase {
 
     func testSpatialIndexNeverReturnsDuplicates() {
         // One segment spanning many 64pt cells, queried with a rect covering all of them.
-        let long = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 900, y: 900, pressure: 1)]
-        let index = StrokeSpatialIndex.build(strokes: [long])
+        let long: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 900, y: 900, pressure: 1)]
+        let index = StrokeSpatialIndex.build(strokes: [Array(long)])
         let hits = index.segments(near: CGRect(x: -50, y: -50, width: 1100, height: 1100))
         XCTAssertEqual(hits.count, 1)
         XCTAssertEqual(hits[0], StrokeSpatialIndex.SegmentRef(elementIndex: 0, sampleIndex: 0))
@@ -785,7 +785,7 @@ final class StrokeGeometryLogicTests: XCTestCase {
     func testSpatialIndexPaddingFindsInkOutsideTheCenterlineBox() {
         // A stroke along y = 0; the query sits 15pt below it. Both indexes use 8pt cells, small enough
         // that the grid itself doesn't paper over the gap — only the padding can bridge it.
-        let run = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 100, y: 0, pressure: 1)]
+        let run: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 100, y: 0, pressure: 1)]
         let rect = CGRect(x: 40, y: 15, width: 5, height: 5)
         let unpadded = StrokeSpatialIndex(cellSize: 8)
         unpadded.insert(samples: run, elementIndex: 3)
@@ -810,7 +810,7 @@ final class StrokeGeometryLogicTests: XCTestCase {
     }
 
     func testSpatialIndexHandlesNegativeCoordinatesAndBadCellSizes() {
-        let run = [VectorSample(x: -300, y: -300, pressure: 1), VectorSample(x: -250, y: -290, pressure: 1)]
+        let run: StrokeSamples = [VectorSample(x: -300, y: -300, pressure: 1), VectorSample(x: -250, y: -290, pressure: 1)]
         let index = StrokeSpatialIndex(cellSize: 0)
         XCTAssertEqual(index.cellSize, StrokeSpatialIndex.defaultCellSize, "a bad cell size degrades, not traps")
         index.insert(samples: run, elementIndex: 0)

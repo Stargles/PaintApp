@@ -73,7 +73,7 @@ enum StrokeGeometry {
     ///
     /// A separate overload rather than `samples.map(\.point)` at the call site: this is the hot query
     /// (once per stroke per eraser sample) and the mapping would allocate an array per call.
-    static func distanceSquared(from point: CGPoint, toPolyline samples: [VectorSample]) -> CGFloat {
+    static func distanceSquared(from point: CGPoint, toPolyline samples: some SampleRun) -> CGFloat {
         closestPoint(count: samples.count, to: point) { samples[$0].point }?.distanceSquared ?? .infinity
     }
 
@@ -86,7 +86,7 @@ enum StrokeGeometry {
 
     /// The point on the polyline through `samples` closest to `point` — Mode 3's opening move, which
     /// turns a touch-down location into "which stroke, and where along it".
-    static func closestPoint(onPolyline samples: [VectorSample], to point: CGPoint)
+    static func closestPoint(onPolyline samples: some SampleRun, to point: CGPoint)
         -> (parameter: CGFloat, point: CGPoint, distanceSquared: CGFloat)? {
         closestPoint(count: samples.count, to: point) { samples[$0].point }
     }
@@ -113,7 +113,7 @@ enum StrokeGeometry {
 
     /// Bounding box of a sample run's centerline, optionally inflated by `padding` (pass the stroke's
     /// maximum half-width to get the box its *ink* occupies). Nil for an empty run.
-    static func bounds(of samples: [VectorSample], padding: CGFloat = 0) -> CGRect? {
+    static func bounds(of samples: some SampleRun, padding: CGFloat = 0) -> CGRect? {
         guard let first = samples.first else { return nil }
         var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
         for s in samples.dropFirst() {
@@ -201,7 +201,7 @@ enum StrokeGeometry {
     /// A stroke's footprint as a capsule chain: one capsule per segment, radii taken from the two
     /// samples' pressures. A single-sample run yields one zero-length capsule (the lone dab it
     /// renders as), so downstream code never has to special-case `count == 1`.
-    static func capsuleChain(samples: [VectorSample], brush: Brush, size: CGFloat) -> [Capsule] {
+    static func capsuleChain(samples: some SampleRun, brush: Brush, size: CGFloat) -> [Capsule] {
         guard !samples.isEmpty else { return [] }
         guard samples.count > 1 else {
             return [Capsule(dabAt: samples[0].point,
@@ -367,7 +367,7 @@ enum StrokeGeometry {
     ///
     /// Geometry only: the alpha gate (hardness, opacity × flow) is the caller's, deliberately,
     /// because it is a property of the eraser brush rather than of the two footprints.
-    static func coverage(ofSampleAt index: Int, in samples: [VectorSample], brush: Brush, size: CGFloat,
+    static func coverage(ofSampleAt index: Int, in samples: some SampleRun, brush: Brush, size: CGFloat,
                          by erasers: [Capsule], scratch: inout [ClosedRange<CGFloat>]) -> CGFloat {
         guard samples.indices.contains(index) else { return 0 }
         let sample = samples[index]
@@ -377,7 +377,7 @@ enum StrokeGeometry {
     }
 
     /// Convenience form of `coverage(ofSampleAt:...)` that owns its interval buffer.
-    static func coverage(ofSampleAt index: Int, in samples: [VectorSample], brush: Brush, size: CGFloat,
+    static func coverage(ofSampleAt index: Int, in samples: some SampleRun, brush: Brush, size: CGFloat,
                          by erasers: [Capsule]) -> CGFloat {
         var scratch: [ClosedRange<CGFloat>] = []
         scratch.reserveCapacity(erasers.count)
@@ -424,7 +424,7 @@ enum StrokeGeometry {
     /// `margin` inflates the half-width the eraser has to cover before this reports 1: anti-aliased
     /// fringe means a stroke whose geometric half-width is *just* covered still leaves a visible
     /// edge, so a clean cut requires the eraser to overshoot slightly.
-    static func coverage(atParameter parameter: CGFloat, in samples: [VectorSample], brush: Brush,
+    static func coverage(atParameter parameter: CGFloat, in samples: some SampleRun, brush: Brush,
                          size: CGFloat, by erasers: [Capsule], margin: CGFloat = 0,
                          scratch: inout [ClosedRange<CGFloat>]) -> CGFloat {
         guard let sample = interpolatedSample(in: samples, at: parameter) else { return 0 }
@@ -446,7 +446,7 @@ enum StrokeGeometry {
     ///
     /// Evaluated through `StrokePath`'s statics rather than by building one, because this runs once
     /// per coverage probe and a probe walk is hundreds of them.
-    static func tangent(atParameter parameter: CGFloat, in samples: [VectorSample]) -> CGPoint {
+    static func tangent(atParameter parameter: CGFloat, in samples: some SampleRun) -> CGPoint {
         guard samples.count > 1 else { return CGPoint(x: 1, y: 0) }
         let domainEnd = CGFloat(samples.count - 1)
         let clamped = min(max(parameter, 0), domainEnd)
@@ -468,7 +468,7 @@ enum StrokeGeometry {
     /// building a cumulative-length table because it runs a couple of times per cut boundary, not once
     /// per probe.
     static func offsetParameter(_ parameter: CGFloat, by distance: CGFloat,
-                                in samples: [VectorSample]) -> CGFloat {
+                                in samples: some SampleRun) -> CGFloat {
         guard samples.count > 1 else { return 0 }
         let domainEnd = CGFloat(samples.count - 1)
         var position = min(max(parameter, 0), domainEnd)
@@ -514,7 +514,7 @@ enum StrokeGeometry {
     /// A single-sample run — or a run of nothing but coincident samples — has no tangent at all. It
     /// gets `(1, 0)`: for a round dab every cross-section direction is equivalent, so *any* fixed
     /// choice is exact rather than merely acceptable.
-    static func tangent(ofSampleAt index: Int, in samples: [VectorSample]) -> CGPoint {
+    static func tangent(ofSampleAt index: Int, in samples: some SampleRun) -> CGPoint {
         guard samples.count > 1, samples.indices.contains(index) else { return CGPoint(x: 1, y: 0) }
         let here = samples[index].point
         // Walk outward for a distinct neighbour on each side, so repeated samples don't zero the
@@ -537,7 +537,7 @@ enum StrokeGeometry {
     }
 
     /// Unit normal at `samples[index]` — the direction the stroke's cross-section runs in.
-    static func normal(ofSampleAt index: Int, in samples: [VectorSample]) -> CGPoint {
+    static func normal(ofSampleAt index: Int, in samples: some SampleRun) -> CGPoint {
         let t = tangent(ofSampleAt: index, in: samples)
         return CGPoint(x: -t.y, y: t.x)
     }
@@ -755,7 +755,7 @@ enum StrokeGeometry {
     /// so the piece that survives ends at the same thickness it was mid-stroke instead of snapping to
     /// the nearest stored sample's pressure and visibly stepping. `parameter` is clamped to the run's
     /// domain, so an out-of-range value returns the nearest endpoint rather than nil.
-    static func interpolatedSample(in samples: [VectorSample], at parameter: CGFloat) -> VectorSample? {
+    static func interpolatedSample(in samples: some SampleRun, at parameter: CGFloat) -> VectorSample? {
         guard let first = samples.first, let last = samples.last else { return nil }
         guard parameter > 0 else { return first }
         guard parameter < CGFloat(samples.count - 1) else { return last }
@@ -771,8 +771,8 @@ enum StrokeGeometry {
     /// nib either over- or under-erases, because the nearest *sample* to the eraser can sit well
     /// outside its footprint. Densifying to the eraser's radius first makes sample-granularity
     /// decisions land within a radius of the truth.
-    static func subdivided(_ samples: [VectorSample], maxSpacing: CGFloat) -> [VectorSample] {
-        guard samples.count > 1, maxSpacing > 0 else { return samples }
+    static func subdivided(_ samples: some SampleRun, maxSpacing: CGFloat) -> [VectorSample] {
+        guard samples.count > 1, maxSpacing > 0 else { return Array(samples) }
         var result: [VectorSample] = []
         result.reserveCapacity(samples.count)
         result.append(samples[0])
@@ -781,11 +781,19 @@ enum StrokeGeometry {
             let distance = hypot(to.x - from.x, to.y - from.y)
             if distance > maxSpacing {
                 let steps = Int((distance / maxSpacing).rounded(.up))
+                // `previous` is the *raw* lerp, before it was reduced — an interval channel's value
+                // there is "elapsed since the segment began", so differencing consecutive raws is what
+                // turns the run back into per-point intervals. See `SampleChannel.isCumulative`.
+                var previous = from
                 for step in 1..<steps {
-                    result.append(lerp(from, to, CGFloat(step) / CGFloat(steps)))
+                    let raw = lerp(from, to, CGFloat(step) / CGFloat(steps))
+                    result.append(raw.afterInsertedPredecessor(previous))
+                    previous = raw
                 }
+                result.append(to.afterInsertedPredecessor(previous))
+            } else {
+                result.append(to)
             }
-            result.append(to)
         }
         return result
     }
@@ -817,7 +825,7 @@ enum StrokeGeometry {
     ///
     /// If point decimation is ever added, it must not move these boundary samples, or the cut edge
     /// drifts away from where the user erased.
-    static func splitStroke(_ samples: [VectorSample], removing cuts: [ClosedRange<CGFloat>]) -> [[VectorSample]] {
+    static func splitStroke(_ samples: some SampleRun, removing cuts: [ClosedRange<CGFloat>]) -> [[VectorSample]] {
         splitStrokeRuns(samples, removing: cuts).map(\.samples)
     }
 
@@ -833,16 +841,16 @@ enum StrokeGeometry {
 
     /// `splitStroke`, reporting each run's source parameters as well as its samples. Same walk, same
     /// edge cases; `splitStroke` is this with the parameters dropped.
-    static func splitStrokeRuns(_ samples: [VectorSample],
+    static func splitStrokeRuns(_ samples: some SampleRun,
                                 removing cuts: [ClosedRange<CGFloat>]) -> [SplitRun] {
         guard !samples.isEmpty else { return [] }
         let domainEnd = CGFloat(samples.count - 1)
         let merged = mergedCuts(cuts, clampedTo: 0...domainEnd)
-        guard !merged.isEmpty else { return [(samples, identityParameters(count: samples.count))] }
+        guard !merged.isEmpty else { return [(Array(samples), identityParameters(count: samples.count))] }
 
         // A single sample has no extent to survive inside, so the only question is whether it was hit.
         guard samples.count > 1 else {
-            return merged.contains { $0.lowerBound <= 0 && $0.upperBound >= 0 } ? [] : [(samples, [0])]
+            return merged.contains { $0.lowerBound <= 0 && $0.upperBound >= 0 } ? [] : [(Array(samples), [0])]
         }
 
         var runs: [SplitRun] = []
@@ -866,7 +874,7 @@ enum StrokeGeometry {
     /// where two cuts meet, where the "survivor" is a rounding artefact of the cut edges rather than
     /// ink the user left behind, and emitting one would stamp a visible dab in the middle of the hole
     /// they just erased.
-    private static func appendRun(from low: CGFloat, to high: CGFloat, of samples: [VectorSample],
+    private static func appendRun(from low: CGFloat, to high: CGFloat, of samples: some SampleRun,
                                   into runs: inout [SplitRun]) {
         guard high - low > epsilon else { return }
         var run: [VectorSample] = []
@@ -876,10 +884,18 @@ enum StrokeGeometry {
         let lastInterior = Int(high.rounded(.up)) - 1
         run.reserveCapacity(max(lastInterior - firstInterior + 1, 0) + 2)
         parameters.reserveCapacity(run.capacity)
-        if let start = interpolatedSample(in: samples, at: low) { run.append(start); parameters.append(low) }
+        let start = interpolatedSample(in: samples, at: low)
+        if let start { run.append(start); parameters.append(low) }
+        // The first interior sample now follows a point inserted part-way through its own interval,
+        // so it owes that point the time that elapsed before it — `SampleChannel.isCumulative`, and
+        // the reason a cut piece's velocities equal the uncut stroke's at the same places. Only when
+        // the boundary really was interpolated: a run that starts on a stored point has not split
+        // anybody's interval.
+        var owed = low > CGFloat(Int(low.rounded(.down))) ? start : nil
         if firstInterior <= lastInterior {
             for i in firstInterior...lastInterior where CGFloat(i) > low && CGFloat(i) < high {
-                run.append(samples[i])
+                run.append(owed.map { samples[i].afterInsertedPredecessor($0) } ?? samples[i])
+                owed = nil
                 parameters.append(CGFloat(i))
             }
         }
@@ -907,7 +923,7 @@ enum StrokeGeometry {
     ///
     /// Runs of a single sample are kept, same as `splitStroke`: a lone dab inside the selection is
     /// legitimate ink. An empty `samples` returns `[]`.
-    static func splitRuns(_ samples: [VectorSample], inside: (CGPoint) -> Bool) -> [[VectorSample]] {
+    static func splitRuns(_ samples: some SampleRun, inside: (CGPoint) -> Bool) -> [[VectorSample]] {
         membershipRuns(samples, inside: inside).filter(\.isInside).map(\.samples)
     }
 
@@ -934,10 +950,10 @@ enum StrokeGeometry {
     ///
     /// Runs of a single sample are kept, same as `splitStroke`: a lone dab inside the selection is
     /// legitimate ink. An empty `samples` returns `[]`; a single sample returns one run.
-    static func membershipRuns(_ samples: [VectorSample], inside: (CGPoint) -> Bool) -> [MembershipRun] {
+    static func membershipRuns(_ samples: some SampleRun, inside: (CGPoint) -> Bool) -> [MembershipRun] {
         guard !samples.isEmpty else { return [] }
         guard samples.count > 1 else {
-            return [(samples, [0], inside(samples[0].point))]
+            return [(Array(samples), [0], inside(samples[0].point))]
         }
         var runs: [MembershipRun] = []
         var current: [VectorSample] = [samples[0]]
@@ -946,6 +962,7 @@ enum StrokeGeometry {
         for i in 1..<samples.count {
             let a = samples[i - 1], b = samples[i]
             let bInside = inside(b.point)
+            var owed: VectorSample?
             if bInside != previousInside {
                 let crossing = bisectCrossing(from: a, aInside: previousInside, to: b, inside: inside)
                 let parameter = CGFloat(i - 1) + crossing.t
@@ -954,8 +971,10 @@ enum StrokeGeometry {
                 runs.append((current, currentParameters, previousInside))
                 current = [crossing.sample]
                 currentParameters = [parameter]
+                // `b` now follows a point inserted inside its own interval — see `appendRun`.
+                owed = crossing.sample
             }
-            current.append(b)
+            current.append(owed.map { b.afterInsertedPredecessor($0) } ?? b)
             currentParameters.append(CGFloat(i))
             previousInside = bInside
         }
@@ -1034,10 +1053,11 @@ enum StrokeGeometry {
         return result
     }
 
+    /// Position and **every channel** between two samples — `VectorSample.lerp`, which walks the
+    /// channel set rather than naming fields, so a cut boundary, a densified point and a bisected
+    /// lasso crossing all carry tilt and Δt without knowing they exist (BRUSH.md §5.5).
     static func lerp(_ from: VectorSample, _ to: VectorSample, _ t: CGFloat) -> VectorSample {
-        VectorSample(x: from.x + (to.x - from.x) * t,
-                     y: from.y + (to.y - from.y) * t,
-                     pressure: from.pressure + (to.pressure - from.pressure) * t)
+        VectorSample.lerp(from, to, t)
     }
 
     /// `v` scaled to unit length, or nil if it has no direction to speak of.

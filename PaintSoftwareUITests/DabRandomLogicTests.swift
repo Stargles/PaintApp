@@ -29,11 +29,11 @@ final class DabRandomLogicTests: XCTestCase {
     }
 
     private static func samples(count: Int, from x0: CGFloat = 20, to x1: CGFloat = 220,
-                                y: CGFloat = 60) -> [VectorSample] {
-        (0..<count).map { i in
+                                y: CGFloat = 60) -> StrokeSamples {
+        StrokeSamples((0..<count).map { i in
             let t = CGFloat(i) / CGFloat(count - 1)
             return VectorSample(x: x0 + (x1 - x0) * t, y: y, pressure: 1)
-        }
+        }, channels: .pressureOnly)
     }
 
     private static let seed: UInt64 = 0x5EED_1234_ABCD_0001
@@ -55,9 +55,9 @@ final class DabRandomLogicTests: XCTestCase {
     /// Differencing is what makes these assertions about randomness rather than about geometry: two
     /// walks over different point counts put their clean dabs in slightly different places, and
     /// comparing raw centres would measure the refit instead of the field.
-    private static func offsets(samples: [VectorSample], brush: Brush, size: CGFloat,
+    private static func offsets(samples: StrokeSamples, brush: Brush, size: CGFloat,
                                 random: DabRandom) -> [CGPoint] {
-        let stamperSamples = samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        let stamperSamples = StrokeSamples(samples, channels: .pressureOnly)
         var clean = brush
         clean.scatter = 0
         let scattered = BrushStamper.bake(samples: stamperSamples, brush: brush, color: .black,
@@ -246,9 +246,9 @@ final class DabRandomLogicTests: XCTestCase {
             return VectorSample(x: 20 + 200 * t, y: 60 + 30 * sin(t * 3), pressure: 1)
         }
         var fit = StrokePathFit()
-        var stored: [VectorSample] = []
-        for sample in raw { stored.append(contentsOf: fit.offer(sample)) }
-        stored.append(contentsOf: fit.finish(nil))
+        var stored = StrokeSamples(channels: .pressureOnly)
+        for sample in raw { for knot in fit.offer(sample) { stored.append(knot) } }
+        for knot in fit.finish(nil) { stored.append(knot) }
         XCTAssertLessThan(stored.count, raw.count / 4,
                           "the refit must have thinned the path, or this measures nothing")
 
@@ -335,13 +335,13 @@ final class DabRandomLogicTests: XCTestCase {
         let brush = Self.scatteringBrush()
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
-        let whole = BrushStamper.bake(samples: stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+        let whole = BrushStamper.bake(samples: stroke.samples,
                                       brush: brush, color: .black, brushSize: 10, brushOpacity: 1,
                                       random: stroke.dabRandom)
 
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
         // A short eraser stroke across the far end of the line.
-        let nib = [VectorSample(x: 190, y: 40, pressure: 1), VectorSample(x: 190, y: 80, pressure: 1)]
+        let nib: StrokeSamples = [VectorSample(x: 190, y: 40, pressure: 1), VectorSample(x: 190, y: 80, pressure: 1)]
         XCTAssertTrue(canvas.erase(alongPath: nib, brush: BrushLibrary.hardRound, size: 14, mode: .cutPoints),
                       "Mode 2 must have cut the stroke")
         guard let head = canvas.strokes.first else { return XCTFail("a head piece should survive") }
@@ -349,7 +349,7 @@ final class DabRandomLogicTests: XCTestCase {
         XCTAssertEqual(head.arcOffset, 0,
                        "a piece starting at the parent's own origin sits at offset zero in the field")
 
-        let survived = BrushStamper.bake(samples: head.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+        let survived = BrushStamper.bake(samples: head.samples,
                                          brush: head.brush, color: .black, brushSize: head.size,
                                          brushOpacity: 1, random: head.dabRandom)
         XCTAssertGreaterThan(survived.count, 10, "the surviving head should still be most of the line")
@@ -370,7 +370,7 @@ final class DabRandomLogicTests: XCTestCase {
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
-        let nib = [VectorSample(x: 120, y: 40, pressure: 1), VectorSample(x: 120, y: 80, pressure: 1)]
+        let nib: StrokeSamples = [VectorSample(x: 120, y: 40, pressure: 1), VectorSample(x: 120, y: 80, pressure: 1)]
         XCTAssertTrue(canvas.erase(alongPath: nib, brush: BrushLibrary.hardRound, size: 14, mode: .cutPoints))
         let pieces = canvas.strokes
         guard pieces.count == 2 else { return XCTFail("a mid-line punch should leave two pieces, got \(pieces.count)") }
@@ -407,9 +407,7 @@ final class DabRandomLogicTests: XCTestCase {
         let brush = Self.scatteringBrush()
         let random = DabRandom(seed: Self.seed)
         let plain = Self.offsets(samples: Self.samples(count: 7), brush: brush, size: 10, random: random)
-        let scaledSamples = Self.samples(count: 7).map {
-            VectorSample(x: $0.point.x * k, y: $0.point.y * k, pressure: $0.pressure)
-        }
+        let scaledSamples = Self.samples(count: 7).transformed(by: CGAffineTransform(scaleX: k, y: k))
         let scaled = Self.offsets(samples: scaledSamples, brush: brush, size: 10 * k, random: random)
         XCTAssertEqual(scaled.count, plain.count, "a uniform scale must not change the dab count")
         for index in 0..<plain.count {

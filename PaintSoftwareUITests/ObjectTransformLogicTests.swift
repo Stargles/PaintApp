@@ -1346,8 +1346,8 @@ final class ObjectTransformLogicTests: XCTestCase {
         var strokes: [VectorStroke] = []
         for row in 0..<8 {
             let y = CGFloat(60 + row * 110)
-            let samples = stride(from: CGFloat(80), through: size.width - 80, by: 20)
-                .map { VectorSample(x: $0, y: y, pressure: 1) }
+            let samples = StrokeSamples(stride(from: CGFloat(80), through: size.width - 80, by: 20)
+                .map { VectorSample(x: $0, y: y, pressure: 1) }, channels: .pressureOnly)
             strokes.append(VectorStroke(brush: Brush(name: "MoveProbe", shape: .softRound, size: 24),
                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                         size: 24, opacity: 1, samples: samples))

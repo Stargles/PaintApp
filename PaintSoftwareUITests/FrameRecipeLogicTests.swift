@@ -28,7 +28,8 @@ final class FrameRecipeLogicTests: XCTestCase {
 
     private func stroke(_ points: [CGPoint], colour: CodableColor, width: CGFloat = 7) -> VectorStroke {
         VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: colour, size: width, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
     }
 
     /// Six leaves, each exercising a different field of a `LeafSnapshot`.
@@ -41,10 +42,10 @@ final class FrameRecipeLogicTests: XCTestCase {
         // 0 — a raster tier with dabs actually stamped into it, so `FrozenCel.strokesImage` is
         //     carrying pixels rather than the nil every vector cel has.
         BrushStamper.stampStroke(into: manager.layers[0].cels[0].raster,
-                                 samples: (0..<12).map {
-                                     BrushStamper.Sample(point: CGPoint(x: 6 + CGFloat($0) * 4, y: 12),
-                                                         pressure: 0.8)
-                                 },
+                                 samples: StrokeSamples((0..<12).map {
+                                     VectorSample(point: CGPoint(x: 6 + CGFloat($0) * 4, y: 12),
+                                                  pressure: 0.8)
+                                 }, channels: .pressureOnly),
                                  brush: BrushLibrary.hardRound, color: .green, brushSize: 6,
                                  brushOpacity: 1, random: DabRandom(seed: 0))
 
@@ -284,9 +285,9 @@ final class FrameRecipeLogicTests: XCTestCase {
             .addStroke(stroke([CGPoint(x: 4, y: 4), CGPoint(x: 60, y: 60)],
                               colour: CodableColor(red: 1, green: 0, blue: 1, alpha: 1), width: 11))
         BrushStamper.stampStroke(into: manager.layers[0].cels[0].raster,
-                                 samples: (0..<10).map {
-                                     BrushStamper.Sample(point: CGPoint(x: 4, y: 40 + CGFloat($0)), pressure: 1)
-                                 },
+                                 samples: StrokeSamples((0..<10).map {
+                                     VectorSample(point: CGPoint(x: 4, y: 40 + CGFloat($0)), pressure: 1)
+                                 }, channels: .pressureOnly),
                                  brush: BrushLibrary.hardRound, color: .black, brushSize: 9, brushOpacity: 1,
                                  random: DabRandom(seed: 0))
         manager.layers[1].cels[0].bakedImage =

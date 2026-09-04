@@ -92,12 +92,23 @@ without it: **anything that shades broadly when the Pencil is leaned over** — 
 edge, a chisel whose nib angle follows the hand rather than the stroke. §8.6's Sketching group is where
 that shows up.
 
-**Azimuth is stored in canvas space, not view space.** `StrokeInput` takes it as
-`touch.azimuthAngle(in: view)`, which moves when the canvas is rotated or zoomed — so stored raw, a
-stroke's ink would change on re-render after the artist turned the canvas, which breaks the promise that
-vector geometry re-rasterizes losslessly. Converting at capture also makes a nib angle rotate *with* the
-drawing when a lasso or a layer transform turns it, which is both what a physical nib does against paper
-and what §4.1 already decided for arc length by measuring in brush widths.
+**Azimuth is stored in the space the samples are in**, so a stroke's ink does not change on re-render
+after the artist turns the canvas, and a nib angle rotates *with* the drawing when a lasso or a layer
+transform turns it — which is both what a physical nib does against paper and what §4.1 already decided
+for arc length by measuring in brush widths.
+
+**This section used to say the capture was in view space and had to be converted, and building it
+refuted that.** `UITouch.azimuthAngle(in:)` expresses the angle in the given view's coordinate system
+exactly as `location(in:)` does the point, and `StrokeInput` reads both from the *same* view — a
+`StrokeCanvasView`, which sits under the `container` that carries the canvas's zoom and rotation. So the
+capture is already in the space the position is in and there is nothing to subtract; the invariant is
+that the two are read from one view, and `StrokeInput.init(touch:in:)`'s single `view` parameter is what
+enforces it. **The conversion that really was missing is one level in**: the vector layer's own
+transform, the lasso's, and a canvas resize's, none of which capture can know. All three arrive at
+`StrokeSamples.transformed(by:)`, which turns every angle channel by the affine's polar rotation
+`atan2(b - c, a + d)` — the same rotation `DabPose` picks for an image dab, and for the same reason. A
+non-affine map (an interpolation lattice warp) has no single rotation and carries the angle unchanged;
+§13 holds that open.
 
 **Every stroke carries tilt, whether or not its brush reads it.** The alternative — capture only when the
 selected brush has a tilt modulation — costs 0.4 MB a thousand strokes to avoid and would make §2.10's
@@ -208,8 +219,8 @@ being consumed, for §2.8's velocity.
 ### 3.3 Refit — BUILT, and not the way this section first described it
 
 **`StrokePathFit` replaces `StrokeSampleGate` entirely, and the gate is deleted.** The stored record
-stays a list of **on-curve points** — `VectorSample`, position and pressure, exactly as before — and
-what changed is *which* samples become points. A sample is kept when dropping it would move the stored
+stays a list of **on-curve points** — position and pressure at the time, and §5.5's channel set since
+stage 4 — and what changed is *which* samples become points. A sample is kept when dropping it would move the stored
 polyline further than a fixed tolerance from the path the pen drew, plus a cap on how far apart two
 stored points may be. Nothing consults the brush. §5.3 is why the gate could not survive.
 
@@ -457,9 +468,34 @@ keeping a second definition of the seed alive.
 | tilt altitude | 1 | **new** — §2.7. 0…π/2 in a byte is 0.35° a step, far finer than a shading ramp resolves |
 | tilt azimuth | 1 | **new** — §2.7. 1.4° a step over a full turn, ruled sufficient |
 
-**Eight bytes a point against five**, and `PackedSampleRun`'s `.float32` mode for `precise` strokes
-widens the same way. Against the MEASURED 0.9 MB a thousand strokes ([PERFORMANCE.md](PERFORMANCE.md) §11),
-that is ~1.3 MB — which is why §2.7 was reversed on seeing the number.
+**Eight bytes a point against five — BUILT, and MEASURED at exactly that**: 8000 payload bytes for a
+thousand-point run carrying every channel against 5000 for the same run carrying only pressure, and
+12 with `preciseCoordinates`, which widens the coordinates the same way. On the wire, where base64 and
+JSON escaping are what the file pays, MEASURED over a thousand samples: **10.785 B a sample against
+6.743**, a ratio of **1.599** — the payload ratio almost exactly, because the run's two fixed costs are
+~30 bytes against ~10,000. Against the MEASURED 0.9 MB a thousand strokes
+([PERFORMANCE.md](PERFORMANCE.md) §11) that is ~1.3 MB, which is why §2.7 was reversed on seeing the number.
+
+**And the common case is cheaper than eight**, at no cost in behaviour: a channel whose every value
+quantises to the neutral's byte is **dropped at commit** (`StrokeSamples.compacted()`), because the funnel
+answers the same value for an absent channel as for an all-neutral one. No decision, no per-brush capture
+rule, no flag.
+
+**MEASURED on the device rather than predicted**: a stroke drawn with a finger in the simulator, saved,
+and its blob read back out of the project package, carries the channel-set byte **`0x04` — `deltaTime`
+and nothing else, five bytes a point.** A finger reports π/2 and 0 for tilt *and exactly 1 for pressure*,
+so all three drop and the common case comes out at the record's old width rather than at the six this
+section first predicted. Its eight stored points carry Δt of 0, 33.5, 33.5, 37.0, 40.5, 40.5, 39.5 and
+0.5 ms — 225 ms of gesture, with the first point's interval zero by definition and the last the lift.
+
+**Δt is an *interval*, not a reading, and that is a ruling rather than a detail.** It is one half-millisecond
+a step, saturating at 127.5 ms — the error that matters is relative, because Δt is a divisor, and it is 6%
+of a raw 240 Hz gap and ~1% of the 40-50 ms gap the refit actually stores. Being an interval changes what
+every derived sample does with it: `StrokePathFit` **absorbs** the intervals of the samples it drops into
+the knot it keeps (or a refitted stroke's velocity would read as the digitiser's rate whatever the hand was
+doing), and a cut boundary inserted part-way through a segment **takes its share and leaves the rest** to
+the sample after it (or a cut piece would read as slower than the stroke ever was, through ink the eraser
+never touched). Both are `SampleChannel.isCumulative`, one flag, no per-site special case.
 
 **Azimuth is a byte, and that is settled rather than assumed.** It works out at 1.4° a step over a full
 turn. The case against it was that azimuth drives a nib angle *directly* rather than through a ramp, so a
@@ -535,24 +571,70 @@ entries no stroke references, or a heavily tuned document accumulates dead brush
 §2.7 puts tilt in stage 4 alongside the record, so these are the shape of a feature being built rather than
 room left for one. Three of them are what make *any* later channel additive; the fourth has been discharged.
 
-**A channel set in the run header, not a fixed record.** `PackedSampleRun` carries a small bitmask naming
-which per-point channels are present and derives `bytesPerSample` from it. A channel is then two bits and
-two arms in the pack/unpack switch — **no format version, no migration, no decode default**, because a run
-written without one simply has those bits clear. The mask costs one byte per *run*, not per point, so
-§5.1's record is unaffected by channels a given stroke does not carry. This also subsumes the `.quarterPixel` / `.float32` mode flag, which
-is a channel-width choice wearing a different hat.
+**BUILT — §12 stage 4.** What follows is what shipped, not what was planned.
 
-**Struct-of-arrays in memory.** A stroke holds parallel arrays — positions, pressures, and one per optional
-channel. An absent channel is an empty array and costs nothing; adding one adds an array rather than
-widening every `VectorSample`. It is also the shape the packer already wants.
+**A channel set in the run header, not a fixed record.** `PackedSampleRun` carries a `SampleChannelSet`
+bitmask naming which per-point channels are present and derives `bytesPerSample` from it. A channel is one
+case in `SampleChannel` and two arms in `StrokeSamples`' storage subscript — **no format version, no
+migration, no decode default**, because a run written without one simply has those bits clear. The mask
+costs one byte per *run*, written as the **first byte of the blob** rather than as a JSON key of its own:
+that makes "one byte a run" literally true (a key costs six characters before its value), makes a run
+self-describing, and takes the wire down to two keys always. It subsumes the `.quarterPixel` / `.float32`
+mode flag as `preciseCoordinates`, bit 0 — a channel-width choice wearing a different hat, and now one
+derivation of the record width rather than two hand-written arms. `VectorStroke.precise` is still off the
+wire and still derived from the header.
 
-**One evaluation funnel, with a defined neutral.** Every sensor resolves through a single
-`value(of: BrushInput, atArcLength:)`, so a new sensor is one case in one switch — **provided that funnel
-answers a defined neutral when the stroke carries no data for the channel asked for.** The neutral is not
-a legacy concern that tilt's arrival retires: a **finger** reports no tilt and never will, and §2.10's
-apply-to-existing verb can point any stroke at a brush reading anything. Neutral is the Pencil held
-upright — full altitude, azimuth zero, no modulation effect — and it must be pinned: a brush reading a
-channel the stroke does not carry renders identically to the same brush with that modulation removed.
+**Struct-of-arrays in memory.** `StrokeSamples` holds parallel arrays — positions, pressures, and one per
+optional channel. An absent channel is an empty array and costs nothing; adding one adds an array rather
+than widening the stored record. It is also the shape the packer already wants.
+
+**The sweep that made it worth having is the one over the sites that rebuilt a stroke by naming its
+fields**, each of which would have dropped tilt on the day it arrived. There are none left: a positional
+transform is `transformed(by:)`, a warp is `replacingPositions(_:angleRotation:)` — whose `angleRotation`
+has no default, so a caller claiming "this map does not turn the ink" has to write it down — and a cut
+piece is `replacingSamples`, which takes the *set* from the parent it was cut out of. `StrokeSamples`
+conforms to `RandomAccessCollection` of `VectorSample`, so every polyline consumer in the engine reads a
+stroke's own storage with no conversion and no allocation, through one `SampleRun` protocol that a bare
+`[VectorSample]` also satisfies. `VectorSample` keeps a field per channel — it is the *view*, and being
+lossless is what lets `StrokeGeometry`'s slicing, interpolating and bisecting carry every channel without
+knowing any channel exists — and `VectorSample.lerp` walks the channel set rather than naming fields, so
+one function serves a cut boundary, a densified point and a lasso crossing.
+
+**`StrokeSamples(_:channels:)` has no default for `channels`**, and that is the guard rail: every site
+that mints a run says out loud which channels it holds, so a new channel cannot be lost by a site that
+predates it. `BrushStamper.Sample` — the stamper's own two-field copy of a sample — is deleted, and
+`stampStroke` takes the stroke's storage directly.
+
+**One evaluation funnel, with a defined neutral.** Every sensor resolves through
+`StrokeSensors.value(of: BrushInput, at: DabSite)`, so a new sensor is one case in one switch — **provided
+that funnel answers a defined neutral when the stroke carries no data for the channel asked for.** The
+neutral is not a legacy concern that tilt's arrival retires: a **finger** reports no tilt and never will,
+and §2.10's apply-to-existing verb can point any stroke at a brush reading anything. Neutral is the Pencil
+held upright — full altitude, azimuth zero, no modulation effect.
+
+**And the neutral is *derived*, not restated.** Three of the four channel-backed inputs reach it by
+reading the channel — `StrokeSamples.value(_:at:)` answers `SampleChannel.neutral` for a run that does
+not carry one — and then running the same normalisation a stored reading gets, so an upright Pencil and
+no Pencil at all come out of one arithmetic. `BrushInput.neutral` is what the tests compare against,
+not what the funnel consults. The first draft short-circuited on `BrushInput.neutral` instead, and a
+mutation test caught what that costs: with two constants for one fact, changing the channel's neutral
+left the render unaffected, and the pin below would have been green against a broken funnel. `velocity`
+is the one exception and has to be, because it reads the channel's **presence** — a Δt of zero is not a
+speed.
+
+**This section spelled it `atArcLength:` and one coordinate turned out not to be enough.** The per-point
+channels are attached to *points* and interpolate by parameter, while §4.1 rules that the random field is
+addressed by arc length in brush widths. The walk produces both in the same loop, so `DabSite` carries
+both; inverting one into the other would cost an arc-length table and would have to be bit-exact to keep
+`RasterVectorParityLogicTests` at zero tolerance. Two coordinates of one march, not two arms.
+
+**The pin is a rendering one, and it is real rather than definitional**: a run with no pressure channel —
+which `compacted()` produces from any stroke drawn at a constant full press, and `StrokeSamples(points:)`
+from the intersection eraser's probe — drawn with `BrushDynamics(sizePressure: 1, opacityPressure: 1)`
+produces byte-identical pixels to the same brush at `.fixed`. A funnel answering `0` makes the first a
+tapered hairline against the second's full-width line. Beside it sits the claim that makes the neutral a
+fact about the world rather than a definition: **a stroke that stores what `StrokeInput` reports for a
+finger resolves exactly as one that stores nothing at all**, through the packer as well as in memory.
 
 **The capture was already there, and that is the whole return on this section.** `StrokeInput` takes
 `altitude` and `azimuth` from the hardware and already answers `π/2` and `0` for a non-Pencil touch — the
@@ -772,7 +854,9 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | ~~`DabLattice.seedID`~~ **gone** | the stroke's own `seed`, which a piece inherits by being a copy — §4.2 | 1 |
 | `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §9 | 2 |
 | ~~`stampApproximateSquare`~~ **gone**, and with it `Brush.hardness` reaching a square dab at all | `stampImage`; `.square` is a committed alpha mask — §3.5 | 3 |
-| `PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag | the channel set, which absorbs the width choice — §5.5 | 4 |
+| ~~`PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag~~ **gone** | `SampleChannelSet`, one header byte, `preciseCoordinates` as bit 0 — §5.5 | 4 |
+| ~~`BrushStamper.Sample`~~ **gone** | `StrokeSamples`; the stamper walks the stroke's own storage — §5.5 | 4 |
+| ~~`VectorSample`'s `Codable`, and `decodeRun`'s `[VectorSample]` fallback~~ **gone** | one way to write a sample, and it is `PackedSampleRun` — §2.14 | 4 |
 | `BrushShape` + `customTextureFileName` as a separable pair | `BrushTip`, one payload-carrying enum — §6 | 5 |
 | `VectorStroke`'s by-value `Brush` | a table index — §5.4 | 6 |
 | `BrushDynamics.sizeFraction` / `.opacityFraction`, the two hardcoded linear pressure blends | the modulation matrix — §6 | 7 |
@@ -861,11 +945,17 @@ first, which cleanly replaces the old one."*
    **refuted by measurement and §3.5 records both**: the cache is keyed on tip, colour and size octave
    rather than rotation-bucketed, and the size term was in turn added only after an in-app measurement
    contradicted the microbenchmark that had said it was worthless.
-4. **The sample record** — the channel set, struct-of-arrays, Δt, velocity as a sensor, and **tilt**
-   (§2.7): altitude and azimuth as two more channels, azimuth converted to canvas space at capture, wired
-   through §5.5's funnel with its neutral. §5.1 carries the widths, both settled. The funnel's neutral is not optional and not
-   deferrable: a finger carries no tilt, so a brush reading a channel a stroke does not have is the
-   ordinary case rather than the legacy one.
+4. **DONE — the sample record.** §5.1 and §5.5. `SampleChannelSet` is one header byte and absorbs the old
+   precision flag; `StrokeSamples` is the struct-of-arrays every transform, cut and warp now carries
+   channels through generically; Δt, altitude and azimuth are three new byte channels; `StrokeSensors` is
+   the funnel and `BrushInput.neutral` its defined answer. Pinned by `SampleRecordLogicTests`: a run that
+   carries some channels and not others round-trips both ways, every neutral survives its own quantisation
+   exactly, an affine turns the nib and a translation does not, the fit's dropped intervals are absorbed
+   and a cut piece reads the uncut stroke's speed, and — the guarantee the whole section exists for — a
+   brush reading a channel the stroke does not carry paints byte-identical pixels to the same brush with
+   that modulation removed. **Two of this section's instructions were refuted and §2.7 and §5.5 record
+   both**: the capture was already in canvas space (the conversion that was missing is the layer
+   transform's), and the funnel needs two coordinates rather than an arc length.
 5. **`BrushTip`**, and the renderer finally reads `customTextureFileName`. User PNG stamps work: the first
    artist-visible feature, and it exercises the whole path.
 6. **The brush table** — §5.4, §2.9, the save-time sweep, and §2.10's apply-to-existing verb.
@@ -898,6 +988,16 @@ first, which cleanly replaces the old one."*
   third party that can relicense or pull it.
 - **Whether the Texture group is worth its licensing step at all.** If §8.4's generator turns out to make
   credible grunge, the CC0 dependency disappears and §12 stage 11 with it. Nobody has tried.
+- **What the live tier does about `taper`.** `StrokeSensors.totalArcWidths` is nil for the live raster
+  walk, which stamps as the pen moves and genuinely cannot know how long the stroke will be, so `taper`
+  answers its neutral there and the full value on replay. Nothing reads taper yet; §12 stage 7 has to
+  decide, and until it does `RasterVectorParityLogicTests` would catch a taper modulation as a divergence
+  rather than as the design question it is.
+- **How an angle channel travels through a map that is not an affine.** `StrokeSamples.transformed(by:)`
+  turns azimuth by an affine's polar rotation, but an interpolation lattice warp has no single rotation
+  and would need the *local* Jacobian per sample. It carries the angle unchanged today, which is stated at
+  both call sites rather than defaulted. Nothing reads azimuth until stage 7's angle output, so the cost
+  of being wrong is currently zero and the cost of guessing now is a second definition to keep in step.
 - **Whether the refit tolerance is one constant or scales with zoom.** Still open, and stage 0 sharpened
   it rather than answering it. The tolerance is in canvas points, so zooming *out* is the dangerous
   direction, not in: at 16383² the artist works at `fitScale` 0.047, one screen point is 21 canvas points,

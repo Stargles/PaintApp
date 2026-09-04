@@ -51,6 +51,10 @@
 		B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */; };
 		F40BEE6BBD790F381BBB5D6E /* PaintSoftware/Engine/DabRandom.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B920BA965F16462CC1EE961 /* PaintSoftware/Engine/DabRandom.swift */; };
 		5746C8A458EA5E232A06A413 /* DabRandomLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */; };
+		845ABFCFE9F3D1CEECEAA62C /* PaintSoftware/Engine/StrokeSamples.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0592107BFFE4B5DC5A2F683 /* PaintSoftware/Engine/StrokeSamples.swift */; };
+		A56A9ED82A3E48A45D9245F7 /* PaintSoftware/Engine/PackedSampleRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 795C8C6F27433010E5A405F0 /* PaintSoftware/Engine/PackedSampleRun.swift */; };
+		288CCA50E23EBB71A823D1A8 /* PaintSoftware/Engine/StrokeSensors.swift in Sources */ = {isa = PBXBuildFile; fileRef = D65CD8D24E3DE77302A36F74 /* PaintSoftware/Engine/StrokeSensors.swift */; };
+		C1A94707A18E900B08D45211 /* SampleRecordLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F37CCC7BFB9B7420415A9DD /* SampleRecordLogicTests.swift */; };
 		A61918E30F864A7807D4D71F /* PaintSoftware/Engine/StrokePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */; };
 		E6E1FC8A9DC5311E20FCD0E9 /* StrokePathFitLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */; };
 		0EF703537241022611DD32A7 /* StrokePathWalkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */; };
@@ -339,6 +343,10 @@
 		B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeStabilizer.swift; sourceTree = "<group>"; };
 		4B920BA965F16462CC1EE961 /* PaintSoftware/Engine/DabRandom.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/DabRandom.swift; sourceTree = "<group>"; };
 		355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DabRandomLogicTests.swift; sourceTree = "<group>"; };
+		C0592107BFFE4B5DC5A2F683 /* PaintSoftware/Engine/StrokeSamples.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeSamples.swift; sourceTree = "<group>"; };
+		795C8C6F27433010E5A405F0 /* PaintSoftware/Engine/PackedSampleRun.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PackedSampleRun.swift; sourceTree = "<group>"; };
+		D65CD8D24E3DE77302A36F74 /* PaintSoftware/Engine/StrokeSensors.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeSensors.swift; sourceTree = "<group>"; };
+		6F37CCC7BFB9B7420415A9DD /* SampleRecordLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleRecordLogicTests.swift; sourceTree = "<group>"; };
 		84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokePath.swift; sourceTree = "<group>"; };
 		946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokePathFitLogicTests.swift; sourceTree = "<group>"; };
 		CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokePathWalkLogicTests.swift; sourceTree = "<group>"; };
@@ -670,6 +678,7 @@
 				37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
 				355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */,
+				6F37CCC7BFB9B7420415A9DD /* SampleRecordLogicTests.swift */,
 				946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */,
 				CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */,
 				40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */,
@@ -798,6 +807,9 @@
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
 				4B920BA965F16462CC1EE961 /* PaintSoftware/Engine/DabRandom.swift */,
+				C0592107BFFE4B5DC5A2F683 /* PaintSoftware/Engine/StrokeSamples.swift */,
+				795C8C6F27433010E5A405F0 /* PaintSoftware/Engine/PackedSampleRun.swift */,
+				D65CD8D24E3DE77302A36F74 /* PaintSoftware/Engine/StrokeSensors.swift */,
 				84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */,
 				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
 				9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */,
@@ -1082,6 +1094,10 @@
 				B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */,
 				F40BEE6BBD790F381BBB5D6E /* PaintSoftware/Engine/DabRandom.swift in Sources */,
 				5746C8A458EA5E232A06A413 /* DabRandomLogicTests.swift in Sources */,
+				845ABFCFE9F3D1CEECEAA62C /* PaintSoftware/Engine/StrokeSamples.swift in Sources */,
+				A56A9ED82A3E48A45D9245F7 /* PaintSoftware/Engine/PackedSampleRun.swift in Sources */,
+				288CCA50E23EBB71A823D1A8 /* PaintSoftware/Engine/StrokeSensors.swift in Sources */,
+				C1A94707A18E900B08D45211 /* SampleRecordLogicTests.swift in Sources */,
 				A61918E30F864A7807D4D71F /* PaintSoftware/Engine/StrokePath.swift in Sources */,
 				E6E1FC8A9DC5311E20FCD0E9 /* StrokePathFitLogicTests.swift in Sources */,
 				0EF703537241022611DD32A7 /* StrokePathWalkLogicTests.swift in Sources */,

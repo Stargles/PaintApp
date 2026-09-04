@@ -54,7 +54,8 @@ final class InterpolationRenderLogicTests: XCTestCase {
                         visibilityThreshold: CGFloat? = nil,
                         sampleVisibilityThresholds: [Int: CGFloat]? = nil) -> VectorStroke {
         VectorStroke(id: id, brush: Self.brush, color: color, size: size, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly),
                      composite: composite, lattice: nil, motionGroupID: nil,
                      visibilityThreshold: visibilityThreshold,
                      sampleVisibilityThresholds: sampleVisibilityThresholds)

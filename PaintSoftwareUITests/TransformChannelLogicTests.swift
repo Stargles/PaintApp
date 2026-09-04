@@ -37,7 +37,8 @@ final class TransformChannelLogicTests: XCTestCase {
         VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: strokeSize, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
     }
 
     /// A manager with a vector layer (index 1) holding one cel over frames 0..<12, with a short bar

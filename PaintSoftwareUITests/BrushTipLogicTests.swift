@@ -43,10 +43,10 @@ final class BrushTipLogicTests: XCTestCase {
                                    "The brush picker must still offer a square brush")
         let texture = RasterLayerTexture(size: CGSize(width: 200, height: 200))
         BrushStamper.stampStroke(into: texture,
-                                 samples: (0..<10).map {
-                                     BrushStamper.Sample(point: CGPoint(x: 40 + CGFloat($0) * 12, y: 100),
-                                                         pressure: 1)
-                                 },
+                                 samples: StrokeSamples((0..<10).map {
+                                     VectorSample(point: CGPoint(x: 40 + CGFloat($0) * 12, y: 100),
+                                                  pressure: 1)
+                                 }, channels: .pressureOnly),
                                  brush: square, color: .black, brushSize: 40, brushOpacity: 1,
                                  random: DabRandom(seed: 99))
         let pixels = try XCTUnwrap(Self.rgba(of: texture))
@@ -272,9 +272,9 @@ final class BrushTipLogicTests: XCTestCase {
     func testAPosedImageWalkStreamsAndReplaysToTheSameDabs() {
         var jittering = BrushLibrary.square
         jittering.rotationJitter = 0.8
-        let samples = (0..<14).map {
-            BrushStamper.Sample(point: CGPoint(x: CGFloat($0) * 9, y: CGFloat($0) * 5), pressure: 0.4 + CGFloat($0) * 0.04)
-        }
+        let samples = StrokeSamples((0..<14).map {
+            VectorSample(point: CGPoint(x: CGFloat($0) * 9, y: CGFloat($0) * 5), pressure: 0.4 + CGFloat($0) * 0.04)
+        }, channels: .pressureOnly)
         let pose = BrushStamper.DabPose(CGAffineTransform(rotationAngle: 0.3).scaledBy(x: 1.7, y: 0.6))
 
         let streamed = BrushStamper.CollectingDabTarget()

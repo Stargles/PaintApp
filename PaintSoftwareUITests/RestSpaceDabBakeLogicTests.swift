@@ -33,23 +33,24 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
 
     /// A twelve-sample horizontal run, 110 pt long — long enough that the dab count is in the
     /// hundreds and a re-phase cannot hide in rounding.
-    private func run(_ count: Int = 12, dx: CGFloat = 10, y: CGFloat = 40) -> [BrushStamper.Sample] {
-        (0..<count).map { BrushStamper.Sample(point: CGPoint(x: CGFloat($0) * dx, y: y), pressure: 1) }
+    private func run(_ count: Int = 12, dx: CGFloat = 10, y: CGFloat = 40) -> StrokeSamples {
+        StrokeSamples((0..<count).map { VectorSample(point: CGPoint(x: CGFloat($0) * dx, y: y), pressure: 1) },
+                      channels: .pressureOnly)
     }
 
     /// A diagonal run, for the projective case: a horizontal line lies along a contour of constant
     /// magnification in a symmetric keystone, so a horizontal stroke would measure a *ratio of 1.000*
     /// and read as proof that per-dab width buys nothing. It was the first thing this file measured
     /// and it was wrong for exactly that reason.
-    private func diagonal(_ count: Int = 12) -> [BrushStamper.Sample] {
-        (0..<count).map {
-            BrushStamper.Sample(point: CGPoint(x: CGFloat($0) * 10, y: CGFloat($0) * 6.5), pressure: 1)
-        }
+    private func diagonal(_ count: Int = 12) -> StrokeSamples {
+        StrokeSamples((0..<count).map {
+            VectorSample(point: CGPoint(x: CGFloat($0) * 10, y: CGFloat($0) * 6.5), pressure: 1)
+        }, channels: .pressureOnly)
     }
 
     private let seed = DabRandom.seed(for: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!)
 
-    private func bake(_ samples: [BrushStamper.Sample], _ brush: Brush,
+    private func bake(_ samples: StrokeSamples, _ brush: Brush,
                       size: CGFloat = 24) -> [BrushStamper.BakedDab] {
         BrushStamper.bake(samples: samples, brush: brush, color: .black,
                           brushSize: size, brushOpacity: 1, random: DabRandom(seed: seed))
@@ -68,9 +69,9 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         VectorStroke(id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!, brush: brush,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: size, opacity: 1,
-                     samples: (0..<count).map {
+                     samples: StrokeSamples((0..<count).map {
                          VectorSample(x: 20 + CGFloat($0) * dx, y: y, pressure: 1)
-                     })
+                     }, channels: .pressureOnly))
     }
 
     /// **The dabs the shipped render path actually stamped**, end to end: `VectorCanvas.render` →
@@ -348,7 +349,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         let ink = stroke(BrushLibrary.pencil)
         let rendered = stamped([.stroke(ink)])
         let direct = BrushStamper.bake(
-            samples: ink.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+            samples: ink.samples,
             brush: ink.brush, color: ink.uiColor, brushSize: ink.size, brushOpacity: ink.opacity,
             random: ink.dabRandom)
 
@@ -432,8 +433,9 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         let stroke = VectorStroke(id: UUID(), brush: BrushLibrary.pencil,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 8, opacity: 1,
-                                  samples: (0..<6).map { VectorSample(x: 10 + CGFloat($0) * 4, y: 20,
-                                                                      pressure: 1) })
+                                  samples: StrokeSamples((0..<6).map {
+                                      VectorSample(x: 10 + CGFloat($0) * 4, y: 20, pressure: 1)
+                                  }, channels: .pressureOnly))
         let restImage = VectorCanvas(size: size, elements: [.stroke(stroke)]).render(quality: .full)
         let posed = VectorCanvas.posing(.stroke(stroke), through: CGAffineTransform(translationX: 60, y: 0))
         let posedImage = VectorCanvas(size: size, elements: [posed]).render(quality: .full)

@@ -1108,6 +1108,9 @@ shake **aliases** — a fast shake records as a slow wobble. The intake already 
 `onStrokeMoved: ((VectorSample, TimeInterval) -> Void)` hands over `UITouch.timestamp`, the pen's own
 hardware clock, at the full coalesced rate, and its doc comment explains why the timestamp rides beside
 the sample rather than inside `VectorSample` (a Codable migration on the format's most numerous type).
+**BRUSH.md §12 stage 4 has since put timing in the record** — one byte of Δt a point, and no migration,
+because the record became a channel set rather than a fixed struct. A guide still reads the absolute
+timestamp beside the sample; what changed is that "a stroke cannot carry time" is no longer true.
 For a slider, sample its continuous `set` closure (`Views/EffectSection.swift:409-432`) on the clock —
 **not** `WindowEventTap`, which is debug-only, thinned to ~20 Hz by design, and **cannot identify a
 SwiftUI control on a real iPad** because no accessibility client is attached (`WindowEventTap.swift:435-461`,

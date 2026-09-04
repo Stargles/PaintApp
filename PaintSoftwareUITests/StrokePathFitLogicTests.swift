@@ -260,7 +260,7 @@ final class StrokePathFitLogicTests: XCTestCase {
         brush.dynamics = BrushDynamics(sizePressure: 1, opacityPressure: 0, minSizeFraction: 0.1)
 
         func firstDabRadiusAfterTheHold(_ knots: [VectorSample]) -> CGFloat? {
-            BrushStamper.bake(samples: knots.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+            BrushStamper.bake(samples: StrokeSamples(knots, channels: .pressureOnly),
                               brush: brush, color: .black, brushSize: 40, brushOpacity: 1,
                               random: DabRandom(seed: 5))
                 .first { $0.center.x > 300.5 }?.radius
@@ -352,7 +352,7 @@ final class StrokePathFitLogicTests: XCTestCase {
             func render(_ input: [VectorSample]) -> UIImage? {
                 let texture = RasterLayerTexture.empty(size: canvas)
                 BrushStamper.stampStroke(into: texture,
-                                         samples: input.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
+                                         samples: StrokeSamples(input, channels: .pressureOnly),
                                          brush: brush, color: .black, brushSize: size, brushOpacity: 1,
                                          random: DabRandom(seed: 1234))
                 return texture.renderToUIImage()

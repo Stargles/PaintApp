@@ -52,7 +52,7 @@ final class SampleCodingLogicTests: XCTestCase {
     /// `CanvasManager.maxCanvasExtent` is 16383 and not 16384.
     func testTheStorableRangeIsTheSignedSixteenBitQuarterPixelField() {
         XCTAssertEqual(PackedSampleRun.quantum, 0.25, "the owner's quarter-pixel rule")
-        XCTAssertEqual(PackedSampleRun.bytesPerSample, 5, "16 + 16 + 8 bits")
+        XCTAssertEqual(SampleChannelSet.pressureOnly.bytesPerSample, 5, "16 + 16 + 8 bits")
         XCTAssertEqual(PackedSampleRun.representable.lowerBound, -8192.0)
         XCTAssertEqual(PackedSampleRun.representable.upperBound, 8191.75)
         XCTAssertEqual(PackedSampleRun.representable.upperBound - PackedSampleRun.representable.lowerBound,
@@ -91,8 +91,9 @@ final class SampleCodingLogicTests: XCTestCase {
     /// Five bytes a sample, and no more — the claim the whole item rests on.
     func testARunIsFiveBytesASample() {
         let run = PackedSampleRun(Self.realisticRun(count: 200), about: .zero)
-        XCTAssertEqual(run.bytes.count, 200 * PackedSampleRun.bytesPerSample)
-        XCTAssertTrue(PackedSampleRun([], about: .zero).bytes.isEmpty, "an empty run costs nothing")
+        XCTAssertEqual(run.bytes.count, 200 * SampleChannelSet.pressureOnly.bytesPerSample)
+        XCTAssertTrue(PackedSampleRun(StrokeSamples(), about: .zero).bytes.isEmpty,
+                      "an empty run costs nothing")
     }
 
     /// **Quantising an already-quantised value must be the identity.** Otherwise every save nudges the
@@ -137,13 +138,13 @@ final class SampleCodingLogicTests: XCTestCase {
     /// precisely the strokes the artist asked to keep exactly is the worst place in the codec to be
     /// quiet, which is why `nonFiniteCount` exists beside it rather than being folded into it.
     func testANonFiniteCoordinateIsCountedInBothLayouts() {
-        let bad = [VectorSample(x: .nan, y: 0, pressure: 1), VectorSample(x: 1, y: 2, pressure: 1)]
+        let bad: StrokeSamples = [VectorSample(x: .nan, y: 0, pressure: 1), VectorSample(x: 1, y: 2, pressure: 1)]
 
         let grid = PackedSampleRun(bad, about: .zero)
         XCTAssertEqual(grid.nonFiniteCount, 1)
         XCTAssertEqual(grid.clampedCount, 1, "the grid notices it as a saturation as well, and always did")
 
-        let precise = PackedSampleRun(bad, about: .zero, precision: .float32)
+        let precise = PackedSampleRun(bad, about: .zero, precise: true)
         XCTAssertEqual(precise.nonFiniteCount, 1, "float32 must still say a coordinate was lost")
         XCTAssertEqual(precise.clampedCount, 0, "…but not by calling it a clamp, which it has no bound for")
         XCTAssertEqual(precise.samples.first?.x, 0, "the lost coordinate lands at the origin, not in a trap")
@@ -152,12 +153,21 @@ final class SampleCodingLogicTests: XCTestCase {
 
     /// A defect upstream must not take the app down inside a save. There is no legitimate way to draw
     /// a NaN, which is exactly why the encoder has to survive one.
+    ///
+    /// **A non-finite *channel* reads back as that channel's neutral**, which is a change of behaviour
+    /// from the 0 the pressure byte used to take and a deliberate one. BRUSH.md §5.5 makes the neutral
+    /// the defined answer where a stroke has no usable data, and "no usable data" is exactly what a NaN
+    /// is; the alternative generalises badly, because 0 means *full lean* for altitude and *invisible*
+    /// for pressure, so a single bad sample would either vanish the ink or flatten the nib. The
+    /// coordinate is a different question and still lands at the origin: it has no neutral, and
+    /// `clampedCount` says out loud that it was lost.
     func testANonFiniteCoordinateIsCountedRatherThanTrapping() {
         let run = PackedSampleRun([VectorSample(x: .nan, y: .infinity, pressure: .nan)], about: .zero)
         let back = try! XCTUnwrap(run.samples.first)
         XCTAssertEqual(run.clampedCount, 1)
         XCTAssertEqual(back.x, 0, "a non-finite coordinate lands at the origin")
-        XCTAssertEqual(back.pressure, 0)
+        XCTAssertEqual(back.pressure, SampleChannel.pressure.neutral,
+                       "a non-finite channel reads as its neutral rather than as nothing")
     }
 
     /// A truncated, mis-aligned or non-base64 blob is a damaged file, and `VectorCanvasData`'s
@@ -224,18 +234,19 @@ final class SampleCodingLogicTests: XCTestCase {
         XCTAssertEqual(decoded.seed, piece.seed)
     }
 
-    /// Not a migration — TODO.md's standing permission says no document written so far has to survive.
-    /// It is three lines, and what they buy is that a project written by yesterday's build still opens.
-    func testTheOldArrayOfSamplesStillDecodes() throws {
+    /// **The pre-item-(8) `[VectorSample]` fallback is gone, and so is the test that pinned it.**
+    /// BRUSH.md §10: no compatibility shim, no decode default, no second way to write a sample. Stage 4
+    /// changes the blob's layout anyway, so nothing on the device survives this build whatever the
+    /// fallback did; keeping it alive would have been a path nothing takes and a second definition of
+    /// what a stored sample is. `VectorSample`'s own `Codable` went with it.
+    func testAnArrayOfSampleObjectsIsNoLongerASampleRunAtAll() throws {
         let stroke = Self.stroke()
         var object = try XCTUnwrap(JSONSerialization.jsonObject(
             with: try JSONEncoder().encode(stroke), options: []) as? [String: Any])
         object["samples"] = [["x": 3.5, "y": 4.5, "pressure": 0.5]]
-
-        let decoded = try JSONDecoder().decode(
-            VectorStroke.self, from: try JSONSerialization.data(withJSONObject: object))
-        XCTAssertEqual(decoded.samples, [VectorSample(x: 3.5, y: 4.5, pressure: 0.5)],
-                       "an old file's samples decode at full precision, exactly as written")
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            VectorStroke.self, from: try JSONSerialization.data(withJSONObject: object)),
+            "the old shape must be refused rather than quietly understood")
     }
 
     // MARK: - The origin actually reaching the file
@@ -249,7 +260,7 @@ final class SampleCodingLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.canvasSize = CGSize(width: 12000, height: 600)
         manager.addVectorLayer()
-        let far = [VectorSample(x: 11_900.25, y: 64, pressure: 1),
+        let far: StrokeSamples = [VectorSample(x: 11_900.25, y: 64, pressure: 1),
                    VectorSample(x: 60.5, y: 500.75, pressure: 0.5)]
         manager.layers[1].cels[0].vector?.addStroke(
             VectorStroke(brush: manager.selectedBrush,
@@ -303,12 +314,17 @@ final class SampleCodingLogicTests: XCTestCase {
     /// than the one it replaces. Asserted as a floor rather than a figure, because the exact ratio is
     /// a property of how many digits the coordinates need — see `PackedSampleRun`'s own measurement.
     func testThePackedFormIsAtLeastFiveTimesSmallerThanTheOneItReplaces() throws {
-        struct Legacy: Encodable { var samples: [VectorSample] }
+        // The shape this replaced: one JSON object per sample. `VectorSample` is not `Codable` any
+        // more — BRUSH.md §10 leaves no second way to write a sample — so the old form is spelled out
+        // here, where it is the thing under measurement rather than a path anything can reach.
+        struct LegacySample: Encodable { var x: CGFloat; var y: CGFloat; var pressure: CGFloat }
+        struct Legacy: Encodable { var samples: [LegacySample] }
         let run = Self.realisticRun(count: 1000)
+        let legacy = run.map { LegacySample(x: $0.x, y: $0.y, pressure: $0.pressure) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
 
-        let today = try encoder.encode(Legacy(samples: run)).count
+        let today = try encoder.encode(Legacy(samples: legacy)).count
         let packed = try encoder.encode(PackedSampleRun(run, about: CGPoint(x: 1024, y: 512))).count
         XCTAssertLessThan(Double(packed) * 5, Double(today),
                           "packed \(packed) B against \(today) B for \(run.count) samples")
@@ -334,25 +350,22 @@ final class SampleCodingLogicTests: XCTestCase {
         let original = Self.realisticRun(count: 200)
 
         /// The worst sample's displacement across shrink → store → regrow, in canvas points.
-        func errorAfterRoundTrip(_ precision: PackedSampleRun.Precision) -> CGFloat {
+        func errorAfterRoundTrip(precise: Bool) -> CGFloat {
             var shrink = CGAffineTransform(translationX: pivot.x, y: pivot.y)
             shrink = shrink.scaledBy(x: 0.02, y: 0.02)
             shrink = shrink.translatedBy(x: -pivot.x, y: -pivot.y)
             let regrow = shrink.inverted()
-            func mapped(_ samples: [VectorSample], through t: CGAffineTransform) -> [VectorSample] {
-                samples.map {
-                    let p = $0.point.applying(t)
-                    return VectorSample(x: p.x, y: p.y, pressure: $0.pressure)
-                }
+            func mapped(_ samples: StrokeSamples, through t: CGAffineTransform) -> StrokeSamples {
+                samples.transformed(by: t)
             }
             let stored = PackedSampleRun(mapped(original, through: shrink),
-                                         about: pivot, precision: precision).samples
+                                         about: pivot, precise: precise).samples
             return zip(original, mapped(stored, through: regrow))
                 .map { hypot($0.x - $1.x, $0.y - $1.y) }.max() ?? 0
         }
 
-        let onTheGrid = errorAfterRoundTrip(.quarterPixel)
-        let atFullPrecision = errorAfterRoundTrip(.float32)
+        let onTheGrid = errorAfterRoundTrip(precise: false)
+        let atFullPrecision = errorAfterRoundTrip(precise: true)
         let both = "quarter-pixel lost \(onTheGrid) pt, float32 lost \(atFullPrecision) pt"
 
         XCTAssertGreaterThan(onTheGrid, 1.0,
@@ -365,24 +378,27 @@ final class SampleCodingLogicTests: XCTestCase {
 
     /// **A precise stroke declares itself and an ordinary one is byte-for-byte what it always was.**
     ///
-    /// The literal below is the fixed point, written out here rather than kept in a golden file: two
-    /// `Int16` quarter-pixel coordinates and a byte of pressure, base64'd, under exactly the two keys
-    /// item (8) shipped. A `p` appearing in that string would mean every stroke in every project on
-    /// the owner's iPad had grown by a key — which is the whole reason the mode is written only when
-    /// it is not the default.
-    func testAnOrdinaryRunIsUnchangedByteForByteAndAPreciseOneSaysSo() throws {
+    /// The literals below are the fixed point, written out here rather than kept in a golden file:
+    /// **one channel-set byte**, then two `Int16` quarter-pixel coordinates and a byte of pressure per
+    /// sample, base64'd, under exactly the two keys item (8) shipped.
+    ///
+    /// **A third key appearing in either string is the failure this pins.** BRUSH.md §5.5 moved the
+    /// mode token into the header byte, so a `p` here would mean the width choice had grown a second
+    /// home; and the header being *inside* the blob is what makes "one byte a run" true rather than
+    /// six characters plus a value.
+    func testTheWireIsTwoKeysAndOneChannelSetByteAheadOfTheSamples() throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let fixture = [VectorSample(x: 3.5, y: 4.5, pressure: 0.5),
+        let fixture: StrokeSamples = [VectorSample(x: 3.5, y: 4.5, pressure: 0.5),
                        VectorSample(x: 10.25, y: -2.75, pressure: 1)]
 
         XCTAssertEqual(String(decoding: try encoder.encode(PackedSampleRun(fixture, about: .zero)), as: UTF8.self),
-                       #"{"d":"DgASAIApAPX\/\/w==","o":[0,0]}"#,
-                       "an ordinary run's bytes must be exactly what they were before item (14)")
+                       #"{"d":"Ag4AEgCAKQD1\/\/8=","o":[0,0]}"#,
+                       "an ordinary run is its channel-set byte and five bytes a sample, and no third key")
         XCTAssertEqual(String(decoding: try encoder.encode(
-                                PackedSampleRun(fixture, about: .zero, precision: .float32)), as: UTF8.self),
-                       #"{"d":"AABgQAAAkECAAAAkQQAAMMD\/","o":[0,0],"p":"f32"}"#,
-                       "and a precise run is the same two keys plus the mode token")
+                                PackedSampleRun(fixture, about: .zero, precise: true)), as: UTF8.self),
+                       #"{"d":"AwAAYEAAAJBAgAAAJEEAADDA\/w==","o":[0,0]}"#,
+                       "and a precise run is the same two keys with `preciseCoordinates` in the header")
 
         // The same statement one level up, where a stroke decides which it writes.
         func samplesObject(of stroke: VectorStroke) throws -> [String: Any] {
@@ -395,8 +411,10 @@ final class SampleCodingLogicTests: XCTestCase {
         XCTAssertEqual(Set(try samplesObject(of: Self.stroke()).keys), ["o", "d"],
                        "an ordinary stroke writes two keys and no third")
         let precise = try samplesObject(of: Self.stroke().markedPrecise())
-        XCTAssertEqual(Set(precise.keys), ["o", "d", "p"])
-        XCTAssertEqual(precise["p"] as? String, "f32")
+        XCTAssertEqual(Set(precise.keys), ["o", "d"], "a precise stroke writes the same two keys")
+        let blob = try XCTUnwrap(Data(base64Encoded: try XCTUnwrap(precise["d"] as? String)))
+        XCTAssertEqual(SampleChannelSet(rawValue: try XCTUnwrap(blob.first)).contains(.preciseCoordinates),
+                       true, "and says so in its header byte instead")
     }
 
     /// `precise` is not stored, so the only thing that can carry it across a save is the shape of the
@@ -412,13 +430,13 @@ final class SampleCodingLogicTests: XCTestCase {
         let walk = Self.realisticRun(count: 24)
         var piece = VectorStroke(brush: manager.selectedBrush,
                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                 size: 8, opacity: 1, samples: Array(walk.prefix(8)))
+                                 size: 8, opacity: 1, samples: walk.replacingSamples(walk.prefix(8)))
         piece.lattice = DabLattice(samples: walk, parameters: [0, 1])
         manager.layers[1].cels[0].vector?.addStroke(piece.markedPrecise())
         manager.layers[1].cels[0].vector?.addStroke(
             VectorStroke(brush: manager.selectedBrush,
                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                         size: 8, opacity: 1, samples: Array(walk.suffix(8))))
+                         size: 8, opacity: 1, samples: walk.replacingSamples(walk.suffix(8))))
 
         let url = ProjectStore.createNewProjectURL(name: "Precise Round Trip")
         saveAndWait(manager, to: url)
@@ -448,7 +466,7 @@ final class SampleCodingLogicTests: XCTestCase {
         let origin = CGPoint(x: 1024, y: 512)
         let far = VectorSample(x: 1_638_400, y: -1_638_400, pressure: 1)
 
-        let precise = PackedSampleRun([far], about: origin, precision: .float32)
+        let precise = PackedSampleRun([far], about: origin, precise: true)
         let survived = try XCTUnwrap(precise.samples.first)
         XCTAssertEqual(precise.clampedCount, 0, "float32 has no boundary to flatten onto")
         XCTAssertEqual(survived.x, far.x, accuracy: 1)
@@ -486,15 +504,15 @@ final class SampleCodingLogicTests: XCTestCase {
     /// Coordinates of the shape `UITouch.location(in:)` produces — full-precision doubles landing
     /// between the grid points, not the short decimals a hand-written fixture reaches for. The
     /// generator is a fixed-seed xorshift so a failure is reproducible.
-    private static func realisticRun(count: Int) -> [VectorSample] {
+    private static func realisticRun(count: Int) -> StrokeSamples {
         var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
         func next() -> CGFloat {
             seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
             return CGFloat(Double(seed % 1_000_000_000) / 1_000_000_000)
         }
-        return (0..<count).map { i in
+        return StrokeSamples((0..<count).map { i in
             VectorSample(x: CGFloat(i % 2048) + next(), y: CGFloat(i % 1024) + next(), pressure: next())
-        }
+        }, channels: .pressureOnly)
     }
 
     private static func stroke() -> VectorStroke {

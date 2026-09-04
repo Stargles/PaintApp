@@ -650,14 +650,11 @@ final class CanvasResizeLogicTests: XCTestCase {
     func testTheSpacingFloorIsWhereAResizeStopsBeingASimilarity() {
         var brush = BrushLibrary.hardRound
         brush.spacingFraction = 0.05
-        let line = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
+        let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
             let target = RecordingDabTarget()
             BrushStamper.stampStroke(into: target,
-                                     samples: line.map {
-                                         BrushStamper.Sample(point: CGPoint(x: $0.x * k, y: $0.y * k),
-                                                             pressure: $0.pressure)
-                                     },
+                                     samples: line.transformed(by: CGAffineTransform(scaleX: k, y: k)),
                                      brush: brush, color: .black, brushSize: size * k,
                                      brushOpacity: 1, random: DabRandom(seed: 99))
             return target.dabs.count
@@ -1347,7 +1344,8 @@ final class CanvasResizeLogicTests: XCTestCase {
         VectorStroke(brush: brush,
                      color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                      size: size, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
     }
 
     /// The bounding box of everything with any alpha in it — what a resample moved, measured in a way

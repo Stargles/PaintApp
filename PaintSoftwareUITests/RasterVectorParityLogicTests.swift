@@ -74,12 +74,12 @@ struct ParityScenario {
     var paintColor: CodableColor
     var paintSize: CGFloat
     var paintOpacity: Double
-    var paintSamples: [VectorSample]
+    var paintSamples: StrokeSamples
     var eraserBrush: Brush
     var eraserColor: CodableColor
     var eraserSize: CGFloat
     var eraserOpacity: Double
-    var eraserSamples: [VectorSample]
+    var eraserSamples: StrokeSamples
     var backdrop: Backdrop
     /// Fixed rather than freshly generated, so a scatter/jitter-carrying brush replays to the same
     /// dabs on a rerun and a reported failure is reproducible. Both tiers draw their random field from
@@ -140,7 +140,7 @@ enum RasterVectorParity {
     /// so the raster tier has to as well or a brush with scatter or rotation jitter lands its dabs
     /// somewhere else entirely and the comparison measures the randomness instead of the eraser.
     static func stamp(_ stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
-        let samples = stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        let samples = stroke.samples
         BrushStamper.stampStroke(into: target, samples: samples, brush: stroke.brush,
                                  color: stroke.uiColor, brushSize: stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
@@ -313,7 +313,7 @@ enum RasterVectorParity {
         let pieces: [VectorElement] = StrokeGeometry.splitStroke(paint.samples, removing: cuts).map { run in
             var piece = paint
             piece.id = UUID()
-            piece.samples = run
+            piece.samples = paint.samples.replacingSamples(run)
             return .stroke(piece)
         }
 
@@ -343,18 +343,18 @@ final class RasterVectorParityLogicTests: XCTestCase {
 
     /// A horizontal run across the middle of the canvas with pressure ramping along it, so the
     /// brush's size and opacity dynamics are actually exercised rather than pinned at one value.
-    private static let paintSamples: [VectorSample] = ramp(from: CGPoint(x: 24, y: 64),
+    private static let paintSamples: StrokeSamples = ramp(from: CGPoint(x: 24, y: 64),
                                                            to: CGPoint(x: 104, y: 64),
                                                            count: 9, from: 0.45, to: 1)
 
     private static func ramp(from start: CGPoint, to end: CGPoint, count: Int,
-                             from p0: CGFloat, to p1: CGFloat) -> [VectorSample] {
-        (0..<count).map { i in
+                             from p0: CGFloat, to p1: CGFloat) -> StrokeSamples {
+        StrokeSamples((0..<count).map { i in
             let t = CGFloat(i) / CGFloat(count - 1)
             return VectorSample(x: start.x + (end.x - start.x) * t,
                                 y: start.y + (end.y - start.y) * t,
                                 pressure: p0 + (p1 - p0) * t)
-        }
+        }, channels: .pressureOnly)
     }
 
     /// The three gesture shapes the acceptance matrix runs. The paint stroke is 24 wide, so its ink
@@ -369,7 +369,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         /// which is precisely why the punch has to be exact.
         case edgeShave
 
-        var samples: [VectorSample] {
+        var samples: StrokeSamples {
             switch self {
             case .squareCut:
                 return ramp(from: CGPoint(x: 64, y: 24), to: CGPoint(x: 64, y: 104), count: 9, from: 1, to: 1)
@@ -580,7 +580,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         let erase = RasterVectorParity.eraseStroke(scene)
 
         let texture = RasterLayerTexture.empty(size: scene.canvasSize)
-        let samples = paint.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        let samples = paint.samples
         BrushStamper.stampStroke(into: texture, samples: samples, brush: paint.brush,
                                  color: paint.uiColor, brushSize: paint.size,
                                  brushOpacity: paint.opacity, isEraser: false,

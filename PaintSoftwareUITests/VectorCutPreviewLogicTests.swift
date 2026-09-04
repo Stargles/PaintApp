@@ -35,35 +35,35 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         Brush(name: "test", shape: .hardRound, size: size, hardness: 1, dynamics: .fixed)
     }
 
-    private func line(y: CGFloat, from x0: CGFloat, to x1: CGFloat, count: Int = 17) -> [VectorSample] {
-        (0..<count).map { i in
+    private func line(y: CGFloat, from x0: CGFloat, to x1: CGFloat, count: Int = 17) -> StrokeSamples {
+        StrokeSamples((0..<count).map { i in
             VectorSample(x: x0 + (x1 - x0) * CGFloat(i) / CGFloat(count - 1), y: y, pressure: 1)
-        }
+        }, channels: .pressureOnly)
     }
 
-    private func stroke(_ samples: [VectorSample], size: CGFloat, opacity: Double = 1) -> VectorStroke {
+    private func stroke(_ samples: StrokeSamples, size: CGFloat, opacity: Double = 1) -> VectorStroke {
         VectorStroke(brush: opaqueBrush(size: size),
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: size, opacity: opacity, samples: samples)
     }
 
     /// A vertical eraser drag across the middle of the canvas, sampled the way a live gesture is.
-    private func drag(x: CGFloat, from y0: CGFloat, to y1: CGFloat, count: Int = 24) -> [VectorSample] {
-        (0..<count).map { i in
+    private func drag(x: CGFloat, from y0: CGFloat, to y1: CGFloat, count: Int = 24) -> StrokeSamples {
+        StrokeSamples((0..<count).map { i in
             VectorSample(x: x, y: y0 + (y1 - y0) * CGFloat(i) / CGFloat(count - 1), pressure: 1)
-        }
+        }, channels: .pressureOnly)
     }
 
     /// Replays `gesture` through the preview exactly as `StrokeCanvasView.previewCutSpans` does —
     /// one two-sample increment per touch sample — and hands back the scratch the artist would be
     /// looking at.
-    private func previewed(_ canvas: VectorCanvas, gesture: [VectorSample],
+    private func previewed(_ canvas: VectorCanvas, gesture: StrokeSamples,
                            brush: Brush, size: CGFloat) -> RasterLayerTexture {
         let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
         var previous: VectorSample?
         var accumulated: [UUID: [ClosedRange<CGFloat>]] = [:]
         for sample in gesture {
-            let increment = previous.map { [$0, sample] } ?? [sample]
+            let increment: StrokeSamples = previous.map { [$0, sample] } ?? [sample]
             previous = sample
             for edit in canvas.cutPreviewEdits(alongPath: increment, brush: brush, size: size,
                                                accumulating: &accumulated) {
@@ -75,10 +75,10 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
     /// A footprint punch of the same gesture — the preview that was *not* shipped, built here so the
     /// difference between the two can be a number instead of an argument.
-    private func footprintPunched(_ canvas: VectorCanvas, gesture: [VectorSample],
+    private func footprintPunched(_ canvas: VectorCanvas, gesture: StrokeSamples,
                                   brush: Brush, size: CGFloat) -> RasterLayerTexture {
         let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
-        let samples = gesture.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
+        let samples = StrokeSamples(gesture, channels: .pressureOnly)
         BrushStamper.stampStroke(into: scratch, samples: samples, brush: brush, color: .black,
                                  brushSize: size, brushOpacity: 1, isEraser: true,
                                  random: DabRandom(seed: 0))
@@ -288,12 +288,13 @@ final class VectorCutPreviewLogicTests: XCTestCase {
     /// affected strokes rather than draw into a flat copy — and that is the term Mode 3 pays.
     func testInkThatSurvivesTheCutIsBrieflyErasedFromTheFlattenedPreview() {
         let horizontal = stroke(line(y: 128, from: 40, to: 216), size: 20)
-        let vertical = stroke((0..<17).map { VectorSample(x: 128, y: 40 + CGFloat($0) * 11, pressure: 1) },
-                              size: 20)
+        let vertical = stroke(StrokeSamples((0..<17).map { VectorSample(x: 128, y: 40 + CGFloat($0) * 11, pressure: 1) },
+                                            channels: .pressureOnly), size: 20)
         // The nib travels along y = 128 well to the left of x = 128, so it reaches the horizontal
         // line's centreline and never the vertical one's: only the horizontal stroke is cut.
         let build = { VectorCanvas(size: Self.canvasSize, strokes: [horizontal, vertical]) }
-        let gesture = (0..<12).map { VectorSample(x: 60 + CGFloat($0) * 3, y: 128, pressure: 1) }
+        let gesture = StrokeSamples((0..<12).map { VectorSample(x: 60 + CGFloat($0) * 3, y: 128, pressure: 1) },
+                                    channels: .pressureOnly)
         let nib = opaqueBrush(size: 30)
 
         let cut = build()

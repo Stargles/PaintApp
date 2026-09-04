@@ -6,10 +6,6 @@ import CoreGraphics
 /// (`VectorCanvas.render`) go through here, so a vector stroke rasterizes identically to how it
 /// would have been drawn live — same shape/hardness/dynamics/scatter/spacing.
 enum BrushStamper {
-    struct Sample {
-        var point: CGPoint
-        var pressure: CGFloat
-    }
 
     /// Distance between consecutive stamps along a path. The 1pt floor keeps thin or tight-spacing
     /// brushes continuous even at `spacingFraction` ~= 0.
@@ -102,7 +98,7 @@ enum BrushStamper {
     /// tolerance, and it would grow every time a brush's spacing was widened. `StrokePath.advance`
     /// marches the interpolant through the stored points instead, so a stroke's ink is a function of
     /// its geometry and not of the spacing it happens to be walked at.
-    static func stampStroke(into raster: DabTarget, samples: [Sample], brush: Brush,
+    static func stampStroke(into raster: DabTarget, samples: StrokeSamples, brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
                             random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) {
         guard !samples.isEmpty else { return }
@@ -112,7 +108,10 @@ enum BrushStamper {
         // against and falls back to points, which keeps the degenerate case addressing distinct cells
         // instead of collapsing every dab onto one.
         let step = brushSize > 0 ? spacing / brushSize : spacing
-        let path = StrokePath(points: samples.map(\.point))
+        let path = StrokePath(points: samples.positions)
+        // BRUSH.md §5.5: every sensor this walk reads resolves here, and a channel the stroke does not
+        // carry answers a defined neutral rather than whatever a field defaulted to.
+        let sensors = StrokeSensors(samples: samples, path: path, random: random, brushSize: brushSize)
 
         func draws(at parameter: CGFloat) -> Bool { visibleRange?.contains(parameter) ?? true }
 
@@ -120,7 +119,9 @@ enum BrushStamper {
         // `visibleRange` counts from, and arc length zero.
         var arcWidths: CGFloat = 0
         if draws(at: 0) {
-            stampDab(into: raster, at: samples[0].point, pressure: samples[0].pressure, brush: brush,
+            stampDab(into: raster, at: samples.positions[0],
+                     pressure: sensors.value(of: .pressure, at: DabSite(parameter: 0, arcWidths: 0)),
+                     brush: brush,
                      color: color, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
                      random: random, arcWidths: arcWidths)
         }
@@ -128,17 +129,18 @@ enum BrushStamper {
         // the next instead of stamping short, which is what keeps a slow drag from bunching dabs up.
         var carried: CGFloat = 0
         for index in 0..<max(samples.count - 1, 0) {
-            // Pressure ramps across the dabs bridging two stored points rather than every one of them
-            // taking the destination point's value. One segment can span many dabs, and holding
-            // pressure flat across them turned a smooth press into a visible staircase in both width
-            // and opacity.
-            let p0 = samples[index].pressure, p1 = samples[index + 1].pressure
             carried = path.advance(segment: index, spacing: spacing, carried: carried) { dab, u in
                 // Advances over a skipped dab as well as a drawn one: the field is addressed by where
                 // the walk got to, not by how many dabs came out of it.
                 arcWidths += step
-                guard draws(at: CGFloat(index) + u) else { return }
-                stampDab(into: raster, at: dab, pressure: p0 + (p1 - p0) * u,
+                let site = DabSite(parameter: CGFloat(index) + u, arcWidths: arcWidths)
+                guard draws(at: site.parameter) else { return }
+                // Pressure ramps across the dabs bridging two stored points rather than every one of
+                // them taking the destination point's value. One segment can span many dabs, and
+                // holding pressure flat across them turned a smooth press into a visible staircase in
+                // both width and opacity. The ramp is the funnel's, so a stroke with no pressure
+                // channel gets the neutral here and nowhere else.
+                stampDab(into: raster, at: dab, pressure: sensors.value(of: .pressure, at: site),
                          brush: brush, color: color, brushSize: brushSize, brushOpacity: brushOpacity,
                          isEraser: isEraser, random: random, arcWidths: arcWidths)
             }
@@ -297,9 +299,7 @@ extension BrushStamper {
         /// and the tip comes out unmirrored. That is exactly what the sixteen-circle approximation
         /// this replaces did — it never mirrored either — and for the one shipped tip, a square, a
         /// reflection is a rotation anyway.
-        static func polarRotation(_ j: CGAffineTransform) -> CGFloat {
-            atan2(j.b - j.c, j.a + j.d)
-        }
+        static func polarRotation(_ j: CGAffineTransform) -> CGFloat { j.polarRotation }
 
         init(_ transform: CGAffineTransform) { self.init(Homography(transform)) }
 
@@ -406,7 +406,7 @@ extension BrushStamper {
 
     /// Walks a stroke in **rest space** and keeps its dabs instead of drawing them. Same arguments as
     /// `stampStroke`, because it is `stampStroke` — into a collector.
-    static func bake(samples: [Sample], brush: Brush, color: UIColor, brushSize: CGFloat,
+    static func bake(samples: StrokeSamples, brush: Brush, color: UIColor, brushSize: CGFloat,
                      brushOpacity: Double, isEraser: Bool = false,
                      random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) -> [BakedDab] {
         let collector = CollectingDabTarget()

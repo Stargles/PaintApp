@@ -24,7 +24,7 @@ struct StrokePath {
 
     init(points: [CGPoint]) { self.points = points }
 
-    init(_ samples: [VectorSample]) { self.init(points: samples.map(\.point)) }
+    init(_ samples: some SampleRun) { self.init(points: samples.map(\.point)) }
 
     var isEmpty: Bool { points.count < 2 }
 
@@ -409,6 +409,12 @@ struct StrokePathFit {
     /// **The knot returned is behind the sample offered**, by design: a knot is committed only once
     /// the sample after it proves it was needed, so the fit is one sample of lag. The live preview
     /// does not wait on it (see `StrokeCanvasView.recordVectorSample`), so the lag is invisible.
+    /// **The knot a break commits absorbs the intervals of the samples the fit is dropping**, which
+    /// is `SampleChannel.isCumulative` (`VectorSample.absorbing`). Δt is "seconds since the previous
+    /// *stored* point", not since the previous *offered* one; without this a refitted stroke's stored
+    /// Δt would be the digitiser's period whatever the hand was doing, and BRUSH.md §2.8's velocity
+    /// would read every stroke at 240 Hz. It is generic over the channel set, so the next interval
+    /// channel needs no edit here.
     mutating func offer(_ sample: VectorSample) -> [VectorSample] {
         guard let anchor else {
             self.anchor = sample
@@ -418,9 +424,14 @@ struct StrokePathFit {
             pending.append(sample)
             return []
         }
-        let knot = pending.last ?? sample
+        guard let trailing = pending.last else {
+            self.anchor = sample
+            pending = []
+            return [sample]
+        }
+        let knot = trailing.absorbing(pending.dropLast())
         self.anchor = knot
-        pending = knot == sample ? [] : [sample]
+        pending = [sample]
         return [knot]
     }
 
@@ -438,8 +449,9 @@ struct StrokePathFit {
         defer { pending = [] }
         guard let sample else {
             guard let trailing = pending.last else { return [] }
-            anchor = trailing
-            return [trailing]
+            let knot = trailing.absorbing(pending.dropLast())
+            anchor = knot
+            return [knot]
         }
         guard let anchor else {
             self.anchor = sample
@@ -448,12 +460,28 @@ struct StrokePathFit {
         var committed: [VectorSample] = []
         // A tail the lift point does not represent is committed first, or the deceleration into the
         // end of the stroke is chamfered off between the last knot and the lift.
-        if breaks(from: anchor, to: sample), let trailing = pending.last, trailing != sample {
-            committed.append(trailing)
+        //
+        // The two identity tests are on **geometry** rather than on `==`. A sample carries an interval
+        // as well as a reading now (`SampleChannel.isCumulative`), so two samples at one position and
+        // one pressure are unequal whenever time passed between them — and "the lift landed where the
+        // last pending sample did" is a question about where the pen is, not about when.
+        if breaks(from: anchor, to: sample), let trailing = pending.last,
+           !StrokePathFit.isSamePoint(trailing, sample) {
+            committed.append(trailing.absorbing(pending.dropLast()))
         }
-        if sample != anchor || !committed.isEmpty { committed.append(sample) }
+        if !StrokePathFit.isSamePoint(sample, anchor) || !committed.isEmpty {
+            // Nothing was committed in between, so the lift absorbs the whole pending run; with a
+            // trailing knot committed the lift follows it directly and absorbs nothing.
+            committed.append(committed.isEmpty ? sample.absorbing(pending) : sample)
+        }
         self.anchor = sample
         return committed
+    }
+
+    /// Whether two samples are the same *point* — position and pressure, the two things the fit's
+    /// thresholds are about. See `finish`.
+    private static func isSamePoint(_ a: VectorSample, _ b: VectorSample) -> Bool {
+        a.x == b.x && a.y == b.y && a.pressure == b.pressure
     }
 
     /// Whether the chord from `anchor` to `sample` has stopped standing in for the run between them.

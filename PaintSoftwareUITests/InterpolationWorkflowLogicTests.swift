@@ -36,7 +36,8 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
         VectorStroke(id: id, brush: Self.brush,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 6, opacity: 1,
-                     samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                     samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
     }
 
     /// Splits a layer into three cels and draws a short bar into the first and the last, leaving the

@@ -522,7 +522,7 @@ enum InterpolationEvaluator {
         trimmed.sampleVisibilityThresholds = nil
         guard kept.count < stroke.samples.count else { return trimmed }
 
-        trimmed.samples = kept.map { stroke.samples[$0] }
+        trimmed.samples = stroke.samples.replacingSamples(kept.map { stroke.samples[$0] })
         // A piece's `parameters` are aligned with its own samples, so they trim at the same indices.
         // The parent walk in `lattice.samples` is untouched — trimming narrows the piece's `range`,
         // which is exactly the effect wanted: fewer of the parent's dabs are drawn.
@@ -538,20 +538,25 @@ enum InterpolationEvaluator {
     private static func warped(_ stroke: VectorStroke, weight: CGFloat, options: Options,
                                by map: ([CGPoint]) -> [CGPoint]) -> VectorStroke {
         var result = stroke
+        // `angleRotation: 0` is a claim, and it is written down rather than defaulted: a lattice warp
+        // is not an affine, so it has no single rotation, and BRUSH.md §2.7's azimuth would need the
+        // *local* Jacobian to turn correctly here. Nothing reads azimuth until §12 stage 7's angle
+        // output, and until then carrying it unchanged is the honest answer rather than a guessed one.
+        // BRUSH.md §13 carries the open question.
         let moved = map(stroke.samples.map(\.point))
         if moved.count == stroke.samples.count {
-            result.samples = zip(stroke.samples, moved).map {
-                VectorSample(x: $1.x, y: $1.y, pressure: $0.pressure)
-            }
+            var i = -1
+            result.samples = stroke.samples.replacingPositions({ _ in i += 1; return moved[i] },
+                                                               angleRotation: 0)
         }
         // A piece's dabs come from its *parent's* walk, so the parent's samples have to travel too —
         // otherwise the stroke's geometry moves and its ink stays behind. See `DabLattice`.
         if var lattice = result.lattice {
             let movedParent = map(lattice.samples.map(\.point))
             if movedParent.count == lattice.samples.count {
-                lattice.samples = zip(lattice.samples, movedParent).map {
-                    VectorSample(x: $1.x, y: $1.y, pressure: $0.pressure)
-                }
+                var j = -1
+                lattice.samples = lattice.samples.replacingPositions({ _ in j += 1; return movedParent[j] },
+                                                                     angleRotation: 0)
                 result.lattice = lattice
             }
         }

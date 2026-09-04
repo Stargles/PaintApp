@@ -1116,7 +1116,8 @@ final class SandwichLogicTests: XCTestCase {
             VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
                          color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1),
                          size: 9, opacity: 1,
-                         samples: points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) })
+                         samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
+                                            channels: .pressureOnly))
         }
         let cels = (0..<3).map { index in
             Cel(id: UUID(), startFrame: index * 4, frameCount: 4,
