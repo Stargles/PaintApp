@@ -327,10 +327,12 @@ projective pose the turn genuinely differs from dab to dab**, which is why the w
 one. Without any of this, a sprite brush under a rotating keyframe keeps its stamps upright while the
 stroke turns.
 
-**A `.high`-interpolated image dab paints past its own quad**, MEASURED at up to **2.39 px**, worst at
-exactly the downscales an artist draws at. So the bound `StrokeScratch` grows its window to and the one
-`strokeDirtyRect` accumulates both carry a spill allowance — a bound one pixel short does not look
-soft, it deletes that edge of the stroke and then leaves it behind on undo.
+**A `.high`-interpolated image dab paints past its own quad**, MEASURED in the app at up to **0.99 px**
+across six sizes × five angles — the resample kernel plus whole-pixel coverage. So the bound
+`StrokeScratch` grows its window to and the one `strokeDirtyRect` accumulates both carry a spill
+allowance, set at three times the measured worst because the two ways to be wrong are not symmetric: a
+bound too large costs a slightly bigger undo patch, and a bound one pixel short does not look soft — it
+deletes that edge of the stroke and then leaves it behind on undo.
 
 ---
 

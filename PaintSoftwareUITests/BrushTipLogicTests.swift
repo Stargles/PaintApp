@@ -48,7 +48,7 @@ final class BrushTipLogicTests: XCTestCase {
                                                          pressure: 1)
                                  },
                                  brush: square, color: .black, brushSize: 40, brushOpacity: 1,
-                                 seed: 99)
+                                 random: DabRandom(seed: 99))
         let pixels = try XCTUnwrap(Self.rgba(of: texture))
 
         // A 40 pt square brush laid along y = 100 inks a band 40 tall and no taller. The corner is
@@ -280,10 +280,10 @@ final class BrushTipLogicTests: XCTestCase {
         let streamed = BrushStamper.CollectingDabTarget()
         BrushStamper.stampStroke(into: BrushStamper.PosedDabTarget(streamed, pose: pose),
                                  samples: samples, brush: jittering, color: .black, brushSize: 24,
-                                 brushOpacity: 1, seed: 4242)
+                                 brushOpacity: 1, random: DabRandom(seed: 4242))
         let replayed = BrushStamper.CollectingDabTarget()
         BrushStamper.replay(BrushStamper.bake(samples: samples, brush: jittering, color: .black,
-                                              brushSize: 24, brushOpacity: 1, seed: 4242),
+                                              brushSize: 24, brushOpacity: 1, random: DabRandom(seed: 4242)),
                             into: replayed, through: pose)
 
         XCTAssertGreaterThan(streamed.dabs.count, 10, "Setup: there are dabs to compare")
@@ -340,30 +340,68 @@ final class BrushTipLogicTests: XCTestCase {
                        + "the cel would have — \(offending) bytes differ, worst by \(worst)")
     }
 
-    /// The dirty rect sizes the undo patch, so the same bound has to hold there: a rect that misses
-    /// the dab's resampled edge leaves that edge on the canvas after undo. Asserted as containment
-    /// of the pixels actually painted, not as equality with the formula, because the formula is the
-    /// thing under test.
-    func testTheDirtyRectContainsEveryPixelAnImageDabPainted() throws {
-        let texture = RasterLayerTexture(size: CGSize(width: 200, height: 200))
-        texture.beginStroke()
-        texture.stampImage(.builtIn(.square), at: CGPoint(x: 100, y: 100), diameter: 36, angle: 0.6,
-                           color: .black, alpha: 1, blendMode: .normal)
-        let dirty = try XCTUnwrap(texture.strokeDirtyRect)
-        let pixels = try XCTUnwrap(Self.rgba(of: texture))
+    /// **The dirty rect sizes the undo patch, so a bound that misses the dab's resampled edge leaves
+    /// that edge on the canvas after undo — and `StrokeScratch` clips a live stroke to a window built
+    /// from the same function, so it loses that edge outright.**
+    ///
+    /// **This is a sweep and not one dab, and it has no slack, because the first version of it had
+    /// both faults and caught nothing.** It stamped a single 36 pt dab at 0.6 rad and compared
+    /// against the bound inset by a forgiving pixel, and it stayed green with `dabImageBounds`'
+    /// allowance set to **zero** — i.e. it was green against the defect it is named for. Six sizes ×
+    /// five angles, at a fractional centre, compared exactly.
+    ///
+    /// The last assertion is the one that makes the rest mean something: **the geometry alone is not
+    /// enough**. CoreGraphics reconstructs a resampled image from a kernel wider than one texel and
+    /// then covers whole pixels, so the painted box escapes the exact rotated square, and a bound
+    /// built from `(d/2)(|cos θ| + |sin θ|)` and nothing else is short. If that ever stopped being
+    /// true the allowance could shrink — but it would be a measurement saying so, not an assumption.
+    func testTheDabBoundContainsEveryPixelAnImageDabPaintsAtEverySizeAndAngle() throws {
+        let side = 256
+        let centre = CGPoint(x: 128.3, y: 128.7)
+        var geometryAloneWasShort = false
+        var worstShortfall: CGFloat = 0
+        for diameter in [CGFloat(9), 16, 24, 36, 64, 129] {
+            for angle in [CGFloat(0), CGFloat.pi / 8, CGFloat.pi / 4, 0.6, 1.1] {
+                let texture = RasterLayerTexture(size: CGSize(width: side, height: side))
+                texture.beginStroke()
+                texture.stampImage(.builtIn(.square), at: centre, diameter: diameter, angle: angle,
+                                   color: .black, alpha: 1, blendMode: .normal)
+                let dirty = try XCTUnwrap(texture.strokeDirtyRect,
+                                          "a dab that painted must report a dirty rect")
+                let pixels = try XCTUnwrap(Self.rgba(of: texture))
 
-        var painted = CGRect.null
-        for y in 0..<pixels.height {
-            for x in 0..<pixels.width where Self.alpha(pixels, x, y) != 0 {
-                painted = painted.union(CGRect(x: x, y: y, width: 1, height: 1))
+                var painted = CGRect.null
+                for y in 0..<pixels.height {
+                    for x in 0..<pixels.width where Self.alpha(pixels, x, y) != 0 {
+                        painted = painted.union(CGRect(x: x, y: y, width: 1, height: 1))
+                    }
+                }
+                let label = "diameter \(diameter) at \(angle) rad"
+                XCTAssertFalse(painted.isNull, "Setup: \(label) painted something")
+                // `rgba` reads back through a bottom-left context, so the dirty rect's y has to be
+                // flipped before the two can be compared at all.
+                let flipped = CGRect(x: dirty.minX, y: CGFloat(side) - dirty.maxY,
+                                     width: dirty.width, height: dirty.height)
+                XCTAssertTrue(flipped.contains(painted),
+                              "\(label): the dirty rect \(flipped) must contain every painted pixel \(painted)")
+
+                let half = diameter / 2 * (abs(cos(angle)) + abs(sin(angle)))
+                let geometryOnly = CGRect(x: centre.x - half, y: CGFloat(side) - centre.y - half,
+                                          width: half * 2, height: half * 2)
+                if !geometryOnly.contains(painted) {
+                    geometryAloneWasShort = true
+                    worstShortfall = max(worstShortfall,
+                                         max(geometryOnly.minX - painted.minX,
+                                             painted.maxX - geometryOnly.maxX))
+                }
             }
         }
-        XCTAssertFalse(painted.isNull, "Setup: the dab painted something")
-        // `rgba` reads the texture through a bottom-left context, so compare heights against a
-        // y-flipped copy of the dirty rect rather than assuming the two agree about y.
-        let flipped = CGRect(x: dirty.minX, y: 200 - dirty.maxY, width: dirty.width, height: dirty.height)
-        XCTAssertTrue(flipped.insetBy(dx: -1, dy: -1).contains(painted),
-                      "the dirty rect \(flipped) must contain every painted pixel \(painted)")
+        XCTAssertTrue(geometryAloneWasShort,
+                      "The exact rotated square is not a bound on the pixels a resampled draw "
+                      + "touches — that is the whole reason `dabImageBounds` carries an allowance, "
+                      + "and a sweep that could not see it would be green against a bound of zero, "
+                      + "which is exactly how the first version of this test failed to catch one.")
+        print("DAB BOUND | geometry alone falls short by up to \(worstShortfall) px")
     }
 
     // MARK: - Helpers

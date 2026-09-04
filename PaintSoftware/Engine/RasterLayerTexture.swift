@@ -48,16 +48,22 @@ protocol DabTarget: AnyObject {
 /// rect a stroke reports and the window a `StrokeScratch` grows both have to contain what the draw
 /// actually painted, and two copies of this arithmetic are two chances for them not to.
 ///
-/// **`resampleSpill` is why this is not just the geometry, and it is measured rather than assumed.**
-/// `.high` interpolation reconstructs from a kernel wider than one texel, so CoreGraphics paints
-/// past the quad's own edge. MEASURED over ten dab sizes × 24 angles, at a fractional centre, as the
-/// furthest non-zero pixel beyond the exact bound: **2.39 px** at 16 pt, 2.38 at 40, 1.99 at 64,
-/// 0.89 at 128 and 0.00 at 300 — worst where the tip is being *downscaled*, which is every dab an
-/// artist actually draws. Three points covers it with the pixel-containment rounding on top.
+/// **`resampleSpill` is why this is not just the geometry.** `.high` interpolation reconstructs from
+/// a kernel wider than one texel and then covers whole pixels, so the painted box escapes the exact
+/// rotated square. MEASURED **in the app** across six dab sizes × five angles at a fractional
+/// centre, as the furthest painted pixel beyond the geometric bound: the geometry alone falls short
+/// by up to **0.99 px**. `BrushTipLogicTests` takes that measurement and asserts containment with no
+/// slack at all, so this constant is pinned rather than trusted.
 ///
-/// A bound one pixel short is not a cosmetic error: `StrokeScratch` clips the stroke to its window,
-/// so the dab would lose that edge outright, and `strokeDirtyRect` sizes the undo patch, so undo
-/// would leave the edge behind on the canvas.
+/// **Three points is deliberately three times the measured worst, because the two ways to be wrong
+/// are not symmetric.** Too large costs a slightly bigger undo patch and a slightly wider stroke
+/// window. Too small deletes ink: `StrokeScratch` clips the stroke to its window, so the dab loses
+/// that edge outright, and `strokeDirtyRect` sizes the undo patch, so undo leaves the edge behind on
+/// the canvas.
+///
+/// (An earlier throwaway probe reported 2.39 px here and it was wrong — it compared the read-back's
+/// y against an unflipped centre, so it measured the flip rather than the kernel. The number above
+/// is the one the shipped test computes, on both axes, through the same read-back it asserts on.)
 func dabImageBounds(at point: CGPoint, diameter: CGFloat, angle: CGFloat) -> CGRect {
     let resampleSpill: CGFloat = 3
     let half = diameter / 2 * (abs(cos(angle)) + abs(sin(angle))) + resampleSpill
