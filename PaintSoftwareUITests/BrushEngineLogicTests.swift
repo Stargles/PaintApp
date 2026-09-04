@@ -319,7 +319,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// A fully deterministic, fully opaque brush: no pressure dynamics, no scatter, no
     /// rotation jitter, hard edge. Any of those would make a single-pixel colour assertion flaky.
     private static func opaqueTestBrush(blendMode: BrushBlendMode) -> Brush {
-        Brush(name: "Test", shape: .hardRound, size: 20, opacity: 1, flow: 1,
+        Brush(name: "Test", tip: .round, size: 20, opacity: 1, flow: 1,
               spacingFraction: 0.1, hardness: 1, stabilization: 0, scatter: 0,
               rotationJitter: 0, dynamics: .fixed, blendMode: blendMode)
     }
@@ -1040,7 +1040,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// real brush at the real size. Rendered at 4x zoom and read back in pixels — at 1x a point 15
     /// away from a 10-point brush's centre would be blank, and here it must be inked.
     func testSizePreviewStampRendersARealDabAtItsRealScreenSize() {
-        let brush = Brush(name: "Preview", shape: .hardRound, size: 10, opacity: 1,
+        let brush = Brush(name: "Preview", tip: .round, size: 10, opacity: 1,
                           spacingFraction: 0.1, hardness: 1, stabilization: 0,
                           dynamics: .fixed)
         let geometry = SizePreviewGeometry(toolSize: 10, canvasScale: 4)
@@ -1066,7 +1066,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The eraser preview shows a removal, not eraser-coloured ink: the dab is composited
     /// `.destinationOut` through a patch of ink, so it comes back as a hole.
     func testSizePreviewEraserStampPunchesAHoleRatherThanPainting() {
-        let brush = Brush(name: "Preview", shape: .hardRound, size: 10, opacity: 1,
+        let brush = Brush(name: "Preview", tip: .round, size: 10, opacity: 1,
                           spacingFraction: 0.1, hardness: 1, stabilization: 0,
                           dynamics: .fixed)
         let geometry = SizePreviewGeometry(toolSize: 10, canvasScale: 2)

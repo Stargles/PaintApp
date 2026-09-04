@@ -233,9 +233,14 @@ enum VectorEraser {
     /// displaced dab left a gap, and misses coverage where one landed outside. Neither is a margin that
     /// can be tuned away.
     ///
-    /// `.square`/`.custom` are excluded because `BrushStamper.stampApproximateSquare` reaches
-    /// `diameter/2 · √2` at the corners while the chain models `diameter/2`. That errs toward retaining
-    /// a punch, which is the safe direction, and a square eraser therefore essentially never splits.
+    /// **A `.stamp` tip is excluded because its ink is a picture and the chain models a capsule.** The
+    /// committed square reaches `diameter/2 · √2` at its corners where the chain models `diameter/2`,
+    /// and an *imported* tip has no stated relation to the chain at all — it may be a splatter with
+    /// holes in it, in which case "the eraser covered this cross-section" is a claim about a shape
+    /// nobody measured. Erring toward retaining a punch is the safe direction and is what this does,
+    /// so a stamp eraser essentially never splits. (This used to name `stampApproximateSquare`'s
+    /// sixteen-disc lattice, which BRUSH.md §12 stage 3 deleted; the conclusion outlived its reason
+    /// and now rests on the tip's own pixels.)
     ///
     /// `minPressure` is the **lightest pressure the gesture actually carried**, not a property of the
     /// brush — judging `opacityPressure` against pressure 0 instead would bottom `opacityFraction` out
@@ -244,9 +249,9 @@ enum VectorEraser {
     /// over the dabs is the minimum over the samples; a finger or mouse drag reports full pressure
     /// throughout, which is the common case the split exists for.
     static func supportsCleanCut(brush: Brush, opacity: Double, minPressure: CGFloat) -> Bool {
-        switch brush.shape {
-        case .square, .custom: return false
-        case .softRound, .hardRound, .pen, .pencil: break
+        switch brush.tip {
+        case .stamp: return false
+        case .round: break
         }
         guard brush.hardness >= 0.95 else { return false }
         guard opacity * brush.flow >= 0.999 else { return false }

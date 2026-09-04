@@ -76,7 +76,7 @@ final class StrokeDensityBench: XCTestCase {
     private static let samplesPerStroke = 40
     private static let brushSize: CGFloat = 18
 
-    private static let benchBrush = Brush(name: "Bench", shape: .softRound, size: brushSize)
+    private static let benchBrush = Brush(name: "Bench", tip: .round, size: brushSize)
 
     /// Deterministic placement, so a run is comparable with the run before it.
     private static func benchStroke(_ index: Int, canvas: CGSize = canvasSize,

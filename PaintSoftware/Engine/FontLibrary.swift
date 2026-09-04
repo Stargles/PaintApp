@@ -266,7 +266,7 @@ enum FontSubstitution: Equatable {
 /// is, and whether that is what was asked for.
 ///
 /// **Reporting the substitution is half the contract.** A silently substituted font is the failure
-/// mode `Brush.customTextureFileName` already has: the document looks subtly wrong on the device
+/// mode `BrushTip.stamp(.imported)` already has: the document looks subtly wrong on the device
 /// that is missing the resource and nobody can say why. Nothing short of embedding the font makes
 /// the document round-trip, and this design does not pretend otherwise — it says so instead.
 struct FontResolution {

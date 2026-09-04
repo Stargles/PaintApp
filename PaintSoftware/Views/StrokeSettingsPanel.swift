@@ -126,7 +126,7 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
             spec.selectPreset(canvasManager, preset)
         } label: {
             VStack(spacing: 6) {
-                Image(systemName: Self.icon(for: preset.shape))
+                Image(systemName: Self.icon(for: preset))
                     .font(.title2)
                     .foregroundColor(isSelected ? .blue : .white)
                     .frame(width: 44, height: 44)
@@ -141,14 +141,27 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
         .accessibilityIdentifier("\(spec.idPrefix).preset.\(preset.name)")
     }
 
-    private static func icon(for shape: BrushShape) -> String {
-        switch shape {
-        case .softRound: return "circle"
-        case .hardRound: return "circle.fill"
-        case .pencil: return "pencil"
-        case .pen: return "pencil.tip"
-        case .square: return "square.fill"
-        case .custom: return "photo"
+    /// **The icon says what the tip is, and the label under it says which preset.**
+    ///
+    /// It used to switch on `BrushShape`, which had a case per preset and so could give the pencil a
+    /// pencil and the pen a nib. Those four cases were one dab — the same `stampCircle` at different
+    /// hardnesses — and `BrushTip` collapsed them, so an icon claiming otherwise would be drawing a
+    /// distinction the renderer does not make. What is left is honest: a disc, filled or hollow by
+    /// the falloff the artist will actually see, and the tip's own picture for a stamp. The preset's
+    /// **name** is already rendered directly beneath and is what tells "Pencil" from "Pen".
+    ///
+    /// The built-in arm switches exhaustively on `BuiltInBrushTexture` so §12 stage 9's generated
+    /// tips cannot silently inherit the square's icon.
+    private static func icon(for brush: Brush) -> String {
+        switch brush.tip {
+        case .round:
+            return brush.hardness >= 0.5 ? "circle.fill" : "circle"
+        case .stamp(.builtIn(let tip)):
+            switch tip {
+            case .square: return "square.fill"
+            }
+        case .stamp(.imported):
+            return "photo"
         }
     }
 

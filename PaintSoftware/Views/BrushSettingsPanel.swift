@@ -58,39 +58,32 @@ struct BrushSettingsPanel: View {
         .padding(.horizontal)
     }
 
-    /// Saves the picked image under `BrushLibrary.customBrushesDirectory` and registers a new
-    /// `.custom`-shaped `Brush` pointing at it. `CanvasManager.addCustomBrush` keeps this in memory
-    /// only for now — persisting custom brushes across launches (writing them into the project
-    /// manifest) is handled elsewhere, not by this import flow.
+    /// Turns the picked image into a tip and registers a `Brush` that stamps it, then selects it —
+    /// so the artist's next stroke is drawn with what they just imported and there is no second step
+    /// to discover. `CanvasManager.addCustomBrush` keeps this in memory and `ProjectStore` writes it
+    /// into the project manifest on the next save.
+    ///
+    /// **The normalisation is `BrushTipImport`'s, not this view's.** What a tip file has to be — a
+    /// square straight-alpha mask, bordered, and read by luminance when the picture carries no alpha
+    /// of its own — is a fact about the renderer, and a copy of it here would be a second definition
+    /// to keep in step. All that is left is the three failures the artist can act on.
     private func importCustomBrush(_ item: PhotosPickerItem?) async {
         guard let item else { return }
         guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
             await MainActor.run { importError = "Couldn't read that image" }
             return
         }
-        let fileName = "custom-\(UUID().uuidString).png"
-        let destination = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
-        guard let pngData = image.pngData() else {
-            await MainActor.run { importError = "Couldn't convert that image to a brush texture" }
-            return
-        }
-        do {
-            try pngData.write(to: destination)
-        } catch {
-            await MainActor.run { importError = "Couldn't save the brush texture: \(error.localizedDescription)" }
-            return
-        }
-        let brush = Brush(
-            name: "Custom \(canvasManager.customBrushes.count + 1)",
-            shape: .custom,
-            customTextureFileName: fileName,
-            size: 24,
-            spacingFraction: 0.12,
-            hardness: 0.8
-        )
         await MainActor.run {
-            importError = nil
-            canvasManager.addCustomBrush(brush)
+            do {
+                try canvasManager.importCustomBrush(from: image)
+                importError = nil
+            } catch BrushTipImport.Failure.blankMask {
+                importError = "That image is blank — a brush needs dark marks on a light background, or its own transparency"
+            } catch BrushTipImport.Failure.couldNotWrite(let error) {
+                importError = "Couldn't save the brush texture: \(error.localizedDescription)"
+            } catch {
+                importError = "Couldn't convert that image to a brush texture"
+            }
         }
     }
 

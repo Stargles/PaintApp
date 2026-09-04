@@ -1682,4 +1682,48 @@ final class ProjectSaveLogicTests: XCTestCase {
         let json = String(decoding: try JSONEncoder().encode(manifest), as: UTF8.self)
         XCTAssertFalse(json.contains("\"rasterOmitted\""))
     }
+
+    // MARK: - A project carries the tips its palette names (BRUSH.md §5.4, BUGS.md)
+
+    /// **The texture sweep, pinned at the level a lost file shows up.** `copyCustomBrushTexturesIntoProject`
+    /// claims in its own doc comment to make a saved project self-contained; nothing tested that it
+    /// copied anything at all, and §12 stage 5 rewrote its filter — `shape == .custom` plus a nil-able
+    /// file name became `BrushTip.importedTextureFileName`. The operand is the file on disk inside the
+    /// package, because that is the thing a project opened on another device depends on.
+    ///
+    /// The second half is what stops it being "copy everything": a built-in tip lives in the app
+    /// bundle, and copying it into every project would be a megabyte a document of the same asset.
+    ///
+    /// **What this deliberately does not pin is *which* brushes get walked.** It is the palette, not
+    /// the drawing, which BUGS.md files against §12 stage 6 — the brush table is what makes "which
+    /// textures does this document use" answerable without a per-save walk of every cel.
+    func testSavingCopiesAnImportedTipIntoThePackageAndLeavesTheBuiltInsAlone() throws {
+        let withImport = CanvasFixture.manager()
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        format.opaque = true
+        let stamp = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format).image { ctx in
+            ctx.cgContext.setFillColor(UIColor.black.cgColor)
+            ctx.cgContext.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+        let imported = try withImport.importCustomBrush(from: stamp)
+        let fileName = try XCTUnwrap(imported.tip.importedTextureFileName,
+                                     "Setup: an import names a file of its own")
+
+        let importedURL = projectURL(name: "Imported Tip")
+        saveAndWait(withImport, to: importedURL)
+        let copied = importedURL.appendingPathComponent("brushes").appendingPathComponent(fileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copied.path),
+                      "the artist's own tip travels with the project — without it the document opens "
+                      + "on another device with a brush that draws nothing")
+
+        let builtInOnly = CanvasFixture.manager()
+        builtInOnly.selectBrush(BrushLibrary.square)
+        let squareURL = projectURL(name: "Built In Tip")
+        saveAndWait(builtInOnly, to: squareURL)
+        let bundled = try? FileManager.default.contentsOfDirectory(
+            atPath: squareURL.appendingPathComponent("brushes").path)
+        XCTAssertTrue(bundled == nil || bundled!.isEmpty,
+                      "a bundled tip is in the binary already: \(bundled ?? [])")
+    }
 }

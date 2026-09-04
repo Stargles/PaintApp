@@ -764,7 +764,11 @@ final class CanvasManager: ObservableObject {
         brushSize = brush.size
         brushOpacity = brush.opacity
         if selectedTool.followsBrushPresetSelection {
-            selectedTool = (brush.shape == .pencil) ? .pencil : .pen
+            // `brush.shape == .pencil` until BRUSH.md §12 stage 5, which is a question `BrushTip`
+            // deliberately cannot answer: a pencil and a pen are both a `.round` tip and differ only
+            // in hardness, spacing and dynamics. Which *preset* this is belongs to the library —
+            // see `BrushLibrary.isPencilPreset` for why it is not a field on `Brush`.
+            selectedTool = BrushLibrary.isPencilPreset(brush) ? .pencil : .pen
         }
     }
 
@@ -772,6 +776,24 @@ final class CanvasManager: ObservableObject {
     func addCustomBrush(_ brush: Brush) {
         customBrushes.append(brush)
         selectBrush(brush)
+    }
+
+    /// **The artist's brush import, end to end** — BRUSH.md §12 stage 5. Turns a picked image into a
+    /// tip, mints a brush that stamps it, adds it to the palette and selects it, so the next stroke
+    /// is drawn with what was just imported and there is no second step to find.
+    ///
+    /// `BrushSettingsPanel` supplies the image and renders whatever this throws
+    /// (`BrushTipImport.Failure`), and holds no other part of the rule. That split is the point:
+    /// three features reached the owner's iPad unusable behind a green model-level suite, and the
+    /// one thing none of those suites could reach was the path an artist actually walks. All of it
+    /// but the photo picker is on this side of the line now.
+    @discardableResult
+    func importCustomBrush(from image: UIImage) throws -> Brush {
+        let brush = Brush(name: "Custom \(customBrushes.count + 1)",
+                          tip: try BrushTipImport.importTip(from: image),
+                          size: 24, spacingFraction: 0.12)
+        addCustomBrush(brush)
+        return brush
     }
 
     // MARK: - Eraser (functions like the brush tool — same shape/dynamics/spacing — but

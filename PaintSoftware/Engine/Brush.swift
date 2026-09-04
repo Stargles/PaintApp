@@ -1,27 +1,73 @@
 import CoreGraphics
 import Foundation
 
-/// The stamp shape a brush lays down. The round family is procedural — a hardness gradient;
-/// `.square` stamps a committed alpha mask through `BrushTextureRef.builtIn(.square)`. `.custom`
-/// stamps the square too until §12 stage 5 points it at `Brush.customTextureFileName`, which is
-/// also the stage that collapses this enum and that field into one `BrushTip`.
-enum BrushShape: String, Codable, CaseIterable, Identifiable {
-    case softRound
-    case hardRound
-    case pencil
-    case pen
-    case square
-    case custom
+/// **Which mask a dab stamps — the one field that decides it.** BRUSH.md §6.
+///
+/// This replaces `BrushShape` **and** `Brush.customTextureFileName`, a case and a parallel optional
+/// that could disagree in both directions: a `.custom` shape with a nil file name named no picture,
+/// and any of the other five shapes could carry a file name that nothing read. Neither state is
+/// expressible now, which is BRUSH.md §9.2's *"payload-carrying enums make illegal states
+/// unrepresentable"* — and the switch in `BrushStamper.stampDab` is exhaustive with no `default:`,
+/// so a third tip kind is a compile error at every dispatch rather than a search.
+///
+/// **Five shapes collapsed into two cases and no ink moved.** `.softRound`, `.hardRound`, `.pen` and
+/// `.pencil` all called `stampCircle` and differed only in the `hardness`, `spacingFraction` and
+/// `dynamics` their presets carried — every one of which is still a `Brush` field, so the four are
+/// one case. `.square` stopped being procedural in §12 stage 3 and became a committed alpha mask;
+/// `.custom` names a PNG under `BrushLibrary.customBrushesDirectory`. Both are `stampImage` of a
+/// `BrushTextureRef`, so they are the other, and the difference between "a shipped tip" and "the
+/// artist's own" is now a case of `BrushTextureRef` rather than a case of the brush's shape.
+enum BrushTip: Equatable {
+    /// Procedural — a radial gradient whose falloff is `Brush.hardness`. No orientation: a disc
+    /// turned is the same disc, which is why `Brush.rotationJitter` reaches only the other arm.
+    case round
+    /// A picture. Its edge is in its own pixels, so `Brush.hardness` does not reach it, and it
+    /// carries an angle because a turned square is not the same square.
+    case stamp(BrushTextureRef)
+}
 
-    var id: String { rawValue }
-    var displayName: String {
+extension BrushTip {
+    /// The file this tip needs to exist under `BrushLibrary.customBrushesDirectory`, or nil for a
+    /// tip the app bundle carries and for the procedural one.
+    ///
+    /// `ProjectStore`'s save-time copy and load-time restore are the callers: what they need is
+    /// *the artist's own files*, since a built-in tip travels inside the binary and a round tip is
+    /// arithmetic. Expressing that as one accessor is what stops the two of them re-deriving
+    /// "custom-shaped, and with a file name" out of a pair of fields that could disagree.
+    var importedTextureFileName: String? {
+        guard case .stamp(.imported(let fileName)) = self else { return nil }
+        return fileName
+    }
+}
+
+extension BrushTip: Codable {
+    private enum CodingKeys: String, CodingKey { case kind, texture }
+    private enum Kind: String, Codable { case round, stamp }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .softRound: return "Soft Round"
-        case .hardRound: return "Hard Round"
-        case .pencil: return "Pencil"
-        case .pen: return "Pen"
-        case .square: return "Square"
-        case .custom: return "Custom"
+        case .round:
+            try container.encode(Kind.round, forKey: .kind)
+        case .stamp(let texture):
+            try container.encode(Kind.stamp, forKey: .kind)
+            try container.encode(texture, forKey: .texture)
+        }
+    }
+
+    /// **Written out rather than synthesized, and strict rather than defaulted.** A synthesized
+    /// enum codec spells the payload `_0`, which is a compiler artifact in a file an artist's work
+    /// is stored in. Strict because BRUSH.md §2.14 rules the documents on the device expendable and
+    /// there is therefore no earlier spelling to accept: an unrecognised `kind` is a corrupt
+    /// manifest, not an old one, and saying so is better than silently substituting a round tip for
+    /// a brush whose ink is visibly a picture.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .round:
+            self = .round
+        case .stamp:
+            self = .stamp(try container.decode(BrushTextureRef.self, forKey: .texture))
         }
     }
 }
@@ -81,26 +127,25 @@ struct BrushDynamics: Codable, Equatable {
     }
 }
 
-/// A brush preset: shape/texture plus every Procreate-style adjustable setting (size, opacity,
+/// A brush preset: the tip it stamps plus every Procreate-style adjustable setting (size, opacity,
 /// spacing, pressure dynamics, stabilization, scatter, blend mode). Value-typed and
 /// `Codable` so it can be edited via simple bindings and persisted (built-ins in `BrushLibrary`,
 /// user imports under `Documents/Brushes`).
 struct Brush: Identifiable, Codable, Equatable {
     var id: UUID
     var name: String
-    var shape: BrushShape
-    /// Set only when `shape == .custom`: file name of the imported stamp texture under
-    /// `Documents/Brushes`.
-    var customTextureFileName: String?
+    /// Which mask a dab stamps — see `BrushTip`. One field, because the pair it replaced could
+    /// contradict itself.
+    var tip: BrushTip
 
     var size: CGFloat // base stamp diameter, in canvas points, at full pressure
     var opacity: Double // 0...1, overall stroke opacity
     var flow: Double // 0...1, per-stamp opacity multiplier (build-up as stamps overlap)
     var spacingFraction: Double // distance between stamps, as a fraction of the current stamp size
     /// 0...1, edge falloff passed through to `RasterLayerTexture.stampCircle(hardness:)` — 0 is
-    /// fully soft/feathered, 1 is a hard, crisp edge. **A procedural-tip parameter only**: a tip
-    /// that is a picture carries its own edge in its pixels, so an image dab has no `hardness` at
-    /// all and a brush whose shape is `.square` or `.custom` does not read this.
+    /// fully soft/feathered, 1 is a hard, crisp edge. **A `.round` tip's parameter only**: a tip
+    /// that is a picture carries its own edge in its pixels, so a `.stamp` dab has no `hardness` at
+    /// all and does not read this.
     var hardness: Double
     /// 0...1 — how strongly raw input is smoothed before it reaches the canvas (see
     /// `StrokeStabilizer`); 0 draws exactly at the raw touch position.
@@ -114,8 +159,7 @@ struct Brush: Identifiable, Codable, Equatable {
     init(
         id: UUID = UUID(),
         name: String,
-        shape: BrushShape,
-        customTextureFileName: String? = nil,
+        tip: BrushTip,
         size: CGFloat,
         opacity: Double = 1,
         flow: Double = 1,
@@ -129,8 +173,7 @@ struct Brush: Identifiable, Codable, Equatable {
     ) {
         self.id = id
         self.name = name
-        self.shape = shape
-        self.customTextureFileName = customTextureFileName
+        self.tip = tip
         self.size = size
         self.opacity = opacity
         self.flow = flow

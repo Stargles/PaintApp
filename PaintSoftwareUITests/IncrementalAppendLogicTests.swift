@@ -29,7 +29,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     private static let canvasSize = CGSize(width: 128, height: 96)
 
     private static func brush(_ blend: BrushBlendMode = .normal) -> Brush {
-        Brush(name: "Append", shape: .softRound, size: 6, spacingFraction: 0.3, blendMode: blend)
+        Brush(name: "Append", tip: .round, size: 6, spacingFraction: 0.3, blendMode: blend)
     }
 
     /// A short deterministic arc, placed so that strokes overlap each other — overlap is what makes

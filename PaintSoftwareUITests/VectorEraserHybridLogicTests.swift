@@ -316,7 +316,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         var jittering = BrushLibrary.hardRound
         jittering.rotationJitter = 0.5
         var square = BrushLibrary.hardRound
-        square.shape = .square
+        square.tip = .stamp(.builtIn(.square))
         var soft = BrushLibrary.hardRound
         soft.hardness = 0.5
 
@@ -346,15 +346,16 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         }
     }
 
-    /// **BRUSH.md §9's one behaviour change: the grain veto is gone, and shape `.pencil` is no longer
-    /// special-cased out of `supportsCleanCut`.**
+    /// **BRUSH.md §9's one behaviour change: the grain veto is gone, and the Pencil preset is no
+    /// longer special-cased out of `supportsCleanCut`.**
     ///
     /// Before BRUSH.md §12 stage 2, `supportsCleanCut` carried an extra `guard !brush.grain.isEnabled`
     /// beside the hardness/opacity/dynamics/scatter gates above — and the shipped `BrushLibrary.pencil`
     /// preset had grain enabled, so a pencil-*shaped* eraser could never take the clean-cut path no
     /// matter how hard, opaque or steady it was tuned. There is no `grain` field left to check, so that
-    /// extra veto is simply gone: `.pencil` is judged on exactly the same four gates as `.softRound`,
-    /// `.hardRound` and `.pen`, with nothing held against its shape.
+    /// extra veto is simply gone: the Pencil preset is judged on exactly the same four gates as Soft
+    /// Round, Hard Round and Pen, with nothing held against it. Since §12 stage 5 all four are one
+    /// `BrushTip.round` and there is not even a shape left to hold against it.
     ///
     /// `BrushLibrary.pencil`'s own hardness (0.7) still fails the unrelated hardness gate on its own, so
     /// this pins the shape in isolation against a brush tuned to clear every *other* gate — the only way
@@ -363,7 +364,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     func testAHardOpaquePencilShapedEraserCleanCutsWhereGrainUsedToVetoIt() {
         var pencilEraser = BrushLibrary.pencil
         pencilEraser.hardness = 1
-        XCTAssertEqual(pencilEraser.shape, .pencil, "Setup: still the shape the grain veto used to single out")
+        XCTAssertTrue(BrushLibrary.isPencilPreset(pencilEraser),
+                      "Setup: still the preset the grain veto used to single out")
 
         let along = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 120, y: 64), count: 15,
                               from: 1, to: 1)

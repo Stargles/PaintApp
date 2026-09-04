@@ -166,7 +166,8 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// below pin; `BrushTipLogicTests` pins the rotating case at the level of `DabPose` itself.
     func testTheRenderedSquareBrushIsWalkedOnceAtRestAndPosedPerFrame() throws {
         let brush = BrushLibrary.square
-        XCTAssertEqual(brush.shape, .square, "Setup: the one built-in that is not a round dab")
+        XCTAssertEqual(brush.tip, .stamp(.builtIn(.square)),
+                       "Setup: the one built-in that is not a round dab")
         let ink = stroke(brush)
         let rest = stamped([.stroke(ink)])
         XCTAssertGreaterThan(rest.count, 5, "Setup: the stroke put down dabs at all")

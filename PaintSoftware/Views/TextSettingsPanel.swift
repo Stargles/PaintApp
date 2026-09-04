@@ -73,7 +73,7 @@ struct TextSettingsPanel: View {
     ///
     /// **The substitution notice is half of `ADD_TEXT.md` §1's font contract.** `FontLibrary.resolve`
     /// reports whether it substituted precisely so it can be said out loud here; a silently
-    /// substituted face is the failure mode `Brush.customTextureFileName` already has.
+    /// substituted face is the failure mode `BrushTip.stamp(.imported)` already has.
     @ViewBuilder
     private var statusRow: some View {
         VStack(alignment: .leading, spacing: 4) {

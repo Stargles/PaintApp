@@ -23,7 +23,7 @@ final class DabRandomLogicTests: XCTestCase {
     /// rounding difference. Round rather than square: `stampApproximateSquare` puts sixteen dabs down
     /// per stamp and the arithmetic below wants one.
     private static func scatteringBrush(spacingFraction: Double = 0.1, scatter: Double = 0.6) -> Brush {
-        Brush(name: "scatter", shape: .hardRound, size: 10, opacity: 1, flow: 1,
+        Brush(name: "scatter", tip: .round, size: 10, opacity: 1, flow: 1,
               spacingFraction: spacingFraction, hardness: 1, stabilization: 0, scatter: scatter,
               rotationJitter: 0, dynamics: .fixed, blendMode: .normal)
     }

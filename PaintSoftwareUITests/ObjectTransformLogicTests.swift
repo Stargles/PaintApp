@@ -1348,7 +1348,7 @@ final class ObjectTransformLogicTests: XCTestCase {
             let y = CGFloat(60 + row * 110)
             let samples = StrokeSamples(stride(from: CGFloat(80), through: size.width - 80, by: 20)
                 .map { VectorSample(x: $0, y: y, pressure: 1) }, channels: .pressureOnly)
-            strokes.append(VectorStroke(brush: Brush(name: "MoveProbe", shape: .softRound, size: 24),
+            strokes.append(VectorStroke(brush: Brush(name: "MoveProbe", tip: .round, size: 24),
                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                         size: 24, opacity: 1, samples: samples))
         }
@@ -1356,7 +1356,7 @@ final class ObjectTransformLogicTests: XCTestCase {
     }
 
     private func probeStroke(from a: CGPoint, to b: CGPoint) -> VectorStroke {
-        VectorStroke(brush: Brush(name: "MoveProbe", shape: .softRound, size: 24),
+        VectorStroke(brush: Brush(name: "MoveProbe", tip: .round, size: 24),
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 24, opacity: 1,
                      samples: [VectorSample(x: a.x, y: a.y, pressure: 1),

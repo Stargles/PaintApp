@@ -794,7 +794,7 @@ final class PerfBaselineTests: XCTestCase {
         let samples = StrokeSamples((0..<20).map { step in
             VectorSample(x: 128 + CGFloat(step) * 40, y: 128, pressure: 1)
         }, channels: .pressureOnly)
-        return VectorStroke(brush: Brush(name: "Probe", shape: .softRound, size: 24),
+        return VectorStroke(brush: Brush(name: "Probe", tip: .round, size: 24),
                             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                             size: 24, opacity: 1, samples: samples)
     }
@@ -819,7 +819,7 @@ final class PerfBaselineTests: XCTestCase {
                                             y: 128 + offset.truncatingRemainder(dividingBy: 1700),
                                             pressure: 0.2 + 0.8 * sin(t * .pi)))
             }
-            strokes.append(VectorStroke(brush: Brush(name: "Perf", shape: .softRound, size: 24),
+            strokes.append(VectorStroke(brush: Brush(name: "Perf", tip: .round, size: 24),
                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                         size: 24, opacity: 1, samples: samples))
         }
@@ -1300,7 +1300,7 @@ final class PerfBaselineTests: XCTestCase {
                            VectorSample(x: 12, y: 4 + offset, pressure: 1)]
             return VectorCanvas.CutPreviewEdit(eraseWalk: samples, eraseRandom: DabRandom(seed: 0),
                                                eraseRanges: [0...1], restamps: [],
-                                               brush: Brush(name: "Probe", shape: .hardRound, size: 4,
+                                               brush: Brush(name: "Probe", tip: .round, size: 4,
                                                             hardness: 1),
                                                size: 4, opacity: 1, color: .black)
         }
@@ -1315,14 +1315,14 @@ final class PerfBaselineTests: XCTestCase {
     /// Hard, opaque, unjittered — the gate `VectorEraser.supportsCleanCut` requires before any
     /// geometry is removed at all. A soft or partial-opacity eraser would exercise only the punch and
     /// measure none of what this test is about.
-    private static let eraseSceneEraserBrush = Brush(name: "PerfEraser", shape: .hardRound, size: 32,
+    private static let eraseSceneEraserBrush = Brush(name: "PerfEraser", tip: .round, size: 32,
                                                      hardness: 1)
 
     /// 200 horizontal 24pt lines, in 4 columns of 50 rows 40pt apart. Wider than the rows are tall,
     /// so a vertical gesture crosses several of them squarely — the full-width crossing that
     /// `splitCleanlyErasedStrokes` cuts, rather than the shave that only the punch can express.
     private static func eraseScenePaintStrokes() -> [VectorStroke] {
-        let brush = Brush(name: "PerfPaint", shape: .hardRound, size: 24, hardness: 1)
+        let brush = Brush(name: "PerfPaint", tip: .round, size: 24, hardness: 1)
         var strokes: [VectorStroke] = []
         strokes.reserveCapacity(eraseSceneStrokeCount)
         for i in 0..<eraseSceneStrokeCount {
@@ -2344,17 +2344,17 @@ final class PerfBaselineTests: XCTestCase {
         func costs(at size: CGSize) -> (raster: Double, composited: Double, layered: Double) {
             let raster = RasterLayerTexture.empty(size: size)
             BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: 60),
-                                     brush: Brush(name: "Perf", shape: .softRound, size: 24),
+                                     brush: Brush(name: "Perf", tip: .round, size: 24),
                                      color: .black, brushSize: 24, brushOpacity: 1, random: DabRandom(seed: 0))
             let scratch = RasterLayerTexture.empty(size: size)
             BrushStamper.stampStroke(into: scratch, samples: syntheticStroke(sampleCount: 12),
-                                     brush: Brush(name: "Perf", shape: .softRound, size: 24),
+                                     brush: Brush(name: "Perf", tip: .round, size: 24),
                                      color: .black, brushSize: 24, brushOpacity: 1, random: DabRandom(seed: 0))
             let committed = VectorCanvas(size: size, strokes: [Self.previewStroke(in: size)])
             _ = committed.render()  // the committed render is cached across a stroke; only the rest is per dab
 
             let bounds = CGRect(origin: .zero, size: size)
-            let brush = Brush(name: "Perf", shape: .softRound, size: 24)
+            let brush = Brush(name: "Perf", tip: .round, size: 24)
             // **One dab is stamped inside each measured frame, and it has to be.** Both render paths
             // are memoized on the texture's `version`, so a loop that only read them would measure the
             // memo rather than a stroke — and the dab is what moves the version in the app too. It is
@@ -2505,7 +2505,7 @@ final class PerfBaselineTests: XCTestCase {
                                 y: 128 + t * (size.height - 256),
                                 pressure: 0.2 + 0.8 * sin(t * .pi))
         }, channels: .pressureOnly)
-        return VectorStroke(brush: Brush(name: "Perf", shape: .softRound, size: 24),
+        return VectorStroke(brush: Brush(name: "Perf", tip: .round, size: 24),
                             color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                             size: 24, opacity: 1, samples: samples)
     }
@@ -3733,7 +3733,7 @@ final class PerfBaselineTests: XCTestCase {
         manager.canvasSize = canvas
         manager.fps = 24
         manager.sceneFrameCount = celsPerLayer * 2
-        let brush = Brush(name: "PerfVector", shape: .hardRound, size: 12, hardness: 1)
+        let brush = Brush(name: "PerfVector", tip: .round, size: 12, hardness: 1)
         for layerIndex in 0..<layerCount {
             manager.addVectorLayer(name: "Vector \(layerIndex)")
             manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
@@ -4485,7 +4485,7 @@ final class PerfBaselineTests: XCTestCase {
                                             y: y + sin(t * .pi * 3) * 20,
                                             pressure: 0.3 + 0.7 * sin(t * .pi)))
             }
-            strokes.append(VectorStroke(brush: Brush(name: "Move", shape: .softRound, size: 20),
+            strokes.append(VectorStroke(brush: Brush(name: "Move", tip: .round, size: 20),
                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                         size: 20, opacity: 1, samples: samples))
         }
@@ -4657,7 +4657,7 @@ final class PerfBaselineTests: XCTestCase {
                                             y: y + sin(t * .pi * 5 + CGFloat(row)) * 8,
                                             pressure: 0.3 + 0.7 * sin(t * .pi)))
             }
-            strokes.append(VectorStroke(brush: Brush(name: "Fit", shape: .softRound, size: 14),
+            strokes.append(VectorStroke(brush: Brush(name: "Fit", tip: .round, size: 14),
                                         color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                         size: 14, opacity: 1, samples: samples))
         }

@@ -82,19 +82,28 @@ enum ProjectStore {
         return try? JSONDecoder().decode(ProjectManifest.self, from: data)
     }
 
-    /// Copies any `.custom`-shaped brush's imported stamp texture from the shared
+    /// Copies every imported stamp texture the given brushes name from the shared
     /// `BrushLibrary.customBrushesDirectory` into this project's own `brushes/` folder, so a saved
     /// project is self-contained: its custom brushes still render correctly even if the global
     /// library entry is later renamed/deleted, or the project is moved to another device. Best
-    /// effort — a brush with no matching source file (or a built-in shape) is silently skipped.
+    /// effort — a brush with no matching source file is silently skipped, and a built-in tip is not
+    /// copied at all because it travels inside the binary.
+    ///
+    /// **Which brushes get walked is still the palette, and that is filed rather than fixed.** The
+    /// caller passes `[selectedBrush] + customBrushes`; no stroke's own `Brush` is consulted. It is
+    /// correct today only because `addCustomBrush` never removes, so the palette is a superset of
+    /// what any stroke can reference — BUGS.md carries it, and BRUSH.md §5.4 assigns the fix to §12
+    /// stage 6, where the document's brush table makes "which textures does this document use" one
+    /// question with one answer. `BrushTip.importedTextureFileName` is the whole of what changed
+    /// here: the pair `shape == .custom` + a nil-able file name became one accessor that cannot
+    /// disagree with itself, so the *filter* is now exact even though the *population* is not.
     private static func copyCustomBrushTexturesIntoProject(_ brushes: [Brush], projectURL: URL) {
-        let customShaped = brushes.filter { $0.shape == .custom }
-        guard !customShaped.isEmpty else { return }
+        let fileNames = Set(brushes.compactMap(\.tip.importedTextureFileName))
+        guard !fileNames.isEmpty else { return }
         let fm = FileManager.default
         let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
         try? fm.createDirectory(at: brushesDir, withIntermediateDirectories: true)
-        for brush in customShaped {
-            guard let fileName = brush.customTextureFileName else { continue }
+        for fileName in fileNames {
             let source = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
             guard fm.fileExists(atPath: source.path) else { continue }
             let destination = brushesDir.appendingPathComponent(fileName)
@@ -108,12 +117,11 @@ enum ProjectStore {
     /// global entry was deleted since this project was last saved), restore it from this
     /// project's own `brushes/` copy so the brush still renders correctly.
     private static func restoreCustomBrushTexturesFromProject(_ brushes: [Brush], projectURL: URL) {
-        let customShaped = brushes.filter { $0.shape == .custom }
-        guard !customShaped.isEmpty else { return }
+        let fileNames = Set(brushes.compactMap(\.tip.importedTextureFileName))
+        guard !fileNames.isEmpty else { return }
         let fm = FileManager.default
         let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
-        for brush in customShaped {
-            guard let fileName = brush.customTextureFileName else { continue }
+        for fileName in fileNames {
             let destination = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
             guard !fm.fileExists(atPath: destination.path) else { continue }
             let source = brushesDir.appendingPathComponent(fileName)
