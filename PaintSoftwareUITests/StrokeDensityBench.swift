@@ -17,10 +17,12 @@ import Darwin
 ///    and what runs on `StrokeCanvasView.renderQueue` (the artist's stale base). Conflating those
 ///    two would make the whole exercise useless: a 400 ms background bake and a 400 ms main-thread
 ///    stall are different answers to "no lagspike, no latency".
-/// 4. *The size of the incremental-append prize*, if (2) says it matters.
+/// 4. *The size of the incremental-append prize*, if (2) says it matters — which (2) said it did,
+///    so (4) is now the **re-measurement of the shipped path** rather than the spike it started as.
 ///
-/// **This class is a throwaway.** It lives on `tmp/strokebench` and is not meant to be merged: it
-/// is minutes of wall clock, and (4) times a render path the app does not have.
+/// **This class is minutes of wall clock and is opt-in for that reason**, not because it is
+/// disposable: it is the only harness that measures the render's cost model, and every figure in
+/// PERFORMANCE.md §11 came out of it.
 ///
 /// It is deliberately *not* named `…LogicTests`, so CLAUDE.md's fast-tier selector does not pick it
 /// up. Run it by name:
@@ -193,6 +195,13 @@ final class StrokeDensityBench: XCTestCase {
     /// every edit drops it, so committing one stroke to a layer holding *n* re-walks all *n* and
     /// re-stamps every dab.
     ///
+    /// **That was true when this was written and is deliberately no longer true of the append.** It
+    /// is what PERFORMANCE.md §11.1's table measured and §11.6 priced; `VectorCanvas.Damage` and
+    /// `appendableBase(quality:)` are what was done about it, and this test is now the *upper* half
+    /// of that story — every row still re-walks except the two that append, which stamp only their
+    /// own dabs. The rows are kept rather than deleted because "which edits still cost the whole
+    /// layer" is exactly the question the next person will ask.
+    ///
     /// `lastRenderDabCount` is the instrument and it has to be read carefully: `render()` leaves it
     /// standing on a cache hit, so it is *not* a proof of a re-walk on its own. `rasterizations`
     /// counts the calls that actually missed the memo, so the two together say both "did it
@@ -224,16 +233,19 @@ final class StrokeDensityBench: XCTestCase {
         let memoHit = step("memo hit") {}
         XCTAssertFalse(memoHit.rewalked, "an untouched canvas must not rasterize twice")
 
-        // (a) Committing a new stroke at pen-up — the case the whole question is about.
+        // (a) Committing a new stroke at pen-up — the case the whole question is about, and the
+        //     one that changed. It still invalidates and still rasterizes; what it no longer does
+        //     is stamp the layer again.
         let elementsBefore = canvas.elements
         let append = step("append") { canvas.addStroke(canvasSpaceStroke: Self.benchStroke(n)) }
-        XCTAssertTrue(append.rewalked, "a committed stroke must invalidate")
-        XCTAssertGreaterThan(append.dabs, baseDabs,
-                             "an append that re-walked stamps MORE than the whole layer did before it")
-        XCTAssertEqual(Double(append.dabs), Double(baseDabs + oneStrokeDabs), accuracy: Double(oneStrokeDabs),
-                       "the append re-stamps every earlier dab as well as the new stroke's")
+        XCTAssertTrue(append.rewalked, "a committed stroke must still invalidate and rasterize")
+        XCTAssertEqual(append.dabs, oneStrokeDabs,
+                       "the append must stamp the new stroke's dabs and nothing else — "
+                       + "\(baseDabs + oneStrokeDabs) is what it cost before the fast path")
 
-        // (b) An eraser stroke.
+        // (b) An eraser stroke. A punch appends one `.erase` element, so it takes the same path;
+        //     a clean cut would not, and this brush at full pressure could take either — so this
+        //     row asserts only that it is no worse than the whole layer.
         let erasePath = (0..<24).map { i -> VectorSample in
             let t = CGFloat(i) / 23
             return VectorSample(x: 64 + t * (Self.canvasSize.width - 128),
@@ -244,6 +256,7 @@ final class StrokeDensityBench: XCTestCase {
                              size: 40, mode: .erase)
         }
         XCTAssertTrue(erase.rewalked, "an eraser stroke must invalidate")
+        XCTAssertLessThanOrEqual(erase.dabs, baseDabs + oneStrokeDabs * 2)
 
         // (c) Undo — the shipped path assigns the snapshot wholesale and calls `bumpVersion()`.
         let undo = step("undo") {
@@ -651,99 +664,85 @@ final class StrokeDensityBench: XCTestCase {
         ])
     }
 
-    // MARK: - (4) The incremental-append spike — THROWAWAY, not a proposed render path
+    // MARK: - (4) What the incremental append actually bought, on the shipped path
 
-    /// **What making the memo incremental would buy**, measured rather than promised.
+    /// **The re-measurement of PERFORMANCE.md §11.6, against the render the app now has.**
     ///
-    /// (a) is the shipped full re-walk of *n+1* strokes. (b) stamps only the newly appended element
-    /// — through `renderIsolated(ids:)`, the same walk and the same isolation rules — and draws it
-    /// over a copy of the standing cached image.
+    /// §11.6 was a spike: it stamped the new element through `renderIsolated(ids:)` into a separate
+    /// bitmap and composited that over a copy of the cached image, which is *not* what shipped.
+    /// `renderLocalContent(elements:quality:over:)` draws the new element's dabs **straight into a
+    /// copy of the standing picture**, through the same walk the whole layer uses — so this arm is
+    /// the app's own code path rather than a model of it, and the two arms are byte-identical
+    /// instead of the spike's 0.0001-of-255 mean difference.
     ///
-    /// **The correctness constraint, which is why this is a spike and not a patch.** The display
-    /// list is not associative in general: an `.erase` stroke composites `destinationOut` against
-    /// everything beneath it, and a run of blend-mode strokes is wrapped in one transparency layer,
-    /// so an element appended into or after either of those is *not* equivalent to compositing it
-    /// over the finished picture. It is equivalent exactly under source-over, which
-    /// `renderLocalContent`'s own rule 2 already states ("source-over is associative, so drawing
-    /// straight into the context is identical"). The case timed here is source-over throughout, and
-    /// the pixels are compared to prove it.
-    func testWhatAnIncrementalAppendWouldBuy() {
+    /// (a) is what a pen-up used to cost and what an *undo* still costs: `bumpVersion()` declares
+    /// `.everything`, so the memo and the appendable base both go and the layer is walked whole.
+    /// (b) is the shipped pen-up: `addStroke` declares `.appended(count: 1)` and `render()` spends
+    /// it. Three appends rather than one, so the figure is a median and not a first-touch.
+    func testWhatTheIncrementalAppendBought() {
         for n in [500, 2000, 4000] {
             autoreleasepool {
                 let strokes = Self.scene(n)
-                let newStroke = Self.benchStroke(n + 1)
 
-                // (a) The shipped path: a canvas of n, memo warm, one append, one full re-walk.
+                // (a) The full re-walk of n+1 — the shipped cost of every edit that is not an append.
                 let full = VectorCanvas(size: Self.canvasSize, strokes: strokes)
+                full.addStroke(Self.benchStroke(n + 1))
                 _ = full.render()
-                full.addStroke(newStroke)
                 let fullSeconds = medianSeconds(runs: 3) {
                     full.bumpVersion()
                     _ = full.render()
                 }
                 let fullDabs = full.lastRenderDabCount
-                let fullImage = full.render()
 
-                // (b) The incremental arm: the standing base plus this element's own dabs.
+                // (b) The shipped pen-up, three times over, on a layer that keeps growing.
                 let incremental = VectorCanvas(size: Self.canvasSize, strokes: strokes)
-                let base = incremental.render()
-                incremental.addStroke(newStroke)
-                let id = incremental.elements.last!.id
-                var composed: UIImage!
-                let incrementalSeconds = medianSeconds(runs: 3) {
-                    let onlyNew = incremental.renderIsolated(ids: [id])!
-                    let format = PixelOps.transparentFormat()
-                    composed = UIGraphicsImageRenderer(size: Self.canvasSize, format: format).image { _ in
-                        base.draw(at: .zero)
-                        onlyNew.draw(at: .zero)
-                    }
+                _ = incremental.render()
+                var samples: [Double] = []
+                var incrementalDabs = 0
+                for k in 0..<3 {
+                    incremental.addStroke(Self.benchStroke(n + 1 + k))
+                    let start = CFAbsoluteTimeGetCurrent()
+                    _ = incremental.render()
+                    samples.append(CFAbsoluteTimeGetCurrent() - start)
+                    incrementalDabs = incremental.lastRenderDabCount
                 }
-                let incrementalDabs = incremental.lastRenderDabCount
+                samples.sort()
+                let incrementalSeconds = samples[samples.count / 2]
 
-                let difference = Self.meanChannelDifference(fullImage, composed)
+                // Byte for byte against a canvas that cannot have taken the fast path, because it
+                // has never rendered anything. A speed-up whose pixels differ is not a speed-up.
+                let cold = VectorCanvas(size: Self.canvasSize, elements: incremental.elements)
+                let identical = Self.identicalBytes(incremental.render(), cold.render())
 
-                report("incremental append", [
+                report("incremental append — shipped", [
                     ("strokes", "\(n)"),
                     ("fullReWalk", ms(fullSeconds)),
                     ("incremental", ms(incrementalSeconds)),
                     ("speedup", String(format: "%.1fx", fullSeconds / max(incrementalSeconds, 1e-9))),
                     ("dabsFull", "\(fullDabs)"),
                     ("dabsIncremental", "\(incrementalDabs)"),
-                    ("meanChannelDiff", String(format: "%.4f", difference)),
+                    ("byteIdentical", identical ? "yes" : "NO"),
                 ])
 
-                XCTAssertLessThan(difference, 1.0,
-                                  "under source-over the two arms must be the same picture — a spike "
-                                  + "whose pixels differ is measuring two different things")
+                XCTAssertTrue(identical,
+                              "the incremental render must be the same bytes as the full walk")
+                XCTAssertLessThan(incrementalDabs, fullDabs / 4,
+                                  "the append must not be stamping the layer")
             }
         }
     }
 
-    /// Mean absolute per-channel difference, 0-255. Not byte equality: the two arms round in
-    /// different places (one composites the new dabs straight into the accumulated context, the
-    /// other into a transparent layer first), so demanding exact bytes would be asserting something
-    /// other than "same picture".
-    private static func meanChannelDifference(_ a: UIImage, _ b: UIImage) -> Double {
+    /// Byte equality of two renders' own backing bitmaps. Not a tolerance: since the append draws
+    /// the new dabs into a copy of the standing picture rather than into a separate layer, there is
+    /// nowhere for a rounding difference to enter, and anything but equality is a defect.
+    /// `IncrementalAppendLogicTests` is where that is pinned; this is here so a *measurement* cannot
+    /// quietly be of two different pictures.
+    private static func identicalBytes(_ a: UIImage, _ b: UIImage) -> Bool {
         guard let ca = a.cgImage, let cb = b.cgImage,
-              ca.width == cb.width, ca.height == cb.height else { return .infinity }
-        let width = ca.width, height = ca.height
-        let bytesPerRow = width * 4
-        var bufferA = [UInt8](repeating: 0, count: bytesPerRow * height)
-        var bufferB = [UInt8](repeating: 0, count: bytesPerRow * height)
-        let space = CGColorSpaceCreateDeviceRGB()
-        let info = CGImageAlphaInfo.premultipliedLast.rawValue
-        bufferA.withUnsafeMutableBytes { raw in
-            CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                      bytesPerRow: bytesPerRow, space: space, bitmapInfo: info)?
-                .draw(ca, in: CGRect(x: 0, y: 0, width: width, height: height))
-        }
-        bufferB.withUnsafeMutableBytes { raw in
-            CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                      bytesPerRow: bytesPerRow, space: space, bitmapInfo: info)?
-                .draw(cb, in: CGRect(x: 0, y: 0, width: width, height: height))
-        }
-        var total = 0.0
-        for i in 0..<bufferA.count { total += Double(abs(Int(bufferA[i]) - Int(bufferB[i]))) }
-        return total / Double(bufferA.count)
+              ca.width == cb.width, ca.height == cb.height,
+              ca.bytesPerRow == cb.bytesPerRow, ca.bitmapInfo == cb.bitmapInfo,
+              let da = ca.dataProvider?.data, let db = cb.dataProvider?.data else { return false }
+        return (da as Data) == (db as Data)
     }
+
 }

@@ -789,6 +789,11 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             _elements = newValue
+            // These five setters deliberately do not invalidate — callers follow with
+            // `bumpVersion()` — but they *do* move the list, and a base whose prefix claim has
+            // quietly stopped being true is the one failure mode that draws a wrong picture rather
+            // than a stale one. Dropping it here costs a store and needs no caller to remember.
+            dropIncrementalBase()
         }
     }
 
@@ -806,6 +811,7 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             _elements = Self.splicing(_elements, kind: .stroke, with: newValue.map { .stroke($0) })
+            dropIncrementalBase()
         }
     }
 
@@ -815,6 +821,7 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             _elements = Self.splicing(_elements, kind: .fill, with: newValue.map { .fill($0) })
+            dropIncrementalBase()
         }
     }
 
@@ -824,6 +831,7 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             _elements = Self.splicing(_elements, kind: .image, with: newValue.map { .image($0) })
+            dropIncrementalBase()
         }
     }
 
@@ -840,6 +848,7 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             _elements = Self.splicing(_elements, kind: .text, with: newValue.map { .text($0) })
+            dropIncrementalBase()
         }
     }
 
@@ -936,6 +945,26 @@ final class VectorCanvas {
     private(set) var contentVersion: Int = 0
 
     private var cachedImage: UIImage?
+
+    /// **The standing picture an append can be drawn on top of, and the number of elements it is a
+    /// picture of.**
+    ///
+    /// Non-nil exactly when `image` is the `.full` local-content render of
+    /// `_elements[0..<prefixCount]` at the identity transform with nothing suppressed. Every
+    /// invalidation that cannot promise that drops it (see `applyToIncrementalBase`), so its being
+    /// present *is* the claim — there is no second flag to fall out of step with it.
+    ///
+    /// **It costs no memory.** At the identity transform `renderLocked`'s `final` *is* the content
+    /// image, so this and `cachedImage` are the same object; the only window in which this is held
+    /// alone is between an append and the render that consumes it, which is a bitmap the shipped
+    /// path was about to allocate anyway. `hasCachedImage` counts it for exactly that reason —
+    /// eviction must not read "no cache" off a cel holding 8 MB.
+    private var incrementalBase: (image: UIImage, prefixCount: Int)?
+
+    /// How many elements the invalidations since `incrementalBase` was taken have *declared* they
+    /// appended. Cross-checked against the list's real length before the fast path is taken, so a
+    /// mutation site that miscounts costs a full re-walk instead of drawing the wrong picture.
+    private var appendedSinceBase = 0
 
     /// The `.preview` render, memoized separately from `cachedImage` — releasing the slider renders
     /// `.full` and must not discard `.preview`, and starting a drag must not discard `.full`.
@@ -1158,9 +1187,9 @@ final class VectorCanvas {
     ///
     /// **The case this deliberately does not have yet is a rectangle.** Middle-of-list edits — the
     /// eraser's cut and split modes, a lasso move, Clear, Recolour — damage a *region* rather than a
-    /// suffix and are their own, larger change (TODO). Adding `case region(CGRect)` here needs no
-    /// second visit to the mutation sites, which is the whole reason this is a type rather than a
-    /// `Bool`; building it now would be machinery with no consumer.
+    /// suffix, and are their own, larger change in [TODO.md](TODO.md). Adding `case region(CGRect)`
+    /// here needs no second visit to the mutation sites, which is the whole reason this is a type
+    /// rather than a `Bool`; building it now would be machinery with no consumer.
     enum Damage: Equatable {
         /// Nothing may be assumed about the display list: the next render walks it whole.
         case everything
@@ -1188,6 +1217,33 @@ final class VectorCanvas {
         cachedImage = nil
         cachedPreviewImage = nil
         lastDamage = damage
+        applyToIncrementalBase(damage)
+    }
+
+    /// Carries `damage` onto `incrementalBase`. Caller must hold `lock`.
+    ///
+    /// **The count check is the guard against a site that declares less than it did.** A declaration
+    /// is a promise about elements this method cannot see — that the prefix did not move — and the
+    /// one part of it that *is* checkable in O(1) is the arithmetic: a run of appends must leave the
+    /// list exactly as long as the base plus everything declared since. A site that removes one
+    /// element and appends two fails it and pays the full walk.
+    private func applyToIncrementalBase(_ damage: Damage) {
+        switch damage {
+        case .everything:
+            dropIncrementalBase()
+        case .appended(let count):
+            guard let base = incrementalBase else { return }
+            appendedSinceBase += count
+            if count < 0 || base.prefixCount + appendedSinceBase != _elements.count {
+                dropIncrementalBase()
+            }
+        }
+    }
+
+    /// Caller must hold `lock`.
+    private func dropIncrementalBase() {
+        incrementalBase = nil
+        appendedSinceBase = 0
     }
 
     /// Invalidates the render cache after a direct mutation of `strokes`/`fills`/`images`/`elements`
@@ -1205,7 +1261,10 @@ final class VectorCanvas {
     var hasCachedImage: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return cachedImage != nil || cachedPreviewImage != nil
+        // `incrementalBase` is counted because between an append and the render that consumes it,
+        // it is the *only* reference to a canvas-sized bitmap. Leaving it out would let eviction
+        // read "nothing cached" off a cel holding 8 MB at 2048×1024.
+        return cachedImage != nil || cachedPreviewImage != nil || incrementalBase != nil
     }
 
     /// Frees the memoized render without touching the content. Deliberately not `invalidate()`:
@@ -1216,6 +1275,8 @@ final class VectorCanvas {
         defer { lock.unlock() }
         cachedImage = nil
         cachedPreviewImage = nil
+        // Eviction frees pixels; a base kept here would be pixels it did not free.
+        dropIncrementalBase()
     }
 
     // MARK: - Mutation
@@ -3695,8 +3756,17 @@ final class VectorCanvas {
         // 1. Content in local (untransformed) space. The suppressed elements are skipped, not removed
         //    — see `suppressedElementIDs`.
         //
-        let content = renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs),
+        //    **Or only the elements the artist has just added, drawn onto the picture of the ones
+        //    they had before** — see `appendableBase(quality:)` for when that is the same picture.
+        //    This is what takes a pen-up from O(everything on the layer) to O(the new mark).
+        let content: UIImage
+        if let base = appendableBase(quality: quality) {
+            content = renderLocalContent(elements: Array(_elements[base.prefixCount...]),
+                                         quality: quality, over: base.image)
+        } else {
+            content = renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs),
                                          quality: quality)
+        }
 
         // 2. Apply the overall transform (identity → skip the extra pass).
         let final: UIImage
@@ -3709,10 +3779,101 @@ final class VectorCanvas {
             }
         }
         switch quality {
-        case .full: cachedImage = final
-        case .preview: cachedPreviewImage = final
+        case .full:
+            cachedImage = final
+            // `final === content` exactly when the transform is the identity, which is the whole of
+            // why this costs nothing: the base and the memo are one object. Under a transform they
+            // would be two canvas-sized bitmaps, and holding a second one per moved cel to make a
+            // *moved* layer's appends incremental is not a trade this has been asked to make — so
+            // that case falls back, on purpose and with a test that says so.
+            if _transform.isIdentity, _suppressedElementIDs.isEmpty {
+                incrementalBase = (final, _elements.count)
+                appendedSinceBase = 0
+            } else {
+                dropIncrementalBase()
+            }
+        case .preview:
+            cachedPreviewImage = final
         }
         return final
+    }
+
+    /// **The picture this render may append to, or nil when it must walk the list whole.**
+    ///
+    /// This is the correctness half of the incremental append and the reason the whole thing is
+    /// worth doing carefully: the display list is **not associative**, so drawing the new elements
+    /// over the standing picture is not always the same picture as re-walking, and taking the fast
+    /// path where it is not would corrupt the artwork silently. Every condition below is a case
+    /// where it *is* provably the same, and everything else falls back.
+    ///
+    /// - `.full` only. `.preview` strokes one `CGPath` per stroke instead of stamping dabs
+    ///   (`strokePolyline`), has its own memo, and is not on the pen-up path this exists for.
+    /// - **The identity transform only**, because `render()` applies the overall transform by
+    ///   *resampling the finished content bitmap* — and resampling a composite is not compositing
+    ///   two resampled halves. The base has to be the pre-transform content, and at the identity it
+    ///   already is.
+    /// - **Nothing suppressed**, so `prefixCount` counts the same elements the base was drawn from.
+    ///
+    /// and then `appendPreservesTheWalk(after:)`, which is the interesting one.
+    ///
+    /// Caller must hold `lock`.
+    private func appendableBase(quality: RenderQuality) -> (image: UIImage, prefixCount: Int)? {
+        guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
+              let base = incrementalBase, base.prefixCount < _elements.count,
+              base.prefixCount + appendedSinceBase == _elements.count,
+              appendPreservesTheWalk(after: base.prefixCount) else { return nil }
+        return base
+    }
+
+    /// **Whether drawing `_elements[prefixCount...]` over a picture of `_elements[0..<prefixCount]`
+    /// gives the same pixels as walking the whole list.**
+    ///
+    /// `renderLocalContent`'s walk looks at exactly one thing outside the element it is drawing: the
+    /// **paint run**, a maximal stretch of consecutive `.paint` strokes, which is wrapped in a single
+    /// transparency layer when any stroke in it carries a non-`.normal` blend mode (rule 2 there).
+    /// That is the only coupling between an element and its neighbours, so it is the only thing that
+    /// can be broken by cutting the list in two — and it breaks in **both** directions:
+    ///
+    /// * an appended paint stroke joins the run the prefix ends with, so if that merged run needs
+    ///   isolating, the re-walk puts the prefix's own strokes *inside* a transparency layer with it
+    ///   while the base has them already flattened. Different pictures.
+    /// * and it breaks even when the *prefix* is innocent, because a single non-`.normal` stroke
+    ///   anywhere in the merged run isolates the whole of it, the earlier strokes included.
+    ///
+    /// So an appended paint stroke is safe exactly when the whole merged run is `.normal` —
+    /// source-over, which is associative, which is `renderLocalContent`'s own rule 2. **All five
+    /// shipped brushes are `.normal`**, so this is the answer essentially always.
+    ///
+    /// **An appended element that is *not* a paint stroke needs no condition at all, and that
+    /// includes the eraser.** A fill, image, video, text object or `.erase` stroke *ends* a paint
+    /// run rather than joining one (rule 1), so the prefix's last run is closed — its transparency
+    /// layer composited down — before the new element is drawn, in the full walk exactly as in the
+    /// base. `.erase` then composites `destinationOut` against the accumulated context (rule 3), and
+    /// the accumulated context is the base, byte for byte:
+    /// `IncrementalAppendLogicTests.testAnAppendedEraserOverAnIsolatedRunIsByteIdentical` is that
+    /// claim run rather than argued.
+    ///
+    /// Cost is O(the merged run), not O(n): the backward scan stops at the first element that is not
+    /// a `.paint` stroke. On a cel that is nothing but paint strokes it *is* O(n) — one enum
+    /// discriminant and one blend-mode compare per element, against the 3.16 µs a dab the walk it
+    /// replaces would spend (PERFORMANCE.md §11.2).
+    ///
+    /// Caller must hold `lock`.
+    private func appendPreservesTheWalk(after prefixCount: Int) -> Bool {
+        guard prefixCount > 0, prefixCount < _elements.count else { return false }
+        // Nothing but a `.paint` stroke at the head of the tail can join the prefix's last run.
+        guard Self.paintStroke(at: prefixCount, in: _elements) != nil else { return true }
+        var index = prefixCount
+        while let stroke = Self.paintStroke(at: index, in: _elements) {
+            if stroke.brush.blendMode != .normal { return false }
+            index += 1
+        }
+        index = prefixCount - 1
+        while index >= 0, let stroke = Self.paintStroke(at: index, in: _elements) {
+            if stroke.brush.blendMode != .normal { return false }
+            index -= 1
+        }
+        return true
     }
 
     /// `render()` for the display path, which can say "no image" in a way the drawing paths cannot.
@@ -3801,12 +3962,20 @@ final class VectorCanvas {
     /// a lasso move's floating piece wants only the suppressed ones — and giving the second its own
     /// renderer would fork the three rules above, so that the float and the layer it was lifted out
     /// of could come to disagree about isolation. One walk, two lists.
-    private func renderLocalContent(elements: [VectorElement], quality: RenderQuality = .full) -> UIImage {
+    ///
+    /// **`over` is the standing picture the walk starts from** — non-nil only on the incremental
+    /// append, where `elements` is the newly added tail rather than the whole list. It is drawn 1:1
+    /// into this renderer's own context before the walk, so the walk lands on exactly the pixels it
+    /// would have accumulated by drawing the prefix itself. Which appends may do this is
+    /// `appendPreservesTheWalk(after:)`, not this method: one walk, and it does not know or care how
+    /// its context got its first pixels.
+    private func renderLocalContent(elements: [VectorElement], quality: RenderQuality = .full,
+                                    over base: UIImage? = nil) -> UIImage {
         // `render()` has already returned by the time an empty canvas would reach here, so this
         // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
         // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the
         // *filtered* list, so a cel whose only element is the one being edited says the same.
-        guard !elements.isEmpty else { return Self.transparentPixel }
+        guard !elements.isEmpty || base != nil else { return Self.transparentPixel }
         // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
         // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
         // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity
@@ -3818,6 +3987,11 @@ final class VectorCanvas {
         var target: CGContextDabTarget!
         let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
+            // 1:1 into a context of the same size, format and scale, over transparent black — so
+            // every destination pixel is `0`, source-over leaves the source exactly as it was, and
+            // this is a copy rather than a composite. `renderLocalContent` is the only place that
+            // has to be true and `IncrementalAppendLogicTests` is where it is checked byte for byte.
+            base?.draw(at: .zero)
             // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
             // throw away the cache's hit rate at every fill or eraser.
             target = CGContextDabTarget(cg)
