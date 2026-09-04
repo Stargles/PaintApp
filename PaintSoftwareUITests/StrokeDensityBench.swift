@@ -29,6 +29,28 @@ import Darwin
 /// ```
 final class StrokeDensityBench: XCTestCase {
 
+    /// **Opt-in, and the reason is the full suite rather than tidiness.** Staying out of the
+    /// fast-tier selector by name keeps these off the tier that runs constantly, but the full suite
+    /// runs every class it can find, and `xcodebuild` distributes parallel work **per test class**,
+    /// so an indivisible class of tests measuring 23.5 s and 35.8 s apiece would set the whole
+    /// suite's critical path on its own — CLAUDE.md's cost model, and the trap it records twice of a
+    /// class growing past the floor while nobody looks.
+    ///
+    /// It is also unsafe to run them together unattended: the numbers in PERFORMANCE.md §11 were
+    /// taken against an XCTest runner whose **cumulative-CPU watchdog SIGKILLs the process**, which
+    /// is what the 64,000-stroke row was originally misread as jetsam. A 23.5 s test passes alone
+    /// and dies when it follows a 35.8 s one in the same process, so these would not merely be slow
+    /// in a full run, they would be an intermittent red that looks environmental.
+    ///
+    /// Re-measure deliberately:
+    /// ```
+    /// PAINTAPP_BENCH=1 xcodebuild test … -only-testing:PaintSoftwareUITests/StrokeDensityBench
+    /// ```
+    override func setUpWithError() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] != nil,
+                          "StrokeDensityBench is opt-in; set PAINTAPP_BENCH=1 to re-measure.")
+    }
+
     // MARK: - The scene
 
     /// The owner's canvas (PERFORMANCE.md §1), not the 2048² the older baselines use.
