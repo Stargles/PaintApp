@@ -74,16 +74,38 @@ its grain instead of re-sampling"* — was declined and inherited by this item o
 would change when brushes became importable. It changes by ceasing to exist. The tests that pin
 grain-travels-with-posed-ink are deleted with the feature rather than rewritten.
 
-**2.6 No barrel roll.** Owner: *"For memory, no barrel roll."* Apple Pencil Pro rotation is not a sensor.
+**2.6 No barrel roll.** Owner: *"For memory, no barrel roll."* Apple Pencil Pro rotation is not a sensor,
+and on the owner's hardware it could not be one: barrel roll needs a Pencil Pro, which needs an M2 iPad,
+and theirs is a 9th-generation iPad taking a first-generation Pencil. So unlike §2.7, this ruling does not
+turn on the storage cost and is not reopened by measuring it.
 
-**2.7 No tilt now, and the architecture accommodates it without a refactor.** Owner: *"i may eventually
-add pen tilt in the future, so design the architecture so that if it eventually does get added, it already
-accommodates it smoothly without needing intensive refactors."* Neither tilt angle nor tilt direction ships
-as a sensor, and until one does the app has no brush that shades broadly when the Pencil is leaned over —
-no charcoal, no soft graphite edge. **§5.5 is the seam, and it is a build requirement of this item rather
-than a note for a later one.**
+**2.7 Tilt ships — altitude and azimuth are both sensors.** The owner deferred it on storage grounds and
+reversed that on the measurement: a thousand strokes of geometry is **0.9 MB** ([PERFORMANCE.md](PERFORMANCE.md)
+§11), so two more bytes a point is not a cost worth a feature. Owner: *"Since I now know that brushstroke
+memory usage is minimal, i will go ahead and make the assertion to add in the pencil tilt that i previously
+canceled."*
 
-**2.8 The sensors are pressure, stroke direction, taper distance, random, and velocity.** Direction is
+**It lands in §12 stage 4, which is where the record is built anyway**, so it is two more channels rather
+than a change of plan — the seam §5.5 required was built for exactly this and is now carrying a shipping
+feature instead of a hypothetical one. What it unlocks is the class of brush the app could not have at all
+without it: **anything that shades broadly when the Pencil is leaned over** — charcoal, a soft graphite
+edge, a chisel whose nib angle follows the hand rather than the stroke. §8.6's Sketching group is where
+that shows up.
+
+**Azimuth is stored in canvas space, not view space.** `StrokeInput` takes it as
+`touch.azimuthAngle(in: view)`, which moves when the canvas is rotated or zoomed — so stored raw, a
+stroke's ink would change on re-render after the artist turned the canvas, which breaks the promise that
+vector geometry re-rasterizes losslessly. Converting at capture also makes a nib angle rotate *with* the
+drawing when a lasso or a layer transform turns it, which is both what a physical nib does against paper
+and what §4.1 already decided for arc length by measuring in brush widths.
+
+**Every stroke carries tilt, whether or not its brush reads it.** The alternative — capture only when the
+selected brush has a tilt modulation — costs 0.4 MB a thousand strokes to avoid and would make §2.10's
+apply-to-existing verb lie: re-pointing an old stroke at a tilt-driven brush would render it with the
+neutral and no explanation. The neutral stays regardless, because a **finger** has no tilt and never will.
+
+**2.8 The sensors are pressure, tilt angle, tilt direction, stroke direction, taper distance, random, and
+velocity.** Direction is
 the brief's *"rotation of your brush follows your brush's painting direction"*. Taper distance is
 position along the stroke. Velocity is the only one of the five that costs storage.
 
@@ -357,9 +379,17 @@ keeping a second definition of the seed alive.
 | x, y | 4 | unchanged — `Int16` quarter-pixel, offset from the run's origin |
 | pressure | 1 | unchanged |
 | Δt from the previous point | 1 | **new** — the only cost of §2.8's velocity, and it buys retiming later |
+| tilt altitude | 1 | **new** — §2.7. 0…π/2 in a byte is 0.35° a step, far finer than a shading ramp resolves |
+| tilt azimuth | 1 or 2 | **new** — §2.7, and **the one width in this table that is a hypothesis rather than a decision** |
 
-**Six bytes a point against five**, and `PackedSampleRun`'s `.float32` mode for `precise` strokes widens
-the same way.
+**Eight or nine bytes a point against five**, and `PackedSampleRun`'s `.float32` mode for `precise` strokes
+widens the same way. Against the MEASURED 0.9 MB a thousand strokes ([PERFORMANCE.md](PERFORMANCE.md) §11),
+that is ~1.3 MB — which is why §2.7 was reversed on seeing the number.
+
+**Azimuth's width is the one thing here to settle by experiment.** A byte over a full turn is 1.4° a step,
+and azimuth drives a nib angle *directly* rather than through a ramp, so a chisel turned slowly could show
+the steps as faceting where altitude never would. Draw that stroke and look at it before choosing; two
+bytes buys 0.0055°, which is certainly enough and probably wasteful.
 
 **The refit (§3.3) does not change this record, and that is a decision rather than an omission.** The
 stored thing stays a list of on-curve points; only their placement moved. §3.3 carries the three reasons
@@ -424,16 +454,16 @@ palette — which §2.10's minting ends. [BUGS.md](BUGS.md) carries it.
 **§2.10 makes the table grow**: an edit mints an entry rather than mutating one. A sweep on save drops
 entries no stroke references, or a heavily tuned document accumulates dead brushes forever.
 
-### 5.5 The tilt seam — §2.7, and a build requirement of this item
+### 5.5 The channel set, the funnel, and the neutral
 
-Adding tilt later must be additive at every layer. Four seams, and each is cheaper to build now than to
-retrofit:
+§2.7 puts tilt in stage 4 alongside the record, so these are the shape of a feature being built rather than
+room left for one. Three of them are what make *any* later channel additive; the fourth has been discharged.
 
 **A channel set in the run header, not a fixed record.** `PackedSampleRun` carries a small bitmask naming
-which per-point channels are present and derives `bytesPerSample` from it. Adding tilt is then two bits
-and two arms in the pack/unpack switch — **no format version, no migration, no decode default**, because a
-run written without tilt simply has those bits clear. The mask costs one byte per *run*, not per point, so
-§5.1's six-byte record is unaffected. This also subsumes the `.quarterPixel` / `.float32` mode flag, which
+which per-point channels are present and derives `bytesPerSample` from it. A channel is then two bits and
+two arms in the pack/unpack switch — **no format version, no migration, no decode default**, because a run
+written without one simply has those bits clear. The mask costs one byte per *run*, not per point, so
+§5.1's record is unaffected by channels a given stroke does not carry. This also subsumes the `.quarterPixel` / `.float32` mode flag, which
 is a channel-width choice wearing a different hat.
 
 **Struct-of-arrays in memory.** A stroke holds parallel arrays — positions, pressures, and one per optional
@@ -441,19 +471,19 @@ channel. An absent channel is an empty array and costs nothing; adding one adds 
 widening every `VectorSample`. It is also the shape the packer already wants.
 
 **One evaluation funnel, with a defined neutral.** Every sensor resolves through a single
-`value(of: BrushInput, atArcLength:)`. Adding `.tiltAngle` / `.tiltDirection` is one case in one switch —
-**provided that funnel answers a defined neutral when the stroke carries no data for the channel asked
-for.** Without that, the day tilt ships every stroke drawn before it renders wrong or traps. Neutral is
-the Pencil held upright: full altitude, azimuth zero, and no modulation effect. Build the neutral now,
-with the funnel, and pin it: a brush reading a channel the stroke does not carry must render identically
-to the same brush with that modulation removed.
+`value(of: BrushInput, atArcLength:)`, so a new sensor is one case in one switch — **provided that funnel
+answers a defined neutral when the stroke carries no data for the channel asked for.** The neutral is not
+a legacy concern that tilt's arrival retires: a **finger** reports no tilt and never will, and §2.10's
+apply-to-existing verb can point any stroke at a brush reading anything. Neutral is the Pencil held
+upright — full altitude, azimuth zero, no modulation effect — and it must be pinned: a brush reading a
+channel the stroke does not carry renders identically to the same brush with that modulation removed.
 
-**Do not delete the capture.** `StrokeInput` already carries `altitude` and `azimuth` from the hardware and
-they currently reach only the action recorder. That is exactly the shape a cleanup pass removes as dead
-code, and this repo has a standing instruction to delete replaced paths rather than leave them beside new
-ones. **This is a named exception**: the capture stays, because it is the half of the seam that cannot be
-rebuilt from a decision — every other part of tilt is code, and this part is a hardware reading that has to
-be taken at the moment of the touch.
+**The capture was already there, and that is the whole return on this section.** `StrokeInput` takes
+`altitude` and `azimuth` from the hardware and already answers `π/2` and `0` for a non-Pencil touch — the
+neutral above, written before anything consumed it. It was kept as a named exception to the
+delete-what-is-unused rule on the grounds that a hardware reading cannot be reconstructed from a decision
+later. Stage 4 connects it; nothing has to be re-derived, and no stroke drawn before it is missing anything
+a decision could have preserved.
 
 ---
 
@@ -462,8 +492,12 @@ be taken at the moment of the touch.
 Every parameter is `base value + [modulation]`, where a modulation is **(input, curve, amount)**. That is
 the brief's *"every parameter should be able to be sensor driven"*, and it is the CSP model.
 
-**Inputs** (§2.8): `pressure` · `direction` · `taper` (distance along the stroke, from either end) ·
-`velocity` · `random`.
+**Inputs** (§2.8): `pressure` · `tiltAngle` · `tiltDirection` · `direction` · `taper` (distance along the
+stroke, from either end) · `velocity` · `random`.
+
+`tiltAngle` is how far the Pencil is leaned over and `tiltDirection` which way it is leaned, in canvas
+space (§2.7). Both answer §5.5's neutral — upright, pointing nowhere — for a finger, and for any stroke
+whose run does not carry the channel.
 
 **Every `random` modulation carries a wavelength λ, expressed in brush widths so a brush looks the same at
 any size** — §2.17. Its value interpolates between hashed lattice points λ of arc length apart, which is
@@ -747,9 +781,12 @@ first, which cleanly replaces the old one."*
    touches.
 3. **`stampImage` on `DabTarget`** + the tinted rotation-bucketed cache + its hit-rate test. `.square`
    becomes a texture; `stampApproximateSquare` goes. `BakedDab` gains an angle and `DabPose` rotates it.
-4. **The sample record** — the channel set, struct-of-arrays, Δt, and velocity as a sensor. §5.1 and
-   **§5.5, which is not deferrable to the stage that adds tilt**: the funnel's neutral has to exist before
-   any brush reads a sensor, or it is a retrofit through every modulation instead of one function.
+4. **The sample record** — the channel set, struct-of-arrays, Δt, velocity as a sensor, and **tilt**
+   (§2.7): altitude and azimuth as two more channels, azimuth converted to canvas space at capture, wired
+   through §5.5's funnel with its neutral. §5.1 carries the widths, and azimuth's is the one to settle by
+   drawing a slowly-turned chisel rather than by choosing. The funnel's neutral is not optional and not
+   deferrable: a finger carries no tilt, so a brush reading a channel a stroke does not have is the
+   ordinary case rather than the legacy one.
 5. **`BrushTip`**, and the renderer finally reads `customTextureFileName`. User PNG stamps work: the first
    artist-visible feature, and it exercises the whole path.
 6. **The brush table** — §5.4, §2.9, the save-time sweep, and §2.10's apply-to-existing verb.
