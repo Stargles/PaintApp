@@ -69,7 +69,7 @@ final class BrushModulationLogicTests: XCTestCase {
     private static func dabs(_ brush: Brush, _ samples: StrokeSamples,
                              size: CGFloat = 20, seed: UInt64 = 0xC0FFEE) -> [BrushStamper.BakedDab] {
         BrushStamper.bake(samples: samples, brush: brush, color: .black, brushSize: size,
-                          brushOpacity: 1, random: DabRandom(seed: seed))
+                          brushOpacity: 1, random: DabRandom(seed: seed)).dabs
     }
 
     // MARK: - The headline: the matrix subsumes what it replaced
@@ -98,6 +98,12 @@ final class BrushModulationLogicTests: XCTestCase {
             return (1 - k) * 1 + k * pressureDriven
         }
         /// `BrushDynamics.opacityFraction(forPressure:)` as it was.
+        ///
+        /// **It is compared against the matrix's `flow` output, not its `opacity` one**, because §12
+        /// stage 8 deleted that output: BRUSH.md §2.11 makes opacity the stroke's cap and flow what
+        /// one stamp lays down, and the deleted blend was always the second of those wearing the
+        /// first's name. The arithmetic below is unchanged, which is the claim — a single pass of any
+        /// preset is the ink it has always been, and only a second pass over the same ground differs.
         func oldOpacityFraction(_ pressure: Double, o: Double) -> Double {
             let p = max(0, min(pressure, 1))
             return (1 - o) * 1 + o * p
@@ -121,8 +127,8 @@ final class BrushModulationLogicTests: XCTestCase {
                 let values = brush.dabValues(atPressure: pressure)
                 XCTAssertEqual(values.size, oldSizeFraction(Double(pressure), k: k, m: m),
                                "\(name): the size row must be the deleted blend, to the bit, at pressure \(pressure)")
-                XCTAssertEqual(values.opacity, oldOpacityFraction(Double(pressure), o: o),
-                               "\(name): the opacity row must be the deleted blend, to the bit, at pressure \(pressure)")
+                XCTAssertEqual(values.flow, oldOpacityFraction(Double(pressure), o: o),
+                               "\(name): the flow row must be the deleted blend, to the bit, at pressure \(pressure)")
             }
 
             // And the pixels, which is what an artist sees. Stamped through the matrix on one side and
@@ -131,7 +137,7 @@ final class BrushModulationLogicTests: XCTestCase {
             let throughMatrix = Self.render(brush, samples)
             let throughOldBlends = Self.renderWithExplicitFractions(brush, samples) { pressure in
                 (size: oldSizeFraction(Double(pressure), k: k, m: m),
-                 opacity: oldOpacityFraction(Double(pressure), o: o))
+                 flow: oldOpacityFraction(Double(pressure), o: o))
             }
             XCTAssertEqual(throughMatrix, throughOldBlends,
                            "\(name) must render byte-identically to the dynamics it replaced")
@@ -144,22 +150,26 @@ final class BrushModulationLogicTests: XCTestCase {
     /// exactly one thing.
     private static func renderWithExplicitFractions(
         _ brush: Brush, _ samples: StrokeSamples, size: CGFloat = 20, opacity: Double = 1,
-        seed: UInt64 = 0xC0FFEE, fractions: (CGFloat) -> (size: Double, opacity: Double)
+        seed: UInt64 = 0xC0FFEE, fractions: (CGFloat) -> (size: Double, flow: Double)
     ) -> [UInt8] {
         let texture = RasterLayerTexture(size: canvas)
         let random = DabRandom(seed: seed)
         let path = StrokePath(points: samples.positions)
         let sensors = StrokeSensors(samples: samples, path: path, random: random, brushSize: size)
         texture.beginStroke()
+        // **The group has to be here too, or this harness stops comparing the matrix.** §12 stage 8
+        // put BRUSH.md §2.11's merge inside `stampStroke`; a hand-rolled walk that calls `stampDab`
+        // directly would have no buffer while its counterpart had one, and the byte comparison would
+        // go red for a reason that has nothing to do with where the numbers came from.
+        texture.beginStrokeGroup(opacity: CGFloat(opacity), blendMode: brush.stroke.blendMode.cgBlendMode)
 
         func stamp(at point: CGPoint, site: DabSite) {
             var values = brush.dabValues { sensors.value(of: $0, at: site) }
             let f = fractions(sensors.value(of: .pressure, at: site))
             values.size = f.size
-            values.opacity = f.opacity
+            values.flow = f.flow
             BrushStamper.stampDab(into: texture, at: point, brush: brush, values: values,
-                                  color: .black, brushSize: size, brushOpacity: opacity,
-                                  isEraser: false, random: random, arcWidths: site.arcWidths)
+                                  color: .black, brushSize: size, random: random, arcWidths: site.arcWidths)
         }
 
         var arcWidths: CGFloat = 0
@@ -173,6 +183,7 @@ final class BrushModulationLogicTests: XCTestCase {
                 return carry.spacing
             }
         }
+        texture.endStrokeGroup()
         texture.endStroke()
         return bytes(of: texture)
     }
@@ -198,7 +209,7 @@ final class BrushModulationLogicTests: XCTestCase {
         var base = BrushLibrary.hardRound
         base.modulations = BrushModulations()
         base.dab.size = 1
-        base.dab.opacity = 1
+        base.dab.flow = 1
         let reference = Self.dabs(base, samples)
         XCTAssertGreaterThan(reference.count, 50, "the fixture has to lay plenty of dabs")
 
@@ -206,7 +217,7 @@ final class BrushModulationLogicTests: XCTestCase {
             var driven = base
             // A pressure row on every output. The amounts are signed where the base is already at its
             // ceiling, so each one has somewhere to move to.
-            let amount: Double = (output == .size || output == .opacity || output == .flow
+            let amount: Double = (output == .size || output == .flow
                                   || output == .density || output == .hardness) ? -0.5 : 0.4
             driven.modulations = BrushModulations([BrushModulation(output, .pressure, amount: amount)])
             if output == .angle {

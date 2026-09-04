@@ -6,9 +6,11 @@ import UIKit
 /// strokes. Square/custom brushes are tiled round dabs (`stampApproximateSquare`), since
 /// `RasterLayerTexture` only exposes a circular stamp.
 ///
-/// Known limitation: stamps composite with `.normal` blend, so overlapping stamps within one
-/// stroke build opacity up — a stroke that crosses itself darkens where it overlaps, which is the
-/// flow-versus-opacity distinction this engine does not yet make.
+/// **BRUSH.md §12 stage 8 closed the flow-versus-opacity gap this comment used to record.** Stamps
+/// still composite `.normal` against each other — that is what build-up *is* — but they do it inside
+/// the stroke's own window, which merges once at the stroke's opacity (`StrokeScratch.commit`). So a
+/// stroke that crosses itself darkens toward its opacity and stops there, and an eraser at 50% takes
+/// away 50% however many times it crosses back over itself.
 ///
 /// The older form of that note claimed "a slow stroke reads darker than a fast one", and it is worth
 /// recording that the measurement does not support the obvious reading of it. Dab emission is not
@@ -668,8 +670,8 @@ final class StrokeCanvasView: UIView {
     /// identity-guarded so the overwhelmingly common call — `nil` when it is already nil, once per
     /// layer per SwiftUI pass — is a pointer comparison.
     ///
-    /// **A `.replacing` scratch stands in for the layer's picture inside its window, so the base is
-    /// punched out under it.** An erase lowers alpha, and Core Animation composites siblings
+    /// **A scratch that replaces the base stands in for the layer's picture inside its window, so
+    /// the base is punched out under it.** An erase lowers alpha, and Core Animation composites siblings
     /// source-over: left showing through, the layer's own ink would fill the punch straight back in
     /// and the artist would drag the eraser across their line and see nothing happen. The
     /// alternative — punching a canvas-sized copy of the render and showing that instead — is 1 GiB
@@ -677,6 +679,14 @@ final class StrokeCanvasView: UIView {
     private func showScratch(_ scratch: StrokeScratch?) {
         let image = scratch?.image
         setBaseHole(scratch.flatMap { $0.replacesBase ? $0.windowRect : nil })
+        // **BRUSH.md §2.11's cap, on the display side.** An `.additive` window holds the stroke's
+        // ink at full flow and is shown at the stroke's own opacity, which is exactly what
+        // `StrokeScratch.commit` will do to it at lift — so what the artist watches build up under
+        // the pen is what lands. The other two roles have already applied the cap inside their own
+        // pixels (`.subtractive` punches the backdrop with it; `.replacing`'s groups each carried
+        // it), so those are shown at 1.
+        let alpha = (scratch?.replacesBase ?? true) ? 1 : (scratch?.opacity ?? 1)
+        if scratchView.alpha != alpha { scratchView.alpha = alpha }
         guard scratchView.image !== image else { return }
         if let scratch, image != nil { scratchView.frame = scratch.windowRect }
         scratchView.image = image
@@ -688,7 +698,7 @@ final class StrokeCanvasView: UIView {
     /// An even-odd path over the whole canvas plus the hole is the least machinery that expresses
     /// "everything except this rectangle" — a mask layer covers what it is given and hides the rest,
     /// so anything smaller than the canvas would hide the artwork. The mask is only ever installed
-    /// while a `.replacing` scratch is live, which is a vector eraser in Modes 1 and 2 or a raster
+    /// while a base-replacing scratch is live, which is a vector eraser in Modes 1 and 2 or a raster
     /// eraser, and is removed the moment the stroke lifts.
     ///
     /// **The window's edge is a seam and it is a sub-pixel one.** The base is masked to fractional
@@ -820,15 +830,20 @@ final class StrokeCanvasView: UIView {
         // Only for the stroke count: no dab reaches the cel until lift, so the cel's own dirty
         // rect stays empty and the scratch's is what the undo step crops to.
         raster.beginStroke()
-        // The eraser's window has to start from the cel's own pixels because `.destinationOut` can
-        // only take away what is there; a paint stroke's holds its own ink and nothing else. The
-        // backdrop is the already-resident render, never a second one, and **nil** for a tier with
-        // no bitmap — `renderToUIImage()` would answer with the shared 1×1, which is the right
+        // The eraser's window needs the cel's own pixels to *show* the removal against and to decide
+        // whether there is anything to remove; a paint stroke's holds its own ink and nothing else.
+        // The backdrop is the already-resident render, never a second one, and **nil** for a tier
+        // with no bitmap — `renderToUIImage()` would answer with the shared 1×1, which is the right
         // thing to draw and the wrong thing to seed a window from, and an erase over nothing has
         // nothing to take away anyway.
+        // BRUSH.md §2.11: the window is this stroke's own, and the stroke's opacity is the cap it
+        // merges under rather than something each dab carries. An eraser's window holds removal
+        // *coverage* (`.subtractive`); a brush's holds ink.
         let scratch = StrokeScratch(canvasSize: raster.size,
-                                    role: isEraser ? .replacing(backdrop: raster.renderIfNonEmpty())
-                                                   : .additive)
+                                    role: isEraser ? .subtractive(backdrop: raster.renderIfNonEmpty())
+                                                   : .additive,
+                                    opacity: CGFloat(brushOpacity),
+                                    blendMode: isEraser ? .normal : brush.stroke.blendMode.cgBlendMode)
         self.scratch = scratch
         lastStampPoint = nil
         lastLiveSample = nil
@@ -1084,8 +1099,8 @@ final class StrokeCanvasView: UIView {
         guard let last = lastStampPoint else {
             let resolved = values(at: 0)
             BrushStamper.stampDab(into: target, at: sample.point, brush: brush, values: resolved,
-                                  color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity,
-                                  isEraser: isEraser, random: random, arcWidths: strokeArcWidths)
+                                  color: brushColor, brushSize: brushSize,
+                                  random: random, arcWidths: strokeArcWidths)
             liveSpacing = BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             lastStampPoint = sample.point
             return
@@ -1098,8 +1113,8 @@ final class StrokeCanvasView: UIView {
             strokeArcWidths += brushSize > 0 ? walked / brushSize : walked
             let resolved = values(at: t)
             BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
-                                  color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity,
-                                  isEraser: isEraser, random: random, arcWidths: strokeArcWidths)
+                                  color: brushColor, brushSize: brushSize,
+                                  random: random, arcWidths: strokeArcWidths)
             return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
         }
         lastStampPoint = walk.carry
@@ -1140,10 +1155,21 @@ final class StrokeCanvasView: UIView {
         // buffers at touch-down, 2 GiB at 16383².
         scratch = {
             if case .replacement = vectorScratchRole {
-                return StrokeScratch(canvasSize: vectorCanvas.size,
-                                     role: .replacing(backdrop: interpolationImage ?? vectorCanvas.renderIfNonEmpty()))
+                let backdrop = interpolationImage ?? vectorCanvas.renderIfNonEmpty()
+                // **Mode 1 and Mode 2 want different windows, and §12 stage 8 is where they part.**
+                // Mode 1 *is* an eraser stroke, so its window holds removal coverage and caps at the
+                // eraser's opacity like any other stroke. Mode 2's window is a picture — `applyPreview`
+                // erases doomed spans out of it and then restamps the end caps back — and each of
+                // those `stampStroke` calls carries its own cap already.
+                let isModeOne = (inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode) != .cutPoints
+                return isModeOne
+                    ? StrokeScratch(canvasSize: vectorCanvas.size, role: .subtractive(backdrop: backdrop),
+                                    opacity: CGFloat(brushOpacity))
+                    : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing(backdrop: backdrop))
             }
-            return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive)
+            return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive,
+                                 opacity: CGFloat(brushOpacity),
+                                 blendMode: brush.stroke.blendMode.cgBlendMode)
         }()
         currentVectorSamples = StrokeSamples(channels: .captured)
         lastSampleTime = nil
@@ -1438,9 +1464,10 @@ final class StrokeCanvasView: UIView {
             resolveIntersectionCut(at: point, in: vectorCanvas)
             return
         }
-        // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) a
-        // `.destinationOut` punch into a copy of the layer, or (Mode 2) the doomed spans punched out
-        // of that same copy. Mode 3 has no scratch content — it has already cut for real.
+        // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) this
+        // eraser's removal coverage shown punched out of a copy of the layer, or (Mode 2) the doomed
+        // spans punched out of that same copy. Mode 3 has no scratch content — it has already cut
+        // for real.
         guard let scratch, !isNoScratchRole else { return }
         if isEraser, vectorEraserMode == .cutPoints, inBetweenCelID == nil, let vectorCanvas {
             previewCutSpans(to: point, pressure: pressure, in: vectorCanvas, into: scratch)

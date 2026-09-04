@@ -162,7 +162,7 @@ final class MaskParityLogicTests: XCTestCase {
                               at: CGPoint(x: 32, y: 32),
                               brush: BrushLibrary.softRound,
                               values: BrushLibrary.softRound.dabValues(atPressure: 1), color: .black,
-                              brushSize: 40, brushOpacity: 1, isEraser: false,
+                              brushSize: 40,
                               random: DabRandom(seed: 0), arcWidths: 0)
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(blue, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
@@ -596,7 +596,7 @@ final class MaskParityLogicTests: XCTestCase {
                               at: CGPoint(x: 32, y: 32),
                               brush: BrushLibrary.softRound,
                               values: BrushLibrary.softRound.dabValues(atPressure: 1), color: .black,
-                              brushSize: 40, brushOpacity: 1, isEraser: false,
+                              brushSize: 40,
                               random: DabRandom(seed: 0), arcWidths: 0)
         manager.layers[0].isVisible = false
         let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])

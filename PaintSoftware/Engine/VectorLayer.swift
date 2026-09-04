@@ -4006,9 +4006,12 @@ final class VectorCanvas {
     ///    transparency layer so its strokes blend against each other but not what's beneath them. An
     ///    all-`.normal` run opens no layer — source-over is associative, so drawing straight into the
     ///    context is identical, and it's the common case.
-    /// 3. An `.erase` stroke is never inside a transparency layer: it punches `.destinationOut` against
-    ///    the accumulated context, lowering the alpha of everything beneath it — punching inside a
-    ///    layer would only eat that group's own pixels.
+    /// 3. An `.erase` stroke is never inside *this* transparency layer: it lowers the alpha of
+    ///    everything accumulated beneath it, and punching inside the paint run's group would only eat
+    ///    that group's own pixels. It does open one of its own — BRUSH.md §2.11's stroke group, where
+    ///    its dabs accumulate removal *coverage* which is then punched out against the context in a
+    ///    single `.destinationOut` composite. That is the same distinction one level down: a punch
+    ///    inside a group eats the group, so the group is coverage and the punch is the merge.
     ///
     /// `insertionIndex(forKind:in:)` keeps fills/images ahead of strokes, so ordinary content has
     /// exactly one paint run. `quality` doesn't reach this logic — only `Self.draw(stroke:…)` branches
@@ -4283,8 +4286,16 @@ final class VectorCanvas {
     /// Uses the stroke's **own** samples even for a piece carrying a `DabLattice`: the lattice exists
     /// to reproduce the parent's dab *phase*, and there are no dabs here.
     ///
-    /// Width and opacity are taken once, at the mean pressure, rather than ramped per dab — a varying
-    /// width would need one stroked path per segment, giving back most of the cost this tier saves.
+    /// Width is taken once, at the mean pressure, rather than ramped per dab — a varying width would
+    /// need one stroked path per segment, giving back most of the cost this tier saves.
+    ///
+    /// **Opacity is the stroke's own, and since BRUSH.md §12 stage 8 the two tiers agree about it.**
+    /// This tier was accidentally already §2.11: one `strokePath` call cannot double-darken where the
+    /// path crosses itself, so a 40% stroke read 40% at the crossing here while the `.full` tier read
+    /// 64%. It used to multiply in the matrix's per-dab `opacity` output on top, which no longer
+    /// exists — the flow a stamp lays down is a statement about *stamps*, and this tier draws none.
+    /// The eraser arm punches at the stroke's opacity for the same reason; it punched at full
+    /// coverage whatever the eraser was set to, which the `.full` tier never did.
     private static func strokePolyline(stroke: VectorStroke, into cg: CGContext, isEraser: Bool) {
         guard let first = stroke.samples.first else { return }
         let meanPressure = Double(stroke.samples.reduce(0) { $0 + $1.pressure })
@@ -4310,15 +4321,15 @@ final class VectorCanvas {
         cg.setLineWidth(width)
         cg.setLineCap(.round)
         cg.setLineJoin(.round)
+        cg.setAlpha(CGFloat(stroke.opacity))
         if isEraser {
-            // `.destinationOut` with an opaque stroke colour punches at full coverage, matching the
-            // eraser dab path where `color` is ignored and only the stamp's alpha counts.
+            // `.destinationOut` with an opaque stroke colour punches at the stroke's own opacity,
+            // matching the eraser dab path where `color` is ignored and only coverage counts.
             cg.setBlendMode(.destinationOut)
             cg.setStrokeColor(UIColor.black.cgColor)
         } else {
             cg.setBlendMode(stroke.brush.stroke.blendMode.cgBlendMode)
             cg.setStrokeColor(stroke.uiColor.cgColor)
-            cg.setAlpha(CGFloat(stroke.opacity * meanValues.opacity))
         }
         cg.addPath(path)
         cg.strokePath()

@@ -17,6 +17,38 @@ import CoreGraphics
 protocol DabTarget: AnyObject {
     func beginStroke()
     func endStroke()
+
+    /// **BRUSH.md §2.11's stroke buffer, opened and closed round one stroke's whole walk.**
+    ///
+    /// Every dab between these two calls is laid down `.normal` at its own `flow`, into a surface of
+    /// the stroke's own; `endStrokeGroup` merges that surface into the target **once**, at `opacity`
+    /// and under `blendMode`. That is the whole of *"Opacity caps what the whole stroke can reach
+    /// however often it crosses itself; Flow is what one stamp lays down."* — a stroke that crosses
+    /// itself reaches `opacity` at the crossing and not `1 - (1 - opacity)²`, and an eraser at 50%
+    /// takes away 50% wherever it went however many times it went there.
+    ///
+    /// **`blendMode` is the stroke's, not the dab's.** A `.multiply` brush blends against what is
+    /// under the stroke rather than against its own overlaps, and `.destinationOut` — the eraser —
+    /// makes the buffer a *coverage* map that is punched out in one operation.
+    ///
+    /// **No bounds are passed, and that is a refutation rather than an omission.** The obvious design
+    /// hands the merge a conservative box derived from the samples and the brush; it cannot be made
+    /// safe, because `ResponseCurve` deliberately does not clamp its output (an overshooting handle
+    /// on a `size` row can exceed `Σ|amount|`), and a box that is too small does not cost memory, it
+    /// **clips ink**. So the merge collects the dabs it is given, takes the union of the rectangles
+    /// they actually painted, and opens its buffer over exactly that — exact by construction, on a
+    /// posed walk as much as a rest one, with nothing to keep in step. The collection costs ~100
+    /// bytes and one array append per dab against ~5.5 µs of drawing, which is under a part in five
+    /// hundred.
+    ///
+    /// Groups do **not** nest, and they are not `beginStroke`/`endStroke`: those bracket a *gesture*
+    /// on a persistent texture (`RasterLayerTexture.strokeCount`) and are deliberate no-ops on a
+    /// `StrokeScratch`, because `VectorCanvas.applyPreview` runs several `stampStroke` calls into one
+    /// scratch. A group per `stampStroke` call is exactly the right granularity there: the erase walk
+    /// gets its own `.destinationOut` group and each restamp its own normal one.
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode)
+    func endStrokeGroup()
+
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode)
 
@@ -68,6 +100,43 @@ func dabImageBounds(at point: CGPoint, diameter: CGFloat, angle: CGFloat) -> CGR
     let resampleSpill: CGFloat = 3
     let half = diameter / 2 * (abs(cos(angle)) + abs(sin(angle))) + resampleSpill
     return CGRect(x: point.x - half, y: point.y - half, width: half * 2, height: half * 2)
+}
+
+/// The pixels one round dab can touch. `options: []` on the radial gradient paints nothing past
+/// `radius`, so this is exact rather than padded — `dabImageBounds`' twin, and shared for the same
+/// reason: the dirty rect a stroke reports, the window a `StrokeScratch` grows and the buffer
+/// `beginStrokeGroup` merges through all have to contain what the draw actually painted.
+func dabCircleBounds(at point: CGPoint, radius: CGFloat) -> CGRect {
+    CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+}
+
+/// **One stroke's dabs, held between `beginStrokeGroup` and `endStrokeGroup`** — the buffer
+/// BRUSH.md §2.11 accepts, in the form that costs no pixels to decide how big it is.
+///
+/// `bounds` is the union of the rectangles the dabs will actually paint, so the merge's buffer is
+/// exactly the stroke's own footprint and nothing is ever clipped. Every `DabTarget` that draws
+/// pixels holds one of these while a group is open; the two that do not (`CollectingDabTarget`,
+/// `PosedDabTarget`) have nothing to buffer.
+struct StrokeGroupBuffer {
+    /// What the whole stroke may reach — BRUSH.md §2.11's cap.
+    let opacity: CGFloat
+    /// How the finished stroke meets what is under it.
+    let blendMode: CGBlendMode
+    private(set) var dabs: [BrushStamper.BakedDab] = []
+    /// Union of every dab's painted rectangle; `.null` while nothing has been laid.
+    private(set) var bounds: CGRect = .null
+
+    init(opacity: CGFloat, blendMode: CGBlendMode) {
+        self.opacity = opacity
+        self.blendMode = blendMode
+    }
+
+    mutating func add(_ dab: BrushStamper.BakedDab, painting rect: CGRect) {
+        dabs.append(dab)
+        bounds = bounds.isNull ? rect : bounds.union(rect)
+    }
+
+    var isEmpty: Bool { dabs.isEmpty }
 }
 
 /// **The dabs the render path actually put down** — `CompositeProbe` one level lower, for the same
@@ -144,7 +213,7 @@ enum DabProbe {
 /// while drawing.
 ///
 /// **The key deliberately excludes `alpha`, and that is the whole reason the cache works.** `alpha`
-/// is `brushOpacity × flow × the matrix's opacity output` — a different float on essentially every dab,
+/// is the matrix's `flow` output — a different float on essentially every dab,
 /// since pressure varies continuously. Keying on it would hit approximately never. Instead the entry
 /// is built at full alpha and the per-dab alpha is applied by `CGContext.setAlpha`.
 ///
@@ -407,13 +476,56 @@ final class CGContextDabTarget: DabTarget {
     func beginStroke() {}
     func endStroke() {}
 
+    /// The stroke's own buffer while §2.11's group is open — see `DabTarget.beginStrokeGroup`.
+    private var group: StrokeGroupBuffer?
+
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
+        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode)
+    }
+
+    /// One transparency layer over exactly the pixels the stroke painted, composited into the
+    /// context under the group's own alpha and blend mode.
+    ///
+    /// CoreGraphics applies the global alpha, the blend mode and the clip **in force when the layer
+    /// opened** to the finished layer as a whole, so this *is* the merge — there is no buffer to
+    /// allocate here and nothing to composite by hand.
+    func endStrokeGroup() {
+        guard let group else { return }
+        self.group = nil
+        guard !group.isEmpty, !group.bounds.isNull else { return }
+        ctx.saveGState()
+        ctx.clip(to: group.bounds)
+        ctx.setAlpha(group.opacity)
+        ctx.setBlendMode(group.blendMode)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        for dab in group.dabs { draw(dab) }
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
+    }
+
+    private func draw(_ dab: BrushStamper.BakedDab) {
+        switch dab.tip {
+        case .round(let hardness):
+            gradients.stamp(into: ctx, at: dab.center, radius: dab.radius, color: dab.color,
+                            alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
+        case .image(let texture, let angle):
+            images.stamp(into: ctx, texture: texture, at: dab.center, diameter: dab.radius * 2,
+                         angle: angle, color: dab.color, alpha: dab.alpha, blendMode: dab.blendMode)
+        }
+    }
+
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
         guard radius > 0, alpha > 0 else { return }
         dabCount += 1
         DabProbe.record(DabProbe.Dab(center: point, radius: radius, alpha: alpha))
-        gradients.stamp(into: ctx, at: point, radius: radius, color: color,
-                        alpha: alpha, hardness: hardness, blendMode: blendMode)
+        let dab = BrushStamper.BakedDab(center: point, radius: radius, color: color, alpha: alpha,
+                                        blendMode: blendMode, tip: .round(hardness: hardness))
+        if group != nil {
+            group?.add(dab, painting: dabCircleBounds(at: point, radius: radius))
+            return
+        }
+        draw(dab)
     }
 
     func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
@@ -423,8 +535,14 @@ final class CGContextDabTarget: DabTarget {
         // `radius` is half the tip's side, so `DabProbe`'s two dab kinds report the same quantity:
         // the half-extent a pose scales.
         DabProbe.record(DabProbe.Dab(center: point, radius: diameter / 2, alpha: alpha, angle: angle))
-        images.stamp(into: ctx, texture: texture, at: point, diameter: diameter, angle: angle,
-                     color: color, alpha: alpha, blendMode: blendMode)
+        let dab = BrushStamper.BakedDab(center: point, radius: diameter / 2, color: color,
+                                        alpha: alpha, blendMode: blendMode,
+                                        tip: .image(texture, angle: angle))
+        if group != nil {
+            group?.add(dab, painting: dabImageBounds(at: point, diameter: diameter, angle: angle))
+            return
+        }
+        draw(dab)
     }
 }
 
@@ -774,32 +892,101 @@ final class RasterLayerTexture: DabTarget {
     ///   - blendMode: `.normal` to paint, `.destinationOut` to erase (alpha controls erase strength).
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor, alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode = .normal) {
         guard radius > 0, alpha > 0 else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        guard let ctx = ensureContext() else { return }
-        dabGradients.stamp(into: ctx, at: point, radius: radius, color: color,
-                           alpha: alpha, hardness: hardness, blendMode: blendMode)
         // `options: []` on the radial gradient paints nothing past `radius`, so the dab's bounding
         // box is exactly this — no need to pad for spill.
-        let dab = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-        _strokeDirtyRect = _strokeDirtyRect?.union(dab) ?? dab
-        cachedImage = nil
-        version += 1
+        let bounds = dabCircleBounds(at: point, radius: radius)
+        lock.lock()
+        defer { lock.unlock() }
+        let dab = BrushStamper.BakedDab(center: point, radius: radius, color: color, alpha: alpha,
+                                        blendMode: blendMode, tip: .round(hardness: hardness))
+        record(dab, painting: bounds)
+        // Held for the merge rather than drawn — the bitmap is not touched until `endStrokeGroup`,
+        // which is also what keeps a group over a blank tier from materialising one.
+        if group != nil { return }
+        guard let ctx = ensureContext() else { return }
+        draw(dab, into: ctx)
     }
 
     /// Stamps one oriented, tinted alpha stamp — `stampCircle`'s twin, and the same bookkeeping.
     func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
                     angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
         guard diameter > 0, alpha > 0 else { return }
+        let bounds = dabImageBounds(at: point, diameter: diameter, angle: angle)
         lock.lock()
         defer { lock.unlock() }
+        let dab = BrushStamper.BakedDab(center: point, radius: diameter / 2, color: color,
+                                        alpha: alpha, blendMode: blendMode,
+                                        tip: .image(texture, angle: angle))
+        record(dab, painting: bounds)
+        if group != nil { return }
         guard let ctx = ensureContext() else { return }
-        dabImages.stamp(into: ctx, texture: texture, at: point, diameter: diameter, angle: angle,
-                        color: color, alpha: alpha, blendMode: blendMode)
-        let dab = dabImageBounds(at: point, diameter: diameter, angle: angle)
-        _strokeDirtyRect = _strokeDirtyRect?.union(dab) ?? dab
+        draw(dab, into: ctx)
+    }
+
+    // MARK: - BRUSH.md §2.11's stroke group
+
+    /// The stroke's own buffer while a group is open. Non-nil only between `beginStrokeGroup` and
+    /// `endStrokeGroup`, and only ever touched under `lock`.
+    private var group: StrokeGroupBuffer?
+
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
+        lock.lock()
+        defer { lock.unlock() }
+        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode)
+    }
+
+    /// Merges the group's dabs into the bitmap once, at the group's own alpha and blend mode.
+    ///
+    /// **Nothing is allocated for a group that laid no dabs**, which is what keeps an eraser over a
+    /// tier with no bitmap from being the thing that opens the canvas buffer: `ensureContext` is not
+    /// reached until there is something to draw, exactly as it was not reached before this stage
+    /// when no dab was stamped.
+    func endStrokeGroup() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let group else { return }
+        self.group = nil
+        guard !group.isEmpty, !group.bounds.isNull, let ctx = ensureContext() else { return }
+        ctx.saveGState()
+        ctx.clip(to: group.bounds)
+        ctx.setAlpha(group.opacity)
+        ctx.setBlendMode(group.blendMode)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        for dab in group.dabs { draw(dab, into: ctx) }
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
         cachedImage = nil
         version += 1
+    }
+
+    /// The dirty rect, the invalidation and — while a group is open — the dab itself. Called under
+    /// `lock` by both stamp entry points, so the bookkeeping a dab does is written once.
+    ///
+    /// **The invalidation belongs to the pixels and not to the call.** A buffered dab has not
+    /// touched the bitmap, so bumping `version` for it would tell every cache keyed on this texture
+    /// that the picture had changed while it had not; `endStrokeGroup` bumps once, when it has. The
+    /// *dirty rect* is the other way round — it is the union of what the stroke will have painted by
+    /// the time anything reads it, and undo crops to it after the group has closed.
+    private func record(_ dab: BrushStamper.BakedDab, painting bounds: CGRect) {
+        _strokeDirtyRect = _strokeDirtyRect?.union(bounds) ?? bounds
+        if group != nil {
+            group?.add(dab, painting: bounds)
+            return
+        }
+        cachedImage = nil
+        version += 1
+    }
+
+    /// One dab onto the bitmap, with no bookkeeping — the half `endStrokeGroup` replays.
+    private func draw(_ dab: BrushStamper.BakedDab, into ctx: CGContext) {
+        switch dab.tip {
+        case .round(let hardness):
+            dabGradients.stamp(into: ctx, at: dab.center, radius: dab.radius, color: dab.color,
+                               alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
+        case .image(let texture, let angle):
+            dabImages.stamp(into: ctx, texture: texture, at: dab.center, diameter: dab.radius * 2,
+                            angle: angle, color: dab.color, alpha: dab.alpha, blendMode: dab.blendMode)
+        }
     }
 
     /// Restores the stroke count on its own, for undo/redo paths that put pixels back with
@@ -835,13 +1022,36 @@ final class RasterLayerTexture: DabTarget {
     /// and chosen by `StrokeScratch.commit(into:)`: a paint stroke's scratch holds only the stroke's
     /// own ink, and source-over is associative, so drawing it here is pixel-identical to having
     /// stamped every dab straight into this texture.
-    func composite(patch: UIImage, at origin: CGPoint) {
+    func composite(patch: UIImage, at origin: CGPoint,
+                   opacity: CGFloat = 1, blendMode: CGBlendMode = .normal) {
         lock.lock()
         defer { lock.unlock() }
         guard let ctx = ensureContext() else { return }
         // ctx is flipped to top-left, so UIImage.draw lands right-side up (same as `setContents`).
         UIGraphicsPushContext(ctx)
-        patch.draw(in: CGRect(origin: origin, size: patch.size))
+        patch.draw(in: CGRect(origin: origin, size: patch.size), blendMode: blendMode, alpha: opacity)
+        UIGraphicsPopContext()
+        cachedImage = nil
+        version += 1
+    }
+
+    /// **Takes `patch`'s coverage away from the region at `origin`, at `opacity`** — the third of
+    /// this class's patch merges, beside `composite` (source-over) and `restore` (`.copy`), and the
+    /// one BRUSH.md §2.11's eraser needs.
+    ///
+    /// `patch` is a *coverage* map, not a picture: only its alpha is read, and what is left behind is
+    /// `destination · (1 - opacity · patch.alpha)`. That is the whole of *"a 50% eraser removes
+    /// exactly 50% wherever the stroke goes, however often it crosses back over itself"* — N dabs at
+    /// `aᵢ` punched one at a time leave `∏(1 - aᵢ)`, which cannot be capped, whereas the same dabs
+    /// accumulated source-over reach `A = 1 - ∏(1 - aᵢ)` and one punch at `o` leaves `1 - o·A`. At
+    /// `o == 1` the two are the same number; below it, only this one obeys the cap.
+    func erase(patch: UIImage, at origin: CGPoint, opacity: CGFloat) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let ctx = ensureContext() else { return }
+        UIGraphicsPushContext(ctx)
+        patch.draw(in: CGRect(origin: origin, size: patch.size), blendMode: .destinationOut,
+                   alpha: opacity)
         UIGraphicsPopContext()
         cachedImage = nil
         version += 1

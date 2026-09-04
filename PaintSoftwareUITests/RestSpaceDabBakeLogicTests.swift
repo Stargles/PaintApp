@@ -51,7 +51,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     private let seed = DabRandom.seed(for: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!)
 
     private func bake(_ samples: StrokeSamples, _ brush: Brush,
-                      size: CGFloat = 24) -> [BrushStamper.BakedDab] {
+                      size: CGFloat = 24) -> BrushStamper.BakedStroke {
         BrushStamper.bake(samples: samples, brush: brush, color: .black,
                           brushSize: size, brushOpacity: 1, random: DabRandom(seed: seed))
     }
@@ -226,7 +226,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// MEASURED across four maps at zero tolerance: min ratio == max ratio == `sqrt(|det|)` to twelve
     /// digits, and `constantScale` holds that number rather than nil.
     func testWidthUnderAnAffineIsExactlyTheAreaRoot() throws {
-        let rest = bake(run(), BrushLibrary.hardRound)
+        let rest = bake(run(), BrushLibrary.hardRound).dabs
         let maps: [CGAffineTransform] = [
             CGAffineTransform(scaleX: 2, y: 2),
             CGAffineTransform(scaleX: 4, y: 1),
@@ -271,7 +271,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// stroke's own midpoint, which is the most favourable scalar available — is wrong at the ends by
     /// a margin this asserts. `DabPose` answers per dab, so it is right at every one.
     func testAProjectivePoseHasPerDabWidthWhereAScalarCannot() throws {
-        let rest = bake(diagonal(), BrushLibrary.hardRound)
+        let rest = bake(diagonal(), BrushLibrary.hardRound).dabs
         let box = CGSize(width: 120, height: 80)
         let keystone = Quad(CGPoint(x: 0, y: 0), CGPoint(x: 120, y: 0),
                             CGPoint(x: 96, y: 80), CGPoint(x: 24, y: 80))
@@ -355,8 +355,8 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
             random: ink.dabRandom)
 
         XCTAssertGreaterThan(rendered.count, 100, "Setup: there are dabs to compare")
-        XCTAssertEqual(rendered.count, direct.count)
-        XCTAssertEqual(rendered, direct.map {
+        XCTAssertEqual(rendered.count, direct.dabs.count)
+        XCTAssertEqual(rendered, direct.dabs.map {
             DabProbe.Dab(center: $0.center, radius: $0.radius, alpha: $0.alpha)
         }, "the unposed arm is the walk it always was")
     }

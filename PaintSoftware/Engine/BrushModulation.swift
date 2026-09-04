@@ -21,9 +21,10 @@ import UIKit
 enum BrushOutput: String, Codable, CaseIterable, Hashable {
     /// A multiplier on the stroke's own diameter — `1` is full width.
     case size
-    /// A multiplier on the stroke's own opacity.
-    case opacity
-    /// The per-stamp coverage multiplier (build-up as stamps overlap).
+    /// **What one stamp lays down** — BRUSH.md §2.11. The stroke's own opacity is the *cap* on what
+    /// all of them together may reach, and it is not an output at all: it belongs to the stroke, is
+    /// applied once at the merge (`DabTarget.beginStrokeGroup`), and cannot be modulated per dab
+    /// without being the thing it caps.
     case flow
     /// The tip's rotation, in **turns**. See `BrushAngleSettings` — the one output that is not a
     /// plain sum of a base and its rows.
@@ -47,7 +48,9 @@ enum BrushOutput: String, Codable, CaseIterable, Hashable {
     var channelBase: UInt64 {
         switch self {
         case .size: return 1
-        case .opacity: return 2
+        // 2 was `opacity`, deleted by §12 stage 8 when the cap moved onto the stroke. The gap
+        // stays: this comment's own instruction is "add cases, never renumber them", and a
+        // renumber re-rolls every stroke drawn with a randomised brush.
         case .flow: return 3
         case .angle: return 4
         case .spacing: return 5
@@ -64,7 +67,7 @@ enum BrushOutput: String, Codable, CaseIterable, Hashable {
     /// carries and the identity a row is added on top of.
     var neutralBase: Double {
         switch self {
-        case .size, .opacity, .flow, .density: return 1
+        case .size, .flow, .density: return 1
         case .spacing: return 0.1
         case .hardness: return 0.8
         case .angle, .scatter, .hue, .saturation, .brightness: return 0
@@ -259,8 +262,8 @@ struct BrushModulations: Codable, Hashable {
 struct BrushDabValues: Equatable {
     /// Fraction of the stroke's own diameter.
     var size: Double
-    /// Multiplier on the stroke's own opacity.
-    var opacity: Double
+    /// **What this one stamp lays down**, and the whole of a dab's alpha — BRUSH.md §2.11. The
+    /// stroke's opacity is not here and never was a dab quantity: it caps the *sum* of the stamps.
     var flow: Double
     /// Fraction of the stroke's own diameter — the gap leading **away** from this dab.
     var spacing: Double
@@ -291,7 +294,7 @@ extension Brush {
     /// One pass over the rows, accumulating into locals — no dictionary, no allocation, and nothing at
     /// all for a brush with no rows, which is what every dab of an unmodulated brush costs.
     func dabValues(_ reading: (BrushInput) -> CGFloat) -> BrushDabValues {
-        var values = BrushDabValues(size: dab.size, opacity: dab.opacity, flow: dab.flow,
+        var values = BrushDabValues(size: dab.size, flow: dab.flow,
                                     spacing: dab.spacing, hardness: dab.hardness, scatter: dab.scatter,
                                     density: dab.density, angleTurns: dab.angle.base,
                                     hueShift: dab.hueShift, saturationShift: dab.saturationShift,
@@ -308,7 +311,6 @@ extension Brush {
             let contribution = row.contribution(reading(row.input))
             switch row.output {
             case .size: values.size += contribution
-            case .opacity: values.opacity += contribution
             case .flow: values.flow += contribution
             case .angle: values.angleTurns += contribution
             case .spacing: values.spacing += contribution
@@ -345,15 +347,20 @@ extension Brush {
 /// The reason §6 gives is a persistence one: `Brush`'s `Codable` is compiler-synthesized, so every new
 /// flat key is a decode-compatibility question and a nested field with a default is not.
 ///
-/// **`size` and `opacity` here are fractions, and `Brush.size` and `Brush.opacity` are the stroke's
-/// own diameter and opacity.** They are genuinely two different numbers: the stroke's are per-stroke,
-/// come from the toolbar, and are multiplied by a lasso resize; these are per-dab and are what the
-/// matrix moves. `BrushStamper` multiplies one by the other.
+/// **`size` here is a fraction and `Brush.size` is the stroke's own diameter.** They are genuinely
+/// two different numbers: the stroke's is per-stroke, comes from the toolbar, and is multiplied by a
+/// lasso resize; this one is per-dab and is what the matrix moves. `BrushStamper` multiplies one by
+/// the other.
+///
+/// **`Brush.opacity` has no counterpart here, and since §12 stage 8 that is the point.** BRUSH.md
+/// §2.11 makes opacity a property of the *stroke* — the cap on what all its stamps together may
+/// reach — and `flow` the property of one stamp. A per-dab opacity multiplier would be a second way
+/// to spell flow, which is §10's two-ways-to-compute trap with a ruling attached.
 struct BrushDabSettings: Codable, Hashable {
     /// Fraction of the stroke's diameter, before modulation. §6's `size` output.
     var size: Double = BrushOutput.size.neutralBase
-    /// Multiplier on the stroke's opacity, before modulation.
-    var opacity: Double = BrushOutput.opacity.neutralBase
+    /// **What one stamp lays down**, before modulation — §6's `flow` output and BRUSH.md §2.11's
+    /// half of the pair. The other half, the stroke's opacity, is `Brush.opacity` and the toolbar's.
     var flow: Double = BrushOutput.flow.neutralBase
     /// Distance between stamps, as a fraction of the stroke's diameter.
     var spacing: Double = BrushOutput.spacing.neutralBase
@@ -386,7 +393,7 @@ struct BrushDabSettings: Codable, Hashable {
 
 extension BrushDabSettings {
     private enum CodingKeys: String, CodingKey {
-        case size, opacity, flow, spacing, hardness, scatter, density, densityWavelength, angle
+        case size, flow, spacing, hardness, scatter, density, densityWavelength, angle
         case hueShift, saturationShift, brightnessShift
     }
 
@@ -396,7 +403,6 @@ extension BrushDabSettings {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = BrushDabSettings.default
         size = try c.decodeIfPresent(Double.self, forKey: .size) ?? d.size
-        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? d.opacity
         flow = try c.decodeIfPresent(Double.self, forKey: .flow) ?? d.flow
         spacing = try c.decodeIfPresent(Double.self, forKey: .spacing) ?? d.spacing
         hardness = try c.decodeIfPresent(Double.self, forKey: .hardness) ?? d.hardness
@@ -513,11 +519,16 @@ extension BrushModulation {
         BrushModulation(.size, .pressure, amount: amount, curve: .ramp(from: atZero, to: 1))
     }
 
-    /// **`opacity ← pressure`** — a feather-light touch fades to nothing, mixed in at `amount`.
+    /// **`flow ← pressure`** — a feather-light touch lays down less ink, mixed in at `amount`.
     /// Straight through, so with a base of `1 - amount` it is `(1 - k) + k · p`, which is
     /// `BrushDynamics.opacityFraction` to the bit.
-    static func opacityFromPressure(amount: Double) -> BrushModulation {
-        BrushModulation(.opacity, .pressure, amount: amount)
+    ///
+    /// **It drives `flow` since §12 stage 8, and the rename is the ruling.** *"Pressure drives flow,
+    /// not a per-dab ceiling"*: a light pass is faint, and going over it again darkens it — up to the
+    /// stroke's opacity and no further. The arithmetic is unchanged; what changed is which of the two
+    /// numbers §2.11 separates it is the arithmetic *of*.
+    static func flowFromPressure(amount: Double) -> BrushModulation {
+        BrushModulation(.flow, .pressure, amount: amount)
     }
 
     /// **`density ← pressure`, BRUSH.md §2.18 and §2.19** — the rough ink nib's dropout.

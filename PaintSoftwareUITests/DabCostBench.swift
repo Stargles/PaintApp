@@ -118,7 +118,7 @@ final class DabCostBench: XCTestCase {
     func testABrushWithNoModulationsAtAll() {
         var plain = BrushLibrary.hardRound
         plain.dab.size = 1
-        plain.dab.opacity = 1
+        plain.dab.flow = 1
         plain.modulations = BrushModulations()
         measureWalk("no rows", brush: plain)
     }
@@ -129,7 +129,7 @@ final class DabCostBench: XCTestCase {
     func testOneRowWithNoCurve() {
         var one = BrushLibrary.hardRound
         one.dab.size = 1
-        one.dab.opacity = 1
+        one.dab.flow = 1
         one.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: -0.4)])
         measureWalk("one row, linear curve", brush: one)
     }
@@ -139,9 +139,9 @@ final class DabCostBench: XCTestCase {
     func testTwoRowsWithNoCurves() {
         var two = BrushLibrary.hardRound
         two.dab.size = 0.6
-        two.dab.opacity = 0.9
+        two.dab.flow = 0.9
         two.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.4),
-                                            BrushModulation(.opacity, .pressure, amount: 0.1)])
+                                            BrushModulation(.flow, .pressure, amount: 0.1)])
         measureWalk("two rows, linear curves", brush: two)
     }
 

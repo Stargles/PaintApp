@@ -123,11 +123,31 @@ enum BrushStamper {
     /// skipped dab: the lattice is a property of the walk, not of what came out of it. A cut piece and
     /// the uncut stroke march identically or the zero-tolerance parity net fails on the first dab past
     /// the cut.
+    ///
+    /// ## The whole walk is one group — BRUSH.md §2.11
+    ///
+    /// `brushOpacity` no longer reaches a dab. It is the **cap** on what this stroke may reach however
+    /// often it crosses itself, and it is applied once, by the `beginStrokeGroup`/`endStrokeGroup`
+    /// bracket round the walk; a dab inside lays down its own `flow`, `.normal`. The brush's blend
+    /// mode — or `.destinationOut` when this is an eraser — travels on the group for the same reason:
+    /// a `.multiply` stroke blends against what is under it rather than against its own overlaps.
+    ///
+    /// **A group per `stampStroke` call is the right granularity**, and it is why this is not on
+    /// `beginStroke`/`endStroke`. `VectorCanvas.applyPreview` runs several of these into one
+    /// `StrokeScratch` — an erase walk and then a restamp per surviving piece — and each wants its own
+    /// merge with its own blend mode.
     static func stampStroke(into raster: DabTarget, samples: StrokeSamples, brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
                             random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
+        raster.beginStrokeGroup(opacity: CGFloat(brushOpacity),
+                                blendMode: isEraser ? .destinationOut
+                                                    : brush.stroke.blendMode.cgBlendMode)
+        defer {
+            raster.endStrokeGroup()
+            raster.endStroke()
+        }
         let path = StrokePath(points: samples.positions)
         // **BRUSH.md §13's open question, answered by §12 stage 7: a *replay* knows how long the
         // stroke is, and a live walk does not.** This one is replaying stored geometry, so the length
@@ -156,8 +176,7 @@ enum BrushStamper {
         var resolved = values(at: DabSite(parameter: 0, arcWidths: 0))
         if draws(at: 0) {
             stampDab(into: raster, at: samples.positions[0], brush: brush, values: resolved,
-                     color: color, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
-                     random: random, arcWidths: arcWidths)
+                     color: color, brushSize: brushSize, random: random, arcWidths: arcWidths)
         }
         var carry = WalkCarry(spacing: stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
         for index in 0..<max(samples.count - 1, 0) {
@@ -177,13 +196,11 @@ enum BrushStamper {
                 // channel gets the neutral here and nowhere else.
                 if draws(at: site.parameter) {
                     stampDab(into: raster, at: dab, brush: brush, values: resolved,
-                             color: color, brushSize: brushSize, brushOpacity: brushOpacity,
-                             isEraser: isEraser, random: random, arcWidths: arcWidths)
+                             color: color, brushSize: brushSize, random: random, arcWidths: arcWidths)
                 }
                 return stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
         }
-        raster.endStroke()
     }
 
     /// **Turns one dab's resolved §6 outputs into one stamp.** The other half of the matrix: `values`
@@ -196,11 +213,16 @@ enum BrushStamper {
     /// dropout, the scatter offset, and the angle's jitter. That is what lets `BrushDabValues` be
     /// answerable by a caller with a pressure and no stroke (`Brush.dabValues(atPressure:)`).
     ///
-    /// The eraser reuses this exact pipeline rather than a special-cased hard circle: it "paints"
-    /// with the same tip/matrix/spacing as any other brush, just composited with `.destinationOut`
-    /// instead of the brush's own blend mode — i.e. painting with 0 opacity as the color, so its
-    /// stamp punches a hole instead of adding color. `color` is irrelevant under `.destinationOut`
-    /// (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
+    /// **A dab lays down its `flow` and nothing else — BRUSH.md §2.11.** *"Flow is what one stamp
+    /// lays down"*; the stroke's own opacity and its blend mode are the group's business
+    /// (`DabTarget.beginStrokeGroup`), applied once when the whole walk merges. So there is no
+    /// `brushOpacity` here to multiply in and no `isEraser` to switch a blend mode on: the alpha is
+    /// the matrix's `flow` output and the blend is `.normal`, on the eraser exactly as on the brush.
+    ///
+    /// The eraser reuses this pipeline rather than a special-cased hard circle: it "paints" with the
+    /// same tip/matrix/spacing as any other brush, and its dabs accumulate **coverage** which the
+    /// group then punches out with `.destinationOut` in one operation. `color` is irrelevant under
+    /// that punch (only the coverage's alpha matters), so an eraser's colour is arbitrary.
     ///
     /// `random` and `arcWidths` say **where in the stroke's random field** this dab sits — the field,
     /// and how far along the stroke it is in brush widths. There is one entry point rather than a
@@ -208,7 +230,6 @@ enum BrushStamper {
     /// from a replayed one, and the seed exists at pen-down.
     static func stampDab(into raster: DabTarget, at point: CGPoint, brush: Brush,
                          values: BrushDabValues, color: UIColor, brushSize: CGFloat,
-                         brushOpacity: Double, isEraser: Bool,
                          random: DabRandom, arcWidths: CGFloat) {
         // **BRUSH.md §2.18 — the dab is skipped when its draw exceeds its density.**
         //
@@ -223,13 +244,14 @@ enum BrushStamper {
         }
         let diameter = max(brushSize * CGFloat(values.size), 0.5)
         let radius = diameter / 2
-        let alpha = CGFloat(brushOpacity) * CGFloat(values.flow) * CGFloat(values.opacity)
+        let alpha = CGFloat(values.flow)
         guard alpha > 0, radius > 0 else { return }
 
         let stampPoint = applyScatter(to: point, radius: radius, scatter: values.scatter,
                                       random: random, arcWidths: arcWidths)
         let hardness = CGFloat(values.hardness)
-        let blendMode = isEraser ? CGBlendMode.destinationOut : brush.stroke.blendMode.cgBlendMode
+        // `.normal` on every dab, brush and eraser alike: the stroke's blend mode is the group's.
+        let blendMode = CGBlendMode.normal
         // §6's hue/saturation/brightness outputs. Guarded rather than always applied: both dab caches
         // are keyed on the colour, so a per-dab colour is `DabGradientCache`'s own named pathological
         // case. A brush that asks for colour jitter pays for it; one that does not pays a comparison.
@@ -414,9 +436,20 @@ extension BrushStamper {
     /// It has state, so each bake owns one rather than sharing.
     final class CollectingDabTarget: DabTarget {
         private(set) var dabs: [BakedDab] = []
+        /// **The stroke-level merge, kept beside the dabs rather than folded into them** — BRUSH.md
+        /// §2.11. A flat `[BakedDab]` cannot carry an opacity cap or a blend mode that belong to the
+        /// walk as a whole, and folding either into each dab would be exactly the double-darkening
+        /// the cap exists to prevent.
+        private(set) var opacity: CGFloat = 1
+        private(set) var blendMode: CGBlendMode = .normal
         init() {}
         func beginStroke() {}
         func endStroke() {}
+        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
+            self.opacity = opacity
+            self.blendMode = blendMode
+        }
+        func endStrokeGroup() {}
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
             dabs.append(BakedDab(center: point, radius: radius, color: color, alpha: alpha,
@@ -456,6 +489,15 @@ extension BrushStamper {
         func beginStroke() { inner.beginStroke() }
         func endStroke() { inner.endStroke() }
 
+        /// Forwarded untouched. A pose moves, scales and turns *dabs*; it has no opinion about what
+        /// the finished stroke may reach or how it meets what is under it — and because the merge's
+        /// buffer is sized from the dabs it is actually handed (`DabTarget.beginStrokeGroup`), the
+        /// posed dabs bound it with no transform of a rectangle to get wrong.
+        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
+            inner.beginStrokeGroup(opacity: opacity, blendMode: blendMode)
+        }
+        func endStrokeGroup() { inner.endStrokeGroup() }
+
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
             guard let center = pose.map.map(point), let k = pose.scale(at: point) else { return }
@@ -474,27 +516,43 @@ extension BrushStamper {
         }
     }
 
+    /// **A whole baked walk: its dabs, and the merge they belong to.**
+    ///
+    /// The opacity and the blend mode are here rather than on `BakedDab` because BRUSH.md §2.11 puts
+    /// them on the *stroke*: they are applied once, over all the dabs together, and a per-dab copy of
+    /// either would reintroduce exactly the double-darkening the cap exists to prevent.
+    struct BakedStroke: Equatable {
+        var dabs: [BakedDab]
+        var opacity: CGFloat
+        var blendMode: CGBlendMode
+    }
+
     /// Walks a stroke in **rest space** and keeps its dabs instead of drawing them. Same arguments as
     /// `stampStroke`, because it is `stampStroke` — into a collector.
     static func bake(samples: StrokeSamples, brush: Brush, color: UIColor, brushSize: CGFloat,
                      brushOpacity: Double, isEraser: Bool = false,
-                     random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) -> [BakedDab] {
+                     random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) -> BakedStroke {
         let collector = CollectingDabTarget()
         stampStroke(into: collector, samples: samples, brush: brush, color: color,
                     brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
                     random: random, visibleRange: visibleRange)
-        return collector.dabs
+        return BakedStroke(dabs: collector.dabs, opacity: collector.opacity,
+                           blendMode: collector.blendMode)
     }
 
     /// Draws a baked walk through a pose. The replay entry point §4.2 asks for, and the same
     /// arithmetic `PosedDabTarget` applies — shared through `DabPose.applied(to:)` so a stored bake
     /// and a streamed one cannot drift.
     ///
+    /// The stroke's own group is opened round the replay, so a bake drawn back lands the same pixels
+    /// the walk that produced it would have — cap included.
+    ///
     /// A dab the pose has no image for is dropped rather than clamped: it is behind the vanishing
     /// line, where there is no answer to draw.
-    static func replay(_ dabs: [BakedDab], into target: DabTarget, through pose: DabPose) {
+    static func replay(_ stroke: BakedStroke, into target: DabTarget, through pose: DabPose) {
         target.beginStroke()
-        for dab in dabs {
+        target.beginStrokeGroup(opacity: stroke.opacity, blendMode: stroke.blendMode)
+        for dab in stroke.dabs {
             guard let moved = pose.applied(to: dab) else { continue }
             switch moved.tip {
             case .round(let hardness):
@@ -505,6 +563,7 @@ extension BrushStamper {
                                   color: moved.color, alpha: moved.alpha, blendMode: moved.blendMode)
             }
         }
+        target.endStrokeGroup()
         target.endStroke()
     }
 }

@@ -20,7 +20,12 @@ enum BrushLibrary {
     ///
     /// - `dab.size` is `1 - k` and one `size ← pressure` row of amount `k` ramps from `m` to 1. Read
     ///   plainly: *that fraction of the width is fixed, the rest comes from the pen.*
-    /// - `dab.opacity` is `1 - o` and one `opacity ← pressure` row of amount `o` runs straight through.
+    /// - `dab.flow` is `1 - o` and one `flow ← pressure` row of amount `o` runs straight through.
+    ///   **That row drove `opacity` until §12 stage 8**, which deleted the output: BRUSH.md §2.11
+    ///   makes opacity the stroke's cap and flow what one stamp lays down, and pressure drives flow.
+    ///   The numbers are untouched, so a single pass of any preset is the ink it always was; what
+    ///   changed is that a second pass over the same ground now darkens toward the stroke's opacity
+    ///   instead of past it.
     ///
     /// **Byte-identical, not merely equivalent** — the association and the order of operations are
     /// preserved exactly, and `ResponseCurve.scale`'s power of two is what makes the curve half exact.
@@ -29,44 +34,44 @@ enum BrushLibrary {
     static let softRound = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000001")!,
         name: "Soft Round", tip: .round, size: 18,
-        dab: BrushDabSettings(size: 0.5, opacity: 0.4, spacing: 0.08, hardness: 0.15),
+        dab: BrushDabSettings(size: 0.5, flow: 0.4, spacing: 0.08, hardness: 0.15),
         stroke: BrushStrokeSettings(stabilization: 0.25),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.5, atZero: 0.2),
-            .opacityFromPressure(amount: 0.6)
+            .flowFromPressure(amount: 0.6)
         ])
     )
 
     static let hardRound = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000002")!,
         name: "Hard Round", tip: .round, size: 10,
-        dab: BrushDabSettings(size: 0.6, opacity: 0.9, spacing: 0.05, hardness: 0.95),
+        dab: BrushDabSettings(size: 0.6, flow: 0.9, spacing: 0.05, hardness: 0.95),
         stroke: BrushStrokeSettings(stabilization: 0.1),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.4, atZero: 0.4),
-            .opacityFromPressure(amount: 0.1)
+            .flowFromPressure(amount: 0.1)
         ])
     )
 
     static let pencil = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000003")!,
         name: "Pencil", tip: .round, size: 6, opacity: 0.9,
-        dab: BrushDabSettings(size: 0.7, opacity: 0.5, spacing: 0.04, hardness: 0.7),
+        dab: BrushDabSettings(size: 0.7, flow: 0.5, spacing: 0.04, hardness: 0.7),
         stroke: BrushStrokeSettings(stabilization: 0.15),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.3, atZero: 0.5),
-            .opacityFromPressure(amount: 0.5)
+            .flowFromPressure(amount: 0.5)
         ])
     )
 
     static let pen = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000004")!,
         name: "Pen", tip: .round, size: 4, opacity: 1,
-        dab: BrushDabSettings(size: 0.85, opacity: 0.95, spacing: 0.03, hardness: 1.0),
+        dab: BrushDabSettings(size: 0.85, flow: 0.95, spacing: 0.03, hardness: 1.0),
         stroke: BrushStrokeSettings(stabilization: 0.4),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.15, atZero: 0.85),
-            .opacityFromPressure(amount: 0.05)
+            .flowFromPressure(amount: 0.05)
         ])
     )
 
@@ -76,11 +81,11 @@ enum BrushLibrary {
     static let square = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000005")!,
         name: "Square", tip: .stamp(.builtIn(.square)), size: 16,
-        dab: BrushDabSettings(size: 0.7, opacity: 0.8, spacing: 0.15),
+        dab: BrushDabSettings(size: 0.7, flow: 0.8, spacing: 0.15),
         stroke: BrushStrokeSettings(stabilization: 0.2),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.3, atZero: 0.5),
-            .opacityFromPressure(amount: 0.2)
+            .flowFromPressure(amount: 0.2)
         ])
     )
 

@@ -62,7 +62,7 @@ final class DabRandomLogicTests: XCTestCase {
                                           brushSize: size, brushOpacity: 1, random: random)
         let straight = BrushStamper.bake(samples: stamperSamples, brush: clean, color: .black,
                                          brushSize: size, brushOpacity: 1, random: random)
-        return zip(scattered, straight).map {
+        return zip(scattered.dabs, straight.dabs).map {
             CGPoint(x: $0.center.x - $1.center.x, y: $0.center.y - $1.center.y)
         }
     }
@@ -263,16 +263,14 @@ final class DabRandomLogicTests: XCTestCase {
             for sample in raw {
                 guard let previous = last else {
                     BrushStamper.stampDab(into: collector, at: sample.point, brush: live, values: values,
-                                          color: .black, brushSize: size, brushOpacity: 1,
-                                          isEraser: false, random: random, arcWidths: arc)
+                                          color: .black, brushSize: size, random: random, arcWidths: arc)
                     last = sample.point
                     continue
                 }
                 let walk = BrushStamper.advance(from: previous, to: sample.point, spacing: spacing) { dab, _, walked in
                     arc += walked / size
                     BrushStamper.stampDab(into: collector, at: dab, brush: live, values: values,
-                                          color: .black, brushSize: size, brushOpacity: 1,
-                                          isEraser: false, random: random, arcWidths: arc)
+                                          color: .black, brushSize: size, random: random, arcWidths: arc)
                     return spacing
                 }
                 last = walk.carry
@@ -338,7 +336,7 @@ final class DabRandomLogicTests: XCTestCase {
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
         let whole = BrushStamper.bake(samples: stroke.samples,
                                       brush: brush, color: .black, brushSize: 10, brushOpacity: 1,
-                                      random: stroke.dabRandom)
+                                      random: stroke.dabRandom).dabs
 
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
         // A short eraser stroke across the far end of the line.
@@ -353,9 +351,9 @@ final class DabRandomLogicTests: XCTestCase {
         let survived = BrushStamper.bake(samples: head.samples,
                                          brush: head.brush, color: .black, brushSize: head.size,
                                          brushOpacity: 1, random: head.dabRandom)
-        XCTAssertGreaterThan(survived.count, 10, "the surviving head should still be most of the line")
-        for index in 0..<survived.count {
-            Self.assertEqual(survived[index].center, whole[index].center,
+        XCTAssertGreaterThan(survived.dabs.count, 10, "the surviving head should still be most of the line")
+        for index in 0..<survived.dabs.count {
+            Self.assertEqual(survived.dabs[index].center, whole[index].center,
                              "dab \(index) of the surviving head moved when the far end was erased")
         }
     }

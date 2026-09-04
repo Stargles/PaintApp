@@ -20,8 +20,13 @@ struct StrokeSettingsSpec {
 }
 
 /// Procreate-style stroke settings: a horizontally-scrolling preset picker and sliders for every
-/// `Brush` setting expected to be user-tunable day to day (size, opacity, pressure dynamics,
+/// `Brush` setting expected to be user-tunable day to day (size, opacity, flow, pressure dynamics,
 /// stabilization, spacing).
+///
+/// **Opacity and Flow are two sliders because BRUSH.md §2.11 makes them two things.** Opacity caps
+/// what the whole stroke may reach however often it crosses itself; Flow is what one stamp lays
+/// down. Set Flow low and a single pass is faint, a second pass over it darker — up to Opacity and
+/// no further.
 ///
 /// `accessory` is extra content placed between the sliders and the preview (the paint brush's
 /// custom-texture import; the eraser has none), and `preview` is the panel's own swatch, which
@@ -64,6 +69,13 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
                     idSuffix: "opacitySlider"
                 )
                 sliderRow(
+                    title: "Flow",
+                    valueText: "\(Int(brush.dab.flow * 100))%",
+                    value: brushBinding(\.dab.flow),
+                    range: 0...1,
+                    idSuffix: "flowSlider"
+                )
+                sliderRow(
                     title: "Pressure → Size",
                     valueText: "\(Int(pressureAmount(.size) * 100))%",
                     value: pressureAmountBinding(.size),
@@ -71,11 +83,11 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
                     idSuffix: "pressureSizeSlider"
                 )
                 sliderRow(
-                    title: "Pressure → Opacity",
-                    valueText: "\(Int(pressureAmount(.opacity) * 100))%",
-                    value: pressureAmountBinding(.opacity),
+                    title: "Pressure → Flow",
+                    valueText: "\(Int(pressureAmount(.flow) * 100))%",
+                    value: pressureAmountBinding(.flow),
                     range: 0...1,
-                    idSuffix: "pressureOpacitySlider"
+                    idSuffix: "pressureFlowSlider"
                 )
                 sliderRow(
                     title: "Stabilization",
@@ -214,13 +226,21 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
         )
     }
 
-    /// **"Pressure → Size" and "Pressure → Opacity", in BRUSH.md §6's matrix.**
+    /// **"Pressure → Size" and "Pressure → Flow", in BRUSH.md §6's matrix.**
     ///
-    /// The slider is the **amount** of a `size ← pressure` / `opacity ← pressure` row, and what is
-    /// left over is the output's base: `base + amount == 1` is what makes a full press reach full
-    /// width and full opacity. That pairing is *this panel's* convention rather than a rule of the
-    /// model — the matrix is perfectly happy with a brush that never reaches full width, and §12
-    /// stage 10's editor is where an artist gets to say so — so it lives here and not on `Brush`.
+    /// The slider is the **amount** of a `size ← pressure` row, and what is left over is the output's
+    /// base: `base + amount == 1` is what makes a full press reach full width. That pairing is *this
+    /// panel's* convention rather than a rule of the model — the matrix is perfectly happy with a
+    /// brush that never reaches full width, and §12 stage 10's editor is where an artist gets to say
+    /// so — so it lives here and not on `Brush`.
+    ///
+    /// **`flow` deliberately breaks that convention, and the Flow slider above is why.** With an
+    /// explicit base slider the pairing would fight the artist: setting Flow to 30% and then touching
+    /// Pressure → Flow would silently throw the 30% away and write `1 - amount` over it. Size has no
+    /// base slider, so nothing there contradicts the convention; flow does, so the convention stops
+    /// at flow — the Flow slider sets the base and this one sets the amount that rides on top. A
+    /// brush can therefore reach more or less than 1 at a full press, which is what the model always
+    /// allowed and what the two sliders now say plainly.
     ///
     /// The row's **curve** is untouched. A preset's size row ramps from its own floor (what
     /// the width a feather-light touch keeps), and moving this slider must not flatten it.
@@ -234,11 +254,9 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
             set: { newValue in
                 var edited = canvasManager[keyPath: spec.selectedBrush]
                 edited.modulations.setAmount(newValue, for: output, from: .pressure)
-                switch output {
-                case .size: edited.dab.size = 1 - newValue
-                case .opacity: edited.dab.opacity = 1 - newValue
-                default: break
-                }
+                // Only `size` pairs its base to the amount — see the doc above for why `flow`, which
+                // has a base slider of its own, must not.
+                if output == .size { edited.dab.size = 1 - newValue }
                 canvasManager[keyPath: spec.selectedBrush] = edited
             }
         )

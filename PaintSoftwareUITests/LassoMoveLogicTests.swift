@@ -4967,6 +4967,9 @@ final class LassoMoveLogicTests: XCTestCase {
         private(set) var dabs: [(point: CGPoint, radius: CGFloat)] = []
         func beginStroke() {}
         func endStroke() {}
+        // Nothing to merge: this records the walk, and the walk is the dabs.
+        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {}
+        func endStrokeGroup() {}
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
             dabs.append((point, radius))

@@ -264,7 +264,7 @@ final class StrokePathFitLogicTests: XCTestCase {
             BrushStamper.bake(samples: StrokeSamples(knots, channels: .pressureOnly),
                               brush: brush, color: .black, brushSize: 40, brushOpacity: 1,
                               random: DabRandom(seed: 5))
-                .first { $0.center.x > 300.5 }?.radius
+                .dabs.first { $0.center.x > 300.5 }?.radius
         }
         let pressed = firstDabRadiusAfterTheHold(stored(raw))
         let flattened = firstDabRadiusAfterTheHold(stored(raw, pressureChange: .greatestFiniteMagnitude))

@@ -243,7 +243,7 @@ enum VectorEraser {
     /// and now rests on the tip's own pixels.)
     ///
     /// `minPressure` is the **lightest pressure the gesture actually carried**, not a property of the
-    /// brush — judging the `opacity ← pressure` row against pressure 0 instead would bottom the output
+    /// brush — judging the `flow ← pressure` row against pressure 0 instead would bottom the output
     /// out at its base and reject every pressure-reactive brush, including both built-in
     /// defaults, making the split path unreachable. Dab pressure interpolates linearly, so the minimum
     /// over the dabs is the minimum over the samples; a finger or mouse drag reports full pressure
@@ -260,8 +260,15 @@ enum VectorEraser {
         // of ink the capsule chain says is solid.
         guard brush.modulations.isPressureOnly, brush.dab.density >= 1 else { return false }
         let values = brush.dabValues(atPressure: minPressure)
+        // **The merged alpha, and there is only one number to merge since §12 stage 8.** BRUSH.md
+        // §2.11 puts the cap on the stroke and the coverage on the dab, so what an eraser actually
+        // takes away where its dabs overlap is `opacity · (the coverage they reach)`, and one dab's
+        // `flow` is the strict lower bound on that coverage. This guard used to be two — the same
+        // product, and then a second one on the matrix's own `opacity` output. That output is gone,
+        // so a second guard would read a base that is now always 1 and pass unconditionally; a false
+        // "clean cut" **deletes ink that should have faded**, which is the asymmetric direction this
+        // whole comment block is about. One guard, on the product, is the honest test.
         guard opacity * values.flow >= 0.999 else { return false }
-        guard values.opacity >= 0.999 else { return false }
         guard values.scatter <= 0, brush.dab.angle.jitter <= 0 else { return false }
         return true
     }

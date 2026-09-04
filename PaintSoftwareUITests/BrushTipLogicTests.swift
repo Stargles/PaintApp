@@ -726,13 +726,13 @@ final class BrushTipLogicTests: XCTestCase {
         // Fixed width and full coverage at any pressure: no rows *and* both bases at 1. Clearing the
         // rows alone would leave the preset's own `1 - amount` bases behind and stamp a 60% dab.
         brush.dab.size = 1
-        brush.dab.opacity = 1
+        brush.dab.flow = 1
         brush.modulations = BrushModulations()
         let texture = RasterLayerTexture(size: CGSize(width: 128, height: 128))
         texture.beginStroke()
         BrushStamper.stampDab(into: texture, at: CGPoint(x: 64, y: 64), brush: brush,
                               values: brush.dabValues(atPressure: 1),
-                              color: .black, brushSize: 60, brushOpacity: 1, isEraser: false,
+                              color: .black, brushSize: 60,
                               random: DabRandom(seed: 7), arcWidths: 0)
         texture.endStroke()
         return try XCTUnwrap(rgba(of: texture))

@@ -20,7 +20,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
         // Fixed width and full coverage: no rows, and both bases back at 1 — clearing the rows alone
         // would leave the preset's own `1 - amount` bases behind.
         brush.dab.size = 1
-        brush.dab.opacity = 1
+        brush.dab.flow = 1
         brush.modulations = BrushModulations()
         return brush
     }
@@ -53,7 +53,8 @@ final class StrokePathWalkLogicTests: XCTestCase {
 
     private func dabs(_ knots: StrokeSamples, brush: Brush, size: CGFloat) -> [BrushStamper.BakedDab] {
         BrushStamper.bake(samples: StrokeSamples(knots, channels: .pressureOnly),
-                          brush: brush, color: .black, brushSize: size, brushOpacity: 1, random: DabRandom(seed: 31))
+                          brush: brush, color: .black, brushSize: size, brushOpacity: 1,
+                          random: DabRandom(seed: 31)).dabs
     }
 
     // MARK: - Geometry helpers

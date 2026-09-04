@@ -243,8 +243,9 @@ final class CanvasDisplayScale: ObservableObject {
 ///
 /// **This is `BrushStamper.stampDab` itself, not an approximation of it** — the same call the canvas
 /// makes, through the same `CGContextDabTarget` `VectorCanvas.renderLocalContent` renders strokes
-/// with. Shape, hardness, flow, opacity, colour, scatter and the square brush's dab lattice
-/// therefore all come out right for free, and stay right when the brush engine changes.
+/// with, inside the same `beginStrokeGroup` bracket a real stroke merges under. Shape, hardness,
+/// flow, opacity, colour, scatter and the square brush's dab lattice therefore all come out right
+/// for free, and stay right when the brush engine changes.
 enum SizePreviewStampRenderer {
 
     /// The ink an eraser preview punches its hole out of.
@@ -287,6 +288,14 @@ enum SizePreviewStampRenderer {
                 cg.fill(CGRect(x: 0, y: 0, width: side, height: side))
             }
             let target = CGContextDabTarget(cg)
+            // **One dab is still a stroke, and BRUSH.md §2.11 means it has to be bracketed like one.**
+            // A dab lays down its `flow` and nothing else; the stroke's opacity and its blend mode —
+            // `.destinationOut` for the eraser — are applied by the group's merge. Without the
+            // bracket this preview would draw at full flow with a normal blend, so the size and
+            // eraser previews would stop matching the ink the same brush actually lays down.
+            target.beginStrokeGroup(opacity: CGFloat(opacity),
+                                    blendMode: isEraser ? .destinationOut
+                                                        : brush.stroke.blendMode.cgBlendMode)
             BrushStamper.stampDab(into: target,
                                   at: CGPoint(x: side / 2, y: side / 2),
                                   brush: brush,
@@ -296,10 +305,9 @@ enum SizePreviewStampRenderer {
                                   values: brush.dabValues(atPressure: 1),
                                   color: color,
                                   brushSize: geometry.stampDiameter,
-                                  brushOpacity: opacity,
-                                  isEraser: isEraser,
                                   random: DabRandom(seed: DabRandom.seed(for: brush.id)),
                                   arcWidths: 0)
+            target.endStrokeGroup()
         }
     }
 }

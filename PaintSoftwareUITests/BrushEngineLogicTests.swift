@@ -25,14 +25,19 @@ final class BrushEngineLogicTests: XCTestCase {
     // MARK: - BRUSH.md §6 — the pressure rows that replaced `BrushDynamics`
 
     /// The two rows every shipped preset carries, as a brush. `size`'s base is `1 - amount` and
-    /// `opacity`'s is too, which is the pairing that makes a full press reach full width — see
+    /// `flow`'s is too, which is the pairing that makes a full press reach full width — see
     /// `BrushLibrary` and `StrokeSettingsPanel.pressureAmountBinding`.
+    ///
+    /// **The second row drives `flow` since §12 stage 8.** BRUSH.md §2.11 makes opacity the stroke's
+    /// cap rather than a dab's multiplier, and the row that used to be spelled `opacity ← pressure`
+    /// was always the arithmetic of *what one stamp lays down*. The parameter keeps the name the
+    /// tests below read it by; the output it drives is flow.
     private func pressureBrush(size: Double, atZero: Double, opacity: Double) -> Brush {
         Brush(name: "fixture", tip: .round, size: 10,
-              dab: BrushDabSettings(size: 1 - size, opacity: 1 - opacity),
+              dab: BrushDabSettings(size: 1 - size, flow: 1 - opacity),
               modulations: BrushModulations([
                 .sizeFromPressure(amount: size, atZero: atZero),
-                .opacityFromPressure(amount: opacity)
+                .flowFromPressure(amount: opacity)
               ]))
     }
 
@@ -41,7 +46,7 @@ final class BrushEngineLogicTests: XCTestCase {
     }
 
     private func opacityFraction(_ brush: Brush, _ pressure: CGFloat) -> Double {
-        brush.dabValues(atPressure: pressure).opacity
+        brush.dabValues(atPressure: pressure).flow
     }
 
     func testSizeFractionIsFixedWhenSizePressureIsZero() {

@@ -1230,14 +1230,13 @@ final class PerfBaselineTests: XCTestCase {
                     last = BrushStamper.advance(from: previous, to: point, spacing: spacing) { dab, _, _ in
                         BrushStamper.stampDab(into: footprintScratch, at: dab, brush: brush,
                                               values: footprintValues,
-                                              color: .black, brushSize: size, brushOpacity: 1,
-                                              isEraser: true, random: DabRandom(seed: 0), arcWidths: 0)
+                                              color: .black, brushSize: size, random: DabRandom(seed: 0), arcWidths: 0)
                         return spacing
                     }.carry
                 } else {
                     BrushStamper.stampDab(into: footprintScratch, at: point, brush: brush,
                               values: brush.dabValues(atPressure: 1),
-                                          color: .black, brushSize: size, brushOpacity: 1, isEraser: true,
+                                          color: .black, brushSize: size,
                                           random: DabRandom(seed: 0), arcWidths: 0)
                     last = point
                 }

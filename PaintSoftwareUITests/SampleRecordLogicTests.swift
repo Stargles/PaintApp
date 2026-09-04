@@ -401,19 +401,19 @@ final class SampleRecordLogicTests: XCTestCase {
 
         var reading = BrushLibrary.hardRound
         reading.dab.size = 0
-        reading.dab.opacity = 0
+        reading.dab.flow = 0
         reading.modulations = BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.1),
-                                                .opacityFromPressure(amount: 1)])
+                                                .flowFromPressure(amount: 1)])
         var removed = reading
         removed.dab.size = 1
-        removed.dab.opacity = 1
+        removed.dab.flow = 1
         removed.modulations = BrushModulations()
 
         let withModulation = BrushStamper.bake(samples: bare, brush: reading, color: .black,
                                                brushSize: 20, brushOpacity: 1, random: DabRandom(seed: 11))
         let withoutModulation = BrushStamper.bake(samples: bare, brush: removed, color: .black,
                                                   brushSize: 20, brushOpacity: 1, random: DabRandom(seed: 11))
-        XCTAssertGreaterThan(withModulation.count, 10, "Setup: there are dabs to compare")
+        XCTAssertGreaterThan(withModulation.dabs.count, 10, "Setup: there are dabs to compare")
         XCTAssertEqual(withModulation, withoutModulation,
                        "a missing channel changed the ink — the funnel is not answering the neutral")
 
