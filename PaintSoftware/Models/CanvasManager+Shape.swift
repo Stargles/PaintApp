@@ -77,7 +77,8 @@ extension CanvasManager {
             .map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
         BrushStamper.stampStroke(into: texture, samples: samples, brush: shapeGestureBrush,
                                  color: shapeGestureColor.uiColor, brushSize: shapeGestureStrokeWidth,
-                                 brushOpacity: shapeGestureOpacity)
+                                 brushOpacity: shapeGestureOpacity,
+                                 random: DabRandom(seed: shapeGestureSeed))
         let image = texture.renderToUIImage()
         shapePreviewCache = (shape, image)
         return image
@@ -104,6 +105,7 @@ extension CanvasManager {
         // Shape detection only ever runs for the pen/pencil (see `startShapeDetection`), so the
         // paint brush's settings are always the right ones to snapshot here.
         shapeGestureBrush = selectedBrush
+        shapeGestureSeed = DabRandom.freshSeed()
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
         shapeGestureColor = CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a))
@@ -176,7 +178,7 @@ extension CanvasManager {
             if let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
                 let stroke = VectorStroke(brush: savedBrush, color: shapeGestureColor,
                                           size: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
-                                          samples: collapsed)
+                                          samples: collapsed, seed: shapeGestureSeed)
                 let strokesBefore = vectorCanvas.strokes
                 // The shape outline is in canvas space (it was dragged there) — same mapping the
                 // live vector-stroke path uses, so a shape drawn on a moved layer lands where the
@@ -209,7 +211,8 @@ extension CanvasManager {
         BrushStamper.stampStroke(into: raster,
                                  samples: samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
                                  brush: brush, color: shapeGestureColor.uiColor,
-                                 brushSize: shapeGestureStrokeWidth, brushOpacity: shapeGestureOpacity)
+                                 brushSize: shapeGestureStrokeWidth, brushOpacity: shapeGestureOpacity,
+                                 random: DabRandom(seed: shapeGestureSeed))
         let after = raster.renderToUIImage()
         let strokeCountAfter = raster.strokeCount
         let cost = Self.approximateImageCost(before) + Self.approximateImageCost(after)

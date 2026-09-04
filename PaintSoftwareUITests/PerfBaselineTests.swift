@@ -146,7 +146,7 @@ final class PerfBaselineTests: XCTestCase {
                                      brush: manager.selectedBrush,
                                      color: .black,
                                      brushSize: brushSize,
-                                     brushOpacity: manager.brushOpacity)
+                                     brushOpacity: manager.brushOpacity, random: DabRandom(seed: 0))
             manager.strokeEnded(layerIndex: 0, celIndex: 0)
         }
     }
@@ -410,7 +410,7 @@ final class PerfBaselineTests: XCTestCase {
                 raster.beginStroke()
                 BrushStamper.stampStroke(into: raster, samples: samples, brush: manager.selectedBrush,
                                          color: .black, brushSize: brushSize,
-                                         brushOpacity: manager.brushOpacity)
+                                         brushOpacity: manager.brushOpacity, random: DabRandom(seed: 0))
                 raster.endStroke()
                 let after = strokeSnapshot(raster)
                 recordCroppedStrokeUndo(manager: manager, raster: raster, from: before, to: after)
@@ -450,7 +450,8 @@ final class PerfBaselineTests: XCTestCase {
         raster.beginStroke()
         BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: Self.sampleCount),
                                  brush: manager.selectedBrush, color: .black,
-                                 brushSize: brushSize, brushOpacity: manager.brushOpacity)
+                                 brushSize: brushSize,
+                                 brushOpacity: manager.brushOpacity, random: DabRandom(seed: 0))
         raster.endStroke()
         let sweepAfter = strokeSnapshot(raster)
         recordCroppedStrokeUndo(manager: manager, raster: raster, from: sweepBefore, to: sweepAfter)
@@ -492,7 +493,7 @@ final class PerfBaselineTests: XCTestCase {
                                  samples: [BrushStamper.Sample(point: CGPoint(x: 200, y: 200), pressure: 1),
                                            BrushStamper.Sample(point: CGPoint(x: 400, y: 260), pressure: 1)],
                                  brush: manager.selectedBrush, color: .black,
-                                 brushSize: 30, brushOpacity: 1)
+                                 brushSize: 30, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
         let reference = alphaFingerprint(raster)
 
@@ -503,7 +504,7 @@ final class PerfBaselineTests: XCTestCase {
                                  samples: [BrushStamper.Sample(point: CGPoint(x: 900, y: 700), pressure: 1),
                                            BrushStamper.Sample(point: CGPoint(x: 1300, y: 1100), pressure: 1)],
                                  brush: manager.selectedBrush, color: .black,
-                                 brushSize: 30, brushOpacity: 1)
+                                 brushSize: 30, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
         let after = strokeSnapshot(raster)
         let painted = alphaFingerprint(raster)
@@ -535,7 +536,7 @@ final class PerfBaselineTests: XCTestCase {
                                  samples: [BrushStamper.Sample(point: CGPoint(x: -20, y: -20), pressure: 1),
                                            BrushStamper.Sample(point: CGPoint(x: 120, y: 120), pressure: 1)],
                                  brush: manager.selectedBrush, color: .black,
-                                 brushSize: 40, brushOpacity: 1)
+                                 brushSize: 40, brushOpacity: 1, random: DabRandom(seed: 0))
         raster.endStroke()
         let after = strokeSnapshot(raster)
         XCTAssertNotEqual(alphaFingerprint(raster), reference, "The edge stroke should have marked the canvas")
@@ -1228,11 +1229,12 @@ final class PerfBaselineTests: XCTestCase {
                     last = BrushStamper.advance(from: previous, to: point, spacing: spacing) { dab in
                         BrushStamper.stampDab(into: footprintScratch, at: dab, pressure: 1, brush: brush,
                                               color: .black, brushSize: size, brushOpacity: 1,
-                                              isEraser: true)
+                                              isEraser: true, random: DabRandom(seed: 0), arcWidths: 0)
                     }
                 } else {
                     BrushStamper.stampDab(into: footprintScratch, at: point, pressure: 1, brush: brush,
-                                          color: .black, brushSize: size, brushOpacity: 1, isEraser: true)
+                                          color: .black, brushSize: size, brushOpacity: 1, isEraser: true,
+                                          random: DabRandom(seed: 0), arcWidths: 0)
                     last = point
                 }
                 footprint.append(CFAbsoluteTimeGetCurrent() - start)
@@ -1296,7 +1298,7 @@ final class PerfBaselineTests: XCTestCase {
         static func edit(at offset: CGFloat) -> VectorCanvas.CutPreviewEdit {
             let samples = [VectorSample(x: 4, y: 4 + offset, pressure: 1),
                            VectorSample(x: 12, y: 4 + offset, pressure: 1)]
-            return VectorCanvas.CutPreviewEdit(eraseWalk: samples, eraseSeedID: UUID(),
+            return VectorCanvas.CutPreviewEdit(eraseWalk: samples, eraseRandom: DabRandom(seed: 0),
                                                eraseRanges: [0...1], restamps: [],
                                                brush: Brush(name: "Probe", shape: .hardRound, size: 4,
                                                             hardness: 1),
@@ -2277,11 +2279,11 @@ final class PerfBaselineTests: XCTestCase {
             let raster = RasterLayerTexture.empty(size: size)
             BrushStamper.stampStroke(into: raster, samples: syntheticStroke(sampleCount: 60),
                                      brush: Brush(name: "Perf", shape: .softRound, size: 24),
-                                     color: .black, brushSize: 24, brushOpacity: 1)
+                                     color: .black, brushSize: 24, brushOpacity: 1, random: DabRandom(seed: 0))
             let scratch = RasterLayerTexture.empty(size: size)
             BrushStamper.stampStroke(into: scratch, samples: syntheticStroke(sampleCount: 12),
                                      brush: Brush(name: "Perf", shape: .softRound, size: 24),
-                                     color: .black, brushSize: 24, brushOpacity: 1)
+                                     color: .black, brushSize: 24, brushOpacity: 1, random: DabRandom(seed: 0))
             let committed = VectorCanvas(size: size, strokes: [Self.previewStroke(in: size)])
             _ = committed.render()  // the committed render is cached across a stroke; only the rest is per dab
 
@@ -2293,7 +2295,7 @@ final class PerfBaselineTests: XCTestCase {
             // the same dab on both sides, so it cancels out of the ratio.
             func dab(into texture: RasterLayerTexture) {
                 BrushStamper.stampStroke(into: texture, samples: syntheticStroke(sampleCount: 2),
-                                         brush: brush, color: .black, brushSize: 24, brushOpacity: 1)
+                                         brush: brush, color: .black, brushSize: 24, brushOpacity: 1, random: DabRandom(seed: 0))
             }
             func rasterFrame() {
                 autoreleasepool {
@@ -3159,7 +3161,7 @@ final class PerfBaselineTests: XCTestCase {
                                            pressure: 0.3 + 0.7 * sin(t * .pi))
             }
             BrushStamper.stampStroke(into: raster, samples: samples, brush: brush,
-                                     color: .black, brushSize: 18, brushOpacity: 1)
+                                     color: .black, brushSize: 18, brushOpacity: 1, random: DabRandom(seed: 0))
             raster.endStroke()
         }
     }

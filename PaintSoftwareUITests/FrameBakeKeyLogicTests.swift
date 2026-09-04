@@ -294,7 +294,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         row("raster version — a dab") { _ in
             BrushStamper.stampStroke(into: probeCel().raster, samples: Self.dabs(y: 8),
                                      brush: BrushLibrary.hardRound, color: .green,
-                                     brushSize: 6, brushOpacity: 1)
+                                     brushSize: 6, brushOpacity: 1, random: DabRandom(seed: 0))
         }
         // The object, with the counter deliberately held equal — a fresh texture carrying the same
         // single stamp. Reopening a project rebuilds every `RasterLayerTexture` with its counter
@@ -304,7 +304,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             let replacement = RasterLayerTexture.empty(size: CanvasFixture.canvasSize)
             BrushStamper.stampStroke(into: replacement, samples: Self.dabs(y: 8),
                                      brush: BrushLibrary.hardRound, color: .green,
-                                     brushSize: 6, brushOpacity: 1)
+                                     brushSize: 6, brushOpacity: 1, random: DabRandom(seed: 0))
             XCTAssertEqual(replacement.version, probeCel().raster.version,
                            "The premise: only the object may differ, or this is the version row again.")
             m.layers[probe].cels[0].raster = replacement

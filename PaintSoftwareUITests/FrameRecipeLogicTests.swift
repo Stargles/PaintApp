@@ -46,7 +46,7 @@ final class FrameRecipeLogicTests: XCTestCase {
                                                          pressure: 0.8)
                                  },
                                  brush: BrushLibrary.hardRound, color: .green, brushSize: 6,
-                                 brushOpacity: 1)
+                                 brushOpacity: 1, random: DabRandom(seed: 0))
 
         // 1 — baked and fill in one cel, in **different** rects and colours. `fillImage` draws last
         //     (LASSO_FILL §2a), so swapping or dropping either changes bytes.
@@ -287,7 +287,8 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  samples: (0..<10).map {
                                      BrushStamper.Sample(point: CGPoint(x: 4, y: 40 + CGFloat($0)), pressure: 1)
                                  },
-                                 brush: BrushLibrary.hardRound, color: .black, brushSize: 9, brushOpacity: 1)
+                                 brush: BrushLibrary.hardRound, color: .black, brushSize: 9, brushOpacity: 1,
+                                 random: DabRandom(seed: 0))
         manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.yellow, rect: CGRect(x: 0, y: 0, width: 64, height: 64))
         manager.layers[1].cels[0].fillImage = nil

@@ -47,12 +47,12 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         }
     }
 
-    private let seed = BrushStamper.seed(for: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!)
+    private let seed = DabRandom.seed(for: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!)
 
     private func bake(_ samples: [BrushStamper.Sample], _ brush: Brush,
                       size: CGFloat = 24) -> [BrushStamper.BakedDab] {
         BrushStamper.bake(samples: samples, brush: brush, color: .black,
-                          brushSize: size, brushOpacity: 1, seed: seed)
+                          brushSize: size, brushOpacity: 1, random: DabRandom(seed: seed))
     }
 
     // MARK: - The shipped render path
@@ -323,7 +323,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         let streamed = BrushStamper.CollectingDabTarget()
         BrushStamper.stampStroke(into: BrushStamper.PosedDabTarget(streamed, pose: pose),
                                  samples: run(), brush: brush, color: .black, brushSize: 24,
-                                 brushOpacity: 1, seed: seed)
+                                 brushOpacity: 1, random: DabRandom(seed: seed))
 
         let replayed = BrushStamper.CollectingDabTarget()
         BrushStamper.replay(bake(run(), brush), into: replayed, through: pose)
@@ -346,7 +346,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
         let direct = BrushStamper.bake(
             samples: ink.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
             brush: ink.brush, color: ink.uiColor, brushSize: ink.size, brushOpacity: ink.opacity,
-            seed: BrushStamper.seed(for: ink.id))
+            random: ink.dabRandom)
 
         XCTAssertGreaterThan(rendered.count, 100, "Setup: there are dabs to compare")
         XCTAssertEqual(rendered.count, direct.count)

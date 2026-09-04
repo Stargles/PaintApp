@@ -206,20 +206,45 @@ struct StrokePath {
         StrokePath.tangents(segment: index, count: points.count) { points[$0] }
     }
 
-    /// The arc length of segment `index`, walked at the same flatness the dab march uses.
-    func length(ofSegment index: Int) -> CGFloat {
+    /// The arc length of segment `index`, walked at the same flatness the dab march uses — the whole
+    /// segment by default, or as far as `u ∈ [0, 1]` through it.
+    ///
+    /// The partial case stops the flattening at `u` rather than re-subdividing to it, so a prefix of a
+    /// segment is measured on exactly the polyline the whole segment is measured on and the two cannot
+    /// disagree about where a point along the curve is.
+    func length(ofSegment index: Int, upTo u: CGFloat = 1) -> CGFloat {
         let p1 = points[index], p2 = points[index + 1]
         let (m1, m2) = tangents(segment: index)
         let steps = StrokePath.subdivisions(p1: p1, p2: p2, m1: m1, m2: m2)
+        let end = min(max(u, 0), 1)
         var total: CGFloat = 0
         var previous = p1
         for step in 1...steps {
-            let next = StrokePath.hermite(p1: p1, p2: p2, m1: m1, m2: m2,
-                                          u: CGFloat(step) / CGFloat(steps))
+            let stepU = min(CGFloat(step) / CGFloat(steps), end)
+            let next = StrokePath.hermite(p1: p1, p2: p2, m1: m1, m2: m2, u: stepU)
             total += hypot(next.x - previous.x, next.y - previous.y)
             previous = next
+            if stepU >= end { break }
         }
         return total
+    }
+
+    /// The arc length from the start of the path to `parameter`, in the "knot index + fraction"
+    /// domain this shares with `StrokeGeometry`.
+    ///
+    /// **Not what the dab march counts, and it is not trying to be.** The march's own arc length is a
+    /// running sum of `spacing`, exact by construction and identical in every tier; this is a
+    /// *geometric* measurement of the same curve, and it exists for the one caller that has to place a
+    /// piece in its parent's random field after the walk has already been re-anchored
+    /// (`VectorCanvas.detachedArcOffset`). There the dabs have moved anyway, so what is wanted is a
+    /// faithful distance rather than a bit-identical one.
+    func arcLength(to parameter: CGFloat) -> CGFloat {
+        guard points.count > 1 else { return 0 }
+        let clamped = min(max(parameter, 0), domainEnd)
+        let whole = min(Int(clamped.rounded(.down)), points.count - 2)
+        var total: CGFloat = 0
+        for index in 0..<whole { total += length(ofSegment: index) }
+        return total + length(ofSegment: whole, upTo: clamped - CGFloat(whole))
     }
 
     // MARK: - The walk

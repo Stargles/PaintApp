@@ -53,6 +53,33 @@ struct VectorStroke: Identifiable, Codable {
     /// only "where did the dabs go". See `DabLattice`.
     var lattice: DabLattice?
 
+    /// **The random field this stroke's dabs are drawn from** — BRUSH.md §4, and the first of the two
+    /// fields that ruling puts on a stroke.
+    ///
+    /// Per-stroke, never per-sample, and **inherited on split rather than regenerated**: every cutter
+    /// here derives a piece by copying the stroke and replacing what the cut changed, so the seed
+    /// travels by default and losing it takes a deliberate act. That is the whole of the owner's
+    /// constraint — *"the randomness seed does not reset for half of the brushstroke"*. It is a field
+    /// rather than something derived from `id` precisely because a split mints a fresh id on each
+    /// piece; deriving it from the id was the defect.
+    ///
+    /// Minted per stroke, and independent of `id`, so a duplicate keeps its ink.
+    var seed: UInt64 = DabRandom.freshSeed()
+
+    /// **How far along the original stroke this one's walk begins**, in canvas points — the second of
+    /// §4's two fields.
+    ///
+    /// Zero for a stroke drawn as itself, and zero for a piece that still replays its parent's whole
+    /// walk through a `DabLattice`, because there the walk starts where the parent's did. Non-zero
+    /// exactly for a piece that has *left* the lattice and re-anchors its own march — the eraser's
+    /// Modes 2 and 3, which remove geometry. Without it such a piece would address the field from zero
+    /// and the surviving ink would re-roll along its whole length.
+    var arcOffset: CGFloat = 0
+
+    /// The field this stroke's dabs are drawn from, as `BrushStamper` wants it. One accessor so the
+    /// two fields cannot be paired up differently at two call sites.
+    var dabRandom: DabRandom { DabRandom(seed: seed, arcOffset: arcOffset) }
+
     /// The motion group this stroke belongs to during keyframe interpolation. Nil means untagged.
     /// A field, not a side table, so it survives copy/duplicate/split/undo automatically and a cut
     /// piece keeps its parent's tag. Independent of `color` — see `MotionGroup.tagColor`.
@@ -99,7 +126,7 @@ struct VectorStroke: Identifiable, Codable {
     /// Spelled out so `init(from:)` below can name the keys without suppressing the synthesized
     /// memberwise initialiser every construction site here uses.
     enum CodingKeys: String, CodingKey {
-        case id, brush, color, size, opacity, samples, composite, lattice
+        case id, brush, color, size, opacity, samples, composite, lattice, seed, arcOffset
         case motionGroupID, animationGroupID, visibilityThreshold, sampleVisibilityThresholds
     }
 }
@@ -109,15 +136,19 @@ struct VectorStroke: Identifiable, Codable {
 /// sub-run alone would re-phase every dab; instead a piece stores the **parent's** samples plus, per
 /// own sample, the parameter it sits at in the parent's domain, and rendering walks the parent whole,
 /// drawing only the dabs inside `range`. `parameters` maps into the parent's domain via linear
-/// interpolation (`parentParameter(of:)`), which lets a piece be cut again. `seedID` is the parent's
-/// id, so the dab RNG replays the parent's sequence.
+/// interpolation (`parentParameter(of:)`), which lets a piece be cut again.
+///
+/// **Dab *geometry* only.** It used to carry the parent's id as well, so the dab RNG could be
+/// re-seeded off it; BRUSH.md §4 moved that onto `VectorStroke.seed`, which a piece inherits simply
+/// by being a copy of its parent. The walk replayed here is what puts a piece's dabs in the same
+/// *places*; the stroke's own seed is what gives them the same *randomness*, and the two questions
+/// are now answered separately — which is what lets a piece that has to re-anchor its walk (the
+/// eraser's Modes 2 and 3) keep its randomness anyway, through `VectorStroke.arcOffset`.
 struct DabLattice: Codable, Equatable {
     /// The parent stroke's samples, whole — the walk that defines the lattice.
     var samples: [VectorSample]
     /// Parameter in the parent's domain for each of the owning stroke's own samples, ascending.
     var parameters: [CGFloat]
-    /// The parent's id, so `BrushStamper.seed(for:)` replays the parent's dab RNG.
-    var seedID: UUID
     /// `VectorStroke.precise` for *this* walk — same field, same derivation, same reason. A piece's
     /// lattice is its parent's whole walk and is mapped by the very transform the piece's own samples
     /// are, so a precise piece whose lattice stayed quantised would come back with its dabs on a
@@ -136,7 +167,7 @@ struct DabLattice: Codable, Equatable {
     /// other run of samples (TODO item (8)), and a synthesized coder would write the parent's whole
     /// walk back out as `{"x":…,"y":…,"pressure":…}` objects — the larger half of a cut-heavy cel.
     /// Declared in an extension below so this stays a memberwise-initialisable struct.
-    enum CodingKeys: String, CodingKey { case samples, parameters, seedID }
+    enum CodingKeys: String, CodingKey { case samples, parameters }
 
     /// `parameter`, in the owning stroke's own domain, mapped into the parent's. Linear between
     /// neighbouring entries — exact, since a piece's segment lies inside one parent segment.
@@ -187,7 +218,6 @@ extension DabLattice {
         // Derived from the run's own shape, exactly as a stroke's is — see `precise`.
         precise = run.precise
         parameters = try c.decode([CGFloat].self, forKey: .parameters)
-        seedID = try c.decode(UUID.self, forKey: .seedID)
     }
 
     /// A lattice's clamp count is deliberately not logged: it is the *parent's* walk, so a piece that
@@ -196,7 +226,6 @@ extension DabLattice {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(VectorSample.packed(samples, for: encoder, precise: precise), forKey: .samples)
         try c.encode(parameters, forKey: .parameters)
-        try c.encode(seedID, forKey: .seedID)
     }
 }
 
@@ -239,6 +268,13 @@ extension VectorStroke {
         composite = try c.decodeIfPresent(StrokeComposite.self, forKey: .composite) ?? .paint
         // Absent is the normal case; only a stroke cut out of another one carries a lattice.
         lattice = try c.decodeIfPresent(DabLattice.self, forKey: .lattice)
+        // A document written before BRUSH.md §4 has no seed, and `seed(for: id)` is not a fallback —
+        // it is the value that stroke's dabs were *actually* drawn with, so its ink does not move on
+        // the first load after this change. The one exception is a cut piece saved by the old engine,
+        // whose parent's seed lived on its lattice: that piece re-rolls once, which §2.14's expendable
+        // documents make an acceptable price for not keeping a second definition of the seed alive.
+        seed = try c.decodeIfPresent(UInt64.self, forKey: .seed) ?? DabRandom.seed(for: id)
+        arcOffset = try c.decodeIfPresent(CGFloat.self, forKey: .arcOffset) ?? 0
         motionGroupID = try c.decodeIfPresent(UUID.self, forKey: .motionGroupID)
         animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
         visibilityThreshold = try c.decodeIfPresent(CGFloat.self, forKey: .visibilityThreshold)
@@ -278,6 +314,11 @@ extension VectorStroke {
         try c.encode(composite, forKey: .composite)
         // Written only when present, so an ordinary stroke's payload stays byte-for-byte unchanged.
         try c.encodeIfPresent(lattice, forKey: .lattice)
+        // Always: the seed is minted, not derived, so nothing else on the wire says what it was.
+        try c.encode(seed, forKey: .seed)
+        // Zero on every stroke the artist draws and on every piece that keeps its parent's lattice,
+        // so this key appears only where an eraser punched.
+        if arcOffset != 0 { try c.encode(arcOffset, forKey: .arcOffset) }
         try c.encodeIfPresent(motionGroupID, forKey: .motionGroupID)
         try c.encodeIfPresent(animationGroupID, forKey: .animationGroupID)
         try c.encodeIfPresent(visibilityThreshold, forKey: .visibilityThreshold)
@@ -1526,9 +1567,10 @@ final class VectorCanvas {
     /// layer transform before meeting the stored, local-space geometry, or erasing a scaled-up layer
     /// would cut a nib-sized hole where the user swept a wide one.
     ///
-    /// Surviving pieces are spliced back in place, keeping their parent's z-position. An untouched
-    /// stroke keeps its id (and so its scatter/jitter pattern, seeded from `stroke.id`); a split mints
-    /// fresh ids and re-rolls the pattern for both pieces.
+    /// Surviving pieces are spliced back in place, keeping their parent's z-position. A piece mints a
+    /// fresh id and inherits its parent's `seed` and `arcOffset`, so its scatter and jitter are the
+    /// parent's — BRUSH.md §4. Modes 2 and 3 re-anchor the *walk* (they remove geometry, so a piece
+    /// cannot keep replaying the parent's), but not the field.
     ///
     /// `.erase` strokes are skipped: cutting a span out of one would *restore* the ink beneath it.
     @discardableResult
@@ -1773,16 +1815,50 @@ final class VectorCanvas {
     private static func piece(of stroke: VectorStroke, samples: [VectorSample],
                               parameters: [CGFloat]) -> VectorStroke {
         var piece = stroke
-        // Fresh id: two pieces cannot share one. The dab seed travels via `DabLattice.seedID`
-        // instead.
+        // Fresh id: two pieces cannot share one. Nothing about the ink hangs off the id any more —
+        // BRUSH.md §4 — so `seed` and `arcOffset` travel by being copied above, and this piece keeps
+        // its parent's walk, on which the parent's own `arcOffset` is still the right origin.
         piece.id = UUID()
         piece.samples = samples
         let mapped = stroke.lattice.map { parameters.map($0.parentParameter(of:)) } ?? parameters
         piece.lattice = DabLattice(samples: stroke.lattice?.samples ?? stroke.samples,
-                                   parameters: mapped,
-                                   seedID: stroke.lattice?.seedID ?? stroke.id)
+                                   parameters: mapped)
         piece.sampleVisibilityThresholds = remapped(stroke.sampleVisibilityThresholds, onto: parameters)
         return piece
+    }
+
+    /// One piece of a stroke that has **left** its parent's dab lattice.
+    ///
+    /// The eraser's Modes 2 and 3 remove geometry, so a piece cannot keep replaying the parent's walk
+    /// — it would draw dabs the artist just erased. It re-anchors its march at its own first sample,
+    /// and that used to re-roll its randomness along its whole length as well, because the seed came
+    /// off the fresh id. BRUSH.md §4 separates the two: the walk re-anchors and the **field does
+    /// not**, because `arcOffset` records where in the original this piece begins.
+    ///
+    /// `startParameter` is the piece's first sample in **this stroke's own** domain; it is mapped onto
+    /// the walk the stroke's dabs were actually laid on before the arc length is measured, so a piece
+    /// cut out of a piece composes rather than chaining.
+    private static func detachedPiece(of stroke: VectorStroke, samples: [VectorSample],
+                                      startParameter: CGFloat) -> VectorStroke {
+        var piece = stroke
+        piece.id = UUID()
+        piece.samples = samples
+        piece.lattice = nil
+        piece.arcOffset = detachedArcOffset(of: stroke, startParameter: startParameter)
+        return piece
+    }
+
+    /// Where a piece starting at `startParameter` sits in its parent's random field, in **brush
+    /// widths** — the unit `DabRandom` addresses the field in.
+    ///
+    /// One function, because the Mode 2 *preview* has to draw the surviving caps in the same place the
+    /// commit will put them; two computations of this would be two chances to disagree, and the
+    /// disagreement would show only for a scattering brush.
+    private static func detachedArcOffset(of stroke: VectorStroke, startParameter: CGFloat) -> CGFloat {
+        let walk = stroke.lattice?.samples ?? stroke.samples
+        let target = stroke.lattice.map { $0.parentParameter(of: startParameter) } ?? startParameter
+        let points = StrokePath(walk).arcLength(to: target)
+        return stroke.arcOffset + (stroke.size > 0 ? points / stroke.size : points)
     }
 
     /// `sampleVisibilityThresholds` — an `[Int: CGFloat]` keyed by index into the *parent's* samples —
@@ -1959,14 +2035,12 @@ final class VectorCanvas {
                                           in: stroke.samples)
             guard !cuts.isEmpty else { result.append(element); continue }
             changed = true
-            for run in StrokeGeometry.splitStroke(stroke.samples, removing: cuts) {
-                var piece = stroke
-                piece.id = UUID()
-                piece.samples = run
-                // Mode 2 removes geometry, so a piece re-stamps from its own first sample rather than
-                // inheriting the parent's lattice, which would keep drawing dabs just cut away.
-                piece.lattice = nil
-                result.append(.stroke(piece))
+            // Mode 2 removes geometry, so a piece re-stamps from its own first sample rather than
+            // inheriting the parent's lattice, which would keep drawing dabs just cut away. Its
+            // randomness stays where it was regardless — see `detachedPiece`.
+            for run in StrokeGeometry.splitStrokeRuns(stroke.samples, removing: cuts) {
+                result.append(.stroke(Self.detachedPiece(of: stroke, samples: run.samples,
+                                                         startParameter: run.parameters.first ?? 0)))
             }
         }
         if changed { _elements = result }
@@ -2513,9 +2587,10 @@ final class VectorCanvas {
     /// Multiplying `stroke.size` by the similarity's own factor is not an approximation. It is exact,
     /// dab for dab: `BrushStamper.stampSpacing` is linear in brush size and `advance` walks in
     /// geometric distance, so a path *k*× longer walked with *k*× spacing takes the identical number
-    /// of steps at the identical parameters. Identical count ⇒ the seeded `DabRNG` draws the
-    /// identical sequence; identical parameters ⇒ `visibleRange` selects the identical dabs of a cut
-    /// piece's parent walk. Measured across 264 similarity cases (k ∈ [0.25, 8], θ ∈ [0, 2.1]): worst
+    /// of steps at the identical parameters. And the random field is addressed in brush widths, so
+    /// `spacing / brushSize` is the *same Double* before and after the scale and every dab draws what
+    /// it drew; identical parameters ⇒ `visibleRange` selects the identical dabs of a cut piece's
+    /// parent walk. Measured across 264 similarity cases (k ∈ [0.25, 8], θ ∈ [0, 2.1]): worst
     /// dab displacement 1.3e-13 pt, worst parameter error 8.9e-16.
     /// `LassoMoveLogicTests.testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt` pins it.
     ///
@@ -2902,9 +2977,9 @@ final class VectorCanvas {
         /// The dab-lattice walk to replay for the erase: the parent's samples for a piece carrying a
         /// `DabLattice`, the stroke's own otherwise. Canvas space.
         var eraseWalk: [VectorSample]
-        /// `BrushStamper.seed(for:)`'s input — the lattice's parent id where there is one — so the
-        /// erase lands on the same dabs the render put down.
-        var eraseSeedID: UUID
+        /// The random field `eraseWalk` is addressed in — the stroke's own, which a piece inherits
+        /// from its parent — so the erase lands on the same dabs the render put down.
+        var eraseRandom: DabRandom
         /// Spans of `eraseWalk`'s parametric domain to erase.
         var eraseRanges: [ClosedRange<CGFloat>]
         /// A surviving piece, and the window of it worth drawing back. Only the ends that abut a cut
@@ -2913,6 +2988,9 @@ final class VectorCanvas {
         struct Restamp {
             var samples: [VectorSample]
             var range: ClosedRange<CGFloat>
+            /// The field this piece will be drawn from once the cut commits — `detachedArcOffset`'s
+            /// answer for the run this window belongs to.
+            var random: DabRandom
         }
         var restamps: [Restamp]
         var brush: Brush
@@ -3023,14 +3101,17 @@ final class VectorCanvas {
                 let startAbutsACut = first > StrokeGeometry.epsilon
                 let endAbutsACut = last < domainEnd - StrokeGeometry.epsilon
                 guard startAbutsACut || endAbutsACut else { continue }
+                let random = DabRandom(seed: stroke.seed,
+                                       arcOffset: Self.detachedArcOffset(of: stroke, startParameter: first))
                 for window in Self.endWindows(of: canvasRun, reach: reach,
                                               fromStart: startAbutsACut, fromEnd: endAbutsACut) {
-                    restamps.append(CutPreviewEdit.Restamp(samples: canvasRun, range: window))
+                    restamps.append(CutPreviewEdit.Restamp(samples: canvasRun, range: window,
+                                                           random: random))
                 }
             }
 
             edits.append(CutPreviewEdit(eraseWalk: Self.canvasSamples(source, through: _transform),
-                                        eraseSeedID: lattice?.seedID ?? stroke.id,
+                                        eraseRandom: stroke.dabRandom,
                                         eraseRanges: eraseRanges,
                                         restamps: restamps,
                                         brush: stroke.brush,
@@ -3119,20 +3200,17 @@ final class VectorCanvas {
             BrushStamper.stampStroke(into: target, samples: walk, brush: edit.brush,
                                      color: .black, brushSize: edit.size,
                                      brushOpacity: edit.opacity, isEraser: true,
-                                     seed: BrushStamper.seed(for: edit.eraseSeedID),
-                                     visibleRange: range)
+                                     random: edit.eraseRandom, visibleRange: range)
         }
         for restamp in edit.restamps {
             let samples = restamp.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
-            // No seed: a piece is minted with a fresh `id` at commit time, so there is no seed the
-            // preview could match. Scatter and rotation jitter therefore land somewhere else in the
-            // preview than they will after the cut — for a scattering brush this is an approximation,
-            // and for every non-scattering one (`BrushStamper.stampDab` touches the RNG nowhere else
-            // for a round shape) it is exact.
+            // The piece's own field, which the commit will give it too — BRUSH.md §4 took the seed off
+            // the id, so the preview can now name the same random the cut is about to produce. It used
+            // to be an approximation for a scattering brush and exact only for a round one.
             BrushStamper.stampStroke(into: target, samples: samples, brush: edit.brush,
                                      color: edit.color, brushSize: edit.size,
                                      brushOpacity: edit.opacity, isEraser: false,
-                                     visibleRange: restamp.range)
+                                     random: restamp.random, visibleRange: restamp.range)
         }
     }
 
@@ -3210,13 +3288,11 @@ final class VectorCanvas {
             guard !cuts.isEmpty else { continue }
 
             var pieces: [VectorElement] = []
-            for run in StrokeGeometry.splitStroke(victim.stroke.samples, removing: cuts) {
-                var piece = victim.stroke
-                piece.id = UUID()
-                piece.samples = run
-                // As in Mode 2: deletes geometry, so the piece is its own stroke from here on.
-                piece.lattice = nil
-                pieces.append(.stroke(piece))
+            // As in Mode 2: deletes geometry, so the piece walks its own samples from here on — and
+            // keeps the parent's random field through its `arcOffset`.
+            for run in StrokeGeometry.splitStrokeRuns(victim.stroke.samples, removing: cuts) {
+                pieces.append(.stroke(Self.detachedPiece(of: victim.stroke, samples: run.samples,
+                                                         startParameter: run.parameters.first ?? 0)))
             }
             splices.append((victim.index, pieces))
         }
@@ -3856,12 +3932,12 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
-    /// Replays one stored stroke. The seed is derived from the stroke's id so a `scatter`/
-    /// `rotationJitter` brush's dabs stay stable across invalidations and save/load — see
-    /// `BrushStamper.DabRNG`.
+    /// Replays one stored stroke. Its dabs come from `VectorStroke.dabRandom`, a hash of the stroke's
+    /// own stored seed and each dab's arc length, so a `scatter`/`rotationJitter` brush lands the same
+    /// ink across invalidations and save/load — see `DabRandom`.
     ///
     /// The one place a stroke's `lattice` is read: a piece is stamped by replaying its **parent's**
-    /// walk under the parent's seed, drawing only the dabs in the piece's range — see `DabLattice`.
+    /// walk, drawing only the dabs in the piece's range — see `DabLattice`.
     /// `target` is the dab sink for `.full`; `cg` is the context `.preview` strokes into — the same
     /// context `target` wraps, so both qualities land under the same transparency layer.
     private static func draw(stroke: VectorStroke, into cg: CGContext, target: DabTarget,
@@ -3927,8 +4003,8 @@ final class VectorCanvas {
     /// computed from the rest size, so its 1 pt floor cannot re-phase the walk under an animated
     /// scale (§8 measures that floor re-phasing a *Uniform* shrink on 19 of 24 frames);
     /// `stampApproximateSquare` builds its sub-lattice from the rest diameter against its own 1 pt
-    /// floors; and the seeded `DabRNG` sees an identical dab count and so draws an identical
-    /// sequence.
+    /// floors; and the random field is addressed at the rest walk's arc lengths, so a posed dab draws
+    /// what the artist's own dab drew.
     private static func stamp(stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
         let rest = stroke.restWalk
         // A lattice without a usable range would otherwise stamp the *parent* whole, which is worse
@@ -3940,7 +4016,7 @@ final class VectorCanvas {
         BrushStamper.stampStroke(into: sink, samples: samples, brush: stroke.brush,
                                  color: stroke.uiColor, brushSize: rest?.size ?? stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
-                                 seed: BrushStamper.seed(for: lattice?.seedID ?? stroke.id),
+                                 random: stroke.dabRandom,
                                  visibleRange: lattice?.range)
     }
 }

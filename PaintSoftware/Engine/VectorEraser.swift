@@ -263,11 +263,9 @@ enum VectorEraser {
     /// about the wrong shape. Such a stroke is left whole and erased by the punch alone, which is exact
     /// whatever the dabs did.
     ///
-    /// The *other* reason this used to exist is gone. Pieces mint fresh ids and `BrushStamper` seeds its
-    /// dab RNG from the id, so a split once re-rolled where every dab landed — `DabLattice.seedID`
-    /// carries the parent's seed now, and `stampStroke` runs the skipped dabs through the RNG so the
-    /// sequence stays in phase. Relaxing this gate is therefore purely a question of teaching the
-    /// coverage test about scattered ink.
+    /// The *other* reason this used to exist is gone: a piece inherits `VectorStroke.seed` and its dabs
+    /// hash on arc length, so a split cannot re-roll where any of them lands (BRUSH.md §4). Relaxing
+    /// this gate is therefore purely a question of teaching the coverage test about scattered ink.
     static func supportsSplitting(strokeBrush: Brush) -> Bool {
         strokeBrush.scatter <= 0 && strokeBrush.rotationJitter <= 0
     }

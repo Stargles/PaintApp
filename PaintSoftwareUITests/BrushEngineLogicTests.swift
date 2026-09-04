@@ -717,7 +717,8 @@ final class BrushEngineLogicTests: XCTestCase {
 
         func stamp(into texture: RasterLayerTexture, visibleRange: ClosedRange<CGFloat>?) {
             BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
-                                     brushSize: 9, brushOpacity: 1, seed: 99, visibleRange: visibleRange)
+                                     brushSize: 9, brushOpacity: 1, random: DabRandom(seed: 99),
+                                     visibleRange: visibleRange)
         }
 
         let whole = RasterLayerTexture(size: Self.canvasSize)
@@ -764,7 +765,7 @@ final class BrushEngineLogicTests: XCTestCase {
         var piece = parent
         piece.id = UUID()
         piece.samples = run.samples
-        piece.lattice = DabLattice(samples: parent.samples, parameters: run.parameters, seedID: parent.id)
+        piece.lattice = DabLattice(samples: parent.samples, parameters: run.parameters)
 
         // **Both operands of both assertions reach the in-memory original**, and that is deliberate
         // rather than incidental. Comparing a decode against another decode is tautological under a

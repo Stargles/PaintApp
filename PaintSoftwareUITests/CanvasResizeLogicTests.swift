@@ -659,7 +659,7 @@ final class CanvasResizeLogicTests: XCTestCase {
                                                              pressure: $0.pressure)
                                      },
                                      brush: brush, color: .black, brushSize: size * k,
-                                     brushOpacity: 1, seed: 99)
+                                     brushOpacity: 1, random: DabRandom(seed: 99))
             return target.dabs.count
         }
         // Clear of the floor at both sizes — 40 × 0.05 = 2 pt, halving to 1 pt — so a resize is the

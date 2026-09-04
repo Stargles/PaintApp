@@ -11,57 +11,6 @@ enum BrushStamper {
         var pressure: CGFloat
     }
 
-    /// Per-dab pseudo-randomness for scatter and rotation jitter, seeded explicitly so a stroke can
-    /// be *replayed* to the same pixels rather than merely to the same statistics.
-    ///
-    /// A global RNG would make a brush with `scatter > 0`/`rotationJitter > 0` re-roll its dabs on
-    /// every re-render (`VectorCanvas.renderLocalContent` re-runs `stampStroke` over every stored
-    /// stroke on each invalidation), visibly jumping an already-drawn stroke — including an eraser's
-    /// punched hole. That breaks the promise that vector geometry re-rasterizes losslessly.
-    ///
-    /// splitmix64: a handful of integer ops, no allocation, no shared state — cheap enough to seed
-    /// once per stroke on a path that runs thousands of times per stroke, and far more statistical
-    /// quality than jittering a brush dab needs.
-    struct DabRNG {
-        private var state: UInt64
-
-        /// Deterministic: the same seed always replays the same dab sequence.
-        init(seed: UInt64) { state = seed }
-
-        /// Non-deterministic, for live raster drawing — where dabs are baked into the bitmap as they
-        /// land and are never replayed, so there is nothing to keep stable.
-        init() { state = UInt64.random(in: .min ... .max) }
-
-        mutating func next() -> UInt64 {
-            state = state &+ 0x9E37_79B9_7F4A_7C15
-            var z = state
-            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-            return z ^ (z >> 31)
-        }
-
-        /// Uniform in `0..<1`. Takes the top 53 bits, the standard way to land a `Double` mantissa
-        /// exactly without the modulo bias of `next() % n`.
-        mutating func unit() -> CGFloat { CGFloat(next() >> 11) * (1.0 / 9_007_199_254_740_992.0) }
-
-        /// Uniform in `-1..<1`.
-        mutating func signedUnit() -> CGFloat { unit() * 2 - 1 }
-    }
-
-    /// Stable 64-bit seed for a stroke's dab sequence, derived from its own identity so it survives
-    /// save/load (a `Hasher` is per-process seeded and would not) and so two strokes never share a
-    /// scatter pattern.
-    static func seed(for id: UUID) -> UInt64 {
-        withUnsafeBytes(of: id.uuid) { raw in
-            var hash: UInt64 = 0xCBF2_9CE4_8422_2325 // FNV-1a 64
-            for byte in raw {
-                hash ^= UInt64(byte)
-                hash = hash &* 0x0000_0100_0000_01B3
-            }
-            return hash
-        }
-    }
-
     /// Distance between consecutive stamps along a path. The 1pt floor keeps thin or tight-spacing
     /// brushes continuous even at `spacingFraction` ~= 0.
     static func stampSpacing(brushSize: CGFloat, brush: Brush) -> CGFloat {
@@ -106,9 +55,21 @@ enum BrushStamper {
     /// Replays a whole stroke (spacing-interpolated between samples, exactly like
     /// `StrokeCanvasView.stampPath`) into `raster`, as one `beginStroke`/`endStroke` unit.
     ///
-    /// Pass `seed` (from `seed(for:)`, i.e. the stroke's own id) whenever the stroke can be replayed —
-    /// which for stored vector geometry is every render. Without it, scatter and rotation jitter are
-    /// re-rolled per render and the stroke's pixels change under the user; see `DabRNG`.
+    /// `random` is the stroke's own field — `VectorStroke.dabRandom` for stored geometry, the seed
+    /// minted at pen-down for live drawing. Every per-dab random value is a hash of it and the dab's
+    /// arc length, so there is nothing to keep in phase; BRUSH.md §4 and `DabRandom`.
+    ///
+    /// ## Arc length is the walk's own coordinate, in brush widths
+    ///
+    /// The march places dabs exactly `spacing` apart along the flattened curve, leftover carried
+    /// across segments, so a dab's arc length is one step more than the previous dab's — the first
+    /// sitting at zero, on `samples[0]`. Accumulated rather than multiplied out, because §6's spacing
+    /// is itself sensor-driven and will vary along a stroke; adding the same step in the same order is
+    /// what makes two tiers walking one stroke agree bit for bit.
+    ///
+    /// The step is `spacing / brushSize`, so the field is addressed in **brush widths** — the unit
+    /// §2.17 states λ in, and the one that makes a uniform scale of a stroke leave its randomness
+    /// exactly where it was. `DabRandom` carries the measurement.
     ///
     /// ## `visibleRange` — showing a sub-run without re-phasing it
     ///
@@ -119,16 +80,16 @@ enum BrushStamper {
     ///
     /// `visibleRange` fixes this as a *filter over the original walk*, not a re-derivation: the caller
     /// passes the **whole** stroke's samples, this walks all of them exactly as before — same spacing
-    /// arithmetic, same carry, same floating-point — and routes dabs outside the range to a sink that
-    /// draws nothing. The dabs that land are bit-for-bit what the uncut stroke produced, which matters
-    /// because the acceptance test for this is asserted at *zero* tolerance.
+    /// arithmetic, same carry, same floating-point, same arc length — and skips the ones outside the
+    /// range. The dabs that land are bit-for-bit what the uncut stroke produced, which matters because
+    /// the acceptance test for this is asserted at *zero* tolerance.
+    ///
+    /// A skipped dab is skipped outright, and the arc length still advances over it. Arc length is a
+    /// property of the walk rather than of what was drawn, which is what lets the skip be a skip.
     ///
     /// The range is in `StrokeGeometry`'s "sample index + fraction" domain; a dab exactly on a
     /// boundary is drawn, so two pieces cut at `low`/`high` render, between them, every dab of the
     /// original except those strictly inside `(low, high)`.
-    ///
-    /// Skipped dabs still go through `stampDab` so they consume the RNG exactly as they would have —
-    /// otherwise a piece of a scattering stroke would re-roll every dab after the first skipped one.
     ///
     /// ## The walk follows the curve, not the samples
     ///
@@ -143,23 +104,26 @@ enum BrushStamper {
     /// its geometry and not of the spacing it happens to be walked at.
     static func stampStroke(into raster: DabTarget, samples: [Sample], brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
-                            seed: UInt64? = nil, visibleRange: ClosedRange<CGFloat>? = nil) {
+                            random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
         let spacing = stampSpacing(brushSize: brushSize, brush: brush)
-        var rng = seed.map { DabRNG(seed: $0) } ?? DabRNG()
+        // One dab's worth of arc length, in brush widths. A zero-width brush has no width to measure
+        // against and falls back to points, which keeps the degenerate case addressing distinct cells
+        // instead of collapsing every dab onto one.
+        let step = brushSize > 0 ? spacing / brushSize : spacing
         let path = StrokePath(points: samples.map(\.point))
 
-        func sink(at parameter: CGFloat) -> DabTarget {
-            guard let visibleRange else { return raster }
-            return visibleRange.contains(parameter) ? raster : DiscardedDabTarget.shared
-        }
+        func draws(at parameter: CGFloat) -> Bool { visibleRange?.contains(parameter) ?? true }
 
-        // The first dab sits on the first stored point — the anchor the whole lattice hangs from, and
-        // what `visibleRange` counts from.
-        stampDab(into: sink(at: 0), at: samples[0].point, pressure: samples[0].pressure, brush: brush,
-                 color: color, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
-                 rng: &rng)
+        // The first dab sits on the first stored point — the anchor the whole lattice hangs from, what
+        // `visibleRange` counts from, and arc length zero.
+        var arcWidths: CGFloat = 0
+        if draws(at: 0) {
+            stampDab(into: raster, at: samples[0].point, pressure: samples[0].pressure, brush: brush,
+                     color: color, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
+                     random: random, arcWidths: arcWidths)
+        }
         // Distance walked since the last dab. A segment too short to place one hands its length to
         // the next instead of stamping short, which is what keeps a slow drag from bunching dabs up.
         var carried: CGFloat = 0
@@ -170,9 +134,13 @@ enum BrushStamper {
             // and opacity.
             let p0 = samples[index].pressure, p1 = samples[index + 1].pressure
             carried = path.advance(segment: index, spacing: spacing, carried: carried) { dab, u in
-                stampDab(into: sink(at: CGFloat(index) + u), at: dab, pressure: p0 + (p1 - p0) * u,
+                // Advances over a skipped dab as well as a drawn one: the field is addressed by where
+                // the walk got to, not by how many dabs came out of it.
+                arcWidths += step
+                guard draws(at: CGFloat(index) + u) else { return }
+                stampDab(into: raster, at: dab, pressure: p0 + (p1 - p0) * u,
                          brush: brush, color: color, brushSize: brushSize, brushOpacity: brushOpacity,
-                         isEraser: isEraser, rng: &rng)
+                         isEraser: isEraser, random: random, arcWidths: arcWidths)
             }
         }
         raster.endStroke()
@@ -186,18 +154,14 @@ enum BrushStamper {
     /// `.destinationOut` instead of the brush's own blend mode — i.e. painting with 0 opacity as the
     /// color, so its stamp punches a hole instead of adding color. `color` is irrelevant under
     /// `.destinationOut` (only the stamp's alpha coverage matters), so it's ignored for an eraser dab.
-    /// Live-drawing entry point: dabs land in the bitmap as they are made and are never replayed, so
-    /// an unseeded `DabRNG` is the right choice. Replayable callers must use the `rng:` overload.
-    static func stampDab(into raster: DabTarget, at point: CGPoint, pressure: CGFloat,
-                         brush: Brush, color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool) {
-        var rng = DabRNG()
-        stampDab(into: raster, at: point, pressure: pressure, brush: brush, color: color,
-                 brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser, rng: &rng)
-    }
-
+    ///
+    /// `random` and `arcWidths` say **where in the stroke's random field** this dab sits — the field,
+    /// and how far along the stroke it is in brush widths. There is one entry point rather than a
+    /// seeded and an unseeded one: BRUSH.md §4 leaves nothing that a live dab could roll differently
+    /// from a replayed one, and the seed exists at pen-down.
     static func stampDab(into raster: DabTarget, at point: CGPoint, pressure: CGFloat,
                          brush: Brush, color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool,
-                         rng: inout DabRNG) {
+                         random: DabRandom, arcWidths: CGFloat) {
         let pressureValue = Double(max(0, min(pressure, 1)))
         let sizeFraction = brush.dynamics.sizeFraction(forPressure: pressureValue)
         let opacityFraction = brush.dynamics.opacityFraction(forPressure: pressureValue)
@@ -206,7 +170,8 @@ enum BrushStamper {
         let alpha = CGFloat(brushOpacity) * CGFloat(brush.flow) * CGFloat(opacityFraction)
         guard alpha > 0, radius > 0 else { return }
 
-        let stampPoint = applyScatter(to: point, radius: radius, scatter: brush.scatter, rng: &rng)
+        let stampPoint = applyScatter(to: point, radius: radius, scatter: brush.scatter,
+                                      random: random, arcWidths: arcWidths)
         let hardness = CGFloat(brush.hardness)
         let blendMode = isEraser ? CGBlendMode.destinationOut : brush.blendMode.cgBlendMode
 
@@ -215,18 +180,23 @@ enum BrushStamper {
             raster.stampCircle(at: stampPoint, radius: radius, color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
         case .square, .custom:
             let rotation: CGFloat = brush.rotationJitter > 0
-                ? rng.signedUnit() * .pi * CGFloat(brush.rotationJitter)
+                ? random.signedUnit(.rotation, at: arcWidths) * .pi * CGFloat(brush.rotationJitter)
                 : 0
             stampApproximateSquare(into: raster, at: stampPoint, diameter: diameter, rotation: rotation,
                                    color: color, alpha: alpha, hardness: hardness, blendMode: blendMode)
         }
     }
 
-    static func applyScatter(to point: CGPoint, radius: CGFloat, scatter: Double, rng: inout DabRNG) -> CGPoint {
+    /// The dab's centre, thrown off the path by up to `radius · 2 · scatter`.
+    ///
+    /// Angle and distance are two draws at one arc length and so come from two `DabRandom` channels —
+    /// with no stream to take "the next value" off, the channel is what keeps them independent.
+    static func applyScatter(to point: CGPoint, radius: CGFloat, scatter: Double,
+                             random: DabRandom, arcWidths: CGFloat) -> CGPoint {
         guard scatter > 0 else { return point }
         let maxOffset = radius * 2 * CGFloat(scatter)
-        let angle = rng.unit() * 2 * .pi
-        let distance = rng.unit() * maxOffset
+        let angle = random.unit(.scatterAngle, at: arcWidths) * 2 * .pi
+        let distance = random.unit(.scatterDistance, at: arcWidths) * maxOffset
         return CGPoint(x: point.x + cos(angle) * distance, y: point.y + sin(angle) * distance)
     }
 
@@ -313,13 +283,11 @@ extension BrushStamper {
         }
     }
 
-    /// **A `DabTarget` that collects instead of drawing** — KEYFRAMES.md §4.2 names it as
-    /// *"structurally identical to the existing `DiscardedDabTarget`"*, and it is: the dab is
-    /// computed by exactly the arithmetic that would have drawn it, and then kept instead of
-    /// rasterized. Running `stampStroke` into one *is* the bake.
+    /// **A `DabTarget` that collects instead of drawing** — KEYFRAMES.md §4.2. The dab is computed by
+    /// exactly the arithmetic that would have drawn it, and then kept instead of rasterized. Running
+    /// `stampStroke` into one *is* the bake.
     ///
-    /// Not shared and not thread-safe, unlike `DiscardedDabTarget` — it has state, so each bake owns
-    /// one.
+    /// It has state, so each bake owns one rather than sharing.
     final class CollectingDabTarget: DabTarget {
         private(set) var dabs: [BakedDab] = []
         init() {}
@@ -337,11 +305,11 @@ extension BrushStamper {
     ///
     /// Wrapping the sink rather than the walk is the whole trick, and it is what makes this stage
     /// small: `stampStroke`, `stampDab`, `applyScatter` and `stampApproximateSquare` all run
-    /// **unchanged, in rest space**, so the dab count, the dab phase, the seeded `DabRNG` draws, and
-    /// the square brush's sub-lattice are invariant across every frame of an animation *by
-    /// construction* rather than by arithmetic that happens to agree. Only the two numbers a pose can
-    /// legitimately change — where the dab is and
-    /// how big it is — are touched, and they are touched last.
+    /// **unchanged, in rest space**, so the dab count, the dab phase, the arc lengths the random field
+    /// is addressed at, and the square brush's sub-lattice are invariant across every frame of an
+    /// animation *by construction* rather than by arithmetic that happens to agree. Only the two
+    /// numbers a pose can legitimately change — where the dab is and how big it is — are touched, and
+    /// they are touched last.
     ///
     /// `beginStroke`/`endStroke` forward, because the wrapped target may be a `RasterLayerTexture`
     /// keeping a stroke count.
@@ -369,11 +337,11 @@ extension BrushStamper {
     /// `stampStroke`, because it is `stampStroke` — into a collector.
     static func bake(samples: [Sample], brush: Brush, color: UIColor, brushSize: CGFloat,
                      brushOpacity: Double, isEraser: Bool = false,
-                     seed: UInt64? = nil, visibleRange: ClosedRange<CGFloat>? = nil) -> [BakedDab] {
+                     random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) -> [BakedDab] {
         let collector = CollectingDabTarget()
         stampStroke(into: collector, samples: samples, brush: brush, color: color,
                     brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
-                    seed: seed, visibleRange: visibleRange)
+                    random: random, visibleRange: visibleRange)
         return collector.dabs
     }
 
@@ -392,19 +360,4 @@ extension BrushStamper {
         }
         target.endStroke()
     }
-}
-
-/// Where `stampStroke` sends the dabs outside a `visibleRange`.
-///
-/// The dab is still *computed* — same size, same alpha, same RNG draws — and then dropped, which is
-/// the point: skipping the call instead would desynchronise the dab RNG for every dab after it, and
-/// branching before the call would put the visibility test in the middle of the arithmetic that has
-/// to stay bit-identical. Stateless, so one shared instance serves every caller on every thread.
-final class DiscardedDabTarget: DabTarget {
-    static let shared = DiscardedDabTarget()
-    private init() {}
-    func beginStroke() {}
-    func endStroke() {}
-    func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
-                     alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {}
 }

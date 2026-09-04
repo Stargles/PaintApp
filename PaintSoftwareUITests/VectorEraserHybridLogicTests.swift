@@ -36,6 +36,9 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     private static let canvasSize = CGSize(width: 128, height: 128)
     private static let paintID = UUID(uuidString: "B0000000-0000-4000-8000-000000000001")!
+    /// The field `RasterVectorParity.paintStroke` gives the paint stroke — the thing a piece must
+    /// inherit now that BRUSH.md §4 took the seed off the id.
+    private static let paintSeed = DabRandom.seed(for: paintID)
     private static let eraserID = UUID(uuidString: "B0000000-0000-4000-8000-000000000002")!
 
     private static func ramp(from start: CGPoint, to end: CGPoint, count: Int,
@@ -286,8 +289,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                 } else {
                     for piece in paint {
                         XCTAssertNotEqual(piece.id, Self.paintID, "\(name): a piece is a new stroke")
-                        XCTAssertEqual(piece.lattice?.seedID, Self.paintID,
-                                       "\(name): a piece must replay the parent's dab RNG")
+                        XCTAssertEqual(piece.seed, Self.paintSeed,
+                                       "\(name): a piece must inherit the parent's random field")
                         XCTAssertEqual(piece.lattice?.samples.count, Self.paintSamples.count,
                                        "\(name): a piece must carry the parent's whole walk, not its own samples")
                         XCTAssertLessThan(piece.samples.count, Self.paintSamples.count,
@@ -449,8 +452,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             var piece = paint
             piece.id = UUID()
             piece.samples = run.samples
-            piece.lattice = DabLattice(samples: paint.samples, parameters: run.parameters,
-                                       seedID: paint.id)
+            piece.lattice = DabLattice(samples: paint.samples, parameters: run.parameters)
             return .stroke(piece)
         }
 
@@ -498,8 +500,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let pieces = strokes(canvas, .paint)
         XCTAssertGreaterThanOrEqual(pieces.count, 2, "The second gesture should have cut again")
         for piece in pieces {
-            XCTAssertEqual(piece.lattice?.seedID, Self.paintID,
-                           "A grandchild still belongs to the original stroke's lattice")
+            XCTAssertEqual(piece.seed, Self.paintSeed,
+                           "A grandchild still draws from the original stroke's random field")
             XCTAssertEqual(piece.lattice?.samples.count, Self.paintSamples.count,
                            "…and points at the original's samples, not its parent piece's")
             guard let range = piece.lattice?.range else {

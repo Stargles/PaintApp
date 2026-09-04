@@ -3104,6 +3104,10 @@ final class CanvasManager: ObservableObject {
     /// collapsed onto the final shape geometry at commit time (preserving brush dynamics).
     var shapeGestureSamples: [VectorSample] = []
     var shapeGestureBrush: Brush = BrushLibrary.softRound
+    /// The random field the shape's dabs are drawn from — BRUSH.md §4. Minted once when the shape is
+    /// confirmed, so every re-render of the live preview lays the same jittered ink and the committed
+    /// shape lays it too. Without it a scattering brush's preview reshuffled on every handle drag.
+    var shapeGestureSeed: UInt64 = DabRandom.freshSeed()
     /// Memoized `activeShapePreviewImage`, keyed by the geometry it was rendered for, plus the
     /// texture it was stamped into. One re-render per geometry change (i.e. per drag event), not one
     /// per SwiftUI pass — `updateShapeOverlay` runs on every render.

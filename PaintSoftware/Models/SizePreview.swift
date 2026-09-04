@@ -265,9 +265,11 @@ enum SizePreviewStampRenderer {
     /// shows through — the removal drawn as a removal.
     ///
     /// The dab is stamped at pressure 1 because that is what the slider's number means (see
-    /// `SizePreviewGeometry.stampDiameter`), and through a **seeded** `DabRNG` so a scattering brush
-    /// does not jitter its preview on every SwiftUI pass — the same reason stored vector strokes are
-    /// replayed seeded rather than re-rolled.
+    /// `SizePreviewGeometry.stampDiameter`), and from a field keyed to the **brush's** own id so a
+    /// scattering brush does not jitter its preview on every SwiftUI pass — the same reason stored
+    /// vector strokes are replayed from a stored seed rather than re-rolled. A brush is not a stroke
+    /// and has no seed of its own; its id is the stable identity to hand `DabRandom.seed(for:)`, and
+    /// it is what makes two previews of one brush agree.
     ///
     /// A stamp larger than the window is not scaled: Core Graphics clips it to the context, which is
     /// exactly the real-size crop that was asked for.
@@ -285,7 +287,6 @@ enum SizePreviewStampRenderer {
                 cg.fill(CGRect(x: 0, y: 0, width: side, height: side))
             }
             let target = CGContextDabTarget(cg)
-            var rng = BrushStamper.DabRNG(seed: BrushStamper.seed(for: brush.id))
             BrushStamper.stampDab(into: target,
                                   at: CGPoint(x: side / 2, y: side / 2),
                                   pressure: 1,
@@ -294,7 +295,8 @@ enum SizePreviewStampRenderer {
                                   brushSize: geometry.stampDiameter,
                                   brushOpacity: opacity,
                                   isEraser: isEraser,
-                                  rng: &rng)
+                                  random: DabRandom(seed: DabRandom.seed(for: brush.id)),
+                                  arcWidths: 0)
         }
     }
 }

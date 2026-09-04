@@ -49,7 +49,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
 
     private func dabs(_ knots: [VectorSample], brush: Brush, size: CGFloat) -> [BrushStamper.BakedDab] {
         BrushStamper.bake(samples: knots.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
-                          brush: brush, color: .black, brushSize: size, brushOpacity: 1, seed: 31)
+                          brush: brush, color: .black, brushSize: size, brushOpacity: 1, random: DabRandom(seed: 31))
     }
 
     // MARK: - Geometry helpers

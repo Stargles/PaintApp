@@ -80,7 +80,8 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let scratch = RasterLayerTexture.load(from: canvas.render(), size: Self.canvasSize)
         let samples = gesture.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
         BrushStamper.stampStroke(into: scratch, samples: samples, brush: brush, color: .black,
-                                 brushSize: size, brushOpacity: 1, isEraser: true)
+                                 brushSize: size, brushOpacity: 1, isEraser: true,
+                                 random: DabRandom(seed: 0))
         return scratch
     }
 

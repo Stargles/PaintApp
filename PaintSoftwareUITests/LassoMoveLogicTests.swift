@@ -281,7 +281,7 @@ final class LassoMoveLogicTests: XCTestCase {
     func testAStrokeWhollyInsideKeepsItsIdAndItsLattice() {
         let (manager, layerIndex, vector) = fixture()
         var drawn = stroke(from: CGPoint(x: 22, y: 22), to: CGPoint(x: 40, y: 22))
-        drawn.lattice = DabLattice(samples: drawn.samples, parameters: [0, 1, 2], seedID: drawn.id)
+        drawn.lattice = DabLattice(samples: drawn.samples, parameters: [0, 1, 2])
         let originalID = drawn.id
         let originalLattice = drawn.lattice
         vector.addStroke(drawn)
@@ -914,7 +914,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                                              pressure: $0.pressure)
                                      },
                                      brush: brush, color: .black, brushSize: size * k,
-                                     brushOpacity: 1, seed: 99)
+                                     brushOpacity: 1, random: DabRandom(seed: 99))
             return target.dabs.count
         }
         // Clear of the floor at both sizes: 40 × 0.05 = 2 pt, doubling to 4 pt.
@@ -955,7 +955,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                                              pressure: $0.pressure)
                                      },
                                      brush: brush, color: .black, brushSize: size * k,
-                                     brushOpacity: 1, seed: 99)
+                                     brushOpacity: 1, random: DabRandom(seed: 99))
             return target.dabs.count
         }
 
@@ -2451,7 +2451,7 @@ final class LassoMoveLogicTests: XCTestCase {
         var precise = VectorStroke(brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
                                    samples: [offGrid(10, 10), offGrid(20, 12), offGrid(30, 14)])
         precise.lattice = DabLattice(samples: [offGrid(10, 10), offGrid(30, 14)],
-                                     parameters: [0, 1], seedID: UUID())
+                                     parameters: [0, 1])
         vector.addStroke(precise.markedPrecise())
         second.addStroke(precise.markedPrecise())
         let ordinary = VectorStroke(brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
@@ -4026,7 +4026,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// makes Clear an eraser rather than a delete key: the artist loops half a line and gets the
     /// other half back intact, ending exactly at the boundary they drew.
     ///
-    /// The `seedID` assertion is the reason this reuses `splitForLassoMove` rather than filtering the
+    /// The lattice assertion is the reason this reuses `splitForLassoMove` rather than filtering the
     /// list by hand. A cut piece renders on its parent's `DabLattice`, so the half that stayed keeps
     /// its dab phase and a scattering brush does not visibly re-roll along the part the artist did
     /// *not* touch — the precise defect `DabLattice` exists to prevent, and it comes free here.
@@ -4048,8 +4048,8 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(survivor.samples.last?.x ?? .nan, 30, accuracy: 0.5,
                        "and the cut lands on the loop, not at the previous stored sample")
         XCTAssertNotEqual(survivor.id, originalID, "a split makes two independent strokes (§5.2)")
-        XCTAssertEqual(survivor.lattice?.seedID, originalID,
-                       "but it draws on its parent's lattice, so its dabs do not re-phase")
+        XCTAssertEqual(survivor.lattice?.samples.count, 3,
+                       "but it draws on its parent's whole walk, so its dabs do not re-phase")
         XCTAssertTrue(isOpaque(vector, at: CGPoint(x: 12, y: 20)), "ink outside the loop stayed")
         XCTAssertFalse(isOpaque(vector, at: CGPoint(x: 44, y: 20)), "ink inside the loop went")
     }
@@ -4991,7 +4991,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                  samples: source.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) },
                                  brush: stroke.brush, color: stroke.uiColor, brushSize: stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: stroke.composite == .erase,
-                                 seed: BrushStamper.seed(for: lattice?.seedID ?? stroke.id),
+                                 random: stroke.dabRandom,
                                  visibleRange: lattice?.range)
         return target.dabs
     }

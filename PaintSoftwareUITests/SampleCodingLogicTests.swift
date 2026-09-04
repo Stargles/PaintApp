@@ -208,7 +208,7 @@ final class SampleCodingLogicTests: XCTestCase {
     /// gets the same packing. `DabLattice`'s hand-written coder exists only for this.
     func testAPieceLatticeIsPackedToo() throws {
         var piece = Self.stroke()
-        piece.lattice = DabLattice(samples: Self.realisticRun(count: 40), parameters: [0, 1], seedID: UUID())
+        piece.lattice = DabLattice(samples: Self.realisticRun(count: 40), parameters: [0, 1])
 
         let object = try XCTUnwrap(JSONSerialization.jsonObject(
             with: try JSONEncoder().encode(piece), options: []) as? [String: Any])
@@ -219,7 +219,9 @@ final class SampleCodingLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorStroke.self, from: try JSONEncoder().encode(piece))
         XCTAssertEqual(decoded.lattice?.samples.count, 40)
         XCTAssertEqual(decoded.lattice?.parameters, piece.lattice?.parameters, "the parameters are not coordinates")
-        XCTAssertEqual(decoded.lattice?.seedID, piece.lattice?.seedID)
+        // The seed rides on the stroke rather than on its lattice — BRUSH.md §4 — so this is where a
+        // piece's dab pattern survives the round trip now.
+        XCTAssertEqual(decoded.seed, piece.seed)
     }
 
     /// Not a migration — TODO.md's standing permission says no document written so far has to survive.
@@ -411,7 +413,7 @@ final class SampleCodingLogicTests: XCTestCase {
         var piece = VectorStroke(brush: manager.selectedBrush,
                                  color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                  size: 8, opacity: 1, samples: Array(walk.prefix(8)))
-        piece.lattice = DabLattice(samples: walk, parameters: [0, 1], seedID: UUID())
+        piece.lattice = DabLattice(samples: walk, parameters: [0, 1])
         manager.layers[1].cels[0].vector?.addStroke(piece.markedPrecise())
         manager.layers[1].cels[0].vector?.addStroke(
             VectorStroke(brush: manager.selectedBrush,

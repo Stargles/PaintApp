@@ -49,6 +49,8 @@
 		C9D0E1F2A3B4C5D6E7F80104 /* PaintSoftware/Services/ProjectBackupManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */; };
 		B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */; };
 		B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */; };
+		F40BEE6BBD790F381BBB5D6E /* PaintSoftware/Engine/DabRandom.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B920BA965F16462CC1EE961 /* PaintSoftware/Engine/DabRandom.swift */; };
+		5746C8A458EA5E232A06A413 /* DabRandomLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */; };
 		A61918E30F864A7807D4D71F /* PaintSoftware/Engine/StrokePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */; };
 		E6E1FC8A9DC5311E20FCD0E9 /* StrokePathFitLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */; };
 		0EF703537241022611DD32A7 /* StrokePathWalkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */; };
@@ -330,6 +332,8 @@
 		C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Services/ProjectBackupManager.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/Brush.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokeStabilizer.swift; sourceTree = "<group>"; };
+		4B920BA965F16462CC1EE961 /* PaintSoftware/Engine/DabRandom.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/DabRandom.swift; sourceTree = "<group>"; };
+		355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DabRandomLogicTests.swift; sourceTree = "<group>"; };
 		84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/StrokePath.swift; sourceTree = "<group>"; };
 		946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokePathFitLogicTests.swift; sourceTree = "<group>"; };
 		CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokePathWalkLogicTests.swift; sourceTree = "<group>"; };
@@ -654,6 +658,7 @@
 				CE9C54AABFA65685152CCC08 /* StrokeInterruptionLogicTests.swift */,
 				37505F94EE15CFA9C4522C17 /* MenuInterruptionUITests.swift */,
 				A1B2C3D4E5F6001122334455 /* BrushEngineLogicTests.swift */,
+				355D8621D62995F96B9EB84C /* DabRandomLogicTests.swift */,
 				946B2933708CE09ECC2F6561 /* StrokePathFitLogicTests.swift */,
 				CDAB2311F862A2FA7B176979 /* StrokePathWalkLogicTests.swift */,
 				40ED75E5C25426851A138A3D /* VectorCanvasDataLogicTests.swift */,
@@ -777,6 +782,7 @@
 				31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */,
 				B2C3D4E5F6001122334455A1 /* PaintSoftware/Engine/Brush.swift */,
 				B2C3D4E5F6001122334455B1 /* PaintSoftware/Engine/StrokeStabilizer.swift */,
+				4B920BA965F16462CC1EE961 /* PaintSoftware/Engine/DabRandom.swift */,
 				84EAF04DCC7256495344F10D /* PaintSoftware/Engine/StrokePath.swift */,
 				893DC147DFDD7619D71F5F2A /* PaintSoftware/Views/TimelineLayoutKey.swift */,
 				9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */,
@@ -1056,6 +1062,8 @@
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,
 				B2C3D4E5F6001122334455B2 /* PaintSoftware/Engine/StrokeStabilizer.swift in Sources */,
+				F40BEE6BBD790F381BBB5D6E /* PaintSoftware/Engine/DabRandom.swift in Sources */,
+				5746C8A458EA5E232A06A413 /* DabRandomLogicTests.swift in Sources */,
 				A61918E30F864A7807D4D71F /* PaintSoftware/Engine/StrokePath.swift in Sources */,
 				E6E1FC8A9DC5311E20FCD0E9 /* StrokePathFitLogicTests.swift in Sources */,
 				0EF703537241022611DD32A7 /* StrokePathWalkLogicTests.swift in Sources */,

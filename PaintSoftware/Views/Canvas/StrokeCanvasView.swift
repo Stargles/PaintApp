@@ -148,6 +148,22 @@ final class StrokeCanvasView: UIView {
     /// between input samples rather than one dot per sample — otherwise a fast drag draws a gappy
     /// line that a bucket fill can leak through.
     private var lastStampPoint: CGPoint?
+
+    /// **The random field this gesture's dabs are drawn from** — BRUSH.md §4, minted at pen-down
+    /// rather than at commit.
+    ///
+    /// Live drawing used to roll its jitter off an unseeded generator on the reasoning that raster
+    /// dabs are baked as they land and never replayed. True of the raster tier, and beside the point
+    /// on the vector one: the scratch shows the artist a scattering stroke under the pen and the
+    /// stored stroke re-rolled it at lift, so the ink visibly resettled the moment they let go. With
+    /// the seed in hand from the first dab, the two address the same field and the only difference
+    /// left is the refit's 0.25 pt.
+    private var strokeSeed: UInt64 = DabRandom.freshSeed()
+
+    /// How far the live walk has travelled, in brush widths — `DabRandom`'s coordinate. Reset with
+    /// the walk at pen-down; advanced one dab's worth per dab, exactly as `stampStroke` advances its
+    /// own.
+    private var strokeArcWidths: CGFloat = 0
     /// Mode 2's preview walks the gesture one **increment** at a time — the previously stored sample
     /// to the one just admitted — so each touch sample asks about the footprint it has just added
     /// rather than about the whole gesture so far. Without that the probe walk would grow with the
@@ -759,6 +775,10 @@ final class StrokeCanvasView: UIView {
         if beginGuideStrokeIfArmed(touch) { return }
         if consumeAsMotionGroupTap(touch) { return }
         onStrokeBegan?() // commit any still-adjustable fill first
+        // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
+        // stored stroke replays are drawn from the same randomness.
+        strokeSeed = DabRandom.freshSeed()
+        strokeArcWidths = 0
         if vectorCanvas != nil { beginVectorStroke(touch); return }
         guard let raster else { return }
         shapeFollowingTouch = false
@@ -995,15 +1015,21 @@ final class StrokeCanvasView: UIView {
     /// `StrokePath`'s curve through them are the same line to well under a pixel, which is why this
     /// walk stays straight while `BrushStamper.stampStroke`'s does not.
     private func stampPath(to point: CGPoint, pressure: CGFloat, into target: DabTarget) {
+        let random = DabRandom(seed: strokeSeed)
+        let spacing = BrushStamper.stampSpacing(brushSize: brushSize, brush: brush)
+        // One dab's worth of arc length in brush widths — the same step `stampStroke` takes, so the
+        // two walks address the same points of the field even though their geometry differs by the
+        // refit's tolerance.
+        let step = brushSize > 0 ? spacing / brushSize : spacing
         guard let last = lastStampPoint else {
-            BrushStamper.stampDab(into: target, at: point, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
+            BrushStamper.stampDab(into: target, at: point, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser, random: random, arcWidths: strokeArcWidths)
             lastStampPoint = point
             return
         }
         // A walk shorter than one spacing returns `last` unchanged; distance accumulates onward.
-        lastStampPoint = BrushStamper.advance(from: last, to: point,
-                                              spacing: BrushStamper.stampSpacing(brushSize: brushSize, brush: brush)) { dab in
-            BrushStamper.stampDab(into: target, at: dab, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser)
+        lastStampPoint = BrushStamper.advance(from: last, to: point, spacing: spacing) { dab in
+            strokeArcWidths += step
+            BrushStamper.stampDab(into: target, at: dab, pressure: pressure, brush: brush, color: brushColor, brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser, random: random, arcWidths: strokeArcWidths)
         }
     }
 
@@ -1163,8 +1189,12 @@ final class StrokeCanvasView: UIView {
                 // `brushColor` is always an already-resolved (non-dynamic) color by the time it reaches
                 // `getRed`, so this can't silently fail — see Utilities/ColorConversion.swift.
                 brushColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+                // The gesture's own seed, so the stroke replays the field the scratch just drew. A
+                // gesture clipped into several runs hands the same seed to each: only the first can
+                // match the preview, and the rest are at least stable across renders.
                 let stroke = VectorStroke(brush: brush, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
-                                          size: brushSize, opacity: brushOpacity, samples: run)
+                                          size: brushSize, opacity: brushOpacity, samples: run,
+                                          seed: strokeSeed)
                 // Samples are in canvas space; this overload maps them into layer-local space so a
                 // stroke on an already-moved layer lands under the finger.
                 vectorCanvas.addStroke(canvasSpaceStroke: stroke)
@@ -1219,7 +1249,7 @@ final class StrokeCanvasView: UIView {
             color: isEraser ? CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
                             : CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
             size: brushSize, opacity: brushOpacity, samples: samples,
-            composite: isEraser ? .erase : .paint)
+            composite: isEraser ? .erase : .paint, seed: strokeSeed)
         canvasManager.recordLocalEdit(canvasSpaceStroke: stroke, forCel: celID, inLayer: layerID)
     }
 

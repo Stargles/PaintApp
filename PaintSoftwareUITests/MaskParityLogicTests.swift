@@ -161,7 +161,8 @@ final class MaskParityLogicTests: XCTestCase {
         BrushStamper.stampDab(into: manager.layers[0].cels[celIndex].raster,
                               at: CGPoint(x: 32, y: 32), pressure: 1,
                               brush: BrushLibrary.softRound, color: .black,
-                              brushSize: 40, brushOpacity: 1, isEraser: false)
+                              brushSize: 40, brushOpacity: 1, isEraser: false,
+                              random: DabRandom(seed: 0), arcWidths: 0)
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(blue, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
         manager.layers[0].isVisible = false
@@ -593,7 +594,8 @@ final class MaskParityLogicTests: XCTestCase {
         BrushStamper.stampDab(into: manager.layers[0].cels[celIndex].raster,
                               at: CGPoint(x: 32, y: 32), pressure: 1,
                               brush: BrushLibrary.softRound, color: .black,
-                              brushSize: 40, brushOpacity: 1, isEraser: false)
+                              brushSize: 40, brushOpacity: 1, isEraser: false,
+                              random: DabRandom(seed: 0), arcWidths: 0)
         manager.layers[0].isVisible = false
         let mask = AlphaMask(sources: [.layer(manager.layers[0].id)])
         manager.layers[1].alphaMask = mask

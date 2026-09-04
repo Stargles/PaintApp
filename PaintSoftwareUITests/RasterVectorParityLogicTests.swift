@@ -82,7 +82,9 @@ struct ParityScenario {
     var eraserSamples: [VectorSample]
     var backdrop: Backdrop
     /// Fixed rather than freshly generated, so a scatter/jitter-carrying brush replays to the same
-    /// dabs on a rerun and a reported failure is reproducible. Both tiers seed from these.
+    /// dabs on a rerun and a reported failure is reproducible. Both tiers draw their random field from
+    /// these — `VectorStroke.seed` is minted fresh per stroke (BRUSH.md §4), so a scenario that wants
+    /// two runs to agree has to name the field rather than let it be rolled.
     var paintID: UUID
     var eraserID: UUID
 }
@@ -104,13 +106,15 @@ enum RasterVectorParity {
     static func paintStroke(_ scenario: ParityScenario) -> VectorStroke {
         VectorStroke(id: scenario.paintID, brush: scenario.brush, color: scenario.paintColor,
                      size: scenario.paintSize, opacity: scenario.paintOpacity,
-                     samples: scenario.paintSamples, composite: .paint)
+                     samples: scenario.paintSamples, composite: .paint,
+                     seed: DabRandom.seed(for: scenario.paintID))
     }
 
     static func eraseStroke(_ scenario: ParityScenario) -> VectorStroke {
         VectorStroke(id: scenario.eraserID, brush: scenario.eraserBrush, color: scenario.eraserColor,
                      size: scenario.eraserSize, opacity: scenario.eraserOpacity,
-                     samples: scenario.eraserSamples, composite: .erase)
+                     samples: scenario.eraserSamples, composite: .erase,
+                     seed: DabRandom.seed(for: scenario.eraserID))
     }
 
     static func backdropElement(_ scenario: ParityScenario) -> VectorElement? {
@@ -131,16 +135,16 @@ enum RasterVectorParity {
         }
     }
 
-    /// Mirrors `VectorCanvas.stamp(stroke:into:isEraser:)`, which is private to that class. The `seed:`
-    /// argument is the load-bearing part: the vector tier always seeds from the stroke's own id, so
-    /// the raster tier has to as well or a brush with scatter or rotation jitter lands its dabs
-    /// somewhere else entirely and the comparison measures the RNG instead of the eraser.
+    /// Mirrors `VectorCanvas.stamp(stroke:into:isEraser:)`, which is private to that class. The
+    /// `random:` argument is the load-bearing part: the vector tier draws from the stroke's own field,
+    /// so the raster tier has to as well or a brush with scatter or rotation jitter lands its dabs
+    /// somewhere else entirely and the comparison measures the randomness instead of the eraser.
     static func stamp(_ stroke: VectorStroke, into target: DabTarget, isEraser: Bool) {
         let samples = stroke.samples.map { BrushStamper.Sample(point: $0.point, pressure: $0.pressure) }
         BrushStamper.stampStroke(into: target, samples: samples, brush: stroke.brush,
                                  color: stroke.uiColor, brushSize: stroke.size,
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
-                                 seed: BrushStamper.seed(for: stroke.id))
+                                 random: stroke.dabRandom)
     }
 
     /// The raster tier's starting bitmap.
@@ -577,7 +581,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         BrushStamper.stampStroke(into: texture, samples: samples, brush: paint.brush,
                                  color: paint.uiColor, brushSize: paint.size,
                                  brushOpacity: paint.opacity, isEraser: false,
-                                 seed: BrushStamper.seed(for: Self.eraserID))  // deliberately the wrong id
+                                 random: DabRandom(seed: DabRandom.seed(for: Self.eraserID)))  // deliberately the wrong field
         RasterVectorParity.stamp(erase, into: texture, isEraser: true)
 
         let vector = VectorCanvas(size: scene.canvasSize,
