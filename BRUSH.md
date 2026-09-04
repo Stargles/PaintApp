@@ -203,6 +203,30 @@ point of every tapered stroke and a hair spike ends in gaps; with it a taper kee
 drawn genuinely light breaks up along its whole length. That is the shape of the curve §6 already gives
 every modulation, not a mechanism of its own.
 
+**2.20 A brush parameter is changed in the brush editor and nowhere else.** The side toolbar carries
+**size and opacity only** — the artist's own two numbers — and gains nothing, ever. Everything that
+belongs to a *brush* lives behind the editor. Owner: *"The side menu sliders stays as is: opacity and
+size. None should be added to that menu. The edit brush menu is where you put all the brush adjustment
+things."*
+
+The navigation is ruled with it. **Tapping the brush icon while it is already selected opens the
+brushes menu** — the whole library, arranged into the folders §8.2 gives it, with an **Add brush**
+button that is where §12 stage 12's importers land. **One tap selects a brush; a second tap on the
+selected brush opens the editor.** So selection and editing are the same gesture repeated, which is
+the grammar the tool icon already uses one level up.
+
+`StrokeSettingsPanel`'s two `Pressure → X` rows and its stabilization and spacing sliders are what the
+editor **absorbs** when it lands; they are not a second home for brush parameters, and stage 8 adding a
+Flow slider beside them was a mistake reversed rather than a precedent. §7 is the design.
+
+**2.21 An imported brush arrives with its dynamics mapped, not merely its tip.** Owner: *"ABR brushes
+(or procreate or other types) should automatically get assigned these settings based on the information
+they have, if available."* So §12 stage 12 is an **adapter** onto §6's matrix rather than a bitmap
+reader: whatever the source format states about pressure, tilt, spacing, jitter and scatter becomes
+rows, and what it does not state is left at the neutral rather than guessed. The owner's *"if
+available"* is the whole licence for that asymmetry — a brush that lands with three rows and an honest
+tip is right, and one that lands with eleven invented ones is not.
+
 ---
 
 ## 3. The pipeline — four stages, one of them stored
@@ -865,7 +889,38 @@ through §6's door.
 ## 7. The editor
 
 A Procreate-shaped panel: parameter groups, each row a base slider, each row able to gain a modulation —
-pick an input, draw a curve, set an amount.
+pick an input, draw a curve, set an amount. **§2.20 rules where it sits and how it is reached**, and
+rules that it is the *only* place a brush parameter is changed. Its shape is otherwise delegated:
+owner, *"You decide how this menu is going to look like, but it should ideally contain a modularity or
+a lot of parameters."* Procreate's Brush Studio is the named reference.
+
+### 7.0 Four worked examples, which are the acceptance test for the design
+
+The owner gave four. Three are already expressible and the fourth is not, and knowing which is which is
+what stops the editor being designed around a mechanism that does not exist.
+
+1. **Edge softness / antialiasing as an option.** One field on `BrushDabSettings`, built here.
+   [BUGS.md](BUGS.md) carries the measurement, the mechanism, and why hardness 1.00 is a legitimate
+   deterministic aliased look while 0.93–0.99 wanders with the size slider.
+2. **Spacing that grows with the brush.** **Already the behaviour, with nothing to build**:
+   `BrushDabSettings.spacing` is a *fraction of the stroke's diameter* (§6), so a brush at size 4 and
+   the same brush at size 80 lay dabs at the same relative gaps. The editor's job is to say so in its
+   units rather than to add a control.
+3. **A line that breaks into segments at low pressure, and the same behaviour driven by tilt.**
+   **Built, and not by moving spacing** — §2.18's `density` with §2.17's λ and §2.19's threshold curve.
+   Widening spacing stretches the whole line uniformly and gives a dotted one; dropping dabs leaves the
+   survivors on the same lattice, which is what reads as broken ink. Tilt-driven is `density ←
+   tiltAngle`: one row, no new mechanism. **The curve is already per row**, so *"the pressure curve to
+   trigger it may be adjustable"* is something the editor exposes rather than something to add.
+4. **Randomness whose *amount* is driven by a sensor** — *"pressure maps to both brush thickness and
+   spacing, with spacing using the randomizer engine"*, and *"pressure to taper"*. **Not expressible,
+   and §13 holds the decision open.** §6 is `base + Σ amount · curve(input)`, a **sum**: two rows give
+   a pressure-driven shift *plus* a fixed-amplitude wobble, never a wobble whose amplitude grows as
+   pressure falls. `density` escapes this by construction — §2.18's *"the coherence lives in the draw,
+   not in the value compared against"* means moving the compared-against value **is** moving the
+   amplitude — which is exactly why (3) works today and (4) does not. *"Pressure to taper"* is the same
+   shape from the other end: `taper` is an *input* (distance along the stroke), so "taper harder when
+   pressed lightly" wants pressure to scale taper's effect rather than add to it.
 
 **The curve editor already exists.** TODO (38) built bezier tangent handles with a tap grammar for the
 timeline's graph band; a pressure curve is the same control over a different domain, and reusing it is
@@ -1263,8 +1318,9 @@ first, which cleanly replaces the old one."*
    CoreGraphics transparency layer composited under the stroke's own alpha and blend mode. The live
    tier gets a third `StrokeScratch` role, `.subtractive`, whose window holds an eraser's **removal
    coverage** rather than a punched picture; `.replacing` keeps its meaning and is the cut preview's
-   alone. `StrokeSettingsPanel` gains a **Flow** slider and *"Pressure → Opacity"* becomes
-   *"Pressure → Flow"*.
+   alone. `StrokeSettingsPanel`'s *"Pressure → Opacity"* becomes *"Pressure → Flow"* — a label
+   corrected rather than a control added, since that row always drove the dab's coverage and coverage
+   is what `flow` is now called.
    Pinned by `BrushEngineLogicTests`' six new tests — the crossing reads the cap and not `1 - (1-o)²`;
    flow builds up where a stroke crosses itself while **every pixel** of a capped render is that
    fraction of an uncapped one (which folding the cap into a stamp cannot do); a 50% eraser takes away
@@ -1292,9 +1348,11 @@ first, which cleanly replaces the old one."*
      nothing at all — it never read opacity.
    - **No XCUITest named `pressureOpacitySlider`.** The identifier appeared once, in the panel that
      defines it.
-   **One convention is broken on purpose**: the panel pairs a `Pressure → X` amount with a base of
-   `1 - amount`, and `flow` is exempt, because it now has a base slider of its own and the pairing
-   would silently overwrite what the artist just set. `StrokeSettingsPanel` carries the reason.
+   **The panel gains no slider, and that is §7's ruling reaching back into this stage.** A base
+   slider for flow was built and removed: every brush parameter belongs to the brush editor, so the
+   panel's `base + amount == 1` convention holds for `flow` exactly as it does for `size`, and flow's
+   base is reachable when §12 stage 10 lands and not before. The side toolbar is untouched — size and
+   opacity, set by the artist, and nothing else.
    **Two divergences the `.preview` tier had are closed by the same change**: `strokePolyline`
    multiplied in the per-dab `opacity` output that no longer exists, and its eraser arm punched at full
    coverage whatever the eraser's opacity was. Both now read the stroke's own opacity, so the tier that
@@ -1309,11 +1367,26 @@ first, which cleanly replaces the old one."*
 11. **The Texture group's CC0 assets.** §8.3 and §8.4 — last of the shipped set, because it is the only part
     with a licensing step, and §8.3's verification happens at this point rather than earlier.
 12. **`.abr`, then Procreate `.brush`.** Last. A parser with no image primitive behind it shapes its model
-    around the wrong renderer.
+    around the wrong renderer. **§2.21 makes this an adapter rather than a parser**: what the file says
+    about pressure, tilt, spacing, jitter and scatter becomes §6 rows, and what it does not say is left
+    at the neutral rather than invented. It is reached from the brushes menu's **Add brush** button
+    (§2.20), not from a settings panel.
 
 ---
 
 ## 13. Open
+
+- **Whether a modulation's `amount` may itself be modulated — the sum-versus-product question, and it
+  is the one the editor's design turns on.** §7.0's fourth worked example is an owner ask that §6
+  cannot express: the matrix adds contributions, so nothing states *"how much random wobble there is
+  depends on pressure"*. Three answers are on the table and none is chosen. A row's `amount` becomes
+  itself a small matrix — one level of nesting, which is CSP's model and the most expressive. A row
+  gains a **second** input whose reading multiplies the first — cheaper, and it covers both of the
+  owner's examples. Or the answer stays *"use `density`"*, which genuinely covers segmentation and
+  covers nothing else. **Decide it with pictures before §12 stage 10 starts**, because every one of
+  the three draws a different editor: the first needs a row that opens into rows, the second needs two
+  input pickers per row, the third needs neither. Note the cost of the first two is not the editor but
+  `Brush.dabValues`, which is the hot per-dab loop and is one pass over a flat array today.
 
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,

@@ -190,11 +190,22 @@ LAYER_TRANSFORM.md.
       crosses itself reaches its opacity and stops — MEASURED at a flat 0.431 across a stroke drawn at 44%
       that crosses itself five times, where the old engine would have read 0.676 at each crossing. The
       eraser obeys the same rule by holding *coverage* and punching once. The `opacity` output is deleted,
-      the panel has a **Flow** slider, and the buffer costs a MEASURED 852 µs (6%) on a 2,301-dab stroke at
-      2048².
+      and the buffer costs a MEASURED 852 µs (6%) on a 2,301-dab stroke at 2048². **No control was added
+      anywhere** — §2.20 — only the panel's *"Pressure → Opacity"* label corrected to *"Pressure → Flow"*.
 
       **What remains is stages 9 through 12**: the library, the tip generator and the shipped brush set; the
       editor; the CC0 assets §8.3 gates on licensing; and the `.abr`/Procreate parsers.
+
+      **Two rulings landed with stage 8 and shape everything after it.** §2.20: **a brush parameter is
+      changed in the brush editor and nowhere else** — the side toolbar keeps size and opacity and gains
+      nothing — and the navigation is ruled with it: tapping the brush icon while it is already selected
+      opens the library of folders with its **Add brush** button, one tap selects a brush and a second tap
+      on the selected one opens the editor. §2.21: **an imported brush arrives with its dynamics mapped,
+      not merely its tip**, so stage 12 is an adapter onto §6's matrix rather than a bitmap reader.
+      **§7.0 is the owner's four worked examples**, and the fourth of them is not expressible: §6 sums its
+      contributions, so nothing states *"how much random wobble there is depends on pressure"*. §13 holds
+      that open and it has to be settled **before the editor starts**, because each of its three answers
+      draws a different editor.
 
       **Three rulings shape what is left.** The rough ink nib is a **dynamics effect, not a tip effect** —
       §8.4, refuted by measurement — so it needs no texture and is built from §2.17's wavelength and §2.18's
