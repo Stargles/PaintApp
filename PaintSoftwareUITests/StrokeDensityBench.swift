@@ -738,6 +738,144 @@ final class StrokeDensityBench: XCTestCase {
         }
     }
 
+    /// **(4b) Where the append's milliseconds actually go — stamping ink, or moving 8 MB about.**
+    ///
+    /// PERFORMANCE.md §11.8 could state the append's *dab* half on the owner's iPad without going
+    /// there — 236 dabs at §11.2's MEASURED 3.16 µs is 0.75 ms — and explicitly refused to infer the
+    /// other half, because the other half is canvas-sized buffer work and §10.2 already caught that
+    /// class of ratio **inverted** between this Mac and the device. This is the term only the
+    /// hardware can settle, and it is taken on the shipped path rather than on a model of it.
+    ///
+    /// **The instrument is a slope, not a stopwatch around a private method.** An append costs
+    /// `fixed + dabs × perDab`: one `UIGraphicsImageRenderer` context of the canvas's size, the
+    /// standing picture drawn 1:1 into it, the walk, and the `CGImage` the renderer makes at the
+    /// end — and only the walk depends on how much was appended. So appending *k* strokes before a
+    /// single render multiplies the ink by *k* and leaves every other term exactly where it was, and
+    /// a least-squares line through five such points reads the two off directly: **the intercept is
+    /// the buffer work and the slope is the ink.**
+    ///
+    /// `lastRenderDabCount` is checked on every point, and that check is what makes the fit
+    /// meaningful rather than decorative: a point that fell back to the full walk would report the
+    /// whole layer's dabs and the line would be fitted to a different function.
+    ///
+    /// **The fit is taken at three layer sizes, and that is the second question rather than a
+    /// repetition of the first.** The intercept is "everything that does not scale with the ink",
+    /// which is not the same as "the two blits": `appendPreservesTheWalk`'s scan is O(the merged
+    /// paint run), so on an all-strokes cel it is O(n) and it lands in the intercept too. If the
+    /// intercept is the buffers it is the same at 500 strokes and at 4,000; if it carries the scan
+    /// it grows with n. That is the only n-dependence left in the append and this is what says
+    /// whether "flat in n" is exactly true or merely true to within the noise.
+    ///
+    /// **And the intercept is read a second time, independently, as a replica** — a bare renderer of
+    /// the canvas's size with a standing picture drawn into it and no ink at all, and then the same
+    /// with nothing drawn into it either, so the 8 MB blit can be told from the context it lands in.
+    /// That is a model of the shipped path's buffer work rather than the path itself and is reported
+    /// as such.
+    ///
+    /// **The replica is taken twice over, and the pair is the point.** One arm throws each image away
+    /// before making the next, so the allocator hands back the same warm 8 MB slab every time; the
+    /// other retains all of them, so every iteration faults in pages it has never touched — which is
+    /// what the shipped append does, since the base it is drawing *from* is the previous render's
+    /// output and is still live while the new context is allocated. A replica that reuses one buffer
+    /// measures a memcpy; the append pays for the memory as well.
+    func testWhereTheAppendsMillisecondsGo() {
+        for n in [500, 2000, 4000] {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()                       // stands the incremental base up
+                var nextIndex = n + 1
+                canvas.addStroke(Self.benchStroke(nextIndex)); nextIndex += 1
+                _ = canvas.render()                       // and one warm append, not timed
+
+                var points: [(dabs: Double, seconds: Double)] = []
+                for k in [1, 2, 4, 8, 16] {
+                    var samples: [Double] = []
+                    var dabs = 0
+                    for _ in 0..<3 {
+                        for _ in 0..<k {
+                            canvas.addStroke(Self.benchStroke(nextIndex)); nextIndex += 1
+                        }
+                        let start = CFAbsoluteTimeGetCurrent()
+                        _ = canvas.render()
+                        samples.append(CFAbsoluteTimeGetCurrent() - start)
+                        dabs = canvas.lastRenderDabCount
+                    }
+                    samples.sort()
+                    let median = samples[samples.count / 2]
+                    points.append((Double(dabs), median))
+                    report("append cost by ink", [
+                        ("strokesOnLayer", "\(n)"),
+                        ("strokesAppended", "\(k)"),
+                        ("dabs", "\(dabs)"),
+                        ("render", ms(median)),
+                    ])
+                    XCTAssertLessThan(dabs, 16 * 400,
+                                      "the k=\(k) point at n=\(n) fell back to the full walk (\(dabs) dabs); the fit would be of the wrong function")
+                }
+
+                let count = Double(points.count)
+                let sumX = points.reduce(0) { $0 + $1.dabs }
+                let sumY = points.reduce(0) { $0 + $1.seconds }
+                let sumXX = points.reduce(0) { $0 + $1.dabs * $1.dabs }
+                let sumXY = points.reduce(0) { $0 + $1.dabs * $1.seconds }
+                let slope = (count * sumXY - sumX * sumY) / (count * sumXX - sumX * sumX)
+                let intercept = (sumY - slope * sumX) / count
+                let meanY = sumY / count
+                let ssTot = points.reduce(0) { $0 + ($1.seconds - meanY) * ($1.seconds - meanY) }
+                let ssRes = points.reduce(0) { $0 + ($1.seconds - (intercept + slope * $1.dabs)) * ($1.seconds - (intercept + slope * $1.dabs)) }
+                let r2 = ssTot > 0 ? 1 - ssRes / ssTot : 0
+
+                let oneStrokeDabs = points[0].dabs
+                let oneStrokeInk = slope * oneStrokeDabs
+                report("append cost split", [
+                    ("strokesOnLayer", "\(n)"),
+                    ("fixedBufferCost", ms(intercept)),
+                    ("usPerDab", String(format: "%.2f", slope * 1e6)),
+                    ("r2", String(format: "%.4f", r2)),
+                    ("oneStrokeDabs", String(format: "%.0f", oneStrokeDabs)),
+                    ("oneStrokeInk", ms(oneStrokeInk)),
+                    ("oneStrokeTotal", ms(intercept + oneStrokeInk)),
+                    ("bufferShare", String(format: "%.0f%%", 100 * intercept / max(intercept + oneStrokeInk, 1e-9))),
+                ])
+
+                XCTAssertGreaterThan(r2, 0.9,
+                                     "the append's cost at n=\(n) is not linear in dabs (R²=\(r2)); the split read off it is not readable")
+                XCTAssertGreaterThan(intercept, 0,
+                                     "a negative fixed cost at n=\(n) means the fit is noise, not a split")
+            }
+        }
+
+        // The replicas — the same canvas-sized buffer work with no ink in it at all, once against a
+        // buffer the allocator can hand back warm and once against memory never touched before.
+        autoreleasepool {
+            let standing = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(200)).render()
+            let format = PixelOps.transparentFormat()
+            format.preferredRange = .standard
+            func renderer(_ body: @escaping (UIGraphicsImageRendererContext) -> Void) -> UIImage {
+                UIGraphicsImageRenderer(size: Self.canvasSize, format: format).image(actions: body)
+            }
+            let warmBlit = medianSeconds(runs: 7) { _ = renderer { _ in standing.draw(at: .zero) } }
+            let warmEmpty = medianSeconds(runs: 7) { _ = renderer { _ in } }
+            var kept: [UIImage] = []
+            kept.reserveCapacity(16)
+            let coldBlit = medianSeconds(runs: 7) { kept.append(renderer { _ in standing.draw(at: .zero) }) }
+            var keptEmpty: [UIImage] = []
+            keptEmpty.reserveCapacity(16)
+            let coldEmpty = medianSeconds(runs: 7) { keptEmpty.append(renderer { _ in }) }
+            report("append cost split — replica", [
+                ("warmBufferReused", ms(warmBlit)),
+                ("warmContextAlone", ms(warmEmpty)),
+                ("freshBufferEachTime", ms(coldBlit)),
+                ("freshContextAlone", ms(coldEmpty)),
+                ("blitAloneWarm", ms(warmBlit - warmEmpty)),
+                ("blitAloneFresh", ms(coldBlit - coldEmpty)),
+                ("canvasBytes", mb(Int(Self.canvasSize.width * Self.canvasSize.height) * 4)),
+            ])
+            XCTAssertEqual(kept.count, 7)
+            XCTAssertEqual(keptEmpty.count, 7)
+        }
+    }
+
     /// Byte equality of two renders' own backing bitmaps. Not a tolerance: since the append draws
     /// the new dabs into a copy of the standing picture rather than into a separate layer, there is
     /// nowhere for a rounding difference to enter, and anything but equality is a defect.

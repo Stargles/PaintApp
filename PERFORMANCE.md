@@ -2253,7 +2253,13 @@ departs from linear and nothing is superlinear anywhere.
 
 **§1's ~1.3× device multiplier holds on this path too, and tightly: 1.31–1.32 for every n ≥ 1000**
 (1.28 at 500). That is worth having beyond this task — §1 established it for *compositing* and §10.2
-found it inverted for the bake codec, so this is a third path and it agrees with the first.
+found it inverted for the bake codec, so this is a third path and it agrees with the first. **And it
+holds on the incremental append as well, 1.30–1.32, which it had no obvious reason to** — that path
+is three quarters buffer copy rather than ink (§11.8, §11.9).
+
+**This table's device column was re-taken on 2026-09-04 and it has not moved**: 1480.2 / 1481.4 ms at
+n = 2000 against the 1489.4 above, and 2958.4 / 2959.1 against 2976.8, across a run of merged stages
+that included one making an image dab 2.1× a round one. §11.8 carries the re-run.
 
 **The owner's unit is strokes; the machine's unit is dabs, and only dabs.** MEASURED on the device:
 **3,200 zig-zag strokes carrying 7,667,200 dabs cost 23.52 s (3.07 µs/dab)** against **32,000 strokes
@@ -2417,11 +2423,14 @@ whenever the appended element is an eraser, carries a blend mode, or lands anywh
   budget table above stops depending on n. The edits that still pay the full walk are undo, a layer
   transform, an eviction and anything inserted into the middle.
 * **Strokes are the wrong unit.** 3.16 µs a dab is the whole cost model; at their brush that is
-  236 dabs and 0.75 ms per stroke, and a smaller brush buys proportionally more strokes. **This is
-  now the whole of what a pen-up costs**, rather than the slope on top of it.
+  236 dabs and 0.75 ms per stroke, and a smaller brush buys proportionally more strokes. **A pen-up
+  now costs that stroke and nothing for the ones already on the layer** — MEASURED on their iPad at
+  **3.4 ms**, of which 0.75 ms is the ink and the rest is one canvas-sized copy that does not care
+  how much is on the layer (§11.9). It was 1.48 s at 2,000 strokes.
 * **The one thing they may still see is a finished stroke blinking out** if they start the next one
-  before the first has rendered — [BUGS.md](BUGS.md). The window is 2.6 ms rather than 1.1 s now, so
-  in practice it should be unreachable, but it is not closed.
+  before the first has rendered — [BUGS.md](BUGS.md). On their own iPad the window is **3.4 ms rather
+  than 1.48 s** (§11.8, at 2,000 strokes), so in practice it should be unreachable, but it is not
+  closed.
 
 ### 11.8 What it bought, measured on the shipped path (2026-09-04)
 
@@ -2456,13 +2465,45 @@ the spike's 0.0001-0.0002 of 255. There is nowhere for a rounding difference to 
 dabs go into a copy of the standing bitmap rather than through an isolated layer, and
 `IncrementalAppendLogicTests` pins that at 128x96 and again at the owner's own 2048x1024.
 
-**No device row, and the reason is not technical.** The iPad refused the test run with *"Unlock
-Kevin's iPad to Continue"* - the lock screen, which no amount of Mac-side work gets past. What can be
-said about the device without measuring it is the dab count, which is hardware-independent: the
-append stamps **236 dabs where it stamped 472,236**, and §11.2's own MEASURED 3.16 us/dab puts those
-236 at **0.75 ms of stamping on their iPad 9**. What is *not* known there is the cost of the two
-canvas-sized copies, and it must not be inferred from the simulator - §10.2 already found the
-device/simulator ratio inverted on a memory-bandwidth-bound path. To take it, unlock the iPad and:
+**And the device row, taken 2026-09-04 on the owner's own iPad.** The run above had none - the iPad
+answered *"Unlock Kevin's iPad to Continue."* This is it, on the same fixture, **MEASURED on the
+owner's iPad 9 (`iPad12,1`, A13, 3 GB, iOS 26.5.2, arm64), Release, `test-without-building`,
+`-parallel-testing-enabled NO`**, two independent runs listed as `run 1 / run 2` rather than averaged.
+The Mac was at 75-81% idle with one other session's `xcodebuild` alive, which for once does not need
+a caveat and has its own operand below.
+
+| n strokes | full re-walk, iPad 9 | §11.2's row | shipped append, iPad 9 | prize | append, sim | device ÷ sim |
+|---|---|---|---|---|---|---|
+| 500 | 371.9 / 387.4 ms | 376.7 | **4.41 / 3.80 ms** | ~93x | 2.71 | (1.51) |
+| **2000** | 1480.2 / 1481.4 ms | 1489.4 | **3.33 / 3.45 ms** | ~437x | 2.57 | **1.32** |
+| 4000 | 2958.4 / 2959.1 ms | 2976.8 | **3.61 / 3.44 ms** | ~840x | 2.71 | **1.30** |
+
+`dabsFull` was 118,236 / 472,236 / 944,236 and `dabsIncremental` **236** on every row of both runs,
+and both runs were byte-identical against the cold canvas. `totalTestCount: 1, skippedTests: 0` off
+the xcresult, on `deviceName: Kevin's iPad`, so the bench ran rather than skipped.
+
+**§11.2's device rows hold, and the agreement is the tightest this file has recorded** - 371.9 and
+387.4 against 376.7, 1480.2 and 1481.4 against **1489.4**, 2958.4 and 2959.1 against **2976.8**: 0.6%
+at n = 2000 and 0.6% at n = 4000, on figures taken a run apart at a different commit. Per-dab that is
+3.13-3.15 us against §11.2's 3.15-3.19. **Several stages have merged since those rows were taken,
+including one that made an image dab 2.1x a round one, and the vector stroke walk did not move.**
+That agreement is also what says this run was not distorted by the other session's build: the timed
+work is the A13's, `xcodebuild` only streams the log, and the calibration rows were taken on an idle
+Mac.
+
+**The device ÷ simulator ratio for the append is 1.30-1.32 - the same 1.31-1.32 §11.2 measured for
+the re-walk, and there was no reason to expect it.** The re-walk is ink and the append is three
+quarters buffer (§11.9), so this is the M4's memory-bandwidth lead over the A13 coming out at
+essentially its compute lead on the same path. It is MEASURED, not explained, and it is the third
+path on which §1's ~1.3x holds against §10.2's one inversion. The n = 500 row reads 1.51 and is
+excluded: it is the first row of the run, which is where §11.2 already puts its warm-up.
+
+**The 0.75 ms this section inferred rather than measured was right, to the two figures it was
+quoted at.** §11.9 measures one stroke's ink on the device at **0.75 ms at n = 2000 and 0.76 ms at
+n = 4000**, against the 236 x 3.16 us = 0.75 ms this paragraph used to carry as INFERRED. The refusal
+to infer the *rest* was also right, and §11.9 is that term.
+
+To re-take either row:
 
 ```bash
 TEST_RUNNER_PAINTAPP_BENCH=1 xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
@@ -2475,6 +2516,12 @@ sets the variable for `xcodebuild`, not for the runner process, so every test sk
 reports `** TEST SUCCEEDED **` with two skips and no `STROKE BENCH |` lines. The banner-versus-count
 trap in one more costume.
 
+**Run the two bench tests as separate invocations, not one.** `testWhatTheIncrementalAppendBought`
+alone is **29.3 s of unyielding CPU in the runner** on the iPad 9 and §11.3 measured the XCTest
+watchdog's SIGKILL somewhere past ~45 s cumulative; adding §11.9's 5.6 s to the same process spends a
+third of the remaining margin for nothing. `build-for-testing` once, then one
+`test-without-building` per test, which is also what makes the two comparable.
+
 **What still costs the whole layer, deliberately.** Undo and redo, a layer transform, a cache
 eviction, an element inserted anywhere but the end, a suppressed element, and an appended stroke
 carrying a blend mode. The first three cannot say what moved; the last three *can* and are still
@@ -2486,5 +2533,74 @@ revisiting a single mutation site.
 **One cost, and it is transient.** Between an append and the render that consumes it the cel holds the
 standing picture alone - 8 MB at 2048x1024 - where the shipped code held nothing. It is the bitmap the
 old path was about to allocate anyway, it is released the moment the render lands, and `hasCachedImage`
-counts it so eviction can see it. The window it is held for shrank from 1.1 s to 2.6 ms at n = 2000,
-so this is strictly less memory-over-time than before.
+counts it so eviction can see it. The window it is held for shrank from 1.1 s to 2.6 ms at n = 2000
+on the simulator, and **from 1.48 s to 3.4 ms on the owner's own iPad**, so this is strictly less
+memory-over-time than before.
+
+
+### 11.9 Where the append's milliseconds go: three quarters of it is moving 8 MB (2026-09-04)
+
+§11.8 refused to infer this term and it was right to: it is canvas-sized buffer work, and §10.2 had
+already caught that class of ratio **inverted** between this Mac and the device. **MEASURED on the
+owner's iPad 9 (`iPad12,1`, A13, 3 GB, iOS 26.5.2), Release, Mac at 75.5% idle**, canvas 2048x1024,
+by `StrokeDensityBench.testWhereTheAppendsMillisecondsGo`.
+
+**The instrument is a slope rather than a stopwatch around a private method**, because there is no
+seam between the blit and the walk and cutting one in would measure the seam. An append costs
+`fixed + dabs x perDab`, and only the walk depends on how much was appended - so appending *k*
+strokes before a single `render()` multiplies the ink by *k* and moves nothing else. Five points,
+k = 1, 2, 4, 8, 16, median of three at each, least squares:
+
+| n strokes | fixed cost | us/dab | one stroke's ink | one stroke, total | buffers' share | R² |
+|---|---|---|---|---|---|---|
+| 500 | 2.97 ms | 3.64 | 0.86 ms | 3.83 ms | 78% | 0.9968 |
+| **2000** | **2.30 ms** | **3.17** | **0.75 ms** | **3.04 ms** | **75%** | 0.9999 |
+| 4000 | 2.57 ms | 3.22 | 0.76 ms | 3.33 ms | 77% | 0.9997 |
+
+**So the answer is ~2.5 ms of buffers against ~0.75 ms of ink: the append is three quarters memory
+traffic and one quarter brush.** Which is the opposite of everything else in §11, where the dab count
+was the only variable that mattered - and it is what makes the append flat: the term that dominates
+it does not know how much is on the layer.
+
+**Two operands, and they agree.** The slope is an independent re-derivation of §11.2's 3.16 us/dab,
+off a different fixture on a different code path, and it lands at **3.17 and 3.22** at n = 2000 and
+4000. The intercept has its own second reading - a **replica**, not the shipped path: a bare
+`UIGraphicsImageRenderer` of the canvas's size with a standing picture drawn 1:1 into it, and then
+the same with nothing drawn into it at all.
+
+| replica arm | seconds |
+|---|---|
+| the 8 MB context, allocated and turned into a `CGImage`, nothing drawn | **0.57 / 0.59 ms** |
+| the same, with the standing picture blitted 1:1 into it | **2.14 / 2.12 ms** |
+| **the blit alone**, by difference | **1.55 ms** |
+
+2.13 ms of replica against a 2.30-2.97 ms intercept, so **the buffer story accounts for essentially
+all of the fixed cost** and the 0.2-0.8 ms left over is the rest of `renderLocked` - the lock, the two
+memo checks, the tail slice, and releasing the previous 8 MB image. Both numbers are physically
+sensible on an A13: an 8 MB zero-fill at 0.57 ms and a 16 MB read-plus-write at 1.55 ms are ~14 and
+~10 GB/s.
+
+**The two replica arms are a pair on purpose and the pair refuted a hypothesis.** One throws each
+image away so the allocator hands back the same warm slab; the other retains all seven so every
+iteration faults in pages it has never touched, which is what the shipped append does - the base it
+draws *from* is the previous render's output and is still live while the new context is allocated.
+**They measure the same, 2.14 against 2.12 ms**, so first-touch faulting is not in this number and a
+warm-buffer replica is not flattering itself. That was the standing explanation for a 2.1x gap in the
+first version of this fixture, and it was wrong: the gap was a four-point fit at R² 0.978, and the
+fifth point closed it.
+
+**`appendPreservesTheWalk`'s O(n) scan is below the noise, so "flat in n" is exactly true rather than
+true to within it.** That backward-and-forward scan over the merged paint run is the only term left in
+an append that grows with the layer, and if it mattered the fixed cost would rise across the table.
+It reads **2.97 / 2.30 / 2.57 ms** at 500 / 2000 / 4000 - not monotone, and *largest* at the smallest
+n. On an all-strokes cel it is one enum discriminant and one blend-mode compare per element against a
+1.55 ms blit, and the arithmetic says it should be invisible; this is the measurement that says it is.
+
+**What this makes the next optimisation, if anyone wants one.** Nothing in the ink half is worth
+touching - 3.2 us a dab is the same walk the whole layer uses and §11.2 has already established it is
+linear and flat. The 2.5 ms is one 8 MB blit plus one 8 MB allocation per pen-up, and it exists
+because `renderLocalContent` must hand back an immutable `UIImage`. A mutable standing bitmap stamped
+in place would remove both, and would cost the memo its immutability - which is the same trade
+[RENDER.md](RENDER.md) §3.8 makes carefully elsewhere, and is **not** proposed here: 3.4 ms a pen-up
+is four frames' headroom at 60 Hz and nothing in §11.7 is waiting on it. Recorded so the next person
+does not re-derive it.
