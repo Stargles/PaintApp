@@ -164,35 +164,42 @@ LAYER_TRANSFORM.md.
       **A tripwire, still live**: `"video"` is the literal sentinel for an unimplemented element kind in
       `VectorCanvasDataLogicTests` and `SaveDamageGateLogicTests`. Implementing it takes the sentinel away.
 
-### (37) The brush engine overhaul — designed, spec at [BRUSH.md](BRUSH.md)
+### (37) The brush engine overhaul — spec at [BRUSH.md](BRUSH.md), eight of twelve stages built
 
 - [ ] > "the ability to import paintbrushes would be nice. There is an md document which describes it, but don't
       > read it this session as this is a low priority task and can wait."
 
-      **[BRUSH.md](BRUSH.md) is the specification** — §1 the ask verbatim, **§2 fourteen owner rulings**, §10
-      the build order. [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the survey that
-      preceded it and is still accurate about the seams.
-      **Stage 0 is done**: the stored path is a **refit at a fixed tolerance** independent of any brush
-      (`StrokePathFit`, 0.25 pt deviation plus a 12 pt cap), the walk marches `StrokePath`'s curve, and
-      `StrokeSampleGate` is deleted. §3.3 was rewritten by building it — it had specified cubic control points
-      as the stored record and the point list survived instead.
-      The rulings that shape the rest: **per-dab randomness is hashed from the stroke's seed and the dab's arc length**
-      rather than drawn from a sequential stream, which is what survives a split, a refit, a spacing edit and
-      an eraser punch alike, and which deletes `DiscardedDabTarget`; and **grain is
-      deleted entirely**, canvas-anchored paper texture included.
-      **Stage 6 is done**: a stroke holds a `BrushRef` rather than a `Brush`, the document's table is
-      `brushtable.json` beside `brushes/`, the sweep is the table's definition rather than a pass over it,
-      and §2.10's apply-to-existing verb is the Select panel's **Brush** button at selection scope. Layer and
-      document scope are filed in [BUGS.md](BUGS.md) rather than built — nothing batches per-cel content
-      restores across several cels into one undo step.
-      **Tilt does not ship and the architecture must accommodate it** — §5.5 is a build requirement of this
-      item, not of the one that adds tilt, and it names the `StrokeInput` capture as an explicit exception to
-      the standing delete-what-is-unused rule.
-      **KEYFRAMES §2.16 is discharged rather than implemented**: the declined grain-on-Move ruling stops
-      existing along with grain.
-      **§2.14 is the standing no-legacy rule scoped to this item**, and §9 is its ledger: every stage
-      deletes its predecessor in the change that replaces it, because there is no cleanup pass scheduled.
-      Nothing on the device needs to survive, so the format changes rather than migrating.
+      **[BRUSH.md](BRUSH.md) is the specification** — §1 the ask verbatim, **§2 nineteen owner rulings**, §12
+      the build order with a DONE marker per stage, §13 what is still open.
+      [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) is the survey that preceded it.
+
+      **Stages 0 through 7 are merged.** The stored path is a refit at a fixed 0.25 pt tolerance with a 12 pt
+      cap, independent of any brush, and `StrokeSampleGate` is deleted. Per-dab randomness is
+      `hash(seed, arcLength)` **in brush widths**, which survives a split, a refit, a spacing edit and an
+      eraser punch, and which deleted `DiscardedDabTarget` and `DabRNG`. Grain does not exist. `DabTarget`
+      has an image primitive with a tinted size-keyed cache, and the square is a real square rather than
+      sixteen circles. A sample run is a **channel set** carrying Δt and tilt, read through `StrokeSensors`'
+      one funnel with a derived neutral. `BrushTip` replaced the shape/filename pair, so an imported PNG
+      stamps — normalised at import, because a picked photo is opaque and would otherwise stamp a block.
+      A stroke holds a `BrushRef` into a process pool, the document's table is `brushtable.json` beside
+      `brushes/`, and §2.10's apply-to-existing verb is the Select panel's **Brush** button at selection
+      scope. And every brush parameter is now **a base plus its modulations** — *(input, curve, amount)*
+      rows over the seven sensors — with `BrushDynamics` deleted rather than kept as a fast path.
+
+      **What remains is stages 8 through 12**: opacity and flow as separate controls with the per-stroke
+      buffer §2.11 accepts; the library, the tip generator and the shipped brush set; the editor; the CC0
+      assets §8.3 gates on licensing; and the `.abr`/Procreate parsers.
+
+      **Three rulings shape what is left.** The rough ink nib is a **dynamics effect, not a tip effect** —
+      §8.4, refuted by measurement — so it needs no texture and is built from §2.17's wavelength and §2.18's
+      `density`. **Tilt ships** (§2.7): altitude and azimuth are stored and reach the funnel, and the brushes
+      that read them are stage 9's. And §2.14 is the standing no-legacy rule scoped to this item, with §10 as
+      its ledger — every stage deletes its predecessor in the change that replaces it, because no cleanup
+      pass is scheduled. Nothing on the device needs to survive, so the format changes rather than migrating.
+
+      **Stage 9 is driven by contact sheet**, at the owner's instruction: candidates rendered through the
+      real stamper, the owner picks and adjusts, and only then are they built as presets. That is the loop
+      that settled §8.4 and it is how the ~24-30 brushes of §8.6 get chosen rather than guessed.
 
 ### (12) Lasso move — the follow-ups its spec still lists as unbuilt
 
