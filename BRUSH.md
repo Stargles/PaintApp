@@ -643,6 +643,31 @@ it is the **broken** line — ink, gap, ink, survivors left where they were. Ran
 the dabs instead, which is a **dotted** line. They are different marks and the difference is §8.4's:
 dropping dabs moves nothing that stays.
 
+**2.31 The editor edits a draft, the pad previews that draft, and Done commits where Cancel discards.**
+Owner: *"can you make it so that as you adjust the settings in the edit brush menu, the strokes in the
+drawing pad adjusts? too?"* and *"the drawing pad shouldnt save the settings until you click done. There
+should also be a cancel button which exits while discarding your changes."*
+
+One mechanism answers both, which is why they are one ruling. The editor opens on a **working copy**;
+every control writes to it; **Done** writes it into the library and **Cancel** throws it away.
+
+**The pad re-walks all of its strokes from the working copy on every change.** So a stroke drawn ten
+edits ago shows what the brush does *now*, and the pad is a picture of the draft rather than a log of
+what it used to be. **This is a deliberate exception to §2.10**, which rules that editing a brush does not
+change strokes already drawn — that rule protects the artist's *canvas*, where ink is a record of a
+decision. The pad is not a canvas; it is the instrument for judging the draft, and a pad that kept its
+old strokes would answer a question nobody asked. §2.10 is untouched where it matters: on Done the brush
+mints a new table entry and the ink in the document is not disturbed.
+
+**What this supersedes**: §7.2 shipped the pad re-walking each stroke *with the brush it was drawn with*,
+which was right for a zoom change and is wrong here.
+
+**The cost is real and is in the drag loop.** A slider fires many updates a second and each one re-walks
+every pad stroke through `BrushStamper`. §7.2 already records `inkedPixels` being un-cached for putting a
+1.4M-pixel pass in that loop, which is the same hazard one level down. Coalesce to a frame and measure
+it; if a pad full of strokes cannot keep up, the honest answer is a cap on how many it keeps, not a
+quietly stale preview.
+
 **2.30 Scatter is two amounts oriented to the stroke, not one isotropic disc.** Owner: *"is offset an
 output? like horizontal or vertical offset of the sprite from the center of the stroke oriented relative
 to direction of the stroke. This being randomized is a well known feature of many paint apps, so the
