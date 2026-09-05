@@ -483,6 +483,27 @@ what was there in `tearDown`, exactly as suites already do for `Compositor.backe
 restore rule reached through a door nobody had checked, and the persistence is what makes it worse: the
 damage shows up in a *different* suite, on a *later* run, with nothing pointing back.
 
+### The simulator subsystem degrades over a long session, and it looks like your code
+
+MEASURED across one heavy session (2026-09-05, dozens of runs and several created/deleted devices), the
+host's simulator daemons became unreliable in **two different disguises**, both of which read as a
+finding and were not:
+
+- **The shared device refused to bootstrap a test runner at all** — *"Early unexpected exit … Test
+  crashed with signal kill before establishing connection"* — on every run, while the same test passed
+  seconds later on a freshly created device. `simctl erase`, reboot and detaching the simulator panel
+  did not fix it; a later `erase` did. The device kept launching and driving the app fine throughout;
+  it was only the XCUITest runner that would not attach.
+- **`backboardd`, `testmanagerd` and `SimRenderServer` crashed mid-run**, taking **8 tests** down with
+  them across two unrelated suites. The tell is in the log — three `Restarting after unexpected exit,
+  crash, or test timeout` blocks — and **no failing test emitted an assertion line**. A full re-run on a
+  fresh device came back 0 failed.
+
+**So a cluster of failures with no assertion messages is a sick host, not a broken change**, and the
+cheap confirmation is a whole re-run on a **newly created** device rather than an isolated re-run of
+each failure: isolation confirms one test, and what you want to know is whether the *run* was sound.
+Creating and deleting a device costs about a minute and settles it.
+
 ### Triaging a failed XCUITest — do this before suspecting your change
 
 A one-off XCUITest failure here is environmental far more often than it is real, and re-running the

@@ -3,6 +3,28 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## A project's restored brush texture can be held down by a negative cache entry (2026-09-05)
+
+**Found while making the brush library relocatable (§2.27), pre-existing, and deliberately not fixed
+there** — a refactor whose only observable difference should be an injectable root is the wrong change
+to carry a behaviour fix.
+
+`BrushTextureStore` memoises a *miss*: a name it could not resolve is remembered as absent, which is
+right for a name that will never exist and wrong for one that is about to. `ProjectStore
+.restoreCustomBrushTexturesFromProject` writes a file into the library root for a brush the document's
+table names — and if anything asked for that name **before** the restore ran, the store already holds
+the negative entry, so the brush keeps drawing nothing for the life of the process. Reopening the app
+fixes it, which is the shape that makes a bug get reported as "sometimes".
+
+**Unlikely in practice and that is why it is filed rather than urgent**: an imported tip's file name is
+`custom-<UUID>.png`, so a name is asked for before its file exists only when a document is opened
+whose brushes were imported on another device. That is exactly §13's *"a document opened on a second
+device"* case, so the two want fixing together.
+
+The fix is one line at the restore — drop the negative entries for the names just written — and its
+test has to ask for the name **first**, then restore, then draw. A test that restores before it asks
+passes against the broken code.
+
 ## Starting a stroke before the last one has rendered leaves the last one off screen (2026-09-04)
 
 **Confirmed by tracing every path that repaints the base, not measured** — `StrokeCanvasView` is not
