@@ -190,10 +190,15 @@ final class RegionRepairLogicTests: XCTestCase {
     /// **It is rounding at the clip, not a walk that drew the wrong thing**, and three experiments
     /// say so. Disabling the skip test entirely reproduces the eraser fixture's four bytes *to the
     /// value*, so it is not an element wrongly left out. Shortening the punch until its group no
-    /// longer straddles the rectangle moves the bytes rather than removing them. And a walk with no
-    /// transparency layer in it at all is byte-exact — the seven tests that use `assertIdentical`,
-    /// including a `.normal` stroke straddling the same edge at opacity 0.55, whose own per-stroke
-    /// group merges source-over.
+    /// longer straddles the rectangle moves the bytes rather than removing them. And the seven tests
+    /// that still assert byte identity have transparency layers of their own and are exact — every
+    /// stroke merges through one (BRUSH.md §12 stage 8), including the `.normal` straddler at
+    /// opacity 0.55 that this suite cuts the rectangle's edge through on purpose.
+    ///
+    /// So what separates the two is the **blend mode the layer merges with**, not the layer: a
+    /// source-over merge truncated by the clip is exact, and `destinationOut` and `multiply` — the
+    /// two that read the destination as well as writing it — are not. That is the measurement; the
+    /// mechanism inside CoreGraphics is INFERRED and nothing here depends on it.
     ///
     /// So the guarantee this suite pins is: **identical everywhere, except at most a rounding unit
     /// inside the rectangle, on no more pixels than its boundary has.** Each of those three is
