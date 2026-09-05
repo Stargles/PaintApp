@@ -203,6 +203,36 @@ final class BrushLibraryStore: ObservableObject {
         }
     }
 
+    /// **Mints a brush from the engine's neutral defaults and puts it in a group** — BRUSH.md §7.1's
+    /// *"create manually"*, the first arm of the `+`.
+    ///
+    /// The owner: *"the create brush right now makes you import a brush, but this library feature
+    /// opens up the possibility of just taking you straight to the edit menu of a default brush."*
+    /// `Brush.manuallyCreated` is what "a default brush" means and carries why it is not a copy of a
+    /// preset; this is the half that needs a library — which group it lands in, and a name that is not
+    /// already taken.
+    ///
+    /// **It is here rather than in the `+`'s own view** for the reason `CanvasManager
+    /// .importCustomBrush` is: nothing in a `View` is reachable from the logic tier, so a rule written
+    /// there is a rule no test can drive.
+    @discardableResult
+    func createBrush(inGroup groupID: UUID? = nil) -> Brush {
+        let brush = Brush.manuallyCreated(named: uniqueBrushName(from: Brush.manualBaseName))
+        add(brush, toGroup: groupID)
+        return brush
+    }
+
+    /// A name no brush in the library already has. Group names are uniqued the same way and for the
+    /// same reason: two rows reading the same is two rows an artist cannot tell apart, and — since a
+    /// row's accessibility identifier is its name — two elements answering one query.
+    private func uniqueBrushName(from name: String) -> String {
+        let taken = Set(allBrushes.map(\.name))
+        guard taken.contains(name) else { return name }
+        var suffix = 2
+        while taken.contains("\(name) \(suffix)") { suffix += 1 }
+        return "\(name) \(suffix)"
+    }
+
     @discardableResult
     func remove(brushID: UUID) -> Bool {
         for groupIndex in groups.indices {

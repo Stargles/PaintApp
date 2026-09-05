@@ -266,6 +266,156 @@ final class BrushEditorUITests: PaintUITestCase {
                              "The pad must draw with the brush as it is now — a snapshot taken when the screen opened would be unchanged")
     }
 
+    // MARK: - 6. The pad's four behaviours — §7.2
+
+    /// **The pad opens on a sample stroke, opens zoomed, and the toggle takes it to real size.**
+    ///
+    /// Three of §7.2's four owner asks, and the fourth (Clear) is what the tests above already lean
+    /// on. The sample is asserted *before any touch* — that is the whole of "the pad is never blank
+    /// and a brush's character is visible before the artist touches it", and it is only checkable
+    /// from the pad's own pixels, because a blank pad and a pad drawing the wrong thing look
+    /// identical in a screenshot of a dark screen.
+    ///
+    /// **What this test does not claim.** That the zoom scales the *view* rather than the brush is
+    /// not decidable from ink pixels — a pad that tripled the brush would lay down the same count —
+    /// and that half is `BrushEditorLogicTests`'
+    /// `testThePadZoomScalesTheViewAndNotTheBrush`, which measures the stroke in canvas points. What
+    /// is here is the half that suite cannot see: the control exists, an artist can reach it, it says
+    /// which state it is in, and what is drawn changes when it is tapped.
+    func testThePadOpensOnASampleStrokeZoomedAndTogglesToRealSize() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openEditor(app)
+
+        let pad = app.otherElements["brushPanel.pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+
+        // 1. It opens on a stroke, before anything is touched.
+        var resting = padInk(pad)
+        for _ in 0..<20 where (resting?.total ?? 0) == 0 {
+            usleep(150_000)
+            resting = padInk(pad)
+        }
+        XCTAssertGreaterThan(resting?.total ?? 0, 0,
+                             "The pad must open showing a sample stroke — §7.2's first ask")
+        XCTAssertEqual(resting?.last, 0,
+                       "…and the sample is not a stroke the artist drew, so it must not be reported as one")
+
+        // 2. It opens zoomed, and says so.
+        let toggle = app.buttons["brushPanel.padZoom"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "§7.2's third ask needs a control")
+        XCTAssertEqual(toggle.value as? String, "Zoomed 3×",
+                       "The pad opens zoomed in — §7.2's second ask")
+        attachScreen("pad-opens-on-a-sample-stroke-zoomed")
+
+        app.buttons["brushPanel.padClear"].tap()
+        XCTAssertEqual(padInk(pad)?.total, 0, "Clear takes the sample with it")
+        let zoomed = padStroke(app, on: pad)
+        XCTAssertGreaterThan(zoomed, 0, "PREMISE: a drag on the pad lays down ink")
+
+        // 3. And the toggle takes it to real size, which changes what is drawn.
+        tapWhenHittable(toggle, "The real-size toggle")
+        XCTAssertEqual(toggle.value as? String, "Real size")
+        attachScreen("pad-at-real-size")
+        app.buttons["brushPanel.padClear"].tap()
+        let real = padStroke(app, on: pad)
+        XCTAssertGreaterThan(real, 0)
+        XCTAssertGreaterThan(zoomed, Int(Double(real) * 1.8),
+                             "The same drag must cover visibly more of a zoomed pad, or the toggle "
+                             + "reached the label and not the render")
+
+        tapWhenHittable(toggle, "The toggle, back")
+        XCTAssertEqual(toggle.value as? String, "Zoomed 3×", "…and it goes both ways")
+    }
+
+    // MARK: - 7. §2.26's two pickers, and §2.25's three fields
+
+    /// **The tip picker swaps the sprite, the texture picker applies paper, and Depth reaches the
+    /// ink.**
+    ///
+    /// BRUSH.md §2.26, the owner: *"their dab sprites should have the ability to be changed, as well
+    /// as texture."* §2.25's canvas-anchored texture shipped with **no artist-facing control for any
+    /// of its three fields**, so a textured brush existed only in code; this drives all three.
+    ///
+    /// **Depth is the discriminating operand, and it is why the test does not stop at "the ink
+    /// changed".** `BrushTextureSettings.depth` documents that 0 is *exactly* no texture — every
+    /// pixel survives — so taking the slider to 0 must bring the ink back to what it was before any
+    /// paper was chosen. A picker that wrote the mask into the model and never reached the merge
+    /// would give three identical numbers and satisfy every model assertion in the suite.
+    func testTheTipAndTexturePickersReachTheInkAndDepthZeroIsExactlyNoTexture() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openEditor(app)
+
+        let pad = app.otherElements["brushPanel.pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+        let tip = app.buttons["brushPanel.tipPicker"]
+        XCTAssertTrue(tip.waitForExistence(timeout: 5), "§2.26 needs a tip picker to exist at all")
+        XCTAssertEqual(tip.value as? String, "Round", "PREMISE: the shipped default is the round tip")
+
+        app.buttons["brushPanel.padClear"].tap()
+        let round = padStroke(app, on: pad)
+        XCTAssertGreaterThan(round, 0, "PREMISE: a drag on the pad lays down ink")
+
+        // The tip. A square mask covers 4/π of the disc it replaces at the same diameter, so this is
+        // a large, signed difference rather than "something moved".
+        tapWhenHittable(tip, "The tip picker")
+        tapWhenHittable(app.buttons["brushPanel.tipOption.square"], "The Square tip")
+        XCTAssertEqual(tip.value as? String, "Square", "The picker must say what the brush now stamps")
+        app.buttons["brushPanel.padClear"].tap()
+        let square = padStroke(app, on: pad)
+        XCTAssertGreaterThan(square, round,
+                             "A square tip covers more paper than the disc it replaced at the same width")
+
+        // The texture. Its two numbers do not exist until there is a sheet — `Brush.texture` is
+        // optional precisely so "no texture" has its own spelling.
+        let texture = app.buttons["brushPanel.texturePicker"]
+        XCTAssertEqual(texture.value as? String, "None")
+        XCTAssertFalse(app.sliders["brushPanel.textureDepth"].exists,
+                       "A depth slider on a brush with no sheet would be a control that does nothing")
+        tapWhenHittable(texture, "The texture picker")
+        tapWhenHittable(app.buttons["brushPanel.textureOption.paperGrain"], "Paper Grain")
+        XCTAssertEqual(texture.value as? String, "Paper Grain")
+
+        let tile = app.sliders["brushPanel.textureTile"]
+        let depth = app.sliders["brushPanel.textureDepth"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 5),
+                      "§2.25's tile size must have a control — it shipped with none")
+        XCTAssertTrue(depth.exists, "…and so must its depth")
+        // The smallest repeat, so several tiles land across the pad and the paper is paper rather
+        // than one smooth ramp across the whole stroke.
+        tile.adjust(toNormalizedSliderPosition: 0)
+        depth.adjust(toNormalizedSliderPosition: 1)
+
+        app.buttons["brushPanel.padClear"].tap()
+        let textured = padStroke(app, on: pad)
+        attachScreen("square-tip-with-paper-grain-at-full-depth")
+        XCTAssertLessThan(textured, square,
+                          "Paper takes ink away — a picker that wrote the mask and never reached the merge would not")
+
+        depth.adjust(toNormalizedSliderPosition: 0)
+        app.buttons["brushPanel.padClear"].tap()
+        let noDepth = padStroke(app, on: pad)
+        attachScreen("same-brush-with-depth-taken-to-zero")
+        XCTAssertGreaterThan(noDepth, textured, "Depth must be the strength of it")
+        XCTAssertEqual(Double(noDepth), Double(square), accuracy: Double(square) * 0.05,
+                       "Depth 0 is **exactly** no texture — every pixel survives, which is what makes "
+                       + "one arithmetic serve the whole range")
+    }
+
+    /// A picture of the screen, kept **only when the test fails**.
+    ///
+    /// `.deleteOnSuccess` is what makes this free on a green run and the whole story on a red one:
+    /// every defect this file exists to catch is one the model tier cannot see, so what a reader of a
+    /// failure needs is what the screen looked like — the same reason CLAUDE.md asks for a screenshot
+    /// before a feature is called done.
+    private func attachScreen(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .deleteOnSuccess
+        add(shot)
+    }
+
     // MARK: - Helpers
 
     /// One drag across the pad; answers how much ink the finished stroke added.

@@ -67,16 +67,45 @@ enum BrushPreview {
         format.scale = scale
         format.opaque = false
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
-            let target = CGContextDabTarget(context.cgContext)
-            BrushStamper.stampStroke(into: target,
-                                     samples: samples(in: size),
-                                     brush: brush,
-                                     color: color,
-                                     brushSize: strokeWidth(for: brush, in: size),
-                                     brushOpacity: brush.opacity,
-                                     isEraser: false,
-                                     random: DabRandom(seed: previewSeed))
+            stampSample(into: CGContextDabTarget(context.cgContext), over: size, brush: brush,
+                        color: color, strokeWidth: strokeWidth(for: brush, in: size),
+                        opacity: brush.opacity)
         }
+    }
+
+    /// **The one sample stroke in the codebase, walked by both surfaces that show one** — a menu row
+    /// (`render`, §7.1) and the editor pad's opening stroke (`BrushScratchPad`, §7.2).
+    ///
+    /// BRUSH.md §7.2: *"The default stroke must be the same fixed S-curve `BrushPreview` walks for
+    /// §7.1's rows — one sample stroke in the codebase, not two, or a brush's row and its pad will
+    /// disagree about what it looks like."*
+    ///
+    /// **Sharing `samples(in:)` alone would not have been enough**, which is why this exists rather
+    /// than the pad calling `stampStroke` for itself: the *seed* is half of what makes a preview a
+    /// function of the brush (§4's randomness is hashed by arc length, so one seed gives one scatter),
+    /// and a pad whose dropout pattern differed from the row's would be the same disagreement one
+    /// level down from the one the ruling names.
+    ///
+    /// `strokeWidth` and `opacity` are the caller's because they are the two numbers that legitimately
+    /// differ: a row clamps the width into 26 points of band (`strokeWidth(for:in:)`) and the pad is
+    /// **real size**, drawing at whatever the artist's own Size slider says.
+    ///
+    /// `offsetBy` moves the whole curve without reshaping it, which the pad needs and a row does not:
+    /// `samples(in:)` fits the S to whatever extent it is handed, so a pad taller than it is wide
+    /// turns the stroke into a vertical zigzag. The pad hands in a band of the curve's own
+    /// proportions and offsets it to the middle — see `BrushScratchPad.stampRestingSample`.
+    static func stampSample(into target: DabTarget, over size: CGSize, offsetBy offset: CGPoint = .zero,
+                            brush: Brush, color: UIColor, strokeWidth: CGFloat, opacity: Double,
+                            isEraser: Bool = false) {
+        BrushStamper.stampStroke(into: target,
+                                 samples: samples(in: size)
+                                     .transformed(by: CGAffineTransform(translationX: offset.x, y: offset.y)),
+                                 brush: brush,
+                                 color: color,
+                                 brushSize: strokeWidth,
+                                 brushOpacity: opacity,
+                                 isEraser: isEraser,
+                                 random: DabRandom(seed: previewSeed))
     }
 
     /// Arbitrary and fixed — see `render`. Written down rather than 0 only so it is obvious in a

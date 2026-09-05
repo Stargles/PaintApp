@@ -28,10 +28,65 @@ enum BuiltInBrushTexture: String, Hashable, CaseIterable {
     /// `CGImage` + `CGImageDestination` as `CGImageAlphaInfo.last` (straight, not premultiplied).
     case square
 
-    /// The PNG's basename in the app bundle. The `brushtip-` prefix exists because a synchronized
-    /// root group flattens `Resources/` into the bundle root, where a file called `square.png`
-    /// would be one artist's icon away from a collision.
-    var resourceName: String { "brushtip-\(rawValue)" }
+    /// **Paper, not a tip** — BRUSH.md §2.25's canvas-anchored sheet, generated rather than
+    /// committed. See `kind` and `BrushPaperGenerator`.
+    case paperGrain
+    /// The second sheet — a woven over/under, which reads as a different *material* from grain
+    /// rather than as the same field at a different scale.
+    case canvasWeave
+
+    /// **Which of §2.26's two collections this belongs in.**
+    ///
+    /// The owner: *"their dab sprites should have the ability to be changed, as well as texture. For
+    /// these two, it may be worth having a library of textures and sprites."* §2.26 rules **two
+    /// browsable collections, one storage mechanism**, and this is that split for the bitmaps the app
+    /// itself ships: a tip is a *shape* one dab stamps, a texture is *paper* a whole stroke lays ink
+    /// through. Both are a `BrushTextureRef` and both resolve through `BrushTextureStore`; what
+    /// differs is which picker offers them, and offering paper as a tip would stamp a dab-shaped
+    /// square of grain.
+    enum Collection { case tip, texture }
+
+    var kind: Collection {
+        switch self {
+        case .square: return .tip
+        case .paperGrain, .canvasWeave: return .texture
+        }
+    }
+
+    /// The PNG's basename in the app bundle, or nil for a bitmap the app **generates**.
+    ///
+    /// The `brushtip-` prefix exists because a synchronized root group flattens `Resources/` into the
+    /// bundle root, where a file called `square.png` would be one artist's icon away from a
+    /// collision.
+    ///
+    /// **The two papers carry no file, and that is a deviation from §12 stage 9 rather than an
+    /// oversight.** That stage rules a *tip* generated at build time and its bytes committed, on the
+    /// grounds that *"a tip is a small alpha bitmap and generating it per launch buys nothing"*. The
+    /// argument is about what generation buys, not what it costs, and for paper it points the other
+    /// way: committing two 256² sheets is two binary assets plus four `project.pbxproj` object ids —
+    /// which this repo has a section on two branches colliding over — against ~30 lines that run once
+    /// per process behind `BrushTextureStore`'s memo. A tip also has to be *chosen* from a contact
+    /// sheet (§8.6) and a generated paper does not.
+    var resourceName: String? {
+        switch kind {
+        case .tip: return "brushtip-\(rawValue)"
+        case .texture: return nil
+        }
+    }
+
+    /// What a picker calls it. The raw value is a Swift identifier; this is English.
+    var displayName: String {
+        switch self {
+        case .square: return "Square"
+        case .paperGrain: return "Paper Grain"
+        case .canvasWeave: return "Canvas Weave"
+        }
+    }
+
+    /// The built-ins in one of §2.26's collections, in the order a picker lists them.
+    static func all(in collection: Collection) -> [BuiltInBrushTexture] {
+        allCases.filter { $0.kind == collection }
+    }
 }
 
 /// **Which alpha mask a dab stamps, and the name its cache entry is keyed on.**
@@ -148,8 +203,15 @@ enum BrushTextureStore {
         let data: Data?
         switch ref {
         case .builtIn(let tip):
+            // **A built-in with no `resourceName` is generated rather than read**, which is the one
+            // branch this function has that is not "two ways to name a file". It is still one
+            // resolution step: everything downstream asks `BrushTextureStore` for a mask and neither
+            // knows nor can tell where the bytes came from — the same relationship `.round` has to
+            // `.stamp` one level up. See `BuiltInBrushTexture.resourceName` for why the papers are
+            // not committed PNGs.
+            guard let resource = tip.resourceName else { return BrushPaperGenerator.mask(tip) }
             data = Bundle(for: BrushTextureBundleToken.self)
-                .url(forResource: tip.resourceName, withExtension: "png")
+                .url(forResource: resource, withExtension: "png")
                 .flatMap { try? Data(contentsOf: $0) }
         case .imported(let fileName):
             data = BrushStorage.shared.read(fileName)
@@ -162,6 +224,236 @@ enum BrushTextureStore {
 /// Nothing but an address for `Bundle(for:)`. `BrushTextureStore` is an enum and enums have no
 /// class to ask.
 final class BrushTextureBundleToken {}
+
+// MARK: - BRUSH.md §2.26 — two collections over one storage mechanism
+
+/// **Which of §2.26's two collections a file in the brush library belongs to.**
+///
+/// The owner: *"it may be worth having a library of textures and sprites to which new sprites can be
+/// added into."* §2.26 rules **two browsable collections, one storage mechanism** — *"both are a
+/// named bitmap under §2.27's root and `BrushTextureRef` already resolves exactly that"*. So the
+/// separation cannot be two directories (that would be two roots, which §2.27 spent a pass removing)
+/// and it cannot be a manifest (a second thing to keep in step with the files). It is a **prefix on
+/// the name**, read back through `BrushStorage.fileNames()` — the fifth of §2.27's five verbs, which
+/// exists for exactly this and had no caller until now.
+///
+/// **A tip's prefix is `custom-`, which is the name imports have always been written under.** Renaming
+/// it to `tip-` would orphan every tip already on an artist's device and every project package that
+/// names one: §2.14 makes *documents* expendable and says nothing about the artist's own brushes, and
+/// `BrushLibraryDocument.version` exists because of that distinction. The prefix is ugly and the files
+/// are real.
+enum BrushAssetKind: String, CaseIterable, Hashable {
+    case tip
+    case texture
+
+    /// What a file of this kind is named. See the type's note for why the tip's is not `tip-`.
+    var filePrefix: String {
+        switch self {
+        case .tip: return "custom-"
+        case .texture: return "texture-"
+        }
+    }
+
+    /// A fresh, unique name for a file of this kind.
+    func newFileName() -> String { "\(filePrefix)\(UUID().uuidString).png" }
+
+    /// Whether a name in the library belongs to this collection.
+    ///
+    /// `library.json` matches neither, which is the point: `fileNames()` answers everything under the
+    /// root and a picker must not offer the library file as a sprite.
+    func owns(_ fileName: String) -> Bool {
+        fileName.hasPrefix(filePrefix) && fileName.hasSuffix(".png")
+    }
+}
+
+/// **The artist's own paper, turned into a texture** — BRUSH.md §2.25 and §2.26's import half.
+///
+/// It is `BrushTipImport`'s twin and it is deliberately **not** the same normalisation, because a tip
+/// and a paper are different kinds of picture and the tip's rules are wrong for paper in two ways
+/// that are visible in one glance:
+///
+/// 1. **No letterbox.** `BrushTipImport` fits a non-square picture inside the square and leaves
+///    transparent margins, which for a *tip* is exactly right — a dab's shape is expressible by
+///    leaving its margins clear. A texture is **tiled**, so a transparent margin is not a margin, it
+///    is a grid of seams laid across every stroke: `BrushTextureMerge` multiplies with
+///    `.destinationIn`, so alpha 0 at depth 1 *removes* the ink there. The picture is aspect-fill
+///    cropped instead, which fills the square edge to edge.
+/// 2. **No border.** The tip's 2 px transparent frame is what a rotated dab antialiases into. A
+///    tiled sheet is never rotated and its edges meet the next tile, so a border would be the same
+///    seam as the letterbox, two pixels wide.
+///
+/// **The luminance rule is kept, and that is deliberate.** An opaque picture is read as
+/// `1 - luminance`, exactly as a tip is, so *dark marks keep ink and light ones take it away* on both
+/// surfaces. Two conventions for what a grey pixel means would be the same picture behaving in
+/// opposite directions depending on which picker it was imported through.
+enum BrushTextureImport {
+
+    /// Normalises `image`, writes it into the brush library, and answers the ref that resolves it.
+    static func importTexture(from image: UIImage) throws -> BrushTextureRef {
+        guard let data = UIImage(cgImage: try mask(from: image)).pngData() else {
+            throw BrushTipImport.Failure.unreadableImage
+        }
+        let fileName = BrushAssetKind.texture.newFileName()
+        do {
+            try BrushStorage.shared.write(data, to: fileName)
+        } catch {
+            throw BrushTipImport.Failure.couldNotWrite(error)
+        }
+        return .imported(fileName: fileName)
+    }
+
+    /// The normalisation itself, with no filesystem in it: `image` as a square straight-alpha sheet
+    /// that tiles edge to edge.
+    static func mask(from image: UIImage) throws -> CGImage {
+        let side = BrushTipImport.maskSide
+        guard image.size.width > 0, image.size.height > 0 else { throw BrushTipImport.Failure.unreadableImage }
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+                                  bytesPerRow: side * 4, space: PixelOps.deviceRGBColorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { throw BrushTipImport.Failure.unreadableImage }
+        ctx.interpolationQuality = .high
+        let fill = aspectFill(width: image.size.width, height: image.size.height)
+        ctx.translateBy(x: 0, y: CGFloat(side))
+        ctx.scaleBy(x: 1, y: -1)
+        UIGraphicsPushContext(ctx)
+        image.draw(in: fill)
+        UIGraphicsPopContext()
+
+        guard let raw = ctx.data else { throw BrushTipImport.Failure.unreadableImage }
+        let bytes = raw.bindMemory(to: UInt8.self, capacity: side * side * 4)
+        // Judged over the whole square, which an aspect-fill makes the whole picture — there is no
+        // letterbox to look inside, which is the one simplification this normalisation gets for free.
+        var opaqueEverywhere = true
+        for i in stride(from: 3, to: side * side * 4, by: 4) where bytes[i] != 255 {
+            opaqueEverywhere = false
+            break
+        }
+        var inked = false
+        for i in stride(from: 0, to: side * side * 4, by: 4) {
+            let a = Int(bytes[i + 3])
+            var coverage = a
+            if opaqueEverywhere, a > 0 {
+                let luminance = (299 * Int(bytes[i]) + 587 * Int(bytes[i + 1]) + 114 * Int(bytes[i + 2])) / 1000
+                coverage = (255 - luminance * 255 / a) * a / 255
+            }
+            coverage = max(0, min(coverage, 255))
+            bytes[i] = 0; bytes[i + 1] = 0; bytes[i + 2] = 0
+            bytes[i + 3] = UInt8(coverage)
+            if coverage > 0 { inked = true }
+        }
+        // **A blank sheet is refused for a sharper reason than a blank tip.** A tip whose mask is
+        // empty draws nothing; a *texture* whose mask is empty multiplies every stroke by zero, so
+        // the brush stops painting at all and nothing on screen says why.
+        guard inked else { throw BrushTipImport.Failure.blankMask }
+        guard let mask = ctx.makeImage() else { throw BrushTipImport.Failure.unreadableImage }
+        return mask
+    }
+
+    /// The rect, in the sheet's own top-left space, that `image` is drawn into: the smallest
+    /// aspect-preserving cover of the whole square, centred. The overflow falls outside the context
+    /// and is clipped, which is what "crop" means here.
+    static func aspectFill(width: CGFloat, height: CGFloat) -> CGRect {
+        let side = CGFloat(BrushTipImport.maskSide)
+        let k = max(side / width, side / height)
+        let w = width * k, h = height * k
+        return CGRect(x: (side - w) / 2, y: (side - h) / 2, width: w, height: h)
+    }
+}
+
+/// **The two papers the app ships, as arithmetic** — see `BuiltInBrushTexture.resourceName` for why
+/// they are generated rather than committed.
+///
+/// **Both tile seamlessly, and that is a requirement rather than a nicety.**
+/// `BrushTextureMerge` lays one draw per repeat, so a field that does not wrap draws a visible grid
+/// across every stroke. Everything below is periodic with a period that divides 256 exactly: the
+/// noise lattice wraps its cell indices, and the weave's cell pitch is a divisor of the side.
+///
+/// Deterministic to the byte — no `UUID`, no `Date`, no `arc4random`. A generated sheet that differed
+/// between launches would be paper that moved under ink already drawn, which is the whole thing §2.25
+/// anchors to the canvas to avoid.
+enum BrushPaperGenerator {
+
+    /// The same 256² `BrushTipImport.maskSide` every other mask in the app is, so one resolution path
+    /// serves all of them and `BrushTextureMaskCache`'s resident cost is bounded by one number.
+    static var side: Int { BrushTipImport.maskSide }
+
+    static func mask(_ paper: BuiltInBrushTexture) -> CGImage? {
+        guard paper.kind == .texture else { return nil }
+        let side = Self.side
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+                                  bytesPerRow: side * 4, space: PixelOps.deviceRGBColorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let raw = ctx.data else { return nil }
+        let bytes = raw.bindMemory(to: UInt8.self, capacity: side * side * 4)
+        for y in 0..<side {
+            for x in 0..<side {
+                let survives: Double
+                switch paper {
+                case .paperGrain: survives = grain(x: x, y: y)
+                case .canvasWeave: survives = weave(x: x, y: y)
+                case .square: survives = 1
+                }
+                let i = (y * side + x) * 4
+                bytes[i] = 0; bytes[i + 1] = 0; bytes[i + 2] = 0
+                bytes[i + 3] = UInt8(max(0, min(255, (survives * 255).rounded())))
+            }
+        }
+        return ctx.makeImage()
+    }
+
+    /// Three octaves of periodic value noise, mapped into `0.35…1`.
+    ///
+    /// **The floor is not taste, it is what keeps `depth` the only strength control.** A sheet
+    /// authored down to 0 would erase ink outright at depth 1 and leave the artist nothing to dial
+    /// back with, since `BrushTextureSettings.depth` scales the *shortfall* — `1 - depth·(1 - a)` —
+    /// and cannot undo an authored zero at full depth.
+    private static func grain(x: Int, y: Int) -> Double {
+        var value = 0.0, amplitude = 1.0, total = 0.0
+        for cells in [8, 16, 32] {
+            value += amplitude * valueNoise(x: x, y: y, cells: cells)
+            total += amplitude
+            amplitude *= 0.55
+        }
+        return 0.35 + 0.65 * (value / total)
+    }
+
+    /// A woven over/under. The pitch is 16 px, so one repeat of the weave itself is 32 px and 256 is
+    /// eight of them — which is why the sheet wraps.
+    private static func weave(x: Int, y: Int) -> Double {
+        let cell = 16
+        let warpOnTop = ((x / cell) + (y / cell)) % 2 == 0
+        let across = Double(x % cell) / Double(cell)
+        let along = Double(y % cell) / Double(cell)
+        // A thread's crown is the middle of its own cell; the value falls to the gap at both edges.
+        let height = warpOnTop ? sin(.pi * across) : sin(.pi * along)
+        return 0.3 + 0.7 * pow(max(height, 0), 0.6)
+    }
+
+    /// Value noise on a `cells × cells` lattice that **wraps**, smoothstep-interpolated.
+    private static func valueNoise(x: Int, y: Int, cells: Int) -> Double {
+        let step = Double(side) / Double(cells)
+        let fx = Double(x) / step, fy = Double(y) / step
+        let ix = Int(floor(fx)), iy = Int(floor(fy))
+        let tx = smoothstep(fx - Double(ix)), ty = smoothstep(fy - Double(iy))
+        let a = lattice(ix, iy, cells), b = lattice(ix + 1, iy, cells)
+        let c = lattice(ix, iy + 1, cells), d = lattice(ix + 1, iy + 1, cells)
+        return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty
+    }
+
+    private static func smoothstep(_ t: Double) -> Double { t * t * (3 - 2 * t) }
+
+    /// One lattice corner, `0…1`. The `% cells` is what makes the field periodic; the hash is a
+    /// written-down integer mix so the same corner is the same number in every process.
+    private static func lattice(_ x: Int, _ y: Int, _ cells: Int) -> Double {
+        let wx = UInt64(((x % cells) + cells) % cells)
+        let wy = UInt64(((y % cells) + cells) % cells)
+        var h = wx &* 0x9E37_79B9_7F4A_7C15 &+ wy &* 0xBF58_476D_1CE4_E5B9 &+ UInt64(cells) &* 0x94D0_49BB_1331_11EB
+        h ^= h >> 30; h = h &* 0xBF58_476D_1CE4_E5B9
+        h ^= h >> 27; h = h &* 0x94D0_49BB_1331_11EB
+        h ^= h >> 31
+        return Double(h >> 11) / Double(UInt64(1) << 53)
+    }
+}
 
 /// **The artist's own PNG, turned into a tip.** BRUSH.md §12 stage 5's import half.
 ///
@@ -226,7 +518,10 @@ enum BrushTipImport {
         guard let data = UIImage(cgImage: try mask(from: image)).pngData() else {
             throw Failure.unreadableImage
         }
-        let fileName = "custom-\(UUID().uuidString).png"
+        // **The name carries which of §2.26's two collections this belongs to** — see
+        // `BrushAssetKind`, and note the tip's prefix is still `custom-`, so nothing already on an
+        // artist's device is orphaned by the split.
+        let fileName = BrushAssetKind.tip.newFileName()
         do {
             try BrushStorage.shared.write(data, to: fileName)
         } catch {

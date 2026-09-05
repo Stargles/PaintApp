@@ -430,6 +430,27 @@ time. Paper does not move, so nothing has to be baked.
 **It is what makes §2.21's importers honest**, since most `.abr` and Procreate brushes carry a texture
 and a brush imported without one is not that brush.
 
+**BUILT 2026-09-05 — and until then it existed only in code.** The merge, the anchoring and the cache
+shipped with §12 stage 8; **not one of the three fields had an artist-facing control**, so no brush in
+the app could carry a texture and the feature was unreachable by any gesture. All three are in the
+editor's left column now (§7.2): which sheet, `tileSize` in canvas points, and `depth`. The pin is
+`BrushEditorUITests`' `testTheTipAndTexturePickersReachTheInkAndDepthZeroIsExactlyNoTexture`, and its
+discriminating operand is **depth 0**: this section documents that 0 is *exactly* no texture, so a
+picker that wrote the mask into the model and never reached the merge gives three identical ink counts
+and satisfies every model assertion in the suite.
+
+**The app now ships two papers, and they are generated rather than committed.**
+`BuiltInBrushTexture` gained `paperGrain` and `canvasWeave`, resolved through the same
+`BrushTextureStore.mask(for:)` as every other bitmap; `BrushPaperGenerator` is the arithmetic.
+That is a deliberate deviation from §12 stage 9's *"a tip is a small alpha bitmap and generating it
+per launch buys nothing"* — an argument about what generation buys rather than what it costs, and for
+paper it points the other way: two committed 256² sheets are two binary assets plus four
+`project.pbxproj` object ids, which CLAUDE.md has a section on two branches colliding over, against
+~30 lines behind a per-process memo. **Both tile seamlessly and that is a requirement, not a
+nicety** — `BrushTextureMerge` lays one draw per repeat, so a field that does not wrap draws a grid
+across every stroke. `BrushEditorLogicTests` pins the wrap, the determinism, and the authored floor
+that keeps `depth` the only strength control.
+
 **2.26 Tips and textures are libraries, not per-brush files.** Owner: *"their dab sprites should have
 the ability to be changed, as well as texture. For these two, it may be worth having a library of
 textures and sprites to which new sprites can be added into."* So the editor picks a tip and a texture
@@ -438,73 +459,84 @@ be open. Two collections, because a tip is a shape and a texture is paper and an
 at different moments — but **one storage mechanism**, since both are a named bitmap under §2.27's root
 and `BrushTextureRef` already resolves exactly that.
 
-**2.30 Scatter is two amounts oriented to the stroke, not one isotropic disc.** Owner: *"is offset an
-output? like horizontal or vertical offset of the sprite from the center of the stroke oriented relative
-to direction of the stroke. This being randomized is a well known feature of many paint apps, so the
-sprites arent just rotated randomly, but also randomly translated to an extent."*
+**BUILT 2026-09-05.** `BrushAssetKind` is the split and `BrushAssetLibrary` is the listing; both
+pickers are in §7.2's left column, each with an Import item of its own. Four things it turned out to
+be worth writing down:
 
-`scatter` today is **isotropic and unaware of the path**: `BrushStamper.applyScatter` draws a free angle
-and a distance, so a dab lands anywhere on a disc. The two axes are therefore coupled at equal weight and
-neither is reachable alone. They do different things:
+- **The separation is a prefix on the name, and it had to be.** It cannot be two directories — that is
+  two roots, which §2.27 spent a pass removing — and it cannot be a manifest, which is a second thing
+  to keep in step with the files. `BrushStorage.fileNames()` is the fifth of §2.27's five verbs and had
+  **no caller at all** until this; it answers everything under the root, `library.json` included, so a
+  picker built on an unfiltered listing offers the artist their own library file as a sprite.
+- **A tip's prefix stays `custom-`.** Renaming it to `tip-` would orphan every tip already on a device
+  and every project package that names one. §2.14 makes *documents* expendable and says nothing about
+  the artist's own brushes, which is why `BrushLibraryDocument` carries a version at all.
+- **Two normalisations, not one, and reusing the tip's is a defect you cannot see in the picker.**
+  `BrushTipImport` letterboxes inside a 2 px transparent border, which is right for a *shape*. A texture
+  is **tiled** and `BrushTextureMerge` multiplies with `.destinationIn`, so those margins are not
+  margins — they are a grid of lines cut out of every stroke. `BrushTextureImport` aspect-fills with no
+  border and keeps the luminance rule, so *dark keeps ink* means the same thing on both surfaces.
+- **A `Menu` row whose icon is `Image(decorative:)` has no accessibility element at all.** MEASURED:
+  the tip menu's Round row (a plain `Button("Round")`) appeared in the tree and the Square row — a
+  `Button` whose label was a `Label { Text } icon: { Image(decorative: mask, scale: 1) }` — produced a
+  `Cell` **containing nothing**, so the option was unaddressable while the menu looked perfectly
+  correct on screen and worked by hand. `Image(uiImage:)` in the same place resolves normally. It is
+  the container-identifier trap's cousin: a view that is present, drawn, and absent from the tree.
 
-- **Across** (along the normal) widens and frays the stroke — the silhouette goes hairy while the ink
-  stays evenly spaced.
-- **Along** (along the tangent) widens nothing; it bunches and gaps the dabs, so density goes irregular
-  without the line getting thicker.
+**2.27 The library must be relocatable, and the architecture owes that before the feature exists.**
+Owner: *"Right now all the files are stored internally on the app, which means that if the app gets
+deleted, then all the files get deleted too. I'd like it to be able to have an external folder, so build
+the architecture so that in the future when this feature gets added, moving the library from internal
+app storage to this external folder is easy."*
 
-So `scatter` is replaced by **`scatterAcross` and `scatterAlong`**, two outputs modulatable
-independently, with the old isotropic behaviour expressible as both set equal. §2.14 governs: the old
-single output is deleted rather than kept beside them.
+**The external folder is still not built and is still not scheduled. The architecture is — BUILT,
+`Engine/BrushStorage.swift`**, which owns the root and is the only thing that turns a stored file
+*name* into a location. What each of the three requirements turned out to be is worth writing down,
+because this section was right about two of them and understated the third.
 
-**§8.4's negative result stands and does not cover this.** It measured that *coherent* `scatter` and a
-pure perpendicular offset are indistinguishable, so a separate `offset` output bought nothing **for the
-rough ink nib**. That is a statement about one brush under coherent noise, not about independent per-axis
-amounts, and §7.2 already carries the qualification that an offset the artist *aims* does not inherit the
-refutation.
+1. **Every stored reference is a *name*, never a path — verified rather than assumed, and it held.**
+   Audited across every persisted surface instead of taken on trust: `BrushTip.stamp(.imported(fileName:))`,
+   `BrushTextureSettings.mask`, `library.json`, `brushtable.json`, and `manifest.json`'s `selectedBrush`
+   and `customBrushes`. No brush path is in `UserDefaults` — the library is a file precisely because
+   `BrushLibraryStore`'s own note says a defaults key is invisible and outlives its writer. The only
+   `URL` any document-shaped type in the repo holds is `VectorVideoElement.assetURL`, and it is
+   documented runtime-only with `assetFileName` as the persisted half — the same split, reached
+   independently, for the same reason. **It is the expensive one to retrofit and nothing had to be
+   retrofitted.** What keeps it paying is requirement 3: there is now exactly one place a name becomes
+   a location, so there is nowhere else for a path to be minted and stored.
+2. **Every file lives under one root — this was the work, and it is done.**
+   `BrushLibrary.customBrushesDirectory` is deleted, along with its side effect of creating the
+   directory on every read. `BrushStorage` holds the root; `BrushStorage.shared` is the app's and is
+   still `Documents/Brushes`, pinned by a test because a refactor that quietly moved it to Application
+   Support would read as *"the artist's brushes are gone"* with nothing in a diff to point at.
+   `relocate(to:)` is the verb an external folder arrives through, and
+   `BrushLibraryStore.init(directory:)` became `init(storage:)`, which is the injection this section
+   named.
+3. **Every access goes through that one type.** `read`, `write`, `contains`, `remove` and `fileNames`
+   are between them the whole of what the app does to a library file; `url(for:)` is **private**, so no
+   URL escapes to be read somewhere a bookmark's bracket would not cover. The security-scoped external
+   folder is five one-line brackets rather than an audit.
 
-**It costs nothing measurable**: the same two draws, resolved onto the tangent and normal instead of a
-free angle, and `StrokeGeometry.tangent(atParameter:)` is already computed because `angle`'s
-direction-follow reads it. **The one thing it does touch is the merge bound** — §12 stage 8's stroke
-group clips to a rectangle derived from the brush's own maximum reach, and that derivation must take the
-larger of the two axes rather than one `scatter`, or a heavily across-scattered stroke loses ink at the
-clip. That is the failure direction the bound was written to avoid.
+**Two things this section did not anticipate, and the first is a correctness requirement rather than
+tidiness.**
 
-**2.29 Every module that reads a sensor carries its own input *and its own curve*. This supersedes
-§2.22's "the second input is not curved".** **BUILT 2026-09-05, in the same pass as §2.28** —
-`BrushModule.scale(BrushInput, ResponseCurve)`, with `.linear` left off the wire so a scale written
-before this and one written after are the same two keys. Owner, with the case that forces it:
+**A relocation has to drop two caches.** `BrushTextureStore` memoizes a mask against a
+`BrushTextureRef` — which is a *name* — and `BrushTextureMaskCache` holds a depth-adjusted copy of
+that. Neither key names the root, which is exactly right while a process has one root and is
+RENDER.md §3.8's family of bug the moment it does not: the same name under a new root would be served
+the old root's pixels, and a file that was missing before the move would stay missing forever off a
+negative entry. `relocate(to:)` drops both, which is cheaper than keying a root into two caches to
+hold entries a relocation invalidates anyway. **It is also what makes the test discriminating**: with
+the drops removed, *"the ink is identical after the folder moved"* is green against an implementation
+that resolves no file at all.
 
-> *"lets picture a scenario where the spacing is randomized but also driven by brush pressure, where the
-> lighter the pressure is, the more frequent you get segmented lines, but over lets say 30% pressure, it
-> appears as a solid line. Thus It requires two inputs assuming randomizer is an input ... So two inputs:
-> pressure and random, with a curves module to make strokes over 30% pressure as solid lines."*
-
-§2.22 ruled a gain uncurved because *"a second `ResponseCurve` per row for a gain term is expressiveness
-the ask does not need"*. **The ask needs it now**, and this is the whole change: a `scale` module becomes
-*(input, curve)* rather than *(input)*. The owner's scenario is then one flat chain —
-`spacing ← random(λ) → scale by pressure through a threshold curve` — where the curve returns 0 above a
-third pressure, so the wobble vanishes and the line is solid, and returns towards 1 below it.
-
-**This is what keeps a chain a list rather than a graph**, which is the property worth protecting. Two
-sensors meeting inside one mapping is the case that would otherwise force branching nodes and wiring;
-carrying the second sensor *inside the module that consumes it* expresses the same thing in a flat
-ordered list. Three sensors is two `scale` modules. §2.22's other clause survives unchanged: **a scale
-attenuates** — the shaped reading is clamped `0…1` — and `amount` remains the only signed, unclamped
-term.
-
-**What the build settled.** `.linear` is not a special case: `ResponseCurve.value(at:)` on an empty
-curve **is** the `0…1` clamp §2.22 asks for, so an uncurved scale is the plain multiply it was, to the
-bit, and the clamp is applied once rather than twice. The editor draws the curve **inside** the module,
-because a curve outside it is a `.curveRamp` and means something else — the two would be
-indistinguishable side by side, and `BrushModulationLogicTests` pins that they *are* different by
-rendering the owner's own chain against the same curve worn as a ramp after the scale. That second brush
-is the operand: without it the test would pass against an implementation that shaped the wrong value.
-
-**The owner's example is also achievable today by a different route, and both should exist.** §2.18's
-`density` with §2.19's threshold curve is exactly *"segments below a third pressure, solid above"*, and
-it is the **broken** line — ink, gap, ink, survivors left where they were. Randomising *spacing* spreads
-the dabs instead, which is a **dotted** line. They are different marks and the difference is §8.4's:
-dropping dabs moves nothing that stays.
+**The injection is on the instance, not on every call, and the asymmetry is deliberate.**
+`BrushTextureStore` and `BrushTipImport` take no storage parameter. Their cache and their writes are
+process-wide, so a per-call storage would let an import land in a root the renderer never reads from —
+an incoherence the single global being replaced could not express, and inventing a new one for the sake
+of symmetry is what §9.2 forbids. `BrushLibraryStore` takes one because *two libraries over two roots*
+is a state a test has to be able to build, and a test that pointed both stores at one directory would
+be green against an implementation with no root at all.
 
 **2.28 A modulation is an input followed by an ordered list of modules, and this supersedes §2.22's
 fixed shape.** Owner, on seeing the editor present a chain over storage that is not one: *"does it
@@ -574,60 +606,73 @@ artist moves deliberately. A deliberately extreme brush, six chains carrying ele
 **10.99 µs a dab** against a shipped preset's 2.38. §2.29's second curve added nothing measurable: the
 second pair was taken after it landed and reads the same as the first.
 
-**2.27 The library must be relocatable, and the architecture owes that before the feature exists.**
-Owner: *"Right now all the files are stored internally on the app, which means that if the app gets
-deleted, then all the files get deleted too. I'd like it to be able to have an external folder, so build
-the architecture so that in the future when this feature gets added, moving the library from internal
-app storage to this external folder is easy."*
+**2.29 Every module that reads a sensor carries its own input *and its own curve*. This supersedes
+§2.22's "the second input is not curved".** **BUILT 2026-09-05, in the same pass as §2.28** —
+`BrushModule.scale(BrushInput, ResponseCurve)`, with `.linear` left off the wire so a scale written
+before this and one written after are the same two keys. Owner, with the case that forces it:
 
-**The external folder is still not built and is still not scheduled. The architecture is — BUILT,
-`Engine/BrushStorage.swift`**, which owns the root and is the only thing that turns a stored file
-*name* into a location. What each of the three requirements turned out to be is worth writing down,
-because this section was right about two of them and understated the third.
+> *"lets picture a scenario where the spacing is randomized but also driven by brush pressure, where the
+> lighter the pressure is, the more frequent you get segmented lines, but over lets say 30% pressure, it
+> appears as a solid line. Thus It requires two inputs assuming randomizer is an input ... So two inputs:
+> pressure and random, with a curves module to make strokes over 30% pressure as solid lines."*
 
-1. **Every stored reference is a *name*, never a path — verified rather than assumed, and it held.**
-   Audited across every persisted surface instead of taken on trust: `BrushTip.stamp(.imported(fileName:))`,
-   `BrushTextureSettings.mask`, `library.json`, `brushtable.json`, and `manifest.json`'s `selectedBrush`
-   and `customBrushes`. No brush path is in `UserDefaults` — the library is a file precisely because
-   `BrushLibraryStore`'s own note says a defaults key is invisible and outlives its writer. The only
-   `URL` any document-shaped type in the repo holds is `VectorVideoElement.assetURL`, and it is
-   documented runtime-only with `assetFileName` as the persisted half — the same split, reached
-   independently, for the same reason. **It is the expensive one to retrofit and nothing had to be
-   retrofitted.** What keeps it paying is requirement 3: there is now exactly one place a name becomes
-   a location, so there is nowhere else for a path to be minted and stored.
-2. **Every file lives under one root — this was the work, and it is done.**
-   `BrushLibrary.customBrushesDirectory` is deleted, along with its side effect of creating the
-   directory on every read. `BrushStorage` holds the root; `BrushStorage.shared` is the app's and is
-   still `Documents/Brushes`, pinned by a test because a refactor that quietly moved it to Application
-   Support would read as *"the artist's brushes are gone"* with nothing in a diff to point at.
-   `relocate(to:)` is the verb an external folder arrives through, and
-   `BrushLibraryStore.init(directory:)` became `init(storage:)`, which is the injection this section
-   named.
-3. **Every access goes through that one type.** `read`, `write`, `contains`, `remove` and `fileNames`
-   are between them the whole of what the app does to a library file; `url(for:)` is **private**, so no
-   URL escapes to be read somewhere a bookmark's bracket would not cover. The security-scoped external
-   folder is five one-line brackets rather than an audit.
+§2.22 ruled a gain uncurved because *"a second `ResponseCurve` per row for a gain term is expressiveness
+the ask does not need"*. **The ask needs it now**, and this is the whole change: a `scale` module becomes
+*(input, curve)* rather than *(input)*. The owner's scenario is then one flat chain —
+`spacing ← random(λ) → scale by pressure through a threshold curve` — where the curve returns 0 above a
+third pressure, so the wobble vanishes and the line is solid, and returns towards 1 below it.
 
-**Two things this section did not anticipate, and the first is a correctness requirement rather than
-tidiness.**
+**This is what keeps a chain a list rather than a graph**, which is the property worth protecting. Two
+sensors meeting inside one mapping is the case that would otherwise force branching nodes and wiring;
+carrying the second sensor *inside the module that consumes it* expresses the same thing in a flat
+ordered list. Three sensors is two `scale` modules. §2.22's other clause survives unchanged: **a scale
+attenuates** — the shaped reading is clamped `0…1` — and `amount` remains the only signed, unclamped
+term.
 
-**A relocation has to drop two caches.** `BrushTextureStore` memoizes a mask against a
-`BrushTextureRef` — which is a *name* — and `BrushTextureMaskCache` holds a depth-adjusted copy of
-that. Neither key names the root, which is exactly right while a process has one root and is
-RENDER.md §3.8's family of bug the moment it does not: the same name under a new root would be served
-the old root's pixels, and a file that was missing before the move would stay missing forever off a
-negative entry. `relocate(to:)` drops both, which is cheaper than keying a root into two caches to
-hold entries a relocation invalidates anyway. **It is also what makes the test discriminating**: with
-the drops removed, *"the ink is identical after the folder moved"* is green against an implementation
-that resolves no file at all.
+**What the build settled.** `.linear` is not a special case: `ResponseCurve.value(at:)` on an empty
+curve **is** the `0…1` clamp §2.22 asks for, so an uncurved scale is the plain multiply it was, to the
+bit, and the clamp is applied once rather than twice. The editor draws the curve **inside** the module,
+because a curve outside it is a `.curveRamp` and means something else — the two would be
+indistinguishable side by side, and `BrushModulationLogicTests` pins that they *are* different by
+rendering the owner's own chain against the same curve worn as a ramp after the scale. That second brush
+is the operand: without it the test would pass against an implementation that shaped the wrong value.
 
-**The injection is on the instance, not on every call, and the asymmetry is deliberate.**
-`BrushTextureStore` and `BrushTipImport` take no storage parameter. Their cache and their writes are
-process-wide, so a per-call storage would let an import land in a root the renderer never reads from —
-an incoherence the single global being replaced could not express, and inventing a new one for the sake
-of symmetry is what §9.2 forbids. `BrushLibraryStore` takes one because *two libraries over two roots*
-is a state a test has to be able to build, and a test that pointed both stores at one directory would
-be green against an implementation with no root at all.
+**The owner's example is also achievable today by a different route, and both should exist.** §2.18's
+`density` with §2.19's threshold curve is exactly *"segments below a third pressure, solid above"*, and
+it is the **broken** line — ink, gap, ink, survivors left where they were. Randomising *spacing* spreads
+the dabs instead, which is a **dotted** line. They are different marks and the difference is §8.4's:
+dropping dabs moves nothing that stays.
+
+**2.30 Scatter is two amounts oriented to the stroke, not one isotropic disc.** Owner: *"is offset an
+output? like horizontal or vertical offset of the sprite from the center of the stroke oriented relative
+to direction of the stroke. This being randomized is a well known feature of many paint apps, so the
+sprites arent just rotated randomly, but also randomly translated to an extent."*
+
+`scatter` today is **isotropic and unaware of the path**: `BrushStamper.applyScatter` draws a free angle
+and a distance, so a dab lands anywhere on a disc. The two axes are therefore coupled at equal weight and
+neither is reachable alone. They do different things:
+
+- **Across** (along the normal) widens and frays the stroke — the silhouette goes hairy while the ink
+  stays evenly spaced.
+- **Along** (along the tangent) widens nothing; it bunches and gaps the dabs, so density goes irregular
+  without the line getting thicker.
+
+So `scatter` is replaced by **`scatterAcross` and `scatterAlong`**, two outputs modulatable
+independently, with the old isotropic behaviour expressible as both set equal. §2.14 governs: the old
+single output is deleted rather than kept beside them.
+
+**§8.4's negative result stands and does not cover this.** It measured that *coherent* `scatter` and a
+pure perpendicular offset are indistinguishable, so a separate `offset` output bought nothing **for the
+rough ink nib**. That is a statement about one brush under coherent noise, not about independent per-axis
+amounts, and §7.2 already carries the qualification that an offset the artist *aims* does not inherit the
+refutation.
+
+**It costs nothing measurable**: the same two draws, resolved onto the tangent and normal instead of a
+free angle, and `StrokeGeometry.tangent(atParameter:)` is already computed because `angle`'s
+direction-follow reads it. **The one thing it does touch is the merge bound** — §12 stage 8's stroke
+group clips to a rectangle derived from the brush's own maximum reach, and that derivation must take the
+larger of the two axes rather than one `scatter`, or a heavily across-scattered stroke loses ink at the
+clip. That is the failure direction the bound was written to avoid.
 
 ---
 
@@ -1439,6 +1484,17 @@ reference actually shows, and which of it is a decision rather than decoration:
   group, and opens §7.2's editor on it. **Import brush** is §2.21's adapter. The first is the one the
   library makes possible: before there was a library there was nowhere for a made-up brush to live, so
   importing was the only way to get a new one and the `+` could only mean that.
+  **BUILT 2026-09-05.** `BrushLibraryStore.createBrush(inGroup:)` is the rule — the neutral value, a
+  name nothing else in the library has, and the group — and the `+`'s item is three verbs that already
+  existed: mint, `spec.selectPreset` (so the *eraser's* own selection moves when the eraser's `+` is
+  used), and `onEditBrush`. Selecting it is what makes *"straight to the edit menu of a default
+  brush"* true rather than opening the editor on whatever was in use before.
+  **The discriminating operand is `modulations`, and "a new brush appeared" is not.** Every shipped
+  preset carries `size ← pressure` and `flow ← pressure` (§12 stage 7), so an implementation that
+  copied the selected brush satisfies *"a fresh row, in the right group, with a fresh name"* and hands
+  the artist two rows they did not add — the opposite of *"fully customize it"*. Pinned both ways by
+  `BrushMenuUITests`' `testCreateManuallyMakesANeutralBrushAndOpensTheEditorOnIt`, which reads the
+  Size row on a shipped preset first and on the made brush after.
 
 - **The set name sits top-left with a chevron**, the **`+` top-right**. §8.1 already rules that the
   shipped collection and the artist's own are two different things; the chevron is where that shows
@@ -1553,6 +1609,16 @@ accessibility tree while the card was plainly on screen and worked perfectly by 
 this, `StrokeSettingsPanel` was bitten by it, the screen's root `Rectangle` exists because it was bitten
 by it, and it happened again one file down. The card carries no identifier now; its label does.
 
+**It is a rule the suite enforces now rather than a thing three reports mention** —
+`BrushMenuUITests`' `testEveryIdentifierTheSuiteDependsOnResolvesToExactlyOneElement`, which walks the
+menu, the editor's root and columns, one expanded output with its module card, and a brush carrying a
+texture, and asserts each identifier the suite names **resolves to exactly one element**. The shape of
+the assertion is the whole point: `exists` is true of an identifier held by two hundred elements and so
+is a tap on `.firstMatch`, which is why every earlier version of this defect passed whatever tests were
+around it. A count is what says it, and it says it for the identifier that was *given* the name as well
+as for the ones that inherited it. It caught nothing on the pass that wrote it, which is what a
+regression test looks like when it is written the day after rather than the day before.
+
 **Two defects were found by driving it, and neither could have been found by a model assertion.**
 
 - **The screen's `accessibilityIdentifier` was on its root `VStack`**, so it was inherited by every
@@ -1567,14 +1633,46 @@ by it, and it happened again one file down. The card carries no identifier now; 
   fix, and it re-baselines size and opacity **only when the value actually moved** so a fresh library
   cannot change the eraser's default width.
 
-  **Four behaviours the pad still owes, and they are the owner's** — asked for after the brief that
-  built it, so their absence is scheduling rather than refusal. It should **open showing a sample stroke
-  with a pressure taper**, so the pad is never blank and a brush's character is visible before the
-  artist touches it; be **zoomed in by default**, because the details that distinguish two brushes are
-  granular; carry a **toggle to real size**, because zoom lies about what a brush looks like in use; and
-  it already **clears**. The default stroke must be the same fixed S-curve `BrushPreview` walks for
-  §7.1's rows — one sample stroke in the codebase, not two, or a brush's row and its pad will disagree
-  about what it looks like.
+  **The pad's four behaviours — BUILT 2026-09-05.** All four are the owner's, asked for after the brief
+  that built the pad, so their absence was scheduling rather than refusal. It **opens showing a sample
+  stroke with a pressure taper**, is **zoomed in by default** at 3×, carries a **toggle to real size**
+  (`brushPanel.padZoom`), and **clears**.
+
+  - **One sample stroke, and sharing the curve was not enough.** `BrushPreview.stampSample` is the
+    call both surfaces make — a menu row's `render` now goes through it too — because the *seed* is
+    half of what makes a preview a function of the brush (§4 hashes randomness by arc length), and a
+    pad whose dropout pattern differed from the row's would be the same disagreement one level down
+    from the one this section names. The width is the caller's: a row clamps it into 26 points of band
+    and the pad is real size.
+  - **The sample is a resting state, not a one-shot.** It re-renders while the artist moves sliders, so
+    the brush's character stays visible before the first touch; the first touch clears it, because
+    judging your own stroke on top of one you did not draw is the confusion the pad removes; and Clear
+    clears, because a Clear that redrew would look inert.
+  - **`samples(in:)` fits the S to whatever extent it is handed, and the pad is not a row.** MEASURED
+    on the simulator: handed the whole pad — about 330 × 1100 canvas points — it produced an S with
+    **522 points of amplitude over 264 of travel**, a vertical zigzag that is a picture of the pad's
+    aspect ratio rather than of the brush. It is drawn into a band of the curve's own proportions,
+    centred (`offsetBy`).
+  - **Zoom scales the view and never the brush** (`BrushPadZoom`). The context keeps its pixel
+    dimensions and takes a larger scale factor, so its user space is canvas points and the extent it
+    covers shrinks; the size reaching `stampStroke` is the artist's own number at every zoom.
+    **Strokes are re-walked rather than magnified** on a change, each with the brush it was drawn with
+    — a bitmap magnify would be a picture of the brush at a resolution it was never drawn at, which is
+    the same lie by another route, and re-walking with the *current* brush would break §2.10 in the one
+    place an artist is watching for it.
+  - **Only the logic tier can tell "scaled the view" from "scaled the brush".** Ink pixels cannot: a
+    pad that tripled the brush lays down the same count as one that tripled the magnification. So
+    `BrushEditorLogicTests`' `testThePadZoomScalesTheViewAndNotTheBrush` measures the stroke in
+    **canvas points** at both zooms (equal) *and* in device pixels (differing by the zoom, which is
+    what a pad ignoring the control would fail), and the UI test asserts the half it can see.
+  - **`inkedPixels` became a computed count.** It was cached and updated on every rebuild, which put a
+    1.4-million-pixel linear pass inside a slider drag once the resting sample started re-rendering.
+    Nothing in the drawing path reads it; only an accessibility client does.
+
+  **§2.26's two pickers and §2.25's three fields are in the left column**, with a thumbnail of the
+  current bitmap beside each — see §2.26 for the four things that turned out to be worth writing down,
+  one of which is that a `Menu` row whose icon is `Image(decorative:)` has **no accessibility element
+  at all**.
 
 **One thing in the reference is a trap worth naming.** Procreate's Apple Pencil tab organises by
 *sensor* — "Pressure" heading, then Size / Opacity / Flow / Bleed underneath — while its other tabs

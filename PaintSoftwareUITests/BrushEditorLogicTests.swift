@@ -346,4 +346,330 @@ final class BrushEditorLogicTests: XCTestCase {
         guard case .scale(.random(let channel, _), _) = row.modules[position] else { return .max }
         return channel.rawValue
     }
+
+    // MARK: - BRUSH.md §2.26 — the two collections
+
+    /// **The two collections are disjoint, and neither of them contains the library file.**
+    ///
+    /// §2.26 rules *"two browsable collections, one storage mechanism"*, and one storage mechanism
+    /// means `BrushStorage.fileNames()` answers **everything under the root** — the tips, the
+    /// textures, and `library.json`. The discriminating operand is that last one: a picker built on
+    /// an unfiltered listing looks perfectly right on a device that has imported nothing and offers
+    /// the artist their own library file as a sprite the moment they save one.
+    ///
+    /// **And the tip prefix is pinned at `custom-`.** Renaming it to something tidier would orphan
+    /// every tip already on an artist's device and every project package that names one; §2.14 makes
+    /// documents expendable and says nothing about the artist's own brushes.
+    func testTheTipAndTextureCollectionsAreDisjointAndExcludeTheLibraryFile() throws {
+        let root = try makeScratchRoot("collections")
+        let storage = BrushStorage(root: root)
+        for name in ["custom-a.png", "custom-b.png", "texture-p.png", "library.json", "notes.txt"] {
+            try storage.write(Data([0]), to: name)
+        }
+
+        let tips = BrushAssetLibrary.items(in: .tip, storage: storage)
+        let textures = BrushAssetLibrary.items(in: .texture, storage: storage)
+
+        XCTAssertEqual(tips.filter { $0.ref.importedFileName != nil }.map(\.id),
+                       ["custom-a.png", "custom-b.png"],
+                       "The tip collection is the `custom-` files, sorted, and nothing else")
+        XCTAssertEqual(textures.filter { $0.ref.importedFileName != nil }.map(\.id),
+                       ["texture-p.png"])
+        for item in tips + textures {
+            XCTAssertNotEqual(item.id, "library.json", "The artist's library file is not a sprite")
+            XCTAssertNotEqual(item.id, "notes.txt", "…and neither is anything else under the root")
+        }
+
+        // The shipped halves, which are what makes each collection non-empty on a device that has
+        // imported nothing — and the reason a paper must not be offered as a tip is that a dab would
+        // stamp a dab-shaped patch of grain.
+        XCTAssertEqual(builtIns(of: tips), [.square])
+        XCTAssertEqual(Set(builtIns(of: textures)), Set([.paperGrain, .canvasWeave]))
+
+        XCTAssertTrue(BrushAssetKind.tip.newFileName().hasPrefix("custom-"),
+                      "A tip's name is `custom-`, unchanged — see BrushAssetKind for what a rename costs")
+        XCTAssertTrue(BrushAssetKind.texture.newFileName().hasPrefix("texture-"))
+    }
+
+    /// **Every shipped paper is generated, deterministic, and tiles with no seam.**
+    ///
+    /// `BrushTextureMerge` lays one draw per repeat, so a field that does not wrap draws a visible
+    /// grid across every stroke — and *"the sheet looks like paper"* is true of a non-wrapping field
+    /// too, which is why the assertion is on the seam rather than on the picture.
+    ///
+    /// **The operand is the step across the wrap against the *largest* step between two interior
+    /// columns, and the mean was tried first and is wrong.** A woven sheet has a real discontinuity
+    /// at every thread boundary, so its wrap — which is one of those boundaries — is a jump beside
+    /// the *average* column step and is not a seam at all. Measured against the largest interior
+    /// boundary the claim is the honest one for both sheets: *the wrap is no worse than an ordinary
+    /// edge of this field*. For the smooth one that is a tight bound, because it has no ordinary
+    /// edges; for the woven one it is what says the pitch still divides the side.
+    ///
+    /// Determinism is the other half and it is not decorative: a sheet that differed between launches
+    /// would be paper that moved under ink already drawn, which is the whole thing §2.25 anchors to
+    /// the canvas to avoid.
+    func testEveryShippedPaperIsDeterministicAndTilesWithoutASeam() throws {
+        for paper in BuiltInBrushTexture.all(in: .texture) {
+            let first = try XCTUnwrap(BrushPaperGenerator.mask(paper), "\(paper.rawValue) generates nothing")
+            let second = try XCTUnwrap(BrushPaperGenerator.mask(paper))
+            XCTAssertEqual(first.width, BrushTipImport.maskSide)
+            XCTAssertEqual(first.height, BrushTipImport.maskSide)
+            let a = try alphaGrid(of: first), b = try alphaGrid(of: second)
+            XCTAssertEqual(a, b, "\(paper.rawValue) must generate the same bytes every time")
+
+            let side = first.width
+            func meanStep(from left: Int, to right: Int) -> Double {
+                let total = (0..<side).reduce(0) { sum, y in
+                    sum + abs(Int(a[y * side + left]) - Int(a[y * side + right]))
+                }
+                return Double(total) / Double(side)
+            }
+            let seam = meanStep(from: side - 1, to: 0)
+            let worstInterior = (0..<(side - 1)).map { meanStep(from: $0, to: $0 + 1) }.max() ?? 0
+            XCTAssertLessThanOrEqual(seam, worstInterior * 1.15 + 1,
+                                     "\(paper.rawValue) does not wrap: the step across the tile "
+                                     + "boundary (\(seam)) is a jump beyond anything inside the "
+                                     + "sheet (\(worstInterior)), which is a grid of seams on every stroke")
+        }
+
+        XCTAssertNil(BrushPaperGenerator.mask(.square),
+                     "A tip is not paper — the generator refuses rather than inventing a sheet")
+    }
+
+    /// **A paper never reaches zero alpha, so `depth` stays the only strength control.**
+    ///
+    /// `BrushTextureSettings.depth` scales the *shortfall* — `1 - depth·(1 - a)` — so an authored
+    /// zero is ink deleted outright at full depth with nothing for the artist to dial back with. The
+    /// floor is what keeps the one slider meaningful over its whole range.
+    func testAShippedPaperNeverReachesZeroSoDepthIsTheOnlyStrengthControl() throws {
+        for paper in BuiltInBrushTexture.all(in: .texture) {
+            let grid = try alphaGrid(of: XCTUnwrap(BrushPaperGenerator.mask(paper)))
+            let lowest = try XCTUnwrap(grid.min())
+            XCTAssertGreaterThanOrEqual(Int(lowest), 60,
+                                        "\(paper.rawValue) takes ink to nothing somewhere, which depth cannot undo")
+            XCTAssertLessThan(Int(lowest), 250, "PREMISE: \(paper.rawValue) has some texture in it at all")
+        }
+    }
+
+    /// **A texture import fills the square where a tip import letterboxes it, and that is the whole
+    /// reason there are two normalisations.**
+    ///
+    /// The obvious implementation reuses `BrushTipImport` for both. It is wrong in a way that is
+    /// invisible in the picker and obvious on the canvas: a tip is letterboxed inside a 2 px
+    /// transparent border, a texture is **tiled**, and `BrushTextureMerge` multiplies with
+    /// `.destinationIn` — so those transparent margins are not margins, they are a grid of lines cut
+    /// out of every stroke.
+    ///
+    /// Both operands are needed. *"The texture fills the square"* alone is satisfied by an
+    /// implementation that stretched it; the tip's clear corner beside it is what says the two really
+    /// are different rules rather than one rule with a different name.
+    func testATextureImportFillsTheSquareWhereATipImportLeavesAClearBorder() throws {
+        let wide = solidImage(width: 64, height: 16)
+
+        let tip = try alphaGrid(of: BrushTipImport.mask(from: wide))
+        let texture = try alphaGrid(of: BrushTextureImport.mask(from: wide))
+        let side = BrushTipImport.maskSide
+
+        XCTAssertEqual(Int(tip[0]), 0, "A tip is letterboxed and bordered — its corner is clear")
+        XCTAssertEqual(Int(tip[side * side - 1]), 0)
+        XCTAssertGreaterThan(Int(tip[(side / 2) * side + side / 2]), 200,
+                             "PREMISE: the tip's own middle is inked")
+
+        for corner in [0, side - 1, side * (side - 1), side * side - 1] {
+            XCTAssertGreaterThan(Int(texture[corner]), 200,
+                                 "A tiled sheet reaches its own edge — a clear corner is a seam in every stroke")
+        }
+        XCTAssertEqual(texture.filter { $0 < 200 }.count, 0,
+                       "An opaque picture aspect-fills the sheet with no margin at all")
+    }
+
+    // MARK: - BRUSH.md §7.1 — what "create manually" makes
+
+    /// **A manually made brush is the engine's neutral, not a copy of a preset**, it lands in the
+    /// open group, and a second one does not take the first one's name.
+    ///
+    /// The discriminating operand is `modulations`. Every shipped preset carries `size ← pressure`
+    /// and `flow ← pressure` (§12 stage 7), so an implementation that duplicated whatever brush was
+    /// selected would satisfy "a new brush appeared, in the right group, with a fresh name" and would
+    /// hand the artist two rows they did not add — which is the opposite of the owner's *"you being
+    /// able to fully customize it"*.
+    ///
+    /// The name matters for a reason beyond tidiness: a brush row's accessibility identifier **is**
+    /// its name, so two brushes called the same thing are two elements answering one query.
+    func testCreateManuallyMintsTheNeutralBrushIntoTheOpenGroupWithAUniqueName() throws {
+        let root = try makeScratchRoot("create-manually")
+        let store = BrushLibraryStore(storage: BrushStorage(root: root), arguments: [])
+        let target = store.addGroup(name: "Mine")
+
+        let made = store.createBrush(inGroup: target.id)
+
+        XCTAssertEqual(store.group(containingBrush: made.id)?.id, target.id,
+                       "It lands in the open group, not wherever the library felt like")
+        XCTAssertEqual(made.name, Brush.manualBaseName)
+        XCTAssertEqual(made.tip, .round)
+        XCTAssertTrue(made.modulations.rows.isEmpty,
+                      "A neutral brush carries no rows — a copy of any shipped preset carries two")
+        XCTAssertEqual(made.dab, .default)
+        XCTAssertEqual(made.stroke, .default)
+        XCTAssertNil(made.texture)
+        XCTAssertFalse(BrushLibrary.defaults.contains { $0.name == made.name },
+                       "PREMISE: it is not one of the shipped presets under another id")
+
+        let second = store.createBrush(inGroup: target.id)
+        XCTAssertNotEqual(second.name, made.name,
+                          "A row's identifier is its name; two the same is one unreachable row")
+        XCTAssertEqual(store.groups.first { $0.id == target.id }?.brushes.count, 2)
+    }
+
+    // MARK: - BRUSH.md §7.2 — the pad's magnification
+
+    /// **Zoom scales the view of a canvas-space render and leaves the brush alone.**
+    ///
+    /// §7.2's own words: the pad *"draws through the real stamper, so zoom must scale the view of a
+    /// canvas-space render, not the brush's size — a brush drawn at 3× size is a different brush, not
+    /// a magnified one"*. Getting it backwards makes the pad lie, which is the one thing it exists
+    /// not to do.
+    ///
+    /// **Two operands, and neither works alone.** The stroke's width measured in *canvas points* must
+    /// be the same at both zooms — that is the half a brush-scaling implementation fails. And the
+    /// same width measured in *device pixels* must differ by the zoom — that is the half a pad which
+    /// ignored zoom entirely would fail, and without it the first assertion is green against a
+    /// control that does nothing at all.
+    func testThePadZoomScalesTheViewAndNotTheBrush() throws {
+        var brush = Brush.manuallyCreated(named: "flat")
+        brush.dab.hardness = 1                       // a crisp disc, so an edge is an edge
+        brush.dab.spacing = 0.05
+        let strokeWidth: CGFloat = 20
+        let viewSize = CGSize(width: 300, height: 200)
+        let screenScale: CGFloat = 2
+        // Inside the canvas extent at **both** zooms: at 3× this pad shows 100 × 66.7 canvas points.
+        let path = StrokeSamples([VectorSample(point: CGPoint(x: 10, y: 30), pressure: 1),
+                                  VectorSample(point: CGPoint(x: 60, y: 30), pressure: 1)],
+                                 channels: .pressureOnly)
+
+        var pixelWidths: [CGFloat: Int] = [:]
+        for zoom in [BrushPadZoom.realSize, BrushPadZoom.standard] {
+            let ctx = try XCTUnwrap(BrushPadZoom.makeContext(viewSize: viewSize,
+                                                             screenScale: screenScale, zoom: zoom))
+            BrushStamper.stampStroke(into: CGContextDabTarget(ctx), samples: path, brush: brush,
+                                     color: .black, brushSize: strokeWidth, brushOpacity: 1,
+                                     isEraser: false, random: DabRandom(seed: 7))
+            // The device-pixel column through the middle of the stroke, at canvas x = 35.
+            let column = Int(35 * screenScale * zoom)
+            pixelWidths[zoom] = inkedRows(in: ctx, atColumn: column)
+        }
+
+        let real = try XCTUnwrap(pixelWidths[BrushPadZoom.realSize])
+        let zoomed = try XCTUnwrap(pixelWidths[BrushPadZoom.standard])
+        XCTAssertGreaterThan(real, 30, "PREMISE: a 20 pt stroke at 2× screen scale is about 40 pixels")
+
+        let ratio = Double(zoomed) / Double(real)
+        XCTAssertEqual(ratio, Double(BrushPadZoom.standard), accuracy: 0.25,
+                       "The same stroke must occupy the zoom's multiple of the pixels — a pad that "
+                       + "ignored the zoom would draw the identical picture")
+
+        let realCanvasPoints = Double(real) / Double(screenScale * BrushPadZoom.realSize)
+        let zoomedCanvasPoints = Double(zoomed) / Double(screenScale * BrushPadZoom.standard)
+        XCTAssertEqual(zoomedCanvasPoints, realCanvasPoints, accuracy: 1.5,
+                       "…and it must be the same width in **canvas points** at both, or the zoom "
+                       + "scaled the brush rather than the view of it")
+
+        // The arithmetic the two above are consequences of.
+        XCTAssertEqual(BrushPadZoom.canvasSize(of: viewSize, at: 3).width, 100, accuracy: 0.001)
+        XCTAssertEqual(BrushPadZoom.canvasPoint(CGPoint(x: 30, y: 60), at: 3), CGPoint(x: 10, y: 20))
+        XCTAssertEqual(BrushPadZoom.toggled(BrushPadZoom.standard), BrushPadZoom.realSize)
+        XCTAssertEqual(BrushPadZoom.toggled(BrushPadZoom.realSize), BrushPadZoom.standard)
+        XCTAssertFalse(BrushPadZoom.isRealSize(BrushPadZoom.standard),
+                       "PREMISE: the pad opens zoomed in — §7.2's second ask")
+    }
+
+    /// **There is one sample stroke in the codebase and it tapers.**
+    ///
+    /// §7.2: *"The default stroke must be the same fixed S-curve `BrushPreview` walks for §7.1's menu
+    /// rows. One sample stroke in the codebase, not two, or a brush's row and its pad disagree about
+    /// what it looks like."* So the row's render is asserted to be **exactly** what
+    /// `BrushPreview.stampSample` lays down — the call the pad makes — rather than merely similar to
+    /// it. A row that grew a private stroke would still look right beside a pad that had one too.
+    ///
+    /// The taper is the owner's own word for what the sample is *for*: a constant-pressure line
+    /// renders four of the five shipped presets as near-identical bars.
+    func testTheOneSampleStrokeTapersAndIsWhatAMenuRowDraws() throws {
+        let size = CGSize(width: 156, height: 26)
+        let samples = BrushPreview.samples(in: size)
+        let pressures = samples.map(\.pressure)
+        XCTAssertLessThan(try XCTUnwrap(pressures.first), 0.15, "It starts on a taper")
+        XCTAssertLessThan(try XCTUnwrap(pressures.last), 0.15, "…and ends on one")
+        XCTAssertGreaterThan(try XCTUnwrap(pressures.max()), 0.95, "…with a press between them")
+        // **An S, which means it leaves the midline in *both* directions.** A range assertion was
+        // tried first and had the wrong threshold in it: at a menu row's 156 × 26 the inset is
+        // driven by the height, so the whole curve is about four points tall. What makes it an S is
+        // the sign change, not the size.
+        let midline = size.height / 2
+        let ys = samples.map { $0.point.y }
+        XCTAssertGreaterThan(try XCTUnwrap(ys.max()), midline + 1, "It dips below the midline")
+        XCTAssertLessThan(try XCTUnwrap(ys.min()), midline - 1, "…and rises above it")
+
+        let brush = BrushLibrary.softRound
+        let fromRow = BrushPreview.render(brush, size: size, scale: 2, color: .white)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 2
+        format.opaque = false
+        let byHand = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            BrushPreview.stampSample(into: CGContextDabTarget(context.cgContext), over: size,
+                                     brush: brush, color: .white,
+                                     strokeWidth: BrushPreview.strokeWidth(for: brush, in: size),
+                                     opacity: brush.opacity)
+        }
+        XCTAssertEqual(fromRow.pngData(), byHand.pngData(),
+                       "A menu row must be that one stamp and nothing of its own")
+    }
+
+    // MARK: - Helpers for the four above
+
+    private func builtIns(of items: [BrushAssetItem]) -> [BuiltInBrushTexture] {
+        items.compactMap { item -> BuiltInBrushTexture? in
+            guard case .builtIn(let builtIn) = item.ref else { return nil }
+            return builtIn
+        }
+    }
+
+    private func makeScratchRoot(_ name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brush-editor-\(name)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    /// A `width × height` opaque black picture — read by luminance on the way in, by both importers,
+    /// so it comes out as full coverage wherever it is drawn.
+    private func solidImage(width: Int, height: Int) -> UIImage {
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+    }
+
+    private func alphaGrid(of image: CGImage) throws -> [UInt8] {
+        let width = image.width, height = image.height
+        var buffer = [UInt8](repeating: 0, count: width * height * 4)
+        let ctx = try XCTUnwrap(CGContext(data: &buffer, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 3, to: buffer.count, by: 4).map { buffer[$0] }
+    }
+
+    /// How many rows of one device-pixel column carry ink.
+    private func inkedRows(in ctx: CGContext, atColumn column: Int) -> Int {
+        guard let data = ctx.data, column >= 0, column < ctx.width else { return 0 }
+        let bytes = data.bindMemory(to: UInt8.self, capacity: ctx.bytesPerRow * ctx.height)
+        var count = 0
+        for row in 0..<ctx.height where bytes[row * ctx.bytesPerRow + column * 4 + 3] > 8 { count += 1 }
+        return count
+    }
 }

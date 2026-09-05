@@ -121,6 +121,15 @@ final class BrushMenuUITests: PaintUITestCase {
                           "Picking the Pen must reach the ink — its stroke is visibly narrower than the 18 pt brush the document opened with")
     }
 
+    /// A picture of the screen, kept **only when the test fails** — see `BrushEditorUITests`'
+    /// attachment of the same name for why the lifetime is what it is.
+    private func attachScreen(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .deleteOnSuccess
+        add(shot)
+    }
+
     /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a
     /// **single** screenshot. `halfBand` is the half-height of each band in normalized coordinates.
     private func inkedColumnHeights(of element: XCUIElement, dx: Double,
@@ -216,5 +225,160 @@ final class BrushMenuUITests: PaintUITestCase {
                       "The eraser keeps its own selection over the shared library")
         XCTAssertFalse(app.buttons["eraserPanel.brush.Pen"].isSelected,
                        "…and the brush's choice does not leak into it")
+    }
+
+    // MARK: - §7.1's `+`, which has two arms now
+
+    /// **Create Manually mints a brush at the engine's neutral and drops the artist into its
+    /// editor** — BRUSH.md §7.1, the owner: *"the create brush right now makes you import a brush,
+    /// but this library feature opens up the possibility of just taking you straight to the edit menu
+    /// of a default brush, and you being able to fully customize it, so new brush should be two
+    /// options: create manually, and import brush."*
+    ///
+    /// **Two operands, because "a new brush appeared" is satisfied by copying whichever preset was
+    /// selected.** Every shipped preset carries `size ← pressure` and `flow ← pressure` (§12 stage
+    /// 7), so the editor opened on one shows a chain under Size and its collapsed row says *"+ 1
+    /// input"*. A brush minted at the neutral shows neither. So this test reads that row on the
+    /// **shipped** brush first and on the made one after — a copy would look identical to a correct
+    /// implementation from either half alone.
+    func testCreateManuallyMakesANeutralBrushAndOpensTheEditorOnIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+
+        // The operand: what the editor looks like on a shipped preset.
+        openBrushEditor(app)
+        let sizeRow = app.buttons["brushPanel.output.size"]
+        XCTAssertTrue(sizeRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(sizeRow.label.contains("input"),
+                      "PREMISE: a shipped preset drives Size from pressure, and the row says so")
+        tapWhenHittable(sizeRow, "The Size row")
+        XCTAssertTrue(app.sliders["brushPanel.amount.size.0"].waitForExistence(timeout: 5),
+                      "PREMISE: …and that chain has an Amount")
+        closeBrushEditor(app)
+
+        // The `+`'s first arm.
+        tapWhenHittable(app.buttons["brushPanel.addButton"], "The + button")
+        let create = app.buttons["brushPanel.createManually"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5),
+                      "The + must offer Create Manually beside Import Custom Brush — §7.1")
+        tapWhenHittable(create, "Create Manually")
+
+        XCTAssertTrue(app.otherElements["brushPanel.editorScreen"].waitForExistence(timeout: 5),
+                      "It must take the artist straight to the edit menu, not merely add a row")
+        attachScreen("create-manually-lands-in-the-editor")
+        XCTAssertEqual(app.buttons["brushPanel.tipPicker"].value as? String, "Round",
+                       "…on a brush with the neutral tip")
+        let madeRow = app.buttons["brushPanel.output.size"]
+        XCTAssertTrue(madeRow.waitForExistence(timeout: 5))
+        XCTAssertFalse(madeRow.label.contains("input"),
+                       "A made brush carries no rows — a copy of the selected preset would carry two")
+        tapWhenHittable(madeRow, "The Size row")
+        XCTAssertTrue(app.buttons["brushPanel.addRow.size"].waitForExistence(timeout: 5),
+                      "PREMISE: the row really did expand")
+        XCTAssertFalse(app.sliders["brushPanel.amount.size.0"].exists,
+                       "…and there is no chain under it to carry an Amount")
+
+        // It is usable, not merely present: the pad beside it draws with it.
+        let pad = app.otherElements["brushPanel.pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+        app.buttons["brushPanel.padClear"].tap()
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.35))
+            .press(forDuration: 0.1,
+                   thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)))
+        var laid = 0
+        for _ in 0..<20 {
+            if let value = pad.value as? String,
+               let part = value.split(separator: ",").last,
+               let n = Int(part.replacingOccurrences(of: "last=", with: "")), n > 0 {
+                laid = n
+                break
+            }
+            usleep(150_000)
+        }
+        XCTAssertGreaterThan(laid, 0, "A brush made from the + must actually paint")
+
+        // And it is in the library, selected, where the artist left it.
+        tapWhenHittable(app.buttons["brushPanel.editorBack"], "The editor's Done chevron")
+        let row = app.buttons["brushPanel.brush.New Brush"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5),
+                      "The made brush must be a row in the open group")
+        XCTAssertTrue(row.isSelected, "…and the selected one, or the editor was editing something else")
+    }
+
+    // MARK: - The container-identifier trap, as a rule the suite enforces
+
+    /// **Every identifier this suite depends on resolves to exactly one element.**
+    ///
+    /// An `accessibilityIdentifier` on a SwiftUI *container* is **inherited by every descendant**
+    /// rather than making an element of its own. Three separate agents have shipped that defect into
+    /// this app — `StrokeSettingsPanel`'s group column, `BrushEditorScreen`'s root, and a module card
+    /// — and each time it was found only by driving the screen, because the screen **works perfectly
+    /// by hand**: a finger uses coordinates and never asks the accessibility tree. CLAUDE.md records
+    /// it, BRUSH.md §7.1 and §7.2 both record it, and it happened again anyway.
+    ///
+    /// **The shape of the assertion is the whole point.** `exists` is true of an identifier held by
+    /// two hundred elements, and so is a tap on `.firstMatch` — which is why every earlier version of
+    /// this defect passed whatever tests were around it. Counting is what says it, and it says it for
+    /// the identifier that was *given* the name as well as for the ones that inherited it: a
+    /// container that swallows its children still resolves to more than one element itself.
+    ///
+    /// It walks three states, because the trap has bitten in three different kinds of place: the
+    /// menu, the editor's root and columns, and one expanded output with a module card in it.
+    func testEveryIdentifierTheSuiteDependsOnResolvesToExactlyOneElement() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+
+        // 1. The menu.
+        openBrushMenu(app)
+        for id in ["brushPanel.groupList", "brushPanel.groupMenu", "brushPanel.addButton",
+                   "brushPanel.group.Basics", "brushPanel.brush.Soft Round", "brushPanel.brush.Pen"] {
+            assertExactlyOne(app, id, "the brushes menu")
+        }
+
+        // 2. The editor: its root, its three columns' own controls, and §2.26's two pickers.
+        openBrushEditor(app)
+        XCTAssertTrue(app.otherElements["brushPanel.editorScreen"].waitForExistence(timeout: 5))
+        for id in ["brushPanel.editorScreen", "brushPanel.editorBack", "brushPanel.outputList",
+                   "brushPanel.tipPicker", "brushPanel.texturePicker",
+                   "brushPanel.sizeSlider", "brushPanel.opacitySlider",
+                   "brushPanel.pad", "brushPanel.padClear", "brushPanel.padZoom",
+                   "brushPanel.output.size", "brushPanel.output.density"] {
+            assertExactlyOne(app, id, "the editor screen")
+        }
+
+        // 3. One expanded output, which is where a chain and a module card live — the card was the
+        // third place this defect was found.
+        tapWhenHittable(app.buttons["brushPanel.output.size"], "The Size row")
+        XCTAssertTrue(app.sliders["brushPanel.base.size"].waitForExistence(timeout: 5))
+        for id in ["brushPanel.base.size", "brushPanel.amount.size.0", "brushPanel.input.size.0",
+                   "brushPanel.removeRow.size.0", "brushPanel.addRow.size",
+                   "brushPanel.addModule.size.0", "brushPanel.module.size.0.0",
+                   "brushPanel.moduleUp.size.0.0", "brushPanel.moduleDown.size.0.0",
+                   "brushPanel.moduleRemove.size.0.0", "brushPanel.curve.size.0.0.graph"] {
+            assertExactlyOne(app, id, "an expanded output's chain")
+        }
+
+        // 4. §2.25's two numbers, which only exist once a sheet is chosen.
+        tapWhenHittable(app.buttons["brushPanel.texturePicker"], "The texture picker")
+        tapWhenHittable(app.buttons["brushPanel.textureOption.paperGrain"], "Paper Grain")
+        XCTAssertTrue(app.sliders["brushPanel.textureTile"].waitForExistence(timeout: 5))
+        for id in ["brushPanel.textureTile", "brushPanel.textureDepth"] {
+            assertExactlyOne(app, id, "a brush with a texture on it")
+        }
+    }
+
+    /// The assertion the test above is made of. A count rather than `exists`, for the reason that
+    /// test's own note gives.
+    private func assertExactlyOne(_ app: XCUIApplication, _ identifier: String, _ state: String,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let matches = app.descendants(matching: .any).matching(identifier: identifier).count
+        XCTAssertEqual(matches, 1,
+                       "`\(identifier)` resolves to \(matches) elements in \(state). "
+                       + (matches == 0
+                          ? "It is missing, so every test that names it is asserting nothing."
+                          : "More than one is the container-identifier trap: an identifier on a "
+                            + "SwiftUI container is inherited by every descendant, so the controls "
+                            + "underneath it become unaddressable while the screen still works by hand."),
+                       file: file, line: line)
     }
 }

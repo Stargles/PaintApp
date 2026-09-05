@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 /// **The brush editor** — BRUSH.md §2.24, §7, §7.2 and §12 stage 10.
 ///
@@ -38,6 +40,24 @@ struct BrushEditorScreen: View {
     /// means and what keeps the list a list.
     @State private var expanded: String?
     @State private var padClearToken = 0
+    /// §7.2's *"zoomed in by default"* and its *"toggle to real size"*, in one number — see
+    /// `BrushPadZoom`, which owns what the two positions are and what they do and do not scale.
+    @State private var padZoom: CGFloat = BrushPadZoom.standard
+
+    /// **§2.26's two collections, read once rather than per frame.**
+    ///
+    /// `BrushAssetLibrary.items(in:)` lists a directory, and a `Menu`'s content is rebuilt on every
+    /// pass of the enclosing body — which during a slider drag is dozens a second. Held in state and
+    /// refreshed where the collection can actually have changed: on appear, and after an import.
+    @State private var tipItems: [BrushAssetItem] = []
+    @State private var textureItems: [BrushAssetItem] = []
+    /// Which collection the photo picker currently open is importing into, and the flag that opens
+    /// it. Two pieces of state rather than one optional because the picker's dismissal clears the
+    /// flag *before* `loadTransferable` finishes, and the kind has to outlive that.
+    @State private var importingKind: BrushAssetKind = .tip
+    @State private var isPickingAsset = false
+    @State private var assetPickerItem: PhotosPickerItem?
+    @State private var assetImportError: String?
 
     private var brush: Brush { canvasManager[keyPath: spec.selectedBrush] }
     private var idPrefix: String { spec.idPrefix }
@@ -77,6 +97,14 @@ struct BrushEditorScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { refreshAssetCollections() }
+        // Raised from a `Menu` item, so it cannot be a `PhotosPicker` button itself — a menu row is
+        // not a place a picker can present from. `BrushSettingsPanel`'s tip importer does the same
+        // dance for the same reason.
+        .photosPicker(isPresented: $isPickingAsset, selection: $assetPickerItem, matching: .images)
+        .onChange(of: assetPickerItem) { _, newItem in
+            Task { await importPickedAsset(newItem) }
+        }
     }
 
     // MARK: - Header
@@ -120,10 +148,16 @@ struct BrushEditorScreen: View {
                     .background(Color.white.opacity(0.05))
                     .cornerRadius(6)
 
-                Text(tipDescription)
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.45))
-                    .fixedSize(horizontal: false, vertical: true)
+                tipSection
+                textureSection
+
+                if let assetImportError {
+                    Text(assetImportError)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("\(idPrefix).assetImportError")
+                }
 
                 Text("Every control in the middle column belongs to the brush. Size and opacity, beside the pad, belong to you.")
                     .font(.caption2)
@@ -137,11 +171,153 @@ struct BrushEditorScreen: View {
         .frame(width: 228)
     }
 
+    // MARK: - §2.26's two collections
+
+    /// **The tip picker** — BRUSH.md §2.26, the owner: *"their dab sprites should have the ability to
+    /// be changed, as well as texture."*
+    ///
+    /// A `Menu` rather than a grid of swatches, and that is a size decision rather than a taste one:
+    /// this column is 228 points wide inside a `ScrollView`, and a scrolling grid there is a third
+    /// nested scroll surface — the same fight §7.2 already lost when it tried to drag-reorder modules.
+    /// Each row carries the tip's own mask as its icon, so the collection is browsed by picture and
+    /// read by name.
+    private var tipSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Tip")
+                .font(.caption).foregroundColor(.white.opacity(0.5))
+            HStack(spacing: 8) {
+                assetThumbnail(of: brush.tip.textureRef)
+                Menu {
+                    // **Round is not in the collection and could not be.** A `BrushTip` is either the
+                    // procedural disc or a picture (see `BrushTip`); the collection holds pictures, so
+                    // the one option that is not one is written here.
+                    Button("Round") { setTip(.round) }
+                        .accessibilityIdentifier("\(idPrefix).tipOption.round")
+                    ForEach(tipItems) { item in
+                        assetMenuRow(item) { setTip(.stamp(item.ref)) }
+                            .accessibilityIdentifier("\(idPrefix).tipOption.\(item.id)")
+                    }
+                    Divider()
+                    Button("Import Tip…") { beginImport(.tip) }
+                        .accessibilityIdentifier("\(idPrefix).importTip")
+                } label: {
+                    pickerLabel(tipName)
+                }
+                .accessibilityIdentifier("\(idPrefix).tipPicker")
+                .accessibilityValue(tipName)
+                Spacer(minLength: 0)
+            }
+            Text(tipDescription)
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// **The texture picker and its two numbers** — BRUSH.md §2.25 and §2.26.
+    ///
+    /// §2.25 shipped with **no artist-facing control for any of its three fields**, so a textured
+    /// brush existed only in code. All three are here: which sheet, how big one repeat is in canvas
+    /// points, and how much of the sheet's shortfall comes out of the ink. The last two appear only
+    /// when there is a texture, because `Brush.texture` is optional precisely so *"no texture"* has
+    /// its own spelling — a depth slider on a brush with no sheet would be a control that does
+    /// nothing, which CLAUDE.md's "a refusal with no notice" section is about.
+    @ViewBuilder
+    private var textureSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Texture")
+                .font(.caption).foregroundColor(.white.opacity(0.5))
+            HStack(spacing: 8) {
+                assetThumbnail(of: brush.texture?.mask)
+                Menu {
+                    Button("None") { setTexture(nil) }
+                        .accessibilityIdentifier("\(idPrefix).textureOption.none")
+                    ForEach(textureItems) { item in
+                        assetMenuRow(item) { setTextureMask(item.ref) }
+                            .accessibilityIdentifier("\(idPrefix).textureOption.\(item.id)")
+                    }
+                    Divider()
+                    Button("Import Texture…") { beginImport(.texture) }
+                        .accessibilityIdentifier("\(idPrefix).importTexture")
+                } label: {
+                    pickerLabel(textureName)
+                }
+                .accessibilityIdentifier("\(idPrefix).texturePicker")
+                .accessibilityValue(textureName)
+                Spacer(minLength: 0)
+            }
+
+            if let texture = brush.texture {
+                sliderRow(title: "Tile Size",
+                          valueText: "\(Int(texture.tileSize.rounded())) pt",
+                          value: Binding(get: { Double(texture.tileSize) },
+                                         set: { newValue in
+                                             edit { $0.texture?.tileSize = CGFloat(newValue) }
+                                         }),
+                          range: Double(BrushTextureSettings.minimumTileSize)...1024,
+                          identifier: "\(idPrefix).textureTile")
+                sliderRow(title: "Depth",
+                          valueText: "\(Int((texture.depth * 100).rounded()))%",
+                          value: Binding(get: { texture.depth },
+                                         set: { newValue in edit { $0.texture?.depth = newValue } }),
+                          range: 0...1,
+                          identifier: "\(idPrefix).textureDepth")
+                Text("Paper, anchored to the canvas. The stroke is the mask; Depth is how much of the sheet's shortfall comes out of the ink, and 0 is exactly none.")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.45))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// One row of a collection: the bitmap beside its name. `Label` rather than a bare `Text` so the
+    /// picture is what an artist scans and the name is what a test names.
+    private func assetMenuRow(_ item: BrushAssetItem, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label {
+                Text(item.name)
+            } icon: {
+                if let mask = BrushTextureStore.mask(for: item.ref) {
+                    Image(uiImage: UIImage(cgImage: mask)).renderingMode(.template)
+                }
+            }
+        }
+    }
+
+    /// The current bitmap, small. **Template-rendered**, because every mask in this app is black with
+    /// its meaning in the *alpha* — drawn as-is on a near-black screen it would be invisible, which is
+    /// the one way a thumbnail can be present and useless at the same time.
+    @ViewBuilder
+    private func assetThumbnail(of ref: BrushTextureRef?) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.08))
+            if let ref, let mask = BrushTextureStore.mask(for: ref) {
+                Image(decorative: mask, scale: 1)
+                    .resizable()
+                    .renderingMode(.template)
+                    .foregroundColor(.white)
+                    .padding(2)
+            }
+        }
+        .frame(width: 34, height: 34)
+    }
+
+    private var tipName: String {
+        switch brush.tip {
+        case .round: return "Round"
+        case .stamp(let ref): return BrushAssetLibrary.name(of: ref, in: .tip)
+        }
+    }
+
+    private var textureName: String {
+        guard let mask = brush.texture?.mask else { return "None" }
+        return BrushAssetLibrary.name(of: mask, in: .texture)
+    }
+
     private var tipDescription: String {
         switch brush.tip {
-        case .round: return "Round tip — procedural, its edge is Hardness."
-        case .stamp(.builtIn(let name)): return "Stamp tip — \(name.rawValue). Its edge is in its own pixels."
-        case .stamp(.imported(let file)): return "Stamp tip — imported (\(file)). Its edge is in its own pixels."
+        case .round: return "Procedural — its edge is Hardness."
+        case .stamp: return "A picture — its edge is in its own pixels, so Hardness does not reach it."
         }
     }
 
@@ -600,6 +776,20 @@ struct BrushEditorScreen: View {
                 Text("Try it")
                     .font(.caption).foregroundColor(.white.opacity(0.5))
                 Spacer(minLength: 0)
+                // §7.2's third ask: *"a toggle to real size, because zoom lies about what a brush
+                // looks like in use."* Two positions rather than a zoom slider — see
+                // `BrushPadZoom.toggled`.
+                Button { padZoom = BrushPadZoom.toggled(padZoom) } label: {
+                    Text(BrushPadZoom.label(padZoom))
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.8))
+                        // Fixed, so Clear does not shuffle sideways as the label changes length —
+                        // a control that moves when you use it is a control you have to re-aim at.
+                        .frame(width: 76, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("\(idPrefix).padZoom")
+                .accessibilityValue(BrushPadZoom.label(padZoom))
                 Button("Clear") { padClearToken += 1 }
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.8))
@@ -630,9 +820,10 @@ struct BrushEditorScreen: View {
                                 strokeSize: canvasManager[keyPath: spec.size],
                                 strokeOpacity: canvasManager[keyPath: spec.opacity],
                                 identifier: "\(idPrefix).pad",
-                                clearToken: padClearToken)
+                                clearToken: padClearToken,
+                                zoom: padZoom)
                 .cornerRadius(8)
-            Text("Drawn with the brush as it is right now, not as it was saved.")
+            Text("Drawn with the brush as it is right now, not as it was saved. It opens on a sample stroke; your first touch takes it away.")
                 .font(.caption2)
                 .foregroundColor(.white.opacity(0.35))
         }
@@ -701,6 +892,83 @@ struct BrushEditorScreen: View {
     /// the ink already on the canvas keeps the brush it was drawn with.
     private func commit() {
         library.update(canvasManager[keyPath: spec.selectedBrush])
+    }
+
+    // MARK: - §2.26's writes
+
+    private func setTip(_ tip: BrushTip) {
+        edit { $0.tip = tip }
+        commit()
+    }
+
+    private func setTexture(_ texture: BrushTextureSettings?) {
+        edit { $0.texture = texture }
+        commit()
+    }
+
+    /// Points the brush's paper at a different sheet, **keeping the tile size and depth the artist
+    /// already set** — swapping the picture is not a reason to throw away the two numbers beside it.
+    /// A brush with no texture gets `BrushTextureSettings`' own defaults, which is where 256 pt and
+    /// full depth are written down.
+    private func setTextureMask(_ ref: BrushTextureRef) {
+        edit { brush in
+            if var existing = brush.texture {
+                existing.mask = ref
+                brush.texture = existing
+            } else {
+                brush.texture = BrushTextureSettings(mask: ref)
+            }
+        }
+        commit()
+    }
+
+    private func beginImport(_ kind: BrushAssetKind) {
+        importingKind = kind
+        assetImportError = nil
+        isPickingAsset = true
+    }
+
+    /// Reads what the artist picked, normalises it into the collection, and points the brush at it.
+    ///
+    /// **The import lands in the *collection*, and pointing this brush at it is a second step** —
+    /// §2.26: *"importing adds to a collection rather than to whichever brush happens to be open."*
+    /// Both happen here because an artist who imported a sprite from inside the editor plainly means
+    /// to use it; what the ruling forbids is the file being reachable *only* through the brush that
+    /// imported it, and it is not — it is in the picker for every brush from the next time one is
+    /// opened.
+    private func importPickedAsset(_ item: PhotosPickerItem?) async {
+        guard let item else { return }
+        let kind = importingKind
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else {
+            await MainActor.run { assetImportError = "Couldn't read that image" }
+            return
+        }
+        await MainActor.run {
+            do {
+                let ref = try BrushAssetLibrary.importImage(image, into: kind)
+                switch kind {
+                case .tip: setTip(.stamp(ref))
+                case .texture: setTextureMask(ref)
+                }
+                assetImportError = nil
+                refreshAssetCollections()
+            } catch BrushTipImport.Failure.blankMask {
+                assetImportError = kind == .tip
+                    ? "That image is blank — a tip needs dark marks on a light background, or its own transparency"
+                    : "That image is blank — a texture with no marks would multiply every stroke by nothing"
+            } catch BrushTipImport.Failure.couldNotWrite(let error) {
+                assetImportError = "Couldn't save it to the brush library: \(error.localizedDescription)"
+            } catch {
+                assetImportError = "Couldn't convert that image"
+            }
+            assetPickerItem = nil
+        }
+    }
+
+    private func refreshAssetCollections() {
+        tipItems = BrushAssetLibrary.items(in: .tip)
+        textureItems = BrushAssetLibrary.items(in: .texture)
     }
 
     private var sizeBinding: Binding<Double> {

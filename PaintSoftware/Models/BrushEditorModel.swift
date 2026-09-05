@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import UIKit
 
 /// **What the brush editor shows, and the arithmetic behind the two controls that are not sliders** —
 /// BRUSH.md §2.24, §7 and §7.2, `§12` stage 10.
@@ -311,6 +312,186 @@ extension BrushModule {
         guard case .scale(_, let curve) = self else { return nil }
         return curve
     }
+}
+
+// MARK: - BRUSH.md §2.26 — the two browsable collections, as a picker can list them
+
+/// One thing a tip or texture picker offers: the bitmap, and what to call it.
+///
+/// `id` is what an accessibility identifier is built from, so a UI test names an asset the way the
+/// model does — and it is the **file name** for an import rather than the display name, because the
+/// display name is a position in a sorted list and the file name is the identity.
+struct BrushAssetItem: Identifiable, Hashable {
+    let ref: BrushTextureRef
+    let name: String
+    let id: String
+}
+
+/// **What is in each of §2.26's two collections, right now** — BRUSH.md §2.26, the owner: *"their dab
+/// sprites should have the ability to be changed, as well as texture. For these two, it may be worth
+/// having a library of textures and sprites to which new sprites can be added into."*
+///
+/// **It is a listing, not a store.** `BrushStorage` owns the root and its five verbs are the whole
+/// file surface (§2.27); this asks `fileNames()` — the one of the five that had no caller until now —
+/// and sorts the answer into the two collections `BrushAssetKind` names. There is no index file, no
+/// second directory and no cache: the files *are* the collection, so a tip written by an import is in
+/// the picker the next time it is opened with nothing to keep in step.
+///
+/// **The names are positional and the ids are not.** An imported bitmap is `custom-<uuid>.png`, which
+/// is not a thing to show an artist, and nothing in the model carries a nicer one — a name would need
+/// a text field at import time, which is a decision the owner has not made. So the display name is
+/// "Imported *n*" over the sorted file names, which is stable while the file is there and shifts when
+/// one is deleted; the **identifier** is the file name, which does not.
+enum BrushAssetLibrary {
+
+    static func items(in kind: BrushAssetKind, storage: BrushStorage = .shared) -> [BrushAssetItem] {
+        let builtIns = BuiltInBrushTexture.all(in: kind == .tip ? .tip : .texture).map {
+            BrushAssetItem(ref: .builtIn($0), name: $0.displayName, id: $0.rawValue)
+        }
+        let imported = storage.fileNames().filter(kind.owns).sorted()
+        return builtIns + imported.enumerated().map { index, fileName in
+            BrushAssetItem(ref: .imported(fileName: fileName),
+                           name: "Imported \(index + 1)",
+                           id: fileName)
+        }
+    }
+
+    /// What a ref is called wherever one is shown outside a picker — the editor's own "Tip:" line.
+    /// Falls back to the file name for an import the listing no longer holds, which is a brush whose
+    /// picture the artist deleted: saying its name is more use than saying "unknown".
+    static func name(of ref: BrushTextureRef, in kind: BrushAssetKind,
+                     storage: BrushStorage = .shared) -> String {
+        if let match = items(in: kind, storage: storage).first(where: { $0.ref == ref }) { return match.name }
+        switch ref {
+        case .builtIn(let builtIn): return builtIn.displayName
+        case .imported(let fileName): return fileName
+        }
+    }
+
+    /// **Adds a picture to a collection and answers the ref that resolves it** — §2.26's *"importing
+    /// adds to a collection rather than to whichever brush happens to be open"*.
+    ///
+    /// Two normalisations, one per collection, and `BrushTextureImport` carries why they cannot be
+    /// the same one: a tip is letterboxed with a transparent border and a tiled sheet cannot be.
+    static func importImage(_ image: UIImage, into kind: BrushAssetKind) throws -> BrushTextureRef {
+        switch kind {
+        case .tip:
+            guard case .stamp(let ref) = try BrushTipImport.importTip(from: image) else {
+                throw BrushTipImport.Failure.unreadableImage
+            }
+            return ref
+        case .texture:
+            return try BrushTextureImport.importTexture(from: image)
+        }
+    }
+}
+
+// MARK: - BRUSH.md §7.2 — the pad's magnification
+
+/// **How much of the canvas the editor's pad shows, and what that does and does not scale** —
+/// BRUSH.md §7.2's second and third owner asks: *"zoomed in by default, because the details that
+/// distinguish two brushes are granular"*, and *"a toggle to real size, because zoom lies about what
+/// a brush looks like in use."*
+///
+/// **The one thing this must not do is scale the brush.** A brush drawn at 3× size is a *different
+/// brush*, not a magnified one, and the pad exists to tell the truth about what a brush looks like.
+/// So every function here moves the *view*: the pad's context keeps its pixel dimensions and takes a
+/// larger scale factor, which shrinks the canvas extent it covers. The size handed to
+/// `BrushStamper.stampStroke` is the artist's own number in canvas points at every zoom, and there is
+/// deliberately no function here that takes one.
+///
+/// It lives outside `BrushScratchPadView` for this file's stated reason — a rule written in a `View`
+/// is a rule no fast-tier test can reach — and `makeContext` is here rather than in the pad so the
+/// test builds the *same* context the app draws into rather than a lookalike.
+enum BrushPadZoom {
+
+    /// **Zoomed in by default.** 3 rather than something larger because the pad is also where an
+    /// artist judges *spacing* and *scatter*, which are read from a length of stroke rather than from
+    /// one dab: at 3× a 330-point pad still shows about 110 canvas points of stroke, and past that a
+    /// brush's line stops being a line.
+    static let standard: CGFloat = 3
+    /// 1 canvas point to 1 view point — the same claim the Size slider's real-size stamp preview
+    /// makes, which is why it is named rather than written as a literal.
+    static let realSize: CGFloat = 1
+
+    static func isRealSize(_ zoom: CGFloat) -> Bool { zoom == realSize }
+
+    /// The toggle. Two positions rather than a slider: §7.2 asks for *"a toggle to real size"*, and a
+    /// continuous zoom would leave the artist unable to say whether what they are looking at is life
+    /// size — which is the whole of what the control is for.
+    static func toggled(_ zoom: CGFloat) -> CGFloat { isRealSize(zoom) ? standard : realSize }
+
+    /// What the button says. The current state rather than what tapping does: a control whose label
+    /// names its *destination* reads as a claim about what is on screen, and this one is beside the
+    /// thing it describes.
+    static func label(_ zoom: CGFloat) -> String {
+        isRealSize(zoom) ? "Real size" : "Zoomed \(Int(zoom.rounded()))×"
+    }
+
+    /// The canvas extent a pad of `viewSize` shows, in canvas points.
+    static func canvasSize(of viewSize: CGSize, at zoom: CGFloat) -> CGSize {
+        CGSize(width: viewSize.width / max(zoom, 0.01), height: viewSize.height / max(zoom, 0.01))
+    }
+
+    /// A touch, in canvas points. Getting this backwards draws the stroke a third of the way to the
+    /// finger, which looks like a broken hit test rather than like a wrong transform.
+    static func canvasPoint(_ viewPoint: CGPoint, at zoom: CGFloat) -> CGPoint {
+        CGPoint(x: viewPoint.x / max(zoom, 0.01), y: viewPoint.y / max(zoom, 0.01))
+    }
+
+    /// **The pad's bitmap: `viewSize · screenScale` pixels, whose user space is canvas points.**
+    ///
+    /// Flipped to UIKit's orientation, because the samples come from `touch.location(in:)` and a bare
+    /// `CGBitmapContext` is y-up from the bottom left. `BrushPreview` needs no such flip — a
+    /// `UIGraphicsImageRenderer` hands out a context that already has one — and getting it wrong here
+    /// would draw every stroke as its own vertical mirror.
+    static func makeContext(viewSize: CGSize, screenScale: CGFloat, zoom: CGFloat) -> CGContext? {
+        let pixelWidth = Int((viewSize.width * screenScale).rounded())
+        let pixelHeight = Int((viewSize.height * screenScale).rounded())
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+        guard let context = CGContext(data: nil, width: pixelWidth, height: pixelHeight,
+                                      bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return nil
+        }
+        let scale = screenScale * max(zoom, 0.01)
+        context.translateBy(x: 0, y: CGFloat(pixelHeight))
+        context.scaleBy(x: scale, y: -scale)
+        return context
+    }
+}
+
+// MARK: - BRUSH.md §7.1 — what "create manually" makes
+
+extension Brush {
+    /// **A brush minted from the engine's neutral defaults** — §7.1's first arm of the `+`.
+    ///
+    /// The owner: *"the create brush right now makes you import a brush, but this library feature
+    /// opens up the possibility of just taking you straight to the edit menu of a default brush, and
+    /// you being able to fully customize it, so new brush should be two options: create manually, and
+    /// import brush."*
+    ///
+    /// So it is deliberately **not** a copy of a shipped preset. `BrushDabSettings.default` is every
+    /// output at §6's neutral, `BrushStrokeSettings.default` is the gesture untouched, the tip is
+    /// `.round`, and `modulations` is **empty** — no `size ← pressure`, no `flow ← pressure`. What the
+    /// artist gets is the engine with nothing said about it, which is the only starting point the
+    /// editor can honestly claim to be "fully customizable" from: every row on the screen then reads
+    /// as something they added.
+    ///
+    /// **`size` is the one number with no neutral to take.** It is the stroke's own diameter rather
+    /// than a dab parameter (see `Brush`), so `BrushDabSettings` has nothing to say about it and a
+    /// number has to be picked. 12 points is legible on the canvas at the default zoom and small
+    /// enough that a first stroke shows the tip rather than a band.
+    static func manuallyCreated(named name: String) -> Brush {
+        Brush(name: name, tip: .round, size: manualStartingSize, opacity: 1,
+              dab: .default, stroke: .default, modulations: BrushModulations())
+    }
+
+    static let manualStartingSize: CGFloat = 12
+    /// What the first manually made brush is called; later ones take a numeric suffix from
+    /// `BrushLibraryStore`, which is the only thing that knows what is taken.
+    static let manualBaseName = "New Brush"
 }
 
 enum BrushEditorDefaults {

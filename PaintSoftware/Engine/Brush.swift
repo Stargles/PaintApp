@@ -38,6 +38,17 @@ extension BrushTip {
         guard case .stamp(.imported(let fileName)) = self else { return nil }
         return fileName
     }
+
+    /// **Which bitmap this tip stamps, or nil for the procedural disc.**
+    ///
+    /// BRUSH.md §2.26's tip picker is the caller: it browses a collection of `BrushTextureRef`s and
+    /// has to be able to show which one the brush currently names. `importedTextureFileName` above
+    /// answers a narrower question — *which file must travel with a project* — and using it here
+    /// would silently treat a built-in tip as "no tip".
+    var textureRef: BrushTextureRef? {
+        guard case .stamp(let ref) = self else { return nil }
+        return ref
+    }
 }
 
 extension BrushTip: Codable {

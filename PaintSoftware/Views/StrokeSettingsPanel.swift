@@ -51,7 +51,7 @@ struct StrokeSettingsSpec {
 /// the draw-to-dismiss path already read.
 ///
 /// `accessory` is extra content below the columns (the eraser's vector-mode picker; the brush has
-/// none), `addMenuItems` is what the `+` offers beyond New Group (the brush's tip importer), and
+/// none), `addMenuItems` is what the `+` offers beyond Create Manually and New Group (the brush's tip importer), and
 /// `onEditBrush` is §2.20's second tap — which `DrawingView` answers by raising the full-screen
 /// editor, because §2.24 rules the editor a screen and this panel is a 300-point dropdown.
 struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
@@ -157,6 +157,28 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
             Spacer(minLength: 4)
 
             Menu {
+                // **§7.1's first arm of the `+`, and it is the one the library made possible.** The
+                // owner: *"the create brush right now makes you import a brush, but this library
+                // feature opens up the possibility of just taking you straight to the edit menu of a
+                // default brush, and you being able to fully customize it, so new brush should be two
+                // options: create manually, and import brush."* Before there was a library there was
+                // nowhere for a made-up brush to live, so importing was the only way to get a new one
+                // and the `+` could only mean that.
+                //
+                // Three verbs that already existed: the store mints and files it
+                // (`BrushLibraryStore.createBrush`, which is where the rule is and where a logic test
+                // can reach it), `spec.selectPreset` selects it exactly as tapping its row would — so
+                // the eraser's own selection moves when the eraser's `+` is used — and `onEditBrush`
+                // is §2.20's second tap. The editor edits *the selection*, so selecting it is what
+                // makes "straight to the edit menu of a default brush" true rather than sending the
+                // artist to the settings of whatever they had before.
+                Button("Create Manually") {
+                    let made = library.createBrush(inGroup: openGroup?.id)
+                    openGroupID = library.group(containingBrush: made.id)?.id ?? openGroupID
+                    spec.selectPreset(canvasManager, made)
+                    onEditBrush()
+                }
+                .accessibilityIdentifier("\(spec.idPrefix).createManually")
                 addMenuItems()
                 Button("New Group") {
                     openGroupID = library.addGroup().id
