@@ -14,8 +14,10 @@ import SwiftUI
 /// brush side — and the accessory slot is spent on the vector-mode picker instead.
 struct EraserSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// BRUSH.md §2.20's second tap — see `BrushSettingsPanel`.
+    let onEditBrush: () -> Void
 
-    private static let spec = StrokeSettingsSpec(
+    static let spec = StrokeSettingsSpec(
         title: "Eraser",
         idPrefix: "eraserPanel",
         selectedBrush: \.selectedEraserBrush,
@@ -30,9 +32,9 @@ struct EraserSettingsPanel: View {
             canvasManager: canvasManager,
             library: canvasManager.brushLibrary,
             spec: Self.spec,
+            onEditBrush: onEditBrush,
             accessory: { vectorModePicker },
-            addMenuItems: { EmptyView() },
-            preview: { preview }
+            addMenuItems: { EmptyView() }
         )
     }
 
@@ -66,45 +68,16 @@ struct EraserSettingsPanel: View {
         }
     }
 
-    // MARK: - Preview
-
-    /// Shows the erase shape's hardness/size as a punched-out hole over a checkerboard, standing in
-    /// for the transparency an eraser leaves — a solid color swatch (like the brush preview) wouldn't
-    /// mean anything here since the eraser's own color is irrelevant (see `BrushStamper.stampDab`).
-    ///
-    /// The circle is `eraserSize` **panel** points and does not track the canvas zoom, so read it as
-    /// "this shape, this hardness", not as "this is how big it will be on the artwork". That matters
-    /// more since 2026-08-18, when the size became Mode 3's selection radius rather than only its
-    /// reach: `StrokeCanvasView.updateEraserFootprint(at:)` draws the canvas-accurate circle, on the
-    /// canvas, under the finger, and that is the one to trust.
-    private var preview: some View {
-        VStack(alignment: .leading) {
-            Text("Preview")
-                .foregroundColor(.white)
-                .padding(.horizontal)
-
-            ZStack {
-                CheckerboardPattern()
-                Circle()
-                    .fill(Color.black.opacity(canvasManager.eraserOpacity))
-                    .frame(width: canvasManager.eraserSize, height: canvasManager.eraserSize)
-                    .blendMode(.destinationOut)
-            }
-            .compositingGroup()
-            .frame(height: 100)
-            .cornerRadius(8)
-            .padding(.horizontal)
-        }
-    }
 }
 
-/// Small grey/white checker backdrop the eraser preview punches a hole out of, standing in for
-/// canvas transparency.
+/// Small grey/white checker backdrop, standing in for canvas transparency.
 ///
-/// Not `private` any more: `OnionSkinPanel`'s tint bar needs exactly the same backdrop for exactly
-/// the same reason — a gradient whose *alpha* is the thing being read cannot be read over an opaque
-/// background. Shared rather than copied, since a second checker at a different square size would
-/// make the two panels quietly disagree about what transparency looks like.
+/// It used to be behind this panel's own eraser swatch — a circle punched out of it with
+/// `.destinationOut`. That swatch is gone: BRUSH.md §7.2's editor draws a real stroke of the brush
+/// and gives the artist a pad to try it on, which is a better answer to "what does this eraser do"
+/// than a static hole. `OnionSkinPanel`'s tint bar still needs the backdrop for its own reason — a
+/// gradient whose *alpha* is the thing being read cannot be read over an opaque background — so this
+/// stays here rather than being deleted with the swatch it was drawn for.
 struct CheckerboardPattern: View {
     var body: some View {
         GeometryReader { geo in

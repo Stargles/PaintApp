@@ -292,6 +292,43 @@ struct BrushModulations: Codable, Hashable {
         }
     }
 
+    /// **Where each row driving one output sits in `rows`**, in author order.
+    ///
+    /// Positions rather than values, because that is what the editor edits by: a `.random` row's
+    /// channel is minted from its *index within its output* (§6.2), so two rows that are equal by
+    /// value are not interchangeable and `firstIndex(of:)` would pick the wrong one.
+    func indices(for output: BrushOutput) -> [Int] {
+        rows.indices.filter { rows[$0].output == output }
+    }
+
+    /// Adds a row at the end — BRUSH.md §7's *"adding and removing rows wants one more accessor of
+    /// the same shape"*, and its two siblings below.
+    ///
+    /// All three go through `setRows`, so §6.2's channel normalisation is re-run over the whole
+    /// table. That is not a formality: inserting or removing a row shifts every later row *on the
+    /// same output* by one position, and the channel is a function of that position, so the draws
+    /// have to be re-minted or two rows would share a cell. The stated cost is §6.2's own — the rows
+    /// after the change re-roll — and it is confined to one output.
+    mutating func append(_ row: BrushModulation) {
+        setRows(rows + [row])
+    }
+
+    /// Replaces the row at `index`. Out of range is a no-op rather than a trap: the editor's list and
+    /// the brush can be one edit apart for a frame, and a crash is not the right answer to that.
+    mutating func replace(at index: Int, with row: BrushModulation) {
+        guard rows.indices.contains(index) else { return }
+        var updated = rows
+        updated[index] = row
+        setRows(updated)
+    }
+
+    mutating func remove(at index: Int) {
+        guard rows.indices.contains(index) else { return }
+        var updated = rows
+        updated.remove(at: index)
+        setRows(updated)
+    }
+
     private static func normalised(_ input: [BrushModulation]) -> [BrushModulation] {
         var perOutput: [BrushOutput: Int] = [:]
         return input.map { row in

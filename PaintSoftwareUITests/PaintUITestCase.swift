@@ -710,13 +710,29 @@ class PaintUITestCase: XCTestCase {
     }
 
     /// Sets a stroke tool's diameter through the editor's Size slider (range 1...200 — see
-    /// `BrushEditorView`), leaving the editor open.
+    /// `BrushEditorScreen`), and **closes the editor again**, leaving the brushes menu open.
+    ///
+    /// **The close is not tidiness; it is what BRUSH.md §2.24 forces.** The editor covers the whole
+    /// screen now, so a caller that set a size and then drew on `canvas.host` — which is what every
+    /// caller of this does — would be drawing on the editor. Leaving the *menu* open preserves what
+    /// those callers rely on next: the first canvas touch dismisses it (`CanvasManager
+    /// .interactionBegan`), which is the behaviour they assert.
     func setBrushSize(_ app: XCUIApplication, tool: String = "brush", normalized: CGFloat) {
         let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
         openBrushEditor(app, tool: tool)
         let slider = app.sliders["\(prefix).sizeSlider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         slider.adjust(toNormalizedSliderPosition: normalized)
+        closeBrushEditor(app, tool: tool)
+    }
+
+    /// Closes the full-screen editor with its Done chevron, back to the brushes menu.
+    func closeBrushEditor(_ app: XCUIApplication, tool: String = "brush") {
+        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        guard app.sliders["\(prefix).sizeSlider"].exists else { return }
+        tapWhenHittable(app.buttons["\(prefix).editorBack"], "The editor's Done chevron")
+        XCTAssertTrue(app.sliders["\(prefix).sizeSlider"].waitForNonExistence(timeout: 5),
+                      "Done must take the editor down")
     }
 
 }

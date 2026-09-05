@@ -36,6 +36,15 @@ struct DrawingView: View {
     /// `onEditEnded` reads it. Putting it on `CanvasManager` would make it a piece of global state
     /// whose lifetime nothing enforces.
     @State private var effectEditWroteKeyframe = false
+    /// Which stroke tool's brush is open in the **full-screen** editor, or nil — BRUSH.md §2.24.
+    ///
+    /// **On this view rather than inside `StrokeSettingsPanel`, because the screen it raises is this
+    /// view's.** It is the same move `showingEffectSettings` made above and for the identical
+    /// reason: the flag has to live where the surface does. It is deliberately *not* folded into
+    /// `activePanel` — the editor is raised from the panel and covers it, so "which dropdown is
+    /// open" and "is the editor up" are two questions, and `CanvasTouchOwner` is fed the first one
+    /// unchanged.
+    @State private var brushEditing: StrokeSettingsSpec?
     // Perf HUD: default OFF (see PerfHUD.swift — nothing runs while hidden), toggled via its own
     // discreet corner button. Lives entirely in its own view; this is just the overlay + state.
     @State private var isPerfHUDVisible: Bool = false
@@ -131,7 +140,7 @@ struct DrawingView: View {
                     // rather than sliding in as a full-height rail from the screen edge.
                     panelView
                         .frame(width: 300)
-                        .frame(maxHeight: 420)
+                        .frame(maxHeight: panelMaxHeight)
                         .background(Color.black.opacity(0.95))
                         .cornerRadius(12)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12), lineWidth: 1))
@@ -143,6 +152,23 @@ struct DrawingView: View {
                 }
 
                 bottomDock
+
+                // **BRUSH.md §2.24's editor, as a layer rather than as a presentation.** See
+                // `BrushEditorScreen` for why it is not a `.fullScreenCover`: the real-size stamp
+                // preview is an `overlayPreferenceValue` applied to this view's own `HStack`, and a
+                // modal window would be drawn above it.
+                //
+                // Above `bottomDock` and below the size-preview overlay, which is the whole of the
+                // z-ordering this feature needs: it covers the canvas, the toolbars, the timeline
+                // and the dropdown it was raised from, and the one thing that may sit on top of it
+                // is the window a slider inside it raises.
+                if let editing = brushEditing {
+                    BrushEditorScreen(canvasManager: canvasManager,
+                                      library: canvasManager.brushLibrary,
+                                      spec: editing,
+                                      onClose: { brushEditing = nil })
+                        .transition(.opacity)
+                }
 
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
                 // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
@@ -190,6 +216,7 @@ struct DrawingView: View {
         // Same argument again for the effect bar: the rail sliding out and the bar sliding up are one
         // transition, so they are keyed on the one value that drives both.
         .animation(.easeInOut(duration: 0.2), value: showingEffectSettings)
+        .animation(.easeInOut(duration: 0.2), value: brushEditing?.idPrefix)
         // Keyed on the whole notice, not on `notice != nil`: re-raising while one is already up
         // swaps the value rather than crossing nil, and only the full value is different enough for
         // SwiftUI to re-run the transition.
@@ -616,6 +643,28 @@ struct DrawingView: View {
     /// because it has no toolbar icon to sit under and dropping it on the leading side kept it near the
     /// Actions row that opened it. As of 2026-08-27 it docks at the bottom instead (`bottomDock`) and
     /// this function never sees it.
+    /// How tall a dropdown may grow.
+    ///
+    /// **The brushes menu gets more, and the owner asked for it**: *"The select brush menu could be a
+    /// bit bigger … or at least extended downwards so I can see more brushes."* 420 shows about six
+    /// rows; 640 shows about eleven, which is what their reference has on screen at once.
+    ///
+    /// A number rather than "fill the space", and that is the structural limit worth stating: this
+    /// card is positioned inside a `ZStack` with a 60-point top inset and the timeline claims the
+    /// bottom of the same stack, so a panel told to fill would run under it. The stack's own height
+    /// is not available here — the `GeometryReader` that has it wraps the toolbar/timeline column,
+    /// not this branch — so making the menu grow to *exactly* the room available would mean moving
+    /// the panel inside that reader, which changes the layout of every other dropdown. 640 clears
+    /// the timeline at its default height on every iPad this runs on, and it is the cheap half of
+    /// the ask the owner explicitly allowed: *"If the implementation of that is costly, then its
+    /// alright."*
+    private var panelMaxHeight: CGFloat {
+        switch activePanel {
+        case .brush, .eraser: return 640
+        default: return 420
+        }
+    }
+
     private var panelAlignment: Alignment {
         switch activePanel {
         // The Actions menu's icon is on the leading side; brush/fill/layers/colour are trailing.
@@ -640,9 +689,11 @@ struct DrawingView: View {
         case .layers:
             EmptyView() // Rendered by `layerPanelRail`, which needs the full-height layout.
         case .brush:
-            BrushSettingsPanel(canvasManager: canvasManager)
+            BrushSettingsPanel(canvasManager: canvasManager,
+                               onEditBrush: { brushEditing = BrushSettingsPanel.spec })
         case .eraser:
-            EraserSettingsPanel(canvasManager: canvasManager)
+            EraserSettingsPanel(canvasManager: canvasManager,
+                                onEditBrush: { brushEditing = EraserSettingsPanel.spec })
         case .color:
             // `activeEditColor`, not `brushColor`: while a text session is live this panel is that
             // session's colour picker, which is what makes `TopToolbar.toggle`'s no-bake conditional

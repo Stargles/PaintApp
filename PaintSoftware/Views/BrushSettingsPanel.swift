@@ -13,11 +13,14 @@ import UIKit
 /// (`brushPanel.importCustomBrush`) because what it does is unchanged.
 struct BrushSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
+    /// BRUSH.md §2.20's second tap. Answered by `DrawingView`, which raises §2.24's full-screen
+    /// editor — see `StrokeSettingsPanel`.
+    let onEditBrush: () -> Void
     @State private var customBrushPickerItem: PhotosPickerItem?
     @State private var isPickingCustomBrush = false
     @State private var importError: String?
 
-    private static let spec = StrokeSettingsSpec(
+    static let spec = StrokeSettingsSpec(
         title: "Brush",
         idPrefix: "brushPanel",
         selectedBrush: \.selectedBrush,
@@ -32,9 +35,9 @@ struct BrushSettingsPanel: View {
             canvasManager: canvasManager,
             library: canvasManager.brushLibrary,
             spec: Self.spec,
+            onEditBrush: onEditBrush,
             accessory: { importErrorRow },
-            addMenuItems: { importButton },
-            preview: { preview }
+            addMenuItems: { importButton }
         )
         // The picker is raised from a `Menu` item, so it cannot be the `PhotosPicker` button itself —
         // a menu row is not a place a picker can present from. The flag is the whole of that
@@ -96,23 +99,4 @@ struct BrushSettingsPanel: View {
         }
     }
 
-    // MARK: - Preview
-
-    private var preview: some View {
-        VStack(alignment: .leading) {
-            Text("Preview")
-                .foregroundColor(.white)
-                .padding(.horizontal)
-
-            ZStack {
-                Color.white
-                    .frame(height: 100)
-                Circle()
-                    .fill(canvasManager.brushColor.opacity(canvasManager.brushOpacity))
-                    .frame(width: canvasManager.brushSize, height: canvasManager.brushSize)
-            }
-            .cornerRadius(8)
-            .padding(.horizontal)
-        }
-    }
 }

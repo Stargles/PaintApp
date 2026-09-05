@@ -38,33 +38,34 @@ struct StrokeSettingsSpec {
 /// behind the second tap (`BrushEditorView`) and the importer is on the `+`, which is the top-right
 /// corner of the first thing the artist sees.
 ///
-/// ## The editor is pushed inside this panel rather than presented as a sheet
+/// ## The editor is a screen, and it is raised from here rather than shown inside here
 ///
-/// A sheet was the obvious form and is wrong here for one measurable reason: the size slider raises a
-/// **real-size stamp preview** drawn by `DrawingView`'s own overlay, positioned against the slider's
-/// frame in the drawing view's coordinate space (`SizePreviewRequest`, `SizePreviewWindow`). A sheet
-/// is a separate presentation above that overlay, so the window an artist raises by holding the Size
-/// slider would be drawn *behind* the sheet — the control would look like it does nothing. Pushing
-/// keeps one view tree, one coordinate space, and `activePanel` on `.brush`, which is also what
-/// `CanvasTouchOwner` and the draw-to-dismiss behaviour already read.
+/// §2.24: *"we need to have it cover the entire screen due to the complex interactions it can have."*
+/// So the second tap calls `onEditBrush` and `DrawingView` puts `BrushEditorScreen` up as a layer of
+/// its own `ZStack` — **not** a `.fullScreenCover`, for the reason the push it replaced existed: the
+/// Size slider raises a real-size stamp preview drawn by `DrawingView`'s overlay against the
+/// slider's frame in that view's coordinate space (`SizePreviewRequest`, `SizePreviewWindow`), and a
+/// modal presentation is a separate window *above* that overlay, so the preview would be drawn
+/// behind it and the control would look inert. A layer keeps one view tree, one coordinate space and
+/// one preference chain, and leaves `activePanel` on `.brush` — which is what `CanvasTouchOwner` and
+/// the draw-to-dismiss path already read.
 ///
 /// `accessory` is extra content below the columns (the eraser's vector-mode picker; the brush has
 /// none), `addMenuItems` is what the `+` offers beyond New Group (the brush's tip importer), and
-/// `preview` is the panel's own swatch, which now sits in the editor beside the sliders it reacts to.
-struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View {
+/// `onEditBrush` is §2.20's second tap — which `DrawingView` answers by raising the full-screen
+/// editor, because §2.24 rules the editor a screen and this panel is a 300-point dropdown.
+struct StrokeSettingsPanel<Accessory: View, AddItems: View>: View {
     @ObservedObject var canvasManager: CanvasManager
     @ObservedObject var library: BrushLibraryStore
     let spec: StrokeSettingsSpec
+    let onEditBrush: () -> Void
     @ViewBuilder let accessory: () -> Accessory
     @ViewBuilder let addMenuItems: () -> AddItems
-    @ViewBuilder let preview: () -> Preview
 
     /// Which group's brushes the right column is showing. View state rather than manager state: the
     /// panel is rebuilt on every `activePanel` switch, and opening onto the group holding whatever is
     /// selected is a better answer than remembering where the artist last was.
     @State private var openGroupID: UUID?
-    /// §2.20's second tap. See the type's note on why this is a push and not a sheet.
-    @State private var isEditingBrush = false
     @State private var renamingGroup: BrushGroup?
     @State private var renameText = ""
 
@@ -76,15 +77,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View
     }
 
     var body: some View {
-        Group {
-            if isEditingBrush {
-                BrushEditorView(canvasManager: canvasManager, library: library, spec: spec,
-                                onBack: { isEditingBrush = false },
-                                preview: preview)
-            } else {
-                menu
-            }
-        }
+        menu
         // **Top-aligned and filling, and the alternative was tried and looked worse.** `DrawingView`
         // draws the card — 300 wide, `maxHeight: 420`, centre-aligned — so a panel that hugs its
         // content floats in the middle of a card that is still 420 tall, with black above the header
@@ -257,7 +250,7 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View
         let isSelected = candidate.id == brush.id
         return Button {
             if isSelected {
-                isEditingBrush = true
+                onEditBrush()
             } else {
                 spec.selectPreset(canvasManager, candidate)
             }

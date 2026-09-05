@@ -17,6 +17,9 @@
 		08016CC169DF5A38F13E1D19 /* LiveHalvesStripMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF34C53C3D313FD8E73589E8 /* LiveHalvesStripMetalLogicTests.swift */; };
 		B3C6E52C6996A05EC38FF558 /* PaintSoftware/Engine/StripedComposite.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7D6E47D187478B86D0DBB7F /* PaintSoftware/Engine/StripedComposite.swift */; };
 		A4690E8C20463AC5A565BA29 /* PaintSoftware/Views/TimelineGraphBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */; };
+		F218C3354159B427BA0DA6F0 /* PaintSoftware/Models/BrushEditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1E457E9EFA7E3F04D87C924 /* PaintSoftware/Models/BrushEditorModel.swift */; };
+		FB9436A7F80D4D32AC2D8565 /* BrushEditorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD85DE6C366204D7F6C6028B /* BrushEditorLogicTests.swift */; };
+		A4C26A7D49A94F5C0FEE44E6 /* BrushEditorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F454CC9D00AA86DABB4B3E /* BrushEditorUITests.swift */; };
 		4D6A8313C18E040312C62A1A /* TimelineGraphBandLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */; };
 		77E55E7528A9D27CE36800D6 /* PaintSoftware/Views/TimelineGraphChannelList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 010800B9CD3634A04604AA7D /* PaintSoftware/Views/TimelineGraphChannelList.swift */; };
 		F7257BD80FAEC4324D78F90E /* TimelineGraphChannelListLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 057762C046FB4E93924750D2 /* TimelineGraphChannelListLogicTests.swift */; };
@@ -319,6 +322,9 @@
 		BF34C53C3D313FD8E73589E8 /* LiveHalvesStripMetalLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LiveHalvesStripMetalLogicTests.swift; path = PaintSoftwareUITests/LiveHalvesStripMetalLogicTests.swift; sourceTree = SOURCE_ROOT; };
 		C7D6E47D187478B86D0DBB7F /* PaintSoftware/Engine/StripedComposite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StripedComposite.swift; path = PaintSoftware/Engine/StripedComposite.swift; sourceTree = SOURCE_ROOT; };
 		63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineGraphBand.swift; sourceTree = "<group>"; };
+		E1E457E9EFA7E3F04D87C924 /* PaintSoftware/Models/BrushEditorModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/BrushEditorModel.swift; sourceTree = "<group>"; };
+		DD85DE6C366204D7F6C6028B /* BrushEditorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushEditorLogicTests.swift; sourceTree = "<group>"; };
+		24F454CC9D00AA86DABB4B3E /* BrushEditorUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushEditorUITests.swift; sourceTree = "<group>"; };
 		8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineGraphBandLogicTests.swift; sourceTree = "<group>"; };
 		010800B9CD3634A04604AA7D /* PaintSoftware/Views/TimelineGraphChannelList.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineGraphChannelList.swift; sourceTree = "<group>"; };
 		057762C046FB4E93924750D2 /* TimelineGraphChannelListLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineGraphChannelListLogicTests.swift; sourceTree = "<group>"; };
@@ -673,6 +679,8 @@
 				A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */,
 				A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */,
 				DB2DE8EB33E6B333909BFB8F /* BrushMenuUITests.swift */,
+				24F454CC9D00AA86DABB4B3E /* BrushEditorUITests.swift */,
+				DD85DE6C366204D7F6C6028B /* BrushEditorLogicTests.swift */,
 				8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */,
 				20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */,
 				01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */,
@@ -825,6 +833,7 @@
 				8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */,
 				3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */,
 				63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */,
+				E1E457E9EFA7E3F04D87C924 /* PaintSoftware/Models/BrushEditorModel.swift */,
 				DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */,
 				010800B9CD3634A04604AA7D /* PaintSoftware/Views/TimelineGraphChannelList.swift */,
 				CB14B009A742DC8A41F53301 /* PaintSoftware/Engine/TextObject.swift */,
@@ -1079,6 +1088,9 @@
 				7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */,
 				9F9CBA62193522CA30FB3605 /* BrushMenuUITests.swift in Sources */,
 				A4690E8C20463AC5A565BA29 /* PaintSoftware/Views/TimelineGraphBand.swift in Sources */,
+				F218C3354159B427BA0DA6F0 /* PaintSoftware/Models/BrushEditorModel.swift in Sources */,
+				FB9436A7F80D4D32AC2D8565 /* BrushEditorLogicTests.swift in Sources */,
+				A4C26A7D49A94F5C0FEE44E6 /* BrushEditorUITests.swift in Sources */,
 				79EBF29EEADB4D5CA3903B81 /* PaintSoftware/Models/PoseComponents.swift in Sources */,
 				14B663FBCF7D75D535E037FD /* PoseComponentsLogicTests.swift in Sources */,
 				FF5656C311B7834F505F8383 /* PoseBandLogicTests.swift in Sources */,

@@ -70,8 +70,10 @@ final class BrushMenuUITests: PaintUITestCase {
         tapWhenHittable(pen, "The Pen's row, a second time")
         XCTAssertTrue(app.sliders["brushPanel.sizeSlider"].waitForExistence(timeout: 5),
                       "A second tap on the selected brush must open the editor")
-        XCTAssertTrue(app.sliders["brushPanel.spacingSlider"].exists,
-                      "…carrying the controls the panel used to show inline")
+        XCTAssertTrue(app.otherElements["brushPanel.editorScreen"].exists,
+                      "…and it is a screen rather than a page of the dropdown — BRUSH.md §2.24")
+        XCTAssertTrue(app.buttons["brushPanel.output.spacing"].exists,
+                      "…carrying every output as its own row, Spacing among them")
 
         // And back out to the menu, so the door swings both ways.
         tapWhenHittable(app.buttons["brushPanel.editorBack"], "The editor's back chevron")
