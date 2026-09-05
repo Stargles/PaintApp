@@ -112,7 +112,7 @@ final class ToolPanelsUITests: PaintUITestCase {
         let brushButton = app.buttons["toolbar.brushButton"]
         XCTAssertTrue(brushButton.waitForExistence(timeout: 5))
         brushButton.tap()
-        let library = app.otherElements["brushPanel.library"]
+        let library = app.scrollViews["brushPanel.groupList"]
         XCTAssertTrue(library.waitForExistence(timeout: 5), "Brush menu should be open")
 
         let canvas = app.otherElements["canvas.host"]
@@ -1190,7 +1190,7 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         XCTAssertFalse(brushIsSelected(app), "Brush must stop reading as active once the eraser is selected")
 
         eraserButton.tap() // Second tap: open its brushes menu.
-        XCTAssertTrue(app.otherElements["eraserPanel.library"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForExistence(timeout: 5),
                       "Eraser menu should be open, mirroring the brush's")
         // Widen it so the drag below fully covers the stroke. The Size slider is behind the editor's
         // door now (BRUSH.md §2.20); `setBrushSize` walks §2.20's second tap to reach it.

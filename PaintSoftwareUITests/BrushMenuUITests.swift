@@ -25,7 +25,7 @@ final class BrushMenuUITests: PaintUITestCase {
     /// Brush is the default tool, so one tap on its icon opens the menu — the second-tap grammar
     /// `TopToolbar.selectBrushToolAndTogglePanel` already used for the panel this replaced.
     private func openBrushMenu(_ app: XCUIApplication) {
-        let library = app.otherElements["brushPanel.library"]
+        let library = app.scrollViews["brushPanel.groupList"]
         app.buttons["toolbar.brushButton"].tap()
         if library.waitForExistence(timeout: 3) { return }
         app.buttons["toolbar.brushButton"].tap()
@@ -60,21 +60,21 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertFalse(pen.isSelected)
 
         // One tap selects.
-        pen.tap()
+        tapWhenHittable(pen, "The Pen's row")
         XCTAssertTrue(pen.isSelected, "One tap moves the selection")
         XCTAssertFalse(soft.isSelected, "…and takes it off the old row")
         XCTAssertFalse(app.sliders["brushPanel.sizeSlider"].exists,
                        "A first tap selects and does not open the editor")
 
         // A second tap on the already-selected row opens the editor — §2.20.
-        pen.tap()
+        tapWhenHittable(pen, "The Pen's row, a second time")
         XCTAssertTrue(app.sliders["brushPanel.sizeSlider"].waitForExistence(timeout: 5),
                       "A second tap on the selected brush must open the editor")
         XCTAssertTrue(app.sliders["brushPanel.spacingSlider"].exists,
                       "…carrying the controls the panel used to show inline")
 
         // And back out to the menu, so the door swings both ways.
-        app.buttons["brushPanel.editorBack"].tap()
+        tapWhenHittable(app.buttons["brushPanel.editorBack"], "The editor's back chevron")
         XCTAssertTrue(app.buttons["brushPanel.brush.Pen"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.sliders["brushPanel.sizeSlider"].waitForNonExistence(timeout: 3))
     }
@@ -91,34 +91,56 @@ final class BrushMenuUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Soft Round is the default: a wide stroke. Sample a little off the line's centre — a fat
-        // brush reaches there and a thin one does not.
-        let start = CGVector(dx: 0.35, dy: 0.30)
-        let end = CGVector(dx: 0.65, dy: 0.30)
-        drawLine(on: canvas, from: start, to: end)
-        let wideNearMiss = rgbaPixel(of: canvas, dx: 0.50, dy: 0.30)
-        XCTAssertFalse(isWhitish(wideNearMiss), "PREMISE: the default brush marks the paper")
+        // Soft Round is the default: 18 pt against the Pen's 4.
+        let wideY = 0.30, thinY = 0.55
+        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: wideY), to: CGVector(dx: 0.65, dy: wideY))
 
         openBrushMenu(app)
         let pen = app.buttons["brushPanel.brush.Pen"]
-        XCTAssertTrue(pen.waitForExistence(timeout: 5))
-        pen.tap()
+        tapWhenHittable(pen, "The Pen's row")
         XCTAssertTrue(pen.isSelected)
         // Close the menu so it cannot swallow the stroke.
         app.buttons["toolbar.brushButton"].tap()
-        XCTAssertTrue(app.otherElements["brushPanel.library"].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 3))
 
-        // The Pen is 4 pt against Soft Round's 18, so a line drawn a clear distance below the first
-        // one leaves a much narrower mark: two points either side of it stay blank where the wide
-        // brush's did not.
-        let thinY = 0.55
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: thinY), to: CGVector(dx: 0.65, dy: thinY))
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.50, dy: thinY)),
-                       "The Pen should still draw a line")
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.50, dy: thinY + 0.012)),
-                      "…a visibly narrower one than the 18 pt brush the document opened with")
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.50, dy: 0.30 + 0.012)),
-                       "PREMISE: the wide brush's own stroke does reach that far from its centre line")
+
+        // **Both strokes measured off one screenshot, in pixels.**
+        //
+        // Two earlier versions of this test sampled a ladder of normalized offsets and failed on their
+        // own premise: at the default 2048² canvas the view zoom is 0.4668, so an 18 pt brush is about
+        // 17 screenshot pixels wide and a 4 pt one about 4 — a real, large difference that is *under
+        // one sample step* when the step is a fraction of the host's height. Counting the inked rows
+        // of one column measures the thing directly and needs no threshold to be guessed.
+        let widths = inkedColumnHeights(of: canvas, dx: 0.50, bands: [wideY, thinY], halfBand: 0.03)
+        XCTAssertGreaterThan(widths[0], 4, "PREMISE: the 18 pt default brush marks the paper and has width")
+        XCTAssertGreaterThan(widths[1], 0, "The Pen should still draw a line")
+        XCTAssertLessThan(widths[1], widths[0],
+                          "Picking the Pen must reach the ink — its stroke is visibly narrower than the 18 pt brush the document opened with")
+    }
+
+    /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a
+    /// **single** screenshot. `halfBand` is the half-height of each band in normalized coordinates.
+    private func inkedColumnHeights(of element: XCUIElement, dx: Double,
+                                    bands: [Double], halfBand: Double) -> [Int] {
+        guard let cg = element.screenshot().image.cgImage else { return bands.map { _ in -1 } }
+        let width = cg.width, height = cg.height
+        var buffer = [UInt8](repeating: 0, count: height * width * 4)
+        guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return bands.map { _ in -1 }
+        }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let x = min(max(Int(dx * Double(width)), 0), width - 1)
+        return bands.map { centre in
+            let low = max(Int((centre - halfBand) * Double(height)), 0)
+            let high = min(Int((centre + halfBand) * Double(height)), height - 1)
+            return (low...high).count { row in
+                let offset = row * width * 4 + x * 4
+                return !(buffer[offset] > 240 && buffer[offset + 1] > 240 && buffer[offset + 2] > 240)
+            }
+        }
     }
 
     /// **Groups: making one, and switching between them.** The `+` is the only door to a new group,
@@ -129,10 +151,10 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(launchCold(app))
         openBrushMenu(app)
 
-        app.buttons["brushPanel.addButton"].tap()
+        tapWhenHittable(app.buttons["brushPanel.addButton"], "The + button")
         let newGroup = app.buttons["brushPanel.newGroup"]
         XCTAssertTrue(newGroup.waitForExistence(timeout: 5), "The + must offer New Group")
-        newGroup.tap()
+        tapWhenHittable(newGroup, "New Group")
 
         let made = app.buttons["brushPanel.group.New Group"]
         XCTAssertTrue(made.waitForExistence(timeout: 5), "The group must appear in the left column")
@@ -141,7 +163,7 @@ final class BrushMenuUITests: PaintUITestCase {
                        "An empty group shows no brushes — the right column follows the left")
 
         // And back.
-        app.buttons["brushPanel.group.Basics"].tap()
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The Basics group row")
         XCTAssertTrue(app.buttons["brushPanel.brush.Pen"].waitForExistence(timeout: 5),
                       "Tapping a group in the left column shows its brushes in the right")
     }
@@ -158,11 +180,11 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(launchCold(app))
         openBrushMenu(app)
 
-        app.buttons["brushPanel.addButton"].tap()
+        tapWhenHittable(app.buttons["brushPanel.addButton"], "The + button")
         let importItem = app.buttons["brushPanel.importCustomBrush"]
         XCTAssertTrue(importItem.waitForExistence(timeout: 5),
                       "Import Custom Brush must be on the +, not scrolled off the bottom of a panel")
-        importItem.tap()
+        tapWhenHittable(importItem, "Import Custom Brush")
 
         // The system photo picker is a remote view; its Cancel button is what proves it presented.
         let cancel = app.buttons["Cancel"]
@@ -179,13 +201,13 @@ final class BrushMenuUITests: PaintUITestCase {
         // Pick the Pen for the *brush*, then switch to the eraser and check its own selection is
         // untouched — Hard Round, its own default.
         openBrushMenu(app)
-        app.buttons["brushPanel.brush.Pen"].tap()
+        tapWhenHittable(app.buttons["brushPanel.brush.Pen"], "The Pen's row")
         app.buttons["toolbar.brushButton"].tap()
 
         let eraser = app.buttons["toolbar.eraserButton"]
         eraser.tap()
         eraser.tap()
-        XCTAssertTrue(app.otherElements["eraserPanel.library"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForExistence(timeout: 5),
                       "The eraser opens the same two-column menu")
         XCTAssertTrue(app.buttons["eraserPanel.group.Basics"].exists)
         XCTAssertTrue(app.buttons["eraserPanel.brush.Hard Round"].isSelected,

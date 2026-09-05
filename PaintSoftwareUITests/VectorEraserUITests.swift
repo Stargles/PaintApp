@@ -37,7 +37,7 @@ class VectorEraserTestSupport: PaintUITestCase {
 
     fileprivate func closeEraserPanel(_ app: XCUIApplication) {
         app.buttons["toolbar.eraserButton"].tap()
-        XCTAssertTrue(app.otherElements["eraserPanel.library"].waitForNonExistence(timeout: 5),
+        XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForNonExistence(timeout: 5),
                       "The eraser panel should close, leaving the canvas unobstructed")
         XCTAssertTrue(app.sliders["eraserPanel.sizeSlider"].waitForNonExistence(timeout: 5),
                       "…and so should the editor behind it, whichever of the two was showing")

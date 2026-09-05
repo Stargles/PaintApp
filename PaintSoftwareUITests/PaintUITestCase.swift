@@ -647,6 +647,29 @@ class PaintUITestCase: XCTestCase {
 
     // MARK: - The brushes menu and the brush editor
 
+    /// Taps a brush row once it is actually hittable.
+    ///
+    /// **The wait is the assertion, not a sleep.** A row's preview stroke is rendered off the main
+    /// thread and written into the row when it arrives (`BrushPreviewRow`), so for the first tens of
+    /// milliseconds after the menu opens the list is being rebuilt under XCUITest's snapshot and a
+    /// tap resolves no hit point at all — `Computed hit point {-1, -1}`, on a row whose frame is
+    /// right there in the tree. A finger is unaffected; the harness is not. Asserting the row
+    /// *becomes* hittable says the thing worth saying — the artist can reach this row — and says it
+    /// without a fixed delay.
+    @discardableResult
+    func tapWhenHittable(_ element: XCUIElement, _ message: String = "") -> Bool {
+        guard element.waitForExistence(timeout: 5) else {
+            XCTFail("\(message.isEmpty ? "Element" : message): never appeared")
+            return false
+        }
+        guard element.wait(for: \.isHittable, toEqual: true, timeout: 5) else {
+            XCTFail("\(message.isEmpty ? "Element" : message): appeared but never became tappable")
+            return false
+        }
+        element.tap()
+        return true
+    }
+
     /// Opens a stroke tool's **brushes menu** — the two-column library, BRUSH.md §7.1.
     ///
     /// The toolbar button is select-then-toggle (`TopToolbar.selectBrushToolAndTogglePanel`), so
@@ -655,7 +678,7 @@ class PaintUITestCase: XCTestCase {
     /// from either state.
     func openBrushLibrary(_ app: XCUIApplication, tool: String = "brush") {
         let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
-        let library = app.otherElements["\(prefix).library"]
+        let library = app.scrollViews["\(prefix).groupList"]
         let button = app.buttons["toolbar.\(tool)Button"]
         XCTAssertTrue(button.waitForExistence(timeout: 5))
         button.tap()
@@ -677,9 +700,11 @@ class PaintUITestCase: XCTestCase {
         openBrushLibrary(app, tool: tool)
 
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "\(prefix).brush."))
-        let selected = rows.allElementsBoundByIndex.first { $0.isSelected }
-        XCTAssertNotNil(selected, "Exactly one brush row must read as selected — that highlight is what makes §2.20's second tap unambiguous")
-        selected?.tap()
+        guard let selected = rows.allElementsBoundByIndex.first(where: { $0.isSelected }) else {
+            XCTFail("Exactly one brush row must read as selected — that highlight is what makes §2.20's second tap unambiguous")
+            return
+        }
+        tapWhenHittable(selected, "The selected brush's row")
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5),
                       "A second tap on the selected brush should open the editor")
     }

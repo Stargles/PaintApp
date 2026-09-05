@@ -85,6 +85,12 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View
                 menu
             }
         }
+        // **Top-aligned and filling, and the alternative was tried and looked worse.** `DrawingView`
+        // draws the card — 300 wide, `maxHeight: 420`, centre-aligned — so a panel that hugs its
+        // content floats in the middle of a card that is still 420 tall, with black above the header
+        // as well as below the columns. Filling puts the header at the top where §7.1 wants it and
+        // spends the slack on the two scroll areas, which is also what happens once §8.6's five
+        // groups of up to thirty brushes land.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.black.opacity(0.9))
         // The panel can be dismissed out from under a held slider (`interactionBegan` closes it on
@@ -118,7 +124,6 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View
             }
             accessory()
         }
-        .accessibilityIdentifier("\(spec.idPrefix).library")
     }
 
     /// The set name with its chevron top-left, the `+` top-right — §7.1.
@@ -187,6 +192,12 @@ struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View
             .padding(.vertical, 4)
         }
         .frame(width: 106)
+        // **The menu's own "I am on screen" element, and it is on the `ScrollView` deliberately.**
+        // An identifier on the enclosing `VStack` is *inherited* by descendants rather than making a
+        // container element of its own: it produced no `otherElements` node at all, and it silently
+        // overwrote the two `Menu`s' identifiers, so `addButton` and `groupMenu` were both
+        // unreachable while looking perfectly correct in the source. A `ScrollView` carries one.
+        .accessibilityIdentifier("\(spec.idPrefix).groupList")
     }
 
     private func groupRow(_ group: BrushGroup) -> some View {
@@ -287,10 +298,17 @@ struct BrushPreviewRow: View {
         ZStack(alignment: .leading) {
             Color.clear.frame(width: size.width, height: size.height)
             if let image = image ?? BrushPreviewCache.shared.cached(key) {
+                // **No `.accessibilityHidden(true)` here, and that is a fix rather than an
+                // omission.** Marking the preview hidden — the obvious thing to do to a picture whose
+                // meaning the row's own label already carries — made the **entire row unhittable**:
+                // a row's centre lands on this image, the accessibility hit test there resolved to
+                // nothing, and XCUITest reported `Computed hit point {-1, -1}` for all five rows
+                // while the group rows beside them were fine. It is not only a harness problem —
+                // direct-touch exploration under VoiceOver finds the same hole. MEASURED both ways
+                // on 2026-09-04: hidden, 5 of 5 rows unhittable; not hidden, 5 of 5 hittable.
                 Image(uiImage: image)
                     .resizable()
                     .frame(width: size.width, height: size.height)
-                    .accessibilityHidden(true)
             }
         }
         .task(id: brush) {
