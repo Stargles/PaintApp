@@ -247,6 +247,72 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertEqual(nib.tip, .stamp(.builtIn(.square)), "The tip is a picture, and it came back as one")
     }
 
+    /// **A library written in *today's* format still round-trips, and the two migrations do not touch
+    /// it.**
+    ///
+    /// The companion to `testTheOwnersOwnLibraryOpensRatherThanBeingReplacedByTheShippedSet`, and the
+    /// half a migration most easily breaks: a reader that splits a `scatter` row into two must leave a
+    /// `scatterAcross` row as *one* row, and a dab that already names both axes must keep the two
+    /// different numbers it names rather than collapsing them. These bytes were typed, not produced by
+    /// the encoder under test — §12 stage 5's rule, and the reason is that an encode-then-decode in
+    /// one process can agree with itself about something no file would ever say.
+    ///
+    /// The dab's two axes are deliberately **unequal**, which no pre-§2.30 file could express: it is
+    /// what says the reader is taking them from the bytes rather than from one number twice.
+    func testALibraryInTodaysFormatIsUntouchedByTheTwoMigrations() throws {
+        let json = """
+        {
+          "version" : 1,
+          "groups" : [
+            {
+              "id" : "77777777-0000-4000-B000-000000000001",
+              "name" : "Modern",
+              "brushes" : [
+                {
+                  "id" : "77777777-0000-4000-A000-000000000001",
+                  "name" : "Two Axes",
+                  "tip" : { "kind" : "round" },
+                  "size" : 9,
+                  "opacity" : 1,
+                  "dab" : { "scatterAcross" : 0.4, "scatterAlong" : 0.1, "density" : 0.5 },
+                  "modulations" : [
+                    { "output" : "scatterAcross", "amount" : 0.25,
+                      "input" : { "kind" : "random", "wavelength" : 2 } },
+                    { "output" : "density", "amount" : -0.5,
+                      "input" : { "kind" : "random", "wavelength" : 3 } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        try Data(json.utf8).write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
+
+        let brush = try XCTUnwrap(makeStore().allBrushes.first)
+        XCTAssertEqual(brush.name, "Two Axes")
+        XCTAssertEqual(brush.dab.scatterAcross, 0.4, accuracy: 1e-12)
+        XCTAssertEqual(brush.dab.scatterAlong, 0.1, accuracy: 1e-12,
+                       "two axes written down stay two numbers — §2.30's base migration must not fire")
+        XCTAssertEqual(brush.modulations.rows(for: .scatterAcross).count, 1,
+                       "a modern row is one row: the split fires on the deleted output's name only")
+        XCTAssertTrue(brush.modulations.rows(for: .scatterAlong).isEmpty)
+        XCTAssertEqual(brush.modulations.rows(for: .scatterAcross).first?.amount, 0.25)
+        XCTAssertEqual(brush.dab.density, 0.5, accuracy: 1e-12,
+                       "and with no legacy λ on the dab, §2.32's density migration must not fire "
+                       + "either — a gate written at the threshold stays at the threshold")
+        XCTAssertEqual(brush.modulations.rows(for: .density).count, 1,
+                       "…and no second density row is appended")
+
+        // The write half, over the same store: what it saves is what a second store reads.
+        let store = makeStore()
+        var edited = brush
+        edited.dab.scatterAlong = 0.7
+        store.update(edited)
+        XCTAssertEqual(makeStore().allBrushes.first?.dab.scatterAlong, 0.7,
+                       "the format the app writes is the format it reads")
+    }
+
     /// The write half: a rename and an added brush survive the store being dropped and a *second*
     /// one built over the same directory, which is what a relaunch is.
     func testARenamedGroupAndAnAddedBrushSurviveARelaunch() throws {
@@ -282,6 +348,91 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertEqual(makeStore().groups.map(\.name),
                        BrushLibrary.groups.map(\.name),
                        "a corrupt file reseeds §8.6's whole set, not an empty picker")
+    }
+
+    /// **…and the bytes it could not read are still there afterwards.**
+    ///
+    /// The half above is what the store already did and it is not enough: reseeding leaves the shipped
+    /// set in `groups`, and the artist's next edit persists *that* over `library.json`. The artist's
+    /// tuning is then gone with a log line as its only trace, and no artist reads the log. §8.1 makes
+    /// this file app-level and hand-made rather than a §2.14 expendable document, which is the whole
+    /// argument in `BrushScatterSplit`.
+    ///
+    /// **The second assertion is the one a "it recovered" test misses.** That the picker came back
+    /// full says nothing about whether anything survived; this reads the preserved file back through
+    /// `BrushStorage` and compares it to the bytes that went in.
+    func testAnUnreadableLibraryIsKeptUnderTheRootRatherThanDestroyed() throws {
+        let original = Data("{ \"groups\": [ this is not json".utf8)
+        try original.write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
+
+        let store = makeStore()
+        XCTAssertEqual(store.groups.map(\.name), BrushLibrary.groups.map(\.name),
+                       "PREMISE: it still seeds, so the artist is not left with an empty picker")
+
+        let storage = BrushStorage(root: directory)
+        let kept = storage.fileNames().filter { $0.hasPrefix("library-unreadable-") }
+        XCTAssertEqual(kept.count, 1, "exactly one copy of the file it could not read")
+        XCTAssertEqual(storage.read(try XCTUnwrap(kept.first)), original,
+                       "the bytes are recoverable, byte for byte — a person can open this file and a "
+                       + "future session can migrate it")
+        XCTAssertFalse(storage.contains(BrushLibraryStore.fileName),
+                       "…and the unreadable file was *moved*, not copied: the seeded library is what "
+                       + "gets persisted over that name next")
+    }
+
+    /// **A file the app cannot read grows one copy, not one per launch.**
+    ///
+    /// This is why the original is removed rather than left where it is. Leaving it means the next
+    /// launch fails to decode it again and keeps a second dated sibling, and the launch after that a
+    /// third — a directory that fills up for as long as the artist does not notice.
+    func testAPreservedLibraryIsNotPreservedAgainOnEveryLaunch() throws {
+        try Data("{ not json".utf8).write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
+        _ = makeStore()
+        _ = makeStore()
+        _ = makeStore()
+        let kept = BrushStorage(root: directory).fileNames().filter { $0.hasPrefix("library-unreadable-") }
+        XCTAssertEqual(kept.count, 1, "three launches, one copy — kept: \(kept)")
+    }
+
+    // MARK: - BRUSH.md §2.30 and §2.32 — the owner's own library opens
+
+    /// **The library pulled off the owner's iPad loads, end to end, through the store.**
+    ///
+    /// This is the assertion that is false on `main`: the file was saved before §2.30, so a row names
+    /// the isotropic `scatter` output that ruling deleted, `BrushOutput` throws on the string, the
+    /// whole document fails and `loadGroups` hands back `BrushLibraryDocument.seeded`. The artist's
+    /// entire library is replaced by the shipped set and the only trace is a log line.
+    ///
+    /// **Through `BrushLibraryStore` rather than through `JSONDecoder`**, because the destruction
+    /// happens in the store's `catch` and a decode test cannot see it: a decoder test that threw
+    /// would be red for the right reason, but a *store* that seeds is green while losing everything.
+    /// The operand that tells them apart is the group and brush names — theirs, not §8.6's.
+    func testTheOwnersOwnLibraryOpensRatherThanBeingReplacedByTheShippedSet() throws {
+        let url = try XCTUnwrap(Bundle(for: BrushLibraryLogicTests.self)
+            .url(forResource: "owner-tuned-library-2026-09-05", withExtension: "json"),
+                                "fixture is not in the test bundle")
+        try Data(contentsOf: url).write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
+
+        let store = makeStore()
+        XCTAssertEqual(store.groups.map(\.name), ["Basics", "Sketching", "Inking", "Painting", "Texture"])
+        XCTAssertEqual(store.allBrushes.count, 16,
+                       "their sixteen, not §8.6's twenty — their file predates the Texture group, and "
+                       + "an empty Texture group is how you tell the two apart")
+        XCTAssertTrue(store.groups.last?.brushes.isEmpty ?? false,
+                      "Texture is empty in their file and full in the seeded set, so this is the "
+                      + "assertion that cannot pass on a reseed")
+
+        // And the brush they tuned came through both migrations rather than merely surviving decode.
+        let theirs = try XCTUnwrap(store.allBrushes.first { $0.name == "Rough Ink" })
+        XCTAssertEqual(theirs.tip, .stamp(.builtIn(.square)))
+        XCTAssertGreaterThan(theirs.dab.scatterAcross, 0, "§2.30: the isotropic base reached an axis")
+        XCTAssertEqual(theirs.dab.scatterAcross, theirs.dab.scatterAlong, accuracy: 1e-12)
+        XCTAssertEqual(theirs.modulations.rows(for: .scatterAcross).count, 1)
+        XCTAssertEqual(theirs.modulations.rows(for: .scatterAlong).count, 1)
+        XCTAssertEqual(theirs.dab.density, BrushDensityGate.threshold, accuracy: 1e-12,
+                       "§2.32: and the density base sits on the gate")
+        XCTAssertEqual(theirs, BrushLibrary.roughInk,
+                       "…which is §8.6's Rough Ink, because this pass extracted it from these bytes")
     }
 
     /// An imported brush a project restored, on a device whose library has never seen it, is taken in

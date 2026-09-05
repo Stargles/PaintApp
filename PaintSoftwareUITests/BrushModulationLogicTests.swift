@@ -623,10 +623,13 @@ final class BrushModulationLogicTests: XCTestCase {
     /// design. What a red says is *"a shipped brush's ink changed"*, and the question to answer is
     /// whether the commit meant it.
     ///
-    /// **§2.32 is the second commit to mean it**, after §2.30's scatter split. Four of the twenty use
-    /// dropout — the two rough inks, Splatter and Stipple — and the gate re-rolls *which* dabs each
-    /// drops while preserving how many; `testTheOwnersTunedRoughInkSurvivesTheDensityConversion` is
-    /// where that claim is measured rather than asserted by a digest. Sixteen are untouched.
+    /// **§2.32 was the second commit to mean it**, after §2.30's scatter split, and folding the
+    /// owner's tuned Rough Ink into §8.6 is the third — this time it is the *whole brush* rather than
+    /// a conversion, and it is the loop §12 stage 9 described working. Nineteen are untouched on that
+    /// run, which is what says the fold reached one preset and not the walk;
+    /// `testTheOwnersTunedRoughInksSurviveBothConversions` and
+    /// `testTheShippedRoughInkIsTheOwnersTunedBrush` are where the claim is measured rather than
+    /// asserted by a digest.
     func testTheShippedTwentyRenderWhatTheyDidWhenTheyWereAuthored() {
         let ramped = Self.rampStroke(from: 0.05, to: 1)
         let flat = Self.rampStroke(from: 1, to: 1)
@@ -658,7 +661,14 @@ final class BrushModulationLogicTests: XCTestCase {
             // every draw and every dab is stamped either way — byte for byte, on both semantics.
             // The ramped stroke is where the dropout lives and where the draw's channel moved.
             "Rough Ink — Blotchy": (10_664_479_671_315_962_948, 1_897_689_623_227_238_386),
-            "Rough Ink": (2_599_573_585_137_153_562, 10_085_289_824_272_709_979),
+            // **Rough Ink is a different brush now and this is the third commit to mean it.** §8.6's
+            // preset was replaced wholesale by the owner's own tuning, extracted from
+            // `owner-tuned-library-2026-09-05.json` — a 3.4 pt reference square at spacing 0.01 in
+            // place of an 11 pt triangle at 0.045. `testTheShippedRoughInkIsTheOwnersTunedBrush` is
+            // where that claim is checked against their bytes; a digest can only say it moved.
+            // **Blotchy's two are unchanged on the same run**, which is what says this pass reached
+            // one preset and not the walk.
+            "Rough Ink": (601_026_654_089_990_080, 5_851_944_440_847_798_605),
             "Painterly": (355_751_157_517_627_361, 15_351_890_775_863_647_610),
             "Bristle": (14_533_520_957_403_309_450, 8_260_293_555_180_371_024),
             "Streaky": (16_392_398_184_521_026_234, 8_307_947_881_667_356_676),
@@ -1743,50 +1753,24 @@ private extension Brush {
 /// regression this file exists to catch.
 extension BrushModulationLogicTests {
 
-    /// The fixture's brush, as the app would load it — which since §2.32 means **through the
-    /// migration in `Brush.init(from:)`**. Nothing here converts anything; the decode does.
-    static func ownerFixtureBrush(named name: String) throws -> Brush {
+    /// The fixture's raw bytes, exactly as they came off the device.
+    static func ownerFixtureData() throws -> Data {
         let url = try XCTUnwrap(Bundle(for: BrushModulationLogicTests.self)
             .url(forResource: "owner-tuned-library-2026-09-05", withExtension: "json"),
                                 "fixture is not in the test bundle")
-        let document = try JSONDecoder().decode(BrushLibraryDocument.self,
-                                                from: ownerFixtureBytes(try Data(contentsOf: url)))
-        return try XCTUnwrap(document.groups.flatMap(\.brushes).first { $0.name == name })
+        return try Data(contentsOf: url)
     }
 
-    /// **The fixture is one ruling older than the model and this is the only thing standing in the
-    /// way** — a finding rather than a workaround.
+    /// The fixture's brush, as the app would load it — **through the two migrations in
+    /// `Brush.init(from:)` and `BrushModulations.init(from:)`**. Nothing here converts anything.
     ///
-    /// It was saved before §2.30, so it names the **isotropic** `scatter` output that ruling deleted,
-    /// and `BrushOutput` cannot decode the string at all: the whole library throws. This applies
-    /// §2.30's own conversion to the bytes — one isotropic row becomes two, `scatterAcross` and
-    /// `scatterAlong`, at the same amount and the same modules, which is exactly what `BrushLibrary`'s
-    /// presets were rewritten into. It is done **here rather than in the app** because the app has no
-    /// such migration: §2.14 rules documents expendable and §2.30 rewrote the presets by hand. What
-    /// this file needs it for is that the two sides of the comparison must differ in `density` and
-    /// nothing else.
-    static func ownerFixtureBytes(_ data: Data) -> Data {
-        guard var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              var groups = root["groups"] as? [[String: Any]] else { return data }
-        for groupIndex in groups.indices {
-            guard var brushes = groups[groupIndex]["brushes"] as? [[String: Any]] else { continue }
-            for brushIndex in brushes.indices {
-                guard let rows = brushes[brushIndex]["modulations"] as? [[String: Any]] else { continue }
-                var converted: [[String: Any]] = []
-                for row in rows {
-                    guard (row["output"] as? String) == "scatter" else { converted.append(row); continue }
-                    for axis in ["scatterAcross", "scatterAlong"] {
-                        var copy = row
-                        copy["output"] = axis
-                        converted.append(copy)
-                    }
-                }
-                brushes[brushIndex]["modulations"] = converted
-            }
-            groups[groupIndex]["brushes"] = brushes
-        }
-        root["groups"] = groups
-        return (try? JSONSerialization.data(withJSONObject: root)) ?? data
+    /// **This used to rewrite the bytes before handing them over and no longer does**, which is the
+    /// whole of this pass: §2.30's rename had no migration in the app, so the file threw on the
+    /// string `"scatter"` and `BrushLibraryStore` replaced the artist's library with the shipped set.
+    /// `BrushScatterSplit` is where it happens now.
+    static func ownerFixtureBrush(named name: String) throws -> Brush {
+        let document = try JSONDecoder().decode(BrushLibraryDocument.self, from: ownerFixtureData())
+        return try XCTUnwrap(document.groups.flatMap(\.brushes).first { $0.name == name })
     }
 
     /// A long stroke at one flat pressure, so the dropout is the only thing varying along it.
@@ -1854,35 +1838,69 @@ extension BrushModulationLogicTests {
     /// kept-fraction into a number worth putting a tolerance on.
     static let dropoutSeeds: [UInt64] = (1...200).map { UInt64($0) &* 0x9E37_79B9_7F4A_7C15 }
 
-    /// **The owner's two rough inks lay the same ink after the conversion as before it.**
+    /// **The mean distance a dab is thrown *across* the stroke**, in canvas points — §2.30's own
+    /// quantity, measured on the ink rather than on the amount that produced it.
     ///
-    /// The expected numbers below were **MEASURED at `6c308c6`, the commit before §2.32, in a
-    /// separate worktree** (`../PaintApp-editor2-base`) by running this same measurement there
-    /// against the same fixture — not by comparing two brushes inside one process, which measures the
-    /// evaluator against itself and would pass whatever the conversion did. CLAUDE.md's *"a green
-    /// assertion is only as good as its two operands"*, and §2.28's own preset pin took its digests
-    /// the same way.
+    /// The fixture stroke is horizontal, so the normal is the y axis and a baked dab's `center.y`
+    /// offset from the path *is* the across displacement, draw and all. It is the operand the inked
+    /// pixel count is least sensitive to and the scatter conversion is most sensitive to: carrying
+    /// §2.30's amount across unchanged moves this by **59%** while moving the ink by 5%.
+    static func acrossDisplacement(_ brush: Brush, pressure: CGFloat, seeds: [UInt64],
+                                   size: CGFloat) -> Double {
+        let samples = dropoutStroke(pressure: pressure)
+        var total = 0.0, count = 0.0
+        for seed in seeds {
+            for dab in dabs(brush, samples, size: size, seed: seed) {
+                total += abs(Double(dab.center.y - 80))
+                count += 1
+            }
+        }
+        return count == 0 ? 0 : total / count
+    }
+
+    /// **The owner's two rough inks lay the same ink today that they laid on the build the owner drew
+    /// with.**
     ///
-    /// **The tolerances are stated because the conversion is exact as an inequality and inexact in
-    /// exactly one way.** `keep ⟺ D ≥ u` is preserved to the arithmetic (see `BrushDensityGate`), but
-    /// `u` moves from the deleted intrinsic channel to a matrix channel, so the *pattern* of gaps is
-    /// re-rolled — §6.2's already-stated cost of moving a row. What survives is the field's
-    /// statistics, and MEASURED they survive well: **every kept fraction within 2.2 percentage
-    /// points, every inked-pixel count within 2.9%, and above the curve's knee the two are identical
-    /// to the byte.** The worst of it is Rough Ink at a twentieth of full pressure — the lightest
-    /// touch of the roughest brush, where the dropout is strongest and a stroke holds fewest
-    /// independent draws.
-    func testTheOwnersTunedRoughInkSurvivesTheDensityConversion() throws {
-        // (pressure, kept fraction, mean skip run, inked pixels) — MEASURED at 6c308c6.
-        let before: [String: [(CGFloat, Double, Double, Double)]] = [
-            "Rough Ink": [(0.05, 0.74000, 22.5167, 1009.3),
-                          (0.15, 0.92533, 7.6242, 1595.6),
-                          (0.25, 0.99719, 0, 2090.8),
-                          (1.00, 0.99642, 0, 3469.6)],
-            "Rough Ink — Blotchy": [(0.05, 0.54708, 51.5375, 764.6),
-                                    (0.15, 0.71117, 34.3425, 979.7),
-                                    (0.25, 0.85416, 17.4275, 1172.5),
-                                    (1.00, 0.99825, 0, 1437.5)]
+    /// The expected numbers below were **MEASURED at `f71eeb9` in a separate worktree** — the commit
+    /// the fixture was saved against, with §2.18's `density` rate *and* §2.30's isotropic disc still
+    /// in the engine — by decoding the same brush there and running this same measurement. Not by
+    /// comparing two brushes inside one process, which measures the evaluator against itself and
+    /// would pass whatever the conversions did. CLAUDE.md's *"a green assertion is only as good as
+    /// its two operands"*, and §2.28's own preset pin took its digests the same way.
+    ///
+    /// **This pin used to isolate §2.32 and now spans §2.30 as well, and that is a fix rather than a
+    /// widening.** Its before-numbers were taken at `6c308c6`, where the fixture could not be decoded
+    /// at all: the file had to be rewritten by a helper in this very class, and that helper renamed
+    /// the *rows* while silently dropping the dab's `scatter` **base** — which is 0.14 of a dab
+    /// diameter on the owner's Rough Ink. So both operands were a brush the owner never drew with,
+    /// agreeing with each other about a field neither of them had. `f71eeb9` needs no helper, because
+    /// the bytes decode there natively, and it is the only commit at which "what the owner approved"
+    /// is a thing a computer can render.
+    ///
+    /// **The tolerances are stated because both conversions are exact in one sense and inexact in
+    /// another.** §2.32's `keep ⟺ D ≥ u` is preserved to the arithmetic, but `u` moves from the
+    /// deleted intrinsic channel to a matrix channel, so the *pattern* of gaps is re-rolled (§6.2's
+    /// already-stated cost of moving a row). §2.30's disc becomes a square, so `BrushScatterSplit`
+    /// converts the amount to hold the mean displacement rather than the number. MEASURED, what
+    /// survives is: **every kept fraction within 0.91 percentage points, every inked-pixel count
+    /// within 0.8%, every mean gap within 4.3%, and every across displacement within 4.3%.** The
+    /// tolerances below are roughly twice the worst of each, and every one is still narrow enough to
+    /// catch the alternative that was rejected: carrying §2.30's amount across unscaled puts the ink
+    /// 4.9% out and the displacement 59% out, against ceilings of 2% and 8%.
+    func testTheOwnersTunedRoughInksSurviveBothConversions() throws {
+        // (pressure, kept fraction, mean skip run, inked pixels, mean across displacement)
+        // — MEASURED at f71eeb9, each brush walked at its own `size`.
+        let before: [String: [(CGFloat, Double, Double, Double, Double)]] = [
+            "Rough Ink": [(0.05, 0.74588, 8.0927, 372.11, 0.13278),
+                          (0.15, 0.92321, 4.0563, 568.52, 0.17351),
+                          (0.25, 0.99916, 0, 682.38, 0.21444),
+                          (0.50, 0.99821, 0, 987.37, 0.31622),
+                          (1.00, 0.99763, 0, 1082.86, 0.34524)],
+            "Rough Ink — Blotchy": [(0.05, 0.54766, 51.5425, 749.47, 0.19776),
+                                    (0.15, 0.71193, 34.3450, 960.34, 0.19707),
+                                    (0.25, 0.85566, 17.4275, 1148.56, 0.19974),
+                                    (0.50, 0.99912, 0, 1341.36, 0.20345),
+                                    (1.00, 0.99894, 0, 1403.52, 0.21238)]
         ]
         for (name, rows) in before {
             let brush = try Self.ownerFixtureBrush(named: name)
@@ -1910,19 +1928,116 @@ extension BrushModulationLogicTests {
                               + "\(row.amount)")
             }
 
-            for (pressure, wasKept, wasRun, wasInk) in rows {
-                let now = Self.dropoutStats(brush, pressure: pressure, seeds: Self.dropoutSeeds)
-                print(String(format: "GATEPIN %@ p=%.2f kept=%.5f run=%.4f ink=%.1f",
-                             name, Double(pressure), now.kept, now.meanRun, now.ink))
-                XCTAssertEqual(now.kept, wasKept, accuracy: 0.025,
+            // **PREMISE, and it is what the whole `scatter` half is about.** The fixture's base is
+            // one isotropic number; a decode that dropped it — which is what `main` did before
+            // §2.30's output existed, and what this class's own deleted helper did — leaves both
+            // axes at zero and the brush frays not at all.
+            XCTAssertEqual(brush.dab.scatterAcross, brush.dab.scatterAlong, accuracy: 1e-12,
+                           "\(name): one isotropic amount is the same number on both axes")
+
+            for (pressure, wasKept, wasRun, wasInk, wasAcross) in rows {
+                let now = Self.dropoutStats(brush, pressure: pressure, seeds: Self.dropoutSeeds,
+                                            size: brush.size)
+                let across = Self.acrossDisplacement(brush, pressure: pressure,
+                                                     seeds: Self.dropoutSeeds, size: brush.size)
+                print(String(format: "FOLDPIN %@ p=%.2f kept=%.5f run=%.4f ink=%.2f across=%.5f",
+                             name, Double(pressure), now.kept, now.meanRun, now.ink, across))
+                XCTAssertEqual(now.kept, wasKept, accuracy: 0.015,
                                "\(name) at pressure \(pressure): the fraction of dabs that survive "
                                + "moved from \(wasKept) to \(now.kept)")
-                XCTAssertEqual(now.ink, wasInk, accuracy: max(wasInk * 0.035, 1),
+                XCTAssertEqual(now.ink, wasInk, accuracy: max(wasInk * 0.02, 1),
                                "\(name) at pressure \(pressure): inked pixels moved from \(wasInk) "
                                + "to \(now.ink)")
-                XCTAssertEqual(now.meanRun, wasRun, accuracy: max(wasRun * 0.12, 0.001),
+                XCTAssertEqual(now.meanRun, wasRun, accuracy: max(wasRun * 0.08, 0.001),
                                "\(name) at pressure \(pressure): the mean length of a gap moved from "
                                + "\(wasRun) to \(now.meanRun) — that is what λ controls")
+                // The scatter conversion's own operand. 8% is nearly twice the worst MEASURED
+                // disagreement (4.3%) and a seventh of what carrying §2.30's amount across unscaled
+                // would cost (59%), so this is the assertion that chose the constant.
+                XCTAssertEqual(across, wasAcross, accuracy: max(wasAcross * 0.08, 1e-6),
+                               "\(name) at pressure \(pressure): the mean distance a dab is thrown "
+                               + "across the stroke moved from \(wasAcross) to \(across) points")
+            }
+        }
+    }
+
+    /// **§8.6's Rough Ink *is* the brush on the owner's iPad, to the bit** — the tune-and-extract
+    /// loop closing rather than a claim that it did.
+    ///
+    /// §12 stage 9 wrote down what a shipped preset is for: *"a shipped preset is the artist's, the
+    /// owner tunes these on the device and has the values extracted back"*. So the assertion is
+    /// equality of the whole `Brush` — tip, size, every base, every row in order with its chain, its
+    /// gain and its derived channel — between what `BrushLibrary` ships and what `Brush.init(from:)`
+    /// makes of their file. Nothing here converts anything: the two conversions are the app's, and
+    /// this says the literal in the source is exactly their output.
+    ///
+    /// **It can go red and it is not vacuous**, which is the question CLAUDE.md says to ask. The two
+    /// operands come from different places — one is a Swift literal a person typed, the other is 46 KB
+    /// of JSON pulled off a device — and mutation-tested, a single digit changed in either fails it.
+    func testTheShippedRoughInkIsTheOwnersTunedBrush() throws {
+        let theirs = try Self.ownerFixtureBrush(named: "Rough Ink")
+        XCTAssertEqual(BrushLibrary.roughInk, theirs,
+                       "§8.6's Rough Ink must be what the owner tuned, put through the app's own two "
+                       + "migrations and nothing else")
+        // Named separately so a red says *which* half moved rather than printing two whole brushes.
+        XCTAssertEqual(BrushLibrary.roughInk.tip, .stamp(.builtIn(.square)),
+                       "they moved off the triangle onto the plain reference square")
+        XCTAssertEqual(BrushLibrary.roughInk.size, theirs.size, accuracy: 1e-12)
+        XCTAssertEqual(BrushLibrary.roughInk.dab, theirs.dab)
+        XCTAssertEqual(BrushLibrary.roughInk.modulations.rows.map(\.output),
+                       theirs.modulations.rows.map(\.output),
+                       "the row *order* is theirs too — §6.2 derives a random row's channel from "
+                       + "where it sits, so reordering these draws different ink")
+    }
+
+    /// **Every other brush in their library is what ships, and the two that are not differ only where
+    /// §2.30 re-authored a preset by hand.**
+    ///
+    /// The owner mentioned Rough Ink and nothing else, and this is what says the rest of the file
+    /// agrees — an assertion nobody could make by reading 46 KB of JSON. Thirteen of the sixteen come
+    /// back byte-identical.
+    ///
+    /// **The three that do not are each a stated fact rather than a tolerance.** Rough Ink is the
+    /// brush above. Rough Ink — Blotchy carries §2.32's randomiser in a different *position* — the
+    /// migration appends it after every other row, while `BrushLibrary` writes it beside the density
+    /// row it belongs with — which is ink-neutral, because a channel is derived per *output* and two
+    /// rows on different outputs cannot collide. And Blotchy and Bristle both carry a `scatter` row
+    /// §2.30 rewrote by hand at the number it had, where `BrushScatterSplit` converts it; that
+    /// constant carries the argument for why a migration and a re-authoring get different answers.
+    func testEveryOtherBrushInTheOwnersLibraryIsWhatShips() throws {
+        let document = try JSONDecoder().decode(BrushLibraryDocument.self, from: Self.ownerFixtureData())
+        let theirs = document.groups.flatMap(\.brushes)
+        XCTAssertEqual(theirs.count, 16, "PREMISE: their file predates §12 stage 11's Texture four")
+
+        // The two §2.30 re-authored by hand, and the only thing that differs about them.
+        let scatterRewritten: Set<String> = ["Rough Ink — Blotchy", "Bristle"]
+        for brush in theirs {
+            let shipped = try XCTUnwrap(BrushLibrary.defaults.first { $0.id == brush.id },
+                                        "\(brush.name) is in their library and not in the shipped set")
+            guard scatterRewritten.contains(brush.name) else {
+                XCTAssertEqual(brush, shipped, "\(brush.name) differs from what ships")
+                continue
+            }
+            XCTAssertEqual(brush.dab, shipped.dab, "\(brush.name): only the scatter *rows* may differ")
+            XCTAssertEqual(brush.tip, shipped.tip)
+            XCTAssertEqual(brush.size, shipped.size, accuracy: 1e-12)
+            for axis in BrushScatterSplit.axes {
+                let mine = try XCTUnwrap(brush.modulations.rows(for: axis).first)
+                let ship = try XCTUnwrap(shipped.modulations.rows(for: axis).first)
+                XCTAssertEqual(mine.amount, ship.amount * BrushScatterSplit.isotropicToAxis,
+                               accuracy: 1e-12,
+                               "\(brush.name) on \(axis): the migrated gain is the hand-written one "
+                               + "through §2.30's conversion, which is the whole of the difference")
+            }
+            // …and nothing else about them moved: every row that is not a scatter row matches, as a
+            // multiset, so the appended-randomiser reordering does not hide a real change.
+            let mineRest = brush.modulations.rows.filter { !BrushScatterSplit.axes.contains($0.output) }
+            let shipRest = shipped.modulations.rows.filter { !BrushScatterSplit.axes.contains($0.output) }
+            XCTAssertEqual(Set(mineRest.map(\.output)), Set(shipRest.map(\.output)))
+            XCTAssertEqual(mineRest.count, shipRest.count)
+            for row in shipRest {
+                XCTAssertTrue(mineRest.contains(row),
+                              "\(brush.name): \(row.output) row \(row.amount) is not in their file")
             }
         }
     }
@@ -1935,8 +2050,9 @@ extension BrushModulationLogicTests {
     /// isolated ones, and that is §2.17's whole distinction between a stipple and a broken line.
     func testTheOwnersRoughInkStillBreaksIntoRunsRatherThanSpeckles() throws {
         let brush = try Self.ownerFixtureBrush(named: "Rough Ink")
-        let light = Self.dropoutStats(brush, pressure: 0.05, seeds: Array(Self.dropoutSeeds.prefix(40)))
-        XCTAssertGreaterThan(light.meanRun, 8,
+        let light = Self.dropoutStats(brush, pressure: 0.05,
+                                      seeds: Array(Self.dropoutSeeds.prefix(40)), size: brush.size)
+        XCTAssertGreaterThan(light.meanRun, 6,
                              "λ = 1.99 widths must drop contiguous runs: mean run \(light.meanRun)")
         // The same brush with λ taken off its randomiser — the mutation this test exists to fail.
         var white = brush
@@ -1948,8 +2064,9 @@ extension BrushModulationLogicTests {
             return flattened
         })
         let speckled = Self.dropoutStats(white, pressure: 0.05,
-                                         seeds: Array(Self.dropoutSeeds.prefix(40)))
+                                         seeds: Array(Self.dropoutSeeds.prefix(40)), size: brush.size)
         XCTAssertLessThan(speckled.meanRun, light.meanRun / 4,
                           "with λ = 0 the same brush speckles instead: \(speckled.meanRun)")
     }
 }
+

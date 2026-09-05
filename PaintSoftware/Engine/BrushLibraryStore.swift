@@ -71,8 +71,58 @@ final class BrushLibraryStore: ObservableObject {
             // is treated as absent rather than honoured.
             return decoded.groups.isEmpty ? BrushLibraryDocument.seeded.groups : decoded.groups
         } catch {
-            log.error("The brush library could not be read and was reseeded: \(String(describing: error), privacy: .public)")
+            let kept = preserve(data, in: storage)
+            log.error("The brush library could not be read and was reseeded; the bytes were kept as \(kept ?? "nothing — the copy failed", privacy: .public): \(String(describing: error), privacy: .public)")
             return BrushLibraryDocument.seeded.groups
+        }
+    }
+
+    /// **A library that cannot be read is moved aside, never destroyed.**
+    ///
+    /// The failing path before this was: catch, log, seed — and then the *next* edit persists the
+    /// shipped defaults over the artist's file. The log line was the only trace, and no artist reads
+    /// the log. What is being lost is not a document (§2.14: expendable) but §8.1's library, which is
+    /// the artist's own tuning and exists in exactly one place; `BrushScatterSplit` carries the
+    /// argument for why that distinction is the load-bearing one here.
+    ///
+    /// **A copy through `BrushStorage`'s existing verbs, not a sixth one.** §2.27 reserves `read`,
+    /// `write`, `contains`, `remove` and `fileNames` as the whole of what the app does to a library
+    /// file — the five brackets a security-scoped external folder would open and close — and a
+    /// rename or a `FileManager` move here would be a sixth access outside that seam. The sibling
+    /// lands under the same root, beside the tips it names, so an artist who has an external folder
+    /// later finds it there too.
+    ///
+    /// **Written before the original is removed, and the original *is* removed.** The order is the
+    /// whole safety property: if the write fails, nothing is taken away. The removal is what makes
+    /// this idempotent — leaving the unreadable file in place means the next launch fails to decode
+    /// it again and keeps a *second* dated copy, and the launch after that a third, so a file the app
+    /// cannot read would grow a copy per launch forever.
+    ///
+    /// **It does not migrate anything.** A future session with a reader for these bytes has the bytes;
+    /// that is the whole promise, and building a mechanism to re-import them before anybody has asked
+    /// is what §9.2 forbids.
+    @discardableResult
+    private static func preserve(_ data: Data, in storage: BrushStorage) -> String? {
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.timeZone = TimeZone(secondsFromGMT: 0)
+        stamp.dateFormat = "yyyy-MM-dd-HHmmss"
+        let base = "library-unreadable-\(stamp.string(from: Date()))"
+        // Two failures inside one second are two files, not one overwriting the other — the second
+        // would otherwise silently destroy the first, which is the thing being fixed.
+        var name = "\(base).json"
+        var suffix = 2
+        while storage.contains(name) {
+            name = "\(base)-\(suffix).json"
+            suffix += 1
+        }
+        do {
+            try storage.write(data, to: name)
+            storage.remove(fileName)
+            return name
+        } catch {
+            log.error("The unreadable brush library could not be copied aside, so it was left where it is: \(String(describing: error), privacy: .public)")
+            return nil
         }
     }
 

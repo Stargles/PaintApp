@@ -242,35 +242,78 @@ enum BrushLibrary {
         ])
     )
 
-    /// **§2.16's brush, and §8.6's one piece of open design, settled.** *"An ink pen which is rough,
-    /// almost giving it a sort of slightly rough blotchy sketchy feel to the lineart."*
+    /// **§2.16's brush, and the one shipped preset the owner has tuned by hand.**
     ///
-    /// **Both mechanisms at once, because the second contact sheet showed they are different
-    /// roughness rather than more and less of one.** The picture is the triangular blob the owner
-    /// named — grossly asymmetric, so `angle.jitter 1` presents a different outline at every dab —
-    /// and the dynamics are Rough Ink Blotchy's own, unchanged. The sheet's factorial is what says
-    /// each half is necessary: the same triangle with the turn taken away, and an eroded round with
-    /// the turn left in, both draw clean lines.
+    /// **This is their tuning, extracted** — `PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json`
+    /// is the library pulled off their iPad after they said it *"looks almost exactly like how I want
+    /// it now"*, and §12 stage 9's own note says why that is where a shipped preset's values come
+    /// from: *"a shipped preset is the artist's, the owner tunes these on the device and has the
+    /// values extracted back"*. Every number below is theirs, put through the two conversions the
+    /// engine has made since they saved it and through nothing else.
+    ///
+    /// **What they changed, and it is not a nudge.** §12 stage 9 shipped a `rough-ink-triangle` nib
+    /// 11 pt across at spacing 0.045 with Rough Ink — Blotchy's dynamics. They kept the *mechanism*
+    /// §8.4 argued for — an asymmetric picture under a full turn, plus a pressure dropout — and
+    /// rebuilt everything else around a much smaller nib: the plain reference **square** at **3.42 pt**
+    /// walked at **0.01** of a width, so a hundred dabs land in the space the triangle laid two, and
+    /// the roughness comes out of the *overlap* of a turning square rather than out of one blob's
+    /// outline. The size row is a full-gain ramp saturating at four sevenths of a press, and there is
+    /// a second, long-λ curved `size ← random` on top of it.
+    ///
+    /// **The two conversions, and both are the app's own.** §2.32's gate: their `density` was a rate
+    /// of 0 with a curve running 0.606 → 1 and a λ of 1.987, which read under the gate with no
+    /// conversion clears 0.5 everywhere and stamps every dab — `BrushDensityGate.converted` is what
+    /// puts the base on the threshold, halves the signal and hangs the randomiser off it, and it is
+    /// the same code `Brush.init(from:)` runs on their file. §2.30's split: their one isotropic
+    /// `scatter` becomes two axes and their one `scatter ← random` row becomes two, each through
+    /// `BrushScatterSplit.isotropicToAxis` — the numbers are written below as *their* value times that
+    /// conversion, so what is in the source is their tuning and the named arithmetic rather than a
+    /// rounded result. The conversion is there because a disc and a square of the same half-extent do
+    /// not scatter equally hard; carrying the number across instead leaves their line 1.2–4.9%
+    /// heavier, and that constant carries the measurement.
+    ///
+    /// **So this preset is, to the bit, what `Brush.init(from:)` makes of their file** —
+    /// `BrushModulationLogicTests.testTheShippedRoughInkIsTheOwnersTunedBrush` asserts exactly that,
+    /// which is the tune-and-extract loop closing rather than a description of it.
+    ///
+    /// **The row order is theirs, and it is load-bearing.** §6.2 mints a `random` row's channel from
+    /// where the row sits among its output's rows, so listing these in any other order re-rolls the
+    /// draws and draws different ink. This is the order their file carries, with the scatter row
+    /// split in place and §2.32's randomiser appended last, exactly where the migration puts it.
     static let roughInk = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-00000000001D")!,
-        name: "Rough Ink", tip: .stamp(.builtIn(.roughInkTriangle)), size: 11,
-        dab: BrushDabSettings(size: 0.6, flow: 1, spacing: 0.045,
+        name: "Rough Ink", tip: .stamp(.builtIn(.square)), size: 3.416158619336784,
+        dab: BrushDabSettings(size: 0.3967320919036865, flow: 1, spacing: 0.01,
+                              scatterAcross: 0.1446623057126999 * BrushScatterSplit.isotropicToAxis,
+                              scatterAlong: 0.1446623057126999 * BrushScatterSplit.isotropicToAxis,
                               density: BrushDensityGate.threshold,
                               angle: BrushAngleSettings(jitter: 1)),
         stroke: BrushStrokeSettings(stabilization: 0.3),
         modulations: BrushModulations([
-            .sizeFromPressure(amount: 0.16, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAcross, .plain(2.5)), amount: 0.30),
-            BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.10),
-            // **§2.30's migration of one isotropic `scatter` row, and it is two rows now.** The
-            // amount and the wavelength are the ones the owner picked on the contact sheet; what
-            // moved is the shape of the draw, from a disc to a square, which §2.30 rules is what
-            // "both set equal" means. The across row keeps the channel the old row drew from.
-            BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
-            BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
-            .densityFromPressure(knee: 0.4, floor: 0.45),
-            .randomisedDensity(wavelength: 4.0),
-            .flowFromPressure(amount: 0.1)
+            // Their `size ← pressure` at full gain, ramping 0 → 1 over the first **585/1024** of the
+            // press and holding there. Written as its keys rather than as `ResponseCurve.ramp`,
+            // which spans the whole range and is a different curve.
+            BrushModulation(.size, .pressure, modules: [.curveRamp(ResponseCurve(AnimationCurve(keys: [
+                AnimationCurve.Key(frame: 0, value: 0, tangentMode: .vector, interpolation: .linear),
+                AnimationCurve.Key(frame: 585, value: 1, tangentMode: .vector, interpolation: .linear)
+            ])))], amount: 1),
+            BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)),
+                            amount: 0.14 * BrushScatterSplit.isotropicToAxis),
+            BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.5)),
+                            amount: 0.14 * BrushScatterSplit.isotropicToAxis),
+            // `knee` is 232/1024 exactly, which is the frame their middle key sits on; `floor` is the
+            // value they dragged the first key to. `densityFromPressure` builds §2.32's half-gain
+            // signal arm, and `randomisedDensity` below is the other half.
+            .densityFromPressure(knee: 232.0 / ResponseCurve.scale, floor: 0.6056701030927836),
+            .flowFromPressure(amount: 0.1),
+            // A second size row: a long-λ random, curved so it is inert below **571/1024** of the
+            // draw and ramps to full above it, at half gain. This is the coarse thick/thin.
+            BrushModulation(.size, .random(.scatterAcross, .plain(2.4103447794914246)),
+                            modules: [.curveRamp(ResponseCurve(AnimationCurve(keys: [
+                                AnimationCurve.Key(frame: 571, value: 0, tangentMode: .vector, interpolation: .linear),
+                                AnimationCurve.Key(frame: 1024, value: 1, tangentMode: .vector, interpolation: .linear)
+                            ])))], amount: 0.5),
+            .randomisedDensity(wavelength: 1.9869282245635986)
         ])
     )
 

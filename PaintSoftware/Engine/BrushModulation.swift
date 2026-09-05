@@ -362,7 +362,18 @@ struct BrushModulation: Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        output = try c.decode(BrushOutput.self, forKey: .output)
+        try self.init(from: decoder, driving: c.decode(BrushOutput.self, forKey: .output))
+    }
+
+    /// **The same row, driving an output the caller names rather than one the bytes do.**
+    ///
+    /// One body, called twice by `BrushScatterSplit`'s migration and once by the ordinary decode
+    /// above, so there is no second reader to keep in step — §10's two-ways-to-compute trap applied
+    /// to a decode. It exists because bytes written before §2.30 name an output that is *gone*: there
+    /// is nothing in the file for `output` to be read from.
+    fileprivate init(from decoder: Decoder, driving output: BrushOutput) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.output = output
         input = try c.decode(BrushInput.self, forKey: .input)
         // A chain with no modules is the common case and the default; leaving the key out is what
         // keeps a plain row three keys on the wire.
@@ -534,8 +545,28 @@ struct BrushModulations: Codable, Hashable {
 
     /// Encoded as the bare array, so a brush's JSON carries `"modulations":[…]` rather than a wrapper
     /// object around one key.
+    ///
+    /// **Element by element rather than `[BrushModulation](from:)`, and that is BRUSH.md §2.30's
+    /// migration** — see `BrushScatterSplit`. A row naming the deleted isotropic `scatter` is read
+    /// **twice**, once per axis, so one row becomes two at the same gain, the same chain and the same
+    /// wavelength. Every other row decodes exactly as it did.
     init(from decoder: Decoder) throws {
-        self.init(try [BrushModulation](from: decoder))
+        var container = try decoder.unkeyedContainer()
+        var rows: [BrushModulation] = []
+        rows.reserveCapacity(container.count ?? 0)
+        while !container.isAtEnd {
+            let element = try container.superDecoder()
+            if BrushScatterSplit.namesTheDeletedOutput(element) {
+                for axis in BrushScatterSplit.axes {
+                    var row = try BrushModulation(from: element, driving: axis)
+                    row.amount *= BrushScatterSplit.isotropicToAxis
+                    rows.append(row)
+                }
+            } else {
+                rows.append(try BrushModulation(from: element))
+            }
+        }
+        self.init(rows)
     }
 
     func encode(to encoder: Encoder) throws { try rows.encode(to: encoder) }
@@ -717,7 +748,103 @@ extension BrushDabSettings {
         hueShift = try c.decodeIfPresent(Double.self, forKey: .hueShift) ?? d.hueShift
         saturationShift = try c.decodeIfPresent(Double.self, forKey: .saturationShift) ?? d.saturationShift
         brightnessShift = try c.decodeIfPresent(Double.self, forKey: .brightnessShift) ?? d.brightnessShift
+
+        // **BRUSH.md §2.30's migration, base half** — see `BrushScatterSplit`, which carries why the
+        // number is converted rather than copied. A file written after §2.30 has no key under this
+        // name and takes the nil arm untouched.
+        if let isotropic = (try? LegacyIsotropicScatterDab(from: decoder))?.scatter {
+            scatterAcross = isotropic * BrushScatterSplit.isotropicToAxis
+            scatterAlong = isotropic * BrushScatterSplit.isotropicToAxis
+        }
     }
+
+    /// §2.30's deleted `scatter`, read out of a `dab` object written before it. Its own type rather
+    /// than a key on `BrushDabSettings`, for the reason `Brush.LegacyDensityDab` is one: a field
+    /// there would be exactly the vestigial parameter CLAUDE.md's *"remove cleanly, no archaeology"*
+    /// forbids. This is a reader for old bytes, and nothing in the engine can be handed one.
+    private struct LegacyIsotropicScatterDab: Decodable {
+        var scatter: Double?
+    }
+}
+
+// MARK: - BRUSH.md §2.30 — one isotropic scatter becomes two axes
+
+/// **What opens a brush library saved before §2.30, and the argument for opening one at all.**
+///
+/// §2.30 deleted the isotropic `scatter` output and replaced it with `scatterAcross` and
+/// `scatterAlong`. `BrushOutput` is a `String` raw-value enum, so a row naming the old output does not
+/// decode to a default — **it throws, and the whole library file with it**. `BrushLibraryStore` then
+/// catches, logs and seeds, so the artist's own tuning is replaced by the shipped set with nothing on
+/// screen to say so. That is not a hypothetical: `owner-tuned-library-2026-09-05.json` — the file
+/// pulled off the owner's iPad after they said Rough Ink *"looks almost exactly like how I want it
+/// now"* — is exactly such a file.
+///
+/// **Should a rename ship a decode migration at all? Here, yes, and the reason is whose bytes they
+/// are.** §2.14 rules that nothing on the device needs to survive — *"everything currently on the
+/// ipad is expendable, so we don't need backwards compatibility"* — and §2.28 declined a legacy
+/// decode arm on that basis. But that ruling is about **documents**. §8.1 makes the library a
+/// different thing: it is app-level rather than per-document, it persists across every document, and
+/// it holds work the artist did **by hand** that exists nowhere else. §2.32 already took that view
+/// and shipped a density migration for precisely this reason (see `BrushDensityGate` and
+/// `Brush.init(from:)`); shipping one for §2.30's rename and not for §2.32's meaning change would be
+/// two answers to one question in one file. This is the consistent half.
+///
+/// **It is two conversions and a preserved file, not a framework** — §9.2. There is no version
+/// number, no registry and no chain of migrators: one legacy key on the dab, one legacy output name
+/// on a row, and `BrushLibraryStore` moving a file it still cannot read aside instead of destroying
+/// it. A third rename gets its own three lines or its own answer.
+///
+/// **The amount is converted, not copied, and `isotropicToAxis` is why.** §2.32's migration does not
+/// copy `density` across either — it rewrites the base and the gains so the *inequality* is preserved,
+/// because what a brush is worth keeping is what it draws. The same principle answers this one, and
+/// the alternative was MEASURED rather than argued: see the constant.
+enum BrushScatterSplit {
+
+    /// The wire name of the output §2.30 deleted. A string rather than a `BrushOutput` case, because
+    /// the whole point is that there is no case for it any more.
+    static let deletedOutput = "scatter"
+
+    /// **What one isotropic amount is worth on each of the two axes.**
+    ///
+    /// §2.30 replaced a **polar** draw — a free angle and a distance, so the dab landed on a *disc*
+    /// whose areal density fell off as 1/r — with two independent signed draws, which land it
+    /// uniformly in a *square* of the same half-extent. MEASURED there over 20,000 dabs, both at reach
+    /// 1: mean displacement **0.767** against the disc's **0.500**, with the per-axis extent unchanged
+    /// at 1.000. So the same number scatters about half again as hard, and this is the ratio that
+    /// undoes it. `ScatterAxesLogicTests` pins the two means the ratio is built from, so the constant
+    /// cannot drift away from the measurement it names.
+    ///
+    /// **Which of the two is right was measured against the owner's own approved ink, not argued.**
+    /// Their tuned Rough Ink was rendered at the commit it was authored on (`f71eeb9`, isotropic
+    /// scatter and §2.18's density rate) and again here, 200 seeds at five pressures. Carrying the
+    /// number across leaves the **inked pixels 1.2–4.9% heavier** and the mean displacement **59%
+    /// larger**; converting by this ratio leaves the inked pixels within **0.8%** at every pressure
+    /// and the mean displacement within 3.7%. §2.32's own pin set 2.9% as the bar for *"their ink
+    /// survived"*, and one of those two numbers is outside it.
+    ///
+    /// **It does not agree with the three presets §2.30 rewrote by hand, and that is not an
+    /// inconsistency.** Re-authoring a preset is an act with a person in it: §2.30 carried Rough Ink —
+    /// Blotchy's, Bristle's and Rough Ink's numbers across, drew the result on a simulator, decided it
+    /// still looked like itself and re-took the digests. A migration has nobody to look at it, runs on
+    /// bytes it has never seen, and its whole promise is that nothing changed. Those are different
+    /// jobs and they get different answers; the consequence is stated where it bites, in `BrushLibrary`
+    /// and in `BrushModulationLogicTests`' fixture comparison.
+    static let isotropicToAxis: Double = 0.500 / 0.767
+
+    /// What the one row becomes, in this order — so the across axis is the *first* row on its output
+    /// and keeps the channel §6.2 would have minted for the row it replaces.
+    static let axes: [BrushOutput] = [.scatterAcross, .scatterAlong]
+
+    /// Whether this encoded row drives the deleted output. Reads one key and answers false for
+    /// anything it cannot understand, so a row that is malformed for some other reason still throws
+    /// where it always threw rather than being quietly duplicated.
+    static func namesTheDeletedOutput(_ decoder: Decoder) -> Bool {
+        guard let container = try? decoder.container(keyedBy: OutputKey.self),
+              let name = try? container.decode(String.self, forKey: .output) else { return false }
+        return name == deletedOutput
+    }
+
+    private enum OutputKey: String, CodingKey { case output }
 }
 
 /// **§6's `angle` output — the one that is not a plain sum of a base and its rows.**
