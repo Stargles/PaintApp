@@ -180,21 +180,27 @@ final class RegionRepairLogicTests: XCTestCase {
     /// **The one place byte identity does not hold, stated as what was measured rather than
     /// assumed.**
     ///
-    /// A repair whose rectangle truncates an `.erase` element's stroke group disagrees with the
-    /// full walk by **one or two units out of 255, on a handful of pixels, all of them inside the
-    /// repaired rectangle** — MEASURED 2026-09-05, four bytes of 76,800 on the fixture below, in
-    /// both directions. It is CoreGraphics rounding at the clip, not a walk that drew the wrong
-    /// thing, and two experiments say so: disabling the skip test entirely reproduces the same four
-    /// bytes to the value, so it is not an element wrongly left out; and shortening the punch so its
-    /// group no longer straddles the rectangle moves the bytes rather than removing them. A paint
-    /// stroke straddling the same edge is byte-exact (`testAStrokeCrossingTheRectanglesEdge…`), so
-    /// this is specific to the `destinationOut` merge, which reads the destination as well as
-    /// writing it.
+    /// A repair whose rectangle **truncates a transparency layer** disagrees with the full walk by
+    /// one or two units out of 255, on pixels along the rectangle's edge, in both directions —
+    /// MEASURED 2026-09-05 at four bytes of 76,800 with an eraser's group cut by the rectangle, and
+    /// at fifty-two with a `.multiply` run's isolation layer cut by it. CoreGraphics composites a
+    /// transparency layer through a buffer sized by the clip in force, and a layer given a smaller
+    /// buffer does not round identically.
+    ///
+    /// **It is rounding at the clip, not a walk that drew the wrong thing**, and three experiments
+    /// say so. Disabling the skip test entirely reproduces the eraser fixture's four bytes *to the
+    /// value*, so it is not an element wrongly left out. Shortening the punch until its group no
+    /// longer straddles the rectangle moves the bytes rather than removing them. And a walk with no
+    /// transparency layer in it at all is byte-exact — the seven tests that use `assertIdentical`,
+    /// including a `.normal` stroke straddling the same edge at opacity 0.55, whose own per-stroke
+    /// group merges source-over.
     ///
     /// So the guarantee this suite pins is: **identical everywhere, except at most a rounding unit
-    /// inside the rectangle where an eraser's group is cut by it.** That is falsifiable in three
-    /// ways — a bigger delta, a difference *outside* the rectangle, or more than a seam's worth of
-    /// pixels — and each of the three would be a real defect.
+    /// inside the rectangle, on no more pixels than its boundary has.** Each of those three is
+    /// falsifiable and each failure is a different real defect — a bigger delta is a wrong picture,
+    /// a difference outside the rectangle is a base whose site under-declared, and a count that
+    /// scales with the rectangle's *area* rather than its perimeter is a region drawn differently
+    /// rather than a seam.
     private func assertMatchesToWithinARoundingUnit(_ repaired: UIImage, _ full: UIImage,
                                                     inside region: CGRect, _ what: String,
                                                     file: StaticString = #filePath,
@@ -206,9 +212,12 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertTrue(region.insetBy(dx: -1, dy: -1).contains(d.box),
                       "\(what): \(d.summary) — a difference outside the repaired rectangle \(region) "
                       + "is a base the site under-declared, not a seam", file: file, line: line)
-        XCTAssertLessThanOrEqual(d.bytes, 64,
-                                 "\(what): \(d.summary) — a seam is a handful of pixels; this is a "
-                                 + "region drawn differently", file: file, line: line)
+        // A seam is a **perimeter**; a region drawn differently is an area. Four channels on every
+        // boundary pixel is the generous form of that, and it is what separates the two.
+        let perimeter = 4 * Int(2 * (region.width + region.height))
+        XCTAssertLessThanOrEqual(d.bytes, perimeter,
+                                 "\(what): \(d.summary) — more bytes than the rectangle has boundary "
+                                 + "pixels (\(perimeter)) is an area, not a seam", file: file, line: line)
     }
 
     private func differs(_ a: UIImage, _ b: UIImage) -> Bool {
@@ -354,8 +363,48 @@ final class RegionRepairLogicTests: XCTestCase {
     /// members it will not stamp. If the run scan were narrowed to the stamped elements the run
     /// would be split, and a split run composites differently — that is the same non-associativity
     /// `appendPreservesTheWalk` exists for, met from the other side.
+    ///
+    /// **Two things the fixture must have, and the first version had neither.** Rule 2 isolates a
+    /// run so its strokes "blend against each other but not what's beneath them", so a run with
+    /// *nothing beneath it* and *no overlaps within it* composites the same isolated or not — and a
+    /// canvas of 48 spread-out `.multiply` marks is exactly that. MEASURED: it was green with the
+    /// transparency layer removed from every clipped walk. So there is a fill underneath now, and
+    /// two short bars that cross each other inside the repaired rectangle without being cut by the
+    /// nib that declares it.
     func testABlendModeRunStraddlingTheRectangleIsByteIdentical() {
-        let canvas = Self.drawnCanvas(48, blend: .multiply)
+        let page = CGRect(origin: .zero, size: Self.canvasSize)
+        // The backdrop the run is isolated *from*. A fill is the cheapest one that is not itself a
+        // stroke, so it cannot join the run it sits under (rule 1).
+        var elements: [VectorElement] = [
+            .fill(VectorFillElement(path: CGPath(rect: page, transform: nil),
+                                    color: CodableColor(red: 0.92, green: 0.86, blue: 0.35, alpha: 1)))
+        ]
+        elements += (0..<48).map { .stroke(Self.mark($0, blend: .multiply)) }
+        // A long bar through cell 11, which is what the flick cuts — so the rectangle is this bar's
+        // footprint: long, thin, and a few percent of the canvas.
+        var bar = Self.mark(400, blend: .multiply)
+        bar.size = 8
+        bar.samples = StrokeSamples((0..<32).map { step -> VectorSample in
+            let t = CGFloat(step) / 31
+            return VectorSample(x: 8 + t * (Self.canvasSize.width - 16), y: 33, pressure: 1)
+        }, channels: .pressureOnly)
+        elements.append(.stroke(bar))
+        // Two more members of the same run, crossing **each other** inside that rectangle and far
+        // enough along it that the nib does not reach them. Without these the run has no internal
+        // overlap and isolating it changes nothing.
+        for flip in 0..<2 {
+            var cross = Self.mark(401 + flip, blend: .multiply)
+            cross.size = 8
+            cross.samples = StrokeSamples((0..<12).map { step -> VectorSample in
+                let t = CGFloat(step) / 11
+                return VectorSample(x: 110 + t * 22,
+                                    y: flip == 0 ? 29 + t * 8 : 37 - t * 8, pressure: 1)
+            }, channels: .pressureOnly)
+            elements.append(.stroke(cross))
+        }
+
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: elements)
+        _ = canvas.render()
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 11), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints))
         let repaired = canvas.render()
@@ -363,8 +412,13 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
         XCTAssertLessThan(regionFraction(canvas), 0.5,
                           "setup: the rectangle must be smaller than the run, or nothing straddles it")
-        assertIdentical(repaired, fullReWalk(of: canvas).image,
-                        "a cut inside a `.multiply` run that reaches past the rectangle")
+        // The crossing pair has to be *inside* the rectangle, or the overlap the isolation is about
+        // is never redrawn and this fixture is the blind one again.
+        XCTAssertTrue(canvas.lastRepairedRegion.contains(CGPoint(x: 121, y: 33)),
+                      "setup: the run's internal overlap must fall inside the repaired rectangle")
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion,
+                                           "a cut inside a `.multiply` run that reaches past the rectangle")
     }
 
     /// **Constraint three: a stroke crossing the rectangle's edge merges at its own opacity.**
