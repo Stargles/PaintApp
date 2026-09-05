@@ -10,29 +10,29 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first — the brush engine, and there is a decision owed before the next stage starts
 
-**[BRUSH.md](BRUSH.md) is the specification. §2 is twenty-two owner rulings — read them rather than
+**[BRUSH.md](BRUSH.md) is the specification. §2 is twenty-three owner rulings — read them rather than
 re-deriving them**, §12 is the build order with a DONE marker per stage, §13 is what is still open.
 
-**Stages 0 through 8 are merged.** TODO (37) describes what that means in one paragraph.
+**Stages 0 through 8 are merged, §2.22 is built, and §12 stage 9's *container* is built** — the
+brushes menu, its groups, and the door to the editor. TODO (37) describes the whole of it in one
+paragraph.
 
-**§13's sum-versus-product question is answered — §2.22, and it is unbuilt.** A modulation row gains a
-**second input whose reading multiplies the first**, so `output = base + Σ amount · curve(input) ·
-reading(second)`. The owner handed the choice back — *"i really don't know, your call ... clean
-architecture is critical so it could be replaced easily"* — and that last clause is what chose it over
-CSP's nested `amount`: a flat second slot is one multiply in `Brush.dabValues`, which is the hot per-dab
-loop, and it **is** a one-row nested matrix, so nesting can subsume it later with nothing un-built.
-Build it before the editor; §2.22 carries the two traps (a row with `random` in *both* slots needs a
-second channel, and the second input is not curved).
+**Start at the editor — §7.2, §12 stage 10.** The door exists and behind it is a shell holding exactly
+the six sliders the old panel had. What it owes: the three columns, the categories §7.2 names, the
+curve editor (which is `TimelineGraphBand`'s control over a different domain, per §7's four numbered
+points — **its y axis must be fixed, not auto-ranged**, which is the defect the owner found on the
+device in TODO (38)), and **the drawing pad**, which is the owner's own stated reason for wanting the
+feature at all.
 
-**The owner's steer for what comes next is explicit**: *"Get something working that i can interact with
-on the ipad and ill tell you if i want changes."* So the editor and the library — §2.20's brushes menu,
-reached by a second tap on the already-selected brush icon — are worth more than any amount of offline
-brush tuning, and §12's ordering of the library before the editor should be re-read against that rather
-than followed out of habit.
+**Two things in the model are reachable only from code until that editor exists**, and both are owed a
+control by it: **§2.22's second input** — a row's gain, with an explicit *none* — and every parameter
+§7 lists as having no UI (`scatter`, the angle's three contributions, `hardness`, `density` and its λ,
+`blendMode`, the three HSB shifts, and §8.4's edge softness).
 
-**Then stage 9, and it is driven by contact sheet.** Render candidates through the real stamper, put
-them in front of the owner, build only what they pick. That is the loop that settled §8.4 and it is the
-instruction for the whole ~24-30 brush set.
+**Then §12 stage 9's contents.** The set is **designed, not assembled** (§8.4): a CC0 pack is starting
+stock, tips are drawn and settings tuned on top of it, and each brush is judged by eye against a contact
+sheet before it enters §8.6's table. §8.3's per-file licensing check now has Krita's bundles as a third
+source. The owner will give opinions once they can try the set — they said so.
 
 **The device build is the other thing worth more than any offline work.** A Release build has not
 reached the iPad since `2bef347`, which is many merges stale, and the owner has said the brush decisions
@@ -42,15 +42,14 @@ changed how every stroke composites, so a build now is worth taking even before 
 
 ## Ask the owner these
 
-- **§13's sum-versus-product question, above.** It gates the editor and it is the only thing on this
-  list that blocks work.
+- **Nothing blocks work.** The owner's standing answer covers the next stage: *"Get something working
+  that i can interact with on the ipad and ill tell you if i want changes."* Build the editor, put it on
+  the device, and ask then.
 - **Drive a real Pencil across the canvas and lean it over.** The simulator cannot synthesise pencil
   input at all, so **non-neutral tilt has only ever been exercised by tests, never by hardware.** Stage
-  4 stores altitude and azimuth and stage 7 reads them; nothing has confirmed the hardware end. This
-  needs a fresh build on the device first.
-- **The Import Custom Brush row sits below the fold** in the brush panel and needs a scroll. It works —
-  it is just not where they would find it. §2.20's brushes menu is where it is going anyway, so this may
-  answer itself.
+  4 stores altitude and azimuth and stage 7 reads them; nothing has confirmed the hardware end. A
+  current build is on the device now, so this is ten seconds of the owner's time and it closes a gap no
+  test in this project can.
 - **Warn them about the Pencil preset before they draw with it.** It ships at 90% opacity with ~25 dabs
   overlapping any point, so it used to saturate solid black and now stops at 90%. That is stage 8
   working, and it will read as a regression on first contact.
@@ -60,19 +59,21 @@ changed how every stroke composites, so a build now is worth taking even before 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**`main` is at stage 8's merge. Nothing is in flight; no worktrees, no `tmp/*` branches, nothing
+**`main` is at `032efa1` plus docs. Nothing is in flight; no worktrees, no `tmp/*` branches, nothing
 uncommitted.**
 
-**Fast tier: 3050 total / 3047 passed / 0 failed / 3 skipped.** It was 3044 at the start of the pass;
-the six new tests are stage 8's.
+**Fast tier: 3074 total / 3071 passed / 0 failed / 3 skipped.** It was 3044 at the start of the pass.
 
-**The full suite is green at `7605169`, run after stage 8 merged** — 3212 tests, 3192 passed, 1 failed,
-19 skipped, 25:02 on an idle erased machine. The one failure is `InterpolationWorkflowUITests`'
-`testInterpolateModeEndToEndFromGestureToScrub`, **which passed clean in isolation** and is the same test
-that failed environmentally at `77430e1`; CLAUDE.md now says to treat a red there as environmental until
-an isolated run says otherwise. Its class table is re-taken in CLAUDE.md — **nothing is owed.**
+**The full suite is green at `032efa1` — 3241 tests, 3222 passed, 0 failed, 19 skipped, 28:55 on an idle
+erased machine, and it is a rare run with no environmental red at all.** Its class table is re-taken in
+CLAUDE.md, together with the finding that **a single class's seconds are noisier than they look**: at 160
+classes across four clones, which classes share a clone moves them, and two ten-test classes went
+opposite ways by ~45% and ~25% this run with no change to either. **Nothing is owed.**
 
-**A Release build of `2bef347` is on the owner's iPad and is many merges stale.**
+**A Release build of `032efa1` is on the owner's iPad**, installed and confirmed by the owner. The
+first `install` failed with `CoreDeviceError 4000` — a *connection* error the deploy section did not
+carry — and `devicectl device info details` re-established the tunnel exactly as it does for the
+documented `1011`, after which the install succeeded. The device read `available (paired)` throughout.
 
 ## What stage 8 settled, because it is easy to re-open by accident
 
@@ -95,19 +96,31 @@ an isolated run says otherwise. Its class table is re-taken in CLAUDE.md — **n
   texture. §13's "unmeasured" entry is retired. The one term that is not bounded — a corner-to-corner
   stroke at 16383² makes a canvas-sized group — is inherent to §2.11 rather than to this implementation.
 
-## Two rulings the owner made this pass that outlive the stage
+## Four rulings the owner made this pass that outlive the stage
 
 - **§2.20 — a brush parameter is changed in the brush editor and nowhere else.** The side toolbar keeps
   size and opacity, the artist's own two numbers, and **gains nothing, ever**. The navigation is ruled
-  with it: tapping the brush icon while it is already selected opens the brushes menu — the library in
-  its folders, with an **Add brush** button that is where the importers land — one tap selects a brush,
-  and a second tap on the selected brush opens the editor. `StrokeSettingsPanel`'s pressure, spacing and
-  stabilization sliders are what that editor **absorbs**; they are not a second home. A Flow slider
-  built into that panel during stage 8 was reverted under this ruling.
-- **§2.21 — an imported brush arrives with its dynamics mapped, not merely its tip.** So §12 stage 12 is
-  an **adapter onto §6's matrix** rather than a bitmap reader: what the file says about pressure, tilt,
-  spacing, jitter and scatter becomes rows, and what it does not say is left at the neutral rather than
-  invented.
+  with it: tapping the brush icon while it is already selected opens the brushes menu, one tap selects,
+  and a second tap on the selected brush opens the editor. A Flow slider built into the stroke panel
+  during stage 8 was reverted under this ruling.
+- **§2.21 — an imported brush arrives with its dynamics mapped, not merely its tip**, so §12 stage 12 is
+  an **adapter onto §6's matrix** rather than a bitmap reader.
+- **§2.22 — a modulation row carries a second input whose reading multiplies the first.** The owner
+  handed the choice back and named the criterion: *"clean architecture is critical so it could be
+  replaced easily."* A flat second slot **is** a one-row nested matrix, so CSP's nested `amount` can
+  subsume it later with nothing un-built — where nesting first would have made the hot per-dab loop
+  recursive. **A second input attenuates**; `amount` stays the only signed, unclamped term.
+- **§2.23 — not every brush is a dab walk.** The owner's fill brush (draw a contour, it fills at
+  pen-up) and its siblings are **unscheduled**, and the ruling is a constraint on everything before
+  them: a stored stroke becomes ink at **one site per tier** and `VectorStroke` knows nothing about
+  dabs, so such a brush needs no new storage and no format change. What must not happen is "walk the
+  path and stamp" leaking into a third place.
+
+**And one spec claim was refuted by the code**: §8.2 said brush groups should reuse the layer tree.
+`Layer`/`LayerFolder` are two concrete layer-shaped structs with no node generic over a payload, and a
+`LayerFolder` **has no ordering field at all** — position is derived from where its contents sit, so an
+empty folder sorts to the top and a new brush group would have jumped the moment it was filled. Groups
+are a flat list, and §8.2 says so now.
 
 ## Filed rather than fixed, and each is a decision rather than a backlog entry
 
@@ -151,14 +164,28 @@ unstarted and the last group needs a design conversation each.
 ## Traps this pass paid for
 
 - **`SendMessage` is documented and not available.** `ListAgents` prints a subagent's address and tells
-  you to message it; the tool is in neither the available nor the deferred set, and two searches found
-  nothing. **So a brief cannot be corrected once the agent is running** — get the brief right, or accept
-  reverting afterwards. The owner believes previous sessions had it, so this may be a bug rather than a
-  design; do not spend context on it.
+  you to message it; the tool is in neither the available nor the deferred set. **So a brief cannot be
+  corrected once the agent is running** — get it right, or accept reverting afterwards. The owner
+  believes previous sessions had it; do not spend context on it.
 - **An agent with the full tool set spawns its own subagents**, so "two agents" became four. Say *"do
   not spawn subagents of your own"* in every brief.
-- **A worker's report is evidence, not fact.** Verify against the tree and the xcresult before merging.
-  This one held up on every count checked, including the test count re-run after a local edit — but the
-  local edit is the point: the count the worker reports is for the tree the worker had.
-- **Four of five prescriptions in this pass's build brief were refuted**, which is now five passes
-  running. Invite refutation explicitly; it is where the value is.
+- **`git merge --ff-only tmp/x` run from inside the tmp worktree merges nothing** and says "Already up
+  to date". Always `git -C <main worktree>`. This file's memory records it four times; it happened a
+  fifth.
+- **`CoreDeviceError 4000` is a connection error the deploy section did not carry**, and it takes the
+  same cure as the documented `1011`: `devicectl device info details` re-establishes the tunnel and the
+  next install succeeds. Retrying `install` alone does not.
+- **Four of five prescriptions in each build brief were refuted again**, which is six passes running.
+  This pass: the merge could not be given a computed bound (`ResponseCurve` does not clamp, so `Σ|amount|`
+  bounds nothing and a short box *clips ink*); a fractional clip antialiases a group's outer pixel row;
+  §2.22's channel needed a whole plane rather than an offset, because an offset inside an output's block
+  halves the stride and reintroduces the collision that field's own doc reasons about; `readsTaper` had
+  the same blind spot as `isPressureOnly` and the brief named only one; and §8.2's layer-tree reuse was
+  wrong three ways over.
+- **A test in a brief can be one that passes against the feature not being built.** §2.22's brief asked
+  for `random × pressure` against `random` + `pressure` — but those differ *anyway* when the gain is
+  ignored. It needed a third render to be the operand that catches it. The two-operands rule applies to
+  the orchestrator's briefs, not only to the worker's code.
+- **A per-class second is noisier than it looks** at 160 classes over four clones: two unchanged
+  ten-test classes moved ~45% and ~25% in opposite directions between consecutive full runs. Trend the
+  total; treat one class's rise as signal only when it repeats.

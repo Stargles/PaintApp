@@ -349,6 +349,35 @@ same class, the same tests, thirteen seconds slower. That is the shape of a clas
 observation, and this file has twice recorded one being discovered late.
 
 
+**MEASURED at `032efa1` on an idle machine with the simulator erased first — 3241 tests, 3222 passed,
+**0 failed**, 19 skipped, 28:55.** A full run with no environmental red at all is rare enough here to be
+worth stating, and it is the second in this file's history. graphify's background rebuild — which the
+post-commit hook fires and which is the obvious suspect for a busy machine — last ran 84 minutes before
+the suite started, so this is an idle-machine number.
+
+| class | seconds | tests |
+|---|---|---|
+| `SelectionAndMoveUITests` | 398 | 10 |
+| `PerfBaselineTests` | 352 | 57 |
+| `SandwichCompositingUITests` | 265 | 10 |
+| `BlendModesAndCompositorUITests` | 259 | 8 |
+| `LayerPanelControlsUITests` | 229 | 8 |
+| `LayerFolderAndMaskMenuUITests` | 201 | 7 |
+| `EraserAndPersistenceUITests` | 199 | 7 |
+| `CuttingModesUITests` | 187 | 4 |
+| `ToolPanelsUITests` | 173 | 10 |
+| `LayerStackUITests` | 165 | 5 |
+
+**4,537 class-seconds across 160 classes**, against 4,236 across 158 at `7605169` — **+301 s for +29
+tests, which breaks the "a new test is close to free" run this file had recorded five times.** Only 98 s
+of that is the new work (`BrushMenuUITests`, 5 tests, ~20 s each, and they are dear because each is a
+cold start with the library file deleted). **The other ~200 s is on classes that did not change**, and it
+is not a slowdown: `SelectionAndMoveUITests` rose 274 → 398 on the same ten tests while
+`SandwichCompositingUITests` fell 346 → 265 on the same ten. **Per-class seconds are not independent of
+which classes a clone is co-scheduled with**, so at 160 classes across four clones that pairing is itself
+a source of variance — which means this table's individual rows are noisier than they look and only the
+total is worth trending. Read a single class's rise as a signal only when it repeats.
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.
