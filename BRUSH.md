@@ -1209,8 +1209,8 @@ different number. The fixed half of that instruction is exactly right and is wha
 
 ### 7.1 The brushes menu — the shape, taken from the owner's own reference
 
-**BUILT 2026-09-04** — `StrokeSettingsPanel` *is* this menu now, `BrushEditorView` is the shell behind
-§2.20's second tap, and the six sliders the panel used to show inline moved into it. Four notes from
+**BUILT 2026-09-04** — `StrokeSettingsPanel` *is* this menu now, §2.20's second tap opens the editor,
+and the six sliders the panel used to show inline moved into it. Four notes from
 building it are folded into the bullets below and marked; everything else is as it was designed.
 
 The owner supplied Procreate's brush menu as the reference and §2.20 rules the navigation. What the
@@ -1260,14 +1260,16 @@ reference actually shows, and which of it is a decision rather than decoration:
   (`brushPanel.importCustomBrush`); what moved is that it is no longer a row under six sliders, which
   is the below-the-fold placement the owner reported having to scroll to find.
 - **Not copied**: Procreate's per-brush cloud-download glyph. Every brush here is local.
-- **BUILT, and it is a deviation worth recording: the editor is pushed inside this panel, not presented
-  as a sheet.** The Size slider raises a **real-size stamp preview** that `DrawingView` draws in its own
-  overlay, positioned against the slider's frame in the drawing view's coordinate space
-  (`SizePreviewRequest`, `SizePreviewWindow`). A sheet presents *above* that overlay, so holding the
-  Size slider inside one would raise a window nobody can see — the control would look inert. Pushing
-  keeps one view tree, one coordinate space, and `activePanel` on `.brush`, which is also what
-  `CanvasTouchOwner` and the draw-to-dismiss path already read. §7.2's editor is a much bigger surface
-  and may want its own presentation; if it takes one, that overlay is what it has to solve.
+- **BUILT, and the presentation is a deviation worth recording: the editor is a layer of
+  `DrawingView`'s own tree, not a sheet.** It was a push *inside* this panel for one day and is a full
+  screen since §2.24; the constraint is the same either way. The Size slider raises a **real-size stamp
+  preview** that `DrawingView` draws in its own `overlayPreferenceValue`, positioned against the
+  slider's frame in the drawing view's coordinate space (`SizePreviewRequest`, `SizePreviewWindow`). A
+  sheet or a `.fullScreenCover` presents *above* that overlay, so holding the Size slider inside one
+  would raise a window nobody can see — the control would look inert. A layer keeps one view tree, one
+  coordinate space, one preference chain, and `activePanel` on `.brush`, which is also what
+  `CanvasTouchOwner` and the draw-to-dismiss path already read. §7.2 records where in the tree that
+  layer has to sit.
 - **BUILT: the marker for "the menu is on screen" is on the group column's `ScrollView`, not on the
   enclosing `VStack`.** An `accessibilityIdentifier` on a SwiftUI container is *inherited by its
   descendants* rather than making an element of its own — it produced no queryable node at all, and it
@@ -1291,6 +1293,13 @@ because the 64-point side toolbar is the stack's *first child* and a layer insid
 it showing. MEASURED both ways on the simulator. `ToolsAndSelectionUITests`'
 `testPressingTheBrushSizeSliderRaisesTheRealSizeStampPreview` drives this screen's Size slider and is
 unchanged, which is the pin that the window still comes up.
+
+**It needs no entry in `CanvasPresentation`, and being a layer is the reason.**
+[MENU_PRESENTATION_CENSUS.md](MENU_PRESENTATION_CENSUS.md)'s registry exists for *system*
+presentations, whose teardown can interrupt a stroke drawn underneath them. This one covers the canvas
+completely and opaquely, so no touch reaches a stroke while it is up and there is nothing for
+`dismissPresentationsOverLiveCanvas()` to close. `activePanel` is left on `.brush` throughout, so
+`CanvasTouchOwner` is fed the value it always was.
 
 Three columns, and the middle one is §2.24's own shape rather than a category list:
 

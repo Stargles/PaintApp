@@ -295,7 +295,7 @@ struct BrushEditorScreen: View {
         .accessibilityIdentifier("\(idPrefix).addRow.\(output.rawValue)")
 
         if brush.modulations.indices(for: output).count > 1 {
-            limitNote(.severalChainsPerOutputAreSummed)
+            limitNote(.severalChainsPerOutputAreSummed, scope: output.rawValue)
         }
     }
 
@@ -350,7 +350,7 @@ struct BrushEditorScreen: View {
                                     inputName: row.input.kind.displayName,
                                     idPrefix: "\(idPrefix).curve.\(rowID)",
                                     onEditEnded: { commit() })
-            limitNote(.oneCurveRampPerChain)
+            limitNote(.oneCurveRampPerChain, scope: rowID)
 
             HStack(spacing: 8) {
                 Text("Then scale by")
@@ -376,20 +376,25 @@ struct BrushEditorScreen: View {
                           identifier: "\(idPrefix).secondLambda.\(rowID)")
             }
 
-            limitNote(.oneRandomiserPerChain)
-            limitNote(.moduleOrderIsFixed)
+            limitNote(.oneRandomiserPerChain, scope: rowID)
+            limitNote(.moduleOrderIsFixed, scope: rowID)
         }
         .padding(12)
         .background(Color.white.opacity(0.05))
         .cornerRadius(8)
     }
 
-    private func limitNote(_ limit: BrushChainLimit) -> some View {
+    /// One of `BrushChainLimit`'s sentences, drawn where the limit bites.
+    ///
+    /// **`scope` keeps the identifier unique**, because a limit that belongs to a *chain* is drawn
+    /// once per chain and an output can carry several: two elements answering to one identifier is
+    /// an ambiguous query, which is the same family of defect as an identifier on a container.
+    private func limitNote(_ limit: BrushChainLimit, scope: String) -> some View {
         Text(limit.explanation)
             .font(.caption2)
             .foregroundColor(.white.opacity(0.35))
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("\(idPrefix).limit.\(limit.rawValue)")
+            .accessibilityIdentifier("\(idPrefix).limit.\(limit.rawValue).\(scope)")
     }
 
     private func inputPicker(selection: BrushInputKind, identifier: String,
