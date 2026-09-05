@@ -848,6 +848,12 @@ back. `commit()`, which used to run on every slider lift and every module edit, 
 `ResponseCurveEditorView`'s `onEditEnded` — there is no longer a *"when does this reach the library"* for
 a control to answer.
 
+**One thing Cancel deliberately does *not* undo: an import.** Bringing a tip or a texture in through
+the editor's pickers writes a file into §2.26's collection, and §2.26 rules that *"importing adds to a
+collection rather than to whichever brush happens to be open"* — so the file stays and only the
+brush's *pointer* at it is discarded. That is the same answer §2.26 already gives and it is written
+down here because "Cancel discards your changes" invites the opposite reading.
+
 **Size and opacity are the one thing Cancel has to undo.** They are the artist's (§2.20), they live on
 `CanvasManager` and the side toolbar shows them, so they are written **live** — a size that only appeared
 on Done would read as a slider that did nothing. Cancel restores what they were when the screen opened.

@@ -161,7 +161,6 @@ final class BrushScratchPad: UIView {
     }
     private var finished: [FinishedStroke] = []
 
-
     /// **True while the only thing on the pad is the opening sample stroke.**
     ///
     /// It is what makes the sample a *resting state* rather than a one-shot: while it holds, moving a

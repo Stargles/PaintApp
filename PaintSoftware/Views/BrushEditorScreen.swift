@@ -1006,6 +1006,11 @@ struct BrushEditorScreen: View {
     /// **§2.31's Cancel: the library is byte-identical afterwards.** Nothing to undo on the brush —
     /// no edit ever left the draft — so the only state to restore is the artist's own two numbers,
     /// which are `CanvasManager`'s rather than the brush's and were being written live.
+    ///
+    /// **An import is not undone, and that is §2.26 rather than an oversight.** A tip or texture
+    /// brought in through the pickers goes into the *collection* — *"importing adds to a collection
+    /// rather than to whichever brush happens to be open"* — so the file stays and only this brush's
+    /// pointer at it is discarded with the draft.
     private func cancel() {
         if let openedSize { canvasManager[keyPath: spec.size] = openedSize }
         if let openedOpacity { canvasManager[keyPath: spec.opacity] = openedOpacity }
