@@ -4,11 +4,15 @@ import SwiftUI
 /// and the eraser expose the same knobs over two parallel sets of properties (`selectedBrush`/
 /// `brushSize`/`brushOpacity` vs `selectedEraserBrush`/`eraserSize`/`eraserOpacity`), so the panel
 /// itself is shared and only this differs — see `BrushSettingsPanel`/`EraserSettingsPanel`.
+///
+/// **There is no `presets` keypath any more.** It used to name two different arrays —
+/// `availableBrushes` for the brush, `availableEraserBrushes` (the five built-ins, no imports) for
+/// the eraser — and BRUSH.md §11 rules that distinction away: *the eraser is a brush*, so an
+/// imported tip erases with no eraser work. One library, two selections.
 struct StrokeSettingsSpec {
     let title: String
     /// Prefix for every control's accessibility identifier, e.g. "brushPanel" → "brushPanel.sizeSlider".
     let idPrefix: String
-    let presets: KeyPath<CanvasManager, [Brush]>
     let selectedBrush: ReferenceWritableKeyPath<CanvasManager, Brush>
     let size: ReferenceWritableKeyPath<CanvasManager, CGFloat>
     let opacity: ReferenceWritableKeyPath<CanvasManager, Double>
@@ -19,90 +23,66 @@ struct StrokeSettingsSpec {
     let previewTool: SizePreviewTool
 }
 
-/// Procreate-style stroke settings: a horizontally-scrolling preset picker and sliders for every
-/// `Brush` setting expected to be user-tunable day to day (size, opacity, pressure dynamics,
-/// stabilization, spacing).
+/// **The brushes menu** — BRUSH.md §7.1, reached by §2.20's second tap on the tool icon.
 ///
-/// **Opacity here is BRUSH.md §2.11's cap** — what the whole stroke may reach however often it
-/// crosses itself — and it is the artist's own number, set here and in the side toolbar and nowhere
-/// else. Flow, which is what one stamp lays down, is a *brush* parameter: its base belongs to §12
-/// stage 10's brush editor with every other brush parameter, and only the pressure amount that
-/// rides on it is exposed here, as it always was.
+/// Two independently scrolling columns: the groups on the left with the open one highlighted, that
+/// group's brushes on the right, one row each showing the brush's **name over a stroke of itself**.
+/// The open group's name and a chevron sit top-left, the `+` top-right.
 ///
-/// `accessory` is extra content placed between the sliders and the preview (the paint brush's
-/// custom-texture import; the eraser has none), and `preview` is the panel's own swatch, which
-/// differs enough between the two to stay caller-supplied.
-struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
+/// ## What this replaced, and why the sliders moved
+///
+/// It was a horizontal strip of five preset icons above six sliders — Size, Opacity, Pressure →
+/// Size, Pressure → Flow, Stabilization, Spacing — with the Import Custom Brush row below them,
+/// **below the fold**, which the owner reported having to scroll to find. BRUSH.md §2.20 rules that
+/// *"a brush parameter is changed in the brush editor and nowhere else"*, so those six are now
+/// behind the second tap (`BrushEditorView`) and the importer is on the `+`, which is the top-right
+/// corner of the first thing the artist sees.
+///
+/// ## The editor is pushed inside this panel rather than presented as a sheet
+///
+/// A sheet was the obvious form and is wrong here for one measurable reason: the size slider raises a
+/// **real-size stamp preview** drawn by `DrawingView`'s own overlay, positioned against the slider's
+/// frame in the drawing view's coordinate space (`SizePreviewRequest`, `SizePreviewWindow`). A sheet
+/// is a separate presentation above that overlay, so the window an artist raises by holding the Size
+/// slider would be drawn *behind* the sheet — the control would look like it does nothing. Pushing
+/// keeps one view tree, one coordinate space, and `activePanel` on `.brush`, which is also what
+/// `CanvasTouchOwner` and the draw-to-dismiss behaviour already read.
+///
+/// `accessory` is extra content below the columns (the eraser's vector-mode picker; the brush has
+/// none), `addMenuItems` is what the `+` offers beyond New Group (the brush's tip importer), and
+/// `preview` is the panel's own swatch, which now sits in the editor beside the sliders it reacts to.
+struct StrokeSettingsPanel<Accessory: View, AddItems: View, Preview: View>: View {
     @ObservedObject var canvasManager: CanvasManager
+    @ObservedObject var library: BrushLibraryStore
     let spec: StrokeSettingsSpec
     @ViewBuilder let accessory: () -> Accessory
+    @ViewBuilder let addMenuItems: () -> AddItems
     @ViewBuilder let preview: () -> Preview
+
+    /// Which group's brushes the right column is showing. View state rather than manager state: the
+    /// panel is rebuilt on every `activePanel` switch, and opening onto the group holding whatever is
+    /// selected is a better answer than remembering where the artist last was.
+    @State private var openGroupID: UUID?
+    /// §2.20's second tap. See the type's note on why this is a push and not a sheet.
+    @State private var isEditingBrush = false
+    @State private var renamingGroup: BrushGroup?
+    @State private var renameText = ""
 
     private var brush: Brush { canvasManager[keyPath: spec.selectedBrush] }
 
+    private var openGroup: BrushGroup? {
+        if let openGroupID, let found = library.groups.first(where: { $0.id == openGroupID }) { return found }
+        return library.groupToOpen(forSelected: brush.id)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text(spec.title)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding([.horizontal, .top])
-
-                presetPicker
-
-                sliderRow(
-                    title: "Size",
-                    valueText: "\(Int(canvasManager[keyPath: spec.size]))",
-                    value: sizeBinding,
-                    range: 1...200,
-                    idSuffix: "sizeSlider",
-                    // `.leading`: this panel is a 300-point dropdown pinned to the trailing edge and
-                    // the hand adjusting the slider is inside its bounds, so the window is only
-                    // reliably uncovered past the panel's leading edge.
-                    preview: SizePreviewRequest(sliderID: "\(spec.idPrefix).sizeSlider",
-                                                tool: spec.previewTool, side: .leading)
-                )
-                sliderRow(
-                    title: "Opacity",
-                    valueText: "\(Int(canvasManager[keyPath: spec.opacity] * 100))%",
-                    value: opacityBinding,
-                    range: 0...1,
-                    idSuffix: "opacitySlider"
-                )
-                sliderRow(
-                    title: "Pressure → Size",
-                    valueText: "\(Int(pressureAmount(.size) * 100))%",
-                    value: pressureAmountBinding(.size),
-                    range: 0...1,
-                    idSuffix: "pressureSizeSlider"
-                )
-                sliderRow(
-                    title: "Pressure → Flow",
-                    valueText: "\(Int(pressureAmount(.flow) * 100))%",
-                    value: pressureAmountBinding(.flow),
-                    range: 0...1,
-                    idSuffix: "pressureFlowSlider"
-                )
-                sliderRow(
-                    title: "Stabilization",
-                    valueText: "\(Int(brush.stroke.stabilization * 100))%",
-                    value: brushBinding(\.stroke.stabilization),
-                    range: 0...1,
-                    idSuffix: "stabilizationSlider"
-                )
-                sliderRow(
-                    title: "Spacing",
-                    valueText: "\(Int(brush.dab.spacing * 100))%",
-                    value: brushBinding(\.dab.spacing),
-                    range: 0.02...0.5,
-                    idSuffix: "spacingSlider"
-                )
-
-                accessory()
-
-                preview()
-
-                Spacer(minLength: 8)
+        Group {
+            if isEditingBrush {
+                BrushEditorView(canvasManager: canvasManager, library: library, spec: spec,
+                                onBack: { isEditingBrush = false },
+                                preview: preview)
+            } else {
+                menu
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -111,158 +91,217 @@ struct StrokeSettingsPanel<Accessory: View, Preview: View>: View {
         // the next canvas touch), and a slider that goes away never sends `onEditingChanged(false)`.
         // Without this the window would be stranded on screen with nothing left to lower it.
         .onDisappear { canvasManager.sizePreview.dismiss() }
-    }
-
-    // MARK: - Preset picker
-
-    private var presetPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(canvasManager[keyPath: spec.presets]) { preset in
-                    presetButton(preset)
-                }
+        .onAppear { openGroupID = library.groupToOpen(forSelected: brush.id)?.id }
+        .alert("Rename Group", isPresented: Binding(get: { renamingGroup != nil },
+                                                    set: { if !$0 { renamingGroup = nil } })) {
+            TextField("Name", text: $renameText)
+                .accessibilityIdentifier("\(spec.idPrefix).renameField")
+            Button("Cancel", role: .cancel) { renamingGroup = nil }
+            Button("Rename") {
+                if let group = renamingGroup { library.renameGroup(group.id, to: renameText) }
+                renamingGroup = nil
             }
-            .padding(.horizontal)
+            .accessibilityIdentifier("\(spec.idPrefix).renameConfirm")
         }
     }
 
-    private func presetButton(_ preset: Brush) -> some View {
-        let isSelected = preset.id == brush.id
+    // MARK: - The menu
+
+    private var menu: some View {
+        VStack(spacing: 0) {
+            header
+            Divider().overlay(Color.white.opacity(0.15))
+            HStack(spacing: 0) {
+                groupColumn
+                Divider().overlay(Color.white.opacity(0.15))
+                brushColumn
+            }
+            accessory()
+        }
+        .accessibilityIdentifier("\(spec.idPrefix).library")
+    }
+
+    /// The set name with its chevron top-left, the `+` top-right — §7.1.
+    ///
+    /// The chevron is not decoration: it opens the **open group's own** menu, which is where rename
+    /// and reordering live. A library whose groups could not be renamed or ordered would be a list
+    /// the artist cannot organise, which is the half of §2.16 that is not "make your own".
+    private var header: some View {
+        HStack(spacing: 6) {
+            Menu {
+                Button("Rename…") {
+                    renameText = openGroup?.name ?? ""
+                    renamingGroup = openGroup
+                }
+                .accessibilityIdentifier("\(spec.idPrefix).renameGroup")
+                Button("Move Up") { if let id = openGroup?.id { library.moveGroup(id, by: -1) } }
+                Button("Move Down") { if let id = openGroup?.id { library.moveGroup(id, by: 1) } }
+                if library.groups.count > 1 {
+                    Button("Delete Group", role: .destructive) {
+                        guard let id = openGroup?.id else { return }
+                        library.removeGroup(id)
+                        openGroupID = library.groups.first?.id
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(openGroup?.name ?? spec.title)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+            .accessibilityIdentifier("\(spec.idPrefix).groupMenu")
+
+            Spacer(minLength: 4)
+
+            Menu {
+                addMenuItems()
+                Button("New Group") {
+                    openGroupID = library.addGroup().id
+                }
+                .accessibilityIdentifier("\(spec.idPrefix).newGroup")
+            } label: {
+                Image(systemName: "plus")
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("\(spec.idPrefix).addButton")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var groupColumn: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 0) {
+                ForEach(library.groups) { group in
+                    groupRow(group)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(width: 106)
+    }
+
+    private func groupRow(_ group: BrushGroup) -> some View {
+        let isOpen = group.id == openGroup?.id
         return Button {
-            spec.selectPreset(canvasManager, preset)
+            openGroupID = group.id
         } label: {
-            VStack(spacing: 6) {
-                Image(systemName: Self.icon(for: preset))
-                    .font(.title2)
-                    .foregroundColor(isSelected ? .blue : .white)
-                    .frame(width: 44, height: 44)
-                    .background(isSelected ? Color.white.opacity(0.2) : Color.clear)
-                    .cornerRadius(8)
-                Text(preset.name)
-                    .font(.caption2)
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.caption)
+                    .foregroundColor(isOpen ? .blue : .white.opacity(0.7))
+                Text(group.name)
+                    .font(.caption)
                     .foregroundColor(.white)
                     .lineLimit(1)
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 9)
+            .background(isOpen ? Color.white.opacity(0.18) : Color.clear)
+            .contentShape(Rectangle())
         }
-        .accessibilityIdentifier("\(spec.idPrefix).preset.\(preset.name)")
+        .accessibilityIdentifier("\(spec.idPrefix).group.\(group.name)")
+        .accessibilityAddTraits(isOpen ? [.isSelected] : [])
     }
 
-    /// **The icon says what the tip is, and the label under it says which preset.**
-    ///
-    /// It used to switch on `BrushShape`, which had a case per preset and so could give the pencil a
-    /// pencil and the pen a nib. Those four cases were one dab — the same `stampCircle` at different
-    /// hardnesses — and `BrushTip` collapsed them, so an icon claiming otherwise would be drawing a
-    /// distinction the renderer does not make. What is left is honest: a disc, filled or hollow by
-    /// the falloff the artist will actually see, and the tip's own picture for a stamp. The preset's
-    /// **name** is already rendered directly beneath and is what tells "Pencil" from "Pen".
-    ///
-    /// The built-in arm switches exhaustively on `BuiltInBrushTexture` so §12 stage 9's generated
-    /// tips cannot silently inherit the square's icon.
-    private static func icon(for brush: Brush) -> String {
-        switch brush.tip {
-        case .round:
-            return brush.dab.hardness >= 0.5 ? "circle.fill" : "circle"
-        case .stamp(.builtIn(let tip)):
-            switch tip {
-            case .square: return "square.fill"
-            }
-        case .stamp(.imported):
-            return "photo"
-        }
-    }
-
-    // MARK: - Slider row helper
-
-    /// `preview` non-nil marks this row as a *size* slider: holding it raises the real-size stamp
-    /// window beside the panel. This hook only covers the **lift** — a press that never moves
-    /// produces no `onEditingChanged` at all, so the touch-down half the owner actually asked for
-    /// lives in `.sizePreviewSlider`, which carries the measurement.
-    private func sliderRow(title: String, valueText: String, value: Binding<Double>, range: ClosedRange<Double>,
-                           idSuffix: String, preview: SizePreviewRequest? = nil) -> some View {
-        VStack(alignment: .leading) {
-            Text("\(title): \(valueText)")
-                .foregroundColor(.white)
-            Slider(value: value, in: range, onEditingChanged: { isEditing in
-                guard let preview else { return }
-                canvasManager.sizePreview.editingChanged(isEditing, for: preview)
-            })
-            .accessibilityIdentifier("\(spec.idPrefix).\(idSuffix)")
-            .sizePreviewSlider(preview, canvasManager: canvasManager)
-        }
-        .padding(.horizontal)
-    }
-
-    // MARK: - Bindings
-
-    /// Drives both the live size (what the toolbar's own size slider and `stampPath` read) and
-    /// `selectedBrush.size`, so this slider and the toolbar's stay in lockstep no matter which one
-    /// the user last touched. Note this only tweaks the *active* brush in place — tapping away to
-    /// another preset and back re-copies that preset's original values from `BrushLibrary`/
-    /// `customBrushes` rather than remembering the tweak; persisting per-preset edits is real
-    /// follow-up work, not implemented here.
-    private var sizeBinding: Binding<Double> {
-        Binding(
-            get: { Double(canvasManager[keyPath: spec.size]) },
-            set: { newValue in
-                canvasManager[keyPath: spec.size] = CGFloat(newValue)
-                canvasManager[keyPath: spec.selectedBrush].size = CGFloat(newValue)
-            }
-        )
-    }
-
-    private var opacityBinding: Binding<Double> {
-        Binding(
-            get: { canvasManager[keyPath: spec.opacity] },
-            set: { newValue in
-                canvasManager[keyPath: spec.opacity] = newValue
-                canvasManager[keyPath: spec.selectedBrush].opacity = newValue
-            }
-        )
-    }
-
-    /// **"Pressure → Size" and "Pressure → Flow", in BRUSH.md §6's matrix.**
-    ///
-    /// The slider is the **amount** of a `size ← pressure` / `flow ← pressure` row, and what is left
-    /// over is the output's base: `base + amount == 1` is what makes a full press reach full width and
-    /// full coverage. That pairing is *this panel's* convention rather than a rule of the model — the
-    /// matrix is perfectly happy with a brush that never reaches either — so it lives here and not on
-    /// `Brush`.
-    ///
-    /// **It survives stage 8 unchanged, and the reason is a ruling about where controls live.** A
-    /// base slider for flow would have to break the pairing, since setting a base and then touching
-    /// this slider would write `1 - amount` over it. There is no base slider: every brush parameter
-    /// belongs to §12 stage 10's editor, and the two rows here are what that editor absorbs. So the
-    /// convention holds for both outputs and the panel gained nothing at stage 8 but an honest label
-    /// — `opacity ← pressure` drove the dab's coverage, and the output that does that is now named
-    /// `flow`.
-    ///
-    /// The row's **curve** is untouched. A preset's size row ramps from its own floor (what
-    /// the width a feather-light touch keeps), and moving this slider must not flatten it.
-    private func pressureAmount(_ output: BrushOutput) -> Double {
-        brush.modulations.amount(for: output, from: .pressure)
-    }
-
-    private func pressureAmountBinding(_ output: BrushOutput) -> Binding<Double> {
-        Binding(
-            get: { pressureAmount(output) },
-            set: { newValue in
-                var edited = canvasManager[keyPath: spec.selectedBrush]
-                edited.modulations.setAmount(newValue, for: output, from: .pressure)
-                switch output {
-                case .size: edited.dab.size = 1 - newValue
-                case .flow: edited.dab.flow = 1 - newValue
-                default: break
+    private var brushColumn: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            // Lazy so a group of thirty brushes renders the strokes for the rows on screen and not
+            // for the twenty-two below the fold — §7.1's *"a panel that stamps thirty strokes
+            // synchronously on open is a defect"*. `BrushPreviewRow` then takes its own render off
+            // the main thread; the two together are what keep opening the menu free.
+            LazyVStack(spacing: 0) {
+                ForEach(openGroup?.brushes ?? []) { candidate in
+                    brushRow(candidate)
                 }
-                canvasManager[keyPath: spec.selectedBrush] = edited
+                if openGroup?.brushes.isEmpty ?? true {
+                    Text("No brushes in this group yet — add one with +")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.6))
+                        .multilineTextAlignment(.leading)
+                        .padding(12)
+                }
             }
-        )
+            .padding(.vertical, 4)
+        }
+        .frame(maxWidth: .infinity)
     }
 
-    private func brushBinding(_ path: WritableKeyPath<Brush, Double>) -> Binding<Double> {
-        Binding(
-            get: { brush[keyPath: path] },
-            set: { canvasManager[keyPath: spec.selectedBrush][keyPath: path] = $0 }
-        )
+    /// **One tap selects, a second tap on the already-selected row opens the editor** — §2.20.
+    ///
+    /// The row's own highlight is what makes that unambiguous, so it is exposed as an accessibility
+    /// trait as well as drawn: a test that only read `canvasManager.selectedBrush` would stay green
+    /// against a menu that had stopped highlighting anything, and the artist would have no way to
+    /// know which tap they were about to make.
+    private func brushRow(_ candidate: Brush) -> some View {
+        let isSelected = candidate.id == brush.id
+        return Button {
+            if isSelected {
+                isEditingBrush = true
+            } else {
+                spec.selectPreset(canvasManager, candidate)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(candidate.name)
+                    .font(.caption2)
+                    .foregroundColor(isSelected ? .blue : .white)
+                    .lineLimit(1)
+                BrushPreviewRow(brush: candidate)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.white.opacity(0.18) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("\(spec.idPrefix).brush.\(candidate.name)")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
+}
 
+/// One row's rendered stroke — BRUSH.md §7.1's *"a brush's row is its name over a rendered stroke of
+/// itself"*.
+///
+/// Renders **off the main thread** and only when the row is actually built, which with the enclosing
+/// `LazyVStack` means when it is on screen. A cache hit is taken synchronously so a row that has
+/// been seen before never flickers through the placeholder.
+struct BrushPreviewRow: View {
+    let brush: Brush
+    var size = CGSize(width: 156, height: 26)
+
+    @State private var image: UIImage?
+
+    private var key: BrushPreviewKey { BrushPreviewKey(brush: brush, size: size, scale: 2) }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Color.clear.frame(width: size.width, height: size.height)
+            if let image = image ?? BrushPreviewCache.shared.cached(key) {
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: size.width, height: size.height)
+                    .accessibilityHidden(true)
+            }
+        }
+        .task(id: brush) {
+            if BrushPreviewCache.shared.cached(key) != nil { return }
+            let requested = brush
+            let target = size
+            let rendered = await Task.detached(priority: .userInitiated) {
+                BrushPreviewCache.shared.image(for: requested, size: target, scale: 2, color: .white)
+            }.value
+            guard !Task.isCancelled, requested == brush else { return }
+            image = rendered
+        }
+    }
 }

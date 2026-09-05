@@ -106,19 +106,21 @@ final class ToolPanelsUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
-        // Brush is the default tool, so a single tap opens its settings menu directly.
+        // Brush is the default tool, so a single tap opens its brushes menu directly. The probe is
+        // the menu's own two columns; the sliders it used to carry are behind the editor now
+        // (BRUSH.md §2.20), and this test is about the menu, not about them.
         let brushButton = app.buttons["toolbar.brushButton"]
         XCTAssertTrue(brushButton.waitForExistence(timeout: 5))
         brushButton.tap()
-        let sizeSlider = app.sliders["brushPanel.sizeSlider"]
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Brush menu should be open")
+        let library = app.otherElements["brushPanel.library"]
+        XCTAssertTrue(library.waitForExistence(timeout: 5), "Brush menu should be open")
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let p = safeOutsideCornerPoint(canvas)
         drawLine(on: canvas, from: p, to: CGVector(dx: p.dx + 0.12, dy: p.dy))
 
-        XCTAssertTrue(sizeSlider.waitForNonExistence(timeout: 3), "Continuing to draw should dismiss the open brush menu")
+        XCTAssertTrue(library.waitForNonExistence(timeout: 3), "Continuing to draw should dismiss the open brush menu")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "The stroke should have actually been drawn, not swallowed by the menu")
     }
 
@@ -210,10 +212,13 @@ final class ToolPanelsUITests: PaintUITestCase {
         XCTAssertFalse(app.otherElements["sizePreview.window"].exists,
                        "PREMISE: and no preview is on screen at rest")
 
-        // Brush is the default tool, so one tap opens its settings panel.
-        app.buttons["toolbar.brushButton"].tap()
+        // The Size slider moved into the brush editor with every other brush parameter (BRUSH.md
+        // §2.20), so reaching it is now the menu's second tap. The preview window it raises is drawn
+        // by `DrawingView`'s overlay against the slider's own frame, which is why the editor is a
+        // push inside the panel rather than a sheet over it — see `StrokeSettingsPanel`.
+        openBrushEditor(app)
         let sizeSlider = app.sliders["brushPanel.sizeSlider"]
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Brush panel should be open")
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Brush editor should be open")
 
         // Park the thumb under the middle of the track, so the press below lands on the thumb
         // rather than on bare track — which a slider ignores, and which would make this test pass
@@ -1184,10 +1189,13 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         XCTAssertTrue(eraserButton.isSelected)
         XCTAssertFalse(brushIsSelected(app), "Brush must stop reading as active once the eraser is selected")
 
-        eraserButton.tap() // Second tap: open its settings menu.
+        eraserButton.tap() // Second tap: open its brushes menu.
+        XCTAssertTrue(app.otherElements["eraserPanel.library"].waitForExistence(timeout: 5),
+                      "Eraser menu should be open, mirroring the brush's")
+        // Widen it so the drag below fully covers the stroke. The Size slider is behind the editor's
+        // door now (BRUSH.md §2.20); `setBrushSize` walks §2.20's second tap to reach it.
+        setBrushSize(app, tool: "eraser", normalized: 1.0)
         let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "Eraser menu should be open, mirroring the brush's")
-        sizeSlider.adjust(toNormalizedSliderPosition: 1.0) // Widen it so the drag below fully covers the stroke.
 
         drawLine(on: canvas, from: p, to: q) // Drag back over the same stroke to erase it.
         XCTAssertTrue(sizeSlider.waitForNonExistence(timeout: 3), "Continuing to erase should dismiss the open eraser menu")
@@ -1228,10 +1236,7 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         let eraserButton = app.buttons["toolbar.eraserButton"]
         XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
         eraserButton.tap() // select
-        eraserButton.tap() // open settings
-        let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
-        sizeSlider.adjust(toNormalizedSliderPosition: 1.0)
+        setBrushSize(app, tool: "eraser", normalized: 1.0) // menu, second tap, Size slider
 
         drawLine(on: canvas, from: CGVector(dx: 0.55, dy: 0.33), to: CGVector(dx: 0.78, dy: 0.33))
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.66, dy: 0.33)), "Erasing over the filled region should restore blank paper")
@@ -1265,10 +1270,7 @@ final class EraserAndPersistenceUITests: PaintUITestCase {
         let eraserButton = app.buttons["toolbar.eraserButton"]
         XCTAssertTrue(eraserButton.waitForExistence(timeout: 5))
         eraserButton.tap() // select
-        eraserButton.tap() // open settings
-        let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
-        sizeSlider.adjust(toNormalizedSliderPosition: 1.0)
+        setBrushSize(app, tool: "eraser", normalized: 1.0) // menu, second tap, Size slider
 
         drawLine(on: canvas, from: p, to: q)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: p.dx + 0.06, dy: p.dy)), "Erasing after a committed Move should reach the moved content")

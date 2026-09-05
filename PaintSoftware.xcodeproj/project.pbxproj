@@ -113,6 +113,9 @@
 		DEC0DE000000000000000006 /* LayerTreeCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */; };
 		DEC0DE000000000000000008 /* ViewPresetCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */; };
 		DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */; };
+		53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF25F37F990F45A8BD53227 /* PaintSoftware/Engine/BrushGroup.swift */; };
+		B260F52A04C5DBC81BB54DFD /* PaintSoftware/Engine/BrushLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83ACBEFCCAAC384FAEC9A331 /* PaintSoftware/Engine/BrushLibraryStore.swift */; };
+		48AA976125C7A0110E955471 /* PaintSoftware/Engine/BrushPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AF49D9FDA989935C7E9E6B7 /* PaintSoftware/Engine/BrushPreview.swift */; };
 		DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */; };
 		DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */; };
 		DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */; };
@@ -289,6 +292,8 @@
 		A75FC87AF0FDF6840F6B8144 /* PaintSoftware/Engine/ResponseCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */; };
 		D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */; };
 		CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */; };
+		7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */; };
+		9F9CBA62193522CA30FB3605 /* BrushMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2DE8EB33E6B333909BFB8F /* BrushMenuUITests.swift */; };
 		156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */ = {isa = PBXBuildFile; fileRef = 3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */; };
 /* End PBXBuildFile section */
 
@@ -412,6 +417,9 @@
 		DEC0DE000000000000000005 /* LayerTreeCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LayerTreeCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000007 /* ViewPresetCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ViewPresetCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibrary.swift; sourceTree = "<group>"; };
+		EAF25F37F990F45A8BD53227 /* PaintSoftware/Engine/BrushGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushGroup.swift; sourceTree = "<group>"; };
+		83ACBEFCCAAC384FAEC9A331 /* PaintSoftware/Engine/BrushLibraryStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibraryStore.swift; sourceTree = "<group>"; };
+		7AF49D9FDA989935C7E9E6B7 /* PaintSoftware/Engine/BrushPreview.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushPreview.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushStamper.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/MetalFillEngine.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterLayerTexture.swift; sourceTree = "<group>"; };
@@ -587,6 +595,8 @@
 		8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ResponseCurve.swift; sourceTree = "<group>"; };
 		FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTipLogicTests.swift; sourceTree = "<group>"; };
 		A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushModulationLogicTests.swift; sourceTree = "<group>"; };
+		A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushLibraryLogicTests.swift; sourceTree = "<group>"; };
+		DB2DE8EB33E6B333909BFB8F /* BrushMenuUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushMenuUITests.swift; sourceTree = "<group>"; };
 		3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-square.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -658,6 +668,8 @@
 			children = (
 				FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */,
 				A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */,
+				A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */,
+				DB2DE8EB33E6B333909BFB8F /* BrushMenuUITests.swift */,
 				8CE8823C6ABCC236DEE229B2 /* TimelineGraphBandLogicTests.swift */,
 				20B926A46A1B30146EE6BE03 /* PoseComponentsLogicTests.swift */,
 				01DD01B539A663E29F2EC7FC /* PoseBandLogicTests.swift */,
@@ -856,6 +868,9 @@
 				9A7B5C3D1E2F000000000D01 /* PaintSoftware/Engine/VectorEraser.swift */,
 				C9D0E1F2A3B4C5D6E7F80103 /* PaintSoftware/Services/ProjectBackupManager.swift */,
 				DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */,
+				EAF25F37F990F45A8BD53227 /* PaintSoftware/Engine/BrushGroup.swift */,
+				83ACBEFCCAAC384FAEC9A331 /* PaintSoftware/Engine/BrushLibraryStore.swift */,
+				7AF49D9FDA989935C7E9E6B7 /* PaintSoftware/Engine/BrushPreview.swift */,
 				DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */,
 				DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */,
 				5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */,
@@ -1057,6 +1072,8 @@
 				A75FC87AF0FDF6840F6B8144 /* PaintSoftware/Engine/ResponseCurve.swift in Sources */,
 				D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */,
 				CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */,
+				7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */,
+				9F9CBA62193522CA30FB3605 /* BrushMenuUITests.swift in Sources */,
 				A4690E8C20463AC5A565BA29 /* PaintSoftware/Views/TimelineGraphBand.swift in Sources */,
 				79EBF29EEADB4D5CA3903B81 /* PaintSoftware/Models/PoseComponents.swift in Sources */,
 				14B663FBCF7D75D535E037FD /* PoseComponentsLogicTests.swift in Sources */,
@@ -1220,6 +1237,9 @@
 				65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */,
 				A2197A2D31E7E6822CA563C6 /* DabCostBench.swift in Sources */,
 				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
+				53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */,
+				B260F52A04C5DBC81BB54DFD /* PaintSoftware/Engine/BrushLibraryStore.swift in Sources */,
+				48AA976125C7A0110E955471 /* PaintSoftware/Engine/BrushPreview.swift in Sources */,
 				DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */,
 				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,
 				DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */,

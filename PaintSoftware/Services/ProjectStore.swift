@@ -1517,6 +1517,10 @@ enum ProjectStore {
                                      palette: [manifest.selectedBrush] + manifest.customBrushes),
             projectURL: url)
         manager.customBrushes = manifest.customBrushes
+        // BRUSH.md §8.1: the library is app-level and the manifest's list is this *document's*.
+        // A project made on another device carries brushes this library has never seen, and the two
+        // lines above make them drawable; this is what makes them pickable.
+        manager.adoptRestoredBrushesIntoLibrary()
         manager.selectBrush(manifest.selectedBrush)
         // Assigned directly rather than through a `select…` helper: unlike a brush, the vector-eraser
         // mode carries no size/opacity to re-baseline, so there is nothing for such a helper to do.

@@ -32,17 +32,15 @@ class VectorEraserTestSupport: PaintUITestCase {
     /// eraser was already the active tool. Probing for the panel's own slider is what makes this
     /// work from either state.
     fileprivate func openEraserPanel(_ app: XCUIApplication) {
-        let sizeSlider = app.sliders["eraserPanel.sizeSlider"]
-        app.buttons["toolbar.eraserButton"].tap()
-        if sizeSlider.waitForExistence(timeout: 2) { return }
-        app.buttons["toolbar.eraserButton"].tap()
-        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5), "The eraser panel should open")
+        openBrushLibrary(app, tool: "eraser")
     }
 
     fileprivate func closeEraserPanel(_ app: XCUIApplication) {
         app.buttons["toolbar.eraserButton"].tap()
-        XCTAssertTrue(app.sliders["eraserPanel.sizeSlider"].waitForNonExistence(timeout: 5),
+        XCTAssertTrue(app.otherElements["eraserPanel.library"].waitForNonExistence(timeout: 5),
                       "The eraser panel should close, leaving the canvas unobstructed")
+        XCTAssertTrue(app.sliders["eraserPanel.sizeSlider"].waitForNonExistence(timeout: 5),
+                      "…and so should the editor behind it, whichever of the two was showing")
     }
 
     fileprivate var modePicker: (XCUIApplication) -> XCUIElement {
@@ -63,12 +61,11 @@ class VectorEraserTestSupport: PaintUITestCase {
         closeEraserPanel(app)
     }
 
-    /// Sets the eraser's diameter via the panel slider (range 1...200 — see `StrokeSettingsPanel`).
+    /// Sets the eraser's diameter via the editor's Size slider (range 1...200 — see
+    /// `BrushEditorView`). It used to sit in the panel itself; BRUSH.md §2.20 moved every brush
+    /// parameter behind the brushes menu's second tap, which `setBrushSize` walks.
     fileprivate func setEraserSize(_ app: XCUIApplication, normalized: CGFloat) {
-        openEraserPanel(app)
-        let slider = app.sliders["eraserPanel.sizeSlider"]
-        XCTAssertTrue(slider.waitForExistence(timeout: 5))
-        slider.adjust(toNormalizedSliderPosition: normalized)
+        setBrushSize(app, tool: "eraser", normalized: normalized)
         closeEraserPanel(app)
     }
 

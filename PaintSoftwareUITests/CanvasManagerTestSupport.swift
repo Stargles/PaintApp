@@ -28,9 +28,28 @@ enum CanvasFixture {
     /// whole default 12-frame scene. `addLayer` leaves the topmost layer active.
     static func manager(layerCount: Int = 1) -> CanvasManager {
         let manager = CanvasManager()
+        manager.brushLibraryOverride = isolatedBrushLibrary()
         manager.canvasSize = canvasSize
         for _ in 0..<layerCount { manager.addLayer() }
         return manager
+    }
+
+    /// A `BrushLibraryStore` over a directory of this fixture's own — **never the shared one**.
+    ///
+    /// `BrushLibraryStore.shared` writes `Documents/Brushes/library.json` in whatever process is
+    /// running, and an imported brush appended to it survives the test, the suite and the *run*. That
+    /// is precisely the shape CLAUDE.md's "a static that writes through to `UserDefaults` outlives the
+    /// test that set it" section describes — 15 reds in a later fast tier, every one an artifact of a
+    /// previous run — reached through a file instead of a defaults key. A test asking "does a new
+    /// document's picker hold no imported brushes?" is otherwise asking about run history.
+    ///
+    /// Not torn down: it lives under `temporaryDirectory`, holds a few kilobytes, and a fixture that
+    /// deleted it would have to outlive every manager that might still write to it.
+    static func isolatedBrushLibrary() -> BrushLibraryStore {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brushLibrary-fixture-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return BrushLibraryStore(directory: directory, arguments: [])
     }
 
     /// Every cel of a layer as `(startFrame, frameCount)` pairs, ordered by start frame — the shape

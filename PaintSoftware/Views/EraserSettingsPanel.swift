@@ -1,18 +1,23 @@
 import SwiftUI
 
-/// Eraser settings — the shared `StrokeSettingsPanel` driven by `CanvasManager`'s separate
-/// `selectedEraserBrush`/`eraserSize`/`eraserOpacity` state instead of the paint brush's, so
+/// Eraser settings — the shared brushes menu (`StrokeSettingsPanel`) driven by `CanvasManager`'s
+/// separate `selectedEraserBrush`/`eraserSize`/`eraserOpacity` state instead of the paint brush's, so
 /// adjusting the eraser never disturbs whatever brush you paint with (see `BrushStamper.stampDab`:
 /// an eraser dab is the same stamp, just composited with `.destinationOut` instead of painting
-/// color). No custom-texture import here — that's a paint-brush-only feature; the eraser spends the
-/// shared panel's accessory slot on its vector-mode picker instead.
+/// color).
+///
+/// **It lists the same library the brush does, and that is BRUSH.md §11 rather than a convenience.**
+/// The eraser used to be offered `availableEraserBrushes` — the five built-ins with imports excluded,
+/// on the grounds that a custom texture was *"a paint-brush-only feature"*. §11 rules the opposite:
+/// *the eraser is a stroke*, so an imported brush erases with no eraser work at all. One library, two
+/// selections. The `+` still offers no importer here — importing is one verb in one place, on the
+/// brush side — and the accessory slot is spent on the vector-mode picker instead.
 struct EraserSettingsPanel: View {
     @ObservedObject var canvasManager: CanvasManager
 
     private static let spec = StrokeSettingsSpec(
         title: "Eraser",
         idPrefix: "eraserPanel",
-        presets: \.availableEraserBrushes,
         selectedBrush: \.selectedEraserBrush,
         size: \.eraserSize,
         opacity: \.eraserOpacity,
@@ -23,8 +28,10 @@ struct EraserSettingsPanel: View {
     var body: some View {
         StrokeSettingsPanel(
             canvasManager: canvasManager,
+            library: canvasManager.brushLibrary,
             spec: Self.spec,
             accessory: { vectorModePicker },
+            addMenuItems: { EmptyView() },
             preview: { preview }
         )
     }
@@ -55,6 +62,7 @@ struct EraserSettingsPanel: View {
                 .accessibilityIdentifier("\(Self.spec.idPrefix).vectorModePicker")
             }
             .padding(.horizontal)
+            .padding(.bottom, 8)
         }
     }
 

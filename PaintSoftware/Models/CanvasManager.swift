@@ -743,12 +743,31 @@ final class CanvasManager: ObservableObject {
     /// directly to them and can move independently of whichever preset is selected — nudging a
     /// brush's size doesn't become a new saved preset.
     @Published var selectedBrush: Brush = BrushLibrary.softRound
-    /// User-imported custom brushes, in the order added. In-memory only here — persisted across app
-    /// launches via `ProjectStore`/`ProjectManifest`.
+    /// User-imported custom brushes **this document must carry tip files for** — BRUSH.md §8.1's
+    /// second half, read by `ProjectStore.importedTextureFileNames` so a saved package is
+    /// self-contained. Persisted per project via `ProjectManifest`.
+    ///
+    /// **Not the palette any more, and the distinction is §8.1's.** It used to be both: the picker
+    /// showed `BrushLibrary.defaults + customBrushes`, so the artist's own brushes lived in whichever
+    /// project happened to be open and a brush imported in one document was unpickable in the next.
+    /// The palette is the *library* now — app-level, `BrushLibraryStore` — and this is what stays,
+    /// unchanged, so the texture copy keeps working. `adoptRestoredBrushesIntoLibrary` is the one
+    /// crossing: a project made on another device restores brushes this library has never seen, and
+    /// they are taken in rather than left drawable-but-unpickable.
     @Published var customBrushes: [Brush] = []
 
-    /// Every brush offered in the picker: the 5 built-in presets followed by user imports.
-    var availableBrushes: [Brush] { BrushLibrary.defaults + customBrushes }
+    /// **The artist's brush library** — BRUSH.md §8.1's app-level collection, persisted across
+    /// documents in `Documents/Brushes/library.json`.
+    ///
+    /// Computed rather than a stored `= .shared`, so merely constructing a `CanvasManager` — which
+    /// every logic test does — does not force the shared store into existence and touch the file
+    /// system. A test that wants its own library sets `brushLibraryOverride`.
+    var brushLibrary: BrushLibraryStore { brushLibraryOverride ?? .shared }
+    /// Tests only; see `brushLibrary`.
+    var brushLibraryOverride: BrushLibraryStore?
+
+    /// Every brush offered in the menu — the whole library, in group order.
+    var availableBrushes: [Brush] { brushLibrary.allBrushes }
 
     /// Selects a brush preset as the active brush. Also re-baselines the live
     /// `brushSize`/`brushOpacity` from the brush's own defaults, and — only when the active tool is
@@ -772,10 +791,32 @@ final class CanvasManager: ObservableObject {
         }
     }
 
-    /// Adds a freshly-imported custom brush to the in-memory list and makes it the active brush.
-    func addCustomBrush(_ brush: Brush) {
+    /// Adds a freshly-imported custom brush to the library and makes it the active brush.
+    ///
+    /// It lands in **the group the menu is showing** where the caller names one, else in the library's
+    /// last group, so what the artist just imported is on screen when the picker closes rather than
+    /// somewhere they have to go and find. It is also recorded in `customBrushes`, which is what makes
+    /// the project package carry its tip PNG.
+    func addCustomBrush(_ brush: Brush, toGroup groupID: UUID? = nil) {
         customBrushes.append(brush)
+        brushLibrary.add(brush, toGroup: groupID)
         selectBrush(brush)
+    }
+
+    /// The name of the group a restored project's own brushes are taken into — see
+    /// `adoptRestoredBrushesIntoLibrary`.
+    static let importedBrushGroupName = "Imported"
+
+    /// **Takes a just-opened project's imported brushes into the library** so they are pickable and
+    /// not merely drawable.
+    ///
+    /// `ProjectStore` restores `customBrushes` from the manifest and copies the project's own tip PNGs
+    /// back into `BrushLibrary.customBrushesDirectory`; on a device whose library has never held them
+    /// — the file came from another iPad — nothing else would ever list them. Additive and id-keyed,
+    /// so opening the same project twice adds nothing the second time.
+    func adoptRestoredBrushesIntoLibrary() {
+        guard !customBrushes.isEmpty else { return }
+        brushLibrary.adopt(customBrushes, intoGroupNamed: Self.importedBrushGroupName)
     }
 
     /// **The artist's brush import, end to end** — BRUSH.md §12 stage 5. Turns a picked image into a
@@ -856,9 +897,13 @@ final class CanvasManager: ObservableObject {
     /// an option.
     let canvasDisplayScale = CanvasDisplayScale()
 
-    /// Every shape offered in the eraser's picker — the same built-ins as the brush picker (custom
-    /// imported textures are a paint-brush-only feature for now).
-    var availableEraserBrushes: [Brush] { BrushLibrary.defaults }
+    /// Every brush offered in the eraser's menu — **the same library the brush picks from**.
+    ///
+    /// It was `BrushLibrary.defaults` alone, on the grounds that an imported texture was a
+    /// paint-brush-only feature. BRUSH.md §11 rules otherwise: *the eraser is a stroke*, so an
+    /// imported brush erases with no eraser work. Kept as its own accessor rather than deleted
+    /// because the two tools still hold two separate *selections* over the one library.
+    var availableEraserBrushes: [Brush] { brushLibrary.allBrushes }
 
     /// Eraser analogue of `selectBrush`: re-baselines `eraserSize`/`eraserOpacity` from the chosen
     /// preset. Never touches `selectedTool` — unlike `selectBrush`, picking an eraser shape only

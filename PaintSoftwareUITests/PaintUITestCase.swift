@@ -645,4 +645,53 @@ class PaintUITestCase: XCTestCase {
         app.buttons["toolbar.brushButton"].tap()
     }
 
+    // MARK: - The brushes menu and the brush editor
+
+    /// Opens a stroke tool's **brushes menu** — the two-column library, BRUSH.md §7.1.
+    ///
+    /// The toolbar button is select-then-toggle (`TopToolbar.selectBrushToolAndTogglePanel`), so
+    /// reaching the menu from an arbitrary starting tool takes one tap to select and one to open, and
+    /// only one if that tool was already active. Probing for the menu itself is what makes this work
+    /// from either state.
+    func openBrushLibrary(_ app: XCUIApplication, tool: String = "brush") {
+        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        let library = app.otherElements["\(prefix).library"]
+        let button = app.buttons["toolbar.\(tool)Button"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        button.tap()
+        if library.waitForExistence(timeout: 3) { return }
+        button.tap()
+        XCTAssertTrue(library.waitForExistence(timeout: 5), "The \(tool) library should open")
+    }
+
+    /// Opens the **brush editor** — where every brush parameter lives as of BRUSH.md §2.20, and where
+    /// this suite's Size / Opacity / Stabilization / Spacing sliders moved to.
+    ///
+    /// The gesture is §2.20's: one tap selects a brush, a second tap on the *already selected* one
+    /// opens the editor. The selected row is found by its `.isSelected` trait rather than by name, so
+    /// a caller need not know which brush the document happens to have picked.
+    func openBrushEditor(_ app: XCUIApplication, tool: String = "brush") {
+        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        let sizeSlider = app.sliders["\(prefix).sizeSlider"]
+        if sizeSlider.exists { return }
+        openBrushLibrary(app, tool: tool)
+
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "\(prefix).brush."))
+        let selected = rows.allElementsBoundByIndex.first { $0.isSelected }
+        XCTAssertNotNil(selected, "Exactly one brush row must read as selected — that highlight is what makes §2.20's second tap unambiguous")
+        selected?.tap()
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5),
+                      "A second tap on the selected brush should open the editor")
+    }
+
+    /// Sets a stroke tool's diameter through the editor's Size slider (range 1...200 — see
+    /// `BrushEditorView`), leaving the editor open.
+    func setBrushSize(_ app: XCUIApplication, tool: String = "brush", normalized: CGFloat) {
+        let prefix = tool == "eraser" ? "eraserPanel" : "brushPanel"
+        openBrushEditor(app, tool: tool)
+        let slider = app.sliders["\(prefix).sizeSlider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        slider.adjust(toNormalizedSliderPosition: normalized)
+    }
+
 }
