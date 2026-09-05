@@ -1067,6 +1067,21 @@ final class VectorCanvas {
     /// of wall-clock time.
     private(set) var lastRenderDabCount: Int = 0
 
+    /// **How many renders repaired a rectangle instead of walking the list whole**, and how many of
+    /// those were thrown away because a replacement painted outside the rectangle its site declared
+    /// — TODO (41)'s two countable properties, in `rasterizations`' idiom and for its reason. "Cost
+    /// scales with the area touched" is a claim about the algorithm; the milliseconds are the
+    /// machine's business. `regionRepairsAbandoned` is the one to watch: a repair that escapes costs
+    /// a wasted walk *and* the full one, so a rising count is the fast path making things worse.
+    private(set) var regionRepairs = 0
+    /// Repairs that had to widen their rectangle by a measured escape and go round a second time.
+    private(set) var regionRepairsWidened = 0
+    private(set) var regionRepairsAbandoned = 0
+
+    /// The clip of the most recent region repair, or `.null` — the seam a test reads to say the
+    /// bound actually bound rather than merely ran.
+    private(set) var lastRepairedRegion: CGRect = .null
+
     /// How many canvas-sized rasterizations this canvas has actually performed — `render()` calls that
     /// missed both memos, plus every `renderIsolated(ids:)`, which is never memoized.
     ///
@@ -3959,18 +3974,35 @@ final class VectorCanvas {
             //    footprint misses the clip, which is drawing that the clip would have thrown away
             //    anyway. That equivalence is the whole safety argument and it is structural rather
             //    than empirical.
-            let repaired = renderLocalContent(elements: Self.visible(_elements,
-                                                                     suppressing: _suppressedElementIDs),
-                                              quality: quality, over: base.image,
-                                              clippedTo: base.region)
-            if repaired.escapedClip {
-                // A replacement painted outside the rectangle its site declared, so the base is
-                // stale where it escaped and this render is unusable. Slow-and-correct: throw it
-                // away and walk the list whole. `Damage.region` names this as the failure it is
-                // shaped to have.
-                content = renderLocalContent(elements: Self.visible(_elements,
-                                                                    suppressing: _suppressedElementIDs),
-                                             quality: quality).image
+            regionRepairs += 1
+            let visible = Self.visible(_elements, suppressing: _suppressedElementIDs)
+            var clip = base.region
+            var repaired = renderLocalContent(elements: visible, quality: quality,
+                                              over: base.image, clippedTo: clip)
+            if !repaired.escaped.isNull, let widened = repairClip(clip.union(repaired.escaped)) {
+                // **A replacement painted outside the rectangle its site declared — by a fraction of
+                // a point.** MEASURED: 0.09 to 0.6 pt, on every one of them. A cut piece re-anchors
+                // its dab walk (`detachedPiece`), so its dabs sit at different arc lengths along the
+                // *same* centreline as its parent's and one near an end can reach a little past the
+                // union of its parent's circles. That is inherent to splitting a stroke and no
+                // rectangle derived from the old list can predict it.
+                //
+                // So widen by what actually escaped and go round once. The retry cannot escape
+                // again: the pieces are measured now (recorded even from the discarded walk), so
+                // they are inside the clip by construction — and the widened clip is still exactly
+                // the region where the two pictures can differ, since it is the parents' ink plus
+                // the replacements' ink and nothing else.
+                regionRepairsWidened += 1
+                clip = widened
+                repaired = renderLocalContent(elements: visible, quality: quality,
+                                              over: base.image, clippedTo: clip)
+            }
+            lastRepairedRegion = clip
+            if !repaired.escaped.isNull {
+                regionRepairsAbandoned += 1
+                // Slow-and-correct. `Damage.region` names this as the failure it is shaped to have:
+                // a site that under-declares costs a re-walk rather than an artifact.
+                content = renderLocalContent(elements: visible, quality: quality).image
             } else {
                 content = repaired.image
             }
@@ -4035,16 +4067,28 @@ final class VectorCanvas {
     private func repairableBase(quality: RenderQuality) -> (image: UIImage, region: CGRect)? {
         guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
               let base = regionBase, !base.region.isNull, !base.region.isEmpty else { return nil }
-        // Integral, and for `CGContextDabTarget.endStrokeGroup`'s measured reason: a clip on a
-        // fractional rectangle is antialiased, so the outermost row of the repair would land at
-        // partial coverage — ink lost at a seam rather than a rounding difference. Rounded *out*,
-        // so the clip still contains everything the site declared.
-        let clip = base.region.integral
-        // A repair that covers the canvas is a full walk with extra bookkeeping, and honestly so:
-        // the guarantee is that cost scales with the area touched, not that it is always small.
-        // Taking the slow path outright is cheaper than taking it through a clip and a skip test.
-        guard clip.width * clip.height < size.width * size.height else { return nil }
+        guard let clip = repairClip(base.region) else { return nil }
         return (base.image, clip)
+    }
+
+    /// `rect` conditioned into a usable clip, or nil when repairing it is not worth it.
+    ///
+    /// **Integral, and for `CGContextDabTarget.endStrokeGroup`'s measured reason**: a clip on a
+    /// fractional rectangle is antialiased, so the outermost row of the repair would land at partial
+    /// coverage — MEASURED there at alpha 193 where 255 was drawn, which is ink lost at a seam
+    /// rather than a rounding difference. Rounded *out*, so the clip still contains everything the
+    /// caller declared.
+    ///
+    /// **A repair that covers the canvas is a full walk with extra bookkeeping**, and saying so is
+    /// the honest half of this feature's guarantee: cost scales with the area touched, not with
+    /// nothing. A lasso dragged the width of the canvas has a canvas-sized rectangle and pays for
+    /// it, and taking the slow path outright is cheaper than taking it through a clip and a skip
+    /// test that rejects nothing.
+    private func repairClip(_ rect: CGRect) -> CGRect? {
+        let clip = rect.integral
+        guard clip.width > 0, clip.height > 0,
+              clip.width * clip.height < size.width * size.height else { return nil }
+        return clip
     }
 
     /// **The picture this render may append to, or nil when it must walk the list whole.**
@@ -4254,7 +4298,7 @@ final class VectorCanvas {
         // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the
         // *filtered* list, so a cel whose only element is the one being edited says the same.
         guard !elements.isEmpty || base != nil else {
-            return LocalContent(image: Self.transparentPixel, escapedClip: false)
+            return LocalContent(image: Self.transparentPixel, escaped: .null)
         }
         // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
         // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
@@ -4269,7 +4313,7 @@ final class VectorCanvas {
         // because the skip test below reads the *previous* walk's answer and must not see this
         // one's.
         var measured: [UUID: CGRect] = [:]
-        var escaped = false
+        var escaped = CGRect.null
         let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
             // 1:1 into a context of the same size, format and scale, over transparent black — so
@@ -4303,7 +4347,7 @@ final class VectorCanvas {
                 let painted = target.lastGroupBounds
                 guard !painted.isNull else { return }
                 measured[stroke.id] = painted
-                if let clip, known == nil, !clip.contains(painted) { escaped = true }
+                if let clip, known == nil, !clip.contains(painted) { escaped = escaped.union(painted) }
             }
 
             var index = 0
@@ -4354,23 +4398,25 @@ final class VectorCanvas {
             }
         }
         lastRenderDabCount = target.dabCount
-        // **Only when the walk is usable.** A render that escaped its clip is about to be thrown
-        // away and walked again; recording footprints measured through a discarded picture would
-        // leave the table describing a render nobody kept.
-        if !escaped {
-            for (id, rect) in measured { paintedBounds[id] = rect }
-        }
-        return LocalContent(image: image, escapedClip: escaped)
+        // **Recorded even when the picture is discarded**, and that is the whole reason a retry
+        // works. A footprint is a property of the stroke's dabs, not of the context they were drawn
+        // into — `CGContextDabTarget.lastGroupBounds` is accumulated from geometry before the clip
+        // is consulted — so a measurement taken through a clip that threw the pixels away is still
+        // true of the stroke. The retry therefore knows exactly what escaped it the first time.
+        for (id, rect) in measured { paintedBounds[id] = rect }
+        return LocalContent(image: image, escaped: escaped)
     }
 
-    /// One walk's output: the picture, and whether it may be used.
+    /// One walk's output: the picture, and — for a clipped walk — **where it went outside its
+    /// clip**, which is `.null` when it did not.
     ///
-    /// `escapedClip` is true only for a clipped walk, and only when an element the previous walk had
-    /// never measured painted outside the clip — i.e. a site under-declared its damage. The picture
-    /// is then wrong outside the clip and the caller must walk the list whole.
+    /// Only an element the previous walk had never measured can escape, because only that element's
+    /// pixels are unaccounted for in the base. The rectangle rather than a flag is what lets the
+    /// caller widen and retry instead of giving up: the escape is *measured*, so the widened clip is
+    /// exactly right rather than a guess, and the second attempt cannot escape again.
     private struct LocalContent {
         let image: UIImage
-        let escapedClip: Bool
+        let escaped: CGRect
     }
 
     // The per-kind drawing helpers are `static`, taking only their inputs, so they cannot re-enter

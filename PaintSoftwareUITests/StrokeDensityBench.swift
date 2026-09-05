@@ -927,7 +927,8 @@ final class StrokeDensityBench: XCTestCase {
                 var driver = VectorEraser.IntersectionDriver()
                 var resolveSeconds = 0.0, renderSeconds = 0.0
                 var worstResolve = 0.0, worstRender = 0.0
-                var cuts = 0, walks = 0
+                var cuts = 0, walks = 0, dabs = 0
+                var regionArea = 0.0
                 let path = Self.dragPath(samples: 40)
                 for point in path {
                     let t0 = CFAbsoluteTimeGetCurrent()
@@ -947,7 +948,15 @@ final class StrokeDensityBench: XCTestCase {
                     let dtRender = CFAbsoluteTimeGetCurrent() - t1
                     renderSeconds += dtRender
                     worstRender = Swift.max(worstRender, dtRender)
-                    if canvas.rasterizations > before { walks += 1 }
+                    if canvas.rasterizations > before {
+                        walks += 1
+                        dabs += canvas.lastRenderDabCount
+                        let region = canvas.lastRepairedRegion
+                        if !region.isNull {
+                            regionArea += Double(region.width * region.height)
+                                / Double(Self.canvasSize.width * Self.canvasSize.height)
+                        }
+                    }
                 }
 
                 report("cross eraser (Mode 3) drag — n=\(n)", [
@@ -961,6 +970,12 @@ final class StrokeDensityBench: XCTestCase {
                     ("worstSingleRender", ms(worstRender)),
                     ("resolveShare", String(format: "%.0f%%",
                                             100 * resolveSeconds / (resolveSeconds + renderSeconds))),
+                    ("dabsStamped", "\(dabs)"),
+                    ("regionRepairs", "\(canvas.regionRepairs)"),
+                    ("repairsWidened", "\(canvas.regionRepairsWidened)"),
+                    ("repairsAbandoned", "\(canvas.regionRepairsAbandoned)"),
+                    ("meanRegionOfCanvas", String(format: "%.1f%%",
+                                                  100 * regionArea / Double(Swift.max(walks, 1)))),
                 ])
             }
 
@@ -982,9 +997,46 @@ final class StrokeDensityBench: XCTestCase {
                 let renderSeconds = CFAbsoluteTimeGetCurrent() - t1
                 report("cut (Mode 2) whole gesture — n=\(n)", [
                     ("changed", "\(changed)"),
+                    ("regionRepairs", "\(canvas.regionRepairs)"),
+                    ("dabsStamped", "\(canvas.lastRenderDabCount)"),
                     ("cutOnce", ms(cutSeconds)),
                     ("reWalkOnce", ms(renderSeconds)),
                     ("gestureTotal", ms(cutSeconds + renderSeconds)),
+                ])
+            }
+
+            // **Mode 2 again, as a flick rather than a sweep**, because the row above is the honest
+            // worst case and not the common one: a cut across the whole canvas unions forty strokes'
+            // footprints into a rectangle the size of the canvas, which `repairClip` correctly
+            // refuses. A real cut is a short stroke through one or two lines.
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                var samples = StrokeSamples(channels: .pressureOnly)
+                let mid = CGPoint(x: Self.canvasSize.width * 0.5, y: Self.canvasSize.height * 0.5)
+                for step in 0...6 {
+                    let t = CGFloat(step) / 6
+                    samples.append(VectorSample(x: mid.x - 30 + t * 60, y: mid.y - 30 + t * 60,
+                                                pressure: 1))
+                }
+                let t0 = CFAbsoluteTimeGetCurrent()
+                let changed = canvas.erase(alongPath: samples, brush: Self.eraserBrush,
+                                           size: Self.eraserSize, mode: .cutPoints)
+                let cutSeconds = CFAbsoluteTimeGetCurrent() - t0
+                let t1 = CFAbsoluteTimeGetCurrent()
+                _ = canvas.render()
+                let renderSeconds = CFAbsoluteTimeGetCurrent() - t1
+                let region = canvas.lastRepairedRegion
+                report("cut (Mode 2) short flick — n=\(n)", [
+                    ("changed", "\(changed)"),
+                    ("regionRepairs", "\(canvas.regionRepairs)"),
+                    ("repairsAbandoned", "\(canvas.regionRepairsAbandoned)"),
+                    ("dabsStamped", "\(canvas.lastRenderDabCount)"),
+                    ("regionOfCanvas", region.isNull ? "full walk"
+                        : String(format: "%.1f%%", 100 * Double(region.width * region.height)
+                                 / Double(Self.canvasSize.width * Self.canvasSize.height))),
+                    ("cutOnce", ms(cutSeconds)),
+                    ("renderOnce", ms(renderSeconds)),
                 ])
             }
 
