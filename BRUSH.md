@@ -286,27 +286,26 @@ and a second thing to keep in step.
   differently in the two slots: a stray reading above 1 is flattened as an *input* and would *amplify*
   as a *gain*. A second input attenuates; raising `amount` is how a row is made bigger.
 
-**2.25 Texture returns, canvas-anchored, and this reverses §2.4.** Owner, having ruled *"Delete all of
-grain"* at the start of this overhaul: *"a lot of paint programs have something called texture ... its a
-texture that gets applied over your brush ... Texture is applied relative to canvas, and uses the
-untextured brush as a transparency mask, then is scaled with opacity."*
+**2.23 Not every brush is a dab walk, and the architecture must survive the first one that is not.**
+Owner: *"There are also some special brush types I want to add which may follow custom brush logic, so
+again, design the architecture cleanly and well thought out. These include stuff like the fill brush
+(you draw and then it applies a fill inside of its contour when you lift the pen), and other special
+brushes."* **Not scheduled** — the owner put it well after the shipped set — but it constrains what may
+be assumed before then.
 
-**Say plainly what changed and why it is cheap now.** §2.4 deleted grain *including* canvas-anchored
-paper, and gave a reason: *"a sprite travels with the stroke, paper does not"* — with the ink composited
-dab by dab straight onto the layer, there was no moment at which the whole stroke existed as a mask, so
-paper could only have been faked per dab. **§12 stage 8 built that moment.** A stroke now paints into
-its own buffer and merges once, so the texture multiplies in **at the merge**, against canvas
-coordinates, with the buffer serving as exactly the transparency mask the owner describes and the
-stroke's opacity scaling the result. The feature that was structurally awkward is now a few lines in one
-place.
+What it forbids is one assumption: *"a `Brush` is a description of how to stamp dabs"*. It is that
+today, and the first fill brush makes it *one case of* something larger. The seam that has to stay
+clean is therefore **where a stored stroke becomes ink**, and the good news is that it is already one
+place per tier — `VectorLayer.stamp(stroke:into:isEraser:)` on the replay side and
+`StrokeCanvasView.stampPath` on the live one — with `VectorStroke` storing samples and a `BrushRef` and
+nothing about dabs. A fill brush stores the identical stroke and resolves differently at those two
+sites; it needs no new storage and no format change.
 
-**Canvas-anchored only.** The owner was offered stroke-anchored as well and did not take it, and the
-reason to be glad is §2.5's: ink that travels — a lasso move, a pose, an interpolation — would have to
-re-sample or bake a stroke-anchored texture, which is the whole argument that deleted grain the first
-time. Paper does not move, so nothing has to be baked.
-
-**It is what makes §2.21's importers honest**, since most `.abr` and Procreate brushes carry a texture
-and a brush imported without one is not that brush.
+So the rule for every stage before it: **a brush's *behaviour* is discriminated at those two call sites
+and nowhere else.** Anything that spreads "walk the path and stamp" into a third place — a cache keyed
+on dab counts, a bounds computed by assuming dabs, an editor that cannot render a brush with no spacing
+— is what would have to be undone. §9.2 is the general form of this and this is its first named
+consumer.
 
 **2.24 The editor is a screen, not a panel, and its shape is a chain per output.** Owner: *"The brush
 edit menu right now is a little menu, whereas in Procreate it is like a separate screen. For this menu,
@@ -334,26 +333,57 @@ rect. **Vertical/horizontal offset** is a *directed* displacement, which §8.4 h
 about: coherent `scatter` and a pure perpendicular offset were indistinguishable, so no `offset` output
 was built. An offset the artist aims is a different thing from that and does not inherit the refutation.
 
-**2.23 Not every brush is a dab walk, and the architecture must survive the first one that is not.**
-Owner: *"There are also some special brush types I want to add which may follow custom brush logic, so
-again, design the architecture cleanly and well thought out. These include stuff like the fill brush
-(you draw and then it applies a fill inside of its contour when you lift the pen), and other special
-brushes."* **Not scheduled** — the owner put it well after the shipped set — but it constrains what may
-be assumed before then.
+**2.25 Texture returns, canvas-anchored, and this reverses §2.4.** Owner, having ruled *"Delete all of
+grain"* at the start of this overhaul: *"a lot of paint programs have something called texture ... its a
+texture that gets applied over your brush ... Texture is applied relative to canvas, and uses the
+untextured brush as a transparency mask, then is scaled with opacity."*
 
-What it forbids is one assumption: *"a `Brush` is a description of how to stamp dabs"*. It is that
-today, and the first fill brush makes it *one case of* something larger. The seam that has to stay
-clean is therefore **where a stored stroke becomes ink**, and the good news is that it is already one
-place per tier — `VectorLayer.stamp(stroke:into:isEraser:)` on the replay side and
-`StrokeCanvasView.stampPath` on the live one — with `VectorStroke` storing samples and a `BrushRef` and
-nothing about dabs. A fill brush stores the identical stroke and resolves differently at those two
-sites; it needs no new storage and no format change.
+**Say plainly what changed and why it is cheap now.** §2.4 deleted grain *including* canvas-anchored
+paper, and gave a reason: *"a sprite travels with the stroke, paper does not"* — with the ink composited
+dab by dab straight onto the layer, there was no moment at which the whole stroke existed as a mask, so
+paper could only have been faked per dab. **§12 stage 8 built that moment.** A stroke now paints into
+its own buffer and merges once, so the texture multiplies in **at the merge**, against canvas
+coordinates, with the buffer serving as exactly the transparency mask the owner describes and the
+stroke's opacity scaling the result. The feature that was structurally awkward is now a few lines in one
+place.
 
-So the rule for every stage before it: **a brush's *behaviour* is discriminated at those two call sites
-and nowhere else.** Anything that spreads "walk the path and stamp" into a third place — a cache keyed
-on dab counts, a bounds computed by assuming dabs, an editor that cannot render a brush with no spacing
-— is what would have to be undone. §9.2 is the general form of this and this is its first named
-consumer.
+**Canvas-anchored only.** The owner was offered stroke-anchored as well and did not take it, and the
+reason to be glad is §2.5's: ink that travels — a lasso move, a pose, an interpolation — would have to
+re-sample or bake a stroke-anchored texture, which is the whole argument that deleted grain the first
+time. Paper does not move, so nothing has to be baked.
+
+**It is what makes §2.21's importers honest**, since most `.abr` and Procreate brushes carry a texture
+and a brush imported without one is not that brush.
+
+**2.26 Tips and textures are libraries, not per-brush files.** Owner: *"their dab sprites should have
+the ability to be changed, as well as texture. For these two, it may be worth having a library of
+textures and sprites to which new sprites can be added into."* So the editor picks a tip and a texture
+from browsable collections, and importing adds to a collection rather than to whichever brush happens to
+be open. Two collections, because a tip is a shape and a texture is paper and an artist reaches for them
+at different moments — but **one storage mechanism**, since both are a named bitmap under §2.27's root
+and `BrushTextureRef` already resolves exactly that.
+
+**2.27 The library must be relocatable, and the architecture owes that before the feature exists.**
+Owner: *"Right now all the files are stored internally on the app, which means that if the app gets
+deleted, then all the files get deleted too. I'd like it to be able to have an external folder, so build
+the architecture so that in the future when this feature gets added, moving the library from internal
+app storage to this external folder is easy."*
+
+**Not scheduled. It is a constraint on everything that touches a file from now on**, and two of the
+three things it needs are already true by accident rather than by design:
+
+1. **Every stored reference is a *name*, never a path.** `BrushTextureRef.imported(fileName)` carries a
+   file name, so nothing a document stores encodes somebody else's directory layout. **True today, and
+   it is the expensive one to retrofit** — keep it true.
+2. **Every file lives under one root.** True in effect (`Documents/Brushes`) and false in structure:
+   `BrushLibrary.customBrushesDirectory` is a computed `static var` that each caller resolves for
+   itself, so there is no single value to change. **This is the one to fix.** One type owns the root and
+   every reader takes it by injection — `BrushLibraryStore.init(directory:)` is already that shape and
+   is the precedent — and the global static goes.
+3. **Every access goes through that one type**, which is what makes a future external folder a wrapper
+   around one call site rather than an audit of the codebase. On iOS an external folder is a bookmarked
+   URL that has to be opened and closed around each access, and that is only cheap if there is one place
+   to do it.
 
 ---
 
@@ -1178,6 +1208,14 @@ Procreate's Brush Studio, which the owner named. Three columns:
   that makes the editor worth building rather than the panel it replaces**, and it is the owner's own
   stated reason for wanting the feature at all: *"i can edit aspects of it myself to see which settings
   are good."* It is a `StrokeCanvasView` over a scratch bitmap with no document behind it.
+
+  **Four behaviours, from the owner's reading of the reference.** It **opens showing a sample stroke
+  with a pressure taper**, so the pad is never blank and a brush's character is visible before the
+  artist touches it. It is **zoomed in by default**, because the details that distinguish two brushes
+  are granular. There is a **toggle to real size**, because zoom lies about what a brush looks like in
+  use. And there is a **clear button**. The default stroke is the same fixed S-curve `BrushPreview`
+  already walks for §7.1's rows — one sample stroke in the codebase, not two, or a brush's row and its
+  pad will disagree about what it looks like.
 
 **The categories are ours, not Procreate's**, because the model underneath is different: Procreate has
 Wet Mix and Bleed and we have neither, and we have `density`, λ and the second input (§2.22) and it has
