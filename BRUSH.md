@@ -1693,6 +1693,27 @@ own band-limiting is MEASURED rather than asserted: three octaves at a falloff o
 structure function by **1.48×** against a predicted 1.51, and stay a sixteenth of the way to a fresh
 draw per dab.
 
+**§8.4's union argument has a boundary, and the owner found it by eye where two rounds of measurement
+had not.** On the second contact sheet the owner noticed that Pencil Blunt's mask has a **sharp cutoff
+along one edge**, making the shape uneven, and that *this* is what produces the blotchy roughness once
+the dab is randomised. That reads as a contradiction of §8.4 and is not one — it is the missing half of
+the same rule:
+
+> **Roughness survives when what a dab presents to the silhouette changes from dab to dab.**
+
+An eroded *round* nib fails that, which is what §8.4 measured: every dab offers the same profile, ten of
+them overlap, and the running maximum is the profile itself. A **direction-locked** nib fails it for the
+same reason, which is why the square slab's ragged edge washed out. But an **asymmetric** nib under
+`angle.jitter` passes it, because rotating an uneven shape changes its outline while rotating a disc
+changes nothing at all. **The tip's asymmetry is what makes rotation jitter visible**, and rotation
+jitter is what makes the asymmetry survive; neither does anything alone. Pencil Blunt carries
+`angle.jitter` at 1, so it had both by accident.
+
+So the generator's rule is not "no tip textures". It is: **a tip contributes roughness only through a
+dynamic that varies its presentation** — rotation jitter for an asymmetric silhouette, size jitter for a
+scale-dependent one — and **interior grain is exempt**, because a pit mid-dab is not filled by a
+neighbour's boundary, which is why the pencils' tooth reads.
+
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
@@ -1739,43 +1760,65 @@ width against 1.25% for the rotated eroded tip — and needs no tip. **The varia
 shaped tips (bristle, chalk, splatter) and not for a rough round, where §6's own modulation is the cheaper
 answer.**
 
-### 8.6 The set
+### 8.6 The set — chosen by the owner from the contact sheet
 
 Five groups; **24–30 brushes**, which is the scale Photoshop now ships by default and well inside Clip
 Studio's 42. Not Procreate's 200+, which is a decade of accretion.
 
-| group | holds |
-|---|---|
-| **Basics** | round soft, round hard, square, chisel |
-| **Sketching** | pencils — hard, soft, blunt, textured |
-| **Inking** | technical pens, brush pen, and **the rough ink nib** §8.4 names |
-| **Painting** | opaque round, flat, bristle, blender |
-| **Texture** | grunge, splatter, stipple, chalk — the CC0 group |
+**Sixteen are chosen and named below. The owner picked them off the first contact sheet and expects to
+add more later** — *"I probably will choose to add more brushes in a future session, so no need to go
+too far"* — so the groups are deliberately short of the band rather than padded to it.
 
 Erasers are not a group: the eraser *is* a brush (§11), so every one of these erases already.
 
-**"Square" does not mean a square, and the owner's reference settles what it does mean.** It is the
-SAI-shaped nib: a **rectangle whose long side sits perpendicular to the direction of travel**, with
-deliberately **ragged edges**. **One drag lays down one rectangular slab** — the nib's long side is the
-slab's width and the travel is its length — and the torn, criss-crossed look of the reference is the
-artist having painted over the same area repeatedly in different directions, not a property of a single
-stroke. So the brush to build is the slab; the texture in the reference is what an artist does with it.
-Two consequences, and the first is the useful one:
+**Basics — 5.** Round Soft, **Opaque Round** (moved here from Painting at the owner's instruction —
+*"I feel it better belongs here"*), Round Hard, and two square nibs:
 
-- **It does not need `roundness`.** §6 predicted that anisotropic tips are what would force a second
-  extent through `DabTarget`, `BakedDab`, `DabPose` and every dirty rect, and named the chisel and flat
-  brushes as the tips that would ask. This one does not ask, because a `.stamp` tip carries a **picture**
-  and a rough rectangle drawn inside a square mask is a rough rectangle. Perpendicularity is
-  `angle`'s direction-follow at 100% with a quarter-turn base — both fields exist and both shipped in
-  §12 stage 7. So the whole nib is a generated PNG plus two numbers, and §6's deferral of `roundness`
-  survives its first real test rather than being cornered by it.
-- **What it costs is mask area**, not correctness: a 4:1 nib occupies a quarter of its square mask, and
-  `size` scales both axes together. For a fixed-aspect nib that is a memory footnote (§8.5's ~4 KB a
-  tip), not a defect. A brush whose aspect the artist wants to *change* is what would need `roundness`,
-  and nothing in §8.6 is that brush.
+- **Square** — a slab with **no noisy edges**, **bevelled corners**, and a falloff *"sort of like opaque
+  round in that it only falls off in the very edges"*. The clean one, and the first sheet's finding is
+  why it is clean: a ragged tip edge does not survive the walk on a direction-locked nib.
+- **Messy Flat** — *"like the flat brush, except with messier ends. Still square, but the sprite gives
+  it a unique non monolithic look for the ends, more of a slightly dirty falloff."* The ends, not the
+  long sides: §8.4 records that a nib's long sides sweep *along* travel and never reach the silhouette.
 
-The owner has explicitly **not** asked for this to be built ahead of the set: *"Theres probably a brush
-like this already in the krita free use pack ... so its not much of a big deal right now."*
+**Sketching — 4.** Pencil Hard, Pencil Soft, **Pencil Blunt**, Pencil Textured. The owner's note on
+Blunt is what §8.4's boundary paragraph is built from: it is *"much closer to the messy edge look I
+wanted for the rough ink brush"*.
+
+**Inking — 4.** Technical Pen Fine, Brush Pen, Rough Ink Blotchy, and **Rough Ink**, which is the one
+piece of open design in the set:
+
+> *"Look at the pencil blunt sprite. Right now, there is a sharp cutoff in the bottom. Whether
+> intentional or not, that sharp cutoff makes the sprite uneven, and thats what creates the rough
+> blotchy look when its randomized. I want you to take that concept with this pen and experiment with
+> it."*
+
+Named candidates: a **triangular** blob, a **rough squareish** shape, or **half-round-half-flat like
+Pencil Blunt** if the rotation is fully isotropic. This is the brush §2.16 asked for by name and the one
+§8.4 twice tried to build from dynamics alone; the answer is now known to be **both** — an uneven
+silhouette *and* the jitter that turns it.
+
+**Painting — 3**, and the group with the most left open.
+
+- **A painterly nib**, to be explored broadly. The owner's reference: real paint-stroke sprites are
+  *"a lot more squarish than slab shaped, though the shape is alot more blotchy than square, with a
+  clear bristle direction noticeable in them."*
+- **Bristle**, with **noisier edges** — *"Right now you can see it fit within a clear oval shape"*, and
+  a silhouette that betrays its bounding shape is the defect.
+- **Streaky** — *"Imagine the sprite being just a bunch of little dots, like 6 or 8 of them placed
+  randomly. The brush makes many streaks."* A handful of separated points, so one drag lays parallel
+  ribbons rather than a band.
+
+**Texture — deferred to §12 stage 11**, the CC0 group, gated on §8.3's per-file licensing.
+
+**The owner's own sprite reference**, supplied as a folder of thirty-three masks and described here
+because the file did not travel: tall roughly-rectangular alpha masks, black on white, in four families
+— **jagged/eroded outlines** (`JaggedSquare`, `MoreJaggedSquare`, `WobblySquare`, `TestSquare3/5`),
+**horizontal bristle streaks** (`SquareBristles`, `SquareBristles2`, `chisel_streaks`, `ZigZag`,
+`ThickStrokes`, `TestSquare7`), **soft or blurred slabs** (`SqareBlurred`, `SpongeSoft`, `CheeseBlurred2`,
+`MoreJaggedSquareBlur`, `TestSquare4/8/10`), and **dotted or speckled fills** (`SpongeDotted`,
+`WobblySquare2`, `TestSquare6`). `SpongeBlob3` — an irregular organic triangle — is named as a Rough Ink
+candidate.
 
 ## 9. Grain — the deletion
 
