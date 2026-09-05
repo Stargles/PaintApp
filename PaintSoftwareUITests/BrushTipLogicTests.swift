@@ -698,17 +698,24 @@ final class BrushTipLogicTests: XCTestCase {
          "stroke":{"stabilization":0.15,"blendMode":"normal"},
          "modulations":[
            {"output":"size","input":{"kind":"pressure"},"amount":0.3,
-            "curve":{"step":1,"keys":[
+            "modules":[{"kind":"curveRamp","curve":{"step":1,"keys":[
               {"frame":0,"value":0.5,"interpolation":"linear","tangentMode":"vector"},
-              {"frame":1024,"value":1,"interpolation":"linear","tangentMode":"vector"}]}},
+              {"frame":1024,"value":1,"interpolation":"linear","tangentMode":"vector"}]}}]},
            {"output":"flow","input":{"kind":"pressure"},"amount":0.5}]}
         """
         let decoded = try JSONDecoder().decode(Brush.self, from: Data(asSavedByAnEarlierLaunch.utf8))
         XCTAssertEqual(decoded.id, BrushLibrary.pencil.id,
                        "the id in a saved document has to name the preset this launch is running")
         // And the *whole* brush, which is what makes this a pin on BRUSH.md §6's grouped encoding as
-        // well as on the id: every sub-struct and every row of the matrix has to come back off a
+        // well as on the id: every sub-struct and every chain of the matrix has to come back off a
         // document written outside this process, or a saved brush is not the brush that was saved.
+        //
+        // **The bytes above changed on 2026-09-05 and that is the ruling, not a repair.** §2.28 made a
+        // modulation an input and an ordered `[BrushModule]`, so the row's `curve` field became a
+        // `modules` entry — and §2.14 rules the documents on the device expendable, so the format
+        // changed rather than growing an arm that accepts both. This test is what caught it: a brush
+        // written in the old shape decodes to a chain with **no modules**, which renders as a straight
+        // ramp with the artist's curve silently gone.
         XCTAssertEqual(decoded, BrushLibrary.pencil,
                        "a preset written to a document decodes to that preset, matrix and all")
         XCTAssertTrue(BrushLibrary.isPencilPreset(decoded),
