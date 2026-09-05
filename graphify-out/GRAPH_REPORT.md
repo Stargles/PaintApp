@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-09-04)
 
 ## Corpus Check
-- 382 files · ~1,876,386 words
+- 382 files · ~1,876,742 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4d30d3d6`
+- Built from commit: `6b044660`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1592,7 +1592,7 @@ Nodes (13): Dab, DabProbe, SandwichPresentation, disengaged, midStroke, rest, Re
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1574 isolated node(s):** `Do this first — the brush engine, and there is a decision owed before the next stage starts`, `Ask the owner these`, `State`, `What stage 8 settled, because it is easy to re-open by accident`, `Four rulings the owner made this pass that outlive the stage` (+1569 more)
+- **1574 isolated node(s):** `1. The brief, verbatim`, `2. Rulings — settled, do not re-litigate`, `3.1 Capture`, `3.2 Stabilize`, `3.3 Refit — BUILT, and not the way this section first described it` (+1569 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **24 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

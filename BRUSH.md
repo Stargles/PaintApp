@@ -286,6 +286,28 @@ and a second thing to keep in step.
   differently in the two slots: a stray reading above 1 is flattened as an *input* and would *amplify*
   as a *gain*. A second input attenuates; raising `amount` is how a row is made bigger.
 
+**2.25 Texture returns, canvas-anchored, and this reverses §2.4.** Owner, having ruled *"Delete all of
+grain"* at the start of this overhaul: *"a lot of paint programs have something called texture ... its a
+texture that gets applied over your brush ... Texture is applied relative to canvas, and uses the
+untextured brush as a transparency mask, then is scaled with opacity."*
+
+**Say plainly what changed and why it is cheap now.** §2.4 deleted grain *including* canvas-anchored
+paper, and gave a reason: *"a sprite travels with the stroke, paper does not"* — with the ink composited
+dab by dab straight onto the layer, there was no moment at which the whole stroke existed as a mask, so
+paper could only have been faked per dab. **§12 stage 8 built that moment.** A stroke now paints into
+its own buffer and merges once, so the texture multiplies in **at the merge**, against canvas
+coordinates, with the buffer serving as exactly the transparency mask the owner describes and the
+stroke's opacity scaling the result. The feature that was structurally awkward is now a few lines in one
+place.
+
+**Canvas-anchored only.** The owner was offered stroke-anchored as well and did not take it, and the
+reason to be glad is §2.5's: ink that travels — a lasso move, a pose, an interpolation — would have to
+re-sample or bake a stroke-anchored texture, which is the whole argument that deleted grain the first
+time. Paper does not move, so nothing has to be baked.
+
+**It is what makes §2.21's importers honest**, since most `.abr` and Procreate brushes carry a texture
+and a brush imported without one is not that brush.
+
 **2.24 The editor is a screen, not a panel, and its shape is a chain per output.** Owner: *"The brush
 edit menu right now is a little menu, whereas in Procreate it is like a separate screen. For this menu,
 I think we need to have it cover the entire screen due to the complex interactions it can have."* The
@@ -856,7 +878,14 @@ still exactly §4's `hash(strokeSeed, arcLength)`; λ = 0 is a fresh draw per da
 **Outputs**: `size` · `opacity` · `flow` · `angle` · ~~`roundness`~~ · `spacing` · `scatter` ·
 `density` · `hue` / `saturation` / `brightness` shift · `hardness` (procedural tips only).
 
-**`roundness` is the one output stage 7 did not ship, and it is a decision rather than an omission.** A
+**`roundness` is the one output stage 7 did not ship, and it is a decision rather than an omission —
+now scheduled, for §12 stage 9.** The owner asked for it by another name (§2.24's *"vertical/horizontal
+stretch"*) and asked whether it is a real feature elsewhere. It is: Photoshop's Shape Dynamics has
+**Roundness Jitter** whose *default* control is pen pressure, and Clip Studio has a **Thickness** slider
+with a **Horizontal/Vertical** toggle driven from its Dynamics popup — which is the owner's phrasing
+almost exactly. **It lands with the brush set rather than before it**, and the reason is authoring
+rather than taste: whether a chisel is a rectangular *sprite* or a squashed *round* tip changes how
+§8.4's generator draws it, so settling it after the tips exist means re-drawing them. A
 non-circular dab contradicts §3.5's ruling that *"a tip's mask is square, by ruling. One scalar for the
 dab's size keeps `DabPose` at one multiply, `BakedDab` at one number and the dirty-rect bound at one
 `abs`."* Shipping it means a second extent through both `DabTarget` primitives, `BakedDab`,
