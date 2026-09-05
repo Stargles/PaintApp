@@ -354,6 +354,17 @@ textured brush can only be built in code. That is §12 stage 10's job and is the
 rather than a defect — but it does mean nothing in the shipped app draws with paper, which is why the
 byte-identity pin below is the one that matters most.
 
+**It was still driven by hand before being called done**, per CLAUDE.md's *"a feature is not finished
+because its model is correct"*: a sixth preset carrying a sheet was added to `BrushLibrary.defaults` in
+a working tree that was never committed, built, installed on the simulator and drawn with. Three things
+came out of that which no logic test would have said. The brushes menu's own **preview swatch is
+textured**, because `BrushPreview` goes through `stampStroke` and inherited the feature with no change —
+so the artist will see which brushes carry paper before picking one. Two strokes drawn a canvas inch
+apart carry **visibly different** paper, which is the anchoring at the scale a person judges it. And
+`tileSize` **96 against a 128-pixel sheet** — a downscale, chosen deliberately because that is where the
+per-tile edge clamp above would show — has **no visible seam**, which is the observation that comment's
+INFERRED is standing next to.
+
 **What it cost, MEASURED.** Nothing per dab: the merge does one `.destinationIn` tiling pass over the
 stroke's own clip, and `BrushTextureMaskCache` holds the depth-adjusted, pre-flipped sheet per
 *(mask, depth)* for the life of the process — so a stroke pays one tiled blit and a brush pays one
