@@ -1046,6 +1046,10 @@ minting is what makes an edit persist.
 
 ### 7.1 The brushes menu — the shape, taken from the owner's own reference
 
+**BUILT 2026-09-04** — `StrokeSettingsPanel` *is* this menu now, `BrushEditorView` is the shell behind
+§2.20's second tap, and the six sliders the panel used to show inline moved into it. Four notes from
+building it are folded into the bullets below and marked; everything else is as it was designed.
+
 The owner supplied Procreate's brush menu as the reference and §2.20 rules the navigation. What the
 reference actually shows, and which of it is a decision rather than decoration:
 
@@ -1060,15 +1064,54 @@ reference actually shows, and which of it is a decision rather than decoration:
   a real `BrushStamper` walk over a fixed S-curve with a pressure ramp, which makes it the same
   contact-sheet render §12 stage 9 chooses the set with, at row size. **Cache it by `BrushRef`**: it is
   the brush's value-addressed identity, so an edited brush re-renders and an unedited one never does.
+  **BUILT, keyed one step earlier — on the `Brush` value itself.** A `BrushRef` *is* `BrushPool`'s index
+  for a brush value, so the two are the same cache; the difference is that minting a ref costs an entry
+  in an **append-only, process-wide** pool that never releases anything, and a preview is rendered for
+  a brush the artist is merely *looking at*. Stage 10's editor will re-render on every tick of a slider
+  drag, and interning each of those would grow the pool by hundreds of brushes nobody drew with.
+  `Brush` is `Hashable` over its whole value — the same hash the pool addresses by — so `BrushPreviewKey`
+  keeps the identity and drops the pool entry.
+  **Two build notes.** The preview stroke's own width is the brush's `size` *clamped into the row*, not
+  taken literally: at row size the Pen's 4 pt is a hairline and a 200 pt import is one dab covering the
+  row, and a constant would be honest about neither. And the rendered image must **not** be
+  `.accessibilityHidden(true)` — MEASURED, that made every brush row report no hit point at all while
+  the group rows beside them were fine, because a row's centre lands on the image. It is a VoiceOver
+  hole as much as an XCUITest one.
 - **The selected brush's row is highlighted**, and a second tap on *that* row opens the editor. So the
   library's own selection state is what makes §2.20's second tap unambiguous — the gesture is "tap the
   thing that is already chosen", one level down from the tool icon's own version of it.
 - **The set name sits top-left with a chevron**, the **`+` top-right**. §8.1 already rules that the
   shipped collection and the artist's own are two different things; the chevron is where that shows
-  up, and the `+` is §2.21's importer.
+  up, and the `+` is §2.21's importer. **BUILT**: the chevron opens the *open group's* own menu —
+  Rename, Move Up, Move Down, Delete — which is where §8.2's ordering and rename became reachable, and
+  the `+` offers Import Custom Brush and New Group. The importer's identifier is unchanged
+  (`brushPanel.importCustomBrush`); what moved is that it is no longer a row under six sliders, which
+  is the below-the-fold placement the owner reported having to scroll to find.
 - **Not copied**: Procreate's per-brush cloud-download glyph. Every brush here is local.
+- **BUILT, and it is a deviation worth recording: the editor is pushed inside this panel, not presented
+  as a sheet.** The Size slider raises a **real-size stamp preview** that `DrawingView` draws in its own
+  overlay, positioned against the slider's frame in the drawing view's coordinate space
+  (`SizePreviewRequest`, `SizePreviewWindow`). A sheet presents *above* that overlay, so holding the
+  Size slider inside one would raise a window nobody can see — the control would look inert. Pushing
+  keeps one view tree, one coordinate space, and `activePanel` on `.brush`, which is also what
+  `CanvasTouchOwner` and the draw-to-dismiss path already read. §7.2's editor is a much bigger surface
+  and may want its own presentation; if it takes one, that overlay is what it has to solve.
+- **BUILT: the marker for "the menu is on screen" is on the group column's `ScrollView`, not on the
+  enclosing `VStack`.** An `accessibilityIdentifier` on a SwiftUI container is *inherited by its
+  descendants* rather than making an element of its own — it produced no queryable node at all, and it
+  silently overwrote both `Menu`s' identifiers, so the `+` and the chevron were unreachable while
+  looking perfectly correct in the source.
 
 ### 7.2 The editor — three columns, and the middle one is per category
+
+**Not built. What exists behind §2.20's second tap is a shell** (`BrushEditorView`, 2026-09-04) holding
+*exactly* the six controls `StrokeSettingsPanel` used to show inline — Size, Opacity, Pressure → Size,
+Pressure → Flow, Stabilization, Spacing — re-housed with nothing added and nothing removed, every
+accessibility identifier unchanged. Moving them is the point: §2.20 rules that a brush parameter is
+changed in the editor and nowhere else, and until there was a door they had nowhere else to be. An edit
+is written through to the library on slider **lift** rather than per tick, because the store persists on
+every change and a drag is dozens of changes a second — which also fixes a real old defect the panel
+had, that a tweak lived only in `selectedBrush` and vanished the moment another preset was picked.
 
 Procreate's Brush Studio, which the owner named. Three columns:
 
@@ -1108,6 +1151,17 @@ The **library** is app-level: the brushes the artist can pick, their groups, and
 persists across documents. The **document table** (§5.4) is per-document: the brushes the strokes in *this*
 file were actually drawn with.
 
+**BUILT 2026-09-04, and it took a third population with it.** Before this, the picker was
+`BrushLibrary.defaults + CanvasManager.customBrushes`, and `customBrushes` is persisted **in the
+project manifest** — so the artist's own brushes lived in whichever document happened to be open, and a
+brush imported in one file was unpickable in the next. That is the defect this section names, and the
+library is the fix. `customBrushes` stays, unchanged, because `ProjectStore.importedTextureFileNames`
+reads it to decide which tip PNGs a saved package must carry; what it *means* narrowed from "the
+palette" to "the imported brushes this document needs files for". The one crossing is
+`CanvasManager.adoptRestoredBrushesIntoLibrary`, called once on project load: a file made on another
+device restores brushes this library has never seen, and without it they would be drawable and
+unpickable. It is id-keyed, so reopening the same project adds nothing the second time.
+
 Both are needed, and the pair buys something neither does alone. Because a stroke is frozen to the brush it
 was drawn with (§2.10), **a document that carries its own table is self-contained** — it opens correctly on
 a device whose library has never held that brush. That falls out of §2.9 and §2.10 rather than costing
@@ -1119,12 +1173,42 @@ uses, because an artist can import a tip and not draw with it yet. A copy that w
 something: the first case loses the ink's own tip, which is the defect BUGS.md carried, and the second
 loses the picker's.
 
-### 8.2 Groups are the layer tree again
+### 8.2 Groups are a flat `[BrushGroup]` — the layer-tree reuse was tried and is refuted
 
-`BrushLibrary` is a flat array of presets plus a custom-brushes directory; there is no folder concept. The
-layer tree is already a complete, tested, persisted, ordered hierarchy with folders, and it is the third
-feature to want that shape — TODO (30) makes the same observation about organising documents. **Reuse it
-rather than hand-rolling a third tree.**
+**This section used to say the opposite**, and it is worth keeping the claim it made because it is the
+kind that sounds unanswerable: *"the layer tree is already a complete, tested, persisted, ordered
+hierarchy with folders, and it is the third feature to want that shape — reuse it rather than
+hand-rolling a third tree."* Built against the code (`BrushGroup.swift`, `BrushLibraryStore.swift`,
+2026-09-04), three facts say no, and each is on its own decisive:
+
+1. **There is no node type to reuse.** `Layer` and `LayerFolder` are two concrete structs, ~700 lines
+   between them, and every field on them is about layers: cel content, `alphaMask`, `compositorRole`,
+   `effect` plus its per-parameter keyframe tracks, `isFillReference`, blend mode, isolation, and the
+   `hasCustomName` provenance flag. Nothing there is generic over a payload. "Reuse" therefore means
+   either making `Layer` generic — a refactor of the single most load-bearing type in the app, to gain a
+   brush picker — or instantiating layers *as* brushes and carrying twenty inert fields per brush.
+2. **A folder has no ordering field at all, and an empty one cannot be placed.**
+   `CanvasManager.containerEntries` derives a folder's position from the *topmost `layers` index its
+   contents occupy*, on the invariant that a folder's layers are a contiguous span. That is elegant for
+   layers, where an empty folder is a transient state; here it is fatal. `layerStackRows`' own comment
+   says it: *"A folder holding no layers yet has no span, so it renders at the top of whatever contains
+   it."* An artist who makes a brush group and then fills it would watch it jump. Brush groups need an
+   order of their own, which is an array index — and `BrushLibraryLogicTests`'
+   `testAnEmptyGroupKeepsThePositionItWasMovedTo` is the pin.
+3. **The owner's own reference shows one level of grouping.** Nesting is the only thing the layer tree
+   would have contributed, and nothing has asked for it. §7.1's two columns cannot render a second level
+   anyway.
+
+So the model is `[BrushGroup]`, each holding `[Brush]`, ~40 lines, with the store
+(`BrushLibraryStore`) owning add / rename / reorder / delete and the one invariant worth having: **a
+brush id lives in at most one group**, so adding a brush to a second group moves it rather than
+duplicating it. TODO (30)'s document-organising observation is untouched by this — it may still want the
+layer tree, and it should be checked against the code the same way.
+
+**And the library is persisted as JSON, not in `UserDefaults`** — `Documents/Brushes/library.json`,
+beside the imported tip PNGs a group's `.stamp(.imported(fileName:))` entries name. It is
+`PaletteStore`'s shape with a file instead of a defaults key, and `-resetBrushLibrary` is
+`-resetPalettes`' twin.
 
 ### 8.3 What may be shipped, and it rules out most of what is on the internet
 
