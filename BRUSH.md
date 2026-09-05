@@ -691,6 +691,24 @@ row does. Three things are owed:
    the base. §7.2 already prints the chain's other rules where they bite; this is the missing one, and it
    is the rule that makes two gains a *balance* rather than two unrelated knobs.
 
+**A gain is a slider *and* a typed field, because the slider's range is not the value's range.** Owner:
+*"making gain a slider means having it bounded, which I think may limit freedom, so make it a slider, but
+also a place where you can type out the percent past 100%."*
+
+**The model already permits this and only the UI would have taken it away.** §6 rules that a row's amount
+is *"signed and is **not** clamped, and neither is the sum — every output enforces its own legal range
+where it is used"*. So a gain above 100% is legal today and a **negative** gain is too, and a negative one
+is not an edge case: it is how a sensor is made to *reduce* a parameter — size falling as pressure rises,
+spacing tightening as the stroke speeds up.
+
+So the control is the slider for the range an artist drags through, plus a **value pill that accepts
+typed entry** past either end of it, negatives included. The editor already draws a value pill beside
+every control (§7.2), so this makes an existing element editable rather than adding one.
+
+**The rule generalises and should be applied that way**: wherever a slider's range is narrower than the
+value's legal range, the pill is the escape hatch. A slider that silently clamps is the same failure as a
+test asserting a census — it encodes today's expectation as tomorrow's limit.
+
 **A `scale` module also gains an amount**, for the same reason one level down: a scale carried an input
 and a curve but no number, so "half as much random" meant *drawing* a flat curve at 0.5 — a curve editor
 used to enter a number. It mixes rather than multiplying outright, `value · (1 - amount + amount ·
