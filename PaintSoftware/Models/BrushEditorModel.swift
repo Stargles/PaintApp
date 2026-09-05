@@ -268,11 +268,11 @@ enum BrushModuleKind: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .curveRamp:
-            return "Remaps the value through a curve. Put one after a randomiser to reshape the wobble's range."
+            return "Remaps the value running through the chain. Put one after a randomiser to reshape the wobble's range."
         case .randomiser:
             return "Multiplies by a random value that varies along the stroke. Octaves add finer detail on top."
         case .scale:
-            return "Multiplies by another sensor's reading. It can only take away — Amount is what makes a chain bigger."
+            return "Multiplies by another sensor's reading, shaped by its own curve. It can only take away — Amount is what makes a chain bigger."
         }
     }
 
@@ -281,8 +281,8 @@ enum BrushModuleKind: String, CaseIterable, Identifiable {
         switch self {
         case .curveRamp: return .curveRamp(ResponseCurve.ramp(from: 0, to: 1))
         case .randomiser: return .scale(.random(.modulation(.size, row: 0),
-                                                BrushEditorDefaults.randomiser))
-        case .scale: return .scale(.pressure)
+                                                BrushEditorDefaults.randomiser), .linear)
+        case .scale: return .scale(.pressure, .linear)
         }
     }
 }
@@ -293,15 +293,23 @@ extension BrushModule {
     var kind: BrushModuleKind {
         switch self {
         case .curveRamp: return .curveRamp
-        case .scale(let input): return input.randomiser == nil ? .scale : .randomiser
+        case .scale(let input, _): return input.randomiser == nil ? .scale : .randomiser
         }
     }
 
     /// The randomiser this module draws through, or nil — nil for a curve ramp and for a scale by an
     /// ordinary sensor.
     var randomiser: BrushRandomiser? {
-        guard case .scale(let input) = self else { return nil }
+        guard case .scale(let input, _) = self else { return nil }
         return input.randomiser
+    }
+
+    /// **§2.29's own curve** — the one a `.scale` shapes *its own sensor's reading* with, which is a
+    /// different thing from a `.curveRamp`'s shaping of the value running through the chain. Nil for
+    /// a ramp, because a ramp *is* its curve and the editor binds to it by position instead.
+    var sensorCurve: ResponseCurve? {
+        guard case .scale(_, let curve) = self else { return nil }
+        return curve
     }
 }
 

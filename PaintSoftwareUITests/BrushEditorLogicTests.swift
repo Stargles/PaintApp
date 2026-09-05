@@ -216,6 +216,14 @@ final class BrushEditorLogicTests: XCTestCase {
                        "a scale carrying a random *is* the randomiser — there is no third case")
         XCTAssertEqual(BrushModule.scale(.pressure).kind, .scale)
         XCTAssertNil(BrushModule.scale(.pressure).randomiser)
+        // §2.29: a module that reads a sensor carries its own curve, and a fresh one is the
+        // pass-through — so adding a scale multiplies by the raw reading until the artist draws on it.
+        for kind in [BrushModuleKind.scale, .randomiser] {
+            XCTAssertEqual(kind.module.sensorCurve, ResponseCurve.linear,
+                           "a fresh \(kind.displayName) reads its sensor straight through")
+        }
+        XCTAssertNil(BrushModuleKind.curveRamp.module.sensorCurve,
+                     "a curve ramp *is* its curve — it does not also carry a sensor's")
         XCTAssertEqual(BrushModule.scale(.random(.scatterAngle, .plain(2))).randomiser?.wavelength, 2)
         XCTAssertNil(BrushModule.curveRamp(.linear).randomiser)
     }
@@ -335,7 +343,7 @@ final class BrushEditorLogicTests: XCTestCase {
     }
 
     private func moduleChannel(_ row: BrushModulation, _ position: Int) -> UInt64 {
-        guard case .scale(.random(let channel, _)) = row.modules[position] else { return .max }
+        guard case .scale(.random(let channel, _), _) = row.modules[position] else { return .max }
         return channel.rawValue
     }
 }

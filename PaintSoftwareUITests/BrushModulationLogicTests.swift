@@ -876,7 +876,7 @@ final class BrushModulationLogicTests: XCTestCase {
                             modules: [.scale(.random(.scatterAngle, .plain(0)))], amount: 1)
         ])
         guard case .random(let first, _) = brush.modulations.rows[0].input,
-              case .scale(.random(let second, _)) = brush.modulations.rows[0].modules[0] else {
+              case .scale(.random(let second, _), _) = brush.modulations.rows[0].modules[0] else {
             return XCTFail("both positions should still be random")
         }
         XCTAssertNotEqual(first, second, "a randomiser module needs a channel of its own")
@@ -1051,8 +1051,8 @@ final class BrushModulationLogicTests: XCTestCase {
                                       .scale(.random(.scatterAngle, .plain(0)))],
                             amount: 1)
         ])
-        guard case .scale(.random(let first, _)) = brush.modulations.rows[0].modules[0],
-              case .scale(.random(let second, _)) = brush.modulations.rows[0].modules[1] else {
+        guard case .scale(.random(let first, _), _) = brush.modulations.rows[0].modules[0],
+              case .scale(.random(let second, _), _) = brush.modulations.rows[0].modules[1] else {
             return XCTFail("both modules should still be randomisers")
         }
         XCTAssertNotEqual(first, second, "two randomisers in one chain need two channels")
@@ -1253,7 +1253,7 @@ final class BrushModulationLogicTests: XCTestCase {
                           "the order is part of the value, so two orders are two matrices")
 
         // §2.28's octaves are on the wire and they are the authored half.
-        guard case .scale(.random(let channel, let randomiser)) = randomFirst.rows[0].modules[0] else {
+        guard case .scale(.random(let channel, let randomiser), _) = randomFirst.rows[0].modules[0] else {
             return XCTFail("the first module must decode as a randomiser")
         }
         XCTAssertEqual(randomiser.wavelength, 2.5)
@@ -1262,7 +1262,7 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertEqual(channel, .modulation(.size, row: 0, slot: 1),
                        "decode runs the same channel normalisation construction does, and a randomiser "
                        + "at position 0 of the chain is plane 1")
-        guard case .scale(.random(let moved, _)) = curveFirst.rows[0].modules[1] else {
+        guard case .scale(.random(let moved, _), _) = curveFirst.rows[0].modules[1] else {
             return XCTFail("the second module must decode as a randomiser")
         }
         XCTAssertEqual(moved, .modulation(.size, row: 0, slot: 2),
@@ -1295,6 +1295,128 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertNotEqual(brush, reversed)
         XCTAssertNotEqual(BrushPool.intern(brush), BrushPool.intern(reversed),
                           "two brushes whose chains differ only in order are two entries")
+    }
+
+    // MARK: - §2.29: a module that reads a sensor carries its own curve
+
+    /// **A scale's own curve shapes its own sensor, not the value running through the chain** — §2.29,
+    /// and the owner's scenario is the fixture:
+    ///
+    /// > *"the spacing is randomized but also driven by brush pressure, where the lighter the pressure
+    /// > is, the more frequent you get segmented lines, but over lets say 30% pressure, it appears as a
+    /// > solid line."*
+    ///
+    /// That is `spacing ← random(λ) → scale by pressure through a threshold that answers 1 at no press
+    /// and 0 above a third`. **The discriminating operand is the same curve worn as a `.curveRamp`
+    /// after the scale**, which is the only other place a flat list could put it: a ramp shapes the
+    /// wobble and a scale's curve shapes the pressure, so the two answer differently at every pressure
+    /// where the curve is not the identity. Without that second brush the test would pass against an
+    /// implementation that put the curve on the wrong operand.
+    func testAScalesOwnCurveShapesItsOwnSensorRatherThanTheRunningValue() {
+        // 1 at no press, 0 from a third of full press upward.
+        let gate = ResponseCurve.threshold(knee: 0.3, low: 1, high: 0)
+        func brush(_ modules: [BrushModule]) -> Brush {
+            var brush = BrushLibrary.hardRound
+            brush.dab.spacing = 0.1
+            brush.modulations = BrushModulations([
+                BrushModulation(.spacing, .random(.scatterAngle, .plain(3)), modules: modules,
+                                amount: 0.2)
+            ])
+            return brush
+        }
+        let owner = brush([.scale(.pressure, gate)])
+        let rampAfter = brush([.scale(.pressure), .curveRamp(gate)])
+        let uncurved = brush([.scale(.pressure)])
+
+        func spacing(_ brush: Brush, pressure: CGFloat, draw: CGFloat) -> Double {
+            brush.dabValues { input in
+                if case .random = input { return draw }
+                return input == .pressure ? pressure : input.neutral
+            }.spacing
+        }
+
+        // The scenario, in the evaluator: the wobble is there at a light touch and gone above a third.
+        XCTAssertEqual(spacing(owner, pressure: 0, draw: 0.8), 0.1 + 0.2 * 0.8, accuracy: 1e-9,
+                       "at no press the gate is open and the whole wobble reaches spacing")
+        XCTAssertEqual(spacing(owner, pressure: 0.6, draw: 0.8), 0.1, accuracy: 1e-12,
+                       "above a third of pressure the gate is shut and the line is solid")
+        XCTAssertEqual(spacing(owner, pressure: 0.6, draw: 0.2), 0.1, accuracy: 1e-12,
+                       "…whatever the draw was, which is what makes it a gate rather than an attenuator")
+        // And it closes *gradually* over the knee rather than stepping, which is the shape of the
+        // curve rather than of a comparison — the owner asked for a curve, not a threshold test.
+        let ladder = [CGFloat(0), 0.05, 0.1, 0.2, 0.29].map { spacing(owner, pressure: $0, draw: 0.8) }
+        for (a, b) in zip(ladder, ladder.dropFirst()) {
+            XCTAssertGreaterThan(a, b, "the wobble closes down as pressure rises: \(ladder)")
+        }
+
+        // The operand: the same curve as a ramp shapes the *wobble* instead, so pressure barely moves
+        // it and the draw decides everything — the mirror of the brush above.
+        XCTAssertNotEqual(spacing(rampAfter, pressure: 0, draw: 0.8),
+                          spacing(owner, pressure: 0, draw: 0.8),
+                          "a curve ramp after the scale shapes the wobble, not the pressure — if these "
+                          + "agree the curve is on the wrong operand")
+        XCTAssertNotEqual(spacing(rampAfter, pressure: 0.6, draw: 0.2),
+                          spacing(owner, pressure: 0.6, draw: 0.2))
+
+        // And §2.22's surviving clause: an *uncurved* scale is the plain multiply it was, to the bit.
+        for pressure in [CGFloat(0), 0.2, 0.5, 1] {
+            XCTAssertEqual(spacing(uncurved, pressure: pressure, draw: 0.8),
+                           0.1 + 0.2 * 0.8 * Double(pressure), accuracy: 0,
+                           "`.linear` is `ResponseCurve`'s own clamp and nothing else")
+        }
+    }
+
+    /// **§2.29's curve round-trips, and is off the wire when it is the pass-through.** Bytes written
+    /// down here, not encoded in this process.
+    func testAScalesCurveRoundTripsAndIsAbsentByDefault() throws {
+        let decoder = JSONDecoder()
+        let bare = Data("""
+        [{"output":"size","input":{"kind":"pressure"},"amount":0.4,
+          "modules":[{"kind":"scale","input":{"kind":"velocity"}}]}]
+        """.utf8)
+        guard case .scale(let input, let curve)? = try decoder.decode(BrushModulations.self, from: bare)
+            .rows[0].modules.first else {
+            return XCTFail("a scale with no curve key must still decode as a scale")
+        }
+        XCTAssertEqual(input, .velocity)
+        XCTAssertTrue(curve.isLinear, "an absent curve is the pass-through")
+
+        let gated = Data("""
+        [{"output":"size","input":{"kind":"pressure"},"amount":0.4,
+          "modules":[{"kind":"scale","input":{"kind":"velocity"},
+                      "curve":{"step":1,"keys":[
+                        {"frame":0,"value":1,"interpolation":"linear","tangentMode":"vector"},
+                        {"frame":307,"value":0,"interpolation":"linear","tangentMode":"vector"},
+                        {"frame":1024,"value":0,"interpolation":"linear","tangentMode":"vector"}]}}]}]
+        """.utf8)
+        guard case .scale(_, let shaped)? = try decoder.decode(BrushModulations.self, from: gated)
+            .rows[0].modules.first else {
+            return XCTFail("a scale with a curve key must decode as a scale")
+        }
+        XCTAssertFalse(shaped.isLinear)
+        XCTAssertEqual(Double(shaped.value(at: 0)), 1, accuracy: 1e-9)
+        XCTAssertEqual(Double(shaped.value(at: 0.6)), 0, accuracy: 1e-9)
+
+        // An uncurved scale writes the two keys it wrote before §2.29 existed.
+        let plain = BrushModulations([BrushModulation(.size, .pressure,
+                                                      modules: [.scale(.velocity)], amount: 0.4)])
+        let json = String(decoding: try JSONEncoder().encode(plain), as: UTF8.self)
+        XCTAssertFalse(json.contains("\"curve\""), "the pass-through is left off the wire")
+
+        // And the curve is part of the brush's identity, which is what `BrushPool` addresses by.
+        var withGate = BrushLibrary.pen
+        withGate.modulations = BrushModulations([
+            BrushModulation(.spacing, .pressure,
+                            modules: [.scale(.velocity, .threshold(knee: 0.3, low: 1, high: 0))],
+                            amount: 0.2)
+        ])
+        var without = BrushLibrary.pen
+        without.modulations = BrushModulations([
+            BrushModulation(.spacing, .pressure, modules: [.scale(.velocity)], amount: 0.2)
+        ])
+        XCTAssertNotEqual(withGate, without)
+        XCTAssertNotEqual(BrushPool.intern(withGate), BrushPool.intern(without))
+        XCTAssertEqual(try decoder.decode(Brush.self, from: JSONEncoder().encode(withGate)), withGate)
     }
 
     /// **The consumers with a pressure and no walk must refuse a row whose *gain* is not pressure.**

@@ -452,12 +452,12 @@ struct BrushEditorScreen: View {
                                         inputName: "the value reaching this module",
                                         idPrefix: "\(idPrefix).curve.\(moduleID)",
                                         onEditEnded: { commit() })
-            case .scale(let input):
+            case .scale(let input, let curve):
                 if let randomiser = input.randomiser {
                     randomiserControls(randomiser, rowID: moduleID, idInfix: "module",
                                        write: { updated in
                         writeModule(rowIndex: rowIndex, position: position,
-                                    .scale(.random(.modulation(.size, row: 0), updated)))
+                                    .scale(.random(.modulation(.size, row: 0), updated), curve))
                     })
                 } else {
                     HStack(spacing: 8) {
@@ -465,11 +465,21 @@ struct BrushEditorScreen: View {
                             .font(.caption).foregroundColor(.white.opacity(0.6))
                         inputPicker(selection: input.kind,
                                     identifier: "\(idPrefix).moduleSensor.\(moduleID)") { kind in
-                            writeModule(rowIndex: rowIndex, position: position, .scale(kind.input()))
+                            writeModule(rowIndex: rowIndex, position: position,
+                                        .scale(kind.input(), curve))
                         }
                         Spacer(minLength: 0)
                     }
                 }
+                // §2.29: a module that reads a sensor carries **its own** curve, shaping that
+                // sensor's reading rather than the value running through the chain. It is drawn
+                // inside the module for that reason — a curve on the outside is a `.curveRamp` and
+                // means something else, and the two would be indistinguishable side by side.
+                ResponseCurveEditorView(curve: sensorCurveBinding(rowIndex: rowIndex,
+                                                                  position: position),
+                                        inputName: input.kind.displayName,
+                                        idPrefix: "\(idPrefix).moduleCurve.\(moduleID)",
+                                        onEditEnded: { commit() })
             }
         }
         .padding(10)
@@ -732,6 +742,30 @@ struct BrushEditorScreen: View {
                         brush.modulations.replace(at: index, with: row)
                     }
                 })
+    }
+
+    /// **§2.29's curve on a `.scale` module** — the one shaping that module's own sensor reading, as
+    /// opposed to `curveBinding`'s, which is a `.curveRamp`'s shaping of the running value.
+    private func sensorCurveBinding(rowIndex: Int, position: Int) -> Binding<ResponseCurve> {
+        Binding(
+            get: {
+                guard brush.modulations.rows.indices.contains(rowIndex) else { return .linear }
+                let modules = brush.modulations.rows[rowIndex].modules
+                guard modules.indices.contains(position),
+                      case .scale(_, let curve) = modules[position] else { return .linear }
+                return curve
+            },
+            set: { newValue in
+                edit { brush in
+                    guard brush.modulations.rows.indices.contains(rowIndex) else { return }
+                    var row = brush.modulations.rows[rowIndex]
+                    guard row.modules.indices.contains(position),
+                          case .scale(let input, _) = row.modules[position] else { return }
+                    row.modules[position] = .scale(input, newValue)
+                    brush.modulations.replace(at: rowIndex, with: row)
+                }
+            }
+        )
     }
 
     /// The `ResponseCurve` of one **curve-ramp module** — addressed by its position in the chain,

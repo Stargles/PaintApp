@@ -149,19 +149,35 @@ enum BrushModule: Hashable {
     /// randomiser between two of these.
     case curveRamp(ResponseCurve)
 
-    /// **A scale by another sensor's reading — §2.22's second input, now a module.** With
-    /// `.random(…)` it is §2.28's randomiser; with any other input it is the gain that ruling built.
+    /// **A scale by another sensor's reading, shaped by that sensor's own curve** — §2.22's second
+    /// input, now a module, and §2.29's *"every module that reads a sensor carries its own input and
+    /// its own curve"*. With `.random(…)` it is §2.28's randomiser; with any other input it is the
+    /// gain §2.22 built.
     ///
-    /// **It attenuates.** The reading is clamped to `0…1`, so a scale can only ever take away — which
-    /// is §2.22's ruling and survives the move verbatim: *"a second input attenuates; `amount` is how
-    /// a row is made bigger"*, and `amount` remains the only signed, unclamped term. Without the
-    /// clamp one sensor would mean two opposite things depending on which position it sat in, since a
-    /// stray reading above 1 is flattened as an *input* and would amplify as a scale.
+    /// **The curve is the second one and it is not the same thing as a `.curveRamp`.** A ramp shapes
+    /// the value *running through the chain*; this shapes the **reading of this module's own sensor**
+    /// before it multiplies. §2.29's example needs exactly that and cannot be said any other way in a
+    /// flat list: *"spacing randomised but also driven by pressure — segmented below a third, solid
+    /// above"* is `spacing ← random(λ) → scale by pressure through a threshold`, where the threshold
+    /// answers 0 above a third and the wobble vanishes. A ramp before or after the scale would shape
+    /// the wobble, not the pressure.
     ///
-    /// **It is not curved from inside itself**, and that is no longer a restriction: a curve *after*
-    /// a scale is a `.curveRamp` after it in the list, which is the thing §2.28 exists to make
-    /// sayable.
-    case scale(BrushInput)
+    /// **This is what keeps a chain a list rather than a graph.** Two sensors meeting inside one
+    /// mapping is the case that would otherwise force branching nodes and wiring; carrying the second
+    /// sensor *inside the module that consumes it* says the same thing in a flat ordered list, and
+    /// three sensors is two `scale` modules.
+    ///
+    /// **It attenuates.** The **shaped** reading is clamped to `0…1`, so a scale can only ever take
+    /// away — §2.22's surviving clause, verbatim: *"a second input attenuates; `amount` is how a row
+    /// is made bigger"*, and `amount` remains the only signed, unclamped term. `.linear` is the
+    /// pass-through and is bit-identical to the uncurved scale this replaced, because
+    /// `ResponseCurve.value(at:)` on an empty curve *is* the clamp.
+    case scale(BrushInput, ResponseCurve)
+}
+
+extension BrushModule {
+    /// A scale with no curve on it — the common case, and what §2.22's second input was.
+    static func scale(_ input: BrushInput) -> BrushModule { .scale(input, .linear) }
 }
 
 extension BrushModule: Codable {
@@ -177,9 +193,12 @@ extension BrushModule: Codable {
         case .curveRamp(let curve):
             try c.encode(Kind.curveRamp, forKey: .kind)
             try c.encode(curve, forKey: .curve)
-        case .scale(let input):
+        case .scale(let input, let curve):
             try c.encode(Kind.scale, forKey: .kind)
             try c.encode(input, forKey: .input)
+            // §2.29's curve is left off the wire when it is the pass-through, so a scale written
+            // before it existed and one written after are the same two keys.
+            if !curve.isLinear { try c.encode(curve, forKey: .curve) }
         }
     }
 
@@ -187,7 +206,9 @@ extension BrushModule: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(Kind.self, forKey: .kind) {
         case .curveRamp: self = .curveRamp(try c.decode(ResponseCurve.self, forKey: .curve))
-        case .scale: self = .scale(try c.decode(BrushInput.self, forKey: .input))
+        case .scale:
+            self = .scale(try c.decode(BrushInput.self, forKey: .input),
+                          try c.decodeIfPresent(ResponseCurve.self, forKey: .curve) ?? .linear)
         }
     }
 }
@@ -259,11 +280,12 @@ struct BrushModulation: Codable, Hashable {
             switch module {
             case .curveRamp(let curve):
                 value = Double(curve.value(at: CGFloat(value)))
-            case .scale(let scaled):
-                // §2.22's ruling, carried into the module: a scale attenuates. Clamped here rather
-                // than at the sensor, because `BrushInput` is *defined* to answer inside `0…1` and a
-                // curve ramp earlier in the chain is not.
-                value *= Double(min(max(reading(scaled), 0), 1))
+            case .scale(let scaled, let curve):
+                // §2.29: the module's own curve shapes its own sensor's reading, and §2.22's
+                // surviving clause clamps the **shaped** value — a scale attenuates. `.linear` is
+                // `ResponseCurve`'s own clamp and nothing else, so an uncurved scale is exactly the
+                // multiply it was before §2.29.
+                value *= Double(min(max(curve.value(at: reading(scaled)), 0), 1))
             }
         }
         return amount * value
@@ -281,7 +303,7 @@ struct BrushModulation: Codable, Hashable {
     /// own, which is what stops one of them being widened and the other forgotten.
     var readInputs: [BrushInput] {
         var inputs = [input]
-        for module in modules { if case .scale(let scaled) = module { inputs.append(scaled) } }
+        for module in modules { if case .scale(let scaled, _) = module { inputs.append(scaled) } }
         return inputs
     }
 
@@ -450,9 +472,10 @@ struct BrushModulations: Codable, Hashable {
                 row.input = .random(.modulation(row.output, row: index), randomiser)
             }
             for position in row.modules.indices {
-                guard case .scale(.random(_, let randomiser)) = row.modules[position] else { continue }
+                guard case .scale(.random(_, let randomiser), let curve) = row.modules[position]
+                else { continue }
                 row.modules[position] = .scale(.random(
-                    .modulation(row.output, row: index, slot: position + 1), randomiser))
+                    .modulation(row.output, row: index, slot: position + 1), randomiser), curve)
             }
             return row
         }
