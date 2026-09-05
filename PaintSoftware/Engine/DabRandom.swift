@@ -65,6 +65,26 @@ struct DabRandom: Equatable {
         /// **BRUSH.md §2.18's dropout draw.** The value a dab's `density` is compared against, and
         /// the one whose wavelength is carried by the density row itself.
         static let density = Channel(rawValue: 4)
+
+        /// **One octave of this channel** — BRUSH.md §2.28's *"each octave needs its own channel or
+        /// two of them are the same number twice"*.
+        ///
+        /// A whole **plane per octave**, `1 << 40` apart, which is the same argument
+        /// `DabRandom.Channel.modulation`'s `slot` makes one storey down and for the same reason: an
+        /// offset *inside* the block below reintroduces, at some stride, exactly the collision the
+        /// separation exists to prevent. The three coordinates therefore read as digits of one
+        /// base-2²⁰ number — the matrix's own span (`16 + 11·4096 + 4095 = 49,167`) in the low
+        /// digit, the module position in the middle, the octave on top — so an address is unique as
+        /// long as each is under 2²⁰, which no brush can approach.
+        ///
+        /// **Octave 0 is this channel unchanged, to the bit**, which is what makes a one-octave
+        /// randomiser identical to the single draw it replaces rather than merely close to it.
+        func octave(_ index: Int) -> Channel {
+            Channel(rawValue: rawValue &+ UInt64(max(index, 0)) &* Channel.octaveStride)
+        }
+
+        /// The distance between one octave's channel and the next. See `octave(_:)`.
+        static let octaveStride: UInt64 = 1 << 40
     }
 
     /// The stroke's own seed. **Inherited on split rather than regenerated** — that is the property
@@ -156,6 +176,38 @@ struct DabRandom: Equatable {
         unit(channel, at: arcWidths, wavelength: wavelength) * 2 - 1
     }
 
+    /// **One value drawn through a whole `BrushRandomiser`** — BRUSH.md §2.28's octaves.
+    ///
+    /// Octave *k* is the same field at **λ/2ᵏ**, weighted `falloff^k`, and the sum is divided by the
+    /// weights so the answer stays in `0..<1` whatever the count. Each octave draws its own channel
+    /// (`Channel.octave(_:)`), so the octaves are independent fields rather than one field sampled
+    /// several times — which is what "band-limited" has to mean here.
+    ///
+    /// **A count of 1 is the single draw above, to the bit, and there is deliberately no early
+    /// return saying so.** The first term is `1 · u`, the first weight is `1`, and `u / 1` is exactly
+    /// `u` in IEEE arithmetic, so the general path *is* the special case. A `guard` would have made
+    /// the pin below true by construction instead of true by arithmetic, and the thing worth pinning
+    /// is that octave 0 keeps its channel and its λ.
+    ///
+    /// Nothing about §4 changes: every octave is still `hash(seed, channel, arc length)` with no
+    /// sequence and no phase, so all of them survive a split, a refit, a spacing edit and an eraser
+    /// punch for the reason §2.13 gives.
+    func unit(_ channel: Channel, at arcWidths: CGFloat, randomiser: BrushRandomiser) -> CGFloat {
+        var total: CGFloat = 0
+        var weights: CGFloat = 0
+        var weight: CGFloat = 1
+        var wavelength = randomiser.wavelength
+        for index in 0..<randomiser.octaves {
+            total += weight * unit(channel.octave(index), at: arcWidths, wavelength: wavelength)
+            weights += weight
+            weight *= CGFloat(randomiser.falloff)
+            wavelength /= 2
+        }
+        // `weights` is at least 1 — the first octave's weight is the literal 1 and `octaves` is
+        // clamped to at least 1 — so this cannot divide by zero however the falloff was authored.
+        return total / weights
+    }
+
     /// Which λ-cell `index` falls in, and how far through it — floor division, so a negative index
     /// (a piece cut from the very start of a warped stroke) lands in the cell below rather than
     /// reflecting about zero.
@@ -233,4 +285,60 @@ struct DabRandom: Equatable {
             return hash
         }
     }
+}
+
+// MARK: - How a random value is drawn
+
+/// **Everything authored about one random draw** — BRUSH.md §2.17's wavelength and §2.28's octaves.
+///
+/// A `BrushInput.random` carries one of these, so the *same* description serves wherever a randomiser
+/// appears: as a chain's input (a pure wobble) and as a `BrushModule.scale` inside one (a randomiser
+/// module attenuating what came before it). **One type, one evaluator** — the alternative was octaves
+/// on the module and a bare λ on the input, which is two spellings of one draw and the two-ways-to-
+/// compute trap BRUSH.md §10 names.
+///
+/// What is *not* here is the channel. That is derived from where the randomiser sits (§6.2), and
+/// storing it beside the authored half is precisely the stale-field defect that derivation exists to
+/// make unrepresentable.
+struct BrushRandomiser: Hashable {
+
+    /// **λ, in brush widths** — §2.17. The value interpolates between hashed lattice points λ apart,
+    /// so a run of dabs shares a slowly-varying value; λ = 0 is a fresh draw per dab. It is what
+    /// separates a stipple from a segmented line.
+    var wavelength: CGFloat
+
+    /// **How many halvings of λ are summed** — §2.28. Octave *k* is λ/2ᵏ.
+    ///
+    /// Clamped to `1...8`, and the ceiling is arithmetic rather than taste: the eighth octave is
+    /// λ/128, which at §2.17's shipped λ of 3.5 widths is 0.027 widths — finer than the tightest
+    /// spacing the app can walk (0.02 of a width, `DabRandom.quantum`'s own bound), so every octave
+    /// past it is per-dab hash noise wearing a wavelength's name.
+    var octaves: Int
+
+    /// **The amplitude ratio between one octave and the next** — §2.28. 0.5 is the usual pink-ish
+    /// falloff; 1 weights every scale equally and 0 silences everything but the first.
+    ///
+    /// Clamped to `0...1`, because a falloff above 1 makes the *finest* octave the loudest, which is
+    /// a different feature (a high-pass) asked for by nobody and reachable by raising λ instead.
+    var falloff: Double
+
+    init(wavelength: CGFloat, octaves: Int = 1, falloff: Double = BrushRandomiser.defaultFalloff) {
+        self.wavelength = wavelength.isFinite ? max(wavelength, 0) : 0
+        self.octaves = min(max(octaves, 1), BrushRandomiser.maximumOctaves)
+        self.falloff = falloff.isFinite ? min(max(falloff, 0), 1) : BrushRandomiser.defaultFalloff
+    }
+
+    static let maximumOctaves = 8
+    static let defaultFalloff = 0.5
+
+    /// A plain single-octave draw — what every `random` row carried before §2.28, and what a fresh
+    /// one still starts as.
+    static func plain(_ wavelength: CGFloat) -> BrushRandomiser {
+        BrushRandomiser(wavelength: wavelength)
+    }
+
+    /// Whether this is the plain single draw. The editor shows the octave controls either way; this
+    /// is what the **codec** asks, so a brush that does not use octaves writes the bytes it always
+    /// wrote.
+    var isSingleOctave: Bool { octaves <= 1 }
 }

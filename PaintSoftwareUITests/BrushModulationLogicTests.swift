@@ -251,7 +251,7 @@ final class BrushModulationLogicTests: XCTestCase {
             ("pressure", .pressure),
             ("velocity", .velocity),
             ("direction", .direction),
-            ("random", .random(.scatterAngle, wavelength: 0))
+            ("random", .random(.scatterAngle, .plain(0)))
         ]
         // A stroke that turns, so `direction` is not constant along it.
         let turning = StrokeSamples(samples.enumerated().map { index, sample -> VectorSample in
@@ -525,11 +525,12 @@ final class BrushModulationLogicTests: XCTestCase {
                                         tangentMode: .free, interpolation: .bezier))
         var brush = BrushLibrary.hardRound
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .pressure, amount: 0.5, curve: ResponseCurve(curve))
+            BrushModulation(.size, .pressure, modules: [.curveRamp(ResponseCurve(curve))],
+                            amount: 0.5)
         ])
         let decoded = try JSONDecoder().decode(Brush.self, from: JSONEncoder().encode(brush))
         XCTAssertEqual(decoded, brush)
-        XCTAssertFalse(decoded.modulations.rows[0].curve.isLinear,
+        XCTAssertFalse(decoded.modulations.rows[0].firstCurve.isLinear,
                        "an authored curve is not the pass-through")
     }
 
@@ -541,8 +542,8 @@ final class BrushModulationLogicTests: XCTestCase {
     func testTwoRandomRowsOnOneOutputAreIndependentDraws() {
         var brush = BrushLibrary.hardRound
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .random(.scatterAngle, wavelength: 0), amount: 0.2),
-            BrushModulation(.size, .random(.scatterAngle, wavelength: 0), amount: 0.2)
+            BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2),
+            BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2)
         ])
         guard case .random(let first, _) = brush.modulations.rows[0].input,
               case .random(let second, _) = brush.modulations.rows[1].input else {
@@ -566,8 +567,8 @@ final class BrushModulationLogicTests: XCTestCase {
     func testRandomRowsOnDifferentOutputsDrawDifferentValues() {
         var brush = BrushLibrary.hardRound
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .random(.scatterAngle, wavelength: 0), amount: 0.2),
-            BrushModulation(.scatter, .random(.scatterAngle, wavelength: 0), amount: 0.2)
+            BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2),
+            BrushModulation(.scatter, .random(.scatterAngle, .plain(0)), amount: 0.2)
         ])
         guard case .random(let a, _) = brush.modulations.rows[0].input,
               case .random(let b, _) = brush.modulations.rows[1].input else {
@@ -592,7 +593,7 @@ final class BrushModulationLogicTests: XCTestCase {
                       "a pressure-only brush is bounded by the chain, as it always was")
 
         for (name, row) in [("velocity", BrushModulation(.size, .velocity, amount: -0.5)),
-                            ("random", BrushModulation(.size, .random(.scatterAngle, wavelength: 0), amount: -0.5)),
+                            ("random", BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: -0.5)),
                             ("taper", BrushModulation(.size, .taper, amount: -0.5))] {
             var driven = pressureOnly
             driven.modulations = BrushModulations([row])
@@ -724,18 +725,19 @@ final class BrushModulationLogicTests: XCTestCase {
 
     // MARK: - §2.22 — a row's second input
 
-    /// **The second input multiplies.** BRUSH.md §2.22: `output = base + Σ amount · curve(input) ·
-    /// reading(second)`.
+    /// **A scale module multiplies.** BRUSH.md §2.22's ruling, carried into §2.28's chain:
+    /// `output = base + Σ amount · chain(input)`, and a `.scale` in the chain multiplies by another
+    /// sensor's reading.
     ///
-    /// Checked at **four** different gain readings on each of three first-input readings, so an
-    /// implementation that ignored the second slot — or that added it, or that used it in place of the
-    /// first — disagrees at every row but one. A single gain reading would not do that: at 1 the right
-    /// and the wrong answers are equal, which is the shape of fixture CLAUDE.md catalogues.
-    func testASecondInputMultipliesTheRowsContribution() {
+    /// Checked at **four** different scale readings on each of three input readings, so an
+    /// implementation that ignored the module — or that added it, or that used it in place of the
+    /// input — disagrees at every row but one. A single scale reading would not do that: at 1 the
+    /// right and the wrong answers are equal, which is the shape of fixture CLAUDE.md catalogues.
+    func testAScaleModuleMultipliesTheChainsContribution() {
         var brush = BrushLibrary.hardRound
         brush.dab.size = 0
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .pressure, second: .velocity, amount: 0.5)
+            BrushModulation(.size, .pressure, modules: [.scale(.velocity)], amount: 0.5)
         ])
         for pressure in [CGFloat(0.2), 0.6, 1] {
             for gain in [CGFloat(0), 0.25, 0.75, 1] {
@@ -747,18 +749,18 @@ final class BrushModulationLogicTests: XCTestCase {
                     }
                 }
                 XCTAssertEqual(values.size, 0.5 * Double(pressure) * Double(gain), accuracy: 1e-12,
-                               "amount · curve(pressure \(pressure)) · reading(velocity \(gain))")
+                               "amount · pressure \(pressure) · reading(velocity \(gain))")
             }
         }
 
-        // The same row with no second input is the plain product, at every one of those pressures —
-        // the operand that says the numbers above came from the gain and not from the curve.
+        // The same chain with no scale module is the plain product, at every one of those pressures —
+        // the operand that says the numbers above came from the module and not from the input.
         var ungained = brush
         ungained.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.5)])
         for pressure in [CGFloat(0.2), 0.6, 1] {
             let values = ungained.dabValues { $0 == .pressure ? pressure : $0.neutral }
             XCTAssertEqual(values.size, 0.5 * Double(pressure), accuracy: 0,
-                           "an absent second input reads exactly 1")
+                           "an empty module list is the bare reading, exactly")
         }
     }
 
@@ -786,11 +788,11 @@ final class BrushModulationLogicTests: XCTestCase {
             brush.modulations = BrushModulations(rows)
             return brush
         }
-        let wobble = BrushModulation(.spacing, .random(.scatterAngle, wavelength: 0), amount: 0.15)
+        let wobble = BrushModulation(.spacing, .random(.scatterAngle, .plain(0)), amount: 0.15)
         let plain = brush([])
         let single = brush([wobble])
-        let scaled = brush([BrushModulation(.spacing, .random(.scatterAngle, wavelength: 0),
-                                            second: .pressure, amount: 0.15)])
+        let scaled = brush([BrushModulation(.spacing, .random(.scatterAngle, .plain(0)),
+                                            modules: [.scale(.pressure)], amount: 0.15)])
         let paired = brush([wobble, BrushModulation(.spacing, .pressure, amount: 0.15)])
 
         let plainInk = Self.render(plain, samples)
@@ -801,17 +803,18 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertNotEqual(singleInk, plainInk, "the wobble row must reach the ink at all")
         XCTAssertNotEqual(scaledInk, singleInk,
                           "a wobble scaled by pressure is not the same ink as an unscaled one — "
-                          + "if these match the second input is not being read")
+                          + "if these match the scale module is not being read")
         XCTAssertNotEqual(scaledInk, pairedInk,
                           "a wobble whose amplitude pressure moves is not a wobble plus a pressure "
-                          + "shift — if these match §2.22 buys nothing over two rows")
+                          + "shift — if these match the scale module buys nothing over two chains")
         XCTAssertNotEqual(pairedInk, plainInk)
     }
 
-    /// **A row with `random` in both slots draws two independent values, not one squared.**
+    /// **A chain with `random` as its input *and* as a randomiser module draws two independent
+    /// values, not one squared.**
     ///
-    /// §4's channel is derived from *(output, row)*, so reusing it for the gain would multiply a draw
-    /// by itself. The assertions are the two operands that tell those apart, and neither is a property
+    /// §4's channel is derived from *(output, row, position)*, so reusing one position's channel for
+    /// another would multiply a draw by itself. The assertions are the two operands that tell those apart, and neither is a property
     /// of noise in general:
     ///
     /// - the **mean of the product** over 8 seeds × 240 arc lengths. Two independent uniforms average
@@ -824,14 +827,14 @@ final class BrushModulationLogicTests: XCTestCase {
         var brush = BrushLibrary.hardRound
         brush.dab.size = 0
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .random(.scatterAngle, wavelength: 0),
-                            second: .random(.scatterAngle, wavelength: 0), amount: 1)
+            BrushModulation(.size, .random(.scatterAngle, .plain(0)),
+                            modules: [.scale(.random(.scatterAngle, .plain(0)))], amount: 1)
         ])
         guard case .random(let first, _) = brush.modulations.rows[0].input,
-              case .random(let second, _)? = brush.modulations.rows[0].second else {
-            return XCTFail("both slots should still be random")
+              case .scale(.random(let second, _)) = brush.modulations.rows[0].modules[0] else {
+            return XCTFail("both positions should still be random")
         }
-        XCTAssertNotEqual(first, second, "the gain slot needs a channel of its own")
+        XCTAssertNotEqual(first, second, "a randomiser module needs a channel of its own")
         XCTAssertNotEqual(second, DabRandom.Channel.scatterAngle, "…and not an intrinsic draw's")
         XCTAssertNotEqual(second, DabRandom.Channel.density)
 
@@ -843,8 +846,8 @@ final class BrushModulationLogicTests: XCTestCase {
                 // Through the evaluator, not through two hand-taken draws: what is under test is the
                 // row, and with base 0 and amount 1 `size` *is* the product of the two readings.
                 let values = brush.dabValues { input in
-                    guard case .random(let channel, let wavelength) = input else { return input.neutral }
-                    return field.unit(channel, at: arc, wavelength: wavelength)
+                    guard case .random(let channel, let randomiser) = input else { return input.neutral }
+                    return field.unit(channel, at: arc, randomiser: randomiser)
                 }
                 products.append(values.size)
                 lefts.append(Double(field.unit(first, at: arc)))
@@ -858,7 +861,7 @@ final class BrushModulationLogicTests: XCTestCase {
                              "…and a single draw squared would average a third, which is the specific "
                              + "failure the second channel exists to prevent")
         XCTAssertEqual(mean(products), mean(zip(lefts, rights).map(*)), accuracy: 1e-12,
-                       "the row's answer is the product of its two slots' draws")
+                       "the chain's answer is the product of its two positions' draws")
 
         let (mx, my) = (mean(lefts), mean(rights))
         let cov = mean(zip(lefts, rights).map { ($0 - mx) * ($1 - my) })
@@ -868,111 +871,385 @@ final class BrushModulationLogicTests: XCTestCase {
                           "two channels are uncorrelated; one channel with itself correlates at 1")
     }
 
-    /// **Absence is free, and the second slot subsumes the old form rather than perturbing it.**
+    /// **A chain with no scale module is unchanged by this feature.**
     ///
-    /// Three pins, because "byte-identical to before" has three ways to be false here:
+    /// Three pins, because "unchanged" has three ways to be false here:
     ///
-    /// - **The wire.** No shipped preset carries a second input and none of their JSON has the key, so
-    ///   a brush written before §2.22 and one written after are the same bytes.
-    /// - **The channel numbering.** Slot 0's arithmetic is compared against the literals it produced
-    ///   before the `slot` parameter existed. A change here would re-roll every stroke drawn with a
-    ///   randomised brush, silently.
-    /// - **The pixels.** A row whose gain reads a constant 1 renders byte-identically to the same row
-    ///   with no gain at all — and the third brush, whose gain is a sensor that *varies* on the same
-    ///   stroke, is the operand that says the comparison is not two blank canvases.
-    ///
-    /// `testTheFivePresetsRenderIdenticallyToTheDynamicsTheyReplaced` is the fourth pin and is
-    /// untouched: it still renders every preset through the matrix against transcribed arithmetic.
-    func testARowWithNoSecondInputIsUnchangedByThisFeature() {
+    /// - **The presets.** None of the five carries a `.scale`, so every one of them evaluates
+    ///   `amount · curve(pressure)` exactly as it did when that was a fixed row. `testTheFivePresets…`
+    ///   above is the arithmetic half and this is the structural one.
+    /// - **The channel numbering.** Position 0's arithmetic is compared against the literals it
+    ///   produced before the chain existed. A change here would re-roll every stroke drawn with a
+    ///   randomised brush, silently — and position 1 is where §2.22's second slot was, so a chain whose
+    ///   first module is a randomiser draws exactly the channel that slot drew.
+    /// - **The pixels.** A chain whose scale reads a constant 1 renders byte-identically to the same
+    ///   chain with no scale at all — and the third brush, whose scale is a sensor that *varies* on the
+    ///   same stroke, is the operand that says the comparison is not two blank canvases.
+    func testAChainWithNoScaleModuleIsUnchangedByThisFeature() {
         for brush in BrushLibrary.defaults {
             for row in brush.modulations.rows {
-                XCTAssertNil(row.second, "\(brush.name) carries no second input")
+                XCTAssertFalse(row.modules.contains { if case .scale = $0 { return true } else { return false } },
+                               "\(brush.name) carries no scale module")
             }
-            guard let json = try? String(decoding: JSONEncoder().encode(brush), as: UTF8.self) else {
-                return XCTFail("\(brush.name) must encode")
-            }
-            XCTAssertFalse(json.contains("\"second\""),
-                           "\(brush.name)'s JSON must be byte-for-byte what it was before §2.22")
         }
 
         // Written down, not computed: 16 reserved + channelBase · 4096 + row, which is what
-        // `modulation(_:row:)` answered before it took a slot.
+        // `modulation(_:row:)` answered before it took a position at all.
         XCTAssertEqual(DabRandom.Channel.modulation(.size, row: 0).rawValue, 4112)
         XCTAssertEqual(DabRandom.Channel.modulation(.spacing, row: 3).rawValue, 20499)
         XCTAssertEqual(DabRandom.Channel.modulation(.brightness, row: 4095).rawValue, 49167)
         XCTAssertGreaterThan(DabRandom.Channel.modulation(.size, row: 0, slot: 1).rawValue, 49167,
-                             "the gain slot is a whole second plane, so no row count can reach it")
+                             "each chain position is a whole plane, so no row count can reach the next")
+        // §2.28: octave 0 is the channel itself, so a one-octave randomiser draws what the single
+        // draw it replaces drew.
+        XCTAssertEqual(DabRandom.Channel.modulation(.size, row: 0).octave(0).rawValue, 4112)
+        XCTAssertGreaterThan(DabRandom.Channel.modulation(.brightness, row: 4095, slot: 63)
+                                .octave(1).rawValue,
+                             DabRandom.Channel.modulation(.brightness, row: 4095, slot: 4095).rawValue,
+                             "an octave plane is past every position plane a chain could reach")
 
         // A stroke pressed flat out, so `pressure` reads exactly 1 at every dab and is the identity.
         let samples = Self.rampStroke(from: 1, to: 1)
         XCTAssertEqual(samples.value(.pressure, at: 0), 1, accuracy: 0,
-                       "the fixture only means anything if the gain really reads 1")
-        func brush(second: BrushInput?) -> Brush {
+                       "the fixture only means anything if the scale really reads 1")
+        func brush(scaledBy scale: BrushInput?) -> Brush {
             var brush = BrushLibrary.hardRound
             brush.dab.hardness = 1
             brush.modulations = BrushModulations([
-                BrushModulation(.size, .velocity, second: second, amount: 0.6)
+                BrushModulation(.size, .velocity, modules: scale.map { [.scale($0)] } ?? [],
+                                amount: 0.6)
             ])
             return brush
         }
-        XCTAssertEqual(Self.render(brush(second: nil), samples),
-                       Self.render(brush(second: .pressure), samples),
-                       "a gain of a constant 1 is the identity, to the byte")
-        XCTAssertNotEqual(Self.render(brush(second: nil), samples),
-                          Self.render(brush(second: .taper), samples),
-                          "…and a gain that varies is not, or the comparison above is vacuous")
+        XCTAssertEqual(Self.render(brush(scaledBy: nil), samples),
+                       Self.render(brush(scaledBy: .pressure), samples),
+                       "a scale by a constant 1 is the identity, to the byte")
+        XCTAssertNotEqual(Self.render(brush(scaledBy: nil), samples),
+                          Self.render(brush(scaledBy: .taper), samples),
+                          "…and a scale that varies is not, or the comparison above is vacuous")
     }
 
-    /// **A second input survives a round trip, and JSON that lacks the key decodes to absent.**
+    // MARK: - §2.28: the order is the artist's
+
+    /// **A curve then a randomiser is different ink from a randomiser then a curve.** This is the
+    /// whole of §2.28 — the owner's *"we may sometimes need the randomizer first, then use curves to
+    /// remap the range"* — and if these two rendered the same the feature would not exist.
+    ///
+    /// The two chains carry the **same two modules** with the same parameters and differ only in the
+    /// order of the list, so nothing but the order can explain a difference. The curve is a threshold
+    /// with a floor of 0.35, chosen because it is *not* injective: below its knee it flattens, so
+    /// `curve(x · r)` and `curve(x) · r` disagree over a whole range of readings rather than at a
+    /// point. The channel each order draws is the same, too — a randomiser at position 1 in both — so
+    /// this is not two different draws being compared.
+    func testTheOrderOfAChainsModulesDecidesTheInk() {
+        let samples = Self.rampStroke(from: 0.05, to: 1)
+        func brush(_ modules: [BrushModule]) -> Brush {
+            var brush = BrushLibrary.hardRound
+            brush.dab.hardness = 1
+            brush.dab.size = 0.3
+            brush.modulations = BrushModulations([
+                BrushModulation(.size, .pressure, modules: modules, amount: 0.7)
+            ])
+            return brush
+        }
+        let ramp = BrushModule.curveRamp(.threshold(knee: 0.5, low: 0.35))
+        let wobble = BrushModule.scale(.random(.scatterAngle, .plain(2)))
+
+        let curveFirst = brush([ramp, wobble])
+        let randomFirst = brush([wobble, ramp])
+        let bare = brush([])
+
+        // PREMISE: both orders reach the ink at all, or the comparison between them is between two
+        // copies of the unmodulated brush.
+        XCTAssertNotEqual(Self.render(curveFirst, samples), Self.render(bare, samples))
+        XCTAssertNotEqual(Self.render(randomFirst, samples), Self.render(bare, samples))
+
+        XCTAssertNotEqual(Self.render(curveFirst, samples), Self.render(randomFirst, samples),
+                          "the same two modules in the other order must make different ink — this is "
+                          + "the ruling, and if it holds the feature does not exist")
+
+        // And say *how* they differ, in the evaluator rather than in pixels: with the curve first the
+        // randomiser attenuates a shaped value, so the answer never exceeds the curve's own output;
+        // with the randomiser first the curve's floor lifts a wobble that had been scaled to nearly
+        // nothing. At a low pressure that floor is the whole difference.
+        let low: (Brush) -> Double = { brush in
+            brush.dabValues { input in
+                if case .random = input { return 0.02 }
+                return input == .pressure ? 0.2 : input.neutral
+            }.size
+        }
+        // `threshold(knee: 0.5, low: 0.35)` rises straight from 0.35 at 0 to 1 at 0.5, so
+        // `curve(0.2) = 0.35 + 0.4 · 0.65 = 0.61` and `curve(0.2 · 0.02) = 0.35 + 0.008 · 0.65`.
+        XCTAssertEqual(low(curveFirst), 0.3 + 0.7 * 0.61 * 0.02, accuracy: 1e-9,
+                       "curve then randomiser: the reading is shaped, then all but scaled away")
+        XCTAssertEqual(low(randomFirst), 0.3 + 0.7 * (0.35 + 0.008 * 0.65), accuracy: 1e-9,
+                       "randomiser then curve: the scaled-down value lands near the bottom of the "
+                       + "curve, where its floor lifts it back — which is exactly what the owner "
+                       + "asked for and is 29x the other order's contribution")
+        XCTAssertGreaterThan(low(randomFirst) - 0.3, (low(curveFirst) - 0.3) * 20,
+                             "…and the gap is not a rounding difference")
+    }
+
+    /// **Two randomiser modules in one chain draw two independent values**, and neither is the
+    /// square of the other.
+    ///
+    /// §2.28: *"each octave and each randomiser module needs its own channel, or two of them are one
+    /// number twice."* Same operands as the input-plus-module test above and for the same reason: a
+    /// mean product of a quarter says independent, a mean of a third says one draw squared, and the
+    /// correlation is 0 against exactly 1.
+    func testTwoRandomiserModulesInOneChainAreIndependent() {
+        var brush = BrushLibrary.hardRound
+        brush.dab.size = 0
+        brush.modulations = BrushModulations([
+            BrushModulation(.size, .pressure,
+                            modules: [.scale(.random(.scatterAngle, .plain(0))),
+                                      .scale(.random(.scatterAngle, .plain(0)))],
+                            amount: 1)
+        ])
+        guard case .scale(.random(let first, _)) = brush.modulations.rows[0].modules[0],
+              case .scale(.random(let second, _)) = brush.modulations.rows[0].modules[1] else {
+            return XCTFail("both modules should still be randomisers")
+        }
+        XCTAssertNotEqual(first, second, "two randomisers in one chain need two channels")
+
+        var products: [Double] = [], lefts: [Double] = [], rights: [Double] = []
+        for seed in [UInt64(3), 11, 101, 0xBEEF, 0xFACE, 1 << 33, 54321, 0x7FFF_FFFF] {
+            let field = DabRandom(seed: seed)
+            for step in 0..<240 {
+                let arc = CGFloat(step) * 0.29
+                // Through the evaluator: with base 0, amount 1 and a pressure of exactly 1, `size`
+                // *is* the product of the two modules' draws.
+                let values = brush.dabValues { input in
+                    guard case .random(let channel, let randomiser) = input else {
+                        return input == .pressure ? 1 : input.neutral
+                    }
+                    return field.unit(channel, at: arc, randomiser: randomiser)
+                }
+                products.append(values.size)
+                lefts.append(Double(field.unit(first, at: arc)))
+                rights.append(Double(field.unit(second, at: arc)))
+            }
+        }
+        func mean(_ xs: [Double]) -> Double { xs.reduce(0, +) / Double(xs.count) }
+        XCTAssertEqual(mean(products), 0.25, accuracy: 0.02,
+                       "two independent uniforms average a quarter")
+        XCTAssertGreaterThan(abs(mean(products) - 1.0 / 3), 0.05,
+                             "…and one draw squared would average a third, which is the failure the "
+                             + "per-position channel exists to prevent")
+        XCTAssertEqual(mean(products), mean(zip(lefts, rights).map(*)), accuracy: 1e-12)
+        let (mx, my) = (mean(lefts), mean(rights))
+        let cov = mean(zip(lefts, rights).map { ($0 - mx) * ($1 - my) })
+        let sx = mean(lefts.map { ($0 - mx) * ($0 - mx) }).squareRoot()
+        let sy = mean(rights.map { ($0 - my) * ($0 - my) }).squareRoot()
+        XCTAssertLessThan(abs(cov / (sx * sy)), 0.1,
+                          "two channels are uncorrelated; one channel with itself correlates at 1")
+    }
+
+    // MARK: - §2.28: octaves
+
+    /// **One octave is the single draw it replaces, to the bit** — and three octaves are not.
+    ///
+    /// Compared at `accuracy: 0` against `unit(_:at:wavelength:)`, which is the call every stroke
+    /// drawn before §2.28 made, over a range of λ including 0. If this moved, every randomised brush
+    /// in every document would re-roll.
+    func testOneOctaveIsBitIdenticalToTheSingleDrawAndThreeAreNot() {
+        let field = DabRandom(seed: 0x0C7A_5E00)
+        let channel = DabRandom.Channel.modulation(.size, row: 0)
+        var differed = 0
+        for lambda in [CGFloat(0), 0.5, 2, 3.5, 9] {
+            for step in 0..<400 {
+                let arc = CGFloat(step) * 0.13
+                XCTAssertEqual(field.unit(channel, at: arc, randomiser: .plain(lambda)),
+                               field.unit(channel, at: arc, wavelength: lambda), accuracy: 0,
+                               "one octave must be the draw it replaces, exactly")
+                let three = field.unit(channel, at: arc,
+                                       randomiser: BrushRandomiser(wavelength: lambda, octaves: 3))
+                if three != field.unit(channel, at: arc, wavelength: lambda) { differed += 1 }
+            }
+        }
+        XCTAssertGreaterThan(differed, 1900,
+                             "three octaves must be a different field almost everywhere, or the "
+                             + "count is not reaching the draw")
+    }
+
+    /// **Octaves move where the field's energy sits across scales, and it stays band-limited** — the
+    /// assertion that is about the field's *shape* rather than about two positions disagreeing, which
+    /// CLAUDE.md has a section on.
+    ///
+    /// The measure is the **structure function** `R(s) = mean |v(x + s) − v(x)|`, taken at a step far
+    /// finer than the finest octave and at a step as coarse as λ itself, and the statistic is their
+    /// ratio — the field's *tilt*. It is the right one because the two ends move in opposite
+    /// directions and a wrong implementation moves neither:
+    ///
+    /// - **Coarse** (`s ≈ λ`): every octave has decorrelated, and the octaves are independent, so the
+    ///   sum falls to `√(Σ f²ᵏ) / Σ fᵏ` of one octave — **0.655** at three octaves and a falloff of
+    ///   0.5. Detail was added *and the coarse shape got quieter*, which is what normalising means.
+    /// - **Fine** (`s ≪ λ/2ⁿ`): every octave is still in its linear regime, and the slopes add in
+    ///   quadrature: `√(Σ (2f)²ᵏ) / Σ fᵏ` = **0.990**. At a falloff of exactly 0.5 each octave
+    ///   contributes the same slope, which is why this end barely moves.
+    ///
+    /// So the predicted tilt ratio is `0.990 / 0.655` = **1.51**. MEASURED 1.48 over eight seeds,
+    /// which is what the bound below is set from. **White noise is the operand that says this is
+    /// band-limited at all**: a fresh draw per dab has a tilt of ~1.0, sixteen times the three-octave
+    /// field's, because it has no scale structure to tilt.
+    func testOctavesTiltTheFieldsEnergyWithoutMakingItWhite() {
+        let channel = DabRandom.Channel.modulation(.scatter, row: 0)
+        let seeds: [UInt64] = [1, 5, 17, 0xABCD, 0x1234_5678, 1 << 20, 987_654, 0xF00D]
+        func structure(_ randomiser: BrushRandomiser, step: CGFloat, seed: UInt64) -> Double {
+            let field = DabRandom(seed: seed)
+            var total = 0.0
+            for index in 0..<4000 {
+                let x = CGFloat(index) * 0.037
+                total += Double(abs(field.unit(channel, at: x + step, randomiser: randomiser)
+                                    - field.unit(channel, at: x, randomiser: randomiser)))
+            }
+            return total / 4000
+        }
+        func tilt(_ randomiser: BrushRandomiser) -> Double {
+            let fine = seeds.map { structure(randomiser, step: 0.125, seed: $0) }.reduce(0, +)
+            let coarse = seeds.map { structure(randomiser, step: 4, seed: $0) }.reduce(0, +)
+            return fine / coarse
+        }
+        let one = tilt(BrushRandomiser(wavelength: 4, octaves: 1))
+        let three = tilt(BrushRandomiser(wavelength: 4, octaves: 3))
+        let white = tilt(BrushRandomiser(wavelength: 0, octaves: 1))
+
+        XCTAssertGreaterThan(one, 0, "PREMISE: a single octave varies at all")
+        XCTAssertEqual(three / one, 1.51, accuracy: 0.2,
+                       "three octaves at a falloff of 0.5 must tilt the field by √(Σ(2f)²ᵏ)/√(Σf²ᵏ) "
+                       + "— measured \(three / one)")
+        XCTAssertLessThan(three, white / 8,
+                          "…and it must still be band-limited: a fresh draw per dab tilts at ~1 "
+                          + "(\(white) against \(three))")
+
+        // Monotone in the count, which no single ratio can say: each octave adds a finer scale, so
+        // the tilt only ever rises. A field whose octaves *shared* a channel, or whose wavelength
+        // went the other way, would not do this.
+        let ladder = (1...4).map { tilt(BrushRandomiser(wavelength: 4, octaves: $0)) }
+        for (a, b) in zip(ladder, ladder.dropFirst()) {
+            XCTAssertGreaterThan(b, a, "each octave must add detail: \(ladder)")
+        }
+
+        // And the falloff is what decides it: silence every octave above the first and the field is
+        // the single octave again, to the bit.
+        for seed in seeds {
+            XCTAssertEqual(structure(BrushRandomiser(wavelength: 4, octaves: 5, falloff: 0),
+                                     step: 0.125, seed: seed),
+                           structure(BrushRandomiser(wavelength: 4, octaves: 1),
+                                     step: 0.125, seed: seed),
+                           accuracy: 0,
+                           "a falloff of 0 weights every octave but the first at nothing")
+        }
+    }
+
+    /// **Every octave draws its own channel.** §2.28's *"each octave needs its own channel or two of
+    /// them are the same number twice"*, asserted the way independence has to be — a mean product of a
+    /// quarter and a correlation of 0, over eight seeds — rather than by finding one arc length where
+    /// two numbers differ.
+    func testEachOctaveDrawsItsOwnChannel() {
+        let channel = DabRandom.Channel.modulation(.size, row: 2, slot: 1)
+        XCTAssertEqual(channel.octave(0), channel, "octave 0 is the channel itself")
+        XCTAssertNotEqual(channel.octave(1), channel)
+        XCTAssertNotEqual(channel.octave(1), channel.octave(2))
+
+        var products: [Double] = [], lefts: [Double] = [], rights: [Double] = []
+        for seed in [UInt64(2), 13, 211, 0xC0DE, 0xD00D, 1 << 51, 24680, 0x3FFF_FFFF] {
+            let field = DabRandom(seed: seed)
+            for step in 0..<240 {
+                let arc = CGFloat(step) * 0.41
+                let a = Double(field.unit(channel.octave(0), at: arc))
+                let b = Double(field.unit(channel.octave(1), at: arc))
+                lefts.append(a); rights.append(b); products.append(a * b)
+            }
+        }
+        func mean(_ xs: [Double]) -> Double { xs.reduce(0, +) / Double(xs.count) }
+        XCTAssertEqual(mean(products), 0.25, accuracy: 0.02)
+        XCTAssertGreaterThan(abs(mean(products) - 1.0 / 3), 0.05,
+                             "one octave squared would average a third")
+        let (mx, my) = (mean(lefts), mean(rights))
+        let cov = mean(zip(lefts, rights).map { ($0 - mx) * ($1 - my) })
+        let sx = mean(lefts.map { ($0 - mx) * ($0 - mx) }).squareRoot()
+        let sy = mean(rights.map { ($0 - my) * ($0 - my) }).squareRoot()
+        XCTAssertLessThan(abs(cov / (sx * sy)), 0.1, "two octaves must be uncorrelated fields")
+    }
+
+    /// **A chain round-trips through `Codable`, and a reordered chain decodes to the other order.**
     ///
     /// The decoded bytes are **written down here**, not encoded in this process. BRUSH.md §12 stage 5
     /// records that exact mistake being made on this path: an in-process round trip measures
-    /// `JSONDecoder` against `JSONEncoder` and would pass with the key spelled anything at all.
-    func testASecondInputRoundTripsAndIsAbsentByDefault() throws {
+    /// `JSONDecoder` against `JSONEncoder` and would pass with the key spelled anything at all — and
+    /// for *this* feature it would pass with the module list stored as a set.
+    func testAChainAndItsReverseRoundTripThroughTheirOwnBytes() throws {
         let decoder = JSONDecoder()
 
-        let withoutKey = Data("""
+        // A chain with no modules at all — three keys, which is what a plain row costs.
+        let bare = Data("""
         [{"output":"spacing","input":{"kind":"pressure"},"amount":0.25}]
         """.utf8)
-        let old = try decoder.decode(BrushModulations.self, from: withoutKey)
-        XCTAssertNil(old.rows[0].second, "a brush written before §2.22 decodes to a row with no gain")
-        XCTAssertEqual(old.rows[0].input, .pressure)
+        let plain = try decoder.decode(BrushModulations.self, from: bare)
+        XCTAssertEqual(plain.rows[0].modules, [], "an absent module list decodes to an empty chain")
+        XCTAssertEqual(plain.rows[0].input, .pressure)
 
-        let withKey = Data("""
-        [{"output":"spacing","input":{"kind":"random","wavelength":0},
-          "second":{"kind":"random","wavelength":2.5},"amount":0.25}]
-        """.utf8)
-        let carried = try decoder.decode(BrushModulations.self, from: withKey)
-        guard case .random(let first, let firstLambda) = carried.rows[0].input,
-              case .random(let second, let secondLambda)? = carried.rows[0].second else {
-            return XCTFail("both slots must decode as random rows")
+        // The same two modules, written down in each order.
+        func bytes(randomiserFirst: Bool) -> Data {
+            let ramp = #"{"kind":"curveRamp","curve":{"keys":[{"frame":0,"value":0.2},{"frame":1024,"value":1}]}}"#
+            let wobble = #"{"kind":"scale","input":{"kind":"random","wavelength":2.5,"octaves":3,"falloff":0.25}}"#
+            let modules = randomiserFirst ? "\(wobble),\(ramp)" : "\(ramp),\(wobble)"
+            return Data("""
+            [{"output":"size","input":{"kind":"pressure"},"amount":0.4,"modules":[\(modules)]}]
+            """.utf8)
         }
-        XCTAssertEqual(firstLambda, 0)
-        XCTAssertEqual(secondLambda, 2.5, "λ is the authored half and survives the wire")
-        XCTAssertNotEqual(first, second,
-                          "decode runs the same channel normalisation construction does, or a stale "
-                          + "channel on the wire could make two draws one")
+        let curveFirst = try decoder.decode(BrushModulations.self, from: bytes(randomiserFirst: false))
+        let randomFirst = try decoder.decode(BrushModulations.self, from: bytes(randomiserFirst: true))
 
-        // And the whole brush, through `Brush`'s own codec.
+        XCTAssertEqual(curveFirst.rows[0].modules.map(\.kind), [.curveRamp, .randomiser])
+        XCTAssertEqual(randomFirst.rows[0].modules.map(\.kind), [.randomiser, .curveRamp])
+        XCTAssertNotEqual(curveFirst, randomFirst,
+                          "the order is part of the value, so two orders are two matrices")
+
+        // §2.28's octaves are on the wire and they are the authored half.
+        guard case .scale(.random(let channel, let randomiser)) = randomFirst.rows[0].modules[0] else {
+            return XCTFail("the first module must decode as a randomiser")
+        }
+        XCTAssertEqual(randomiser.wavelength, 2.5)
+        XCTAssertEqual(randomiser.octaves, 3)
+        XCTAssertEqual(randomiser.falloff, 0.25)
+        XCTAssertEqual(channel, .modulation(.size, row: 0, slot: 1),
+                       "decode runs the same channel normalisation construction does, and a randomiser "
+                       + "at position 0 of the chain is plane 1")
+        guard case .scale(.random(let moved, _)) = curveFirst.rows[0].modules[1] else {
+            return XCTFail("the second module must decode as a randomiser")
+        }
+        XCTAssertEqual(moved, .modulation(.size, row: 0, slot: 2),
+                       "…and moving it along the chain moves the plane it draws from")
+
+        // And the whole brush, through `Brush`'s own codec, encoded and decoded.
         var brush = BrushLibrary.pencil
         brush.modulations = BrushModulations([
-            BrushModulation(.spacing, .random(.scatterAngle, wavelength: 1.5), second: .pressure,
+            BrushModulation(.spacing, .random(.scatterAngle, BrushRandomiser(wavelength: 1.5, octaves: 4,
+                                                                            falloff: 0.6)),
+                            modules: [.scale(.pressure),
+                                      .curveRamp(.threshold(knee: 0.3))],
                             amount: 0.3)
         ])
         let roundTripped = try decoder.decode(Brush.self, from: JSONEncoder().encode(brush))
         XCTAssertEqual(roundTripped, brush)
-        XCTAssertEqual(roundTripped.modulations.rows[0].second, .pressure)
+        XCTAssertEqual(roundTripped.modulations.rows[0].modules.map(\.kind), [.scale, .curveRamp])
 
-        // **`Hashable` is what `BrushPool` addresses an entry by**, so the gain is part of a brush's
-        // identity. Interned, not compared — the pool's dictionary is the consumer that would hand
-        // two different brushes one ref if the field fell out of the hash.
-        var ungained = brush
-        ungained.modulations = BrushModulations([
-            BrushModulation(.spacing, .random(.scatterAngle, wavelength: 1.5), amount: 0.3)
+        // **`Hashable` is what `BrushPool` addresses an entry by**, so the module list — and its order
+        // — is part of a brush's identity. Interned, not compared: the pool's dictionary is the
+        // consumer that would hand two different brushes one ref if the order fell out of the hash.
+        var reversed = brush
+        reversed.modulations = BrushModulations([
+            BrushModulation(.spacing, .random(.scatterAngle, BrushRandomiser(wavelength: 1.5, octaves: 4,
+                                                                            falloff: 0.6)),
+                            modules: [.curveRamp(.threshold(knee: 0.3)),
+                                      .scale(.pressure)],
+                            amount: 0.3)
         ])
-        XCTAssertNotEqual(brush, ungained)
-        XCTAssertNotEqual(BrushPool.intern(brush), BrushPool.intern(ungained),
-                          "two brushes differing only in a row's second input are two entries")
+        XCTAssertNotEqual(brush, reversed)
+        XCTAssertNotEqual(BrushPool.intern(brush), BrushPool.intern(reversed),
+                          "two brushes whose chains differ only in order are two entries")
     }
 
     /// **The consumers with a pressure and no walk must refuse a row whose *gain* is not pressure.**
@@ -985,19 +1262,19 @@ final class BrushModulationLogicTests: XCTestCase {
         var pressureOnly = BrushLibrary.hardRound
         pressureOnly.dab.hardness = 1
         pressureOnly.modulations = BrushModulations([
-            BrushModulation(.size, .pressure, second: .pressure, amount: -0.4)
+            BrushModulation(.size, .pressure, modules: [.scale(.pressure)], amount: -0.4)
         ])
         XCTAssertTrue(pressureOnly.modulations.isPressureOnly,
-                      "pressure in both slots is still answerable at a bare pressure")
+                      "pressure in every position is still answerable at a bare pressure")
         XCTAssertTrue(VectorEraser.supportsSplitting(strokeBrush: pressureOnly))
 
-        for gain in [BrushInput.velocity, .taper, .random(.scatterAngle, wavelength: 0), .direction] {
+        for gain in [BrushInput.velocity, .taper, .random(.scatterAngle, .plain(0)), .direction] {
             var driven = pressureOnly
             driven.modulations = BrushModulations([
-                BrushModulation(.size, .pressure, second: gain, amount: -0.4)
+                BrushModulation(.size, .pressure, modules: [.scale(gain)], amount: -0.4)
             ])
             XCTAssertFalse(driven.modulations.isPressureOnly,
-                           "a gain of \(gain) is not resolvable without a walk")
+                           "a scale by \(gain) is not resolvable without a walk")
             XCTAssertFalse(VectorEraser.supportsSplitting(strokeBrush: driven))
             XCTAssertFalse(VectorEraser.supportsCleanCut(brush: driven, opacity: 1, minPressure: 1))
         }
@@ -1007,14 +1284,14 @@ final class BrushModulationLogicTests: XCTestCase {
     /// first slot does.** `StrokeSensors` answers `taper`'s neutral — **1** — where
     /// `totalArcWidths` is missing, so a `readsTaper` that scanned only first inputs would leave such
     /// a row at full gain for the whole stroke and render a brush that does not taper, green.
-    func testATaperInTheGainSlotIsStillMeasured() {
+    func testATaperInAScaleModuleIsStillMeasured() {
         var brush = BrushLibrary.hardRound
         brush.dab.hardness = 1
         brush.dab.size = 0.2
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .pressure, second: .taper, amount: 0.7)
+            BrushModulation(.size, .pressure, modules: [.scale(.taper)], amount: 0.7)
         ])
-        XCTAssertTrue(brush.modulations.readsTaper, "the gain slot asks for the stroke's length too")
+        XCTAssertTrue(brush.modulations.readsTaper, "a scale module asks for the stroke's length too")
 
         // And it reaches the ink: the dabs at the ends are narrower than the ones in the middle,
         // which is only expressible if the length was measured.
@@ -1025,13 +1302,13 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertLessThan(radii[1], middle * 0.6, "the head is tapered")
         XCTAssertLessThan(radii[radii.count - 2], middle * 0.6, "and so is the tail")
 
-        // The operand: with the gain gone the same row is flat, so the taper above is the gain's and
-        // not the walk's.
+        // The operand: with the module gone the same chain is flat, so the taper above is the
+        // module's and not the walk's.
         var flat = brush
         flat.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.7)])
         let flatRadii = Self.dabs(flat, samples).map(\.radius)
         XCTAssertEqual(flatRadii.min() ?? 0, flatRadii.max() ?? 1, accuracy: 1e-9,
-                       "a pressure-flat stroke with no taper gain draws one width")
+                       "a pressure-flat stroke with no taper scale draws one width")
     }
 }
 

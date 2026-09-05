@@ -27,10 +27,19 @@ enum BrushInput: Hashable {
     /// Brush widths rather than canvas points for §4.1's reason: it is the unit that makes a uniform
     /// scale of a stroke change nothing, and spacing and λ are already measured in it.
     case velocity
-    /// A per-dab draw from the stroke's own random field, `0..<1` — BRUSH.md §4 and §2.17. Never
-    /// missing: it is a hash of the seed and the arc length, so there is nothing to store and nothing
-    /// to be absent.
-    case random(DabRandom.Channel, wavelength: CGFloat)
+    /// A per-dab draw from the stroke's own random field, `0..<1` — BRUSH.md §4, §2.17 and §2.28.
+    /// Never missing: it is a hash of the seed and the arc length, so there is nothing to store and
+    /// nothing to be absent.
+    ///
+    /// **The `BrushRandomiser` is everything authored about the draw** — λ, and §2.28's octave count
+    /// and falloff. The channel beside it is *derived* from where this input sits (§6.2) and is
+    /// rewritten by `BrushModulations` on construction and on decode.
+    ///
+    /// **This one case is both of §2.28's random shapes**, and that is why there is no separate
+    /// randomiser module: a chain whose *input* is `.random` is a pure wobble, and a
+    /// `BrushModule.scale(.random(…))` inside a chain is a randomiser attenuating what came before
+    /// it. One case, one payload, one evaluator.
+    case random(DabRandom.Channel, BrushRandomiser)
 
     /// The stored channel this input reads, or nil if it is derived from the walk.
     var backingChannel: SampleChannel? {
@@ -62,7 +71,7 @@ enum BrushInput: Hashable {
 }
 
 extension BrushInput: Codable {
-    private enum CodingKeys: String, CodingKey { case kind, wavelength }
+    private enum CodingKeys: String, CodingKey { case kind, wavelength, octaves, falloff }
     private enum Kind: String, Codable {
         case pressure, tiltAngle, tiltDirection, direction, taper, velocity, random
     }
@@ -74,6 +83,10 @@ extension BrushInput: Codable {
     /// (`BrushModulations`), so writing it down would create a second, authoritative-looking copy of a
     /// fact the matrix owns — the exact shape of the `BrushShape` + `customTextureFileName` pair §12
     /// stage 5 deleted. Only λ, the authored half, is stored.
+    ///
+    /// **§2.28's octaves are written only when there are any.** A single-octave randomiser is what
+    /// every `random` input carried before the chain existed, and it writes exactly the two keys it
+    /// wrote then — so the wire cost of the feature is zero for a brush that does not use it.
     ///
     /// Strict on an unrecognised `kind`, per §2.14: the documents on the device are expendable, so
     /// there is no earlier spelling to accept and an unknown sensor is a corrupt brush rather than an
@@ -87,9 +100,13 @@ extension BrushInput: Codable {
         case .direction: try c.encode(Kind.direction, forKey: .kind)
         case .taper: try c.encode(Kind.taper, forKey: .kind)
         case .velocity: try c.encode(Kind.velocity, forKey: .kind)
-        case .random(_, let wavelength):
+        case .random(_, let randomiser):
             try c.encode(Kind.random, forKey: .kind)
-            try c.encode(wavelength, forKey: .wavelength)
+            try c.encode(randomiser.wavelength, forKey: .wavelength)
+            if !randomiser.isSingleOctave {
+                try c.encode(randomiser.octaves, forKey: .octaves)
+                try c.encode(randomiser.falloff, forKey: .falloff)
+            }
         }
     }
 
@@ -104,7 +121,11 @@ extension BrushInput: Codable {
         case .velocity: self = .velocity
         case .random:
             // The channel is re-derived by `BrushModulations`; anything here would be overwritten.
-            self = .random(.scatterAngle, wavelength: try c.decode(CGFloat.self, forKey: .wavelength))
+            self = .random(.scatterAngle, BrushRandomiser(
+                wavelength: try c.decode(CGFloat.self, forKey: .wavelength),
+                octaves: try c.decodeIfPresent(Int.self, forKey: .octaves) ?? 1,
+                falloff: try c.decodeIfPresent(Double.self, forKey: .falloff)
+                    ?? BrushRandomiser.defaultFalloff))
         }
     }
 }
@@ -206,8 +227,8 @@ struct StrokeSensors {
         case .velocity:
             guard samples.carries(.deltaTime) else { return BrushInput.velocity.neutral }
             return velocity(at: site.parameter)
-        case let .random(channel, wavelength):
-            return random.unit(channel, at: site.arcWidths, wavelength: wavelength)
+        case let .random(channel, randomiser):
+            return random.unit(channel, at: site.arcWidths, randomiser: randomiser)
         }
     }
 

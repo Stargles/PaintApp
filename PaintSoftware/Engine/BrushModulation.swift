@@ -94,15 +94,20 @@ extension DabRandom.Channel {
     /// is two parameters moving together for no visible reason. 4096 is past anything a brush editor
     /// could produce, and 0–15 stay reserved for the four intrinsic draws.
     ///
-    /// **`slot` is BRUSH.md §2.22's second input, and it addresses a whole second *plane* rather than
-    /// a second half of the row block.** A row with `random` in both slots must draw two independent
-    /// values — reusing one channel would **square** a single draw rather than multiply two — so the
-    /// second slot needs a channel of its own. Splitting the 4096 rows in half would work and is the
-    /// wrong shape: it reintroduces exactly the collision the paragraph above reasons about, at half
-    /// the distance. `slotStride` is instead larger than the whole matrix's span
-    /// (`16 + 11 · 4096 + 4095 = 49,167`), so **no row count whatever can make slot 0 meet slot 1**.
-    /// Slot 0's arithmetic is unchanged to the bit, which is what keeps every brush drawn before
-    /// §2.22 drawing the same ink.
+    /// **`slot` is the randomiser's position in the chain, and it addresses a whole *plane* per
+    /// position rather than a slice of the row block.** BRUSH.md §2.28: a chain may carry several
+    /// randomisers, and *"each needs its own channel or two of them are the same number twice"* —
+    /// reusing one channel would square a single draw rather than multiply two independent ones.
+    /// Splitting the 4096 rows would work and is the wrong shape: it reintroduces exactly the
+    /// collision the paragraph above reasons about, at a shorter distance. `slotStride` is instead
+    /// larger than the whole matrix's span (`16 + 11 · 4096 + 4095 = 49,167`), so **no row count
+    /// whatever can make two positions meet**.
+    ///
+    /// **Slot 0 is the chain's input and slot *m + 1* is its *m*-th module.** That numbering is not
+    /// arbitrary: §2.22's second slot was position 1, so a row that was *(input, curve, second)*
+    /// before §2.28 and is *(input, [curveRamp, scale])* after it draws the **same two channels**, to
+    /// the bit, and the ink a randomised brush lays down did not move when the chain replaced the
+    /// row.
     static func modulation(_ output: BrushOutput, row: Int, slot: Int = 0) -> DabRandom.Channel {
         DabRandom.Channel(rawValue: 16
                           &+ UInt64(max(slot, 0)) &* DabRandom.Channel.slotStride
@@ -112,86 +117,185 @@ extension DabRandom.Channel {
 
     /// Rows an output may carry before it would meet the next output. See above.
     static let outputStride: UInt64 = 4096
-    /// The distance between one row's first input's channel and its second's — a power of two past
-    /// the whole matrix's span, so the two planes cannot meet at any row count.
+    /// The distance between one chain position's channel and the next — a power of two past the whole
+    /// matrix's span, so two positions cannot meet at any row count. `DabRandom.Channel.octaveStride`
+    /// is the third digit of the same number and its doc carries the arithmetic.
     static let slotStride: UInt64 = 1 << 20
 }
 
-/// **One row of BRUSH.md §6's matrix** — *(input, curve, amount)* driving one output.
+/// **One link of BRUSH.md §2.28's chain** — what a sensor's reading passes through on its way to an
+/// output.
 ///
-/// `output = base + Σ amount · curve(input) · reading(second)` — BRUSH.md §2.22. The sensor's reading
-/// is clamped to `0…1` and shaped by the curve; the amount is signed and is **not** clamped, and
-/// neither is the sum — every output enforces its own legal range where it is used, which is the same
-/// division `ResponseCurve` makes and `AnimationCurve` made before it.
+/// §2.28, the owner: *"right now there seems to be a hardcoded order for everything. For example we
+/// may sometimes need the randomizer first, then use curves to remap the range."* So a modulation is
+/// an input and an **ordered list** of these, applied left to right, and the order is the artist's.
+/// What §2.22 shipped — `amount · curve(input) · reading(second)` — is exactly the chain
+/// `[.curveRamp, .scale]`, which is why every brush written against that row renders unchanged.
 ///
-/// **The second input is optional and its absence reads 1**, so a row without one is the plain
-/// `amount · curve(input)` it was before §2.22, to the bit — `x * 1` is exactly `x`.
-struct BrushModulation: Codable, Hashable {
-    /// Which parameter this row drives.
-    var output: BrushOutput
-    /// Which sensor drives it. For `.random`, the channel carried here is **derived, not authored** —
-    /// `BrushModulations` rewrites it from the row's position on construction and on decode, so a
-    /// hand-written or stale channel cannot make two rows move together. The wavelength is the
-    /// authored half.
-    var input: BrushInput
-    /// How the `0…1` reading is shaped. `.linear` is the pass-through and costs nothing.
-    var curve: ResponseCurve
-    /// How much of the shaped reading reaches the output. Signed.
-    var amount: Double
-    /// **BRUSH.md §2.22's second input — a *gain* on the first, not a second row.** Optional; absent
-    /// reads 1.
-    ///
-    /// Two rows *add*, so `spacing ← random` beside `spacing ← pressure` is a pressure shift **plus**
-    /// a fixed-amplitude wobble. A second input *scales*, so the wobble's amplitude is what pressure
-    /// moves — which is §7.0's fourth worked example, *"how much random wobble there is depends on
-    /// pressure"*, and the one thing the additive matrix could not state at all.
-    ///
-    /// **It is not curved, by ruling.** A second `ResponseCurve` per row for a gain term is
-    /// expressiveness the ask does not need and a second thing to keep in step. And for `.random`,
-    /// the channel here is derived exactly as `input`'s is — `BrushModulations` rewrites it from the
-    /// row's position *in the second slot*, so a row randomised on both sides draws two independent
-    /// values rather than squaring one.
-    var second: BrushInput?
+/// **Two cases, not the three the design named, and the third is the second with a random input.**
+/// §2.28 asks for a curve ramp, a randomiser and a scale-by-sensor. `BrushInput.random` *is* a
+/// `BrushInput` (§13: *"a pure randomiser is an input, not a module"*), so `.scale(.random(…))` is
+/// the randomiser and a separate `.randomiser` case would be a second spelling of one behaviour —
+/// §10's two-ways-to-compute trap, with `Codable` and channel derivation to keep in step twice. The
+/// editor still offers three things to add, because that is the artist's vocabulary; the storage has
+/// two, because that is how many behaviours there are.
+enum BrushModule: Hashable {
 
-    init(_ output: BrushOutput, _ input: BrushInput, second: BrushInput? = nil,
-         amount: Double, curve: ResponseCurve = .linear) {
+    /// **§2.24's *"input/output curve ramp module"***. Shapes the running value, clamping its input
+    /// to `0…1` and leaving its output alone — `ResponseCurve`'s own division, unchanged.
+    ///
+    /// A chain may carry several, and they compose in the order they are listed: `curve₂(curve₁(x))`.
+    /// That is new in §2.28 and it is the point of it — *"randomise, then remap the range"* is a
+    /// randomiser between two of these.
+    case curveRamp(ResponseCurve)
+
+    /// **A scale by another sensor's reading — §2.22's second input, now a module.** With
+    /// `.random(…)` it is §2.28's randomiser; with any other input it is the gain that ruling built.
+    ///
+    /// **It attenuates.** The reading is clamped to `0…1`, so a scale can only ever take away — which
+    /// is §2.22's ruling and survives the move verbatim: *"a second input attenuates; `amount` is how
+    /// a row is made bigger"*, and `amount` remains the only signed, unclamped term. Without the
+    /// clamp one sensor would mean two opposite things depending on which position it sat in, since a
+    /// stray reading above 1 is flattened as an *input* and would amplify as a scale.
+    ///
+    /// **It is not curved from inside itself**, and that is no longer a restriction: a curve *after*
+    /// a scale is a `.curveRamp` after it in the list, which is the thing §2.28 exists to make
+    /// sayable.
+    case scale(BrushInput)
+}
+
+extension BrushModule: Codable {
+    private enum CodingKeys: String, CodingKey { case kind, curve, input }
+    private enum Kind: String, Codable { case curveRamp, scale }
+
+    /// Written out rather than synthesized, for `BrushInput`'s reason one level up: a synthesized
+    /// codec for an enum with a payload spells it `_0`, which is a compiler artifact in a file an
+    /// artist's brushes live in.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .curveRamp(let curve):
+            try c.encode(Kind.curveRamp, forKey: .kind)
+            try c.encode(curve, forKey: .curve)
+        case .scale(let input):
+            try c.encode(Kind.scale, forKey: .kind)
+            try c.encode(input, forKey: .input)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .curveRamp: self = .curveRamp(try c.decode(ResponseCurve.self, forKey: .curve))
+        case .scale: self = .scale(try c.decode(BrushInput.self, forKey: .input))
+        }
+    }
+}
+
+/// **One chain of BRUSH.md §2.28** — an input, an ordered list of modules, and the amount of the
+/// result that reaches one output.
+///
+/// `output = base + Σ amount · chain(input)`, where the chain is the sensor's reading passed through
+/// the modules **in the order the artist put them**. The reading enters in `0…1`; the amount is
+/// signed and **not** clamped, and neither is the sum — every output enforces its own legal range
+/// where it is used, which is the same division `ResponseCurve` makes and `AnimationCurve` made
+/// before it.
+///
+/// ## What it replaces, and why the ink did not move
+///
+/// §2.22 shipped a fixed row, `amount · curve(input) · reading(second)`. That is exactly the chain
+/// `[.curveRamp(curve), .scale(second)]` read left to right, with the same clamps in the same places
+/// — so a brush written against the old row renders through the new walk unchanged, and
+/// `BrushModulationLogicTests` pins the five presets against digests taken at the commit before this
+/// existed. What the list adds is the order the owner asked for: *"we may sometimes need the
+/// randomizer first, then use curves to remap the range."*
+///
+/// What is *not* preserved is the storage. `curve` and `second` are gone as fields, and §2.14 rules
+/// the documents on the device expendable — so the format changed rather than growing a legacy
+/// decode arm, and the five presets carry chains rather than being translated into them.
+struct BrushModulation: Codable, Hashable {
+    /// Which parameter this chain drives.
+    var output: BrushOutput
+    /// Which sensor it starts from. For `.random`, the channel carried here is **derived, not
+    /// authored** — `BrushModulations` rewrites it from the chain's position on construction and on
+    /// decode, so a hand-written or stale channel cannot make two chains move together. The
+    /// `BrushRandomiser` beside it is the authored half.
+    var input: BrushInput
+    /// **§2.28's ordered list.** Applied left to right; empty is the bare reading, which is what a
+    /// plain `flow ← pressure` row is.
+    ///
+    /// A `.random` inside a `.scale` has its channel derived from **its position in this list**
+    /// exactly as the input's is, so two randomisers in one chain draw two independent values — and
+    /// reordering them re-rolls both, which is the same stated cost §6.2 records for inserting a row
+    /// before another one.
+    var modules: [BrushModule]
+    /// How much of the chain's result reaches the output. Signed, and the only signed term.
+    var amount: Double
+
+    init(_ output: BrushOutput, _ input: BrushInput, modules: [BrushModule] = [], amount: Double) {
         self.output = output
         self.input = input
-        self.second = second
-        self.curve = curve
+        self.modules = modules
         self.amount = amount
     }
 
-    /// This row's contribution, given a reading of each of its inputs.
+    /// **This chain's contribution at one dab**, given a way to read a sensor.
     ///
-    /// `secondReading` defaults to 1, which is what the absence of a second input reads — and `x * 1`
-    /// is exactly `x` in IEEE arithmetic, so a row without one contributes the identical `Double` it
-    /// contributed before §2.22 rather than a nearby one.
+    /// `reading` is §5.5's funnel, taken as a closure so the pressure-only overload
+    /// (`Brush.dabValues(atPressure:)`) can hand it the neutrals with no second arm to keep in step.
+    /// It is called once for the input and once per `.scale` module, and not at all for a
+    /// `.curveRamp` — so a chain pays exactly as many sensor evaluations as it names.
     ///
-    /// **The gain is clamped to `0…1` and the first reading's clamp is the curve's.** Every
-    /// `BrushInput` is *defined* to answer inside `0…1`, so this is the same belt-and-braces
-    /// `ResponseCurve.value(at:)` applies to its own input — and without it the two slots would treat
-    /// one sensor differently: a stray reading above 1 would be flattened as an input and would
-    /// *amplify* the row as a gain. A second input attenuates; raising `amount` is how a row is made
-    /// bigger.
-    func contribution(_ reading: CGFloat, second secondReading: CGFloat = 1) -> Double {
-        amount * Double(curve.value(at: reading)) * Double(min(max(secondReading, 0), 1))
+    /// **`amount` multiplies last, and that is a change of association worth stating.** §2.22
+    /// evaluated `(amount · curve) · second`; this evaluates `amount · (curve · second)`, and
+    /// floating-point multiplication is not associative. The two are identical for every chain with
+    /// no `.scale` — `x · 1` is exactly `x`, and no shipped preset carries one — and where a scale is
+    /// present they can differ by an ulp of the *contribution*, far below the ulp of dab diameter
+    /// `RasterVectorParityLogicTests` compares at. Multiplying last is what leaves the list's order
+    /// as the only thing deciding the answer.
+    func contribution(_ reading: (BrushInput) -> CGFloat) -> Double {
+        var value = Double(reading(input))
+        for module in modules {
+            switch module {
+            case .curveRamp(let curve):
+                value = Double(curve.value(at: CGFloat(value)))
+            case .scale(let scaled):
+                // §2.22's ruling, carried into the module: a scale attenuates. Clamped here rather
+                // than at the sensor, because `BrushInput` is *defined* to answer inside `0…1` and a
+                // curve ramp earlier in the chain is not.
+                value *= Double(min(max(reading(scaled), 0), 1))
+            }
+        }
+        return amount * value
+    }
+
+    /// The first curve ramp in the chain, or `.linear` — what a caller that only wants to *look* at
+    /// the shaping asks. There is no setter: where a curve sits in the list is part of what it means.
+    var firstCurve: ResponseCurve {
+        for module in modules { if case .curveRamp(let curve) = module { return curve } }
+        return .linear
+    }
+
+    /// Every `BrushInput` this chain reads, in evaluation order — the input, then each `.scale`'s.
+    /// `BrushModulations`' two scanners are built from this rather than from a second walk of their
+    /// own, which is what stops one of them being widened and the other forgotten.
+    var readInputs: [BrushInput] {
+        var inputs = [input]
+        for module in modules { if case .scale(let scaled) = module { inputs.append(scaled) } }
+        return inputs
     }
 
     // MARK: - Codable
 
-    private enum CodingKeys: String, CodingKey { case output, input, second, curve, amount }
+    private enum CodingKeys: String, CodingKey { case output, input, modules, amount }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         output = try c.decode(BrushOutput.self, forKey: .output)
         input = try c.decode(BrushInput.self, forKey: .input)
-        // A row with no curve drawn on it is the common case and the default; leaving the key out is
-        // what keeps a plain ramp two numbers on the wire.
-        // §2.22: absent-by-default, so every brush written before the second input existed decodes
-        // to a row with none and renders unchanged.
-        second = try c.decodeIfPresent(BrushInput.self, forKey: .second)
-        curve = try c.decodeIfPresent(ResponseCurve.self, forKey: .curve) ?? .linear
+        // A chain with no modules is the common case and the default; leaving the key out is what
+        // keeps a plain row three keys on the wire.
+        modules = try c.decodeIfPresent([BrushModule].self, forKey: .modules) ?? []
         amount = try c.decode(Double.self, forKey: .amount)
     }
 
@@ -199,10 +303,7 @@ struct BrushModulation: Codable, Hashable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(output, forKey: .output)
         try c.encode(input, forKey: .input)
-        // Left off the wire entirely when there is none — a row without a second input writes the
-        // same four keys it always wrote.
-        if let second { try c.encode(second, forKey: .second) }
-        if !curve.isLinear { try c.encode(curve, forKey: .curve) }
+        if !modules.isEmpty { try c.encode(modules, forKey: .modules) }
         try c.encode(amount, forKey: .amount)
     }
 }
@@ -249,12 +350,14 @@ struct BrushModulations: Codable, Hashable {
     /// input that needs a number the walk does not otherwise have (`StrokeSensors.totalArcWidths`), and
     /// measuring it is a second flattening pass over the curve. Asking first means a brush that does
     /// not taper pays nothing at all, and one that does pays a walk it could not be drawn without.
-    /// **Both slots are asked**, and that is not defensive. §2.22's second input reaches the funnel by
-    /// the same door as the first, so a row whose *gain* is `taper` needs `totalArcWidths` measured
-    /// exactly as much — and `StrokeSensors` answers `taper`'s neutral, **1**, where the length is
-    /// missing. A scan of first inputs alone would leave such a row silently at full gain for the
-    /// whole stroke, which is a green render of a brush that does not taper.
-    var readsTaper: Bool { rows.contains { $0.input == .taper || $0.second == .taper } }
+    /// **Every position in the chain is asked**, and that is not defensive. §2.28's `.scale` modules
+    /// reach the funnel by the same door as the input, so a chain whose *scale* is `taper` needs
+    /// `totalArcWidths` measured exactly as much — and `StrokeSensors` answers `taper`'s neutral,
+    /// **1**, where the length is missing. A scan of inputs alone would leave such a chain silently at
+    /// full scale for the whole stroke, which is a green render of a brush that does not taper. It
+    /// asks `BrushModulation.readInputs` rather than walking the modules itself, so this and
+    /// `isPressureOnly` cannot be widened one at a time.
+    var readsTaper: Bool { rows.contains { $0.readInputs.contains(.taper) } }
 
     /// Whether every row is driven by `pressure` alone.
     ///
@@ -264,13 +367,14 @@ struct BrushModulations: Codable, Hashable {
     /// that is the *true* answer only for a brush this returns true for. Everything else falls back to
     /// the exact alpha punch, which is BRUSH.md §11's *"`supportsCleanCut` / `supportsSplitting` gate
     /// on brush properties, not on a list of known brushes"* reached through one more door.
-    /// **A row's *second* input (§2.22) is asked too, and it has to be.** `dabValues(atPressure:)`
-    /// answers every non-pressure sensor with its neutral, so a `size ← pressure × velocity` row
+    /// **Every `.scale` module (§2.28) is asked too, and it has to be.** `dabValues(atPressure:)`
+    /// answers every non-pressure sensor with its neutral, so a `size ← pressure × velocity` chain
     /// contributes nothing at all there while contributing along the whole of a real stroke — the
     /// capsule chain would then claim a coverage the ink does not have, and `VectorEraser` would cut
-    /// away faded ink it cannot see. `nil` is pressure-only because its absence reads a constant 1.
+    /// away faded ink it cannot see. A `.curveRamp` reads no sensor at all, so a curve anywhere in the
+    /// chain leaves the answer true.
     var isPressureOnly: Bool {
-        rows.allSatisfy { $0.input == .pressure && ($0.second ?? .pressure) == .pressure }
+        rows.allSatisfy { $0.readInputs.allSatisfy { $0 == .pressure } }
     }
 
     /// The amount of the first row driving `output` from `input`, or 0 where there is none.
@@ -278,17 +382,17 @@ struct BrushModulations: Codable, Hashable {
         rows.first { $0.output == output && $0.input == input }?.amount ?? 0
     }
 
-    /// Sets that amount, replacing the row in place or adding one carrying `curve`.
+    /// Sets that amount, replacing the chain in place or adding one carrying `modules`.
     ///
-    /// **A row at amount 0 is kept rather than removed**, and that is deliberate: the curve is the
-    /// artist's, and dropping the row at the bottom of a slider's travel would throw it away and
-    /// hand back a straight line when the slider came back up.
+    /// **A chain at amount 0 is kept rather than removed**, and that is deliberate: the modules are
+    /// the artist's, and dropping the chain at the bottom of a slider's travel would throw them away
+    /// and hand back a bare input when the slider came back up.
     mutating func setAmount(_ amount: Double, for output: BrushOutput, from input: BrushInput,
-                            curve: ResponseCurve = .linear) {
+                            modules: [BrushModule] = []) {
         if let index = rows.firstIndex(where: { $0.output == output && $0.input == input }) {
             rows[index].amount = amount
         } else {
-            setRows(rows + [BrushModulation(output, input, amount: amount, curve: curve)])
+            setRows(rows + [BrushModulation(output, input, modules: modules, amount: amount)])
         }
     }
 
@@ -329,20 +433,26 @@ struct BrushModulations: Codable, Hashable {
         setRows(updated)
     }
 
+    /// **Every `.random` in every position of every chain, re-addressed from where it sits.**
+    ///
+    /// Position 0 is the chain's own input and position *m + 1* is its *m*-th module — the numbering
+    /// `DabRandom.Channel.modulation`'s `slot` reasons about, and the reason a chain that was a §2.22
+    /// row draws exactly the channels that row drew. Leaving any position out is the failure the
+    /// mechanism exists to prevent: a stale channel could make two chains move together, or make one
+    /// chain square a single draw rather than multiply two.
     private static func normalised(_ input: [BrushModulation]) -> [BrushModulation] {
         var perOutput: [BrushOutput: Int] = [:]
         return input.map { row in
             var row = row
             let index = perOutput[row.output, default: 0]
             perOutput[row.output] = index + 1
-            if case .random(_, let wavelength) = row.input {
-                row.input = .random(.modulation(row.output, row: index), wavelength: wavelength)
+            if case .random(_, let randomiser) = row.input {
+                row.input = .random(.modulation(row.output, row: index), randomiser)
             }
-            // §2.22's second slot is rewritten here for the same reason the first is, and leaving it
-            // out is the failure the mechanism exists to prevent: a hand-written or stale channel in
-            // the gain slot could make two rows move together, or make one row square a single draw.
-            if case .random(_, let wavelength)? = row.second {
-                row.second = .random(.modulation(row.output, row: index, slot: 1), wavelength: wavelength)
+            for position in row.modules.indices {
+                guard case .scale(.random(_, let randomiser)) = row.modules[position] else { continue }
+                row.modules[position] = .scale(.random(
+                    .modulation(row.output, row: index, slot: position + 1), randomiser))
             }
             return row
         }
@@ -418,11 +528,10 @@ extension Brush {
             values.angleTurns += dab.angle.directionFollow * Double(reading(.direction))
         }
         for row in modulations.rows {
-            // §2.22: `amount · curve(input) · reading(second)`, and the second input's absence reads
-            // 1. The `map` is what keeps a row without one from paying a *sensor* evaluation — the
-            // multiply itself is exact either way, but `reading` is §5.5's funnel and a `direction`
-            // read walks the curve's tangent.
-            let contribution = row.contribution(reading(row.input), second: row.second.map(reading) ?? 1)
+            // §2.28: the reading walked through the chain's modules in order, then scaled by the
+            // amount. A chain with no modules pays one `reading` call and one multiply, which is
+            // what it cost when a row was three fields — `DabCostBench` carries the measurement.
+            let contribution = row.contribution(reading)
             switch row.output {
             case .size: values.size += contribution
             case .flow: values.flow += contribution
@@ -630,7 +739,8 @@ extension BrushModulation {
     /// carries the argument for why the curve half is exact; `BrushModulationLogicTests` carries the
     /// pin that the five shipped presets render byte-identically because of it.
     static func sizeFromPressure(amount: Double, atZero: Double) -> BrushModulation {
-        BrushModulation(.size, .pressure, amount: amount, curve: .ramp(from: atZero, to: 1))
+        BrushModulation(.size, .pressure, modules: [.curveRamp(.ramp(from: atZero, to: 1))],
+                        amount: amount)
     }
 
     /// **`flow ← pressure`** — a feather-light touch lays down less ink, mixed in at `amount`.
@@ -655,6 +765,7 @@ extension BrushModulation {
     /// The base is 0 and the amount 1, so the row *is* the curve: density is entirely what pressure
     /// says. Its λ is not here — it belongs to the draw, so it is `BrushDabSettings.densityWavelength`.
     static func densityFromPressure(knee: Double = 1.0 / 3, floor: Double = 0) -> BrushModulation {
-        BrushModulation(.density, .pressure, amount: 1, curve: .threshold(knee: knee, low: floor))
+        BrushModulation(.density, .pressure,
+                        modules: [.curveRamp(.threshold(knee: knee, low: floor))], amount: 1)
     }
 }

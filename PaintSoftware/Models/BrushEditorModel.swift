@@ -198,12 +198,12 @@ enum BrushInputKind: String, CaseIterable, Hashable, Identifiable {
         }
     }
 
-    /// **The channel is deliberately garbage here.** `BrushModulations` rewrites it from the row's
-    /// position on construction and on decode, in both slots, so anything minted outside that type is
-    /// overwritten before it can be read — which is §6.2's *"derived rather than stored"* doing its
-    /// job rather than a shortcut. A hand-picked channel would be the stale-field defect §6.2 exists
-    /// to make unrepresentable.
-    func input(wavelength: CGFloat = BrushEditorDefaults.wavelength) -> BrushInput {
+    /// **The channel is deliberately garbage here.** `BrushModulations` rewrites it from the chain's
+    /// position on construction and on decode, in every position, so anything minted outside that
+    /// type is overwritten before it can be read — which is §6.2's *"derived rather than stored"*
+    /// doing its job rather than a shortcut. A hand-picked channel would be the stale-field defect
+    /// §6.2 exists to make unrepresentable.
+    func input(_ randomiser: BrushRandomiser = BrushEditorDefaults.randomiser) -> BrushInput {
         switch self {
         case .pressure: return .pressure
         case .tiltAngle: return .tiltAngle
@@ -211,7 +211,7 @@ enum BrushInputKind: String, CaseIterable, Hashable, Identifiable {
         case .direction: return .direction
         case .taper: return .taper
         case .velocity: return .velocity
-        case .random: return .random(.modulation(.size, row: 0), wavelength: wavelength)
+        case .random: return .random(.modulation(.size, row: 0), randomiser)
         }
     }
 }
@@ -229,130 +229,121 @@ extension BrushInput {
         }
     }
 
-    /// The authored half of a `.random` input — nil for every sensor, which is what makes "show λ
-    /// only where it means something" a property of the value rather than a rule in the view.
-    var wavelength: CGFloat? {
-        guard case .random(_, let wavelength) = self else { return nil }
-        return wavelength
+    /// The authored half of a `.random` input — λ, §2.28's octave count and its falloff — and nil for
+    /// every sensor, which is what makes "show the randomiser's controls only where they mean
+    /// something" a property of the value rather than a rule in the view.
+    var randomiser: BrushRandomiser? {
+        guard case .random(_, let randomiser) = self else { return nil }
+        return randomiser
+    }
+}
+
+// MARK: - The modules, as a menu can offer them
+
+/// **What the *Add module* menu lists** — BRUSH.md §2.28's three modules, over `BrushModule`'s two
+/// cases.
+///
+/// The third is the second with a random input: `.scale(.random(…))` **is** the randomiser, because
+/// `.random` is a `BrushInput` (§13's *"a pure randomiser is an input, not a module"*). Storing a
+/// third case would be two spellings of one behaviour and two channel derivations to keep in step;
+/// offering two menu entries would hide the randomiser behind a sensor picker an artist has no reason
+/// to look in. So the vocabulary is three and the storage is two, and this type is the join.
+enum BrushModuleKind: String, CaseIterable, Identifiable {
+    case curveRamp
+    case randomiser
+    case scale
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .curveRamp: return "Curve Ramp"
+        case .randomiser: return "Randomiser"
+        case .scale: return "Scale by Sensor"
+        }
+    }
+
+    /// What the module does to the value reaching it, in the artist's terms — shown under the module
+    /// so a chain reads as a sentence rather than as three boxes.
+    var detail: String {
+        switch self {
+        case .curveRamp:
+            return "Remaps the value through a curve. Put one after a randomiser to reshape the wobble's range."
+        case .randomiser:
+            return "Multiplies by a random value that varies along the stroke. Octaves add finer detail on top."
+        case .scale:
+            return "Multiplies by another sensor's reading. It can only take away — Amount is what makes a chain bigger."
+        }
+    }
+
+    /// A fresh module of this kind, at the defaults a first use should have.
+    var module: BrushModule {
+        switch self {
+        case .curveRamp: return .curveRamp(ResponseCurve.ramp(from: 0, to: 1))
+        case .randomiser: return .scale(.random(.modulation(.size, row: 0),
+                                                BrushEditorDefaults.randomiser))
+        case .scale: return .scale(.pressure)
+        }
+    }
+}
+
+extension BrushModule {
+    /// Which menu entry this module came from. A `.scale` carrying a `.random` reads back as the
+    /// randomiser, which is the one place the two-cases-three-kinds join has to be exact.
+    var kind: BrushModuleKind {
+        switch self {
+        case .curveRamp: return .curveRamp
+        case .scale(let input): return input.randomiser == nil ? .scale : .randomiser
+        }
+    }
+
+    /// The randomiser this module draws through, or nil — nil for a curve ramp and for a scale by an
+    /// ordinary sensor.
+    var randomiser: BrushRandomiser? {
+        guard case .scale(let input) = self else { return nil }
+        return input.randomiser
     }
 }
 
 enum BrushEditorDefaults {
-    /// What a fresh `random` row's λ is, in brush widths (§2.17). Roughly the `density` row's own
-    /// default, so a first randomiser reads as a wobble rather than as per-dab hash noise.
-    static let wavelength: CGFloat = 3.5
-    /// What a fresh row's amount is. Non-zero, because a row added at 0 does nothing and reads as a
-    /// control that did not work — CLAUDE.md's "a refusal with no notice", reached through a default.
+    /// What a fresh randomiser is, in brush widths (§2.17) at one octave (§2.28). Roughly the
+    /// `density` row's own default λ, so a first randomiser reads as a wobble rather than as per-dab
+    /// hash noise — and one octave, so adding one changes the amplitude and nothing else until the
+    /// artist asks for scales.
+    static let randomiser = BrushRandomiser(wavelength: 3.5)
+    /// What a fresh chain's amount is. Non-zero, because a chain added at 0 does nothing and reads as
+    /// a control that did not work — CLAUDE.md's "a refusal with no notice", reached through a
+    /// default.
     static let amount: Double = 0.5
 }
 
-// MARK: - The owner's chain, over the rows that are actually stored
+// MARK: - What the chain still cannot say
 
-/// **BRUSH.md §2.24's chain, read off one stored row** — *"You select the input option of the brush …
-/// Then you can add modifiers onto it, like it passes through an input/output curve ramp module,
-/// then a randomizer module."*
-///
-/// One row of §6's matrix contributes `amount · curve(input) · reading(second)`. Read left to right
-/// that **is** the owner's chain: an input, then a curve ramp, then a gain — and when the gain is
-/// `.random`, a randomiser. So the shapes agree on the ordinary case rather than merely being
-/// mappable onto each other.
-///
-/// Where they disagree is `BrushChainLimit`, which is written down rather than papered over, because
-/// BRUSH.md §13 is where a difference between the owner's design and the storage belongs and because
-/// the screen shows the artist the relevant sentence instead of a module list the engine cannot
-/// honour.
-struct BrushModulationChain: Equatable {
-    enum Module: Equatable {
-        /// The row's `ResponseCurve` — §2.24's *"input/output curve ramp module"*.
-        case curveRamp(ResponseCurve)
-        /// §2.22's second slot at `.random` — *"a randomizer module"*, and its reading **multiplies**
-        /// what the curve produced rather than adding to it. That is the whole difference between
-        /// this and a second row, and it is why §7.0's fourth worked example is expressible at all.
-        case randomiser(wavelength: CGFloat)
-        /// §2.22's second slot at a sensor. Not a module the owner named — it is the same slot the
-        /// randomiser occupies, so the two are alternatives and the screen offers one picker.
-        case gain(BrushInputKind)
-    }
-
-    var input: BrushInput
-    var amount: Double
-    var modules: [Module]
-
-    /// **In the order the engine applies them**, which is the order they are read out here and the
-    /// order the screen draws them. It is not the artist's to change — see
-    /// `BrushChainLimit.moduleOrderIsFixed`.
-    init(_ row: BrushModulation) {
-        input = row.input
-        amount = row.amount
-        var modules: [Module] = []
-        if !row.curve.isLinear { modules.append(.curveRamp(row.curve)) }
-        switch row.second {
-        case .none: break
-        case .some(let second):
-            if let wavelength = second.wavelength {
-                modules.append(.randomiser(wavelength: wavelength))
-            } else {
-                modules.append(.gain(second.kind))
-            }
-        }
-        self.modules = modules
-    }
-
-    /// The row this chain is of, for the output it drives.
-    ///
-    /// A chain carrying two curve ramps or two randomisers cannot round-trip — the storage has one
-    /// slot for each — so the **last** of each kind wins and `BrushChainLimit` says so. Silently
-    /// keeping the first would be the same lie told the other way round.
-    func row(driving output: BrushOutput) -> BrushModulation {
-        var curve = ResponseCurve.linear
-        var second: BrushInput?
-        for module in modules {
-            switch module {
-            case .curveRamp(let ramp): curve = ramp
-            case .randomiser(let wavelength):
-                second = .random(.modulation(output, row: 0, slot: 1), wavelength: wavelength)
-            case .gain(let kind): second = kind.input()
-            }
-        }
-        return BrushModulation(output, input, second: second, amount: amount, curve: curve)
-    }
-}
-
-/// **Where §2.24's chain and §6's rows genuinely differ.** BRUSH.md §13 carries the same list in
+/// **Where §2.24's chain and §6's storage still differ.** BRUSH.md §13 carries the same list in
 /// prose; this is the copy the screen reads, so the sentence an artist is shown and the sentence the
 /// document records cannot drift.
 ///
-/// Every one of these is a limit of the *storage*, and none of them is fixed by changing the editor.
-/// Closing any of them is a change to `BrushModulation`, which §2.22 already ruled on once and which
-/// is not a decision to take inside a build of the screen that revealed it.
+/// **It was four entries and it is one.** §2.28 closed the other three by making a modulation an
+/// input and an ordered list of modules: the order is the artist's, a chain may carry as many curve
+/// ramps as it likes, and it may carry as many randomisers as it likes. Those three sentences were on
+/// the screen until 2026-09-05 and are **deleted rather than reworded** — a limit the engine no
+/// longer has, still printed beside the control that disproves it, is worse than never having said
+/// it.
+///
+/// The survivor is a fact about the *matrix* rather than about a chain, and closing it is a change to
+/// how outputs are summed rather than to how one chain is evaluated.
 enum BrushChainLimit: String, CaseIterable, Identifiable {
-    /// A row is `amount · curve(input) · second`, evaluated in that order and no other. So the curve
-    /// ramp is always before the randomiser, and *"a randomizer, then a curve ramp"* — randomise
-    /// first and shape the result — cannot be stated. §2.22 rules the second slot uncurved.
-    case moduleOrderIsFixed
-    /// One `curve` field, so one curve ramp. Two in series would need a second `ResponseCurve` per
-    /// row, which is a second thing to keep in step for expressiveness nothing has asked for.
-    case oneCurveRampPerChain
-    /// One `second` field, so one randomiser. Two independent wobbles on one output are two *rows*,
-    /// which sum rather than compose — §8.4's rough nib is built exactly that way.
-    case oneRandomiserPerChain
     /// **Several chains on one output are summed, not chained.** The owner's *"for each output there
     /// can only be one input for now"* is true of everything the shipped set carries, and the storage
-    /// does not enforce it: §8.4's nib is several `random` rows at different λ on one output. So the
-    /// screen lists however many rows there are rather than hiding the extras behind a picker that
-    /// can name one.
+    /// does not enforce it: §8.4's rough nib is several `random` rows at different λ on one output —
+    /// which §2.28's octaves now express inside a single chain, so this is the shape an artist
+    /// reaches for less often than they did.
     case severalChainsPerOutputAreSummed
 
     var id: String { rawValue }
 
     var explanation: String {
         switch self {
-        case .moduleOrderIsFixed:
-            return "Modules run in one order: the curve ramp shapes the input, then the randomiser scales the result. That order is the engine's and cannot be swapped."
-        case .oneCurveRampPerChain:
-            return "One curve ramp per input. Two in series is not something the brush can store."
-        case .oneRandomiserPerChain:
-            return "One randomiser per input. A second independent wobble is a second input on the same output, which adds rather than chains."
         case .severalChainsPerOutputAreSummed:
             return "An output can carry more than one input. They add together — they do not feed into each other."
         }

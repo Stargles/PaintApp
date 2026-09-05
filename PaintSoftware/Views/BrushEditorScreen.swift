@@ -301,8 +301,15 @@ struct BrushEditorScreen: View {
 
     // MARK: - One chain
 
-    /// §2.24's chain for one stored row: the input, then the modules, then the amount that decides
-    /// how much of it reaches the output.
+    /// **§2.28's chain for one stored row**: the input, the amount, and an ordered list of modules the
+    /// artist adds to, removes from and reorders.
+    ///
+    /// The owner, on the screen this replaces: *"does it contain the modular approach? right now there
+    /// seems to be a hardcoded order for everything. For example we may sometimes need the randomizer
+    /// first, then use curves to remap the range."* The list below **is** `BrushModulation.modules`,
+    /// drawn in storage order — there is no mapping layer between what is shown and what is
+    /// evaluated, which is what the screen it replaces had and what made the limit invisible until it
+    /// was written on the screen in words.
     @ViewBuilder
     private func chainCard(output: BrushOutput, index: Int) -> some View {
         let row = brush.modulations.rows[index]
@@ -315,8 +322,8 @@ struct BrushEditorScreen: View {
                             identifier: "\(idPrefix).input.\(rowID)") { kind in
                     edit { brush in
                         var updated = brush.modulations.rows[index]
-                        updated.input = kind.input(wavelength: updated.input.wavelength
-                                                   ?? BrushEditorDefaults.wavelength)
+                        updated.input = kind.input(updated.input.randomiser
+                                                   ?? BrushEditorDefaults.randomiser)
                         brush.modulations.replace(at: index, with: updated)
                     }
                     commit()
@@ -332,12 +339,17 @@ struct BrushEditorScreen: View {
                 .accessibilityIdentifier("\(idPrefix).removeRow.\(rowID)")
             }
 
-            if let wavelength = row.input.wavelength {
-                sliderRow(title: "Wavelength",
-                          valueText: String(format: "%.1f widths", wavelength),
-                          value: wavelengthBinding(index: index, slot: 0),
-                          range: 0...12,
-                          identifier: "\(idPrefix).lambda.\(rowID)")
+            if let randomiser = row.input.randomiser {
+                randomiserControls(randomiser, rowID: rowID, idInfix: "",
+                                   write: { updated in
+                    edit { brush in
+                        guard brush.modulations.rows.indices.contains(index) else { return }
+                        var row = brush.modulations.rows[index]
+                        guard case .random(let channel, _) = row.input else { return }
+                        row.input = .random(channel, updated)
+                        brush.modulations.replace(at: index, with: row)
+                    }
+                })
             }
 
             sliderRow(title: "Amount",
@@ -346,42 +358,184 @@ struct BrushEditorScreen: View {
                       range: -1...1,
                       identifier: "\(idPrefix).amount.\(rowID)")
 
-            ResponseCurveEditorView(curve: curveBinding(index: index),
-                                    inputName: row.input.kind.displayName,
-                                    idPrefix: "\(idPrefix).curve.\(rowID)",
-                                    onEditEnded: { commit() })
-            limitNote(.oneCurveRampPerChain, scope: rowID)
+            Text("Modules")
+                .font(.caption).foregroundColor(.white.opacity(0.6))
+            ForEach(Array(row.modules.enumerated()), id: \.offset) { position, module in
+                moduleCard(rowIndex: index, rowID: rowID, position: position, module: module,
+                           count: row.modules.count)
+            }
 
-            HStack(spacing: 8) {
-                Text("Then scale by")
-                    .font(.caption).foregroundColor(.white.opacity(0.6))
-                secondPicker(selection: row.second?.kind,
-                             identifier: "\(idPrefix).second.\(rowID)") { kind in
-                    edit { brush in
-                        var updated = brush.modulations.rows[index]
-                        updated.second = kind?.input(wavelength: updated.second?.wavelength
-                                                     ?? BrushEditorDefaults.wavelength)
-                        brush.modulations.replace(at: index, with: updated)
+            Menu {
+                ForEach(BrushModuleKind.allCases) { kind in
+                    Button(kind.displayName) {
+                        edit { brush in
+                            guard brush.modulations.rows.indices.contains(index) else { return }
+                            var row = brush.modulations.rows[index]
+                            row.modules.append(kind.module)
+                            brush.modulations.replace(at: index, with: row)
+                        }
+                        commit()
                     }
-                    commit()
+                    .accessibilityIdentifier("\(idPrefix).addModule.\(rowID).\(kind.rawValue)")
                 }
-                Spacer(minLength: 0)
+            } label: {
+                Label("Add module", systemImage: "plus.circle")
+                    .font(.caption)
+                    .foregroundColor(.blue)
             }
-
-            if let wavelength = row.second?.wavelength {
-                sliderRow(title: "Randomiser Wavelength",
-                          valueText: String(format: "%.1f widths", wavelength),
-                          value: wavelengthBinding(index: index, slot: 1),
-                          range: 0...12,
-                          identifier: "\(idPrefix).secondLambda.\(rowID)")
-            }
-
-            limitNote(.oneRandomiserPerChain, scope: rowID)
-            limitNote(.moduleOrderIsFixed, scope: rowID)
+            .accessibilityIdentifier("\(idPrefix).addModule.\(rowID)")
         }
         .padding(12)
         .background(Color.white.opacity(0.05))
         .cornerRadius(8)
+    }
+
+    /// One module of a chain, with the three verbs §2.28 asks for — **move up, move down, remove** —
+    /// beside the controls of whatever kind it is.
+    ///
+    /// **Up and down rather than a drag**, because a module list lives inside a `ScrollView` inside a
+    /// column that also scrolls, and a long-press-to-reorder there fights both. Two taps say the same
+    /// thing, are reachable from the accessibility tree, and cannot be swallowed by a parent's
+    /// gesture — which is the failure mode `BrushEditorUITests` exists to catch.
+    @ViewBuilder
+    private func moduleCard(rowIndex: Int, rowID: String, position: Int,
+                            module: BrushModule, count: Int) -> some View {
+        let moduleID = "\(rowID).\(position)"
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("\(position + 1). \(module.kind.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.white)
+                    .accessibilityIdentifier("\(idPrefix).module.\(moduleID)")
+                Spacer(minLength: 0)
+                Button {
+                    moveModule(rowIndex: rowIndex, from: position, to: position - 1)
+                } label: {
+                    Image(systemName: "arrow.up").font(.caption)
+                        .foregroundColor(position == 0 ? .white.opacity(0.2) : .white.opacity(0.8))
+                }
+                .disabled(position == 0)
+                .accessibilityIdentifier("\(idPrefix).moduleUp.\(moduleID)")
+                Button {
+                    moveModule(rowIndex: rowIndex, from: position, to: position + 1)
+                } label: {
+                    Image(systemName: "arrow.down").font(.caption)
+                        .foregroundColor(position == count - 1 ? .white.opacity(0.2)
+                                                               : .white.opacity(0.8))
+                }
+                .disabled(position == count - 1)
+                .accessibilityIdentifier("\(idPrefix).moduleDown.\(moduleID)")
+                Button {
+                    edit { brush in
+                        guard brush.modulations.rows.indices.contains(rowIndex) else { return }
+                        var row = brush.modulations.rows[rowIndex]
+                        guard row.modules.indices.contains(position) else { return }
+                        row.modules.remove(at: position)
+                        brush.modulations.replace(at: rowIndex, with: row)
+                    }
+                    commit()
+                } label: {
+                    Image(systemName: "trash").font(.caption)
+                        .foregroundColor(.red.opacity(0.8))
+                }
+                .accessibilityIdentifier("\(idPrefix).moduleRemove.\(moduleID)")
+            }
+
+            Text(module.kind.detail)
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+
+            switch module {
+            case .curveRamp:
+                ResponseCurveEditorView(curve: curveBinding(rowIndex: rowIndex, position: position),
+                                        inputName: "the value reaching this module",
+                                        idPrefix: "\(idPrefix).curve.\(moduleID)",
+                                        onEditEnded: { commit() })
+            case .scale(let input):
+                if let randomiser = input.randomiser {
+                    randomiserControls(randomiser, rowID: moduleID, idInfix: "module",
+                                       write: { updated in
+                        writeModule(rowIndex: rowIndex, position: position,
+                                    .scale(.random(.modulation(.size, row: 0), updated)))
+                    })
+                } else {
+                    HStack(spacing: 8) {
+                        Text("Sensor")
+                            .font(.caption).foregroundColor(.white.opacity(0.6))
+                        inputPicker(selection: input.kind,
+                                    identifier: "\(idPrefix).moduleSensor.\(moduleID)") { kind in
+                            writeModule(rowIndex: rowIndex, position: position, .scale(kind.input()))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.06))
+        .cornerRadius(6)
+        .accessibilityIdentifier("\(idPrefix).moduleCard.\(moduleID)")
+    }
+
+    /// **λ, octaves and falloff** — §2.17's wavelength and §2.28's octaves, wherever a randomiser
+    /// sits. One control set, drawn for a chain's `.random` input and for a randomiser module alike,
+    /// because both carry the same `BrushRandomiser` and a second set would be a second thing to keep
+    /// in step.
+    @ViewBuilder
+    private func randomiserControls(_ randomiser: BrushRandomiser, rowID: String, idInfix: String,
+                                    write: @escaping (BrushRandomiser) -> Void) -> some View {
+        let prefix = idInfix.isEmpty ? "\(idPrefix)" : "\(idPrefix).\(idInfix)"
+        sliderRow(title: "Wavelength",
+                  valueText: String(format: "%.1f widths", randomiser.wavelength),
+                  value: Binding(get: { Double(randomiser.wavelength) },
+                                 set: { write(BrushRandomiser(wavelength: CGFloat($0),
+                                                              octaves: randomiser.octaves,
+                                                              falloff: randomiser.falloff)) }),
+                  range: 0...12,
+                  identifier: "\(prefix)Lambda.\(rowID)")
+        sliderRow(title: "Octaves",
+                  valueText: "\(randomiser.octaves)",
+                  value: Binding(get: { Double(randomiser.octaves) },
+                                 set: { write(BrushRandomiser(wavelength: randomiser.wavelength,
+                                                              octaves: Int($0.rounded()),
+                                                              falloff: randomiser.falloff)) }),
+                  range: 1...Double(BrushRandomiser.maximumOctaves),
+                  step: 1,
+                  identifier: "\(prefix)Octaves.\(rowID)")
+        if randomiser.octaves > 1 {
+            sliderRow(title: "Octave Falloff",
+                      valueText: String(format: "%.2f", randomiser.falloff),
+                      value: Binding(get: { randomiser.falloff },
+                                     set: { write(BrushRandomiser(wavelength: randomiser.wavelength,
+                                                                  octaves: randomiser.octaves,
+                                                                  falloff: $0)) }),
+                      range: 0...1,
+                      identifier: "\(prefix)Falloff.\(rowID)")
+        }
+    }
+
+    private func moveModule(rowIndex: Int, from: Int, to: Int) {
+        edit { brush in
+            guard brush.modulations.rows.indices.contains(rowIndex) else { return }
+            var row = brush.modulations.rows[rowIndex]
+            guard row.modules.indices.contains(from), row.modules.indices.contains(to) else { return }
+            let module = row.modules.remove(at: from)
+            row.modules.insert(module, at: to)
+            brush.modulations.replace(at: rowIndex, with: row)
+        }
+        commit()
+    }
+
+    private func writeModule(rowIndex: Int, position: Int, _ module: BrushModule) {
+        edit { brush in
+            guard brush.modulations.rows.indices.contains(rowIndex) else { return }
+            var row = brush.modulations.rows[rowIndex]
+            guard row.modules.indices.contains(position) else { return }
+            row.modules[position] = module
+            brush.modulations.replace(at: rowIndex, with: row)
+        }
+        commit()
     }
 
     /// One of `BrushChainLimit`'s sentences, drawn where the limit bites.
@@ -410,26 +564,6 @@ struct BrushEditorScreen: View {
         .accessibilityIdentifier(identifier)
         .accessibilityValue(selection.displayName)
     }
-
-    /// §2.22's second slot, *"with an explicit none — it is reachable only from code today and this
-    /// is what owes it a control"* (§12 stage 10). None is its default and the state every shipped
-    /// preset is in, so it is the first row of the menu rather than a clear button somewhere else.
-    private func secondPicker(selection: BrushInputKind?, identifier: String,
-                              onPick: @escaping (BrushInputKind?) -> Void) -> some View {
-        Menu {
-            Button("None") { onPick(nil) }
-                .accessibilityIdentifier("\(identifier).none")
-            ForEach(BrushInputKind.allCases) { kind in
-                Button(kind.displayName) { onPick(kind) }
-                    .accessibilityIdentifier("\(identifier).\(kind.rawValue)")
-            }
-        } label: {
-            pickerLabel(selection?.displayName ?? "None")
-        }
-        .accessibilityIdentifier(identifier)
-        .accessibilityValue(selection?.displayName ?? "None")
-    }
-
     private func pickerLabel(_ text: String) -> some View {
         HStack(spacing: 4) {
             Text(text).font(.caption)
@@ -504,20 +638,34 @@ struct BrushEditorScreen: View {
     /// window. The lift is also when the edit is written through to the library, rather than on every
     /// tick — `BrushLibraryStore` persists on every change and a drag is dozens a second.
     private func sliderRow(title: String, valueText: String, value: Binding<Double>,
-                           range: ClosedRange<Double>, identifier: String,
+                           range: ClosedRange<Double>, step: Double? = nil, identifier: String,
                            preview: SizePreviewRequest? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("\(title): \(valueText)")
                 .font(.caption)
                 .foregroundColor(.white)
-            Slider(value: value, in: range, onEditingChanged: { isEditing in
-                if !isEditing { commit() }
-                guard let preview else { return }
-                canvasManager.sizePreview.editingChanged(isEditing, for: preview)
-            })
+            // `step` is for the one control whose values are countable — §2.28's octave count. It is
+            // a branch rather than a defaulted argument because SwiftUI's stepped and continuous
+            // sliders are two initialisers, and a step small enough to stand in for "none" is a
+            // quantisation nobody asked for.
+            Group {
+                if let step {
+                    Slider(value: value, in: range, step: step,
+                           onEditingChanged: { editingChanged($0, preview) })
+                } else {
+                    Slider(value: value, in: range,
+                           onEditingChanged: { editingChanged($0, preview) })
+                }
+            }
             .accessibilityIdentifier(identifier)
             .sizePreviewSlider(preview, canvasManager: canvasManager)
         }
+    }
+
+    private func editingChanged(_ isEditing: Bool, _ preview: SizePreviewRequest?) {
+        if !isEditing { commit() }
+        guard let preview else { return }
+        canvasManager.sizePreview.editingChanged(isEditing, for: preview)
     }
 
     // MARK: - Writing
@@ -580,41 +728,24 @@ struct BrushEditorScreen: View {
                 })
     }
 
-    private func curveBinding(index: Int) -> Binding<ResponseCurve> {
-        Binding(get: { brush.modulations.rows.indices.contains(index)
-                        ? brush.modulations.rows[index].curve : .linear },
-                set: { newValue in
-                    edit { brush in
-                        guard brush.modulations.rows.indices.contains(index) else { return }
-                        var row = brush.modulations.rows[index]
-                        row.curve = newValue
-                        brush.modulations.replace(at: index, with: row)
-                    }
-                })
-    }
-
-    /// λ, in either slot. `slot` 0 is the input's own (§2.17) and 1 is the randomiser's (§2.22); they
-    /// are two authored numbers on one row and the channel each draws from is minted from the slot,
-    /// never from here.
-    private func wavelengthBinding(index: Int, slot: Int) -> Binding<Double> {
+    /// The `ResponseCurve` of one **curve-ramp module** — addressed by its position in the chain,
+    /// because §2.28 lets a chain carry several and they are not interchangeable.
+    private func curveBinding(rowIndex: Int, position: Int) -> Binding<ResponseCurve> {
         Binding(
             get: {
-                guard brush.modulations.rows.indices.contains(index) else { return 0 }
-                let row = brush.modulations.rows[index]
-                return Double((slot == 0 ? row.input.wavelength : row.second?.wavelength) ?? 0)
+                guard brush.modulations.rows.indices.contains(rowIndex) else { return .linear }
+                let modules = brush.modulations.rows[rowIndex].modules
+                guard modules.indices.contains(position),
+                      case .curveRamp(let curve) = modules[position] else { return .linear }
+                return curve
             },
             set: { newValue in
                 edit { brush in
-                    guard brush.modulations.rows.indices.contains(index) else { return }
-                    var row = brush.modulations.rows[index]
-                    if slot == 0 {
-                        guard case .random(let channel, _) = row.input else { return }
-                        row.input = .random(channel, wavelength: CGFloat(newValue))
-                    } else {
-                        guard case .random(let channel, _)? = row.second else { return }
-                        row.second = .random(channel, wavelength: CGFloat(newValue))
-                    }
-                    brush.modulations.replace(at: index, with: row)
+                    guard brush.modulations.rows.indices.contains(rowIndex) else { return }
+                    var row = brush.modulations.rows[rowIndex]
+                    guard row.modules.indices.contains(position) else { return }
+                    row.modules[position] = .curveRamp(newValue)
+                    brush.modulations.replace(at: rowIndex, with: row)
                 }
             }
         )

@@ -166,8 +166,8 @@ final class BrushEditorLogicTests: XCTestCase {
     /// the same number twice and is invisible in every other assertion.
     func testAddingAndRemovingRowsRemintsTheRandomChannels() {
         var modulations = BrushModulations([
-            BrushModulation(.scatter, .random(.modulation(.scatter, row: 0), wavelength: 2), amount: 0.3),
-            BrushModulation(.scatter, .random(.modulation(.scatter, row: 1), wavelength: 5), amount: 0.2)
+            BrushModulation(.scatter, .random(.modulation(.scatter, row: 0), .plain(2)), amount: 0.3),
+            BrushModulation(.scatter, .random(.modulation(.scatter, row: 1), .plain(5)), amount: 0.2)
         ])
         let secondChannel = channel(of: modulations.rows[1].input)
 
@@ -176,10 +176,11 @@ final class BrushEditorLogicTests: XCTestCase {
         XCTAssertNotEqual(channel(of: modulations.rows[0].input), secondChannel,
                           "The surviving row moved to position 0, so its cell must move with it")
         XCTAssertEqual(channel(of: modulations.rows[0].input),
-                       channel(of: BrushInput.random(.modulation(.scatter, row: 0), wavelength: 5)))
-        XCTAssertEqual(modulations.rows[0].input.wavelength, 5, "…and its authored λ is untouched")
+                       channel(of: BrushInput.random(.modulation(.scatter, row: 0), .plain(5))))
+        XCTAssertEqual(modulations.rows[0].input.randomiser?.wavelength, 5,
+                       "…and its authored λ is untouched")
 
-        modulations.append(BrushModulation(.scatter, .random(.modulation(.size, row: 9), wavelength: 1), amount: 0.1))
+        modulations.append(BrushModulation(.scatter, .random(.modulation(.size, row: 9), .plain(1)), amount: 0.1))
         XCTAssertNotEqual(channel(of: modulations.rows[0].input), channel(of: modulations.rows[1].input),
                           "No two rows of one output may share a cell")
     }
@@ -198,84 +199,79 @@ final class BrushEditorLogicTests: XCTestCase {
         XCTAssertEqual(modulations.indices(for: .hue), [])
     }
 
-    // MARK: - The chain, and where it stops fitting
+    // MARK: - The chain the editor edits
 
-    /// **§2.24's chain and §6's row are the same thing on the ordinary case.** A row is
-    /// `amount · curve(input) · second`, which read left to right is an input, a curve ramp and a
-    /// gain — so this round-trips rather than approximating.
-    func testAChainRoundTripsAnOrdinaryRow() {
-        let rows = [
-            BrushModulation(.size, .pressure, amount: 0.5, curve: .ramp(from: 0.2, to: 1)),
-            BrushModulation(.flow, .tiltAngle, amount: -0.3),
-            BrushModulation(.spacing, .pressure,
-                            second: .random(.modulation(.spacing, row: 0, slot: 1), wavelength: 4),
-                            amount: 0.4, curve: .threshold(knee: 0.4)),
-            BrushModulation(.scatter, .velocity, second: .pressure, amount: 0.8)
-        ]
-        for row in rows {
-            let rebuilt = BrushModulationChain(row).row(driving: row.output)
-            XCTAssertEqual(rebuilt, row, "A chain read off a row and written back must be that row")
+    /// **The chain is the storage, not a view over it.** §2.28 made a modulation an input and an
+    /// ordered list of modules, so there is no mapping layer left to round-trip through — the editor
+    /// reads `BrushModulation.modules` and writes it back. What is worth asserting instead is that the
+    /// *vocabulary* the menu offers lands on the storage exactly: three kinds, two cases, and a
+    /// `.scale` carrying a `.random` reads back as the randomiser.
+    func testEveryModuleKindTheMenuOffersReadsBackAsItself() {
+        for kind in BrushModuleKind.allCases {
+            XCTAssertEqual(kind.module.kind, kind,
+                           "\(kind.displayName) must read back as the kind that made it")
+            XCTAssertFalse(kind.detail.isEmpty, "every module says what it does")
         }
+        XCTAssertEqual(BrushModule.scale(.random(.scatterAngle, .plain(2))).kind, .randomiser,
+                       "a scale carrying a random *is* the randomiser — there is no third case")
+        XCTAssertEqual(BrushModule.scale(.pressure).kind, .scale)
+        XCTAssertNil(BrushModule.scale(.pressure).randomiser)
+        XCTAssertEqual(BrushModule.scale(.random(.scatterAngle, .plain(2))).randomiser?.wavelength, 2)
+        XCTAssertNil(BrushModule.curveRamp(.linear).randomiser)
     }
 
-    /// **§7.0's fourth worked example, as the editor states it.** *"How much random wobble there is
-    /// depends on pressure"* is the second slot at `.random` with pressure in the first — a
-    /// randomiser module scaling what the curve produced.
-    func testTheSecondSlotAtRandomReadsAsARandomiserModule() {
-        let row = BrushModulation(.spacing, .pressure,
-                                  second: .random(.modulation(.spacing, row: 0, slot: 1), wavelength: 3),
-                                  amount: 0.5)
-        let chain = BrushModulationChain(row)
-        XCTAssertEqual(chain.modules, [.randomiser(wavelength: 3)])
-        XCTAssertEqual(chain.input.kind, .pressure)
-
-        // …and it is a *gain*, not a row: the wobble's amplitude is what pressure moves.
-        XCTAssertEqual(row.contribution(1, second: 1), 0.5, accuracy: 1e-12)
-        XCTAssertEqual(row.contribution(1, second: 0), 0, accuracy: 1e-12)
-        XCTAssertEqual(row.contribution(0.5, second: 0.5), 0.125, accuracy: 1e-12)
+    /// **A fresh randomiser is one octave**, so adding one changes the amplitude and nothing else
+    /// until the artist asks for scales — and the octave slider's range is the clamp the type
+    /// enforces, not a wider one the model would silently trim.
+    func testAFreshRandomiserIsOneOctaveAndTheCountIsClamped() {
+        XCTAssertEqual(BrushEditorDefaults.randomiser.octaves, 1)
+        XCTAssertEqual(BrushEditorDefaults.randomiser.falloff, BrushRandomiser.defaultFalloff)
+        XCTAssertEqual(BrushRandomiser(wavelength: 1, octaves: 0).octaves, 1,
+                       "zero octaves is not a field at all")
+        XCTAssertEqual(BrushRandomiser(wavelength: 1, octaves: 99).octaves,
+                       BrushRandomiser.maximumOctaves)
+        XCTAssertEqual(BrushRandomiser(wavelength: 1, octaves: 2, falloff: 4).falloff, 1,
+                       "a falloff above 1 would make the finest octave the loudest")
+        XCTAssertEqual(BrushRandomiser(wavelength: -3, octaves: 1).wavelength, 0,
+                       "a negative λ is a fresh draw per dab, not a reflection")
     }
 
-    /// **Where the two models genuinely differ, asserted rather than described.** A chain the owner
-    /// could draw — two curve ramps in series — cannot be stored, and the last one wins. This is the
-    /// boundary BRUSH.md §13 carries; it goes red if somebody later makes the storage able to hold
-    /// both, which is the point.
-    func testAChainWithTwoOfAModuleLosesOneAndTheLimitSaysSo() {
-        let chain = BrushModulationChain(BrushModulation(.size, .pressure, amount: 1))
-        var twoRamps = chain
-        twoRamps.modules = [.curveRamp(.ramp(from: 0, to: 1)), .curveRamp(.threshold(knee: 0.5))]
-        let rebuilt = twoRamps.row(driving: .size)
-        XCTAssertEqual(rebuilt.curve, .threshold(knee: 0.5), "One `curve` field, so the last ramp wins")
-        XCTAssertEqual(BrushModulationChain(rebuilt).modules.count, 1,
-                       "…and reading it back gives one module, which is the honest shape")
+    /// **Moving a randomiser along a chain moves the plane it draws from** — §6.2's derivation,
+    /// through the reorder the editor performs.
+    ///
+    /// The discriminating operand is the *other* module's channel: reordering has to re-mint both, or
+    /// two randomisers end up sharing one cell and draw the same number twice, which is invisible in
+    /// every other assertion.
+    func testReorderingAChainRemintsTheRandomiserChannels() {
+        let wobbleA = BrushModule.scale(.random(.scatterAngle, .plain(2)))
+        let wobbleB = BrushModule.scale(.random(.scatterAngle, .plain(5)))
+        let forward = BrushModulations([
+            BrushModulation(.spacing, .pressure, modules: [wobbleA, wobbleB], amount: 0.4)
+        ])
+        let reversed = BrushModulations([
+            BrushModulation(.spacing, .pressure, modules: [wobbleB, wobbleA], amount: 0.4)
+        ])
+        // The λ travels with the module; the channel travels with the position.
+        XCTAssertEqual(forward.rows[0].modules[0].randomiser?.wavelength, 2)
+        XCTAssertEqual(reversed.rows[0].modules[0].randomiser?.wavelength, 5)
+        XCTAssertEqual(moduleChannel(forward.rows[0], 0), moduleChannel(reversed.rows[0], 0),
+                       "position 0 is plane 1 whichever randomiser sits in it")
+        XCTAssertNotEqual(moduleChannel(forward.rows[0], 0), moduleChannel(forward.rows[0], 1),
+                          "two randomisers in one chain never share a cell")
+        XCTAssertEqual(moduleChannel(forward.rows[0], 1),
+                       DabRandom.Channel.modulation(.spacing, row: 0, slot: 2).rawValue)
+    }
 
-        var twoSeconds = chain
-        twoSeconds.modules = [.randomiser(wavelength: 2), .gain(.pressure)]
-        XCTAssertEqual(BrushModulationChain(twoSeconds.row(driving: .size)).modules, [.gain(.pressure)],
-                       "One `second` field, so a randomiser and a gain are alternatives")
-
-        // The four sentences the screen shows are the four this file names.
-        XCTAssertEqual(BrushChainLimit.allCases.count, 4)
+    /// **The limits the screen prints are the limits the engine has.** §2.28 closed three of the four
+    /// `BrushChainLimit` carried, and a sentence that is no longer true — still printed beside the
+    /// control that disproves it — is worse than never having said it. So the count is pinned.
+    func testTheOnlyChainLimitLeftIsTheOneSeveralChainsShare() {
+        XCTAssertEqual(BrushChainLimit.allCases, [.severalChainsPerOutputAreSummed],
+                       "§2.28 made the order the artist's, and a chain may carry as many curve ramps "
+                       + "and randomisers as it likes — those three sentences are deleted, not reworded")
         for limit in BrushChainLimit.allCases {
             XCTAssertFalse(limit.explanation.isEmpty)
         }
-    }
-
-    /// **The randomiser's cell is minted from the second slot, one plane up** — §6.2. A chain that
-    /// rebuilt the row with the *first* slot's channel would make a row randomised on both sides
-    /// square one draw instead of multiplying two, which is the trap §2.22 names by name.
-    func testARebuiltRandomiserDrawsFromTheSecondPlane() {
-        let chain = BrushModulationChain(BrushModulation(
-            .spacing, .random(.modulation(.spacing, row: 0), wavelength: 2), amount: 1))
-        var withRandomiser = chain
-        withRandomiser.modules = [.randomiser(wavelength: 6)]
-        // Through `BrushModulations`, because that is the only door the app has and the type is what
-        // holds the invariant — a chain's own answer is overwritten by it either way.
-        let modulations = BrushModulations([withRandomiser.row(driving: .spacing)])
-        let row = modulations.rows[0]
-        XCTAssertNotEqual(channel(of: row.input), channel(of: row.second!),
-                          "Both slots randomised must be two independent draws")
-        XCTAssertEqual(channel(of: row.second!),
-                       channel(of: .random(.modulation(.spacing, row: 0, slot: 1), wavelength: 6)))
     }
 
     /// The default a fresh row lands at is **not** zero. A row added at amount 0 does nothing, which
@@ -288,10 +284,58 @@ final class BrushEditorLogicTests: XCTestCase {
         XCTAssertNotEqual(before, brush.dabValues { _ in 0.5 })
     }
 
+    /// **A fresh module arrives in a state the artist can use**, and the three kinds mean different
+    /// things by that — which is why this is three assertions rather than one loop with one rule.
+    ///
+    /// - A **randomiser** and a **scale** must change the value the moment they are added. One that
+    ///   arrived at λ = 0, or reading a neutral 1, would be a control that did nothing — CLAUDE.md's
+    ///   "a refusal with no notice", reached through a default.
+    /// - A **curve ramp** must *not*. `ResponseCurve.ramp(from: 0, to: 1)` is documented and tested
+    ///   bit-exact with the pass-through it replaces, and that is the point: adding the module puts
+    ///   two draggable nodes on the graph without moving any ink until the artist drags one. The
+    ///   failure it must not have is arriving **empty**, which is `AnimationCurve`'s own identity and
+    ///   draws no nodes at all — a control whose first tap would flatten the row to a constant, which
+    ///   is exactly what `ResponseCurveEditing.materialised` exists to prevent one surface over.
+    func testEveryFreshModuleArrivesUsable() {
+        var brush = BrushLibrary.hardRound
+        brush.dab.size = 0.5
+        brush.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.5)])
+        let reading: (BrushInput) -> CGFloat = { input in
+            if case .random = input { return 0.25 }
+            return input == .pressure ? 0.5 : input.neutral
+        }
+        let before = brush.dabValues(reading)
+        func withModule(_ kind: BrushModuleKind) -> Brush {
+            var copy = brush
+            var row = copy.modulations.rows[0]
+            row.modules = [kind.module]
+            copy.modulations.replace(at: 0, with: row)
+            return copy
+        }
+        for kind in [BrushModuleKind.randomiser, .scale] {
+            XCTAssertNotEqual(withModule(kind).dabValues(reading), before,
+                              "a fresh \(kind.displayName) must change the value it is added to")
+        }
+        XCTAssertEqual(withModule(.curveRamp).dabValues(reading), before,
+                       "a fresh curve ramp is the pass-through, to the bit — it hands the artist two "
+                       + "nodes to drag rather than moving the ink on arrival")
+        guard case .curveRamp(let fresh) = BrushModuleKind.curveRamp.module else {
+            return XCTFail("the curve ramp kind must make a curve ramp")
+        }
+        XCTAssertEqual(fresh.curve.keys.count, 2,
+                       "…and it must not arrive empty, or there is nothing on the graph to drag")
+        XCTAssertFalse(fresh.isLinear, "an empty curve is the one state the control cannot edit")
+    }
+
     // MARK: -
 
     private func channel(of input: BrushInput) -> UInt64 {
         guard case .random(let channel, _) = input else { return .max }
+        return channel.rawValue
+    }
+
+    private func moduleChannel(_ row: BrushModulation, _ position: Int) -> UInt64 {
+        guard case .scale(.random(let channel, _)) = row.modules[position] else { return .max }
         return channel.rawValue
     }
 }

@@ -205,7 +205,7 @@ final class DabCostBench: XCTestCase {
         loaded.modulations = BrushModulations(loaded.modulations.rows + [
             BrushModulation(.scatter, .velocity, amount: 0.3),
             BrushModulation(.spacing, .tiltAngle, amount: 0.05),
-            BrushModulation(.size, .random(.scatterAngle, wavelength: 2), amount: 0.1),
+            BrushModulation(.size, .random(.scatterAngle, .plain(2)), amount: 0.1),
             BrushModulation(.hardness, .tiltDirection, amount: -0.2)
         ])
         measureWalk("six rows", brush: loaded)
@@ -227,7 +227,7 @@ final class DabCostBench: XCTestCase {
     func testAColourJitteringBrush() {
         var jittering = BrushLibrary.hardRound
         jittering.modulations = BrushModulations(jittering.modulations.rows + [
-            BrushModulation(.hue, .random(.scatterAngle, wavelength: 1), amount: 0.2)
+            BrushModulation(.hue, .random(.scatterAngle, .plain(1)), amount: 0.2)
         ])
         measureWalk("colour jitter", brush: jittering)
     }
