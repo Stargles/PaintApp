@@ -3084,6 +3084,16 @@ first, which cleanly replaces the old one."*
   `0…1` because above 1 the *finest* octave is the loudest, which is a high-pass and a different feature;
   §8.4's refuted spectral slope is the neighbouring idea and the reason to be careful about reopening it.
 
+- **Whether a library file written before §2.30 should still open.** §2.32's pin found that
+  `owner-tuned-library-2026-09-05.json` — a library pulled off the owner's own iPad — **cannot be
+  decoded by `main` at all**: it names the isotropic `scatter` output §2.30 deleted, so `BrushOutput`
+  throws and the whole file fails. §2.32 shipped a decode migration for its own change (see the
+  ruling, and the reason it is an exception to §2.28's no-legacy-arm note) and deliberately did not
+  ship one for §2.30's, because nobody has asked and no library on a device is known to predate it
+  except that fixture. **The question is whether a brush library is a document (§2.14: expendable) or
+  the artist's tuning (§2.32's answer: not).** If it is the latter, §2.30 owes the same three-line
+  migration §2.32 wrote, and the fixture is the test case.
+
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
   but the *shared* library is still a flat directory: two documents that import the same PNG under different
