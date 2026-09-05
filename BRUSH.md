@@ -254,6 +254,27 @@ would square one draw rather than multiply two. And the second input is **not** 
 would be a second `ResponseCurve` per row for a gain term, which is expressiveness the ask does not need
 and a second thing to keep in step.
 
+**2.23 Not every brush is a dab walk, and the architecture must survive the first one that is not.**
+Owner: *"There are also some special brush types I want to add which may follow custom brush logic, so
+again, design the architecture cleanly and well thought out. These include stuff like the fill brush
+(you draw and then it applies a fill inside of its contour when you lift the pen), and other special
+brushes."* **Not scheduled** — the owner put it well after the shipped set — but it constrains what may
+be assumed before then.
+
+What it forbids is one assumption: *"a `Brush` is a description of how to stamp dabs"*. It is that
+today, and the first fill brush makes it *one case of* something larger. The seam that has to stay
+clean is therefore **where a stored stroke becomes ink**, and the good news is that it is already one
+place per tier — `VectorLayer.stamp(stroke:into:isEraser:)` on the replay side and
+`StrokeCanvasView.stampPath` on the live one — with `VectorStroke` storing samples and a `BrushRef` and
+nothing about dabs. A fill brush stores the identical stroke and resolves differently at those two
+sites; it needs no new storage and no format change.
+
+So the rule for every stage before it: **a brush's *behaviour* is discriminated at those two call sites
+and nowhere else.** Anything that spreads "walk the path and stamp" into a third place — a cache keyed
+on dab counts, a bounds computed by assuming dabs, an editor that cannot render a brush with no spacing
+— is what would have to be undone. §9.2 is the general form of this and this is its first named
+consumer.
+
 ---
 
 ## 3. The pipeline — four stages, one of them stored
@@ -1113,6 +1134,15 @@ roughness, so there is no octave or spectral-slope parameter.
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
+**Both halves are authored rather than only assembled, and the owner asked for that explicitly**: a
+sourced pack is the starting stock, and the shipped brushes are designed on top of it — tips drawn,
+settings tuned, and each judged by eye against the contact sheet before it enters §8.6's table. Owner:
+*"im guessing you are going to use the free krita brush pack, but then have an agent also design some
+brushes too? As in making the sprites, customizing settings to what it thinks looks good, etc. That
+would be appreciated."* So a group is not "whatever the pack had under that name"; §12 stage 9 owes a
+*designed* set, and the sourced assets are raw material for it. **§8.3's licensing rule is unchanged and
+now has a third source to check** — Krita's bundles, per file, before anything is committed.
+
 **Edge softness may be part of the nib rather than a fault in the dab.** The owner, on seeing rough ink
 references: *"some versions of it are heavily aliased thus adding to the rough look... I may settle down on
 there being multiple versions of this brush."* [BUGS.md](BUGS.md) records that a hard round dab is fully
@@ -1161,6 +1191,26 @@ Studio's 42. Not Procreate's 200+, which is a decade of accretion.
 | **Texture** | grunge, splatter, stipple, chalk — the CC0 group |
 
 Erasers are not a group: the eraser *is* a brush (§11), so every one of these erases already.
+
+**"Square" does not mean a square, and the owner's reference settles what it does mean.** It is the
+SAI-shaped nib: a **rectangle whose long side sits perpendicular to the direction of travel**, with
+deliberately **ragged edges**, so that overlapping strokes read as torn-paper slabs rather than as
+ribbons. Two consequences, and the first is the useful one:
+
+- **It does not need `roundness`.** §6 predicted that anisotropic tips are what would force a second
+  extent through `DabTarget`, `BakedDab`, `DabPose` and every dirty rect, and named the chisel and flat
+  brushes as the tips that would ask. This one does not ask, because a `.stamp` tip carries a **picture**
+  and a rough rectangle drawn inside a square mask is a rough rectangle. Perpendicularity is
+  `angle`'s direction-follow at 100% with a quarter-turn base — both fields exist and both shipped in
+  §12 stage 7. So the whole nib is a generated PNG plus two numbers, and §6's deferral of `roundness`
+  survives its first real test rather than being cornered by it.
+- **What it costs is mask area**, not correctness: a 4:1 nib occupies a quarter of its square mask, and
+  `size` scales both axes together. For a fixed-aspect nib that is a memory footnote (§8.5's ~4 KB a
+  tip), not a defect. A brush whose aspect the artist wants to *change* is what would need `roundness`,
+  and nothing in §8.6 is that brush.
+
+The owner has explicitly **not** asked for this to be built ahead of the set: *"Theres probably a brush
+like this already in the krita free use pack ... so its not much of a big deal right now."*
 
 ## 9. Grain — the deletion
 
@@ -1457,6 +1507,14 @@ first, which cleanly replaces the old one."*
 
 - ~~**Whether a modulation's `amount` may itself be modulated.**~~ **Answered — a row carries a second
   input, and its reading multiplies the first.** §2.22.
+
+- **What a brush that is not a dab walk needs — §2.23's fill brush and its siblings.** Unscheduled by
+  the owner and deliberately not designed here, because a mechanism nobody has measured a need for is
+  what §9.2 says not to add. What is written down is only the seam it must arrive through: the two
+  sites where a stored stroke becomes ink. The question left open is whether the discriminator is a
+  case on `BrushTip` (which already makes illegal states unrepresentable and would make a third
+  behaviour a compile error at both sites) or a field beside it — and that is answerable only against a
+  real second behaviour, not before.
 
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
