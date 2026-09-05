@@ -140,6 +140,13 @@ final class ScatterAxesLogicTests: XCTestCase {
     /// That second one is the honest answer to "reproduce the old disc closely enough to state": it
     /// cannot, and it should not. The independence §2.30 asks for *is* the thing that makes it a
     /// square, since a shared angle draw is exactly what ties the two axes together.
+    ///
+    /// **This measures `BrushStamper.applyScatter` itself, not the field it draws from**, at a radius
+    /// of ½ so the reach is exactly 1 and the offset is the amount in dab diameters. That is what
+    /// makes it the test that catches the two mutations a field-level test cannot see: both axes
+    /// drawing one channel (every offset on the diagonal, so the disc fraction falls to 0.707 and
+    /// the mean to 0.707), and unsigned draws (every offset in one quadrant, so the mean of each axis
+    /// stops being zero and the stroke bends).
     func testEqualAmountsGiveASquareRatherThanTheDiscThisReplaced() {
         let field = DabRandom(seed: Self.seed)
         var insideDisc = 0
@@ -148,12 +155,17 @@ final class ScatterAxesLogicTests: XCTestCase {
         var oldMean = 0.0
         var newMax = 0.0
         var oldMax = 0.0
+        var meanAcross = 0.0
+        var meanAlong = 0.0
         let count = 20_000
         for index in 0..<count {
             let arc = CGFloat(index) * 0.037
-            // The shipped arithmetic, on a stroke running along +x so the frame is the identity.
-            let across = Double(field.signedUnit(.scatterAcross, at: arc))
-            let along = Double(field.signedUnit(.scatterAlong, at: arc))
+            // The shipped code, on a stroke running along +x so the frame is the identity and the
+            // offset's x is the along amount and its y the across one. Radius ½ makes the reach 1.
+            let offset = BrushStamper.applyScatter(to: .zero, radius: 0.5, across: 1, along: 1,
+                                                   tangent: CGPoint(x: 1, y: 0),
+                                                   random: field, arcWidths: arc)
+            let along = Double(offset.x), across = Double(offset.y)
             // The deleted arithmetic, written out rather than called — it no longer exists.
             let angle = Double(field.unit(.scatterAcross, at: arc)) * 2 * .pi
             let distance = Double(field.unit(.scatterAlong, at: arc))
@@ -165,17 +177,20 @@ final class ScatterAxesLogicTests: XCTestCase {
             oldMean += hypot(oldX, oldY)
             newMax = max(newMax, max(abs(across), abs(along)))
             oldMax = max(oldMax, max(abs(oldX), abs(oldY)))
+            meanAcross += across; meanAlong += along
         }
         newMean /= Double(count); oldMean /= Double(count)
+        meanAcross /= Double(count); meanAlong /= Double(count)
         print("SCATTERSHAPE newMean=\(newMean) oldMean=\(oldMean) "
               + "newMaxAxis=\(newMax) oldMaxAxis=\(oldMax) "
-              + "insideDisc=\(Double(insideDisc) / Double(count)) corners=\(Double(corners) / Double(count))")
+              + "insideDisc=\(Double(insideDisc) / Double(count)) corners=\(Double(corners) / Double(count)) "
+              + "meanAcross=\(meanAcross) meanAlong=\(meanAlong)")
 
         // The reach on each axis is the same number it always was: one amount, one dab diameter.
         XCTAssertEqual(newMax, 1, accuracy: 0.01, "an amount still spans ±1 on its own axis")
         XCTAssertLessThanOrEqual(oldMax, 1.0001, "PREMISE: so did the disc")
         // π/4 of a square is inside its inscribed disc. Anything nearer 1 would mean the draws are
-        // still polar; anything nearer 0 would mean the extent moved.
+        // still polar; 0.707 is what one draw used twice gives, every offset on the diagonal.
         XCTAssertEqual(Double(insideDisc) / Double(count), .pi / 4, accuracy: 0.02,
                        "the offsets fill a square, so 78.5% of them fall inside the disc that fitted in it")
         XCTAssertGreaterThan(Double(corners) / Double(count), 0.03,
@@ -185,6 +200,11 @@ final class ScatterAxesLogicTests: XCTestCase {
         XCTAssertEqual(newMean, 0.765, accuracy: 0.03,
                        "equal amounts displace further on average than the disc did")
         XCTAssertEqual(oldMean, 0.5, accuracy: 0.02, "PREMISE: the disc's own mean was half its reach")
+        // **The scatter is centred on the path.** An unsigned draw would put every dab on one side
+        // and one end of its own step, which reads as a stroke that has bent and slipped rather than
+        // one that has frayed — and nothing about the extent or the shape would say so.
+        XCTAssertEqual(meanAcross, 0, accuracy: 0.02, "the stroke frays about its path, it does not bend")
+        XCTAssertEqual(meanAlong, 0, accuracy: 0.02, "…and it does not slip forward along it either")
     }
 
     // MARK: - 3. The two axes are two draws
