@@ -307,6 +307,62 @@ on dab counts, a bounds computed by assuming dabs, an editor that cannot render 
 — is what would have to be undone. §9.2 is the general form of this and this is its first named
 consumer.
 
+**BUILT.** `BrushTextureSettings` is three fields — the `BrushTextureRef` mask, `tileSize` (the side of
+one repeat, **in canvas points**, so the anchoring is expressed in the units it is a claim about) and
+`depth`, whose 0 is exactly no texture. It hangs off `Brush` as an **optional**, so a brush without one
+takes no branch anywhere and hashes to what it hashed before; §9.2's *"nothing beyond what the stage
+needs"* is why there is no offset, rotation, contrast or invert.
+
+It rides `DabTarget.beginStrokeGroup`, because the group *is* the moment §2.4 said did not exist.
+`BrushTextureMerge.apply` multiplies it in with `.destinationIn` **inside** the transparency layer,
+after the dabs and before the merge's own `setAlpha` — which is the owner's sentence in the order the
+owner said it: the accumulated untextured walk is the transparency mask, and the stroke's opacity then
+scales the textured result.
+
+**Canvas-anchored costs exactly one number, and it is `RasterLayerTexture.canvasOrigin`.** A live stroke
+accumulates in a `StrokeScratch` window positioned at the pen and *reallocated* as the stroke grows;
+without the phase the paper would be anchored to wherever the pen started and would slide at every
+reallocation — which is the sprite behaviour §2.4 deleted, reached by accident. Every other target's
+origin is `.zero`, and the two previews are the deliberate exception: a swatch sits in no canvas, so
+`BrushPreview` and `SizePreview` anchor to their own origin.
+
+**Every tier, and there are four rather than three.** The cel (`RasterLayerTexture`), the render-local
+context (`CGContextDabTarget`, which is `VectorCanvas.renderLocalContent`), the **ungrouped** live walk
+— `StrokeCanvasView.stampPath` stamps dabs with no group open, so the scratch carries the texture
+itself and applies it where the window merges — and a **grouped walk inside a scratch window**, which is
+`VectorCanvas.applyPreview`'s restamps and the only reader of `canvasOrigin`. Nothing was added to
+`DabImageCache` or `DabGradientCache`: a texture in a dab-level key would be a texture in the wrong
+place. Nothing was added to `PixelOps.RasterizeKey` or `LayerContentVersion` either, and that is a
+finding rather than an omission — the texture is a field of `Brush`, `Brush` is `Hashable`, a stroke
+stores a `BrushRef` into the pool addressed by that hash, so a textured brush is a different stored
+value and every key already downstream of `vectorVersion` moves on its own.
+
+**The eraser textures its removal**, because §11's *"the eraser is a stroke"* is the whole architecture
+and an exception would be the thing to justify. One consequence had to be written down:
+`VectorEraser.supportsCleanCut` now refuses a textured brush outright, since it removes
+`depth·(1 - texel)` less than its footprint claims and a clean cut would delete ink the punch would
+have left behind — the asymmetric direction that gate is built around.
+
+**A brush's texture travels with the document by the tip's own route.** `Brush.importedTextureFileNames`
+is now the single statement of *"which files does this brush need"*, and both `BrushTable` and
+`ProjectStore`'s save-and-restore filter read it rather than re-deriving it — BUGS.md's
+*"copied by the palette, not by what is drawn"* is one missed union away from being true again, one
+field along.
+
+**What it is not, yet: reachable.** There is no editor control for any of the three fields, so today a
+textured brush can only be built in code. That is §12 stage 10's job and is the honest state to record
+rather than a defect — but it does mean nothing in the shipped app draws with paper, which is why the
+byte-identity pin below is the one that matters most.
+
+**What it cost, MEASURED.** Nothing per dab: the merge does one `.destinationIn` tiling pass over the
+stroke's own clip, and `BrushTextureMaskCache` holds the depth-adjusted, pre-flipped sheet per
+*(mask, depth)* for the life of the process — so a stroke pays one tiled blit and a brush pays one
+bitmap build, ever. The key deliberately has **no size term**, which is how it avoids being the fourth
+of RENDER.md §3.8's three size-keyed memos rather than merely hoping not to be. An untextured brush
+renders **byte-identical** to `b4dffeb`: `BrushTextureLogicTests` carries FNV-1a digests of a round-tip
+stroke on the cel and render-local tiers and a stamp-tip stroke on the cel tier, all three measured on
+that commit before any of this existed.
+
 **2.24 The editor is a screen, not a panel, and its shape is a chain per output.** Owner: *"The brush
 edit menu right now is a little menu, whereas in Procreate it is like a separate screen. For this menu,
 I think we need to have it cover the entire screen due to the complex interactions it can have."* The
@@ -1470,6 +1526,20 @@ makes it so. Intended, and pinned by a test that names it.
 
 **Do not touch** `Effect.Noise` and the "Grain" control in `Views/EffectSection.swift`. That is the image
 effect, a different feature that shares a word. Four test suites reference it.
+
+**Texture came back on 2026-09-04 and this ledger stands unamended, which is the point.** §2.25 reverses
+§2.4, and nothing above was resurrected to do it: `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the
+Grain Depth slider and the `supportsCleanCut` grain veto are all still gone, the deleted tests are still
+deleted, and no vestigial field came back to life. What returned is a different mechanism in a different
+place — a sheet multiplied into the *stroke's* buffer at the merge, in canvas coordinates, rather than a
+noise function folded into each *dab's* alpha — and it is a new type, `BrushTextureSettings`, sitting
+beside `BrushTip` rather than where `BrushGrain` sat.
+
+The distinction is not bookkeeping. `grainAlphaMultiplier` was a function of the dab's absolute position
+evaluated per dab, so posed ink boiled and a lassoed move re-sampled; a canvas-anchored sheet applied
+once at the merge has neither property, and §2.5's KEYFRAMES §2.16 stays discharged rather than reopened.
+The one thing §2.4 was right about is still true and is why this shape was chosen: **a sprite travels
+with the stroke and paper does not.**
 
 ---
 

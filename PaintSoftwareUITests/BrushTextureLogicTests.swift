@@ -452,13 +452,18 @@ final class BrushTextureLogicTests: XCTestCase {
         let origin = CGPoint(x: 53, y: 91)
         let replay = try Self.pixels(Self.replayTier(plain, at: origin))
         let renderLocal = try Self.pixels(Self.renderLocalTier(plain, at: origin))
-        // **A picture tip as well as a round one, and it is not symmetry for its own sake.**
-        // `dabCircleBounds` is exact — a round dab paints nothing at the edge of its own box — so the
-        // outermost row of a round stroke's merge clip is already transparent and *any* damage to
-        // that clip multiplies zero by something. An image dab spills past its geometric bound
-        // (`dabImageBounds`' measured allowance), so its ink genuinely reaches the boundary and the
-        // clip is observable. MEASURED: with `endStrokeGroup`'s `.integral` removed, the round arm
-        // above stays green and this one does not.
+        // **A picture tip as well as a round one**, because `stampImage` and `DabImageCache` are a
+        // second renderer and a pin that covered only the round arm would be a pin on half the app.
+        //
+        // It was added trying to reach a *different* thing and did not, which is worth writing down
+        // rather than leaving as a comment nobody re-checked. The hypothesis was that removing
+        // `endStrokeGroup`'s `.integral` clip would show up here: `dabCircleBounds` is exact, so a
+        // round stroke's outermost clipped row is already transparent and damage to the clip
+        // multiplies zero by something, whereas an image dab was expected to reach its bound.
+        // MEASURED: it does not red either arm. `dabImageBounds`' `resampleSpill` is **3 points**,
+        // three times the measured worst of 0.99 px, so the merge's clip sits about two points
+        // outside any ink here too. The `.integral` clip is guarded by the four zero-tolerance parity
+        // tests §12 stage 8 names, and by nothing in this file.
         var stamped = plain
         stamped.tip = .stamp(.builtIn(.square))
         let picture = try Self.pixels(Self.replayTier(stamped, at: origin))
