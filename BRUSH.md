@@ -765,11 +765,65 @@ amounts, and §7.2 already carries the qualification that an offset the artist *
 refutation.
 
 **It costs nothing measurable**: the same two draws, resolved onto the tangent and normal instead of a
-free angle, and `StrokeGeometry.tangent(atParameter:)` is already computed because `angle`'s
-direction-follow reads it. **The one thing it does touch is the merge bound** — §12 stage 8's stroke
-group clips to a rectangle derived from the brush's own maximum reach, and that derivation must take the
-larger of the two axes rather than one `scatter`, or a heavily across-scattered stroke loses ink at the
-clip. That is the failure direction the bound was written to avoid.
+free angle, and `StrokePath.tangent(at:)` is already computed because `angle`'s direction-follow reads
+it through `StrokeSensors`.
+
+### What shipped — 2026-09-05
+
+`BrushOutput.scatter` is **deleted**; `scatterAcross` and `scatterAlong` replace it, in
+`BrushDabSettings`, `BrushDabValues`, the editor's Placement group and both eraser gates.
+`BrushStamper.applyScatter` takes two signed draws and a **unit tangent**, and `stampDab` takes that
+tangent as a parameter — from `StrokePath.tangent(at:)` in both walks, which is the same function
+`StrokeSensors` answers `direction` from, so the scatter's frame and a direction-following tip cannot
+disagree. `PosedDabTarget` needed nothing: it wraps the *sink*, so a keyframed dab is scattered about
+its **rest** tangent and then mapped, and the offset does not re-roll as a pose turns the stroke.
+
+**The channels are the old pair renamed, not new ones.** `DabRandom.Channel.scatterAngle` and
+`scatterDistance` become `scatterAcross` and `scatterAlong` keeping raw values **1** and **2**, and
+`scatterAcross` keeps `channelBase` **6** while `scatterAlong` takes the next free number, **12**. §4's
+rule is *add channels, never renumber*, and the pair being replaced is exactly a pair — two draws at one
+arc length, which is the sentence §4 uses to explain why channels exist at all. Keeping the numbers is
+what makes a migrated row draw the cell it always drew; the arithmetic on top of it changed anyway.
+
+**The merge-bound instruction above was already satisfied, and could not have been otherwise.** §12
+stage 8 records that the conservative box derived from `Brush.maximumDabExtent` was **refuted during
+that stage and never shipped** — `ResponseCurve` does not clamp, so no such box is a bound — and what
+is there is the union of the rectangles the dabs *actually painted*. Nothing in the merge reads a
+scatter amount, so there was no derivation to widen. The test named in that stage now runs three
+configurations (isotropic, across-only, along-only) with a setup assertion that each one displaces on
+the axis it asked for, so a bound reintroduced from one axis would red; mutating the clip by 6 px
+vertically reds all three.
+
+**Equal amounts do not reproduce the disc, and that is the ruling rather than a shortfall.** The old
+draw was polar — a free angle and a distance — so the dab landed on a **disc** whose areal density fell
+off as 1/r. Two *independent* signed draws land it uniformly in a **square** of the same half-extent,
+and independence is precisely what §2.30 asks for: `cos θ` and `sin θ` come from one draw, so any
+version that keeps the disc keeps the axes tied together and an across-only brush would still wobble
+along the path. MEASURED over 20,000 dabs, both at reach 1: mean displacement **0.767** against the
+disc's **0.500**, 78.1% of offsets inside the inscribed disc (π/4 = 78.5%), 4.0% in corners no disc can
+reach, and the per-axis extent unchanged at 1.000. So an artist setting both to the old number gets a
+slightly heavier, squarer scatter of the same reach.
+
+**Three of §8.6's sixteen moved, and only three.** Rough Ink, Rough Ink — Blotchy and Bristle each
+carried one `scatter ← random` row and now carry two, at the same amount and the same λ; their digests
+are re-taken in `BrushModulationLogicTests`. **Painterly and Streaky carry no scatter row at all** and
+are byte-identical, as are the other eleven.
+
+**Driven on the simulator, not only asserted.** Bristle and Streaky were drawn on a real canvas and
+still look like themselves — Bristle's frayed open band and Streaky's six ribbons. A new brush made
+from **Add brush → Create Manually** reaches both rows in **Placement**, each with its own base slider
+and its own description: at `scatterAcross` 0.76 widths a straight stroke comes out as a lumpy band
+roughly three times the nib's width with a hairy edge, and at `scatterAlong` 1.20 with across back at
+0 the band is **exactly the nib's width** and the ink along it is bunched and gapped instead. That
+side-by-side is the ruling's own sentence, drawn.
+
+**One live/replay asymmetry is real and is asserted rather than tolerated.** At pen-down the live walk
+has exactly one sample, so it has no direction and its **first dab** scatters about `+x` while the
+replay scatters about the fitted tangent — the same shape as `taper` (§12 stage 7: *"the live walk
+genuinely cannot and answers the neutral"*), and it already applied to a direction-following tip's
+first dab before this. Every dab after it agrees to the refit's own angular error, MEASURED at
+**0.020 pt** on a 10 pt brush scattering 0.6 diameters, and the offset *magnitudes* — which are
+frame-free — agree at **4e-14**. `DabRandomLogicTests` pins all three.
 
 ---
 
@@ -1299,8 +1353,16 @@ whose run does not carry the channel.
 any size** — §2.17. Its value interpolates between hashed lattice points λ of arc length apart, which is
 still exactly §4's `hash(strokeSeed, arcLength)`; λ = 0 is a fresh draw per dab.
 
-**Outputs**: `size` · `opacity` · `flow` · `angle` · ~~`roundness`~~ · `spacing` · `scatter` ·
-`density` · `hue` / `saturation` / `brightness` shift · `hardness` (procedural tips only).
+**Outputs**: `size` · `opacity` · `flow` · `angle` · ~~`roundness`~~ · `spacing` · `scatterAcross` ·
+`scatterAlong` · `density` · `hue` / `saturation` / `brightness` shift · `hardness` (procedural tips
+only).
+
+**`scatter` was one output until 2026-09-05 and is two now** — §2.30, which is also where the deletion
+is justified against §2.14 and where the shape change from a disc to a square is measured. The two are
+ordinary outputs in every other respect: a base in `BrushDabSettings`, a `channelBase`, a row in the
+editor's Placement group. What is *not* ordinary about them is that the stamper needs a **geometry** as
+well as a draw to resolve them — the unit tangent at the dab — which is why `stampDab` grew a parameter
+and `BrushDabValues` did not.
 
 **`roundness` is the one output stage 7 did not ship, and it is a decision rather than an omission —
 now scheduled, for §12 stage 9.** The owner asked for it by another name (§2.24's *"vertical/horizontal
