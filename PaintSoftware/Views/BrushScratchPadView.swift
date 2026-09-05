@@ -68,9 +68,15 @@ final class BrushScratchPad: UIView {
     var strokeOpacity: Double = 1
     var clearToken = 0
 
-    /// Everything drawn so far, at screen scale. Rebuilt when the pad is resized — a scratch pad has
-    /// nothing worth preserving across a layout change, and scaling a bitmap of dabs would be a
-    /// picture of a brush at a size it was never drawn at.
+    /// Everything drawn so far, at screen scale.
+    ///
+    /// **A resize keeps what is on it, and that is a fix rather than a nicety.** MEASURED on the
+    /// simulator: opening the second-input picker raised the software keyboard, which shortened this
+    /// view, and a rebuild-on-resize wiped the stroke the artist had just drawn to see what their
+    /// edit did. Anything that changes the layout — a rotation, Split View, a keyboard — would do the
+    /// same. The old pixels are drawn back at 1:1 rather than scaled, so a grow keeps the ink where
+    /// it was and a shrink crops it; scaling would be a picture of the brush at a size it was never
+    /// drawn at, which is the one thing a "try it" pad must not show.
     private var committed: CGContext?
     /// The pad as it was when the current stroke began, so the stroke can be re-stamped whole on
     /// every touch move.
@@ -111,9 +117,24 @@ final class BrushScratchPad: UIView {
         let height = Int((bounds.height * scale).rounded())
         guard width > 0, height > 0 else { return }
         if let committed, committed.width == width, committed.height == height { return }
+        let carried = committed?.makeImage()
+        let carriedSize = committed.map { CGSize(width: $0.width, height: $0.height) }
         committed = Self.makeContext(width: width, height: height, scale: scale)
-        inkedPixels = 0
-        lastStrokeInk = 0
+        if let carried, let carriedSize {
+            // Top-left anchored: the context is flipped, so in device pixels the old image's top row
+            // belongs at the *top* of the new buffer, which with a y-up identity CTM is the far end.
+            inDevicePixels { context, rect in
+                context.draw(carried, in: CGRect(x: 0, y: rect.height - carriedSize.height,
+                                                 width: carriedSize.width, height: carriedSize.height))
+            }
+            inkedPixels = countInk()
+        } else {
+            inkedPixels = 0
+            lastStrokeInk = 0
+        }
+        // `lastStrokeInk` is a fact about a stroke, not about this buffer, so a resize does not
+        // clear it — and clearing it would make the pad's own probe depend on whether a keyboard
+        // happened to be up, which is exactly the kind of operand CLAUDE.md warns about.
         setNeedsDisplay()
     }
 

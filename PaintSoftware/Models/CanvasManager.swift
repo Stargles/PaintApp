@@ -791,6 +791,36 @@ final class CanvasManager: ObservableObject {
         }
     }
 
+    /// **Takes the library's current value for whichever brushes are selected** — BRUSH.md §7's
+    /// *"edits currently apply to a live copy and are lost when the preset changes"*, at the one
+    /// place that half of it could not reach.
+    ///
+    /// `selectedBrush` and `selectedEraserBrush` are initialised from the **literals**
+    /// `BrushLibrary.softRound` / `.hardRound`, which is right on a device with no library and wrong
+    /// the moment one has been edited: MEASURED as a red UI test where an edit survived closing the
+    /// editor and did not survive a relaunch, with the library file holding the edit the whole time
+    /// and the menu row beside the editor drawing it. The ids are written down (they have to be, for
+    /// the picker's highlight to survive a reload), so the library can be asked.
+    ///
+    /// **Size and opacity are re-baselined only when the value actually moved**, which is what keeps
+    /// this from quietly changing the eraser's default width: on a fresh library the stored brush
+    /// *is* the literal, the guard fails, and nothing is touched. After an edit, re-baselining is
+    /// `selectBrush`'s own behaviour and is what the artist means by having set a size in the editor.
+    /// The tool is deliberately not retargeted — this is not a selection, it is the same selection
+    /// catching up.
+    func adoptLibrarySelections() {
+        if let stored = brushLibrary.brush(withID: selectedBrush.id), stored != selectedBrush {
+            selectedBrush = stored
+            brushSize = stored.size
+            brushOpacity = stored.opacity
+        }
+        if let stored = brushLibrary.brush(withID: selectedEraserBrush.id), stored != selectedEraserBrush {
+            selectedEraserBrush = stored
+            eraserSize = stored.size
+            eraserOpacity = stored.opacity
+        }
+    }
+
     /// Adds a freshly-imported custom brush to the library and makes it the active brush.
     ///
     /// It lands in **the group the menu is showing** where the caller names one, else in the library's

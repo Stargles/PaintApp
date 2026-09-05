@@ -43,23 +43,40 @@ struct BrushEditorScreen: View {
     private var idPrefix: String { spec.idPrefix }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(Color.white.opacity(0.15))
-            HStack(spacing: 0) {
-                identityColumn
+        ZStack {
+            // **The screen's own backdrop *and* its "I am on screen" marker, and the identifier is
+            // on this rectangle rather than on the `VStack` deliberately.**
+            //
+            // An `accessibilityIdentifier` on a SwiftUI *container* is inherited by every descendant
+            // rather than making an element of its own — CLAUDE.md records it, `StrokeSettingsPanel`
+            // was bitten by it in the same shape, and this screen was bitten by it again: with the
+            // identifier on the `VStack`, **every control below it answered to
+            // `brushPanel.editorScreen`** and `brushPanel.sizeSlider` existed nowhere. MEASURED as a
+            // red UI test that could not open the editor while the editor was plainly on screen when
+            // driven by hand — because driving it by hand uses coordinates and never asks the
+            // accessibility tree. A `Shape` carries an identifier of its own, which is
+            // `CurveEditor.curveGraph`'s spelling.
+            //
+            // Opaque, too: this is a screen, so what is behind it must not read through and must not
+            // be touchable. The dropdown's `Color.black.opacity(0.9)` would leave the canvas showing
+            // through a surface the artist is meant to be drawing on.
+            Rectangle()
+                .fill(Color(white: 0.07))
+                .accessibilityIdentifier("\(idPrefix).editorScreen")
+
+            VStack(spacing: 0) {
+                header
                 Divider().overlay(Color.white.opacity(0.15))
-                outputColumn
-                Divider().overlay(Color.white.opacity(0.15))
-                padColumn
+                HStack(spacing: 0) {
+                    identityColumn
+                    Divider().overlay(Color.white.opacity(0.15))
+                    outputColumn
+                    Divider().overlay(Color.white.opacity(0.15))
+                    padColumn
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Opaque: this is a screen, so what is behind it must not read through and must not be
-        // touchable. `Color.black.opacity(0.9)` — the dropdown's backdrop — would leave the canvas
-        // showing through a surface the artist is meant to be drawing on.
-        .background(Color(white: 0.07))
-        .accessibilityIdentifier("\(idPrefix).editorScreen")
     }
 
     // MARK: - Header
@@ -108,23 +125,7 @@ struct BrushEditorScreen: View {
                     .foregroundColor(.white.opacity(0.45))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Divider().overlay(Color.white.opacity(0.12))
-
-                // §2.20: the side toolbar carries size and opacity and gains nothing, ever — these
-                // two are the artist's own numbers and they live here beside the brush's rather
-                // than among them.
-                sliderRow(title: "Size",
-                          valueText: "\(Int(canvasManager[keyPath: spec.size]))",
-                          value: sizeBinding, range: 1...200,
-                          identifier: "\(idPrefix).sizeSlider",
-                          preview: SizePreviewRequest(sliderID: "\(idPrefix).sizeSlider",
-                                                      tool: spec.previewTool, side: .leading))
-                sliderRow(title: "Opacity",
-                          valueText: "\(Int(canvasManager[keyPath: spec.opacity] * 100))%",
-                          value: opacityBinding, range: 0...1,
-                          identifier: "\(idPrefix).opacitySlider")
-
-                Text("Size and opacity belong to you, not to the brush — everything below belongs to the brush.")
+                Text("Every control in the middle column belongs to the brush. Size and opacity, beside the pad, belong to you.")
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.35))
                     .fixedSize(horizontal: false, vertical: true)
@@ -449,6 +450,26 @@ struct BrushEditorScreen: View {
                     .foregroundColor(.white.opacity(0.8))
                     .accessibilityIdentifier("\(idPrefix).padClear")
             }
+            // §2.20: the side toolbar carries size and opacity and gains nothing, ever — so the
+            // artist's own two numbers live here, beside the pad they are testing on, rather than
+            // among the brush's own.
+            //
+            // **On this side rather than the left column, and that is the Size slider's preview
+            // deciding it.** `SizePreviewSide.leading` puts the real-size window past the slider's
+            // leading edge; from the leftmost column that clamps flush against the screen edge and
+            // lands on top of the side toolbar. Here it opens into the middle column with room to
+            // spare.
+            sliderRow(title: "Size",
+                      valueText: "\(Int(canvasManager[keyPath: spec.size]))",
+                      value: sizeBinding, range: 1...200,
+                      identifier: "\(idPrefix).sizeSlider",
+                      preview: SizePreviewRequest(sliderID: "\(idPrefix).sizeSlider",
+                                                  tool: spec.previewTool, side: .leading))
+            sliderRow(title: "Opacity",
+                      valueText: "\(Int(canvasManager[keyPath: spec.opacity] * 100))%",
+                      value: opacityBinding, range: 0...1,
+                      identifier: "\(idPrefix).opacitySlider")
+
             BrushScratchPadView(brush: brush,
                                 color: padColor,
                                 strokeSize: canvasManager[keyPath: spec.size],

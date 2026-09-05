@@ -153,23 +153,6 @@ struct DrawingView: View {
 
                 bottomDock
 
-                // **BRUSH.md §2.24's editor, as a layer rather than as a presentation.** See
-                // `BrushEditorScreen` for why it is not a `.fullScreenCover`: the real-size stamp
-                // preview is an `overlayPreferenceValue` applied to this view's own `HStack`, and a
-                // modal window would be drawn above it.
-                //
-                // Above `bottomDock` and below the size-preview overlay, which is the whole of the
-                // z-ordering this feature needs: it covers the canvas, the toolbars, the timeline
-                // and the dropdown it was raised from, and the one thing that may sit on top of it
-                // is the window a slider inside it raises.
-                if let editing = brushEditing {
-                    BrushEditorScreen(canvasManager: canvasManager,
-                                      library: canvasManager.brushLibrary,
-                                      spec: editing,
-                                      onClose: { brushEditing = nil })
-                        .transition(.opacity)
-                }
-
                 // Discreet, default-off FPS/frame-time HUD (see PerfHUD.swift) — tucked below the
                 // top toolbar on the leading side, clear of the toolbar's own icons, the trailing
                 // panel, and the bottom timeline/transform bar.
@@ -201,10 +184,29 @@ struct DrawingView: View {
                     .allowsHitTesting(false)
             }
         }
+        // **The live selection catches up with the library here, once per document** — see
+        // `CanvasManager.adoptLibrarySelections`. This view is the editor screen's root and appears
+        // before anything can be drawn, so it is the last moment at which "the brush the artist
+        // edited last session" can still be made the brush the first stroke uses.
+        .onAppear { canvasManager.adoptLibrarySelections() }
         .background(Color.black)
         // **Above everything, including the side toolbar** — which is why it is an overlay on the
         // `HStack` rather than another layer of the canvas `ZStack`. See below for what it is for.
         .overlay { canvasResizeBusyOverlay }
+        // **BRUSH.md §2.24's editor: "it should cover the entire screen".**
+        //
+        // An overlay on the `HStack` for the same reason the busy overlay above is one — the canvas
+        // `ZStack` is the *second* child of that stack, so a layer inside it leaves the 64-point side
+        // toolbar showing beside it, which is not what "the entire screen" means. MEASURED that way
+        // first, on the simulator, and it is visibly a panel-with-a-rail rather than a screen.
+        //
+        // **Not a `.fullScreenCover`**, and that is the constraint the push it replaced was solving:
+        // the real-size stamp preview is the `overlayPreferenceValue` applied on the very next line,
+        // and a modal presentation is a separate window above it — so the window a held Size slider
+        // raises would be drawn behind the sheet and the control would look inert. An overlay is part
+        // of this view's own tree, so the anchor preference still reaches the line below and the
+        // window still lands beside the slider.
+        .overlay { brushEditorLayer }
         // Applied here, above both surfaces that carry a size slider: the left rail is clipped by its
         // own `cornerRadius(16)` and the settings panel by its `cornerRadius(12)`, so a window
         // overlaid inside either one would be cut off at that container's edge.
@@ -672,6 +674,17 @@ struct DrawingView: View {
             return .topLeading
         default:
             return .topTrailing
+        }
+    }
+
+    @ViewBuilder
+    private var brushEditorLayer: some View {
+        if let editing = brushEditing {
+            BrushEditorScreen(canvasManager: canvasManager,
+                              library: canvasManager.brushLibrary,
+                              spec: editing,
+                              onClose: { brushEditing = nil })
+                .transition(.opacity)
         }
     }
 

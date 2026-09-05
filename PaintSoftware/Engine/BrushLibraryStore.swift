@@ -88,6 +88,20 @@ final class BrushLibraryStore: ObservableObject {
 
     var allBrushes: [Brush] { groups.flatMap(\.brushes) }
 
+    /// The library's own copy of a brush, by id.
+    ///
+    /// **What makes an edit outlive the process** — BRUSH.md §7 and §12 stage 10.
+    /// `CanvasManager.selectedBrush` starts life as the *literal* `BrushLibrary.softRound`, so
+    /// without this a relaunch showed the shipped preset's values while the menu row beside it drew
+    /// the edited stroke: the library had the edit and the live selection did not. See
+    /// `CanvasManager.adoptLibrarySelections`.
+    func brush(withID id: UUID) -> Brush? {
+        for group in groups {
+            if let found = group.brushes.first(where: { $0.id == id }) { return found }
+        }
+        return nil
+    }
+
     func group(containingBrush id: UUID) -> BrushGroup? {
         groups.first { $0.brushes.contains { $0.id == id } }
     }
