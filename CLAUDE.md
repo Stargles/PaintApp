@@ -316,6 +316,39 @@ so there is still no single long class to split and the 2026-08-15 lever remains
 floor while nobody looked, and this is the third time it has drifted up. It is not the critical path, so
 splitting it buys nothing today; re-take this table when the next graph-editor test is added.
 
+**MEASURED at `7605169` on an idle machine with the simulator erased first — 3212 tests, 3192 passed, 1
+failed, 19 skipped, 25:02.** The one failure is `InterpolationWorkflowUITests`'
+`testInterpolateModeEndToEndFromGestureToScrub` **again** — the same test as at `77430e1` — and it
+**passed clean in isolation** again. That is now twice in consecutive full runs, so it is worth saying
+plainly: this test is the suite's longest single test at ~150 s, it lives in a class whose name differs
+from its file, and it is the one that reds under parallel clones. Treat a red there as environmental
+until an isolated run says otherwise, and do not bisect it.
+
+| class | seconds | tests |
+|---|---|---|
+| `SandwichCompositingUITests` | 346 | 10 |
+| `SelectionAndMoveUITests` | 274 | 10 |
+| `PerfBaselineTests` | 261 | 57 |
+| `BlendModesAndCompositorUITests` | 233 | 8 |
+| `LayerPanelControlsUITests` | 226 | 8 |
+| `GraphEditorGestureUITests` | 206 | 4 |
+| `LayerFolderAndMaskMenuUITests` | 192 | 7 |
+| `EraserAndPersistenceUITests` | 163 | 7 |
+| `CuttingModesUITests` | 162 | 4 |
+| `LayerStackUITests` | 161 | 5 |
+
+**4,236 class-seconds across 158 classes**, against 4,283 across 155 at `77430e1` — so ~53 new tests cost
+**less than nothing** measurable, the fifth consecutive run to find a new test close to free. Four clones
+hold 17.7 min of ideal work against 25.0 min of wall clock, and the top five classes are spread across
+120 seconds, so there is still no single long class to split.
+
+**`GraphEditorGestureUITests` has stopped drifting** — 206 s across 4 tests against 217 s at `77430e1`,
+so the third rise this file recorded was noise rather than a trend, and the watch on it can relax. The
+one to watch instead is **`LayerPanelControlsUITests`**, 226 s across 8 where it was 213 across 8: the
+same class, the same tests, thirteen seconds slower. That is the shape of a class growing under
+observation, and this file has twice recorded one being discovered late.
+
+
 ### A green assertion is only as good as its two operands
 
 Three failures of this shape landed in one day, and none of them looks wrong while you read it.

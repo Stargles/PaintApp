@@ -66,10 +66,11 @@ uncommitted.**
 **Fast tier: 3050 total / 3047 passed / 0 failed / 3 skipped.** It was 3044 at the start of the pass;
 the six new tests are stage 8's.
 
-**The full suite has not run since `77430e1`** — 3159 tests, 3139 passed, 1 environmental failure,
-19 skipped, 24:47 on an idle erased machine. **Four stages have merged since** (6, 7, the docs, and now
-8, which changed the live drawing path and every compositing tier), **so a full run is owed and is the
-first thing the next pass should start in the background.**
+**The full suite is green at `7605169`, run after stage 8 merged** — 3212 tests, 3192 passed, 1 failed,
+19 skipped, 25:02 on an idle erased machine. The one failure is `InterpolationWorkflowUITests`'
+`testInterpolateModeEndToEndFromGestureToScrub`, **which passed clean in isolation** and is the same test
+that failed environmentally at `77430e1`; CLAUDE.md now says to treat a red there as environmental until
+an isolated run says otherwise. Its class table is re-taken in CLAUDE.md — **nothing is owed.**
 
 **A Release build of `2bef347` is on the owner's iPad and is many merges stale.**
 
