@@ -650,6 +650,15 @@ are taken, and reclaims a slot whose owner died so one `^C` cannot wedge the mac
 after. It needs no daemon and no cleanup. Raise the slot count only on a machine with more cores;
 two is sized for this one, where the full suite already fans out to four clones of its own.
 
+**The erase is right for a state flake and is the WORST case for a timing one**, and that asymmetry
+cost a session an hour on 2026-09-05. A wall-clock assertion measured **43 ms** warm in the suite,
+**95.8 ms** cold in-suite, and **207 ms** on the first run after a `simctl erase` — so the isolated
+re-run this section prescribes failed **4.7× worse than the suite had**, and read as confirmation of a
+real regression in a branch that had not touched the code being timed. The same test then passed 28/28
+twice on a warm device. **So before erasing, ask what the failing assertion is about**: if it names a
+duration, run it warm first and erase only if it still fails. Better, do not put a wall-clock assertion
+in the fast tier at all — the bench files are excluded by filename and exist for exactly this.
+
 Passes clean → environmental. Say so in the summary, name the test, and move on; it is not a
 finding and does not need a fix. Fails clean → now it is yours, and you have a 30-second loop to
 debug it in instead of a 22-minute one.
