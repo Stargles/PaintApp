@@ -439,9 +439,14 @@ discriminating operand is **depth 0**: this section documents that 0 is *exactly
 picker that wrote the mask into the model and never reached the merge gives three identical ink counts
 and satisfies every model assertion in the suite.
 
-**The app now ships two papers, and they are generated rather than committed.**
+**The app now ships three papers, and they are generated rather than committed.**
 `BuiltInBrushTexture` gained `paperGrain` and `canvasWeave`, resolved through the same
 `BrushTextureStore.mask(for:)` as every other bitmap; `BrushPaperGenerator` is the arithmetic.
+**`paperTooth` is the third, added at §12 stage 11**, and it is the first sheet whose valleys reach
+the floor (0.04 against `paperGrain`'s 0.35) — §8.4's *"a union fills a dimming but not a hole"*
+applied to paper. Chalk is unusable without it: **this feature is what makes a generated chalk
+credible, and §8.4 records that the union argument does not reach a canvas-anchored sheet at all**,
+because the merge happens once per stroke rather than once per dab.
 That is a deliberate deviation from §12 stage 9's *"a tip is a small alpha bitmap and generating it
 per launch buys nothing"* — an argument about what generation buys rather than what it costs, and for
 paper it points the other way: two committed 256² sheets are two binary assets plus four
@@ -2039,6 +2044,71 @@ it is there at all, and a nib needs both.
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
+**~~That last clause~~ is refuted. Round four generated the Texture group and it is what ships**, so
+§12 stage 11's licensing step is deleted. The sentence was true when it was written and stopped being
+true for a reason worth naming: it was an argument from the *pictures*, and what the Texture group
+turns out to need is three **dials** the earlier rounds had never moved.
+
+- **Spacing, and it is the big one.** Basics through Painting walk at 0.03–0.095. Grunge walks at
+  **0.30**, Splatter at 0.46, Stipple at 0.34. This section already had the rule in the negative — *"anything
+  whose character is in its pixels needs the dabs far enough apart to be seen one at a time"*, which
+  is what killed the first sheet's blender — and nobody had turned the dial the other way. The sheet
+  carries the CONTROL: **Grunge's own picture at spacing 0.05 renders as a plain black band with a
+  hairy edge**, which is the same nib, the same jitter and the same seed.
+- **Interior holes at floor 0**, per the second sheet's *"a union fills a dimming but not a hole"*.
+- **§2.25's canvas-anchored paper, which is not another mechanism but a hole in the argument.** The
+  sheet multiplies in at the **merge**, once per stroke, so a hole in it is not filled by the next
+  dab at *any* spacing or flow. this section's union argument does not reach it at all. That mechanism did
+  not exist when this section was written — §2.4 had deleted paper and §12 stage 8 built the moment
+  it needs — and Chalk is unusable without it.
+
+**And the two mechanisms this section spent three rounds separating are now measurable, which
+refuted the brief round four was written from.** `BrushTipGeneratorLogicTests` measures both: the
+**support-function ratio** (does the silhouette change under rotation) and the **interior hole
+share** (how much of the mask's own interior carries no ink at all). MEASURED:
+
+| tip | support | interior holes | mechanism |
+|---|---|---|---|
+| `rough-ink-triangle` | **1.61** | **1.4%** | silhouette |
+| `pencil-textured` | **1.11** | **31.4%** | interior |
+| `grunge-crust` | **1.33** | **42.7%** | interior |
+| `chalk-block` | 1.51 | 19.3% | both |
+
+**`grunge-crust` is below the 1.35 ceiling `rough-ink-eroded-round` has to stay under to be a valid
+control.** Its silhouette is very nearly a disc. The expectation going in was that every Texture nib
+would be grossly asymmetric like the triangle; what makes grunge grunge is that 42.7% of its interior
+is hole and `angle.jitter` moves that hole field's phase from dab to dab. It is the **pencils'**
+mechanism at four times the spacing, not the rough ink nib's.
+
+**Which means a Texture nib's no-turn control is not always a strong control, and Splatter's is the
+weak one.** A splatter mask is a cluster of near-discs, and *rotating a disc changes nothing* — this
+section's own first argument, arriving in the one family made of discs. What breaks the repetition
+there is `size ← random`, MEASURED at the top of this section at 3.6% against an eroded tip's 0.41%. Read the
+splatter control as "the size draw is what matters here", not as a failure of the boundary paragraph.
+
+**Two things the first render of round four got wrong, so nobody repeats them.**
+
+- **Past about spacing 0.4 a stamp brush stops being a stroke.** Grunge was first drawn at 0.62 with
+  a 0.55 dropout and it fell apart into islands with gaps a brush width wide — the far end of the
+  minimum-spacing finding, which nobody had found because nobody had gone there. 0.30 with no dropout
+  is a crust; 0.62 with one is a trail of blots.
+- **A paper laid at a tile comparable to the brush reads as a repeating pattern, not as paper.** The
+  first Chalk rows put `paperTooth` at 40 points under a 30 point nib, and its coarsest octave — one
+  64 px blob per sheet — became a *recognisable mark repeating every 40 points* along the stroke. Two
+  fixes and both were needed: the sheet's octave set starts one octave finer so no single feature
+  dominates, and the presets lay it at **80–160 points** so a repeat spans several stroke widths. The
+  sheet carries the A/B at 80 and at 150 and the difference is not subtle.
+
+**And one rule this section's neighbour had was wrong.** `BrushEditorLogicTests` required every
+shipped paper to stay above alpha 60, reasoning that *"an authored zero is ink deleted outright at
+full depth with nothing for the artist to dial back with"*. The first half is right and the second is
+not — `depth` scales the *shortfall*, `1 - depth·(1 - a)`, so a sheet authored at 0 is 0.5 at depth
+0.5. What `depth` cannot do is go **deeper** than the sheet is drawn, which makes a floor a ceiling on
+the paper's strength. 60 was `paperGrain`'s own material generalised into a rule, and Chalk needs the
+other end of the range: `paperTooth` bottoms out at 0.04, and the sheet's four Chalk rows — no paper,
+`paperGrain`, `paperTooth` at 80 points and the same at 150 — differ in exactly that one field, with
+only the `paperTooth` ones reading as chalk.
+
 **The generator and the first contact sheet are built — §12 stage 9's first half — and four things came
 back from rendering it.** `PaintSoftwareUITests/BrushTipGenerator.swift` draws twenty-three masks and
 `BrushContactSheetBench` renders every candidate through `BrushStamper.stampStroke` itself, so what
@@ -2174,6 +2244,10 @@ answer.**
 Five groups; **24–30 brushes**, which is the scale Photoshop now ships by default and well inside Clip
 Studio's 42. Not Procreate's 200+, which is a decade of accretion.
 
+**Twenty ship. Sixteen were picked by the owner off rounds one to three and named below; the four
+Texture brushes were generated at round four**, which is §13's question answered — see the table under
+*What shipped*.
+
 **Sixteen are chosen and named below. The owner picked them off the first contact sheet and expects to
 add more later** — *"I probably will choose to add more brushes in a future session, so no need to go
 too far"* — so the groups are deliberately short of the band rather than padded to it.
@@ -2218,7 +2292,14 @@ silhouette *and* the jitter that turns it.
   randomly. The brush makes many streaks."* A handful of separated points, so one drag lays parallel
   ribbons rather than a band.
 
-**Texture — deferred to §12 stage 11**, the CC0 group, gated on §8.3's per-file licensing.
+**Texture — 4, and they are generated rather than sourced.** §8.4 deferred this group to §12 stage 11's
+CC0 licensing because *"scanned grunge and splatter are genuinely hard to fake"*; §13 asked whether
+eleven shipped generated tips had made that obsolete, and round four's sheet says they had. **Grunge**,
+**Splatter**, **Stipple** and **Chalk** — §8.6's own four names, in that order, with no third-party
+asset among them. What they needed was three dials rather than better pictures: a spacing of 0.09–0.46
+where every other group walks at 0.03–0.095, interior holes at floor 0, and §2.25's canvas-anchored
+paper, which merges once per stroke and is therefore the one texture §8.4's union argument cannot
+reach. §8.4 carries the measurements and the two things the first render got wrong.
 
 **The owner's own sprite reference**, supplied as a folder of thirty-three masks and described here
 because the file did not travel: tall roughly-rectangular alpha masks, black on white, in four families
@@ -2255,7 +2336,7 @@ contact-sheet row allows"* and every square, flat and bristle nib has the same p
 | **Painterly** | Blotchy · Streaky · Jagged · Soft Slab · Dry Load |
 | **Bristle** | Open · Open + Envelope · Dense |
 | **Streaky** | Six Dots *(stratified)* · Eight Dots *(uniform)* |
-| **Texture** | empty — §12 stage 11's CC0 sourcing |
+| **Texture** | *(round four)* Grunge: Crust · Crust No Turn *(control)* · Crust Tight *(control)* · Crust + Paper · Soot — Splatter: Spray · Spray No Turn *(control)* · Fine — Stipple: Dynamics · Dynamics Long λ *(control)* · Specks — Chalk: Block · + Paper Grain · + Tooth · + Tooth Coarse · Worn Broad |
 
 The chisel, the two ragged square slabs, the painting flat and the blender are **gone** rather than
 carried: none is among the sixteen, and the first sheet's finding is why the ragged slabs are — a
@@ -2295,7 +2376,18 @@ the `BrushTipGenerator` shape that drew them so any one of them can be regenerat
 | Painting | **Painterly** | `paint-dry-load` | speckled interior, broken edges, **spacing 0.095** so the pixels are seen one dab at a time |
 | | **Bristle** | `bristle-open` | **open nib + envelope**. The mask fix alone left the walk dilating the outer boundary; the A/B row with a short-λ size wobble and a coherent scatter won it |
 | | **Streaky** | `streak-dots-6` | six stratified dots at **half** round two's radius, `jitter 0` |
-| Texture | — | — | empty, and honest: §12 stage 11's CC0 sourcing fills it |
+
+**The Texture group is §12 stage 11, authored 2026-09-05, and it carries no third-party asset.** Four
+more generated PNGs (`brushtip-grunge-crust`, `-splatter-drops`, `-stipple-specks`, `-chalk-block`), so
+fifteen of the twenty carry a picture and five are still answered by arithmetic. One new *paper* rides
+with them — `paperTooth`, generated like the other two.
+
+| group | brush | tip | why this one |
+|---|---|---|---|
+| Texture | **Grunge** | `grunge-crust` + `paperTooth` @160 d0.6 | a lobed crust at **spacing 0.30**, three times anything else here, plus §2.25's sheet at a tile three stroke widths across. Its silhouette is nearly a disc (support **1.33**) and **42.7% of its interior is hole** — the pencils' mechanism, not the rough ink nib's |
+| | **Splatter** | `splatter-drops` | twenty-six drops off a cube law, each stretched along its own axis, at spacing 0.46 with a coherent dropout. **`size ← random` is doing more than the turn**, because a drop is nearly a disc |
+| | **Stipple** | `stipple-specks` | seventeen hard dots a stamp. The dynamics-only row is the refutation: `density` on a round tip at spacing 0.70 is a **beaded line**, because nothing in the engine offsets a dab across the path |
+| | **Chalk** | `chalk-block` + `paperTooth` @80 d0.9 | the nib alone is a dark stroke with a grainy edge — at spacing 0.09 twenty dabs overlap and its holes union away. **The paper is the brush.** The sheet's three rows differ in exactly that field |
 
 **Rough Square + Blotchy Dynamics was rendered and the triangle kept.** The owner asked to see it —
 *"i wonder what rough ink square with blotchy dynamics will look like"* — so round three carries the
@@ -2656,8 +2748,45 @@ first, which cleanly replaces the old one."*
     range, and neither existing curve control could be pointed at a `ResponseCurve`. **Two defects were
     found only by driving it**: an identifier on the screen's root container that made every control
     below it unreachable, and an edit that survived the editor and not the process.
-11. **The Texture group's CC0 assets.** §8.3 and §8.4 — last of the shipped set, because it is the only part
-    with a licensing step, and §8.3's verification happens at this point rather than earlier.
+11. **DONE — the Texture group, and it needed no CC0 assets at all.** §13 asked whether §8.4's *"scanned
+    grunge and splatter are genuinely hard to fake"* still held after eleven generated tips; round four's
+    contact sheet says it does not, so **this stage's licensing step is deleted rather than performed**
+    and §8.3's per-file verification is owed by nothing that ships. Four generated tips, one generated
+    paper (`paperTooth`), four presets, and §8.6's own four names filled in order.
+    **What it turned on was three dials rather than better pictures** — a spacing of 0.09–0.46 against
+    every other group's 0.03–0.095, interior holes at floor 0, and §2.25's canvas-anchored sheet, which
+    merges *once per stroke* and is therefore the one texture §8.4's union argument cannot reach. §8.4
+    carries the measurements, the two things the first render got wrong, and the paper-floor rule this
+    stage had to change.
+    **Three of this stage's premises did not survive contact.**
+    - **"Every Texture nib will be grossly asymmetric like Rough Ink's triangle."** MEASURED,
+      `grunge-crust`'s support ratio is **1.33** — *below* the 1.35 ceiling the eroded-round CONTROL has
+      to stay under. It works by its **interior**, 42.7% hole, which is `pencil-textured`'s mechanism
+      (1.11 / 31.4%) at four times the spacing. §8.4's two arms are now measured separately and named
+      per nib.
+    - **"Splatter is plausibly `scatter` plus dropout rather than a picture."** It is a picture, and the
+      dynamics arm is worse than the brief expected in a specific way: **nothing in this engine offsets
+      a dab across the path**, so `density` on a round tip is a beaded *line* rather than a stipple or a
+      spray. Every drop the shipped Splatter lays is inside one dab of the path, and its spread is the
+      mask's own. **§2.30's `scatterAcross` is the lever both Splatter and Stipple want and do not have
+      yet**; it was being built in parallel with this stage and was deliberately not used.
+    - **"A shipped paper never reaches zero, so `depth` stays the only strength control."** The rule was
+      right and its reason was backwards; §8.4 records the correction and the test was rewritten rather
+      than relaxed.
+    **Nothing that already shipped moved.** `BrushModulationLogicTests`' shipped-preset digest pin is
+    twenty rows now, and the sixteen came back **identical** on the run that took the four new ones —
+    which is what says this stage added a group rather than changed the walk. The fifteen committed
+    PNGs are byte-identical to the generator's current output, so the four new shapes and the
+    `splatterCluster` rewrite moved nothing they were not asked to.
+    **And the reachability drive caught nothing about the brushes and one thing about the method.** All
+    four draw correctly from a cold launch with the library file deleted — the menu lists Texture with
+    four preview swatches and each lays its own ink. The first drive did not: Chalk came back solid black
+    with no paper, which read exactly like the "correct model, wrong pixels" defect this file has a
+    section on. **It was the binary.** The `.app` installed had been built by the run that
+    mutation-tested `Chalk`'s texture to `depth: 0`, and the revert landed after that build and before
+    any other. CLAUDE.md's *"a red xcresult is evidence about a binary, not about your working tree"*,
+    reached from the other side: **the simulator you are driving is a binary too**. Rebuild between a
+    mutation run and a drive, or the drive is evidence about the mutation.
 12. **Three formats, and it stays last.** Owner: *"support of clip studio paint, abr, procreate brushes
     are good enough for now i think"*, and on timing, *"Your choice"*. **Last**, and the reason is
     sharper than the original one: the model moved twice on the day this was scheduled — §2.28's module
@@ -2748,12 +2877,25 @@ first, which cleanly replaces the old one."*
   whose painted box is the whole canvas — a corner-to-corner diagonal at 16383² makes the transparency
   layer canvas-sized — which is inherent to a per-stroke buffer rather than to this implementation of
   one, and nobody has drawn that stroke.
-- **Every CC0 claim in §8.3 needs re-checking against its source before an asset is committed**, and
-  nobody has done that yet. The two that matter are GIMP's `data/brushes` — whose own licence file admits
-  older files predate its CC0 policy, so it is a per-file question — and the OpenGameArt set, hosted by a
-  third party that can relicense or pull it.
-- **Whether the Texture group is worth its licensing step at all.** If §8.4's generator turns out to make
-  credible grunge, the CC0 dependency disappears and §12 stage 11 with it. Nobody has tried.
+- ~~**Every CC0 claim in §8.3 needs re-checking against its source before an asset is committed.**~~
+  **Nothing shipped needs it.** §12 stage 11 generated the Texture group, so no third-party asset is in
+  the binary and §8.3's per-file check is owed by nobody. The rule itself stands unchanged and applies
+  the moment anyone sources anything — which §12 stage 12's importers make an artist's business rather
+  than this app's.
+- ~~**Whether the Texture group is worth its licensing step at all.**~~ **Answered: it is not, and §12
+  stage 11's licensing step is deleted.** Round four's contact sheet generated grunge, splatter, stipple
+  and chalk and all four ship. §8.4 carries the measurements; the short version is that it turned on
+  **spacing** (0.09–0.46 against every other group's 0.03–0.095), **holes at floor 0**, and §2.25's
+  canvas-anchored paper — which merges once per stroke and is therefore the one texture this document's
+  union argument cannot reach. **Chalk is the clearest of the four and the least like the others**: its
+  nib alone is a dark stroke with a grainy edge, and the sheet's three rows differing only in `texture`
+  say the paper *is* the brush.
+- **Whether the Texture group wants §2.30's `scatterAcross` once it lands.** Splatter and Stipple both
+  put every drop inside one dab of the path, because nothing in the engine offsets a dab across the
+  stroke — the mask's own spread is all there is. Both read well as stamp brushes and neither throws ink
+  the way a flicked brush does. §2.30 was being built in parallel with §12 stage 11 and was deliberately
+  not used; re-render those two rows once it is in, and expect the *dynamics-only* stipple — which is a
+  beaded line today — to become viable at the same time.
 - ~~**What the live tier does about `taper`.**~~ **Answered by §12 stage 7, and the answer is
   asymmetric.** A replay measures the stroke's own length and `stampStroke` passes it, so a taper row
   works there; it is measured **only when a row asks for it**, because it is a second flattening pass

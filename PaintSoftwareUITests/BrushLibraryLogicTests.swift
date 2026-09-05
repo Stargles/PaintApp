@@ -31,21 +31,23 @@ final class BrushLibraryLogicTests: XCTestCase {
 
     // MARK: - The seeded library
 
-    /// **A device that has never held a library gets §8.6's set** — five groups, sixteen brushes and
-    /// an empty Texture, in the owner's own order. Authored at §12 stage 9; before it this seeded
-    /// one "Basics" group holding the five legacy presets.
+    /// **A device that has never held a library gets §8.6's set** — five groups and twenty brushes,
+    /// in the owner's own order. Authored at §12 stage 9; before it this seeded one "Basics" group
+    /// holding the five legacy presets.
     ///
-    /// The empty group is asserted rather than tolerated: §12 stage 11's CC0 sourcing fills it, and
-    /// an empty group is honest about that where a missing one is not.
+    /// **Texture was empty here until §12 stage 11 and is asserted full now.** It shipped empty
+    /// because §8.3 gates CC0 sourcing on a per-file licence check; §13 asked whether the generator
+    /// made that unnecessary and round four's contact sheet answered yes, so the four are generated
+    /// like every other tip and the count is four rather than zero.
     func testAFreshLibrarySeedsTheShippedGroupsAndTheirBrushes() {
         let store = makeStore()
         XCTAssertEqual(store.groups.map(\.name),
                        ["Basics", "Sketching", "Inking", "Painting", "Texture"])
-        XCTAssertEqual(store.groups.map(\.brushes.count), [5, 4, 4, 3, 0])
-        XCTAssertEqual(store.allBrushes.count, 16)
+        XCTAssertEqual(store.groups.map(\.brushes.count), [5, 4, 4, 3, 4])
+        XCTAssertEqual(store.allBrushes.count, 20)
         XCTAssertEqual(store.allBrushes.count, BrushLibrary.defaults.count)
-        XCTAssertEqual(Set(store.allBrushes.map(\.id)).count, 16,
-                       "sixteen written-down ids, and no two the same — a collision makes the "
+        XCTAssertEqual(Set(store.allBrushes.map(\.id)).count, 20,
+                       "twenty written-down ids, and no two the same — a collision makes the "
                        + "picker highlight two rows and `update(_:)` write to one of them")
         XCTAssertEqual(Set(store.groups.map(\.id)).count, 5)
     }
@@ -76,8 +78,8 @@ final class BrushLibraryLogicTests: XCTestCase {
                 XCTAssertEqual(mask?.height, BrushTipImport.maskSide, brush.name)
             }
         }
-        XCTAssertEqual(stamped, 11,
-                       "PREMISE: eleven of §8.6's sixteen carry a picture and five are answered by "
+        XCTAssertEqual(stamped, 15,
+                       "PREMISE: fifteen of §8.6's twenty carry a picture and five are answered by "
                        + "arithmetic — if this moves, the count above is stale rather than wrong")
     }
 

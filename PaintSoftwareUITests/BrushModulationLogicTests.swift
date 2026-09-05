@@ -578,9 +578,10 @@ final class BrushModulationLogicTests: XCTestCase {
         }
     }
 
-    /// **And the same pin for what §8.6 actually ships**, taken at the commit that authored it.
+    /// **And the same pin for what §8.6 actually ships**, taken at the commit that authored it —
+    /// sixteen at §12 stage 9 and four more at stage 11, each measured when it was added.
     ///
-    /// The test above protects a *migration* that is finished; this protects the sixteen brushes an
+    /// The test above protects a *migration* that is finished; this protects the twenty brushes an
     /// artist will open the app and find. Without it a change to the walk, the tip loader or the
     /// matrix could move every shipped brush's ink and nothing in the suite would say so — the
     /// reachability and ink checks in `BrushLibraryLogicTests` only ask whether a brush draws *at
@@ -590,7 +591,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// the device and have them extracted back into the source, and that moves the digests by
     /// design. What a red says is *"a shipped brush's ink changed"*, and the question to answer is
     /// whether the commit meant it.
-    func testTheShippedSixteenRenderWhatTheyDidWhenTheyWereAuthored() {
+    func testTheShippedTwentyRenderWhatTheyDidWhenTheyWereAuthored() {
         let ramped = Self.rampStroke(from: 0.05, to: 1)
         let flat = Self.rampStroke(from: 1, to: 1)
         // MEASURED at the §12 stage 9 authoring commit by printing them from this function.
@@ -619,9 +620,17 @@ final class BrushModulationLogicTests: XCTestCase {
             "Rough Ink": (8_419_025_256_513_150_091, 10_085_289_824_272_709_979),
             "Painterly": (355_751_157_517_627_361, 15_351_890_775_863_647_610),
             "Bristle": (14_533_520_957_403_309_450, 8_260_293_555_180_371_024),
-            "Streaky": (16_392_398_184_521_026_234, 8_307_947_881_667_356_676)
+            "Streaky": (16_392_398_184_521_026_234, 8_307_947_881_667_356_676),
+            // **§12 stage 11's four, MEASURED at the commit that authored them.** The other sixteen
+            // came back unchanged on the same run, which is what says the Texture group was added
+            // rather than the walk moved. Chalk's digest covers §2.25's merge as well as its dabs —
+            // `render` walks a whole `stampStroke`, so the paper is inside the number.
+            "Grunge": (13_596_034_156_539_080_871, 13_523_272_526_962_090_298),
+            "Splatter": (16_899_600_055_808_276_393, 13_861_195_677_941_883_625),
+            "Stipple": (2_281_880_113_399_185_065, 10_700_246_836_647_646_257),
+            "Chalk": (9_596_848_185_652_238_267, 15_987_492_500_338_589_173)
         ]
-        XCTAssertEqual(BrushLibrary.defaults.count, 16, "PREMISE: §8.6 ships sixteen")
+        XCTAssertEqual(BrushLibrary.defaults.count, 20, "PREMISE: §8.6 ships twenty")
         for brush in BrushLibrary.defaults {
             let a = Self.fnv1a(Self.render(brush, ramped))
             let b = Self.fnv1a(Self.render(brush, flat))

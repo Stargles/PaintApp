@@ -2,7 +2,7 @@ import Foundation
 
 /// **The shipped brush set — BRUSH.md §8.6, authored at §12 stage 9.**
 ///
-/// Sixteen brushes in four groups plus an empty fifth, replacing the five legacy presets **whole**:
+/// Twenty brushes in five groups, replacing the five legacy presets **whole**:
 /// §2.16 is *"all the current brushes should be removed and replaced with these as current brushes
 /// are a legacy feature"*, and §12 stage 9 spells out that they are *"deleted here, not
 /// deprecated"*. Nothing named `softRound`, `hardRound`, `pencil`, `pen` or the old `square`
@@ -23,11 +23,16 @@ import Foundation
 /// highlight found nothing after a reload. A written-down id makes a preset's identity a fact about
 /// the preset rather than about the launch that wrote it.
 ///
-/// **Where the tips come from.** Eleven of the sixteen stamp a `BuiltInBrushTexture` — a committed
+/// **Where the tips come from.** Fifteen of the twenty stamp a `BuiltInBrushTexture` — a committed
 /// PNG in `Resources/`, drawn by `BrushTipGenerator` and traceable to it by name. The other five
 /// need **no artwork at all**, which is §8.4's whole finding: a soft round is a falloff, a hard
 /// round a disc, a technical pen a small hard disc, an opaque round a near-hard one, and Rough Ink
 /// Blotchy is §6's modulation matrix on a clean round tip.
+///
+/// **And none of them is sourced.** §8.4 ruled the Texture group CC0-only because scanned grunge and
+/// splatter were held to be genuinely hard to fake; §12 stage 11's contact sheet refuted that, so
+/// the four Texture brushes are generated on the same terms as the other eleven and the shipped set
+/// carries no third-party licence at all.
 enum BrushLibrary {
 
     // MARK: - Basics
@@ -330,6 +335,108 @@ enum BrushLibrary {
         ])
     )
 
+    // MARK: - Texture
+    //
+    // **§12 stage 11, and it carries no licensing step.** §8.4 ruled *"source CC0 only for Texture,
+    // where scanned grunge and splatter are genuinely hard to fake"*; §13 asked whether the
+    // generator had made that true-when-written claim obsolete, and round four's contact sheet says
+    // it has. All four are `BrushTipGenerator` masks and two of them are the app's own paper.
+    //
+    // **What separates this group from every other one is `spacing`.** Basics through Painting walk
+    // at 0.03–0.095; these walk at 0.09–0.46. §8.4 already had the rule — *"anything whose character
+    // is in its pixels needs the dabs far enough apart to be seen one at a time"* — and the sheet's
+    // CONTROL row is the proof: Grunge's own picture at spacing 0.05 renders as a plain black band
+    // with a hairy edge.
+
+    /// **§8.6's Grunge.** A lobed, torn crust at spacing 0.30, turned isotropically, laying its ink
+    /// through §2.25's Rough Tooth.
+    ///
+    /// **The paper is not decoration and the A/B on the sheet is why.** The nib's holes survive
+    /// three overlapping dabs and no more; the sheet merges **once per stroke**, so its holes
+    /// survive any spacing and any flow — §8.4's union argument does not reach a canvas-anchored
+    /// texture at all. Laid at 160 points so one repeat is three stroke widths: the first render put
+    /// it at 44 and the paper competed with the nib instead of staining it.
+    static let grunge = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000021")!,
+        name: "Grunge", tip: .stamp(.builtIn(.grungeCrust)), size: 46,
+        dab: BrushDabSettings(size: 0.9, flow: 0.55, spacing: 0.30,
+                              angle: BrushAngleSettings(jitter: 1)),
+        stroke: BrushStrokeSettings(stabilization: 0.25),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.2, atZero: 0.7),
+            BrushModulation(.size, .random(.scatterAngle, .plain(0.9)), amount: 0.18),
+            .flowFromPressure(amount: 0.35)
+        ]),
+        texture: BrushTextureSettings(mask: .builtIn(.paperTooth), tileSize: 160, depth: 0.6)
+    )
+
+    /// **§8.6's Splatter.** Twenty-six drops off a cube law, stamped every 0.46 of a width with
+    /// §2.18's dropout under it, each stamp turned and resized.
+    ///
+    /// **The size draw is doing more of the work than the turn**, which is §8.4's own measurement
+    /// arriving in the one family where it can be seen: a drop is nearly a disc, and rotating a disc
+    /// changes nothing. The sheet's no-turn control is the weakest control on it for exactly that
+    /// reason — what breaks the repetition here is `size ← random`, not `angle.jitter`.
+    ///
+    /// **Its honest limit is that every drop lands within one dab of the path.** Nothing in the
+    /// engine offsets a dab across the stroke, so the spread is the mask's own; §2.30's
+    /// `scatterAcross` is the lever this brush wants and does not have yet.
+    static let splatter = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000022")!,
+        name: "Splatter", tip: .stamp(.builtIn(.splatterDrops)), size: 48,
+        dab: BrushDabSettings(size: 0.95, flow: 0.95, spacing: 0.46,
+                              density: 0.7, densityWavelength: 1.0,
+                              angle: BrushAngleSettings(jitter: 1)),
+        stroke: BrushStrokeSettings(stabilization: 0.2),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.25, atZero: 0.55),
+            BrushModulation(.size, .random(.scatterAngle, .plain(0.4)), amount: 0.35),
+            .flowFromPressure(amount: 0.15)
+        ])
+    )
+
+    /// **§8.6's Stipple.** Seventeen hard-edged dots a stamp, at spacing 0.34 with a short-λ dropout.
+    ///
+    /// **The picture is what makes it a stipple, and the sheet's dynamics-only row is the
+    /// refutation.** §2.18's `density` on a small round tip at spacing 0.7 is a *beaded line* — the
+    /// dots all sit on the path, because nothing spreads them across it. The tip is where the spread
+    /// comes from. λ is 0.4 rather than §2.17's shipped 3.5 for §2.18's own reason: a long λ drops
+    /// contiguous runs, which is a segmented line rather than a stipple.
+    static let stipple = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000023")!,
+        name: "Stipple", tip: .stamp(.builtIn(.stippleSpecks)), size: 30,
+        dab: BrushDabSettings(size: 0.9, flow: 0.95, spacing: 0.34,
+                              density: 0.85, densityWavelength: 0.4,
+                              angle: BrushAngleSettings(jitter: 1)),
+        stroke: BrushStrokeSettings(stabilization: 0.25),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.3, atZero: 0.5),
+            BrushModulation(.size, .random(.scatterAngle, .plain(0.3)), amount: 0.25)
+        ])
+    )
+
+    /// **§8.6's Chalk, and it is the clearest result on round four's sheet.** Three rows differing
+    /// in exactly one field — no texture, `paperGrain`, `paperTooth` — and only the third reads as
+    /// chalk. The nib alone draws a dark stroke with a grainy edge, because at spacing 0.09 twenty
+    /// dabs overlap and the holes union away exactly as §8.4 predicts.
+    ///
+    /// **80 points is the tile and it is a scale decision, not a taste one.** `tileSize` is in canvas
+    /// points, so the sheet's coarsest feature is `32/256 · tileSize` ≈ 10 points against a 30 point
+    /// nib — three grains across the stroke. A fourth row at 150 is on the sheet showing what the
+    /// other side of that looks like: blotches the size of the brush.
+    static let chalk = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000024")!,
+        name: "Chalk", tip: .stamp(.builtIn(.chalkBlock)), size: 30, opacity: 0.95,
+        dab: BrushDabSettings(size: 0.85, flow: 0.5, spacing: 0.09,
+                              angle: BrushAngleSettings(jitter: 1)),
+        stroke: BrushStrokeSettings(stabilization: 0.18),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.3, atZero: 0.5),
+            .flowFromPressure(amount: 0.5)
+        ]),
+        texture: BrushTextureSettings(mask: .builtIn(.paperTooth), tileSize: 80, depth: 0.9)
+    )
+
     // MARK: - The groups
 
     /// **The group ids are written down for the reason the preset ids are** — they are persisted the
@@ -345,11 +452,10 @@ enum BrushLibrary {
 
     /// **§8.6's five groups, in the owner's own order.**
     ///
-    /// **Texture is empty and shipping it empty is deliberate** — §12 stage 11's CC0 sourcing fills
-    /// it, and §8.3 gates that on a per-file licence check that has not happened. An empty group is
-    /// honest about what is coming; a missing one is not, and `BrushGroup` exists precisely because
-    /// an empty group has to be placeable (`BrushLibraryLogicTests`'
-    /// `testAnEmptyGroupKeepsThePositionItWasMovedTo`).
+    /// **Texture is full now, and it cost no licence.** It shipped empty at §12 stage 9 because §8.3
+    /// gates CC0 sourcing on a per-file check nobody had done; §13 asked whether the generator could
+    /// make it unnecessary, and round four's contact sheet says it can. Nothing in this library
+    /// carries a third-party asset.
     ///
     /// Erasers are not a group: the eraser **is** a brush (§11), so every one of these erases
     /// already.
@@ -362,7 +468,8 @@ enum BrushLibrary {
                    brushes: [technicalPenFine, brushPen, roughInkBlotchy, roughInk]),
         BrushGroup(id: GroupID.painting, name: "Painting",
                    brushes: [painterly, bristle, streaky]),
-        BrushGroup(id: GroupID.texture, name: "Texture", brushes: [])
+        BrushGroup(id: GroupID.texture, name: "Texture",
+                   brushes: [grunge, splatter, stipple, chalk])
     ]
 
     /// Every shipped brush, in menu order. Derived from `groups` rather than written twice — a

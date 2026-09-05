@@ -316,6 +316,10 @@
 		C55CE056B842B0FB999D79A9 /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png in Resources */ = {isa = PBXBuildFile; fileRef = 6FC2A78EC884BDE00BD4766F /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png */; };
 		B735B324EA1D0A4ABEDD593B /* PaintSoftware/Resources/brushtip-paint-dry-load.png in Resources */ = {isa = PBXBuildFile; fileRef = F1C6A6717BBDC0D3E9AEBA1A /* PaintSoftware/Resources/brushtip-paint-dry-load.png */; };
 		190D1A86E71A6FAAF74BCC77 /* PaintSoftware/Resources/brushtip-bristle-open.png in Resources */ = {isa = PBXBuildFile; fileRef = E2DBC5407E778428537EE8B2 /* PaintSoftware/Resources/brushtip-bristle-open.png */; };
+		103A3AB516B4A9A82C6F3586 /* PaintSoftware/Resources/brushtip-grunge-crust.png in Resources */ = {isa = PBXBuildFile; fileRef = F2F5529E1B80315E919C4B33 /* PaintSoftware/Resources/brushtip-grunge-crust.png */; };
+		C820FE56442BB41812A6C987 /* PaintSoftware/Resources/brushtip-splatter-drops.png in Resources */ = {isa = PBXBuildFile; fileRef = 9DD9D58F44833EDE18D8FC73 /* PaintSoftware/Resources/brushtip-splatter-drops.png */; };
+		50AC8BF2E7512F7835F966C5 /* PaintSoftware/Resources/brushtip-stipple-specks.png in Resources */ = {isa = PBXBuildFile; fileRef = AC21EE11B6588BA210F44256 /* PaintSoftware/Resources/brushtip-stipple-specks.png */; };
+		A9F0449B88567B8F34B33C00 /* PaintSoftware/Resources/brushtip-chalk-block.png in Resources */ = {isa = PBXBuildFile; fileRef = E0E9851408E0E3F0095A83A3 /* PaintSoftware/Resources/brushtip-chalk-block.png */; };
 		EE85F5408AD35C8538CE4C53 /* PaintSoftware/Resources/brushtip-streak-dots-6.png in Resources */ = {isa = PBXBuildFile; fileRef = C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */; };
 /* End PBXBuildFile section */
 
@@ -641,6 +645,10 @@
 		6FC2A78EC884BDE00BD4766F /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-rough-ink-triangle.png; sourceTree = "<group>"; };
 		F1C6A6717BBDC0D3E9AEBA1A /* PaintSoftware/Resources/brushtip-paint-dry-load.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-paint-dry-load.png; sourceTree = "<group>"; };
 		E2DBC5407E778428537EE8B2 /* PaintSoftware/Resources/brushtip-bristle-open.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-bristle-open.png; sourceTree = "<group>"; };
+		F2F5529E1B80315E919C4B33 /* PaintSoftware/Resources/brushtip-grunge-crust.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-grunge-crust.png; sourceTree = "<group>"; };
+		9DD9D58F44833EDE18D8FC73 /* PaintSoftware/Resources/brushtip-splatter-drops.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-splatter-drops.png; sourceTree = "<group>"; };
+		AC21EE11B6588BA210F44256 /* PaintSoftware/Resources/brushtip-stipple-specks.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-stipple-specks.png; sourceTree = "<group>"; };
+		E0E9851408E0E3F0095A83A3 /* PaintSoftware/Resources/brushtip-chalk-block.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-chalk-block.png; sourceTree = "<group>"; };
 		C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-streak-dots-6.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -884,6 +892,10 @@
 				6FC2A78EC884BDE00BD4766F /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png */,
 				F1C6A6717BBDC0D3E9AEBA1A /* PaintSoftware/Resources/brushtip-paint-dry-load.png */,
 				E2DBC5407E778428537EE8B2 /* PaintSoftware/Resources/brushtip-bristle-open.png */,
+				F2F5529E1B80315E919C4B33 /* PaintSoftware/Resources/brushtip-grunge-crust.png */,
+				9DD9D58F44833EDE18D8FC73 /* PaintSoftware/Resources/brushtip-splatter-drops.png */,
+				AC21EE11B6588BA210F44256 /* PaintSoftware/Resources/brushtip-stipple-specks.png */,
+				E0E9851408E0E3F0095A83A3 /* PaintSoftware/Resources/brushtip-chalk-block.png */,
 				C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */,
 				63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */,
 				E1E457E9EFA7E3F04D87C924 /* PaintSoftware/Models/BrushEditorModel.swift */,
@@ -1124,6 +1136,10 @@
 				C55CE056B842B0FB999D79A9 /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png in Resources */,
 				B735B324EA1D0A4ABEDD593B /* PaintSoftware/Resources/brushtip-paint-dry-load.png in Resources */,
 				190D1A86E71A6FAAF74BCC77 /* PaintSoftware/Resources/brushtip-bristle-open.png in Resources */,
+				103A3AB516B4A9A82C6F3586 /* PaintSoftware/Resources/brushtip-grunge-crust.png in Resources */,
+				C820FE56442BB41812A6C987 /* PaintSoftware/Resources/brushtip-splatter-drops.png in Resources */,
+				50AC8BF2E7512F7835F966C5 /* PaintSoftware/Resources/brushtip-stipple-specks.png in Resources */,
+				A9F0449B88567B8F34B33C00 /* PaintSoftware/Resources/brushtip-chalk-block.png in Resources */,
 				EE85F5408AD35C8538CE4C53 /* PaintSoftware/Resources/brushtip-streak-dots-6.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

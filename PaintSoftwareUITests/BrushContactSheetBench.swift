@@ -15,7 +15,13 @@ import CoreGraphics
 /// modulation — if the sheet is wrong, the app is wrong in the same way, which is the only property
 /// that makes a picture worth ruling from.
 ///
-/// **This is the second sheet, and two things changed because the first one was read.**
+/// **Round four adds the Texture group**, which §12 stage 11 had deferred to CC0 sourcing and which
+/// §13 asked the generator to attempt: fifteen rows over four slots, every slot carrying a control
+/// that is meant to fail. Two of those controls are new in kind — a picture stamped at a *shipped*
+/// brush's spacing rather than at its own, and a nib whose paper is removed — and both are the
+/// sheet's way of asking which of §8.4's mechanisms is doing the work.
+///
+/// **The two things below changed because the first sheet was read, and they still hold.**
 ///
 /// - **A third stroke that turns.** The first sheet's report recorded the Chisel as *"correct but
 ///   subtle; the thick/thin needs a stroke that turns more than a contact-sheet row allows"* — and
@@ -139,11 +145,14 @@ final class BrushContactSheetBench: XCTestCase {
         // reading a nib's edge. Deliberately the lower-resolution of the two — the per-group sheets
         // are where an edge is judged, and a scale-2 overview is 60 MB of backing store for nothing.
         let all = BrushCandidates.groups.map { Self.section(for: $0, in: candidates) }
-        let overview = Self.sheet(title: "Brush candidates — BRUSH.md §12 stage 9, round two",
-                                  subtitle: "\(candidates.count) rows over §8.6's sixteen slots, "
+        let overview = Self.sheet(title: "Brush candidates — BRUSH.md §12 stage 11, round four",
+                                  subtitle: "\(candidates.count) rows over §8.6's twenty slots, "
                                           + "\(tips.count) generated tips. CHOSEN is settled; "
                                           + "VARIANT competes for an open slot; CONTROL is on the "
-                                          + "sheet in order to fail.",
+                                          + "sheet in order to fail. The Texture group is §13's "
+                                          + "open question — can the generator make credible "
+                                          + "grunge, splatter, stipple and chalk, and does that "
+                                          + "delete §12 stage 11's licensing step?",
                                   sections: all, swatches: swatches, scale: 1)
         let overviewURL = directory.appendingPathComponent("contact-sheet-all.png")
         try XCTUnwrap(overview.pngData()).write(to: overviewURL)
@@ -175,8 +184,7 @@ final class BrushContactSheetBench: XCTestCase {
 
     private static func subtitle(for group: String, count: Int) -> String {
         if count == 0 {
-            return "§12 stage 11 — the CC0 group. Nothing is generated here: §8.4 rules that "
-                 + "scanned grunge and splatter are what is genuinely hard to fake."
+            return "No candidate was drawn for any slot in this group."
         }
         return "\(count) rows, each drawn at its own size through BrushStamper.stampStroke. "
              + "Left: pressure ramps 0.04 → 1 → 0.04. Middle: held light at 0.25. "
@@ -251,8 +259,7 @@ final class BrushContactSheetBench: XCTestCase {
                 let count = section.slots.reduce(0) { $0 + $1.rows.count }
                 y = drawHeader(section.group, count: count, at: y, cg: cg)
                 if section.slots.isEmpty {
-                    draw("Empty by design — §12 stage 11 sources this group CC0. "
-                         + "§8.6: grunge, splatter, stipple, chalk.",
+                    draw("No slots are declared for this group.",
                          in: CGRect(x: swatchX, y: y + 16, width: pageWidth - 2 * margin, height: 20),
                          font: .italicSystemFont(ofSize: 12), color: dim)
                     y += rowHeight * 0.55

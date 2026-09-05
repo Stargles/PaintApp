@@ -94,12 +94,52 @@ enum BuiltInBrushTexture: String, Hashable, CaseIterable {
     /// ribbons back into a band, which is the one place on the sheet where rotation is wrong.
     case streakDots6 = "streak-dots-6"
 
+    // MARK: - §12 stage 11's shipped tips
+    //
+    // **The Texture group, and it is generated rather than sourced.** §8.4 ruled *"source CC0 only
+    // for Texture, where scanned grunge and splatter are genuinely hard to fake"*; §13 asked
+    // whether that was still true after the generator had made eleven tips, and round four's
+    // contact sheet answered no. The four below are `BrushTipGenerator`'s output on exactly the
+    // terms the eleven above are — named after the shape that drew them, regenerable byte for byte.
+
+    /// **Texture ▸ Grunge.** A lobed, torn crust whose interior reaches **zero** alpha, stamped at
+    /// spacing 0.30 — three times anything else this app ships. §8.4's minimum-spacing finding read
+    /// the other way round: a crust needs its dabs far enough apart to be seen one at a time.
+    case grungeCrust = "grunge-crust"
+
+    /// **Texture ▸ Splatter.** Twenty-six drops off a cube law, each stretched along its own axis,
+    /// spread nearly to the mask's edge — one or two carriers and a crowd of flecks, which is the
+    /// size *hierarchy* that separates a splatter from a field of dots.
+    case splatterDrops = "splatter-drops"
+
+    /// **Texture ▸ Stipple.** Seventeen hard-edged dots of mixed size. The dynamics-only route —
+    /// §2.18's dropout on a round tip — is a beaded *line*, because nothing in the engine spreads
+    /// ink across the path; the picture is what makes a stipple a field.
+    case stippleSpecks = "stipple-specks"
+
+    /// **Texture ▸ Chalk.** A torn squarish stick whose interior is holes. Useless on its own — at
+    /// spacing 0.09 the holes union away — and the brush that carries it lays ink through §2.25's
+    /// canvas-anchored `paperTooth`, which merges once per stroke and therefore cannot be unioned.
+    case chalkBlock = "chalk-block"
+
     /// **Paper, not a tip** — BRUSH.md §2.25's canvas-anchored sheet, generated rather than
     /// committed. See `kind` and `BrushPaperGenerator`.
     case paperGrain
     /// The second sheet — a woven over/under, which reads as a different *material* from grain
     /// rather than as the same field at a different scale.
     case canvasWeave
+
+    /// **The third sheet, and the one whose valleys reach the floor** — coarse rough paper, added
+    /// for §12 stage 11's Texture group. `paperGrain` bottoms out at 0.35 because it is *paper*
+    /// under a pencil and a sheet that erased ink outright would leave nothing to dial back with;
+    /// this one bottoms out at 0.04, because a **hole** is what the Chalk and Grunge brushes are
+    /// after and §8.4's *"a union fills a dimming but not a hole"* applies to a canvas-anchored
+    /// sheet the same way it applies to a tip.
+    ///
+    /// The dialling-back argument survives intact: `depth` scales the *shortfall*, so this sheet at
+    /// depth 0.4 is a mottle and `paperGrain` at depth 1 cannot be made deeper than it is authored.
+    /// Deep is the expressive end, and it was the missing one.
+    case paperTooth
 
     /// **Which of §2.26's two collections this belongs in.**
     ///
@@ -114,9 +154,10 @@ enum BuiltInBrushTexture: String, Hashable, CaseIterable {
     /// a bitmap that silently shows up in the paper picker.
     var kind: Collection {
         switch self {
-        case .square, .squareBevelWide, .flatMessyEndsDirty, .pencilHard, .pencilSoft, .pencilBlunt, .pencilTextured, .penBrush, .roughInkTriangle, .paintDryLoad, .bristleOpen, .streakDots6:
+        case .square, .squareBevelWide, .flatMessyEndsDirty, .pencilHard, .pencilSoft, .pencilBlunt, .pencilTextured, .penBrush, .roughInkTriangle, .paintDryLoad, .bristleOpen, .streakDots6,
+             .grungeCrust, .splatterDrops, .stippleSpecks, .chalkBlock:
             return .tip
-        case .paperGrain, .canvasWeave:
+        case .paperGrain, .canvasWeave, .paperTooth:
             return .texture
         }
     }
@@ -157,8 +198,13 @@ enum BuiltInBrushTexture: String, Hashable, CaseIterable {
         case .paintDryLoad: return "Dry Load"
         case .bristleOpen: return "Bristle"
         case .streakDots6: return "Streak Dots"
+        case .grungeCrust: return "Grunge Crust"
+        case .splatterDrops: return "Splatter Drops"
+        case .stippleSpecks: return "Stipple Specks"
+        case .chalkBlock: return "Chalk Block"
         case .paperGrain: return "Paper Grain"
         case .canvasWeave: return "Canvas Weave"
+        case .paperTooth: return "Rough Tooth"
         }
     }
 
@@ -470,6 +516,7 @@ enum BrushPaperGenerator {
                 switch paper {
                 case .paperGrain: survives = grain(x: x, y: y)
                 case .canvasWeave: survives = weave(x: x, y: y)
+                case .paperTooth: survives = tooth(x: x, y: y)
                 // Unreachable: the `kind == .texture` guard above returns before this. A `default`
                 // rather than the twelve tip cases on purpose — `BuiltInBrushTexture.kind` is the
                 // exhaustive switch that forces a new case to be *classified*, and duplicating that
@@ -499,6 +546,34 @@ enum BrushPaperGenerator {
             amplitude *= 0.55
         }
         return 0.35 + 0.65 * (value / total)
+    }
+
+    /// **Coarse rough paper whose valleys reach the floor** — the sheet a Texture-group brush lays
+    /// its ink through.
+    ///
+    /// What separates it from `grain` is the **steep S**: the field is pushed to its ends, so what
+    /// comes out is pits at 0.04 and flats at 1 rather than an even mottle around a mean. MEASURED
+    /// over the sheet, 34% of it is below 0.2 and 25% above 0.8, against `grain`'s 0% below 0.2.
+    ///
+    /// The floor is 0.04 and not 0, which is the one thing kept from `grain`'s argument: a sheet
+    /// that reached exactly 0 would make a stroke's holes independent of `depth` at the bottom of
+    /// the range, and a knob whose end is unreachable is worse than one whose end is dull.
+    ///
+    /// **The octave set starts at eight cells and not four, and the first render of §12 stage 11's
+    /// sheet is why.** A four-cell octave is one 64 px blob per sheet, which at a tile of 40 points
+    /// on a 30 point brush is a *recognisable shape repeating every 40 points* — the tiling became
+    /// visible as a row of identical marks along the stroke rather than as paper. Starting one
+    /// octave finer leaves no single dominant feature for the eye to lock onto, and the presets
+    /// that use this lay it at 150–190 points so a repeat spans several stroke widths as well.
+    private static func tooth(x: Int, y: Int) -> Double {
+        var value = 0.0, amplitude = 1.0, total = 0.0
+        for cells in [8, 16, 32, 64] {
+            value += amplitude * valueNoise(x: x, y: y, cells: cells)
+            total += amplitude
+            amplitude *= 0.62
+        }
+        let n = value / total
+        return 0.04 + 0.96 * smoothstep(min(max((n - 0.34) / 0.28, 0), 1))
     }
 
     /// A woven over/under. The pitch is 16 px, so one repeat of the weave itself is 32 px and 256 is

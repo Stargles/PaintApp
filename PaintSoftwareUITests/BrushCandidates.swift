@@ -9,11 +9,11 @@ import CoreGraphics
 /// touches `BrushLibrary`, nothing here has a written-down `id` (a preset's id is a manifest
 /// commitment — §12 stage 5's own note), and every brush below is free to be deleted whole.
 ///
-/// **This is round two, and it is organised by §8.6's sixteen slots rather than by candidate.** The
-/// owner picked sixteen brushes off the first sheet and left four of them open — Square, Messy Flat,
-/// Rough Ink and the whole Painting group. Every row below names the **slot** it belongs to and its
-/// **standing** in it, so a row that is already settled and a row competing for an open slot cannot
-/// be confused for one another.
+/// **This is round four, and it is organised by §8.6's twenty slots rather than by candidate.** The
+/// owner picked sixteen off rounds one to three; round four adds the **Texture** group, which §12
+/// stage 11 had deferred to CC0 sourcing and which §13 asked the generator to try. Every row below
+/// names the **slot** it belongs to and its **standing** in it, so a row that is already settled and
+/// a row competing for an open slot cannot be confused for one another.
 ///
 /// **Three kinds of candidate, and the sheet marks which is which**, because the most useful thing
 /// on it is that some of these need no artwork at all:
@@ -87,8 +87,7 @@ enum BrushCandidates {
         let note: String
     }
 
-    /// §8.6's five groups, in its own order. `Texture` holds nothing: it is §12 stage 11's CC0
-    /// sourcing, and showing it empty is more honest than leaving it off the sheet.
+    /// §8.6's five groups, in its own order.
     static let groups: [String] = ["Basics", "Sketching", "Inking", "Painting", "Texture"]
 
     /// **§8.6's sixteen, per group, in the owner's own order.** The sheet's slot headers are driven
@@ -99,7 +98,10 @@ enum BrushCandidates {
         "Sketching": ["Pencil Hard", "Pencil Soft", "Pencil Blunt", "Pencil Textured"],
         "Inking": ["Technical Pen Fine", "Brush Pen", "Rough Ink Blotchy", "Rough Ink"],
         "Painting": ["Painterly", "Bristle", "Streaky"],
-        "Texture": []
+        // **§8.6 names four and §13 asks whether the generator can draw them** — *"grunge, splatter,
+        // stipple and chalk"*, deferred to §12 stage 11 because §8.4 ruled scanned organics genuinely
+        // hard to fake. Round four is that question asked rather than answered from the armchair.
+        "Texture": ["Grunge", "Splatter", "Stipple", "Chalk"]
     ]
 
     /// **The five rows that make up §8.4's factorial on asymmetry × rotation.** Named here rather
@@ -601,6 +603,276 @@ enum BrushCandidates {
             note: "Eight dots placed by a uniform draw, which is what \"placed randomly\" says "
                 + "literally — two can share a ribbon and leave a gap elsewhere."))
 
+        out.append(contentsOf: texture(stamp: stamp, kind: kind))
+        return out
+    }
+
+    // MARK: - Texture — §13's open question
+
+    /// **Round four, and it is a question rather than a set.** §8.4 ruled *"generate Basics,
+    /// Sketching, Inking and Painting; source CC0 only for Texture, where scanned grunge and
+    /// splatter are genuinely hard to fake"*, and §12 stage 11 is the one stage that therefore
+    /// carries a licensing step. §13: *"if §8.4's generator turns out to make credible grunge, the
+    /// CC0 dependency disappears and §12 stage 11 with it. Nobody has tried."*
+    ///
+    /// **Three levers separate these rows from every earlier sheet, and only the third is new
+    /// information.**
+    ///
+    /// 1. **Spacing.** Every shipped brush walks at 0.03–0.095; these walk at 0.25–0.7. §8.4 already
+    ///    knew why — *"anything whose character is in its pixels needs the dabs far enough apart to
+    ///    be seen one at a time"* — and the blender died of it, but nobody had then turned the dial
+    ///    the other way. A grunge brush is a **stamp** brush, and a paint program has always spaced
+    ///    one that way.
+    /// 2. **Holes at floor 0 and a grossly asymmetric outline under `angle.jitter 1`**, which is
+    ///    §8.4's boundary paragraph applied rather than rediscovered. Every slot carries a **no-turn
+    ///    control** so the sheet says which term did the work.
+    /// 3. **§2.25's canvas-anchored paper**, which did not exist when §8.4 was written and changes
+    ///    the argument rather than adding to it: the sheet multiplies in at the **merge**, once per
+    ///    stroke, so a hole in it is not filled by the next dab at any spacing or flow. §8.4's union
+    ///    argument does not reach it at all. The Chalk rows are that A/B — one picture, the texture
+    ///    added a term at a time — and Grunge carries the same pair.
+    private static func texture(stamp: @escaping (String) -> BrushTip,
+                                kind: (String) -> Kind) -> [Candidate] {
+        var out: [Candidate] = []
+
+        // MARK: Grunge
+
+        // The A leg. A lobed, torn crust whose interior is holes rather than mottle, stamped every
+        // 0.30 of a width so about three dabs overlap a point instead of twenty.
+        let grungeDab = { (spacing: Double, jitter: Double) in
+            BrushDabSettings(size: 0.9, flow: 0.55, spacing: spacing,
+                             angle: BrushAngleSettings(jitter: jitter))
+        }
+        let grungeRows = BrushModulations([
+            .sizeFromPressure(amount: 0.2, atZero: 0.7),
+            BrushModulation(.size, .random(.scatterAngle, .plain(0.9)), amount: 0.18),
+            .flowFromPressure(amount: 0.35)
+        ])
+
+        out.append(Candidate(
+            group: "Texture", slot: "Grunge", standing: .contender,
+            name: "Grunge — Crust", kind: kind("grunge-crust"),
+            brush: Brush(name: "Grunge — Crust", tip: stamp("grunge-crust"), size: 46,
+                         dab: grungeDab(0.30, 1), stroke: BrushStrokeSettings(stabilization: 0.25),
+                         modulations: grungeRows),
+            note: "The picture alone, at a stamp brush's spacing. Lobed outline, torn boundary, "
+                + "interior holes at floor 0 — and 0.30 spacing, which is 3× anything shipped."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Grunge", standing: .control,
+            name: "Grunge — Crust, No Turn", kind: kind("grunge-crust"),
+            brush: Brush(name: "Grunge — Crust, No Turn", tip: stamp("grunge-crust"), size: 46,
+                         dab: grungeDab(0.30, 0.03),
+                         stroke: BrushStrokeSettings(stabilization: 0.25),
+                         modulations: grungeRows),
+            note: "The same picture with the turn taken away — §8.4's asymmetry-alone cell. It "
+                + "should read as one blot repeated at a regular interval, not as grunge."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Grunge", standing: .control,
+            name: "Grunge — Crust, Tight", kind: kind("grunge-crust"),
+            brush: Brush(name: "Grunge — Crust, Tight", tip: stamp("grunge-crust"), size: 46,
+                         dab: grungeDab(0.05, 1), stroke: BrushStrokeSettings(stabilization: 0.25),
+                         modulations: grungeRows),
+            note: "The same picture and the same turn at a *shipped* brush's spacing. §8.4's "
+                + "minimum-spacing finding, which killed the first sheet's blender — the holes "
+                + "should union away into a plain band."))
+
+        // The §2.25 leg: **only `texture` differs** from Crust, so the pair is attributable.
+        out.append(Candidate(
+            group: "Texture", slot: "Grunge", standing: .contender,
+            name: "Grunge — Crust + Paper", kind: kind("grunge-crust"),
+            brush: Brush(name: "Grunge — Crust + Paper", tip: stamp("grunge-crust"), size: 46,
+                         dab: grungeDab(0.30, 1), stroke: BrushStrokeSettings(stabilization: 0.25),
+                         modulations: grungeRows,
+                         texture: BrushTextureSettings(mask: .builtIn(.paperTooth),
+                                                       tileSize: 160, depth: 0.6)),
+            note: "Crust with §2.25's canvas-anchored Rough Tooth over it and nothing else "
+                + "changed. The sheet merges once per stroke, so its holes cannot be unioned away "
+                + "— which is the mechanism §8.4 did not have. Laid at 160pt and 0.6 depth: round "
+                + "one had 44pt and 0.85 and the paper *competed* with the nib instead of "
+                + "staining it."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Grunge", standing: .contender,
+            name: "Grunge — Soot", kind: kind("grunge-soot"),
+            brush: Brush(name: "Grunge — Soot", tip: stamp("grunge-soot"), size: 40,
+                         dab: BrushDabSettings(size: 0.9, flow: 0.8, spacing: 0.34,
+                                               density: 0.9, densityWavelength: 0.6,
+                                               angle: BrushAngleSettings(jitter: 1)),
+                         stroke: BrushStrokeSettings(stabilization: 0.25),
+                         modulations: BrushModulations([
+                             .sizeFromPressure(amount: 0.25, atZero: 0.6),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(1.4)), amount: 0.26)
+                         ])),
+            note: "A finer hole field than Crust's, denser and blacker. **Round one had this at "
+                + "spacing 0.62 with a 0.55 dropout and it fell apart into islands** — past about "
+                + "0.4 a stamp brush stops being a stroke, which is the far end of §8.4's "
+                + "minimum-spacing finding and is on this sheet because nobody had found it."))
+
+        // MARK: Splatter
+
+        let splatterRows = BrushModulations([
+            .sizeFromPressure(amount: 0.25, atZero: 0.55),
+            BrushModulation(.size, .random(.scatterAngle, .plain(0.4)), amount: 0.35),
+            .flowFromPressure(amount: 0.15)
+        ])
+
+        out.append(Candidate(
+            group: "Texture", slot: "Splatter", standing: .contender,
+            name: "Splatter — Spray", kind: kind("splatter-drops"),
+            brush: Brush(name: "Splatter — Spray", tip: stamp("splatter-drops"), size: 48,
+                         dab: BrushDabSettings(size: 0.95, flow: 0.95, spacing: 0.46,
+                                               density: 0.7, densityWavelength: 1.0,
+                                               angle: BrushAngleSettings(jitter: 1)),
+                         stroke: BrushStrokeSettings(stabilization: 0.2),
+                         modulations: splatterRows),
+            note: "Twenty-six drops off a cube law — one or two carriers, the rest flecks — turned "
+                + "and resized per stamp. The drops' own spread nearly to the mask's edge is what "
+                + "puts ink off the path, since a stamp lands on it."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Splatter", standing: .control,
+            name: "Splatter — Spray, No Turn", kind: kind("splatter-drops"),
+            brush: Brush(name: "Splatter — Spray, No Turn", tip: stamp("splatter-drops"), size: 48,
+                         dab: BrushDabSettings(size: 0.95, flow: 0.95, spacing: 0.46,
+                                               density: 0.7, densityWavelength: 1.0,
+                                               angle: BrushAngleSettings(jitter: 0.03)),
+                         stroke: BrushStrokeSettings(stabilization: 0.2),
+                         modulations: splatterRows),
+            note: "The same cluster stamped at the same angle every time. §8.5's sawtooth in its "
+                + "purest form — this should read as a repeating pattern rather than as a spray."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Splatter", standing: .contender,
+            name: "Splatter — Fine", kind: kind("splatter-fine"),
+            brush: Brush(name: "Splatter — Fine", tip: stamp("splatter-fine"), size: 34,
+                         dab: BrushDabSettings(size: 0.95, flow: 0.9, spacing: 0.34,
+                                               density: 0.7, densityWavelength: 0.6,
+                                               angle: BrushAngleSettings(jitter: 1)),
+                         stroke: BrushStrokeSettings(stabilization: 0.2),
+                         modulations: splatterRows),
+            note: "Twenty smaller drops with no carrier among them, at a tighter spacing — an "
+                + "airbrush mist rather than a flicked loaded brush."))
+
+        // MARK: Stipple
+
+        // §2.18's own sentence is that λ is what makes a stipple: *"at λ = 0 ten overlapping dabs
+        // cover every point … at λ ≈ 3–4 a contiguous run drops and the line breaks."* So the
+        // dynamics arm is a small hard disc walked far apart with a **short**-λ dropout, and the
+        // long-λ row beside it is on the sheet in order to be a broken line instead.
+        let stippleDynamics = { (lambda: CGFloat) in
+            Brush(name: "Stipple", tip: .round, size: 10,
+                  dab: BrushDabSettings(size: 0.55, flow: 1, spacing: 0.70, hardness: 0.92,
+                                        density: 0.42, densityWavelength: lambda),
+                  stroke: BrushStrokeSettings(stabilization: 0.25),
+                  modulations: BrushModulations([
+                      .sizeFromPressure(amount: 0.3, atZero: 0.45),
+                      BrushModulation(.size, .random(.scatterAngle, .plain(0.25)), amount: 0.45)
+                  ]))
+        }
+
+        out.append(Candidate(
+            group: "Texture", slot: "Stipple", standing: .contender,
+            name: "Stipple — Dynamics", kind: .dynamicsOnly,
+            brush: stippleDynamics(0.2),
+            note: "No picture at all: a small hard disc, spacing 0.70, and §2.18's dropout at "
+                + "λ 0.2 so skips are isolated. The size draw is what stops it being a ruler."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Stipple", standing: .control,
+            name: "Stipple — Dynamics, Long λ", kind: .dynamicsOnly,
+            brush: stippleDynamics(3.5),
+            note: "The same brush with λ at §2.17's shipped 3.5. §2.18 says this is a *segmented "
+                + "line* rather than a stipple — the dropout drops runs. On the sheet to fail as a "
+                + "stipple and to show what λ is doing."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Stipple", standing: .contender,
+            name: "Stipple — Specks", kind: kind("stipple-specks"),
+            brush: Brush(name: "Stipple — Specks", tip: stamp("stipple-specks"), size: 30,
+                         dab: BrushDabSettings(size: 0.9, flow: 0.95, spacing: 0.34,
+                                               density: 0.85, densityWavelength: 0.4,
+                                               angle: BrushAngleSettings(jitter: 1)),
+                         stroke: BrushStrokeSettings(stabilization: 0.25),
+                         modulations: BrushModulations([
+                             .sizeFromPressure(amount: 0.3, atZero: 0.5),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(0.3)), amount: 0.25)
+                         ])),
+            note: "What a picture adds over the row above: one stamp is already seventeen "
+                + "hard-edged dots of mixed size, so a drag lays a field rather than a line."))
+
+        // MARK: Chalk
+        //
+        // **The cleanest A/B on this sheet.** Four rows, one nib, and the only thing that changes
+        // between the first three is `Brush.texture` — no paper, `paperGrain`, `paperTooth`. If §2.25
+        // is what makes a generated chalk credible, these three rows say so and nothing else on the
+        // sheet has to.
+        let chalkBrush = { (name: String, texture: BrushTextureSettings?) in
+            Brush(name: name, tip: stamp("chalk-block"), size: 30, opacity: 0.95,
+                  dab: BrushDabSettings(size: 0.85, flow: 0.5, spacing: 0.09,
+                                        angle: BrushAngleSettings(jitter: 1)),
+                  stroke: BrushStrokeSettings(stabilization: 0.18),
+                  modulations: BrushModulations([
+                      .sizeFromPressure(amount: 0.3, atZero: 0.5),
+                      .flowFromPressure(amount: 0.5)
+                  ]),
+                  texture: texture)
+        }
+
+        out.append(Candidate(
+            group: "Texture", slot: "Chalk", standing: .contender,
+            name: "Chalk — Block", kind: kind("chalk-block"),
+            brush: chalkBrush("Chalk — Block", nil),
+            note: "The nib on its own — a torn squarish stick whose interior is holes. The A leg "
+                + "of the texture A/B: everything below is this row plus a sheet."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Chalk", standing: .contender,
+            name: "Chalk — Block + Paper Grain", kind: kind("chalk-block"),
+            brush: chalkBrush("Chalk — Block + Paper Grain",
+                              BrushTextureSettings(mask: .builtIn(.paperGrain),
+                                                   tileSize: 80, depth: 1)),
+            note: "The same row plus §2.25's shipped Paper Grain at full depth. That sheet floors "
+                + "at 0.35, so it can only dim — the question this row asks is whether dimming is "
+                + "enough when it is applied at the merge instead of per dab."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Chalk", standing: .contender,
+            name: "Chalk — Block + Tooth", kind: kind("chalk-block"),
+            brush: chalkBrush("Chalk — Block + Tooth",
+                              BrushTextureSettings(mask: .builtIn(.paperTooth),
+                                                   tileSize: 80, depth: 0.9)),
+            note: "And the same row again with Rough Tooth, whose valleys reach 0.04. The four "
+                + "Chalk rows differ in exactly one field."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Chalk", standing: .contender,
+            name: "Chalk — Block + Tooth, Coarse", kind: kind("chalk-block"),
+            brush: chalkBrush("Chalk — Block + Tooth, Coarse",
+                              BrushTextureSettings(mask: .builtIn(.paperTooth),
+                                                   tileSize: 150, depth: 0.9)),
+            note: "The same sheet laid at 150pt instead of 80. `tileSize` is in canvas points, so "
+                + "this row is the *scale* question on its own: at 150 the tooth is coarser than "
+                + "the 30pt nib and reads as blotches, at 80 it reads as paper."))
+
+        out.append(Candidate(
+            group: "Texture", slot: "Chalk", standing: .contender,
+            name: "Chalk — Worn Broad", kind: kind("chalk-worn"),
+            brush: Brush(name: "Chalk — Worn Broad", tip: stamp("chalk-worn"), size: 44,
+                         opacity: 0.95,
+                         dab: BrushDabSettings(size: 0.9, flow: 0.4, spacing: 0.13,
+                                               angle: BrushAngleSettings(jitter: 1)),
+                         stroke: BrushStrokeSettings(stabilization: 0.18),
+                         modulations: BrushModulations([
+                             .sizeFromPressure(amount: 0.28, atZero: 0.55),
+                             .flowFromPressure(amount: 0.55)
+                         ]),
+                         texture: BrushTextureSettings(mask: .builtIn(.paperTooth),
+                                                       tileSize: 110, depth: 0.8)),
+            note: "A broader, blunter stick at a wider spacing and a lower flow, on a coarser "
+                + "sheet — the side-of-the-chalk mark rather than the edge."))
+
         return out
     }
 
@@ -624,7 +896,21 @@ enum BrushCandidates {
         if angle.jitter != 0 {
             parts.append("jitter \(f(angle.jitter, 3)) (±\(f(angle.jitter * 180, 0))°)")
         }
+        // **§2.25's paper, printed because round four's whole question turns on it.** A row that
+        // lays ink through a sheet and a row that does not are otherwise identical in every number
+        // on this line, and the Chalk slot is three of exactly that pair.
+        if let texture = brush.texture {
+            parts.append("tex \(name(texture.mask)) @\(f(texture.tileSize, 0))pt "
+                         + "d\(f(texture.depth, 2))")
+        }
         return parts.joined(separator: "  ")
+    }
+
+    private static func name(_ ref: BrushTextureRef) -> String {
+        switch ref {
+        case .builtIn(let built): return built.displayName
+        case .imported(let fileName): return fileName
+        }
     }
 
     /// The matrix's rows, as one line.

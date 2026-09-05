@@ -453,18 +453,45 @@ final class BrushEditorLogicTests: XCTestCase {
                      "A tip is not paper — the generator refuses rather than inventing a sheet")
     }
 
-    /// **A paper never reaches zero alpha, so `depth` stays the only strength control.**
+    /// **A paper never reaches zero alpha, so `depth` stays the only strength control — and the
+    /// bound this used to assert was wrong about what `depth` can do.**
     ///
-    /// `BrushTextureSettings.depth` scales the *shortfall* — `1 - depth·(1 - a)` — so an authored
-    /// zero is ink deleted outright at full depth with nothing for the artist to dial back with. The
-    /// floor is what keeps the one slider meaningful over its whole range.
+    /// It required every shipped sheet to stay above **60** and gave as the reason that *"an authored
+    /// zero is ink deleted outright at full depth with nothing for the artist to dial back with"*.
+    /// The first half is right and the second is not: `depth` scales the shortfall, `1 - depth·(1 -
+    /// a)`, so a sheet authored at 0 is 0.5 at depth 0.5 and dials back perfectly. What `depth`
+    /// cannot do is go **deeper** than the sheet is drawn — so a floor is a ceiling on the paper's
+    /// strength, and 60 was `paperGrain`'s own material generalised into a rule.
+    ///
+    /// §12 stage 11 needed the other end of that range. A Chalk brush lays ink through a sheet whose
+    /// valleys reach 0.04, and §8.4's *"a union fills a dimming but not a hole"* is exactly why: the
+    /// sheet at a 0.35 floor is a grey wash and at 0.04 it is chalk on tooth. The contact sheet
+    /// carries both rows and they differ in that one field.
+    ///
+    /// **So the two assertions that survive are the ones that are actually about the control.** A
+    /// sheet may not reach *exactly* zero, because at depth 1 that is ink deleted rather than scaled
+    /// and there is no setting at which it comes back. And the claim the old reason got backwards is
+    /// pinned rather than dropped: at half depth every sheet still passes at least half the ink at
+    /// its own deepest point, which is `depth` dialling an authored floor back.
     func testAShippedPaperNeverReachesZeroSoDepthIsTheOnlyStrengthControl() throws {
         for paper in BuiltInBrushTexture.all(in: .texture) {
             let grid = try alphaGrid(of: XCTUnwrap(BrushPaperGenerator.mask(paper)))
             let lowest = try XCTUnwrap(grid.min())
-            XCTAssertGreaterThanOrEqual(Int(lowest), 60,
-                                        "\(paper.rawValue) takes ink to nothing somewhere, which depth cannot undo")
+            XCTAssertGreaterThan(Int(lowest), 0,
+                                 "\(paper.rawValue) takes ink to *nothing* somewhere. At depth 1 that "
+                                 + "is a stencil rather than paper, and no setting brings it back")
             XCTAssertLessThan(Int(lowest), 250, "PREMISE: \(paper.rawValue) has some texture in it at all")
+
+            // The half-depth entry the merge would actually tile, not the arithmetic restated.
+            let halved = try XCTUnwrap(BrushTextureMaskCache.entry(
+                for: BrushTextureSettings(mask: .builtIn(paper), tileSize: 128, depth: 0.5)))
+            let dialled = try XCTUnwrap(alphaGrid(of: halved).min())
+            XCTAssertGreaterThanOrEqual(Int(dialled), 124,
+                                        "\(paper.rawValue) at depth 0.5 still bottoms out at "
+                                        + "\(dialled). `depth` scales the shortfall, so half depth "
+                                        + "keeps at least half the ink however deep the sheet is "
+                                        + "authored — that is what makes a deep sheet a *strong* "
+                                        + "paper rather than an unusable one")
         }
     }
 

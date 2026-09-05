@@ -397,6 +397,248 @@ final class BrushTipGeneratorLogicTests: XCTestCase {
                              "the whole design is that the ends are rough *relative to* the sides")
     }
 
+    // MARK: - §12 stage 11's Texture group
+
+    /// **Every Texture nib has to carry one of §8.4's two mechanisms, and this measures *which*.**
+    ///
+    /// §8.4 names two ways a tip can contribute roughness and they are different mechanisms rather
+    /// than degrees of one:
+    ///
+    /// - a **silhouette** that changes under rotation, measured by the support-function ratio the
+    ///   Rough Ink test above uses;
+    /// - **interior holes**, which §8.4 exempts from the union argument because *a pit mid-dab is not
+    ///   filled by a neighbour's boundary*.
+    ///
+    /// **Writing this test refuted the brief it was written from.** The expectation was that every
+    /// Texture nib would be grossly asymmetric like Rough Ink's triangle. MEASURED, `grunge-crust`
+    /// is **1.33** — *below* the 1.35 ceiling `rough-ink-eroded-round` has to stay under to be a
+    /// valid control. Its silhouette is very nearly a disc. What makes it grunge is that **42.7%** of
+    /// its interior is hole, and `angle.jitter` moves that hole field's phase from dab to dab; it is
+    /// `pencil-textured`'s mechanism (support **1.11**, holes 31.4%) at a much wider spacing, not
+    /// `rough-ink-triangle`'s (support 1.61, holes **1.4%**).
+    ///
+    /// So the table below names the mechanism each nib is claimed to work by, and **the last row is
+    /// the calibration**: the triangle has to come out the *other* way round on both numbers, or
+    /// these two metrics are both measuring "the mask is not a filled square" and neither says
+    /// anything.
+    func testEveryTextureNibCarriesOneOfTheTwoMechanismsAndTheSheetSaysWhich() throws {
+        var support: [String: Double] = [:]
+        var holes: [String: Double] = [:]
+        for tip in BrushTipGenerator.generateAll() {
+            support[tip.name] = Self.supportRatio(of: tip.alpha)
+            holes[tip.name] = Self.interiorHoleShare(of: tip.alpha)
+        }
+
+        // name, minimum support ratio, minimum interior-hole share, why
+        let claims: [(String, Double, Double, String)] = [
+            ("grunge-crust", 0, 0.30,
+             "a lobed crust whose silhouette is nearly round — it works by its holes"),
+            ("chalk-block", 1.40, 0.12,
+             "a torn stick: both mechanisms, which is why it is the one nib that also wants paper"),
+            ("splatter-drops", 1.40, 0.35,
+             "a cluster: the gaps between drops are what make it a spray rather than a blot"),
+            ("stipple-specks", 1.40, 0.35,
+             "the same, and the gaps are the whole picture")
+        ]
+        for (name, minimumSupport, minimumHoles, why) in claims {
+            let ratio = try XCTUnwrap(support[name])
+            let hole = try XCTUnwrap(holes[name])
+            XCTAssertGreaterThan(ratio, minimumSupport,
+                                 "\(name) support \(String(format: "%.2f", ratio)) — \(why)")
+            XCTAssertGreaterThan(hole, minimumHoles,
+                                 "\(name) is \(String(format: "%.1f", hole * 100))% interior hole "
+                                 + "— \(why). §8.4: a union fills a dimming but not a hole.")
+        }
+
+        let triangle = try XCTUnwrap(holes["rough-ink-triangle"])
+        XCTAssertLessThan(triangle, 0.05,
+                          "CALIBRATION: rough-ink-triangle is \(String(format: "%.1f", triangle * 100))% "
+                          + "interior hole. It is supposed to be a solid blob that works by its "
+                          + "outline — if the hole metric calls it holed, it is measuring "
+                          + "\"the mask is not a filled square\" and the four claims above say nothing.")
+        XCTAssertGreaterThan(try XCTUnwrap(support["rough-ink-triangle"]),
+                             try XCTUnwrap(support["grunge-crust"]),
+                             "CALIBRATION: and the triangle has to be the *more* anisotropic of the "
+                             + "two, which is the half of §8.4 grunge does not use")
+    }
+
+    /// **§12 stage 11's whole claim, measured on the pixels: the Texture group's wide spacing is
+    /// what keeps its holes open.**
+    ///
+    /// §8.4 says *"anything whose character is in its pixels needs the dabs far enough apart to be
+    /// seen one at a time"* and the first sheet's blender died of it. The Texture group is that
+    /// finding read the other way: Grunge walks at **0.30**, three times anything else this app
+    /// ships, and the contact sheet carries a CONTROL row of the same picture at 0.05 that renders
+    /// as a plain black band with a hairy edge.
+    ///
+    /// So this is that control as an assertion. Same brush, same seed, same path, same picture —
+    /// only `spacing` differs, and both the clear share of the stroke's own bounding box and its
+    /// mean tone have to move. **The texture is removed from both arms**, because a canvas-anchored
+    /// sheet punches holes at any spacing and would make this pass for the wrong reason.
+    func testGrungesHolesSurviveAtItsOwnSpacingAndNotAtAShippedOne() throws {
+        func measure(spacing: Double) throws -> (clear: Double, mean: Double) {
+            var brush = BrushLibrary.grunge
+            brush.texture = nil
+            brush.dab.spacing = spacing
+            let texture = RasterLayerTexture(size: CGSize(width: 420, height: 160))
+            let samples = StrokeSamples((0..<70).map {
+                VectorSample(point: CGPoint(x: 40 + CGFloat($0) * 5, y: 80), pressure: 0.95)
+            }, channels: .pressureOnly)
+            BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
+                                     brushSize: brush.size, brushOpacity: brush.opacity,
+                                     random: DabRandom(seed: 0x7E_5100))
+            let image = try XCTUnwrap(Self.alphaImage(of: texture))
+            // The ink's own bounding box, so the two arms are compared over the stroke each of them
+            // actually drew rather than over a window guessed from the brush's size.
+            var minX = image.width, maxX = -1, minY = image.height, maxY = -1
+            for y in 0..<image.height {
+                for x in 0..<image.width where image.bytes[y * image.width + x] > 8 {
+                    minX = min(minX, x); maxX = max(maxX, x)
+                    minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+            XCTAssertGreaterThan(maxX, minX, "PREMISE: the stroke inked something")
+            var clear = 0, total = 0, sum = 0
+            for y in minY...maxY {
+                for x in minX...maxX {
+                    total += 1
+                    let alpha = Int(image.bytes[y * image.width + x])
+                    sum += alpha
+                    if alpha < 8 { clear += 1 }
+                }
+            }
+            return (Double(clear) / Double(total), Double(sum) / Double(total))
+        }
+
+        let wide = try measure(spacing: 0.30)
+        let tight = try measure(spacing: 0.05)
+        XCTAssertGreaterThan(wide.clear, 0.15,
+                             "at its shipped 0.30 the crust leaves only "
+                             + "\(String(format: "%.1f", wide.clear * 100))% of its own box clear, "
+                             + "which is not a crust")
+        XCTAssertGreaterThan(wide.clear, tight.clear * 1.6,
+                             "0.30 leaves \(String(format: "%.1f", wide.clear * 100))% clear and "
+                             + "0.05 leaves \(String(format: "%.1f", tight.clear * 100))% — §8.4's "
+                             + "minimum-spacing finding is what this group is built on, and if the "
+                             + "two are close the spacing is not what is doing the work")
+        XCTAssertLessThan(wide.mean, tight.mean * 0.75,
+                          "the tone has to move as well as the holes: 0.30 means "
+                          + "\(String(format: "%.0f", wide.mean)) against 0.05's "
+                          + "\(String(format: "%.0f", tight.mean)), out of 255")
+    }
+
+    /// **The Chalk A/B on the sheet claims the three rows differ in exactly one field, and this is
+    /// what makes that true.**
+    ///
+    /// The sheet's finding is that Chalk's nib alone draws a dark stroke with a grainy edge and only
+    /// becomes chalk through §2.25's canvas-anchored sheet. That is a claim about the *fixtures* —
+    /// one row at a different spacing or flow would leave the sheet looking the same and meaning
+    /// nothing. CLAUDE.md's *"mutate one fixture cumulatively, so a row's difference is attributable
+    /// to the row"*, one level up, exactly as `testTheRoughInkRowsDifferOnlyInTheirPictureAnd…` does.
+    func testTheChalkRowsDifferOnlyInTheirPaper() throws {
+        let rows = BrushCandidates.all(tips: BrushTipGenerator.generateAll())
+            .filter { $0.slot == "Chalk" && $0.name.hasPrefix("Chalk — Block") }
+        XCTAssertEqual(rows.count, 4, "PREMISE: the A/B is four rows of one nib")
+
+        let reference = try XCTUnwrap(rows.first).brush
+        XCTAssertNil(reference.texture, "PREMISE: the first row is the leg with no paper on it")
+        for candidate in rows {
+            let brush = candidate.brush
+            XCTAssertEqual(brush.tip, reference.tip, candidate.name)
+            XCTAssertEqual(brush.size, reference.size, candidate.name)
+            XCTAssertEqual(brush.opacity, reference.opacity, candidate.name)
+            XCTAssertEqual(brush.dab, reference.dab, candidate.name)
+            XCTAssertEqual(brush.stroke, reference.stroke, candidate.name)
+            XCTAssertEqual(brush.modulations.rows, reference.modulations.rows, candidate.name)
+        }
+        XCTAssertEqual(Set(rows.compactMap { $0.brush.texture }).count, 3,
+                       "three of the four carry a paper and no two are the same one — the field "
+                       + "the sheet says is the only difference has to actually differ")
+    }
+
+    /// **And the paper has to reach the ink, not only the model.**
+    ///
+    /// A `BrushTextureSettings` that resolved to nothing — a mask the bundle does not carry, a depth
+    /// quantised to zero — leaves a perfectly well-formed value on the brush and paints the
+    /// untextured stroke. `BrushTextureMaskCache` answers nil for a missing sheet and the merge
+    /// *skips*, which is the safe direction and therefore the silent one. So: the shipped Chalk and
+    /// the same brush with its texture removed are walked over the same path with the same seed, and
+    /// the paper has to take a real share of the ink away.
+    func testTheShippedChalkActuallyLaysItsInkThroughPaper() throws {
+        func inkSum(_ brush: Brush) throws -> Int {
+            let texture = RasterLayerTexture(size: CGSize(width: 320, height: 120))
+            let samples = StrokeSamples((0..<60).map {
+                VectorSample(point: CGPoint(x: 30 + CGFloat($0) * 4, y: 60), pressure: 0.95)
+            }, channels: .pressureOnly)
+            BrushStamper.stampStroke(into: texture, samples: samples, brush: brush, color: .black,
+                                     brushSize: brush.size, brushOpacity: brush.opacity,
+                                     random: DabRandom(seed: 0x7E_5101))
+            let image = try XCTUnwrap(Self.alphaImage(of: texture))
+            return image.bytes.reduce(0) { $0 + Int($1) }
+        }
+
+        let shipped = BrushLibrary.chalk
+        XCTAssertNotNil(shipped.texture, "PREMISE: Chalk is the brush that carries a sheet")
+        var bare = shipped
+        bare.texture = nil
+
+        let withPaper = try inkSum(shipped)
+        let withoutPaper = try inkSum(bare)
+        XCTAssertGreaterThan(withoutPaper, 0, "PREMISE: the bare nib inks something")
+        XCTAssertLessThan(Double(withPaper), Double(withoutPaper) * 0.75,
+                          "the paper took \(String(format: "%.0f", (1 - Double(withPaper) / Double(withoutPaper)) * 100))% "
+                          + "of the ink away. §2.25's sheet is the whole of what makes this brush "
+                          + "chalk rather than a dark stroke with a grainy edge — a merge that "
+                          + "skipped would leave these two equal and every model assertion green.")
+    }
+
+    /// **And it has to reach the ink on the tier the artist actually draws on.**
+    ///
+    /// The test above walks `stampStroke` into a `RasterLayerTexture` directly. The app's default
+    /// layer is a **vector** one: the pen's ink is a `VectorStroke` carrying a `BrushRef` into
+    /// `BrushPool`, re-rendered from that pool on every invalidation. Every link in that chain is a
+    /// place a `texture` can be dropped while the model stays perfectly correct — CLAUDE.md's own
+    /// *"a correct value drawn in the wrong place"*, and the reason this is a second test rather
+    /// than a second assertion in the first.
+    func testTheShippedChalkLaysItsInkThroughPaperOnTheVectorTierToo() throws {
+        func inkSum(_ brush: Brush) throws -> Int {
+            let size = CGSize(width: 320, height: 120)
+            let stroke = VectorStroke(brush: brush,
+                                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                      size: brush.size, opacity: brush.opacity,
+                                      samples: StrokeSamples((0..<60).map {
+                                          VectorSample(point: CGPoint(x: 30 + CGFloat($0) * 4, y: 60),
+                                                       pressure: 0.95)
+                                      }, channels: .pressureOnly))
+            let canvas = VectorCanvas(size: size, strokes: [stroke], fills: [])
+            let image = canvas.render()
+            let cg = try XCTUnwrap(image.cgImage)
+            var bytes = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+            bytes.withUnsafeMutableBytes { raw in
+                guard let ctx = CGContext(data: raw.baseAddress, width: cg.width, height: cg.height,
+                                          bitsPerComponent: 8, bytesPerRow: cg.width * 4,
+                                          space: PixelOps.deviceRGBColorSpace,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                else { return }
+                ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            }
+            return stride(from: 3, to: bytes.count, by: 4).reduce(0) { $0 + Int(bytes[$1]) }
+        }
+
+        let shipped = BrushLibrary.chalk
+        var bare = shipped
+        bare.texture = nil
+        let withPaper = try inkSum(shipped)
+        let withoutPaper = try inkSum(bare)
+        XCTAssertGreaterThan(withoutPaper, 0, "PREMISE: the bare nib inks something on this tier")
+        XCTAssertLessThan(Double(withPaper), Double(withoutPaper) * 0.75,
+                          "on the vector tier the paper took "
+                          + "\(String(format: "%.0f", (1 - Double(withPaper) / Double(withoutPaper)) * 100))% "
+                          + "of the ink away. The artist draws here, and a texture that reaches the "
+                          + "raster tier and not this one is a brush that looks right in every test "
+                          + "and solid black on the canvas.")
+    }
+
     // MARK: - Helpers
 
     /// **The support function's extremes, as a ratio.** For each of 180 directions, how far the
@@ -429,6 +671,44 @@ final class BrushTipGeneratorLogicTests: XCTestCase {
             highest = max(highest, reach)
         }
         return lowest > 1 ? highest / lowest : Double.greatestFiniteMagnitude
+    }
+
+    /// **§8.4's *other* operand: how much of the mask's own interior is a hole.**
+    ///
+    /// Per row, the pixels strictly between the leftmost and rightmost ink that carry no ink at all,
+    /// over the width of that span. A solid blob answers ~0 however ragged its outline; a nib whose
+    /// grain punches through answers a third or more. The support ratio above cannot see this at all
+    /// — `pencil-textured` measures **1.11** on it, which is a disc — and §8.4 is explicit that the
+    /// two are different mechanisms rather than degrees of one: an outline is filled in by the next
+    /// dab's outline, and a pit mid-dab is not.
+    ///
+    /// A *hole*, not a dimming, for the reason §8.4's second sheet found: twenty overlapping dabs
+    /// turn 0.2 of coverage into 0.92, so the threshold is "no ink" rather than "less ink".
+    private static func interiorHoleShare(of alpha: [UInt8]) -> Double {
+        let n = BrushTipGenerator.side
+        var holes = 0, span = 0
+        for y in 0..<n {
+            var first = -1, last = -1
+            for x in 0..<n where alpha[y * n + x] > 24 {
+                if first < 0 { first = x }
+                last = x
+            }
+            guard first >= 0, last > first else { continue }
+            span += last - first + 1
+            for x in first...last where alpha[y * n + x] < 8 { holes += 1 }
+        }
+        return span > 0 ? Double(holes) / Double(span) : 0
+    }
+
+    /// The same read as `alphaBytes` with the rendered image's own dimensions kept, because
+    /// `renderToUIImage` answers at the device's scale and a test that indexed a row by an assumed
+    /// width would be reading the wrong pixels while still passing.
+    private static func alphaImage(of texture: RasterLayerTexture)
+        -> (bytes: [UInt8], width: Int, height: Int)? {
+        guard let cg = texture.renderToUIImage().cgImage, let bytes = alphaBytes(of: texture) else {
+            return nil
+        }
+        return (bytes, cg.width, cg.height)
     }
 
     private static func alphaBytes(of texture: RasterLayerTexture) -> [UInt8]? {

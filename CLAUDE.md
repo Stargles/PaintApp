@@ -261,6 +261,14 @@ before something was deleted will silently resurrect it, and the count is the on
   the test names against the value it reports — that is thirty seconds and it settles which of the
   two you are looking at. Use plain `test` (which builds) unless you have a reason not to.
 
+  **And the simulator you are *driving* is a binary too, which is the same trap pointed at the
+  screenshot.** `simctl install` ships whatever `build/DerivedData/.../*.app` currently holds, and
+  that is the last thing any `xcodebuild` wrote to that path — including the run you used to
+  mutation-test an assertion. Session 26 reverted a deliberate `depth: 0` mutation, installed without
+  rebuilding, drew with the brush, and spent a cycle diagnosing a shipped defect that existed only in
+  the installed bundle. **Rebuild between a mutation run and a drive**, and when a drive contradicts a
+  green test about the same code, suspect the bundle before the code.
+
 **MEASURED at `8a4f156` — 3048 tests, 3042 passed, 0 failed, 6 skipped, and no environmental red at all**,
 which is rare enough here to be worth stating. The wall clock was 24.9 min but **that number is not a
 measurement**: two logic-tier runs were queued alongside it under `simlock`. Per this section's own 2026-08-29

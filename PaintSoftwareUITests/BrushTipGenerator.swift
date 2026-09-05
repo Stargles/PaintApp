@@ -36,8 +36,13 @@ import CoreGraphics
 /// - **Soft and hard round, the technical pens, and the opaque round.** `BrushTip.round` already
 ///   *is* a disc with a falloff; §8.4's *"a hard round is a disc, a soft round a falloff"* is a
 ///   description of the procedural arm, not an instruction to draw one.
-/// - **The Texture group.** §8.6's grunge, splatter, stipple and chalk are §12 stage 11's CC0
-///   sourcing, because scanned grunge is what §8.4 says is genuinely hard to fake.
+/// **The Texture group is generated too, and that was an open question until round four.** §8.4
+/// ruled *"source CC0 only for Texture, where scanned grunge and splatter are genuinely hard to
+/// fake"*; §13 asked whether eleven shipped tips had made that obsolete. They had. The four Texture
+/// nibs turn on three things the earlier rounds had not put together — **holes at floor 0** rather
+/// than a mottle, a **spacing of 0.09–0.46** where every other group walks at 0.03–0.095, and
+/// §2.25's **canvas-anchored paper**, which merges once per stroke and is therefore the one texture
+/// in this engine that §8.4's union argument cannot reach.
 ///
 /// **A tip's silhouette has to be discriminating, and that is checked rather than assumed.** §12
 /// stage 5 records the trap in this document's own back yard: *"a tip that fills its mask is
@@ -285,7 +290,81 @@ enum BrushTipGenerator {
 
         Shape(name: "streak-dots-8", seed: 0x5148_0062,
               body: { u, v, s in dots(u, v, s, count: 8, stratified: false,
-                                      minRadius: 0.045, maxRadius: 0.075) })
+                                      minRadius: 0.045, maxRadius: 0.075) }),
+
+        // MARK: Texture — §13's open question, asked of the generator
+        //
+        // **§8.4 rules *"source CC0 only for Texture, where scanned grunge and splatter are
+        // genuinely hard to fake"*, and §13 asks whether that is still true now the generator has
+        // made eleven shipped tips.** These are the attempt. Everything the first three rounds
+        // learned governs them and none of it is optional:
+        //
+        // - Every one is **grossly asymmetric** and carried at `angle.jitter 1`, because §8.4's
+        //   boundary paragraph is that asymmetry and rotation multiply and neither works alone.
+        // - Interior structure reaches **zero**, never a dimming — twenty overlapping dabs turn 0.2
+        //   of coverage into 0.92.
+        // - And they are authored to be stamped **far apart**. §8.4: *"anything whose character is
+        //   in its pixels needs the dabs far enough apart to be seen one at a time."* Every shipped
+        //   brush before this walks at 0.03–0.095; these want 0.25–0.7, which is where a paint
+        //   program's grunge and splatter brushes have always sat and is the one dial nobody on this
+        //   sheet had turned.
+
+        // **Grunge — a crust, not a blob.** The gross shape is a lobed disc whose radius swings by a
+        // third, so a turn presents a genuinely different outline; on top of it a coarse tear, a dry
+        // broken outer band, and a `Grain` whose floor is **0** so the interior is holes rather than
+        // mottle. The two differ only in how coarse the holes are: `crust` is a sponge print, `soot`
+        // a finer deposit that survives a smaller brush.
+        Shape(name: "grunge-crust", seed: 0x5148_0071,
+              grain: Grain(frequency: 5.0, octaves: 3, floor: 0.0, threshold: 0.47, softness: 0.09),
+              body: { u, v, s in grungeBlob(u, v, s, radius: 0.80, lobes: 0.26, bite: 0.20,
+                                            dry: 0.65) }),
+
+        Shape(name: "grunge-soot", seed: 0x5148_0072,
+              grain: Grain(frequency: 11.0, octaves: 3, floor: 0.0, threshold: 0.44, softness: 0.14),
+              body: { u, v, s in grungeBlob(u, v, s, radius: 0.84, lobes: 0.22, bite: 0.26,
+                                            dry: 0.50) }),
+
+        // **Splatter — a cluster of drops whose radii come off a cube law.** That is the whole of
+        // what separates a splatter from a field of dots: one or two drops carry most of the ink and
+        // the rest are specks, so a stamp has a *shape* rather than a texture. Each drop's own
+        // boundary is torn on the unit circle (`nib`'s wrap trick) so nothing here is a disc.
+        // **Thirteen drops at a 0.44 maximum was the first render and it was wrong**: the cube law
+        // gave two or three *large* blobs a stamp and almost no specks, so a drag laid a chain of
+        // fat dots. What a splatter needs is the other end of the same law — one or two carriers
+        // and a crowd of flecks, spread nearly to the mask's edge so the flecks land off the path.
+        Shape(name: "splatter-drops", seed: 0x5148_0081,
+              body: { u, v, s in splatterCluster(u, v, s, drops: 26, spread: 0.86,
+                                                 minRadius: 0.014, maxRadius: 0.30, tear: 0.22) }),
+
+        // **No carriers at all** — every drop small, spread nearly to the edge. Round two had this
+        // at a 0.24 maximum and the elongation merged its drops into one blot; a mist is a mist
+        // because nothing in it is large.
+        Shape(name: "splatter-fine", seed: 0x5148_0082,
+              body: { u, v, s in splatterCluster(u, v, s, drops: 20, spread: 0.90,
+                                                 minRadius: 0.014, maxRadius: 0.14, tear: 0.25) }),
+
+        // **Stipple — the tipped arm of the question.** §2.18's `density` on a plain round tip is
+        // the other arm and needs no picture at all; this is what a picture adds, which is that a
+        // single stamp is already several dots of different sizes. Hard-edged on purpose: a stipple
+        // whose dots are feathered reads as spray.
+        Shape(name: "stipple-specks", seed: 0x5148_0091,
+              body: { u, v, s in speckle(u, v, s, count: 17, spread: 0.80,
+                                         minRadius: 0.030, maxRadius: 0.105) }),
+
+        // **Chalk — a worn stick, squarish and torn, with the pits doing the work.** The body is a
+        // superellipse the way the painterly nibs are, but the boundary is torn at two scales
+        // instead of combed and the `Grain` floor is 0, so the interior is holes. What this nib is
+        // *for* is to be laid through §2.25's canvas-anchored paper, which is the route that did not
+        // exist when §8.4 was written — see `BrushCandidates`' Chalk rows, which are the A/B.
+        Shape(name: "chalk-block", seed: 0x5148_00A1,
+              grain: Grain(frequency: 7.5, octaves: 3, floor: 0.0, threshold: 0.40, softness: 0.20),
+              body: { u, v, s in chalkBlock(u, v, s, aspect: 1.45, exponent: 3.2, tear: 0.17,
+                                            edge: 0.045) }),
+
+        Shape(name: "chalk-worn", seed: 0x5148_00A2,
+              grain: Grain(frequency: 4.5, octaves: 2, floor: 0.0, threshold: 0.34, softness: 0.30),
+              body: { u, v, s in chalkBlock(u, v, s, aspect: 1.15, exponent: 2.6, tear: 0.24,
+                                            edge: 0.090) })
     ]
 
     // MARK: - The shape vocabulary
@@ -592,6 +671,125 @@ enum BrushTipGenerator {
             coverage = max(coverage, smoothFalloff(radius - sqrt(dx * dx + dy * dy), 0.55 * radius))
         }
         return coverage
+    }
+
+    // MARK: - The Texture group's vocabulary — §13's open question
+
+    /// **A grunge crust.** A disc whose radius carries two independent noise terms on the unit
+    /// circle: a **low-frequency lobe field** that is the gross asymmetry §8.4's rotation has to have
+    /// something to turn, and a coarser tear on top of it. Then a **dry band**, which is the outer
+    /// third of the blob eaten into rather than feathered.
+    ///
+    /// Both noise terms are sampled on the unit circle rather than on an angle, for `nib`'s reason:
+    /// a 1-D field indexed by `atan2` has a seam at `-π` and a repeated stamp turns one straight
+    /// facet into a stripe.
+    ///
+    /// This draws only the **silhouette**. The holes are the `Grain` the catalogue pairs it with,
+    /// whose floor is 0 — §8.4's *"a union fills in a dimming; it cannot fill in a hole"*, which for
+    /// a stamp brush at a wide spacing is the whole design rather than a caveat.
+    static func grungeBlob(_ u: Float, _ v: Float, _ seed: UInt64,
+                           radius: Float, lobes: Float, bite: Float, dry: Float) -> Float {
+        let r: Float = sqrt(u * u + v * v)
+        guard r > 1e-4 else { return 1 }
+        let cx: Float = u / r, cy: Float = v / r
+        let low: Float = value2(cx * 1.7 + 2.9, cy * 1.7 + 6.1, seed &+ 5)
+        let mid: Float = value2(cx * 5.5 + 9.3, cy * 5.5 + 1.7, seed &+ 6)
+        let rr: Float = radius * (1 + lobes * (2 * low - 1) + bite * (2 * mid - 1))
+        let body: Float = step(rr - r, 1.6 * pixel)
+        guard body > 0 else { return 0 }
+        guard dry > 1e-4 else { return body }
+        // The dry band. `t` is 0 at the boundary and 1 a third of the radius inside it, so the
+        // break-up is strongest exactly where the edge is and stops before it eats the core.
+        let t: Float = min(max((rr - r) / (0.34 * radius), 0), 1)
+        let pits: Float = fbm2(u * 7.5 + 4.4, v * 7.5 + 8.8, octaves: 2, seed: seed &+ 47)
+        return body * (t + (1 - t) * (1 - dry + dry * pits))
+    }
+
+    /// **A splatter cluster** — drops whose radii come off a **cube law**, so one or two carry most
+    /// of the ink and the rest are specks.
+    ///
+    /// That distribution is the design and a uniform one is the failure: a stamp of equal dots is a
+    /// stipple, and what makes a splatter read is that it has a *main* and a spray around it. The
+    /// placement is `sqrt`-warped so the drops are area-uniform on the disc rather than piling into
+    /// the middle.
+    ///
+    /// **Each drop is stretched along its own random axis**, and the first render is why. A cluster
+    /// of round blots came back reading as *hexagons* — a radial displacement at three cycles is a
+    /// faceted circle and nothing else — where a flung drop is elongated in the direction it
+    /// travelled. Every drop carries an axis and an aspect of 1–2.1, measured in a space squashed
+    /// along that axis, so the shape is an ellipse before its boundary is torn.
+    ///
+    /// The tear is then at 5.5 cycles rather than 3, which is fine irregularity on a rounded outline
+    /// instead of a polygon. The union is a `max`, which is what makes two overlapping drops one
+    /// blot with a waist rather than a brighter disc.
+    static func splatterCluster(_ u: Float, _ v: Float, _ seed: UInt64,
+                                drops: Int, spread: Float,
+                                minRadius: Float, maxRadius: Float, tear: Float) -> Float {
+        var coverage: Float = 0
+        for i in 0..<drops {
+            let s: UInt64 = seed &+ UInt64(i) &* 0x9E37_79B9_7F4A_7C15
+            let radius: Float = minRadius
+                + (maxRadius - minRadius) * pow(hash01(i, 1, s), 3.0)
+            let angle: Float = hash01(i, 2, s) * 6.2831853
+            let reach: Float = spread * sqrt(hash01(i, 3, s))
+            let dx: Float = u - cos(angle) * reach, dy: Float = v - sin(angle) * reach
+            guard abs(dx) < radius * 2.6 + 0.02, abs(dy) < radius * 2.6 + 0.02 else { continue }
+            let axis: Float = hash01(i, 9, s) * 3.1415927
+            let ca: Float = cos(axis), sa: Float = sin(axis)
+            let stretch: Float = 1 + 1.1 * hash01(i, 10, s)
+            let px: Float = (dx * ca + dy * sa) / stretch, py: Float = -dx * sa + dy * ca
+            let d: Float = sqrt(px * px + py * py)
+            guard d < radius * 1.6 + 0.02 else { continue }
+            guard d > 1e-4 else { return 1 }
+            let n: Float = value2(px / d * 5.5 + Float(i) * 2.7, py / d * 5.5 + 4.3, s &+ 0x71)
+            let rr: Float = radius * (1 + tear * (2 * n - 1))
+            coverage = max(coverage, step(rr - d, 1.3 * pixel))
+            if coverage >= 1 { return 1 }
+        }
+        return coverage
+    }
+
+    /// **Stipple's tipped arm** — hard-edged dots of mixed size scattered over the nib.
+    ///
+    /// Deliberately *not* `dots`, which feathers each disc over 55% of its own radius because a
+    /// Streaky ribbon wants soft sides. A stipple whose dots are feathered reads as spray, and the
+    /// two masks would otherwise be one function with a parameter nobody could name.
+    static func speckle(_ u: Float, _ v: Float, _ seed: UInt64,
+                        count: Int, spread: Float, minRadius: Float, maxRadius: Float) -> Float {
+        var coverage: Float = 0
+        for i in 0..<count {
+            let s: UInt64 = seed &+ UInt64(i) &* 0xC2B2_AE3D_27D4_EB4F
+            let angle: Float = hash01(i, 4, s) * 6.2831853
+            let reach: Float = spread * sqrt(hash01(i, 5, s))
+            let radius: Float = minRadius + (maxRadius - minRadius) * pow(hash01(i, 6, s), 1.8)
+            let dx: Float = u - cos(angle) * reach, dy: Float = v - sin(angle) * reach
+            coverage = max(coverage, step(radius - sqrt(dx * dx + dy * dy), 1.2 * pixel))
+            if coverage >= 1 { return 1 }
+        }
+        return coverage
+    }
+
+    /// **A worn stick of chalk** — a superellipse whose boundary is torn at two scales.
+    ///
+    /// The body is the painterly nibs' shape and the difference is what is done to it: they carry a
+    /// `comb` because a paint brush has bristles, and this carries a two-scale tear because a stick
+    /// of chalk has a broken edge. The interior is the `Grain` the catalogue pairs it with, at floor
+    /// 0 — holes, not shading.
+    ///
+    /// The tear is a **sum of an isotropic 2-D term and a directional one**, and the second is what
+    /// makes the nib asymmetric enough for `angle.jitter` to have something to turn: a purely radial
+    /// displacement moves every direction alike, which is §8.4's refuted eroded round.
+    static func chalkBlock(_ u: Float, _ v: Float, _ seed: UInt64,
+                           aspect: Float, exponent: Float, tear: Float, edge: Float) -> Float {
+        let hu: Float = 0.92
+        let hv: Float = hu / aspect
+        let su: Float = abs(u) / hu, sv: Float = abs(v) / hv
+        let sBox: Float = pow(pow(su, exponent) + pow(sv, exponent), 1 / exponent)
+        let broad: Float = 2 * value2(u * 1.5 + 3.7, v * 1.5 + 8.1, seed &+ 13) - 1
+        let fine: Float = ragged(u * 2.2 + v * 1.4 + 5.9, seed &+ 17)
+        let d: Float = (1 + tear * (0.6 * broad + 0.4 * fine)) - sBox
+        guard d > 0 else { return 0 }
+        return smoothFalloff(d, max(edge, 1.4 * pixel))
     }
 
     // MARK: - Edge and falloff helpers
