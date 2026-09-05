@@ -286,6 +286,32 @@ and a second thing to keep in step.
   differently in the two slots: a stray reading above 1 is flattened as an *input* and would *amplify*
   as a *gain*. A second input attenuates; raising `amount` is how a row is made bigger.
 
+**2.24 The editor is a screen, not a panel, and its shape is a chain per output.** Owner: *"The brush
+edit menu right now is a little menu, whereas in Procreate it is like a separate screen. For this menu,
+I think we need to have it cover the entire screen due to the complex interactions it can have."* The
+brushes menu stays a dropdown and **wants to be taller** — the owner asked for more brushes visible at
+once — but the editor is full-screen.
+
+Its shape is the owner's own, and it is **not** the flat row list §6 stores:
+
+> *"there should be a dropdown list of all the outputs of the brush ... These can be organized into
+> groups. Clicking on one of these outputs will expand it down into the controller. You select the input
+> option of the brush (pressure, tilt, etc). Then you can add modifiers onto it, like it passes through
+> an input/output curve ramp module, then a randomizer module. This means that for each output there can
+> only be one input for now, but I think thats alright, though in the future it may change."*
+
+So: **outputs are the index**, each expands to *one* input followed by an **ordered chain of modules** —
+a curve ramp, a randomiser, and whatever else earns a place. §13 carries where this and §6 disagree and
+what it costs to close the gap; it is a real difference in both directions, not a skin.
+
+**Three outputs the owner named that do not exist yet.** `flow` does and is *"alpha of dab, not to be
+confused with opacity"*, which is exactly what §2.11 built. **Vertical/horizontal stretch** is the
+`roundness` §6 deferred, and it is the expensive one — a second extent through both `DabTarget`
+primitives, `BakedDab`, `DabPose.applied(to:)`, `dabBounds`, `StrokeScratch`'s window and every dirty
+rect. **Vertical/horizontal offset** is a *directed* displacement, which §8.4 has a negative result
+about: coherent `scatter` and a pure perpendicular offset were indistinguishable, so no `offset` output
+was built. An offset the artist aims is a different thing from that and does not inherit the refutation.
+
 **2.23 Not every brush is a dab walk, and the architecture must survive the first one that is not.**
 Owner: *"There are also some special brush types I want to add which may follow custom brush logic, so
 again, design the architecture cleanly and well thought out. These include stuff like the fill brush

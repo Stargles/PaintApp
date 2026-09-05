@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-09-04)
 
 ## Corpus Check
-- 376 files · ~1,865,051 words
+- 382 files · ~1,876,386 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `2d8953cb`
+- Built from commit: `4d30d3d6`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -781,7 +781,7 @@ Nodes (21): Editing, handles, none, spacing, Grip, Guide, GuideOverlayView, Bool
 
 ### Community 115 - "Handoff"
 Cohesion: 0.20
-Nodes (10): Ask the owner these, Do this first — the brush engine, and there is a decision owed before the next stage starts, Everything else open, none of it touched this pass, Filed rather than fixed, and each is a decision rather than a backlog entry, Handoff, Standing instructions from the owner about how you work, State, Traps this pass paid for (+2 more)
+Nodes (10): Ask the owner these, Do this first — the brush engine, and there is a decision owed before the next stage starts, Everything else open, none of it touched this pass, Filed rather than fixed, and each is a decision rather than a backlog entry, Four rulings the owner made this pass that outlive the stage, Handoff, Standing instructions from the owner about how you work, State (+2 more)
 
 ### Community 116 - "LassoFillLogicTests"
 Cohesion: 0.06
@@ -1592,7 +1592,7 @@ Nodes (13): Dab, DabProbe, SandwichPresentation, disengaged, midStroke, rest, Re
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1574 isolated node(s):** `1. The brief, verbatim`, `2. Rulings — settled, do not re-litigate`, `3.1 Capture`, `3.2 Stabilize`, `3.3 Refit — BUILT, and not the way this section first described it` (+1569 more)
+- **1574 isolated node(s):** `Do this first — the brush engine, and there is a decision owed before the next stage starts`, `Ask the owner these`, `State`, `What stage 8 settled, because it is easy to re-open by accident`, `Four rulings the owner made this pass that outlive the stage` (+1569 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **24 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
