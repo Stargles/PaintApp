@@ -2140,10 +2140,18 @@ the `BrushTipGenerator` shape that drew them so any one of them can be regenerat
 
 **Rough Square + Blotchy Dynamics was rendered and the triangle kept.** The owner asked to see it —
 *"i wonder what rough ink square with blotchy dynamics will look like"* — so round three carries the
-row with **only the tip swapped** from the triangle's. The square reads slightly heavier and blockier:
-its four flat faces give a coarser, more repetitive notch, where the triangle's larger asymmetry (its
-support ratio is about 2 against the square's 1.4) presents a more varied outline per turn. Neither is
-wrong; the triangle is the more varied line and was already accepted, so it ships.
+row with **only the tip swapped** from the triangle's, which makes the pair the picture term isolated
+against a fixed set of dynamics. On the sheet the square's line reads a little heavier and blockier and
+the triangle's tooth a little finer; they are close, and the triangle was already the owner's accepted
+pick, so it ships.
+
+**The obvious explanation for that is wrong, and the measurement is worth keeping because of it.** The
+natural reading is *the triangle is more asymmetric, so rotation changes its outline more*. MEASURED by
+`BrushTipGeneratorLogicTests`' own support-function ratio, it is the other way round: **rough-ink-square
+1.79, rough-ink-triangle 1.61** (half-flat 2.77, the eroded-round control 1.10). §8.4's boundary
+paragraph is satisfied by both — what separates them is that the square's four flat faces repeat every
+quarter turn while the triangle's three do not, so the square presents a coarser and more *repetitive*
+notch at the same anisotropy. Gross anisotropy is the gate, not the ranking.
 
 **`isPencilPreset` is group membership now**, which is what this section predicted stage 9 would do:
 picking *any* of the four Sketching brushes selects the pencil tool, and a brush the artist adds to
