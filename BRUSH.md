@@ -643,6 +643,50 @@ it is the **broken** line — ink, gap, ink, survivors left where they were. Ran
 the dabs instead, which is a **dotted** line. They are different marks and the difference is §8.4's:
 dropping dabs moves nothing that stays.
 
+**2.32 `density` is a threshold, not a built-in dice roll, and this supersedes §2.18's intrinsic draw.**
+Owner: *"I cant change the wavelength or octaves etc. of the random density. Could it be better to just
+have something like a rule where threshold of over 50% means the dab stays? then you can control it with
+modules."*
+
+**Yes, and it is a deletion rather than an addition.** `density` becomes an ordinary §6 output and the
+stamper's rule is one comparison: **a dab is stamped when its resolved `density` is at least 0.5.** The
+randomness moves onto the chain, where a randomiser module already carries λ, octaves and a falloff, and
+can itself be curved and scaled.
+
+**What goes:** `BrushDabSettings.densityWavelength`, `DabRandom.Channel.density`'s intrinsic roll, and
+the special case in `stampDab` that made this the one output whose value is not a pure function of its
+inputs. §2.18's *"the coherence lives in the draw, not in the value compared against"* is **superseded
+rather than contradicted** — it was a warning about a hybrid where the threshold moved while the draw
+stayed white, and under a fixed threshold there is no separate draw to stay white. The mechanism it
+argued for survives exactly: band-limited noise crossing a threshold is what makes a *run* of dabs drop,
+and that is now stated on the chain instead of hidden in the output.
+
+**It is a semantic change and every preset using it must be converted.** Today `density` is a **rate** —
+0.4 means four dabs in ten, scattered in runs of λ. After this it is a **gate**: 0.4 with no randomiser
+draws *nothing at all*, and "four in ten" is written as a base near the threshold with a randomiser
+swinging across it. §8.6's Rough Ink and Rough Ink Blotchy both use dropout and both need rewriting; a
+preset whose ink changes silently is a regression, so pin them.
+
+**What it buys**, and it is the whole reason the owner asked: octaves on the dropout, a curve on the
+dropout, a second input scaling the dropout (so §2.29's *"segments below a third pressure"* becomes one
+chain rather than a special case), and several randomisers at different λ on one output — §8.4's
+multi-scale roughness, now expressible on the parameter that most wants it.
+
+**2.33 A scale module carries its own amount, so two inputs on one output can be balanced.** Owner:
+*"Lets say I have an output controlled by both pressure and random. Pressure has an amount slider, but
+random does not. It may be worth having a gain value for each input, so I can control exactly how much
+the two affect the output."*
+
+A chain is `amount · modules(input)` — **one** amount, applied last, so the row's primary input has a
+number and a `scale` module has only a curve. Setting "half as much random" therefore meant *drawing* a
+flat curve at 0.5, which is using a curve editor to enter a number.
+
+So `BrushModule.scale` becomes *(input, curve, amount)*, mixed rather than multiplied outright:
+`value · (1 - amount + amount · curve(reading))`. **At amount 0 the module does nothing and at 1 it is
+today's behaviour**, which is what makes it a strict addition and keeps every existing chain rendering
+byte-identical. Every module that reads a sensor now carries the same three things — input, curve,
+amount — which is the consistency §2.29 started and this finishes.
+
 **2.31 The editor edits a draft, the pad previews that draft, and Done commits where Cancel discards.**
 Owner: *"can you make it so that as you adjust the settings in the edit brush menu, the strokes in the
 drawing pad adjusts? too?"* and *"the drawing pad shouldnt save the settings until you click done. There
