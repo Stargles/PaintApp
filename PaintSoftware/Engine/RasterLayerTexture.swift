@@ -501,8 +501,28 @@ final class CGContextDabTarget: DabTarget {
     /// The stroke's own buffer while §2.11's group is open — see `DabTarget.beginStrokeGroup`.
     private var group: StrokeGroupBuffer?
 
+    /// **What the group that closed most recently actually painted**, or `.null` if it painted
+    /// nothing — `StrokeGroupBuffer.bounds` kept after the merge instead of thrown away with it.
+    ///
+    /// `VectorCanvas` reads this once per element to bound a region re-walk, and it has to be *this*
+    /// number rather than one derived from the brush: BRUSH.md §12 stage 8 records that a
+    /// conservative box built from `Brush.maximumDabExtent` was refuted during that stage and never
+    /// shipped, because `ResponseCurve` does not clamp and so no static box is a bound. The union of
+    /// the rectangles the dabs were actually handed is exact by construction, and the walk computes
+    /// it anyway to size the merge's clip.
+    ///
+    /// **Independent of the clip in force**, which is what makes it usable as a cache: a dab is added
+    /// to the group by geometry, not by whether CoreGraphics went on to paint any of it. So the value
+    /// a *clipped* walk records is the same one a full walk would.
+    ///
+    /// Reset on `beginStrokeGroup` rather than only assigned on `endStrokeGroup`, so a caller that
+    /// reads it after a draw that opened no group at all — `strokePolyline`, the `.preview` tier —
+    /// gets `.null` rather than the previous stroke's answer.
+    private(set) var lastGroupBounds: CGRect = .null
+
     func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
         group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode, texture: texture)
+        lastGroupBounds = .null
     }
 
     /// One transparency layer over exactly the pixels the stroke painted, composited into the
@@ -514,6 +534,7 @@ final class CGContextDabTarget: DabTarget {
     func endStrokeGroup() {
         guard let group else { return }
         self.group = nil
+        lastGroupBounds = group.bounds
         guard !group.isEmpty, !group.bounds.isNull else { return }
         ctx.saveGState()
         // **Integral, and that is not tidiness.** A clip on a fractional rectangle is antialiased, so

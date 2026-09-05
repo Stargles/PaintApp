@@ -876,6 +876,147 @@ final class StrokeDensityBench: XCTestCase {
         }
     }
 
+    // MARK: - (5) Where the owner's cross-eraser lag spike actually is
+
+    /// The eraser the owner reports the spike with. Mode 3's footprint is a *selection* radius fixed
+    /// at the brush size (`VectorCanvas.cutToIntersection(atCanvasPoint:)` takes no pressure), so
+    /// this is the whole of the nib.
+    private static let eraserSize: CGFloat = 40
+    private static let eraserBrush = Brush(name: "BenchEraser", tip: .round, size: eraserSize)
+
+    /// A drag across the middle of the canvas, where `scene(n)`'s strokes are densest — the gesture
+    /// the report describes. Sampled at the rate a finger delivers, not at the rate a test would
+    /// like: **the cost this measures is per touch sample**, so a coarse path would understate it by
+    /// exactly the factor it was coarsened by.
+    private static func dragPath(samples: Int) -> [CGPoint] {
+        (0..<samples).map { step in
+            let t = CGFloat(step) / CGFloat(max(samples - 1, 1))
+            return CGPoint(x: 200 + t * (canvasSize.width - 400),
+                           y: canvasSize.height * 0.5 + sin(t * .pi * 2) * canvasSize.height * 0.18)
+        }
+    }
+
+    /// **The owner, on a build carrying everything from this session**: *"right now when I draw a
+    /// bunch of brushstrokes and then use the cross eraser on them, I get a lagspike."*
+    ///
+    /// *"Cross eraser"* is `VectorEraserMode.cutToIntersection`, whose segmented-control label is
+    /// **"To Cross"** — Mode 3, not the Mode 2 cut that TODO (41) names. That distinction is the
+    /// whole point of this test, because the two have completely different cost models:
+    ///
+    /// * Mode 2 commits **once, at lift**, through `erase(alongPath:…)`. One middle-of-list edit and
+    ///   one re-walk for the whole gesture.
+    /// * Mode 3 commits **once per touch sample**, through `cutToIntersection(atCanvasPoint:…)`, and
+    ///   each commit that cuts calls `invalidate(.everything)`. So a 40-sample drag is up to 40
+    ///   re-walks — and, before any of them, 40 runs of a search that `VectorLayer.swift:3470` marks
+    ///   *"INFERRED, not measured … if a drag ever stutters in a dense drawing, this loop is where to
+    ///   look first."*
+    ///
+    /// This splits the drag into those two halves so the profile decides which is the spike rather
+    /// than the brief. `resolve` is what runs **on the main thread** during the drag; `render` is
+    /// what `StrokeCanvasView.renderQueue` runs behind it, and is the term TODO (41) is aimed at.
+    func testWhereACrossEraserDragSpendsItsTime() {
+        // Warm every allocator and gradient cache the first row would otherwise pay for.
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
+
+        for n in [200, 500, 1000] {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                // A layer on screen has already rendered, so the drag starts from a warm memo.
+                _ = canvas.render()
+
+                var driver = VectorEraser.IntersectionDriver()
+                var resolveSeconds = 0.0, renderSeconds = 0.0
+                var worstResolve = 0.0, worstRender = 0.0
+                var cuts = 0, walks = 0
+                let path = Self.dragPath(samples: 40)
+                for point in path {
+                    let t0 = CFAbsoluteTimeGetCurrent()
+                    let resolved = canvas.cutToIntersection(atCanvasPoint: point,
+                                                            brush: Self.eraserBrush,
+                                                            size: Self.eraserSize,
+                                                            suppressing: driver.suppressed)
+                    let dtResolve = CFAbsoluteTimeGetCurrent() - t0
+                    resolveSeconds += dtResolve
+                    worstResolve = Swift.max(worstResolve, dtResolve)
+                    driver.accept(resolved.outcome, underTip: resolved.underTip)
+                    if resolved.outcome == .cut { cuts += 1 }
+
+                    let before = canvas.rasterizations
+                    let t1 = CFAbsoluteTimeGetCurrent()
+                    _ = canvas.render()
+                    let dtRender = CFAbsoluteTimeGetCurrent() - t1
+                    renderSeconds += dtRender
+                    worstRender = Swift.max(worstRender, dtRender)
+                    if canvas.rasterizations > before { walks += 1 }
+                }
+
+                report("cross eraser (Mode 3) drag — n=\(n)", [
+                    ("touchSamples", "\(path.count)"),
+                    ("cuts", "\(cuts)"),
+                    ("reWalks", "\(walks)"),
+                    ("resolveTotal", ms(resolveSeconds)),
+                    ("renderTotal", ms(renderSeconds)),
+                    ("dragTotal", ms(resolveSeconds + renderSeconds)),
+                    ("worstSingleResolve", ms(worstResolve)),
+                    ("worstSingleRender", ms(worstRender)),
+                    ("resolveShare", String(format: "%.0f%%",
+                                            100 * resolveSeconds / (resolveSeconds + renderSeconds))),
+                ])
+            }
+
+            // Mode 2, the cut TODO (41) names, for the comparison that says whether the report is
+            // about the re-walk at all: one commit, one re-walk, for the whole gesture.
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                var samples = StrokeSamples(channels: .pressureOnly)
+                for point in Self.dragPath(samples: 40) {
+                    samples.append(VectorSample(x: point.x, y: point.y, pressure: 1))
+                }
+                let t0 = CFAbsoluteTimeGetCurrent()
+                let changed = canvas.erase(alongPath: samples, brush: Self.eraserBrush,
+                                           size: Self.eraserSize, mode: .cutPoints)
+                let cutSeconds = CFAbsoluteTimeGetCurrent() - t0
+                let t1 = CFAbsoluteTimeGetCurrent()
+                _ = canvas.render()
+                let renderSeconds = CFAbsoluteTimeGetCurrent() - t1
+                report("cut (Mode 2) whole gesture — n=\(n)", [
+                    ("changed", "\(changed)"),
+                    ("cutOnce", ms(cutSeconds)),
+                    ("reWalkOnce", ms(renderSeconds)),
+                    ("gestureTotal", ms(cutSeconds + renderSeconds)),
+                ])
+            }
+
+            // What the *resolve* half of a Mode 3 sample is made of, so the 2–8% above is attributed
+            // rather than left as one number. `strokeIndex()` is keyed on `version`, and every cut
+            // moves it, so the sample after a cut rebuilds a grid over every segment on the layer.
+            // A resolve aimed at bare canvas pays exactly that rebuild and then the candidate query,
+            // and returns `.missed` before the O(segments × segments) intersection work — so the
+            // difference between it and the cutting resolve above is the search.
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                // A corner the `inset: 48` scene builder keeps clear of, so nothing is under the tip.
+                let bare = CGPoint(x: 8, y: 8)
+                let cold = medianSeconds(runs: 5) {
+                    canvas.bumpVersion()
+                    _ = canvas.cutToIntersection(atCanvasPoint: bare, brush: Self.eraserBrush,
+                                                 size: Self.eraserSize)
+                }
+                let warm = medianSeconds(runs: 5) {
+                    _ = canvas.cutToIntersection(atCanvasPoint: bare, brush: Self.eraserBrush,
+                                                 size: Self.eraserSize)
+                }
+                report("Mode 3 resolve split — n=\(n)", [
+                    ("indexRebuildPlusMiss", ms(cold)),
+                    ("missAlone", ms(warm)),
+                    ("indexRebuildAlone", ms(cold - warm)),
+                ])
+            }
+        }
+    }
+
     /// Byte equality of two renders' own backing bitmaps. Not a tolerance: since the append draws
     /// the new dabs into a copy of the standing picture rather than into a separate layer, there is
     /// nowhere for a rounding difference to enter, and anything but equality is a defect.

@@ -1023,6 +1023,37 @@ final class VectorCanvas {
     /// mutation site that miscounts costs a full re-walk instead of drawing the wrong picture.
     private var appendedSinceBase = 0
 
+    /// **The standing picture a *region* re-walk repairs, and the rectangle it has to repair.**
+    ///
+    /// `incrementalBase`'s counterpart for the edits that are not appends — TODO (41). Where that
+    /// one is "a picture of the first *k* elements, draw the rest on top", this one is "a picture of
+    /// the *old* list, clear this rectangle and redraw what falls inside it". Non-nil exactly when
+    /// `image` is a `.full` local-content render at the identity transform with nothing suppressed,
+    /// and `region` is the union of every rectangle declared damaged since it was taken.
+    ///
+    /// It costs no memory for the same reason `incrementalBase` does not: at the identity transform
+    /// `renderLocked`'s `final` *is* the content image, so this holds the object `cachedImage` was
+    /// already holding, and only outlives it between the edit and the render that consumes it.
+    private var regionBase: (image: UIImage, region: CGRect)?
+
+    /// **What each element's dabs actually painted, from the walk that last drew it** — the bound a
+    /// region re-walk skips on, and the reason it can skip at all.
+    ///
+    /// BRUSH.md §12 stage 8 refuted the obvious alternative: a box derived from the brush is not a
+    /// bound, because `ResponseCurve` does not clamp. What *is* exact is the union of the rectangles
+    /// the dabs were handed, which the stroke group computes anyway to size its merge clip
+    /// (`CGContextDabTarget.lastGroupBounds`). So this is measured, never estimated.
+    ///
+    /// **An entry is a promise that the element has not changed since**, which is what makes it safe
+    /// to skip on: `.everything` clears the table wholesale, and a region site forgets the ids it
+    /// rewrites (`forgetPaintedBounds`). An element with no entry is therefore new-or-changed, is
+    /// always drawn, and has its own footprint checked against the clip — see `renderLocalContent`'s
+    /// `escapedClip`.
+    ///
+    /// Keyed by element id rather than by position because a region edit is a *splice*: one stroke
+    /// becomes two pieces and every index after it moves.
+    private var paintedBounds: [UUID: CGRect] = [:]
+
     /// The `.preview` render, memoized separately from `cachedImage` — releasing the slider renders
     /// `.full` and must not discard `.preview`, and starting a drag must not discard `.full`.
     private var cachedPreviewImage: UIImage?
@@ -1242,17 +1273,28 @@ final class VectorCanvas {
     /// `applyToIncrementalBase` cross-checks the element count against what was declared, so a site
     /// that miscounts costs a re-walk rather than an artifact.
     ///
-    /// **The case this deliberately does not have yet is a rectangle.** Middle-of-list edits — the
-    /// eraser's cut and split modes, a lasso move, Clear, Recolour — damage a *region* rather than a
-    /// suffix, and are their own, larger change in [TODO.md](TODO.md). Adding `case region(CGRect)`
-    /// here needs no second visit to the mutation sites, which is the whole reason this is a type
-    /// rather than a `Bool`; building it now would be machinery with no consumer.
+    /// **And the rectangle, which this type was shaped for and now has** — TODO (41). A
+    /// middle-of-list edit rewrites elements in place, so it is neither `.everything` nor a suffix;
+    /// what it *can* say is where on the canvas it happened. The prediction that adding it would
+    /// need no second visit to the mutation sites held: the sites that declare one below gained a
+    /// rectangle, not a rewrite.
     enum Damage: Equatable {
         /// Nothing may be assumed about the display list: the next render walks it whole.
         case everything
         /// The last `count` elements were **appended to the end** of the list, and nothing already
         /// in it moved, changed, or went away.
         case appended(count: Int)
+        /// **Every pixel where the new list draws differently from the old one is inside `rect`** —
+        /// which is a stronger claim than "the edit happened there" and is the one the render acts
+        /// on. Elements outside it are untouched *and* their ink is untouched.
+        ///
+        /// A site declares this from the **measured** footprints of the elements it removed or
+        /// rewrote (`paintedBounds(of:)`), never from their geometry — see `paintedBounds`. The
+        /// half it cannot measure is what its *replacements* will paint, since that is only known
+        /// once they are walked; `renderLocalContent` checks that half itself and falls back to the
+        /// full walk if it escapes, so a site that under-declares costs a re-walk rather than an
+        /// artifact. That is `applyToIncrementalBase`'s count check, one case along.
+        case region(CGRect)
     }
 
     /// What the most recent invalidation declared. A test seam in `rasterizations`' idiom: what each
@@ -1271,10 +1313,72 @@ final class VectorCanvas {
     /// which that distinction is true. Caller must hold `lock`.
     private func invalidateRenderOnly(_ damage: Damage) {
         version += 1
+        // **Before `cachedImage` is cleared**, because the picture being cleared is the one a region
+        // re-walk starts from. This is the only ordering constraint in this method.
+        applyToRegionBase(damage)
         cachedImage = nil
         cachedPreviewImage = nil
         lastDamage = damage
         applyToIncrementalBase(damage)
+    }
+
+    /// Carries `damage` onto `regionBase` and `paintedBounds`. Caller must hold `lock`.
+    ///
+    /// The two non-region cases are the conservative half and are why this is safe: `.everything`
+    /// cannot say anything about any element, so it drops the base *and* every measured footprint;
+    /// an append leaves existing elements alone but is served by `incrementalBase`, which is
+    /// strictly cheaper, so it keeps the footprints and drops the base rather than trying to hold
+    /// both stories at once.
+    private func applyToRegionBase(_ damage: Damage) {
+        switch damage {
+        case .everything:
+            regionBase = nil
+            // An entry is a promise that the element it names has not changed. A wholesale
+            // `elements =` — undo, redo, a loaded document — can reuse an id for different content,
+            // so no promise survives it.
+            paintedBounds.removeAll(keepingCapacity: true)
+        case .appended:
+            regionBase = nil
+        case .region(let rect):
+            let rect = rect.standardized
+            // A base is only a base at the identity with nothing suppressed, for `appendableBase`'s
+            // two reasons: the overall transform is applied by resampling the finished content, and
+            // a suppressed element is not in the picture the base holds.
+            guard _transform.isIdentity, _suppressedElementIDs.isEmpty,
+                  !rect.isNull, !rect.isInfinite else { regionBase = nil; return }
+            if let standing = regionBase {
+                regionBase = (standing.image, standing.region.union(rect))
+            } else if let standing = cachedImage {
+                regionBase = (standing, rect)
+            } else {
+                // Nothing memoized to repair — the next render walks the list whole and takes a
+                // fresh base off the end of it.
+                regionBase = nil
+            }
+        }
+    }
+
+    /// Forgets the measured footprints of `ids`, which is how a region site says *"these elements
+    /// are not the ones I measured"*. Caller must hold `lock`.
+    ///
+    /// Every site that declares `.region` must call this for the elements it removes or rewrites
+    /// **and** may skip it for the ones it adds, which have no entry by construction. Forgetting too
+    /// much costs a redraw; forgetting too little draws the wrong picture, so the sites below forget
+    /// before they splice.
+    private func forgetPaintedBounds<S: Sequence>(_ ids: S) where S.Element == UUID {
+        for id in ids { paintedBounds.removeValue(forKey: id) }
+    }
+
+    /// The union of what `ids` last painted, or nil if any of them has no measured footprint — in
+    /// which case the caller cannot bound its own damage and must declare `.everything`.
+    /// Caller must hold `lock`.
+    private func paintedBounds<S: Sequence>(of ids: S) -> CGRect? where S.Element == UUID {
+        var union = CGRect.null
+        for id in ids {
+            guard let rect = paintedBounds[id] else { return nil }
+            union = union.union(rect)
+        }
+        return union.isNull ? nil : union
     }
 
     /// Carries `damage` onto `incrementalBase`. Caller must hold `lock`.
@@ -1286,7 +1390,9 @@ final class VectorCanvas {
     /// element and appends two fails it and pays the full walk.
     private func applyToIncrementalBase(_ damage: Damage) {
         switch damage {
-        case .everything:
+        case .everything, .region:
+            // A region edit is a splice — a stroke becomes two pieces — so the list length moves and
+            // the prefix claim is dead. `regionBase` is the base that survives it.
             dropIncrementalBase()
         case .appended(let count):
             guard let base = incrementalBase else { return }
@@ -1320,8 +1426,10 @@ final class VectorCanvas {
         defer { lock.unlock() }
         // `incrementalBase` is counted because between an append and the render that consumes it,
         // it is the *only* reference to a canvas-sized bitmap. Leaving it out would let eviction
-        // read "nothing cached" off a cel holding 8 MB at 2048×1024.
-        return cachedImage != nil || cachedPreviewImage != nil || incrementalBase != nil
+        // read "nothing cached" off a cel holding 8 MB at 2048×1024. `regionBase` is the same claim
+        // for the same window, one edit shape along.
+        return cachedImage != nil || cachedPreviewImage != nil
+            || incrementalBase != nil || regionBase != nil
     }
 
     /// Frees the memoized render without touching the content. Deliberately not `invalidate()`:
@@ -1334,6 +1442,10 @@ final class VectorCanvas {
         cachedPreviewImage = nil
         // Eviction frees pixels; a base kept here would be pixels it did not free.
         dropIncrementalBase()
+        regionBase = nil
+        // The measured footprints are a few dozen bytes an element and are what makes the *next*
+        // region edit cheap, so eviction keeps them: they are not pixels, and they stay true —
+        // nothing about the display list changed here.
     }
 
     // MARK: - Mutation
@@ -1727,7 +1839,7 @@ final class VectorCanvas {
         }
         localContentBoundsRasterizations += 1
         let bounds = PixelOps.opaqueContentBounds(
-            renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs)))
+            renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs)).image)
         cachedLocalContentBounds = .some(bounds)
         cachedLocalContentBoundsVersion = contentVersion
         return bounds
@@ -1791,7 +1903,7 @@ final class VectorCanvas {
             (changed, damage) = eraseHybrid(sweep: sweep, samples: localSamples, brush: brush,
                                             size: localSize, opacity: opacity)
         case .cutPoints:
-            changed = cutAlongFootprint(sweep: sweep)
+            (changed, damage) = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
             // Whole-gesture form, resolved once against the first sample, against the gesture's whole
             // swept footprint. It is not what ships: `StrokeCanvasView.endVectorStroke` skips Mode 3
@@ -1799,8 +1911,10 @@ final class VectorCanvas {
             // `cutToIntersection(atCanvasPoint:…)`, since Mode 3 cuts on touch-down and re-resolves
             // per crossing. Kept — and routed through the *same* private resolve as the live path, so
             // it cannot drift into a second, differently-behaving Mode 3.
-            changed = cutToIntersection(sweep: sweep, near: localSamples[0].point,
-                                        suppressing: []).outcome == .cut
+            let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point,
+                                             suppressing: [])
+            changed = resolved.outcome == .cut
+            damage = resolved.damage
         }
         if changed { invalidate(damage) }
         return changed
@@ -1845,9 +1959,12 @@ final class VectorCanvas {
                                              size: localSize) else { return (.missed, []) }
 
         let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point, suppressing: suppressing)
-        // A cut splices pieces in at the parent's z-position, which is a middle-of-list edit.
-        if resolved.outcome == .cut { invalidate(.everything) }
-        return resolved
+        // A cut splices pieces in at the parent's z-position, which is a middle-of-list edit — and
+        // since TODO (41) that is a *rectangle*, which matters here more than anywhere else in the
+        // app: this method runs once per touch sample, so the drag pays whatever a cut costs forty
+        // times over (PERFORMANCE.md §11.10).
+        if resolved.outcome == .cut { invalidate(resolved.damage) }
+        return (resolved.outcome, resolved.underTip)
     }
 
     // MARK: - Mode 1 — the hybrid
@@ -2231,11 +2348,15 @@ final class VectorCanvas {
 
     /// Mode 2: every paint stroke loses the spans its geometry shares with the eraser's footprint.
     /// Caller must hold `lock`.
-    private func cutAlongFootprint(sweep: VectorEraser.Sweep) -> Bool {
+    /// **Returns the damage as well as whether anything changed** — TODO (41), and Mode 3's
+    /// arrangement for Mode 3's reason: the union of what the strokes it replaced last painted is
+    /// the region where the two pictures can differ, and it is measured rather than derived.
+    private func cutAlongFootprint(sweep: VectorEraser.Sweep) -> (changed: Bool, damage: Damage) {
         let candidates = Set(strokeIndex().segments(near: sweep.bounds).map(\.elementIndex))
-        guard !candidates.isEmpty else { return false }
+        guard !candidates.isEmpty else { return (false, .everything) }
 
         var changed = false
+        var replacedIDs: [UUID] = []
         var result: [VectorElement] = []
         result.reserveCapacity(_elements.count)
         for (index, element) in _elements.enumerated() {
@@ -2249,6 +2370,7 @@ final class VectorCanvas {
                                           in: stroke.samples)
             guard !cuts.isEmpty else { result.append(element); continue }
             changed = true
+            replacedIDs.append(stroke.id)
             // Mode 2 removes geometry, so a piece re-stamps from its own first sample rather than
             // inheriting the parent's lattice, which would keep drawing dabs just cut away. Its
             // randomness stays where it was regardless — see `detachedPiece`.
@@ -2257,8 +2379,11 @@ final class VectorCanvas {
                                                          startParameter: run.parameters.first ?? 0)))
             }
         }
-        if changed { _elements = result }
-        return changed
+        guard changed else { return (false, .everything) }
+        let damage: Damage = paintedBounds(of: replacedIDs).map { .region($0) } ?? .everything
+        _elements = result
+        forgetPaintedBounds(replacedIDs)
+        return (true, damage)
     }
 
     // MARK: - Lasso move
@@ -3442,12 +3567,18 @@ final class VectorCanvas {
     /// afterwards, in descending index. Two lines that cross each other and are both taken in one tap
     /// must each see the other's original geometry, or whichever went second would compute its bracket
     /// against a stroke that no longer crosses it and be deleted whole.
+    ///
+    /// **Returns the damage as well**, so the two callers can declare a rectangle instead of
+    /// `.everything` — TODO (41). It is the union of what the strokes this replaced last *painted*,
+    /// which is exactly the region where the old picture and the new one can differ on the removal
+    /// side; the pieces that take their place are sub-spans of those same strokes drawn with the
+    /// same brush, so they land inside it, and `renderLocalContent` checks rather than assumes that.
     private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint,
                                    suppressing: Set<UUID>)
-        -> (outcome: VectorEraser.CutOutcome, underTip: Set<UUID>) {
+        -> (outcome: VectorEraser.CutOutcome, underTip: Set<UUID>, damage: Damage) {
         let index = strokeIndex()
         let candidates = Set(index.segments(near: sweep.bounds).map(\.elementIndex))
-        guard !candidates.isEmpty else { return (.missed, []) }
+        guard !candidates.isEmpty else { return (.missed, [], .everything) }
 
         // Everything the eraser came down on: every candidate whose centreline the footprint actually
         // reaches (a near miss cuts nothing).
@@ -3462,10 +3593,10 @@ final class VectorCanvas {
             guard !suppressing.contains(stroke.id) else { continue }
             victims.append((elementIndex, stroke, hit.parameter))
         }
-        guard !underTip.isEmpty else { return (.missed, []) }
+        guard !underTip.isEmpty else { return (.missed, [], .everything) }
         // Past this point the tip *is* over ink, so every remaining exit says `.unchanged` rather than
         // `.missed` — the driver must stay latched until the finger leaves those strokes.
-        guard !victims.isEmpty else { return (.unchanged, underTip) }
+        guard !victims.isEmpty else { return (.unchanged, underTip, .everything) }
 
         // INFERRED, not measured: this is the one place the change costs more per touch sample. Each
         // victim runs the same per-stroke work the single target used to — a spatial-index query and
@@ -3505,7 +3636,12 @@ final class VectorCanvas {
             }
             splices.append((victim.index, pieces))
         }
-        guard !splices.isEmpty else { return (.unchanged, underTip) }
+        guard !splices.isEmpty else { return (.unchanged, underTip, .everything) }
+
+        // The ids about to stop existing, and what they last put on the canvas. Taken *before* the
+        // splice, because afterwards the list no longer holds them.
+        let replacedIDs = splices.compactMap { _elements[$0.index].stroke?.id }
+        let damage: Damage = paintedBounds(of: replacedIDs).map { .region($0) } ?? .everything
 
         // Descending, so an earlier splice cannot invalidate a later index.
         for splice in splices.sorted(by: { $0.index > $1.index }) {
@@ -3513,7 +3649,10 @@ final class VectorCanvas {
             for piece in splice.pieces { if let stroke = piece.stroke { underTip.insert(stroke.id) } }
             _elements.replaceSubrange(splice.index...splice.index, with: splice.pieces)
         }
-        return (.cut, underTip)
+        // These ids are gone; the pieces that replaced them have never been measured. Both halves
+        // matter: a stale entry under a *reused* id would let a changed element be skipped.
+        forgetPaintedBounds(replacedIDs)
+        return (.cut, underTip, damage)
     }
 
     /// `cuts` reduced to what actually removes something, so a graze that merely touches a stroke's
@@ -3812,10 +3951,32 @@ final class VectorCanvas {
         let content: UIImage
         if let base = appendableBase(quality: quality) {
             content = renderLocalContent(elements: Array(_elements[base.prefixCount...]),
-                                         quality: quality, over: base.image)
+                                         quality: quality, over: base.image).image
+        } else if let base = repairableBase(quality: quality) {
+            //    **Or the whole list again, clipped to what the edit touched** — TODO (41). Every
+            //    element is still walked, so the isolation rules below see exactly the list they
+            //    would have seen; what is skipped is the *stamping* of elements whose measured
+            //    footprint misses the clip, which is drawing that the clip would have thrown away
+            //    anyway. That equivalence is the whole safety argument and it is structural rather
+            //    than empirical.
+            let repaired = renderLocalContent(elements: Self.visible(_elements,
+                                                                     suppressing: _suppressedElementIDs),
+                                              quality: quality, over: base.image,
+                                              clippedTo: base.region)
+            if repaired.escapedClip {
+                // A replacement painted outside the rectangle its site declared, so the base is
+                // stale where it escaped and this render is unusable. Slow-and-correct: throw it
+                // away and walk the list whole. `Damage.region` names this as the failure it is
+                // shaped to have.
+                content = renderLocalContent(elements: Self.visible(_elements,
+                                                                    suppressing: _suppressedElementIDs),
+                                             quality: quality).image
+            } else {
+                content = repaired.image
+            }
         } else {
             content = renderLocalContent(elements: Self.visible(_elements, suppressing: _suppressedElementIDs),
-                                         quality: quality)
+                                         quality: quality).image
         }
 
         // 2. Apply the overall transform (identity → skip the extra pass).
@@ -3842,10 +4003,48 @@ final class VectorCanvas {
             } else {
                 dropIncrementalBase()
             }
+            // The damage this render just repaired is repaired. Held as `cachedImage` from here, so
+            // the *next* region edit adopts it there rather than keeping a second reference alive.
+            regionBase = nil
         case .preview:
             cachedPreviewImage = final
         }
         return final
+    }
+
+    /// **The picture this render may repair in place, and the rectangle to repair** — nil when it
+    /// must walk the list whole. `appendableBase(quality:)`'s counterpart for the edits that are
+    /// not appends.
+    ///
+    /// There is deliberately no equivalent of `appendPreservesTheWalk` here, and its absence is the
+    /// point. That predicate exists because cutting the list in two can change how a *paint run* is
+    /// isolated, so the two halves stop composing. A region render does not cut the list at all: it
+    /// walks every element, in order, with the same run scan, and merely declines to stamp the ones
+    /// whose ink cannot reach the clip. Under a clip, drawing an element outside it and skipping it
+    /// are the same operation — so there is no case to exclude, including a run of non-`.normal`
+    /// strokes straddling the rectangle's edge.
+    ///
+    /// The conditions are `appendableBase`'s own, for its reasons: `.full` only, because `.preview`
+    /// strokes paths rather than stamping dabs and has its own memo; the identity transform only,
+    /// because the overall transform is applied by resampling the finished content and a resample of
+    /// a repair is not a repair of a resample; and nothing suppressed, so the base is a picture of
+    /// the same elements this walk sees. `applyToRegionBase` tests the last two as well, when it
+    /// decides whether to *take* a base — the same deliberate doubling `appendableBase` documents.
+    ///
+    /// Caller must hold `lock`.
+    private func repairableBase(quality: RenderQuality) -> (image: UIImage, region: CGRect)? {
+        guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
+              let base = regionBase, !base.region.isNull, !base.region.isEmpty else { return nil }
+        // Integral, and for `CGContextDabTarget.endStrokeGroup`'s measured reason: a clip on a
+        // fractional rectangle is antialiased, so the outermost row of the repair would land at
+        // partial coverage — ink lost at a seam rather than a rounding difference. Rounded *out*,
+        // so the clip still contains everything the site declared.
+        let clip = base.region.integral
+        // A repair that covers the canvas is a full walk with extra bookkeeping, and honestly so:
+        // the guarantee is that cost scales with the area touched, not that it is always small.
+        // Taking the slow path outright is cheaper than taking it through a clip and a skip test.
+        guard clip.width * clip.height < size.width * size.height else { return nil }
+        return (base.image, clip)
     }
 
     /// **The picture this render may append to, or nil when it must walk the list whole.**
@@ -3982,7 +4181,7 @@ final class VectorCanvas {
         }
         guard !isolated.isEmpty else { return nil }
         rasterizations += 1
-        let content = renderLocalContent(elements: isolated)
+        let content = renderLocalContent(elements: isolated).image
         guard !_transform.isIdentity else { return content }
         let bounds = CGRect(origin: .zero, size: size)
         return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
@@ -4029,13 +4228,34 @@ final class VectorCanvas {
     /// would have accumulated by drawing the prefix itself. Which appends may do this is
     /// `appendPreservesTheWalk(after:)`, not this method: one walk, and it does not know or care how
     /// its context got its first pixels.
+    ///
+    /// **`clippedTo` is the region repair** — TODO (41). Non-nil only from `repairableBase`, where
+    /// `base` is a picture of the list *before* the edit and `elements` is the list after it. The
+    /// rectangle is cleared and the walk runs inside it, so:
+    ///
+    /// * every pixel outside it keeps the base's, which is correct because the site declared that
+    ///   nothing outside it draws differently;
+    /// * every pixel inside it is redrawn **from the bottom of the stack**, which is what an
+    ///   `.erase` element needs — a punch composites `destinationOut` against everything beneath it,
+    ///   so a repair that started at the edit would punch against nothing;
+    /// * and an element whose measured footprint (`paintedBounds`) cannot reach the rectangle is not
+    ///   stamped, because under this clip stamping it and skipping it are the same operation. That
+    ///   is what makes the cost the area's rather than the layer's, and it is an argument about the
+    ///   clip rather than about brushes, so it survives whatever a brush does with scatter or size.
+    ///
+    /// The walk is otherwise untouched — same order, same run scan, same isolation decisions, same
+    /// per-stroke group — which is why a straddling stroke or a straddling blend-mode run needs no
+    /// special case.
     private func renderLocalContent(elements: [VectorElement], quality: RenderQuality = .full,
-                                    over base: UIImage? = nil) -> UIImage {
+                                    over base: UIImage? = nil,
+                                    clippedTo clip: CGRect? = nil) -> LocalContent {
         // `render()` has already returned by the time an empty canvas would reach here, so this
         // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
         // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the
         // *filtered* list, so a cel whose only element is the one being edited says the same.
-        guard !elements.isEmpty || base != nil else { return Self.transparentPixel }
+        guard !elements.isEmpty || base != nil else {
+            return LocalContent(image: Self.transparentPixel, escapedClip: false)
+        }
         // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
         // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
         // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity
@@ -4045,6 +4265,11 @@ final class VectorCanvas {
         // Hoisted so `lastRenderDabCount` can be read off it once the (synchronous) renderer closure
         // below has finished drawing.
         var target: CGContextDabTarget!
+        // Measured footprints from this walk, applied to `paintedBounds` after it — never during,
+        // because the skip test below reads the *previous* walk's answer and must not see this
+        // one's.
+        var measured: [UUID: CGRect] = [:]
+        var escaped = false
         let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let cg = ctx.cgContext
             // 1:1 into a context of the same size, format and scale, over transparent black — so
@@ -4052,13 +4277,43 @@ final class VectorCanvas {
             // this is a copy rather than a composite. `renderLocalContent` is the only place that
             // has to be true and `IncrementalAppendLogicTests` is where it is checked byte for byte.
             base?.draw(at: .zero)
+            if let clip {
+                // The clip goes on before anything else so it governs the clear, the walk and every
+                // transparency layer the walk opens; the base above is deliberately drawn *whole*,
+                // since it is the picture outside the clip as well as inside it.
+                cg.clip(to: clip)
+                cg.clear(clip)
+            }
             // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
             // throw away the cache's hit rate at every fill or eraser.
             target = CGContextDabTarget(cg)
+
+            /// One stroke, stamped or skipped, with its footprint measured either way.
+            ///
+            /// The three rules, in order: an element the previous walk measured as unable to reach
+            /// the clip is skipped; anything else is drawn; and anything drawn that the previous
+            /// walk had *no* measurement for is new-or-changed, so the base cannot be trusted where
+            /// it paints and its footprint has to be inside the clip.
+            func drawStroke(_ stroke: VectorStroke, isEraser: Bool) {
+                let known = quality == .full ? self.paintedBounds[stroke.id] : nil
+                if let clip, let known, !known.intersects(clip) { return }
+                Self.draw(stroke: stroke, into: cg, target: target, isEraser: isEraser,
+                          quality: quality)
+                guard quality == .full else { return }
+                let painted = target.lastGroupBounds
+                guard !painted.isNull else { return }
+                measured[stroke.id] = painted
+                if let clip, known == nil, !clip.contains(painted) { escaped = true }
+            }
+
             var index = 0
             while index < elements.count {
                 switch elements[index] {
                 case .fill(let fill):
+                    // Fills, images, video and text are always drawn: they carry no measured
+                    // footprint, they are a handful per cel where strokes are thousands, and under
+                    // the clip each is one bounded draw. Adding a bound for them would buy a few
+                    // microseconds and cost a second thing that can be wrong.
                     Self.draw(fill: fill, into: cg)
                     index += 1
                 case .image(let element):
@@ -4075,11 +4330,13 @@ final class VectorCanvas {
                     index += 1
                 case .stroke(let stroke) where stroke.composite == .erase:
                     // Never inside a transparency layer — see rule 3 on `renderLocalContent`.
-                    Self.draw(stroke: stroke, into: cg, target: target, isEraser: true, quality: quality)
+                    drawStroke(stroke, isEraser: true)
                     index += 1
                 case .stroke:
                     // Scan the maximal run of consecutive `.paint` strokes, deciding up front whether
-                    // it needs isolating (rules 1 and 2).
+                    // it needs isolating (rules 1 and 2). **The scan is over the whole run whether or
+                    // not its members will be stamped**, so a clipped walk isolates exactly what an
+                    // unclipped one would.
                     var end = index
                     var needsIsolation = false
                     while let stroke = Self.paintStroke(at: end, in: elements) {
@@ -4089,7 +4346,7 @@ final class VectorCanvas {
                     if needsIsolation { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
                     for i in index..<end {
                         guard let stroke = Self.paintStroke(at: i, in: elements) else { continue }
-                        Self.draw(stroke: stroke, into: cg, target: target, isEraser: false, quality: quality)
+                        drawStroke(stroke, isEraser: false)
                     }
                     if needsIsolation { cg.endTransparencyLayer() }
                     index = end
@@ -4097,7 +4354,23 @@ final class VectorCanvas {
             }
         }
         lastRenderDabCount = target.dabCount
-        return image
+        // **Only when the walk is usable.** A render that escaped its clip is about to be thrown
+        // away and walked again; recording footprints measured through a discarded picture would
+        // leave the table describing a render nobody kept.
+        if !escaped {
+            for (id, rect) in measured { paintedBounds[id] = rect }
+        }
+        return LocalContent(image: image, escapedClip: escaped)
+    }
+
+    /// One walk's output: the picture, and whether it may be used.
+    ///
+    /// `escapedClip` is true only for a clipped walk, and only when an element the previous walk had
+    /// never measured painted outside the clip — i.e. a site under-declared its damage. The picture
+    /// is then wrong outside the clip and the caller must walk the list whole.
+    private struct LocalContent {
+        let image: UIImage
+        let escapedClip: Bool
     }
 
     // The per-kind drawing helpers are `static`, taking only their inputs, so they cannot re-enter
