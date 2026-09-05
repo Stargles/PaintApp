@@ -1194,8 +1194,11 @@ Erasers are not a group: the eraser *is* a brush (§11), so every one of these e
 
 **"Square" does not mean a square, and the owner's reference settles what it does mean.** It is the
 SAI-shaped nib: a **rectangle whose long side sits perpendicular to the direction of travel**, with
-deliberately **ragged edges**, so that overlapping strokes read as torn-paper slabs rather than as
-ribbons. Two consequences, and the first is the useful one:
+deliberately **ragged edges**. **One drag lays down one rectangular slab** — the nib's long side is the
+slab's width and the travel is its length — and the torn, criss-crossed look of the reference is the
+artist having painted over the same area repeatedly in different directions, not a property of a single
+stroke. So the brush to build is the slab; the texture in the reference is what an artist does with it.
+Two consequences, and the first is the useful one:
 
 - **It does not need `roundness`.** §6 predicted that anisotropic tips are what would force a second
   extent through `DabTarget`, `BakedDab`, `DabPose` and every dirty rect, and named the chisel and flat
