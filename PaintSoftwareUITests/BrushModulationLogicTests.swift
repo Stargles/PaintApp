@@ -112,11 +112,11 @@ final class BrushModulationLogicTests: XCTestCase {
         // (preset, sizePressure, opacityPressure, minSizeFraction) — the numbers `BrushLibrary`
         // carried before §12 stage 7, taken from git rather than from anything still running.
         let table: [(String, Brush, Double, Double, Double)] = [
-            ("Soft Round", BrushLibrary.softRound, 0.5, 0.6, 0.2),
-            ("Hard Round", BrushLibrary.hardRound, 0.4, 0.1, 0.4),
-            ("Pencil", BrushLibrary.pencil, 0.3, 0.5, 0.5),
-            ("Pen", BrushLibrary.pen, 0.15, 0.05, 0.85),
-            ("Square", BrushLibrary.square, 0.3, 0.2, 0.5)
+            ("Soft Round", TestBrushes.softRound, 0.5, 0.6, 0.2),
+            ("Hard Round", TestBrushes.hardRound, 0.4, 0.1, 0.4),
+            ("Pencil", TestBrushes.pencil, 0.3, 0.5, 0.5),
+            ("Pen", TestBrushes.pen, 0.15, 0.05, 0.85),
+            ("Square", TestBrushes.square, 0.3, 0.2, 0.5)
         ]
         let samples = Self.rampStroke()
 
@@ -194,9 +194,9 @@ final class BrushModulationLogicTests: XCTestCase {
     /// looking at the ink and not at two blank canvases.
     func testTheresetPinFailsWhenARowsAmountMoves() {
         let samples = Self.rampStroke()
-        var nudged = BrushLibrary.softRound
+        var nudged = TestBrushes.softRound
         nudged.modulations.setAmount(0.51, for: .size, from: .pressure)
-        XCTAssertNotEqual(Self.render(BrushLibrary.softRound, samples), Self.render(nudged, samples),
+        XCTAssertNotEqual(Self.render(TestBrushes.softRound, samples), Self.render(nudged, samples),
                           "a hundredth on the size row must change the ink, or the preset pin is vacuous")
     }
 
@@ -207,7 +207,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// finished because its model is correct"* section is about.
     func testEveryOutputChangesTheDabsItIsSupposedTo() {
         let samples = Self.rampStroke(from: 0.4, to: 0.9)
-        var base = BrushLibrary.hardRound
+        var base = TestBrushes.hardRound
         base.modulations = BrushModulations()
         base.dab.size = 1
         base.dab.flow = 1
@@ -243,7 +243,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// rather than skipped.
     func testEveryInputReachesADab() {
         let samples = Self.rampStroke(from: 0.2, to: 1)
-        var base = BrushLibrary.hardRound
+        var base = TestBrushes.hardRound
         base.modulations = BrushModulations()
         base.dab.size = 1
 
@@ -313,7 +313,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// taken shifts nothing.
     func testDensityAtOneIsBitIdenticalToNoDensityAtAll() {
         let samples = Self.rampStroke()
-        var scattering = BrushLibrary.hardRound
+        var scattering = TestBrushes.hardRound
         scattering.dab.scatter = 0.4          // so any re-phasing of the field would be visible
         var withRow = scattering
         withRow.dab.density = 1
@@ -327,7 +327,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// requirement, and the one that says the skip is a skip rather than a re-walk.
     func testLoweringDensityRemovesDabsWithoutMovingTheRest() {
         let samples = Self.rampStroke(from: 1, to: 1)
-        var solid = BrushLibrary.hardRound
+        var solid = TestBrushes.hardRound
         solid.dab.scatter = 0.3
         var sparse = solid
         sparse.dab.density = 0.5
@@ -359,7 +359,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// written up as an assertion true of mathematics rather than of the code.
     func testAWavelengthTurnsScatteredDropoutIntoLongGaps() {
         let samples = Self.rampStroke(from: 1, to: 1, points: 3)
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.density = 0.5
         // A 5 pt brush over a 136 pt stroke is **27 brush widths**, so λ = 3 fits nine periods in.
         // The fixture has to span several periods or the whole stroke lands in one cell of the field
@@ -411,7 +411,7 @@ final class BrushModulationLogicTests: XCTestCase {
             tapered.pressure = CGFloat(min(1, 4 * min(t, 1 - t) + 0.05))
             return tapered
         }, channels: .captured)
-        var base = BrushLibrary.hardRound
+        var base = TestBrushes.hardRound
         base.dab.density = 0
         base.dab.densityWavelength = 0
 
@@ -450,7 +450,7 @@ final class BrushModulationLogicTests: XCTestCase {
             moved.y = 80 + 45 * sin(CGFloat(index) / 4)
             return moved
         }, channels: .captured)
-        var named = BrushLibrary.square
+        var named = TestBrushes.square
         named.modulations = BrushModulations()
         named.dab.size = 1
         named.dab.angle.directionFollow = 1
@@ -523,7 +523,7 @@ final class BrushModulationLogicTests: XCTestCase {
         curve.setKey(AnimationCurve.Key(frame: 0, value: 0,
                                         outHandle: AnimationCurve.Handle(deltaFrames: 700, deltaValue: 0.1),
                                         tangentMode: .free, interpolation: .bezier))
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.modulations = BrushModulations([
             BrushModulation(.size, .pressure, modules: [.curveRamp(ResponseCurve(curve))],
                             amount: 0.5)
@@ -547,7 +547,13 @@ final class BrushModulationLogicTests: XCTestCase {
     ///
     /// Two stroke shapes each, because a preset's rows are pressure-driven and a flat stroke would
     /// exercise one point of every curve.
-    func testTheFivePresetsRenderExactlyWhatTheyDidBeforeTheChain() {
+    /// **The five brushes are `TestBrushes` rather than `BrushLibrary` since §12 stage 9**, and that
+    /// is what keeps this pin meaning what it meant. The digests below were MEASURED at `4791204`
+    /// against *those five values*; stage 9 replaced the shipped library wholesale, so pointing this
+    /// at `BrushLibrary.defaults` would compare sixteen new brushes against five numbers taken from
+    /// five old ones — every lookup would miss and the test would report a missing digest rather
+    /// than a moved one. `TestBrushes` holds the five verbatim, so the operands are unchanged.
+    func testTheLegacyFivePresetsRenderExactlyWhatTheyDidBeforeTheChain() {
         let ramped = Self.rampStroke(from: 0.05, to: 1)
         let flat = Self.rampStroke(from: 1, to: 1)
         // MEASURED at 4791204, and again at 860a4a0, by printing them from this function.
@@ -558,7 +564,7 @@ final class BrushModulationLogicTests: XCTestCase {
             "Pen": (2_676_786_774_523_550_981, 6_432_432_205_937_772_741),
             "Square": (9_328_559_346_825_169_403, 17_314_037_651_872_200_229)
         ]
-        for brush in BrushLibrary.defaults {
+        for brush in TestBrushes.all {
             let a = Self.fnv1a(Self.render(brush, ramped))
             let b = Self.fnv1a(Self.render(brush, flat))
             print("PRESETDIGEST \(brush.name) ramped=\(a) flat=\(b)")
@@ -567,6 +573,55 @@ final class BrushModulationLogicTests: XCTestCase {
             }
             XCTAssertEqual(a, wantA, "\(brush.name) on a pressure ramp must render what it did at 4791204")
             XCTAssertEqual(b, wantB, "\(brush.name) at full pressure must render what it did at 4791204")
+        }
+    }
+
+    /// **And the same pin for what §8.6 actually ships**, taken at the commit that authored it.
+    ///
+    /// The test above protects a *migration* that is finished; this protects the sixteen brushes an
+    /// artist will open the app and find. Without it a change to the walk, the tip loader or the
+    /// matrix could move every shipped brush's ink and nothing in the suite would say so — the
+    /// reachability and ink checks in `BrushLibraryLogicTests` only ask whether a brush draws *at
+    /// all*.
+    ///
+    /// **A red here is not automatically a defect.** The owner is expected to tune these values on
+    /// the device and have them extracted back into the source, and that moves the digests by
+    /// design. What a red says is *"a shipped brush's ink changed"*, and the question to answer is
+    /// whether the commit meant it.
+    func testTheShippedSixteenRenderWhatTheyDidWhenTheyWereAuthored() {
+        let ramped = Self.rampStroke(from: 0.05, to: 1)
+        let flat = Self.rampStroke(from: 1, to: 1)
+        // MEASURED at the §12 stage 9 authoring commit by printing them from this function.
+        let expected: [String: (UInt64, UInt64)] = [
+            "Round Soft": (14_479_412_610_270_906_290, 7_725_169_628_810_786_793),
+            "Opaque Round": (14_031_810_148_111_688_496, 7_752_166_484_277_330_825),
+            "Round Hard": (857_427_189_099_703_352, 12_793_331_967_159_332_770),
+            "Square": (297_893_817_308_680_933, 7_044_966_681_973_245_797),
+            "Messy Flat": (15_398_306_454_794_370_804, 7_432_146_390_286_174_691),
+            "Pencil Hard": (8_492_720_267_819_852_461, 9_666_278_003_650_022_874),
+            "Pencil Soft": (508_224_714_915_770_472, 12_117_638_138_213_041_072),
+            "Pencil Blunt": (260_190_636_488_757_883, 4_507_685_382_537_459_566),
+            "Pencil Textured": (6_740_349_161_358_214_297, 774_266_664_593_138_620),
+            // Ramped and flat are the **same** number, and that is the brush rather than a mistake:
+            // Technical Pen — Fine carries no modulation rows at all, so pressure reaches nothing.
+            "Technical Pen — Fine": (6_432_432_205_937_772_741, 6_432_432_205_937_772_741),
+            "Brush Pen": (13_213_744_725_641_260_825, 1_548_782_417_872_889_637),
+            "Rough Ink — Blotchy": (2_811_490_964_214_552_533, 6_693_005_144_034_532_530),
+            "Rough Ink": (11_321_709_665_543_946_915, 5_431_125_670_970_736_223),
+            "Painterly": (355_751_157_517_627_361, 15_351_890_775_863_647_610),
+            "Bristle": (5_470_370_236_309_926_412, 13_171_590_424_428_297_766),
+            "Streaky": (16_392_398_184_521_026_234, 8_307_947_881_667_356_676)
+        ]
+        XCTAssertEqual(BrushLibrary.defaults.count, 16, "PREMISE: §8.6 ships sixteen")
+        for brush in BrushLibrary.defaults {
+            let a = Self.fnv1a(Self.render(brush, ramped))
+            let b = Self.fnv1a(Self.render(brush, flat))
+            print("SHIPPEDDIGEST \(brush.name) ramped=\(a) flat=\(b)")
+            guard let (wantA, wantB) = expected[brush.name] else {
+                return XCTFail("\(brush.name) has no digest recorded — take one and write it down")
+            }
+            XCTAssertEqual(a, wantA, "\(brush.name) on a pressure ramp draws different ink now")
+            XCTAssertEqual(b, wantB, "\(brush.name) at full pressure draws different ink now")
         }
     }
 
@@ -587,7 +642,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// no order, so the channel has to be in the hash or two rows at one arc length would be the same
     /// number — and §8.4's rough nib is *built* from several `random` rows at different λ.
     func testTwoRandomRowsOnOneOutputAreIndependentDraws() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.modulations = BrushModulations([
             BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2),
             BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2)
@@ -612,7 +667,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// A row driving a *different* output draws from a different channel too, so `size` and `scatter`
     /// do not move together when both are randomised.
     func testRandomRowsOnDifferentOutputsDrawDifferentValues() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.modulations = BrushModulations([
             BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2),
             BrushModulation(.scatter, .random(.scatterAngle, .plain(0)), amount: 0.2)
@@ -634,7 +689,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// wrong width. §12 stage 7 widens `VectorEraser`'s gate from two fields to the matrix, because
     /// `StrokeGeometry.stampRadius` resolves a brush at a bare pressure with everything else neutral.
     func testTheEraserRefusesABrushWhoseWidthItCannotSee() {
-        var pressureOnly = BrushLibrary.hardRound
+        var pressureOnly = TestBrushes.hardRound
         pressureOnly.dab.hardness = 1
         XCTAssertTrue(VectorEraser.supportsSplitting(strokeBrush: pressureOnly),
                       "a pressure-only brush is bounded by the chain, as it always was")
@@ -702,7 +757,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// no shift must be untouched and one with a shift must not be.
     func testAColourShiftReachesTheInkAndCostsNothingWhenItIsZero() {
         let samples = Self.rampStroke(from: 1, to: 1, points: 3)
-        var plain = BrushLibrary.hardRound
+        var plain = TestBrushes.hardRound
         plain.modulations = BrushModulations()
         var shifted = plain
         shifted.dab.hueShift = 0.3
@@ -748,7 +803,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// dab rather than once per stroke.
     func testSpacingIsResolvedPerDabRatherThanOncePerStroke() {
         let samples = Self.rampStroke(from: 0.1, to: 1, points: 3)
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.modulations = BrushModulations([BrushModulation(.spacing, .pressure, amount: 0.4)])
         brush.dab.spacing = 0.1
 
@@ -781,7 +836,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// input — disagrees at every row but one. A single scale reading would not do that: at 1 the
     /// right and the wrong answers are equal, which is the shape of fixture CLAUDE.md catalogues.
     func testAScaleModuleMultipliesTheChainsContribution() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.size = 0
         brush.modulations = BrushModulations([
             BrushModulation(.size, .pressure, modules: [.scale(.velocity)], amount: 0.5)
@@ -829,7 +884,7 @@ final class BrushModulationLogicTests: XCTestCase {
     func testAScaledRandomIsDifferentInkFromARandomPlusAPressureRow() {
         let samples = Self.rampStroke(from: 0.05, to: 1)
         func brush(_ rows: [BrushModulation]) -> Brush {
-            var brush = BrushLibrary.hardRound
+            var brush = TestBrushes.hardRound
             brush.dab.spacing = 0.1
             brush.dab.hardness = 1
             brush.modulations = BrushModulations(rows)
@@ -871,7 +926,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// Asserting merely that the two differ somewhere would be true of any field whatever — the
     /// mistake this repo has written up — and asserting a single position would be a coin flip.
     func testARowRandomisedInBothSlotsDrawsTwoIndependentValues() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.size = 0
         brush.modulations = BrushModulations([
             BrushModulation(.size, .random(.scatterAngle, .plain(0)),
@@ -960,7 +1015,7 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertEqual(samples.value(.pressure, at: 0), 1, accuracy: 0,
                        "the fixture only means anything if the scale really reads 1")
         func brush(scaledBy scale: BrushInput?) -> Brush {
-            var brush = BrushLibrary.hardRound
+            var brush = TestBrushes.hardRound
             brush.dab.hardness = 1
             brush.modulations = BrushModulations([
                 BrushModulation(.size, .velocity, modules: scale.map { [.scale($0)] } ?? [],
@@ -991,7 +1046,7 @@ final class BrushModulationLogicTests: XCTestCase {
     func testTheOrderOfAChainsModulesDecidesTheInk() {
         let samples = Self.rampStroke(from: 0.05, to: 1)
         func brush(_ modules: [BrushModule]) -> Brush {
-            var brush = BrushLibrary.hardRound
+            var brush = TestBrushes.hardRound
             brush.dab.hardness = 1
             brush.dab.size = 0.3
             brush.modulations = BrushModulations([
@@ -1045,7 +1100,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// mean product of a quarter says independent, a mean of a third says one draw squared, and the
     /// correlation is 0 against exactly 1.
     func testTwoRandomiserModulesInOneChainAreIndependent() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.size = 0
         brush.modulations = BrushModulations([
             BrushModulation(.size, .pressure,
@@ -1271,7 +1326,7 @@ final class BrushModulationLogicTests: XCTestCase {
                        "…and moving it along the chain moves the plane it draws from")
 
         // And the whole brush, through `Brush`'s own codec, encoded and decoded.
-        var brush = BrushLibrary.pencil
+        var brush = TestBrushes.pencil
         brush.modulations = BrushModulations([
             BrushModulation(.spacing, .random(.scatterAngle, BrushRandomiser(wavelength: 1.5, octaves: 4,
                                                                             falloff: 0.6)),
@@ -1318,7 +1373,7 @@ final class BrushModulationLogicTests: XCTestCase {
         // 1 at no press, 0 from a third of full press upward.
         let gate = ResponseCurve.threshold(knee: 0.3, low: 1, high: 0)
         func brush(_ modules: [BrushModule]) -> Brush {
-            var brush = BrushLibrary.hardRound
+            var brush = TestBrushes.hardRound
             brush.dab.spacing = 0.1
             brush.modulations = BrushModulations([
                 BrushModulation(.spacing, .random(.scatterAngle, .plain(3)), modules: modules,
@@ -1406,13 +1461,13 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertFalse(json.contains("\"curve\""), "the pass-through is left off the wire")
 
         // And the curve is part of the brush's identity, which is what `BrushPool` addresses by.
-        var withGate = BrushLibrary.pen
+        var withGate = TestBrushes.pen
         withGate.modulations = BrushModulations([
             BrushModulation(.spacing, .pressure,
                             modules: [.scale(.velocity, .threshold(knee: 0.3, low: 1, high: 0))],
                             amount: 0.2)
         ])
-        var without = BrushLibrary.pen
+        var without = TestBrushes.pen
         without.modulations = BrushModulations([
             BrushModulation(.spacing, .pressure, modules: [.scale(.velocity)], amount: 0.2)
         ])
@@ -1428,7 +1483,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// capsule chain would then bound the ink at the wrong width and `VectorEraser` would cut away
     /// faded ink it never saw — CLAUDE.md's *"getting this wrong deletes ink that should have faded"*.
     func testTheEraserRefusesABrushWhoseGainItCannotSee() {
-        var pressureOnly = BrushLibrary.hardRound
+        var pressureOnly = TestBrushes.hardRound
         pressureOnly.dab.hardness = 1
         pressureOnly.modulations = BrushModulations([
             BrushModulation(.size, .pressure, modules: [.scale(.pressure)], amount: -0.4)
@@ -1454,7 +1509,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// `totalArcWidths` is missing, so a `readsTaper` that scanned only first inputs would leave such
     /// a row at full gain for the whole stroke and render a brush that does not taper, green.
     func testATaperInAScaleModuleIsStillMeasured() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.hardness = 1
         brush.dab.size = 0.2
         brush.modulations = BrushModulations([

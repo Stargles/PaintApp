@@ -224,7 +224,7 @@ final class FrameBakerLogicTests: XCTestCase {
         let cel = Cel(id: UUID(), startFrame: 2, frameCount: 5,
                       raster: .empty(size: CanvasFixture.canvasSize),
                       vector: .empty(size: CanvasFixture.canvasSize))
-        cel.vector?.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        cel.vector?.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                            size: 6, opacity: 1,
                                            samples: [VectorSample(x: 6, y: 10, pressure: 1),

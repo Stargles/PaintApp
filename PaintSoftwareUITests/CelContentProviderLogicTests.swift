@@ -28,7 +28,7 @@ final class CelContentProviderLogicTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private static let brush = BrushLibrary.hardRound
+    private static let brush = TestBrushes.hardRound
     private var size: CGSize { CanvasFixture.canvasSize }
 
     private func stroke(_ points: [CGPoint]) -> VectorStroke {

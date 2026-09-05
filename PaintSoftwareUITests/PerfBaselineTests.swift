@@ -1466,7 +1466,7 @@ final class PerfBaselineTests: XCTestCase {
     /// being keyed exactly rather than by octave.
     func testDabImageCacheHitRate() {
         let manager = perfManager()
-        manager.selectedBrush = BrushLibrary.square
+        manager.selectedBrush = TestBrushes.square
         let texture = manager.layers[0].cels[0].raster
         let samples = syntheticStroke(sampleCount: Self.sampleCount)
 
@@ -1489,7 +1489,7 @@ final class PerfBaselineTests: XCTestCase {
         // The round dab the same walk lays, for scale: an image dab is intrinsically dearer than a
         // disc and the point of the cache is to keep that ratio small rather than to erase it.
         let round = perfManager()
-        round.selectedBrush = BrushLibrary.hardRound
+        round.selectedBrush = TestBrushes.hardRound
         let roundStart = Date()
         stamp(samples, into: round)
         let roundSeconds = -roundStart.timeIntervalSinceNow
@@ -4893,7 +4893,7 @@ final class PerfBaselineTests: XCTestCase {
             let vector = manager.layers.count - 1
 
             func stroke(_ dx: CGFloat) -> VectorStroke {
-                VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+                VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                              color: CodableColor(red: 0, green: 0.7, blue: 0.9, alpha: 1),
                              size: 18, opacity: 1,
                              samples: StrokeSamples(stride(from: CGFloat(0), through: 600, by: 40).map {
@@ -5123,7 +5123,7 @@ final class PerfBaselineTests: XCTestCase {
         /// One stroke's worth of geometry, offset so the cel accumulates real overlapping ink rather
         /// than the same line forty times.
         func stroke(_ index: Int) -> VectorStroke {
-            VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+            VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                          color: CodableColor(red: 0, green: 0.2, blue: 0.8, alpha: 1),
                          size: 14, opacity: 1,
                          samples: StrokeSamples(stride(from: CGFloat(0), through: 1600, by: 40).map {
@@ -5243,7 +5243,7 @@ final class PerfBaselineTests: XCTestCase {
                                     y: y0 + h * 0.045 * sin(t * .pi * 2 + phase),
                                     pressure: 0.3 + 0.7 * sin(t * .pi))
             }, channels: .pressureOnly)
-            strokes.append(VectorStroke(brush: BrushLibrary.hardRound, color: ink,
+            strokes.append(VectorStroke(brush: TestBrushes.hardRound, color: ink,
                                         size: width, opacity: 1, samples: samples))
         }
         return strokes

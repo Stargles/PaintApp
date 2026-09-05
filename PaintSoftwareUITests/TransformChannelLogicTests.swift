@@ -34,7 +34,7 @@ final class TransformChannelLogicTests: XCTestCase {
     // MARK: - Fixtures
 
     private func stroke(_ points: [CGPoint], size strokeSize: CGFloat = 6) -> VectorStroke {
-        VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: strokeSize, opacity: 1,
                      samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },

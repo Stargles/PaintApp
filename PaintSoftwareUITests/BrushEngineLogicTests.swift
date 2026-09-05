@@ -78,7 +78,7 @@ final class BrushEngineLogicTests: XCTestCase {
     }
 
     func testSizeFractionClampsOutOfRangePressure() {
-        let brush = BrushLibrary.softRound
+        let brush = TestBrushes.softRound
         XCTAssertEqual(sizeFraction(brush, -5), sizeFraction(brush, 0), accuracy: 0.0001)
         XCTAssertEqual(sizeFraction(brush, 5), sizeFraction(brush, 1), accuracy: 0.0001)
     }
@@ -726,7 +726,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// The cut is deliberately at a fractional parameter and off any dab position, so nothing about the
     /// result is an artefact of the boundary landing on a sample or on a lattice step.
     func testComplementaryVisibleRangesReproduceTheWholeStrokeExactly() {
-        let brush = BrushLibrary.hardRound
+        let brush = TestBrushes.hardRound
         // Curved, with a pressure ramp: both the dab spacing carry across segments and the pressure
         // interpolation have to survive the filter, not just the positions.
         let samples = StrokeSamples((0..<9).map { i -> VectorSample in
@@ -766,7 +766,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// precisely the artefact the split exists to avoid, arriving a day later than the cut. And an
     /// ordinary stroke must not start writing the key, so files that contain no pieces are unchanged.
     func testAPieceLatticeSurvivesEncodingAndAnOrdinaryStrokeDoesNotCarryOne() throws {
-        let parent = VectorStroke(brush: BrushLibrary.hardRound,
+        let parent = VectorStroke(brush: TestBrushes.hardRound,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 9, opacity: 1,
                                   // Pressures in *even* 255ths, and coordinates on whole points, so
@@ -1676,7 +1676,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// names as the asymmetric direction. Mutation-tested: relaxing the surviving guard to
     /// `>= 0` makes the first two rows below pass, so this is looking at the product.
     func testTheCleanCutGateReadsTheMergedAlphaRatherThanADeletedOutput() {
-        var solid = BrushLibrary.hardRound
+        var solid = TestBrushes.hardRound
         solid.dab.hardness = 1
         solid.dab.flow = 1
         solid.dab.scatter = 0

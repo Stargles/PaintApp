@@ -38,7 +38,7 @@ final class StrokeCanvasView: UIView {
     var brushOpacity: Double = 1
     /// The full active brush preset, beyond the live `brushSize`/`brushOpacity` above — kept
     /// separate so sliders can move them independently of the selected preset.
-    var brush: Brush = BrushLibrary.softRound {
+    var brush: Brush = BrushLibrary.roundSoft {
         didSet { stabilizer.stabilization = brush.stroke.stabilization }
     }
     var isEraser: Bool = false

@@ -122,13 +122,18 @@ enum BrushTipGenerator {
         // more of a slightly dirty falloff."* §8.4's fourth finding is why the long sides are left
         // clean: with `base 0.25` and `directionFollow 1` they sweep *along* the travel and never
         // reach the silhouette, so roughening them roughens nothing an artist will see.
+        //
+        // **Round three turns the dirt through ninety degrees**, which is the owner's second tweak
+        // off the second sheet and is `comb`'s whole note: this nib's mask `u` is the *across-stroke*
+        // axis, so a comb in `u` traces ribbons along the drag and a comb in `v` — round two's —
+        // rakes across it.
         Shape(name: "flat-messy-ends", seed: 0x5148_0111,
               body: { u, v, s in messyEndSlab(u, v, s, aspect: 4.0, endRough: 0.10,
-                                              endFade: 0.30, dirt: 0.55, sideSoft: 0.035) }),
+                                              endFade: 0.26, dirt: 0.90, sideSoft: 0.035) }),
 
         Shape(name: "flat-messy-ends-dirty", seed: 0x5148_0112,
               body: { u, v, s in messyEndSlab(u, v, s, aspect: 3.2, endRough: 0.17,
-                                              endFade: 0.46, dirt: 0.85, sideSoft: 0.055) }),
+                                              endFade: 0.42, dirt: 1.0, sideSoft: 0.055) }),
 
         // MARK: Sketching — four pencils, unchanged and accepted off the first sheet
 
@@ -270,13 +275,17 @@ enum BrushTipGenerator {
         // The two differ in how the dots are placed, which is the question the ask leaves open.
         // Stratified across the nib guarantees six distinct ribbons; a uniform draw is what *"placed
         // randomly"* says literally and lets two dots share a ribbon.
+        // **The radii are halved from round two at the owner's instruction** — *"make the dots a
+        // bit smaller, at least half the radius. Ill go with the 6 dots option."* Round two drew
+        // 0.10–0.17; these are 0.05–0.085, which at a 30 pt brush is a ribbon 1.5–2.5 pt wide.
+        // The placement is unchanged: stratified, so six distinct ribbons are guaranteed.
         Shape(name: "streak-dots-6", seed: 0x5148_0061,
               body: { u, v, s in dots(u, v, s, count: 6, stratified: true,
-                                      minRadius: 0.10, maxRadius: 0.17) }),
+                                      minRadius: 0.050, maxRadius: 0.085) }),
 
         Shape(name: "streak-dots-8", seed: 0x5148_0062,
               body: { u, v, s in dots(u, v, s, count: 8, stratified: false,
-                                      minRadius: 0.09, maxRadius: 0.15) })
+                                      minRadius: 0.045, maxRadius: 0.075) })
     ]
 
     // MARK: - The shape vocabulary
@@ -311,8 +320,17 @@ enum BrushTipGenerator {
     ///
     /// Three things happen at the end and they are separable on purpose: the boundary itself is
     /// displaced (`endRough`), it fades rather than cuts, and over the last `endFade` of the nib the
-    /// coverage is multiplied by a mottle (`dirt`) so the end is *"non monolithic"* rather than a
+    /// coverage is multiplied by a **comb** (`dirt`) so the end is *"non monolithic"* rather than a
     /// softer straight line.
+    ///
+    /// **The comb runs across `u` and not across `v`, and round two had it the other way round.**
+    /// The owner, on the second sheet: *"the bristle direction for those slab brushes is pointing
+    /// the wrong way, perpendicular to the brush stroke direction."* They are right, and this nib is
+    /// where mask space and stroke space part company — see `comb`'s own note. The dirt was an
+    /// `fbm2` whose `v` coefficient was `aspect * 5.5` against `7.5` in `u`, so its structure was
+    /// elongated **along `u`**; with `base 0.25` and `directionFollow 1` that lands it across the
+    /// travel. It is a comb in `u` now, so each tooth keeps one fixed offset from the path and draws
+    /// a ribbon along the drag.
     static func messyEndSlab(_ u: Float, _ v: Float, _ seed: UInt64,
                              aspect: Float, endRough: Float, endFade: Float,
                              dirt: Float, sideSoft: Float) -> Float {
@@ -327,9 +345,23 @@ enum BrushTipGenerator {
         guard du > 0 else { return 0 }
         coverage *= smoothFalloff(du, max(endFade * 0.30, 1.2 * pixel))
 
-        let t: Float = min(max(du / max(endFade, 1e-4), 0), 1)
-        let mottle: Float = fbm2(u * 7.5 + 2.3, v * aspect * 5.5 + 9.1, octaves: 2, seed: seed &+ 9)
-        return coverage * (t + (1 - t) * (1 - dirt + dirt * mottle))
+        // The fringe is the outer `endFade` of the nib in `u`, which is where the stroke's two
+        // *edges* live — so the teeth are ribbons at the edge of the band rather than a texture in
+        // the middle of it, which is what *"a slightly dirty falloff"* asks for.
+        //
+        // **The comb carries its own envelope rather than riding the coverage falloff's, and the
+        // first render of round three is why.** Blended as `t + (1 - t) · comb` the teeth reach
+        // their full depth only in the outermost sliver, and eight overlapping dabs at flow 0.85
+        // accumulate everything shallower straight back to opaque: the render came out as a row of
+        // fine ticks rather than as ribbons. `reach` holds the teeth at full depth over the outer
+        // 55% of the fringe and closes them by its inner edge, which is a real width for a hole to
+        // live in. §8.4's *"what survives is a hole, not a dimming"* is unchanged by turning the
+        // comb the right way round — orientation decides whether a tooth is a ribbon or a rake,
+        // depth decides whether it is there at all.
+        let reach: Float = min(max((endFade - du) / (0.45 * endFade), 0), 1)
+        let bristles: Float = comb(across: u, along: v * aspect, seed &+ 9,
+                                   teeth: 12, depth: dirt, cut: 0.40)
+        return coverage * (1 - reach * (1 - bristles))
     }
 
     /// A pencil's outline: a disc whose radius wobbles with the angle, optionally fading over the
@@ -431,8 +463,9 @@ enum BrushTipGenerator {
     ///   term that survives a stroke rather than the boundary noise.
     ///
     /// `streakCut` is the share of the comb that closes completely and therefore the width of the
-    /// channels; `streakDepth` is how far a closed band goes, and it wants to be near 1 for the
-    /// reason written at the line itself.
+    /// channels; `streakDepth` is how far a closed band goes, and it wants to be near 1 here for the
+    /// reason `comb` records — these nibs' teeth vary across `v`, and a stroke lays twenty-odd
+    /// overlapping dabs over every point, so a band dimmed to 0.2 accumulates to 0.92 and is gone.
     ///
     /// `dry` breaks the outer band of the nib, which is what makes a loaded flat read as loaded.
     static func painterly(_ u: Float, _ v: Float, _ seed: UInt64,
@@ -449,29 +482,10 @@ enum BrushTipGenerator {
         guard d > 0 else { return 0 }
         var coverage: Float = smoothFalloff(d, max(edge, 1.4 * pixel))
 
-        // **The streaks are a function of `v` and all but a function of `v` alone, and the first
-        // contact sheet is what settled that.** They were a band in `v` times a break-up in `u`,
-        // which reads beautifully on the mask and renders as a solid slab: consecutive dabs slide
-        // along `u`, so one dab's gap sits over its neighbour's ink and the union fills every
-        // channel in. §8.4's argument reaching *inside* the dab. The `u` term survives only as a
-        // slow lateral wobble of the whole comb — a tenth of a band period over the nib, which
-        // moves by about 0.005 of a period between neighbouring dabs and therefore cannot fill.
-        //
-        // **And the channel has to reach zero.** A stroke lays twenty-odd overlapping dabs over
-        // every point at these spacings, so a band dimmed to 0.2 accumulates to 0.92 and is gone.
-        // What survives a union is a hole; a dimming is not one. `streakDepth` is therefore near 1
-        // on every nib whose streaks are meant to be seen, and the *width* of the channel is what
-        // separates a comb from a blotch.
-        let phase: Float = v * streaks + 0.37 + 0.10 * value1(u * 1.7 + 1.9, seed &+ 42)
-        let band: Float = value1(phase, seed &+ 41)
-        let closed: Float = min(max((streakCut - band) / 0.16, 0), 1)
-        // **A comb whose every channel is the same depth is a rake, not a brush.** `amplitude`
-        // varies slowly along `v` only — so one channel is a clean gap, its neighbour a grey drag
-        // and the one after it barely there — which is the *"more blotchy than square"* half of the
-        // owner's sentence. Along `v` only, for the same reason the phase is: anything that varies
-        // along `u` is filled in by the next dab.
-        let amplitude: Float = 0.35 + 0.65 * value1(v * streaks * 0.31 + 5.1, seed &+ 44)
-        coverage *= 1 - streakDepth * amplitude * closed
+        // **The painterly nibs hold no base turn, so their across-travel axis is `v`** — which is why
+        // this call passes `across: v` where `messyEndSlab` passes `across: u`. See `comb`.
+        coverage *= comb(across: v, along: u, seed,
+                         teeth: streaks, depth: streakDepth, cut: streakCut)
 
         guard dry > 1e-4 else { return coverage }
         let t: Float = min(max(d / 0.30, 0), 1)
@@ -479,8 +493,57 @@ enum BrushTipGenerator {
         return coverage * (t + (1 - t) * (1 - dry + dry * pits))
     }
 
+    /// **A comb of streaks that trace ribbons along the drag — and which mask axis that is is a
+    /// property of the brush's `angle`, not of the tip.**
+    ///
+    /// The owner, on the second sheet: *"the bristle direction for those slab brushes is pointing
+    /// the wrong way, perpendicular to the brush stroke direction."* It was, and the reason it is
+    /// easy to get backwards is that **mask space and stroke space are not the same axes**:
+    ///
+    /// - `directionFollow 1`, **no base turn** — the painterly nibs, the bristle, the dots. Mask `u`
+    ///   lies **along** the travel and `v` runs **across** the stroke, so the comb varies in `v`.
+    /// - `directionFollow 1` **plus `base 0.25`** — every slab (Square, Messy Flat). The nib's long
+    ///   side is perpendicular to the travel, so mask `u` is **across** the stroke and `v` is along
+    ///   it. The comb varies in `u`.
+    ///
+    /// `across` is therefore whichever coordinate runs across the stroke's *width*, and `along` is
+    /// the one that runs with the travel. Get them the wrong way round and the result is doubly
+    /// wrong: the streaks read as a rake dragged sideways, **and** they are the orientation §8.4
+    /// says the walk dilates away — consecutive dabs slide along the travel, so one dab's gap sits
+    /// over its neighbour's ink and the union fills every channel in.
+    ///
+    /// Two consequences of getting it right, and the first one is a correction this file made to
+    /// itself on the round-three render:
+    ///
+    /// - **Turning the comb the right way does not buy a shallow tooth.** It is tempting to think a
+    ///   tooth at a fixed offset from the path survives at any depth, since every dab presents it
+    ///   identically — but the walk **accumulates** rather than taking a maximum. Eight overlapping
+    ///   dabs at flow 0.85, each laying 15% of a tooth's dimming, reach 0.66 and twelve reach 0.81.
+    ///   §8.4's *"what survives is a hole, not a dimming"* is therefore orthogonal to this note:
+    ///   orientation decides whether a tooth reads as a ribbon or as a rake, `depth` decides whether
+    ///   it is visible at all, and a nib needs both.
+    /// - **The `along` term may only wobble.** It moves the whole comb sideways by a tenth of a
+    ///   tooth period over the nib — about 0.005 of a period between neighbouring dabs — which is
+    ///   slow enough that it cannot fill a channel and fast enough that the comb is not a ruler.
+    ///
+    /// `cut` is the share of the comb that closes and therefore the width of the channels; `depth`
+    /// is how far a closed tooth goes; `band` is the ramp either side of the cut. `amplitude` varies
+    /// slowly **along `across` only**, so one channel is a clean gap, its neighbour a grey drag and
+    /// the one after it barely there — a comb whose every channel is the same depth is a rake.
+    static func comb(across: Float, along: Float, _ seed: UInt64,
+                     teeth: Float, depth: Float, cut: Float, band: Float = 0.16) -> Float {
+        let phase: Float = across * teeth + 0.37 + 0.10 * value1(along * 1.7 + 1.9, seed &+ 42)
+        let n: Float = value1(phase, seed &+ 41)
+        let closed: Float = min(max((cut - n) / band, 0), 1)
+        let amplitude: Float = 0.35 + 0.65 * value1(across * teeth * 0.31 + 5.1, seed &+ 44)
+        return 1 - depth * amplitude * closed
+    }
+
     /// **Parallel filaments with no shared envelope** — §8.6's *"Right now you can see it fit within
     /// a clear oval shape"*, which was literal and is the whole of what this rewrites.
+    ///
+    /// The filaments run along `u` with their centres spread across `v`, which is `comb`'s
+    /// no-base-turn case: these nibs carry `directionFollow 1` and no hold, so `u` is the travel.
     ///
     /// Round one multiplied every filament by one elliptical envelope, so whatever the filaments did
     /// the **silhouette** was that ellipse — the exact defect the owner named, and a nib that

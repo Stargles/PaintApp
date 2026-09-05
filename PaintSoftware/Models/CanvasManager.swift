@@ -742,7 +742,7 @@ final class CanvasManager: ObservableObject {
     /// published properties rather than folded into this because `SideToolbar`'s sliders bind
     /// directly to them and can move independently of whichever preset is selected — nudging a
     /// brush's size doesn't become a new saved preset.
-    @Published var selectedBrush: Brush = BrushLibrary.softRound
+    @Published var selectedBrush: Brush = BrushLibrary.roundSoft
     /// User-imported custom brushes **this document must carry tip files for** — BRUSH.md §8.1's
     /// second half, read by `ProjectStore.importedTextureFileNames` so a saved package is
     /// self-contained. Persisted per project via `ProjectManifest`.
@@ -796,7 +796,7 @@ final class CanvasManager: ObservableObject {
     /// place that half of it could not reach.
     ///
     /// `selectedBrush` and `selectedEraserBrush` are initialised from the **literals**
-    /// `BrushLibrary.softRound` / `.hardRound`, which is right on a device with no library and wrong
+    /// `BrushLibrary.roundSoft` / `.roundHard`, which is right on a device with no library and wrong
     /// the moment one has been edited: MEASURED as a red UI test where an edit survived closing the
     /// editor and did not survive a relaunch, with the library file holding the edit the whole time
     /// and the menu row beside the editor drawing it. The ids are written down (they have to be, for
@@ -874,7 +874,7 @@ final class CanvasManager: ObservableObject {
 
     /// The eraser's own brush preset. Defaults to Hard Round, the crisp/predictable shape most paint
     /// apps default their eraser to.
-    @Published var selectedEraserBrush: Brush = BrushLibrary.hardRound
+    @Published var selectedEraserBrush: Brush = BrushLibrary.roundHard
     /// Live-adjustable eraser diameter, separate from `brushSize`. Defaults larger than the paint
     /// brush's default — erasers are typically used broader than the pen/pencil.
     @Published var eraserSize: CGFloat = 20
@@ -3200,7 +3200,7 @@ final class CanvasManager: ObservableObject {
     /// The original stroke samples captured before shape detection fired, saved so they can be
     /// collapsed onto the final shape geometry at commit time (preserving brush dynamics).
     var shapeGestureSamples: [VectorSample] = []
-    var shapeGestureBrush: Brush = BrushLibrary.softRound
+    var shapeGestureBrush: Brush = BrushLibrary.roundSoft
     /// The random field the shape's dabs are drawn from — BRUSH.md §4. Minted once when the shape is
     /// confirmed, so every re-render of the live preview lays the same jittered ink and the committed
     /// shape lays it too. Without it a scattering brush's preview reshuffled on every handle drag.

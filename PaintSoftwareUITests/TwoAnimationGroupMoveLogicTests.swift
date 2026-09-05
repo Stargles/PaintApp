@@ -58,7 +58,7 @@ final class TwoAnimationGroupMoveLogicTests: XCTestCase {
 
     private func stroke(from a: CGPoint, to b: CGPoint, group: UUID? = nil,
                         size: CGFloat = 4) -> VectorStroke {
-        var stroke = VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(),
+        var stroke = VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(),
                                   size: size, opacity: 1,
                                   samples: [VectorSample(x: a.x, y: a.y, pressure: 1),
                                             VectorSample(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,

@@ -1113,7 +1113,7 @@ final class SandwichLogicTests: XCTestCase {
         manager.addVectorLayer()
 
         func stroke(_ points: [CGPoint]) -> VectorStroke {
-            VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+            VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                          color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1),
                          size: 9, opacity: 1,
                          samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
@@ -1292,7 +1292,7 @@ final class SandwichLogicTests: XCTestCase {
         // of this key — was edited.
         let retimed = manager.contentVersion(ofLayer: 1, atFrame: 5)
         manager.layers[1].cels[0].vector?.addStroke(
-            VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+            VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                          color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1), size: 9, opacity: 1,
                          samples: [VectorSample(x: 8, y: 52, pressure: 1),
                                    VectorSample(x: 50, y: 52, pressure: 1)]))

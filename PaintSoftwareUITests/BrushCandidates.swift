@@ -408,29 +408,44 @@ enum BrushCandidates {
         // other's weaker version, so the obvious question the factorial cannot answer is what they
         // look like together. This row is that question: the triangle at full turn, carrying
         // Blotchy's own dropout, width wobble and scatter unchanged.
-        out.append(Candidate(
-            group: "Inking", slot: "Rough Ink", standing: .contender,
-            name: "Rough Ink — Triangle + Blotchy Dynamics", kind: kind("rough-ink-triangle"),
-            brush: Brush(name: "Rough Ink — Triangle + Blotchy Dynamics",
-                         tip: stamp("rough-ink-triangle"), size: 11,
-                         dab: BrushDabSettings(size: 0.6, flow: 1, spacing: 0.045,
-                                               density: 0, densityWavelength: 4.0,
-                                               angle: BrushAngleSettings(jitter: 1)),
-                         stroke: BrushStrokeSettings(stabilization: 0.3),
-                         modulations: BrushModulations([
-                             .sizeFromPressure(amount: 0.16, atZero: 0.55),
-                             BrushModulation(.size, .random(.scatterAngle, .plain(2.5)),
-                                             amount: 0.30),
-                             BrushModulation(.size, .random(.scatterAngle, .plain(0.3)),
-                                             amount: 0.10),
-                             BrushModulation(.scatter, .random(.scatterAngle, .plain(1.5)),
-                                             amount: 0.14),
-                             .densityFromPressure(knee: 0.4, floor: 0.45),
-                             .flowFromPressure(amount: 0.1)
-                         ])),
-            note: "Outside the factorial on purpose: the picture's fine tooth *and* Blotchy's "
-                + "coarse lumps and dropout at once. Not attributable, and not meant to be — it "
-                + "is the row that asks whether the two mechanisms add up."))
+        // **And the seventh, which is the owner's own question off the second sheet.** They accepted
+        // Triangle + Blotchy for the slot and then asked to see the square given the same
+        // treatment before it is settled: *"i wonder what rough ink square with blotchy dynamics
+        // will look like."* So this row is the one above with **only the picture swapped** — same
+        // size, same dab, same spacing, same dropout, same four random rows, same jitter — which
+        // makes the pair attributable even though neither is attributable on its own.
+        let blotchyRoughInk: [(String, String, String)] = [
+            ("Rough Ink — Triangle + Blotchy Dynamics", "rough-ink-triangle",
+             "Outside the factorial on purpose: the picture's fine tooth *and* Blotchy's coarse "
+             + "lumps and dropout at once. Not attributable, and not meant to be — it is the row "
+             + "that asks whether the two mechanisms add up."),
+            ("Rough Ink — Rough Square + Blotchy Dynamics", "rough-ink-square",
+             "The owner's ask off the second sheet: the square nib given the triangle's treatment. "
+             + "Only the tip differs from the row above, so the pair is the picture term isolated "
+             + "against a fixed set of dynamics.")
+        ]
+        for (name, tipName, note) in blotchyRoughInk {
+            out.append(Candidate(
+                group: "Inking", slot: "Rough Ink", standing: .contender,
+                name: name, kind: kind(tipName),
+                brush: Brush(name: name, tip: stamp(tipName), size: 11,
+                             dab: BrushDabSettings(size: 0.6, flow: 1, spacing: 0.045,
+                                                   density: 0, densityWavelength: 4.0,
+                                                   angle: BrushAngleSettings(jitter: 1)),
+                             stroke: BrushStrokeSettings(stabilization: 0.3),
+                             modulations: BrushModulations([
+                                 .sizeFromPressure(amount: 0.16, atZero: 0.55),
+                                 BrushModulation(.size, .random(.scatterAngle, .plain(2.5)),
+                                                 amount: 0.30),
+                                 BrushModulation(.size, .random(.scatterAngle, .plain(0.3)),
+                                                 amount: 0.10),
+                                 BrushModulation(.scatter, .random(.scatterAngle, .plain(1.5)),
+                                                 amount: 0.14),
+                                 .densityFromPressure(knee: 0.4, floor: 0.45),
+                                 .flowFromPressure(amount: 0.1)
+                             ])),
+                note: note))
+        }
 
         // MARK: - Painting
 

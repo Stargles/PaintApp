@@ -98,8 +98,12 @@ final class BrushStorageLogicTests: XCTestCase {
         // separation is on disk rather than only in two live objects.
         let reopenedA = BrushLibraryStore(storage: BrushStorage(root: rootA), arguments: [])
         let reopenedB = BrushLibraryStore(storage: BrushStorage(root: rootB), arguments: [])
-        XCTAssertEqual(reopenedA.groups.map(\.name), ["Basics", "Only in A"])
-        XCTAssertEqual(reopenedB.groups.map(\.name), ["Basics", "Only in B"])
+        // §8.6's whole seeded set plus the one group each store added — it was `["Basics", …]`
+        // until §12 stage 9 authored the shipped library, and deriving it keeps this test about
+        // *separation* rather than about how many groups ship.
+        let seeded = BrushLibrary.groups.map(\.name)
+        XCTAssertEqual(reopenedA.groups.map(\.name), seeded + ["Only in A"])
+        XCTAssertEqual(reopenedB.groups.map(\.name), seeded + ["Only in B"])
     }
 
     // MARK: - Requirement 1 — every stored reference is a name, never a path
@@ -133,7 +137,7 @@ final class BrushStorageLogicTests: XCTestCase {
         let read = BrushLibraryStore(storage: BrushStorage(root: rootB), arguments: [])
         let travelled = try XCTUnwrap(read.allBrushes.first { $0.name == "Travelling" })
         XCTAssertEqual(travelled.tip, tip, "the brush comes back naming the same file")
-        XCTAssertEqual(read.groups.map(\.name), ["Basics", "Imported"])
+        XCTAssertEqual(read.groups.map(\.name), BrushLibrary.groups.map(\.name) + ["Imported"])
     }
 
     /// **An imported tip and a textured brush both survive the move**, which is two tests in one

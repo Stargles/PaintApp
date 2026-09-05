@@ -305,6 +305,17 @@
 		7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */; };
 		9F9CBA62193522CA30FB3605 /* BrushMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2DE8EB33E6B333909BFB8F /* BrushMenuUITests.swift */; };
 		156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */ = {isa = PBXBuildFile; fileRef = 3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */; };
+		A903366A8FF7893CAD8D4F92 /* PaintSoftware/Resources/brushtip-square-bevel-wide.png in Resources */ = {isa = PBXBuildFile; fileRef = B1E1FC25DD8524A33038DCCD /* PaintSoftware/Resources/brushtip-square-bevel-wide.png */; };
+		9D6CE0CE88C71A19D09B6EFA /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png in Resources */ = {isa = PBXBuildFile; fileRef = 0F4D4F4AF15EFEE4CD3FF408 /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png */; };
+		2C7F3821D34D8A34531C0046 /* PaintSoftware/Resources/brushtip-pencil-hard.png in Resources */ = {isa = PBXBuildFile; fileRef = 113E5012D241F2F87198201E /* PaintSoftware/Resources/brushtip-pencil-hard.png */; };
+		C97113D51EC4487E70C71D1C /* PaintSoftware/Resources/brushtip-pencil-soft.png in Resources */ = {isa = PBXBuildFile; fileRef = DEE3D0BB73A65CB91D7A2A3C /* PaintSoftware/Resources/brushtip-pencil-soft.png */; };
+		58B5C2AA1A6A1CDC4D85BECA /* PaintSoftware/Resources/brushtip-pencil-blunt.png in Resources */ = {isa = PBXBuildFile; fileRef = 169E0D5CBA21CC0EC82802D1 /* PaintSoftware/Resources/brushtip-pencil-blunt.png */; };
+		25971EE63F35605870E5F776 /* PaintSoftware/Resources/brushtip-pencil-textured.png in Resources */ = {isa = PBXBuildFile; fileRef = CC612583EC8E40A06D2EE976 /* PaintSoftware/Resources/brushtip-pencil-textured.png */; };
+		96BF62AD35AA806A954B5CA6 /* PaintSoftware/Resources/brushtip-pen-brush.png in Resources */ = {isa = PBXBuildFile; fileRef = 0DE5BEB50F6D453C1C1EEFD8 /* PaintSoftware/Resources/brushtip-pen-brush.png */; };
+		C55CE056B842B0FB999D79A9 /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png in Resources */ = {isa = PBXBuildFile; fileRef = 6FC2A78EC884BDE00BD4766F /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png */; };
+		B735B324EA1D0A4ABEDD593B /* PaintSoftware/Resources/brushtip-paint-dry-load.png in Resources */ = {isa = PBXBuildFile; fileRef = F1C6A6717BBDC0D3E9AEBA1A /* PaintSoftware/Resources/brushtip-paint-dry-load.png */; };
+		190D1A86E71A6FAAF74BCC77 /* PaintSoftware/Resources/brushtip-bristle-open.png in Resources */ = {isa = PBXBuildFile; fileRef = E2DBC5407E778428537EE8B2 /* PaintSoftware/Resources/brushtip-bristle-open.png */; };
+		EE85F5408AD35C8538CE4C53 /* PaintSoftware/Resources/brushtip-streak-dots-6.png in Resources */ = {isa = PBXBuildFile; fileRef = C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -618,6 +629,17 @@
 		A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushLibraryLogicTests.swift; sourceTree = "<group>"; };
 		DB2DE8EB33E6B333909BFB8F /* BrushMenuUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushMenuUITests.swift; sourceTree = "<group>"; };
 		3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-square.png; sourceTree = "<group>"; };
+		B1E1FC25DD8524A33038DCCD /* PaintSoftware/Resources/brushtip-square-bevel-wide.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-square-bevel-wide.png; sourceTree = "<group>"; };
+		0F4D4F4AF15EFEE4CD3FF408 /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png; sourceTree = "<group>"; };
+		113E5012D241F2F87198201E /* PaintSoftware/Resources/brushtip-pencil-hard.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-pencil-hard.png; sourceTree = "<group>"; };
+		DEE3D0BB73A65CB91D7A2A3C /* PaintSoftware/Resources/brushtip-pencil-soft.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-pencil-soft.png; sourceTree = "<group>"; };
+		169E0D5CBA21CC0EC82802D1 /* PaintSoftware/Resources/brushtip-pencil-blunt.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-pencil-blunt.png; sourceTree = "<group>"; };
+		CC612583EC8E40A06D2EE976 /* PaintSoftware/Resources/brushtip-pencil-textured.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-pencil-textured.png; sourceTree = "<group>"; };
+		0DE5BEB50F6D453C1C1EEFD8 /* PaintSoftware/Resources/brushtip-pen-brush.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-pen-brush.png; sourceTree = "<group>"; };
+		6FC2A78EC884BDE00BD4766F /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-rough-ink-triangle.png; sourceTree = "<group>"; };
+		F1C6A6717BBDC0D3E9AEBA1A /* PaintSoftware/Resources/brushtip-paint-dry-load.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-paint-dry-load.png; sourceTree = "<group>"; };
+		E2DBC5407E778428537EE8B2 /* PaintSoftware/Resources/brushtip-bristle-open.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-bristle-open.png; sourceTree = "<group>"; };
+		C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = PaintSoftware/Resources/brushtip-streak-dots-6.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -849,6 +871,17 @@
 				4B5379F7B114FC84D7AB2328 /* PaintSoftware/Engine/BrushModulation.swift */,
 				8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */,
 				3E93DB9B5948F7F58B083F7D /* PaintSoftware/Resources/brushtip-square.png */,
+				B1E1FC25DD8524A33038DCCD /* PaintSoftware/Resources/brushtip-square-bevel-wide.png */,
+				0F4D4F4AF15EFEE4CD3FF408 /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png */,
+				113E5012D241F2F87198201E /* PaintSoftware/Resources/brushtip-pencil-hard.png */,
+				DEE3D0BB73A65CB91D7A2A3C /* PaintSoftware/Resources/brushtip-pencil-soft.png */,
+				169E0D5CBA21CC0EC82802D1 /* PaintSoftware/Resources/brushtip-pencil-blunt.png */,
+				CC612583EC8E40A06D2EE976 /* PaintSoftware/Resources/brushtip-pencil-textured.png */,
+				0DE5BEB50F6D453C1C1EEFD8 /* PaintSoftware/Resources/brushtip-pen-brush.png */,
+				6FC2A78EC884BDE00BD4766F /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png */,
+				F1C6A6717BBDC0D3E9AEBA1A /* PaintSoftware/Resources/brushtip-paint-dry-load.png */,
+				E2DBC5407E778428537EE8B2 /* PaintSoftware/Resources/brushtip-bristle-open.png */,
+				C661B202B4DF7D83CE490008 /* PaintSoftware/Resources/brushtip-streak-dots-6.png */,
 				63C46BCE52DAEB342AE2A2C9 /* PaintSoftware/Views/TimelineGraphBand.swift */,
 				E1E457E9EFA7E3F04D87C924 /* PaintSoftware/Models/BrushEditorModel.swift */,
 				DEC787C8C6D98BA394715CAD /* PaintSoftware/Models/PoseComponents.swift */,
@@ -1078,6 +1111,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */,
+				A903366A8FF7893CAD8D4F92 /* PaintSoftware/Resources/brushtip-square-bevel-wide.png in Resources */,
+				9D6CE0CE88C71A19D09B6EFA /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png in Resources */,
+				2C7F3821D34D8A34531C0046 /* PaintSoftware/Resources/brushtip-pencil-hard.png in Resources */,
+				C97113D51EC4487E70C71D1C /* PaintSoftware/Resources/brushtip-pencil-soft.png in Resources */,
+				58B5C2AA1A6A1CDC4D85BECA /* PaintSoftware/Resources/brushtip-pencil-blunt.png in Resources */,
+				25971EE63F35605870E5F776 /* PaintSoftware/Resources/brushtip-pencil-textured.png in Resources */,
+				96BF62AD35AA806A954B5CA6 /* PaintSoftware/Resources/brushtip-pen-brush.png in Resources */,
+				C55CE056B842B0FB999D79A9 /* PaintSoftware/Resources/brushtip-rough-ink-triangle.png in Resources */,
+				B735B324EA1D0A4ABEDD593B /* PaintSoftware/Resources/brushtip-paint-dry-load.png in Resources */,
+				190D1A86E71A6FAAF74BCC77 /* PaintSoftware/Resources/brushtip-bristle-open.png in Resources */,
+				EE85F5408AD35C8538CE4C53 /* PaintSoftware/Resources/brushtip-streak-dots-6.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

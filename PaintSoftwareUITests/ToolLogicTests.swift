@@ -175,9 +175,9 @@ final class ToolLogicTests: XCTestCase {
         XCTAssertTrue(manager.textGestureActive,
                       "fixture precondition: there has to be a live text session for this to measure anything")
 
-        manager.selectBrush(BrushLibrary.pencil)
+        manager.selectBrush(TestBrushes.pencil)
 
-        XCTAssertEqual(manager.selectedBrush.name, BrushLibrary.pencil.name,
+        XCTAssertEqual(manager.selectedBrush.name, TestBrushes.pencil.name,
                        "The preset itself still becomes the active brush — that half was never in question")
         XCTAssertEqual(manager.selectedTool, .text, """
             Picking a brush preset took the tool off `.text` without committing the text session. \
@@ -198,11 +198,20 @@ final class ToolLogicTests: XCTestCase {
         let manager = CanvasFixture.manager()
         XCTAssertEqual(manager.selectedTool, .pen, "fixture precondition: a new document starts on the pen")
 
-        manager.selectBrush(BrushLibrary.pencil)
-        XCTAssertEqual(manager.selectedTool, .pencil, "The Pencil preset selects the pencil")
+        // **Re-derived at §12 stage 9: the affinity is group membership now, not one preset id.**
+        // `BrushLibrary.isPencilPreset` asks whether a brush is in §8.6's Sketching group, so it has
+        // to be handed a brush the app actually ships — a fixture that merely *looks* like a pencil
+        // is not in any group and correctly answers no.
+        manager.selectBrush(BrushLibrary.pencilHard)
+        XCTAssertEqual(manager.selectedTool, .pencil, "A brush in Sketching selects the pencil")
 
-        manager.selectBrush(BrushLibrary.softRound)
+        manager.selectBrush(BrushLibrary.roundSoft)
         XCTAssertEqual(manager.selectedTool, .pen, "…and a round preset comes back to the pen")
+
+        manager.selectBrush(BrushLibrary.pencilTextured)
+        XCTAssertEqual(manager.selectedTool, .pencil,
+                       "…and it is the whole group, not one hand-checked id — which is what the "
+                       + "five-id version could not say")
     }
 
     /// The rule that was already there, pinned so the rewrite cannot drop it while adding the two
@@ -211,12 +220,12 @@ final class ToolLogicTests: XCTestCase {
         let manager = CanvasFixture.manager()
 
         manager.selectedTool = .eraser
-        manager.selectBrush(BrushLibrary.pencil)
+        manager.selectBrush(TestBrushes.pencil)
         XCTAssertEqual(manager.selectedTool, .eraser,
                        "Picking a paint brush while erasing must not silently switch back to painting")
 
         manager.selectedTool = .fill
-        manager.selectBrush(BrushLibrary.pencil)
+        manager.selectBrush(TestBrushes.pencil)
         XCTAssertEqual(manager.selectedTool, .fill)
     }
 

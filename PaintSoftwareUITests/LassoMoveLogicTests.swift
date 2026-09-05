@@ -35,7 +35,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
     private func stroke(from a: CGPoint, to b: CGPoint, size: CGFloat = 4,
                         composite: StrokeComposite = .paint,
-                        brush: Brush = BrushLibrary.hardRound) -> VectorStroke {
+                        brush: Brush = TestBrushes.hardRound) -> VectorStroke {
         VectorStroke(id: UUID(), brush: brush, color: black(), size: size, opacity: 1,
                      samples: [VectorSample(x: a.x, y: a.y, pressure: 1),
                                VectorSample(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, pressure: 1),
@@ -854,7 +854,7 @@ final class LassoMoveLogicTests: XCTestCase {
         // `spacingFraction` 0.25 at size 8 gives a 2 pt spacing, and 4 pt when doubled — both clear
         // of `stampSpacing`'s 1 pt floor, which is the one thing that breaks the similarity. See
         // `testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount`.
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.25
         vector.addStroke(stroke(from: CGPoint(x: 6, y: 32), to: CGPoint(x: 58, y: 32),
                                 size: 8, brush: brush))
@@ -903,7 +903,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// `testAScaledPieceLandsEveryDabWhereTheSimilarityPutsIt` cannot mistake its brush for an
     /// arbitrary choice.
     func testTheSpacingFloorIsTheOnePlaceAScaleChangesTheDabCount() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.05
         let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
@@ -941,7 +941,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// so, because "and back" is the whole claim and a `1.0000000000000002` would make it a different
     /// test. `testAScaleOutAndBackIsPixelIdentical` is the same finding one level up, in pixels.
     func testTheSpacingFloorSurvivesAScaleRoundTrip() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.05
         let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
@@ -2442,13 +2442,13 @@ final class LassoMoveLogicTests: XCTestCase {
         func offGrid(_ x: CGFloat, _ y: CGFloat) -> VectorSample {
             VectorSample(x: x + 0.13, y: y + 0.07, pressure: 1)
         }
-        var precise = VectorStroke(brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
+        var precise = VectorStroke(brush: TestBrushes.hardRound, color: black(), size: 4, opacity: 1,
                                    samples: [offGrid(10, 10), offGrid(20, 12), offGrid(30, 14)])
         precise.lattice = DabLattice(samples: [offGrid(10, 10), offGrid(30, 14)],
                                      parameters: [0, 1])
         vector.addStroke(precise.markedPrecise())
         second.addStroke(precise.markedPrecise())
-        let ordinary = VectorStroke(brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
+        let ordinary = VectorStroke(brush: TestBrushes.hardRound, color: black(), size: 4, opacity: 1,
                                     samples: [offGrid(40, 40), offGrid(50, 44)])
         vector.addStroke(ordinary)
 
@@ -3095,7 +3095,7 @@ final class LassoMoveLogicTests: XCTestCase {
             vector.addStroke(stroke(from: a, to: b, size: width))
         }
         XCTAssertTrue(manager.beginVectorWholeCelMove())
-        let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound, size: width)
+        let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: TestBrushes.hardRound, size: width)
 
         func fitted(at boxAngle: CGFloat) -> ObjectTransformFrame {
             manager.turnVectorFloatBox(to: boxAngle)
@@ -3150,7 +3150,7 @@ final class LassoMoveLogicTests: XCTestCase {
             let expected: CGFloat
             if isRing {
                 let radius: CGFloat = 20, width: CGFloat = 2
-                let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound,
+                let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: TestBrushes.hardRound,
                                                        size: width)
                 var samples = StrokeSamples(channels: .pressureOnly)
                 for step in 0...256 {
@@ -3158,17 +3158,17 @@ final class LassoMoveLogicTests: XCTestCase {
                     samples.append(VectorSample(x: centre.x + radius * cos(t),
                                                 y: centre.y + radius * sin(t), pressure: 1))
                 }
-                vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(),
+                vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(),
                                               size: width, opacity: 1, samples: samples,
                                               composite: .paint))
                 expected = 2 * radius + 2 * reach
             } else {
                 let width: CGFloat = 24
-                vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(),
+                vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(),
                                               size: width, opacity: 1,
                                               samples: [VectorSample(x: centre.x, y: centre.y, pressure: 1)],
                                               composite: .paint))
-                expected = 2 * StrokeGeometry.stampRadius(forPressure: 1, brush: BrushLibrary.hardRound,
+                expected = 2 * StrokeGeometry.stampRadius(forPressure: 1, brush: TestBrushes.hardRound,
                                                           size: width)
             }
             XCTAssertTrue(manager.beginVectorWholeCelMove(), "ring \(isRing)")
@@ -3763,7 +3763,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// what makes one write pattern right for all three.
     func testARecolourCarriesTheHueAndLeavesEveryOpacityExactlyWhereItWas() {
         let (manager, layerIndex, vector) = fixture()
-        vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                       color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                       size: 5, opacity: 0.6,
                                       samples: [VectorSample(x: 20, y: 20, pressure: 1),

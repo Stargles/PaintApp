@@ -38,24 +38,48 @@ final class BrushTipLogicTests: XCTestCase {
     /// The square brush is in the shipped picker, so an artist can reach it with no prior state —
     /// CLAUDE.md's cold-start reachability bar. Constructing a `Brush` in the fixture would prove
     /// only that the fixture works.
-    func testTheSquareBrushInTheShippedLibraryDrawsSquareInkFromAColdStart() throws {
-        let square = try XCTUnwrap(BrushLibrary.defaults.first { $0.tip == .stamp(.builtIn(.square)) },
+    /// **Re-derived at §12 stage 9, because the shipped Square is a different nib.** It used to be
+    /// `.builtIn(.square)` — a filled square — and §8.6's is a 2.5:1 bevelled slab held at
+    /// `angle.base 0.25` with `directionFollow 1`. The old expectations were about a square dab and
+    /// would have been *silently* wrong here: a slab drags a band too, and every alpha the old test
+    /// sampled is still inked.
+    ///
+    /// The discriminating sample is at the stroke's **start**, and it is discriminating precisely
+    /// because the nib is thin along the travel: 0.384 of the brush width against a disc's 1. So a
+    /// slab's ink begins where the pen touched down and a round tip's reaches half a width in front
+    /// of it. A tip that never reached the renderer draws the disc.
+    func testTheSquareBrushInTheShippedLibraryDrawsSlabInkFromAColdStart() throws {
+        let square = try XCTUnwrap(BrushLibrary.defaults.first { $0.name == "Square" },
                                    "The brush picker must still offer a square brush")
-        let texture = RasterLayerTexture(size: CGSize(width: 200, height: 200))
-        BrushStamper.stampStroke(into: texture,
-                                 samples: StrokeSamples((0..<10).map {
-                                     VectorSample(point: CGPoint(x: 40 + CGFloat($0) * 12, y: 100),
-                                                  pressure: 1)
-                                 }, channels: .pressureOnly),
-                                 brush: square, color: .black, brushSize: 40, brushOpacity: 1,
-                                 random: DabRandom(seed: 99))
-        let pixels = try XCTUnwrap(Self.rgba(of: texture))
+        XCTAssertEqual(square.tip, .stamp(.builtIn(.squareBevelWide)))
 
-        // A 40 pt square brush laid along y = 100 inks a band 40 tall and no taller. The corner is
-        // the discriminating pixel: a round brush of the same size would leave it clear.
+        func draw(_ brush: Brush) throws -> (bytes: [UInt8], width: Int, height: Int) {
+            let texture = RasterLayerTexture(size: CGSize(width: 200, height: 200))
+            BrushStamper.stampStroke(into: texture,
+                                     samples: StrokeSamples((0..<10).map {
+                                         VectorSample(point: CGPoint(x: 40 + CGFloat($0) * 12, y: 100),
+                                                      pressure: 1)
+                                     }, channels: .pressureOnly),
+                                     brush: brush, color: .black, brushSize: 40, brushOpacity: 1,
+                                     random: DabRandom(seed: 99))
+            return try XCTUnwrap(Self.rgba(of: texture))
+        }
+
+        let pixels = try draw(square)
+        // The nib's long side is perpendicular to the travel, so a horizontal drag lays a band as
+        // tall as that side — 0.96 of the brush width, centred on the path.
         XCTAssertGreaterThan(Self.alpha(pixels, 100, 100), 200, "the stroke is on the canvas at all")
-        XCTAssertGreaterThan(Self.alpha(pixels, 100, 118), 200, "…and it is square to its top edge")
+        XCTAssertGreaterThan(Self.alpha(pixels, 100, 115), 200, "…and it is square to its top edge")
         XCTAssertEqual(Self.alpha(pixels, 100, 130), 0, "…and stops there")
+
+        var asRound = square
+        asRound.tip = .round
+        let round = try draw(asRound)
+        XCTAssertEqual(Self.alpha(pixels, 25, 100), 0,
+                       "a slab is thin along the travel, so its ink starts where the pen did")
+        XCTAssertGreaterThan(Self.alpha(round, 25, 100), 200,
+                             "…and a disc of the same size reaches half a width in front of it — "
+                             + "which is what makes the line above a claim about the tip")
     }
 
     // MARK: - A square dab is a square
@@ -270,7 +294,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// answer. `RestSpaceDabBakeLogicTests` makes it for round dabs; the image arm is new code in
     /// both `PosedDabTarget` and `replay`, and this is the operand that catches one of them alone.
     func testAPosedImageWalkStreamsAndReplaysToTheSameDabs() {
-        var jittering = BrushLibrary.square
+        var jittering = TestBrushes.square
         jittering.dab.angle.jitter = 0.8
         let samples = StrokeSamples((0..<14).map {
             VectorSample(point: CGPoint(x: CGFloat($0) * 9, y: CGFloat($0) * 5), pressure: 0.4 + CGFloat($0) * 0.04)
@@ -619,11 +643,14 @@ final class BrushTipLogicTests: XCTestCase {
         let cases: [(String, BrushTip)] = [
             ("round", .round),
             ("built-in stamp", .stamp(.builtIn(.square))),
+            // A §12 stage 9 tip too, so a case whose raw value is edited — which would orphan every
+            // saved brush naming it — cannot pass on `square`'s back.
+            ("shipped stamp", .stamp(.builtIn(.pencilBlunt))),
             ("imported stamp", .stamp(.imported(fileName: "custom-1E2F.png")))
         ]
         for (name, tip) in cases {
             try XCTContext.runActivity(named: name) { _ in
-                var brush = BrushLibrary.hardRound
+                var brush = TestBrushes.hardRound
                 brush.tip = tip
                 let data = try JSONEncoder().encode(brush)
                 XCTAssertEqual(try JSONDecoder().decode(Brush.self, from: data), brush)
@@ -642,7 +669,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// tip is the one inside `VectorStroke` — a different encoder from the manifest's palette, and
     /// the one an artist's drawing actually depends on.
     func testAStrokesImportedTipSurvivesTheStrokesOwnRoundTrip() throws {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.tip = .stamp(.imported(fileName: "custom-9A7B.png"))
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 12, opacity: 1,
@@ -658,7 +685,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// the wrong ink, with nothing said. BRUSH.md §2.14 rules the documents on the device
     /// expendable, so there is no earlier spelling this has to accept and no reason to be tolerant.
     func testAnUnreadableTipIsRefusedRatherThanQuietlyBecomingARoundBrush() throws {
-        let good = try JSONEncoder().encode(BrushLibrary.square)
+        let good = try JSONEncoder().encode(TestBrushes.square)
         let json = try XCTUnwrap(String(data: good, encoding: .utf8))
         XCTAssertTrue(json.contains("\"builtIn\""), "Setup: this is the key being corrupted")
 
@@ -704,8 +731,8 @@ final class BrushTipLogicTests: XCTestCase {
            {"output":"flow","input":{"kind":"pressure"},"amount":0.5}]}
         """
         let decoded = try JSONDecoder().decode(Brush.self, from: Data(asSavedByAnEarlierLaunch.utf8))
-        XCTAssertEqual(decoded.id, BrushLibrary.pencil.id,
-                       "the id in a saved document has to name the preset this launch is running")
+        XCTAssertEqual(decoded.id, TestBrushes.pencil.id,
+                       "the id in a saved document has to name the brush this launch is running")
         // And the *whole* brush, which is what makes this a pin on BRUSH.md §6's grouped encoding as
         // well as on the id: every sub-struct and every chain of the matrix has to come back off a
         // document written outside this process, or a saved brush is not the brush that was saved.
@@ -716,14 +743,21 @@ final class BrushTipLogicTests: XCTestCase {
         // changed rather than growing an arm that accepts both. This test is what caught it: a brush
         // written in the old shape decodes to a chain with **no modules**, which renders as a straight
         // ramp with the artist's curve silently gone.
-        XCTAssertEqual(decoded, BrushLibrary.pencil,
+        XCTAssertEqual(decoded, TestBrushes.pencil,
                        "a preset written to a document decodes to that preset, matrix and all")
-        XCTAssertTrue(BrushLibrary.isPencilPreset(decoded),
-                      "…which is what keeps picking Pencil selecting the pencil tool")
-        XCTAssertFalse(BrushLibrary.isPencilPreset(BrushLibrary.pen),
+
+        // **The `isPencilPreset` half moved to the shipped library at §12 stage 9 and had to.** The
+        // affinity was five hand-checked ids and is now membership of §8.6's Sketching group, so the
+        // brush it is asked about has to be one this app actually ships — the document above is the
+        // *encoding* pin and no longer a member of anything.
+        XCTAssertTrue(BrushLibrary.isPencilPreset(BrushLibrary.pencilBlunt),
+                      "…which is what keeps picking a pencil selecting the pencil tool")
+        XCTAssertFalse(BrushLibrary.isPencilPreset(BrushLibrary.brushPen),
                        "…and it is a test rather than a constant `true`")
+        XCTAssertFalse(BrushLibrary.isPencilPreset(decoded),
+                       "…and a brush that is not in the library is not in the Sketching group")
         XCTAssertEqual(Set(BrushLibrary.defaults.map(\.id)).count, BrushLibrary.defaults.count,
-                       "the five presets are five identities, so the picker cannot highlight two")
+                       "§8.6's sixteen are sixteen identities, so the picker cannot highlight two")
     }
 
     // MARK: - Helpers
@@ -731,7 +765,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// One dab of `tip`, 60 pt across, stamped through the real `BrushStamper.stampDab` — so what is
     /// under test is the dispatch a `Brush` drives, not a hand-picked primitive call.
     private static func dab(with tip: BrushTip) throws -> (bytes: [UInt8], width: Int, height: Int) {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.tip = tip
         brush.dab.hardness = 1
         // Fixed width and full coverage at any pressure: no rows *and* both bases at 1. Clearing the

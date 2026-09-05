@@ -218,7 +218,7 @@ final class SampleRecordLogicTests: XCTestCase {
         canvas.setTransform(CGAffineTransform(rotationAngle: 0.9).translatedBy(x: 25, y: -10))
         let drawn = fullRun()
         canvas.addStroke(canvasSpaceStroke: VectorStroke(
-            brush: BrushLibrary.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+            brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
             size: 8, opacity: 1, samples: drawn))
 
         let stored = try XCTUnwrap(canvas.strokes.first).samples
@@ -240,7 +240,7 @@ final class SampleRecordLogicTests: XCTestCase {
     /// `VectorCanvas.mapping(_:throughSimilarity:)`, and a rotation there turns the nib with the ink —
     /// which is what a physical nib does against paper when you turn the paper.
     func testALassoRotationTurnsTheStoredNibWithTheInk() throws {
-        let stroke = VectorStroke(brush: BrushLibrary.hardRound,
+        let stroke = VectorStroke(brush: TestBrushes.hardRound,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 8, opacity: 1, samples: fullRun())
         let turned = VectorCanvas.mapping(.stroke(stroke), throughSimilarity:
@@ -399,7 +399,7 @@ final class SampleRecordLogicTests: XCTestCase {
         let bare = StrokeSamples(points: (0..<6).map { CGPoint(x: 20 + CGFloat($0) * 18, y: 60) })
         XCTAssertFalse(bare.carries(.pressure), "Setup: this run must genuinely lack the channel")
 
-        var reading = BrushLibrary.hardRound
+        var reading = TestBrushes.hardRound
         reading.dab.size = 0
         reading.dab.flow = 0
         reading.modulations = BrushModulations([.sizeFromPressure(amount: 1, atZero: 0.1),
@@ -444,7 +444,7 @@ final class SampleRecordLogicTests: XCTestCase {
                                          deltaTime: 0.01, tiltAltitude: 0.31, tiltAzimuth: 4.2))
             without.append(VectorSample(x: p.x, y: p.y, pressure: pressure))
         }
-        let brush = BrushLibrary.hardRound
+        let brush = TestBrushes.hardRound
         XCTAssertEqual(Self.rendered(PackedSampleRun(withTilt, about: .zero).samples, brush: brush),
                        Self.rendered(PackedSampleRun(without, about: .zero).samples, brush: brush),
                        "tilt bytes leaked into the pressure the brush reads")

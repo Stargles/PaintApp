@@ -51,7 +51,7 @@ struct ProjectManifest: Codable {
     init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
-         selectedBrush: Brush = BrushLibrary.softRound, customBrushes: [Brush] = [],
+         selectedBrush: Brush = BrushLibrary.roundSoft, customBrushes: [Brush] = [],
          vectorEraserMode: VectorEraserMode = .erase,
          folders: [FolderManifest] = [], viewPresets: [ViewPresetManifest] = [],
          motionGroups: [MotionGroup] = [], guideStrokes: [GuideStroke] = [],
@@ -95,7 +95,7 @@ struct ProjectManifest: Codable {
         backgroundColor = try container.decodeIfPresent(CodableColor.self, forKey: .backgroundColor)
             ?? CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
         isBackgroundVisible = try container.decodeIfPresent(Bool.self, forKey: .isBackgroundVisible) ?? true
-        selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.softRound
+        selectedBrush = try container.decodeIfPresent(Brush.self, forKey: .selectedBrush) ?? BrushLibrary.roundSoft
         customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
         vectorEraserMode = try container.decodeIfPresent(VectorEraserMode.self, forKey: .vectorEraserMode) ?? .erase
         folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []

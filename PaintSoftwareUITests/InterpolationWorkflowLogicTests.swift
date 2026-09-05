@@ -22,7 +22,7 @@ final class InterpolationWorkflowLogicTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private static let brush = BrushLibrary.hardRound
+    private static let brush = TestBrushes.hardRound
 
     /// A manager with one raster layer (index 0, from `CanvasFixture`) and two vector layers at
     /// indices 1 and 2, each with a single cel spanning the scene.

@@ -46,7 +46,7 @@ final class InterpolationRenderLogicTests: XCTestCase {
 
     /// Hard-edged, fully opaque, no jitter. Every assertion below is about *where* ink landed, and a
     /// soft or textured brush turns each of them into a question about a gradient's tail instead.
-    private static let brush = BrushLibrary.hardRound
+    private static let brush = TestBrushes.hardRound
 
     private func stroke(_ points: [CGPoint], id: UUID, size: CGFloat = 14,
                         color: CodableColor = CodableColor(red: 0, green: 0, blue: 0, alpha: 1),

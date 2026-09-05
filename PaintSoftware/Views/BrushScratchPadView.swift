@@ -95,7 +95,7 @@ struct BrushScratchPadView: UIViewRepresentable {
 /// SwiftUI gesture that reports it.
 final class BrushScratchPad: UIView {
 
-    var brush: Brush = BrushLibrary.softRound
+    var brush: Brush = BrushLibrary.roundSoft
     var color: UIColor = .black
     var strokeSize: CGFloat = 18
     var strokeOpacity: Double = 1

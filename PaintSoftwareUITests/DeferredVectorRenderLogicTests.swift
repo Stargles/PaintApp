@@ -16,7 +16,7 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
     private func canvas(withInk: Bool) -> VectorCanvas {
         let canvas = VectorCanvas(size: CGSize(width: 32, height: 32), elements: [])
         guard withInk else { return canvas }
-        canvas.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        canvas.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                       color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                       size: 4, opacity: 1,
                                       samples: [VectorSample(x: 4, y: 16, pressure: 1),
@@ -59,7 +59,7 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
     func testAnInvalidationDuringARasterizeStartsTheNewerOne() {
         let inked = canvas(withInk: true)
         let stale = inked.version
-        inked.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        inked.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                      size: 4, opacity: 1,
                                      samples: [VectorSample(x: 16, y: 4, pressure: 1),

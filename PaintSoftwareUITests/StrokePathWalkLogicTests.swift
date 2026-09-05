@@ -13,7 +13,7 @@ final class StrokePathWalkLogicTests: XCTestCase {
     // MARK: - Fixtures
 
     private func inkBrush(spacing: Double = 0.08) -> Brush {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = spacing
         brush.dab.scatter = 0
         brush.dab.angle.jitter = 0

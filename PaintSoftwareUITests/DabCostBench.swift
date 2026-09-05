@@ -87,7 +87,7 @@ final class DabCostBench: XCTestCase {
     /// It is printed rather than asserted against a threshold, for the reason the file header gives:
     /// a timing gate on a shared machine is a flake, and the finding is the *ratio*.
     func testWhatTheStrokeGroupCosts() {
-        let brush = BrushLibrary.hardRound
+        let brush = TestBrushes.hardRound
         let corpus = (0..<200).map { Self.stroke(index: $0) }
 
         func time(grouped: Bool) -> (seconds: Double, dabs: Int) {
@@ -133,7 +133,7 @@ final class DabCostBench: XCTestCase {
     /// two rows of §6's matrix, resolved per dab, where before §12 stage 7 there were two hardcoded
     /// linear blends.
     func testAShippedPresetsPerDabCost() {
-        measureWalk("hardRound (2 rows)", brush: BrushLibrary.hardRound)
+        measureWalk("hardRound (2 rows)", brush: TestBrushes.hardRound)
     }
 
 
@@ -143,7 +143,7 @@ final class DabCostBench: XCTestCase {
     /// **and** to §11.2's own figure.
     func testTheWholeReWalkIncludingRasterization() {
         let corpus = (0..<200).map { Self.stroke(index: $0) }
-        let brush = BrushLibrary.hardRound
+        let brush = TestBrushes.hardRound
         func pass() -> (dabs: Int, seconds: Double) {
             let texture = RasterLayerTexture(size: Self.canvas)
             let start = CFAbsoluteTimeGetCurrent()
@@ -169,7 +169,7 @@ final class DabCostBench: XCTestCase {
 
     /// The floor: a brush with no rows at all, which is what the matrix costs when nothing modulates.
     func testABrushWithNoModulationsAtAll() {
-        var plain = BrushLibrary.hardRound
+        var plain = TestBrushes.hardRound
         plain.dab.size = 1
         plain.dab.flow = 1
         plain.modulations = BrushModulations()
@@ -180,7 +180,7 @@ final class DabCostBench: XCTestCase {
     /// before any curve arithmetic — the sensor read, the closure call and whatever ARC traffic
     /// iterating `[BrushModulation]` produces.
     func testOneRowWithNoCurve() {
-        var one = BrushLibrary.hardRound
+        var one = TestBrushes.hardRound
         one.dab.size = 1
         one.dab.flow = 1
         one.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: -0.4)])
@@ -190,7 +190,7 @@ final class DabCostBench: XCTestCase {
     /// **Attribution: two rows, no curves.** Against `hardRound (2 rows)`, whose size row carries a
     /// two-key ramp, this isolates what `AnimationCurve.evaluate` costs on the hot path.
     func testTwoRowsWithNoCurves() {
-        var two = BrushLibrary.hardRound
+        var two = TestBrushes.hardRound
         two.dab.size = 0.6
         two.dab.flow = 0.9
         two.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.4),
@@ -201,7 +201,7 @@ final class DabCostBench: XCTestCase {
     /// A heavily modulated brush — six rows across five sensors — so the marginal cost of a row is
     /// visible rather than inferred.
     func testAHeavilyModulatedBrush() {
-        var loaded = BrushLibrary.hardRound
+        var loaded = TestBrushes.hardRound
         loaded.modulations = BrushModulations(loaded.modulations.rows + [
             BrushModulation(.scatter, .velocity, amount: 0.3),
             BrushModulation(.spacing, .tiltAngle, amount: 0.05),
@@ -214,7 +214,7 @@ final class DabCostBench: XCTestCase {
     /// §2.18's dropout, which adds a draw and a comparison per dab and *removes* dabs — so the cost is
     /// reported per dab actually stamped, which is what an artist pays for.
     func testADensityBrush() {
-        var sparse = BrushLibrary.hardRound
+        var sparse = TestBrushes.hardRound
         sparse.dab.density = 0
         sparse.dab.densityWavelength = 3.5
         sparse.modulations = BrushModulations(sparse.modulations.rows + [.densityFromPressure()])
@@ -229,7 +229,7 @@ final class DabCostBench: XCTestCase {
     /// than any shipped preset and more than an artist is likely to build: compare it against
     /// `six rows` above, whose chains carry one module each.
     func testAHeavilyChainedBrush() {
-        var chained = BrushLibrary.hardRound
+        var chained = TestBrushes.hardRound
         chained.modulations = BrushModulations([
             BrushModulation(.size, .pressure,
                             modules: [.curveRamp(.ramp(from: 0.4, to: 1)),
@@ -258,7 +258,7 @@ final class DabCostBench: XCTestCase {
     /// the slope is visible rather than inferred: one octave, four, and the eight the type caps at.
     func testAMultiOctaveRandomiser() {
         for octaves in [1, 4, BrushRandomiser.maximumOctaves] {
-            var noisy = BrushLibrary.hardRound
+            var noisy = TestBrushes.hardRound
             noisy.modulations = BrushModulations(noisy.modulations.rows + [
                 BrushModulation(.size, .random(.scatterAngle,
                                                BrushRandomiser(wavelength: 3.5, octaves: octaves)),
@@ -272,7 +272,7 @@ final class DabCostBench: XCTestCase {
     /// `BrushColorShift`. Timed on the walk, so what is reported here is the shift arithmetic alone;
     /// the cache cost lands in the rasterizer and is stated in PERFORMANCE.md rather than measured here.
     func testAColourJitteringBrush() {
-        var jittering = BrushLibrary.hardRound
+        var jittering = TestBrushes.hardRound
         jittering.modulations = BrushModulations(jittering.modulations.rows + [
             BrushModulation(.hue, .random(.scatterAngle, .plain(1)), amount: 0.2)
         ])

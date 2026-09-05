@@ -293,7 +293,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
         row("raster version — a dab") { _ in
             BrushStamper.stampStroke(into: probeCel().raster, samples: Self.dabs(y: 8),
-                                     brush: BrushLibrary.hardRound, color: .green,
+                                     brush: TestBrushes.hardRound, color: .green,
                                      brushSize: 6, brushOpacity: 1, random: DabRandom(seed: 0))
         }
         // The object, with the counter deliberately held equal — a fresh texture carrying the same
@@ -303,7 +303,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         row("raster object at an equal version") { m in
             let replacement = RasterLayerTexture.empty(size: CanvasFixture.canvasSize)
             BrushStamper.stampStroke(into: replacement, samples: Self.dabs(y: 8),
-                                     brush: BrushLibrary.hardRound, color: .green,
+                                     brush: TestBrushes.hardRound, color: .green,
                                      brushSize: 6, brushOpacity: 1, random: DabRandom(seed: 0))
             XCTAssertEqual(replacement.version, probeCel().raster.version,
                            "The premise: only the object may differ, or this is the version row again.")
@@ -607,7 +607,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     /// content so that they differ only in which object holds it.
     private static var bar: VectorStroke {
         VectorStroke(id: UUID(uuidString: "1D9E2C64-0000-4000-8000-00000000BA51")!,
-                     brush: BrushLibrary.hardRound,
+                     brush: TestBrushes.hardRound,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 5, opacity: 1,
                      samples: [VectorSample(x: 8, y: 44, pressure: 1),

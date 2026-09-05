@@ -42,7 +42,7 @@ final class BrushEditorLogicTests: XCTestCase {
     /// catches its counterpart here.
     func testEachBaseKeyPathMovesTheValueTheStamperResolves() {
         for output in BrushOutput.allCases {
-            var brush = BrushLibrary.hardRound
+            var brush = TestBrushes.hardRound
             brush.modulations = BrushModulations()          // base only, so the row cannot mask it
             let before = brush.dabValues { _ in 1 }
             brush[keyPath: output.baseKeyPath] = brush[keyPath: output.baseKeyPath] + 0.25
@@ -286,7 +286,7 @@ final class BrushEditorLogicTests: XCTestCase {
     /// reads as a control that did not work — CLAUDE.md's "a refusal with no notice", through a
     /// default.
     func testAFreshRowIsAudible() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         let before = brush.dabValues { _ in 0.5 }
         brush.modulations.append(BrushModulation(.scatter, .pressure, amount: BrushEditorDefaults.amount))
         XCTAssertNotEqual(before, brush.dabValues { _ in 0.5 })
@@ -305,7 +305,7 @@ final class BrushEditorLogicTests: XCTestCase {
     ///   draws no nodes at all — a control whose first tap would flatten the row to a constant, which
     ///   is exactly what `ResponseCurveEditing.materialised` exists to prevent one surface over.
     func testEveryFreshModuleArrivesUsable() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.size = 0.5
         brush.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.5)])
         let reading: (BrushInput) -> CGFloat = { input in

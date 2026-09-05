@@ -129,7 +129,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// as a fallback. Asserted on the renderer's own dabs: the count is one number across 24 frames,
     /// and at the deepest frame every radius is the rest radius times that frame's scale, exactly.
     func testARenderedUniformShrinkWalksOneLatticeOnEveryFrame() throws {
-        let ink = stroke(BrushLibrary.hardRound)
+        let ink = stroke(TestBrushes.hardRound)
         let rest = stamped([.stroke(ink)])
         XCTAssertGreaterThan(rest.count, 80, "Setup: a walk long enough for a re-phase to show")
 
@@ -165,7 +165,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// **angle**, and a pose has to turn it. A pure scale turns nothing, which is what the angles
     /// below pin; `BrushTipLogicTests` pins the rotating case at the level of `DabPose` itself.
     func testTheRenderedSquareBrushIsWalkedOnceAtRestAndPosedPerFrame() throws {
-        let brush = BrushLibrary.square
+        let brush = TestBrushes.square
         XCTAssertEqual(brush.tip, .stamp(.builtIn(.square)),
                        "Setup: the one built-in that is not a round dab")
         let ink = stroke(brush)
@@ -206,7 +206,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// is asserted here on the renderer rather than on a construction that ships nowhere: 24 slid
     /// frames, one dab count.
     func testARenderedPureTranslationDoesNotMoveTheDabCount() {
-        let ink = stroke(BrushLibrary.pencil)
+        let ink = stroke(TestBrushes.pencil)
         var counts = Set<Int>()
         for frame in 0..<24 {
             let t = CGAffineTransform(translationX: CGFloat(frame) * 3.7, y: CGFloat(frame) * 1.3)
@@ -226,7 +226,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// MEASURED across four maps at zero tolerance: min ratio == max ratio == `sqrt(|det|)` to twelve
     /// digits, and `constantScale` holds that number rather than nil.
     func testWidthUnderAnAffineIsExactlyTheAreaRoot() throws {
-        let rest = bake(run(), BrushLibrary.hardRound).dabs
+        let rest = bake(run(), TestBrushes.hardRound).dabs
         let maps: [CGAffineTransform] = [
             CGAffineTransform(scaleX: 2, y: 2),
             CGAffineTransform(scaleX: 4, y: 1),
@@ -252,7 +252,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// formula — the two operands must be the shipped one and the new one, or this pins nothing.
     func testTheAffineWidthAgreesWithTheShippedStretchMapping() throws {
         let t = CGAffineTransform(rotationAngle: 0.4).scaledBy(x: 3, y: 0.75)
-        let stroke = VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        let stroke = VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 24, opacity: 1,
                                   samples: [VectorSample(x: 0, y: 0, pressure: 1),
@@ -271,7 +271,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// stroke's own midpoint, which is the most favourable scalar available — is wrong at the ends by
     /// a margin this asserts. `DabPose` answers per dab, so it is right at every one.
     func testAProjectivePoseHasPerDabWidthWhereAScalarCannot() throws {
-        let rest = bake(diagonal(), BrushLibrary.hardRound).dabs
+        let rest = bake(diagonal(), TestBrushes.hardRound).dabs
         let box = CGSize(width: 120, height: 80)
         let keystone = Quad(CGPoint(x: 0, y: 0), CGPoint(x: 120, y: 0),
                             CGPoint(x: 96, y: 80), CGPoint(x: 24, y: 80))
@@ -322,7 +322,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// and they share `DabPose.applied(to:)` so they cannot drift. Pinned anyway, because "they share
     /// a function" is a claim about today's source and this is a claim about the answer.
     func testStreamingAPoseAndReplayingABakeGiveTheSameDabs() {
-        let brush = BrushLibrary.pencil
+        let brush = TestBrushes.pencil
         let t = CGAffineTransform(rotationAngle: 0.3).scaledBy(x: 1.7, y: 0.6)
         let pose = BrushStamper.DabPose(t)
 
@@ -347,7 +347,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// is the claim: the arm a `restWalk` selects is unreachable here, and what is left is the call
     /// that shipped before this stage.
     func testAnUnposedStrokeStampsExactlyWhatItAlwaysDid() {
-        let ink = stroke(BrushLibrary.pencil)
+        let ink = stroke(TestBrushes.pencil)
         let rendered = stamped([.stroke(ink)])
         let direct = BrushStamper.bake(
             samples: ink.samples,
@@ -370,7 +370,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// The two operands are the *same* stroke with and without the field, not two similar ones, so a
     /// difference can only be the field.
     func testTheRestWalkIsNotPersistedAndOwesNoMigration() throws {
-        var stroke = VectorStroke(id: UUID(), brush: BrushLibrary.pencil,
+        var stroke = VectorStroke(id: UUID(), brush: TestBrushes.pencil,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 12, opacity: 1,
                                   samples: [VectorSample(x: 1, y: 2, pressure: 1),
@@ -397,7 +397,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// into the artist's geometry must leave no record claiming the stroke is a posed copy of
     /// somewhere else — the next render would draw its dabs back at the pre-move position.
     func testOnlyAPoseAttachesARestWalkAndACommitDoesNot() throws {
-        let stroke = VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        let stroke = VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 8, opacity: 1,
                                   samples: [VectorSample(x: 0, y: 0, pressure: 1),
@@ -431,7 +431,7 @@ final class RestSpaceDabBakeLogicTests: XCTestCase {
     /// not of where they are drawn, and wiring it to the wrong end would show up exactly here.
     func testPosedInkIsDrawnAtThePosedPositionAndNotAtRest() throws {
         let size = CGSize(width: 120, height: 120)
-        let stroke = VectorStroke(id: UUID(), brush: BrushLibrary.pencil,
+        let stroke = VectorStroke(id: UUID(), brush: TestBrushes.pencil,
                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 8, opacity: 1,
                                   samples: StrokeSamples((0..<6).map {

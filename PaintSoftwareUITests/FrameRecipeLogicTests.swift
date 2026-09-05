@@ -27,7 +27,7 @@ final class FrameRecipeLogicTests: XCTestCase {
     // a grading layer (pixels: none), and a hidden layer named as somebody's mask source.
 
     private func stroke(_ points: [CGPoint], colour: CodableColor, width: CGFloat = 7) -> VectorStroke {
-        VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: colour, size: width, opacity: 1,
+        VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: colour, size: width, opacity: 1,
                      samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },
                                             channels: .pressureOnly))
     }
@@ -46,7 +46,7 @@ final class FrameRecipeLogicTests: XCTestCase {
                                      VectorSample(point: CGPoint(x: 6 + CGFloat($0) * 4, y: 12),
                                                   pressure: 0.8)
                                  }, channels: .pressureOnly),
-                                 brush: BrushLibrary.hardRound, color: .green, brushSize: 6,
+                                 brush: TestBrushes.hardRound, color: .green, brushSize: 6,
                                  brushOpacity: 1, random: DabRandom(seed: 0))
 
         // 1 — baked and fill in one cel, in **different** rects and colours. `fillImage` draws last
@@ -288,7 +288,7 @@ final class FrameRecipeLogicTests: XCTestCase {
                                  samples: StrokeSamples((0..<10).map {
                                      VectorSample(point: CGPoint(x: 4, y: 40 + CGFloat($0)), pressure: 1)
                                  }, channels: .pressureOnly),
-                                 brush: BrushLibrary.hardRound, color: .black, brushSize: 9, brushOpacity: 1,
+                                 brush: TestBrushes.hardRound, color: .black, brushSize: 9, brushOpacity: 1,
                                  random: DabRandom(seed: 0))
         manager.layers[1].cels[0].bakedImage =
             CanvasFixture.solidImage(.yellow, rect: CGRect(x: 0, y: 0, width: 64, height: 64))

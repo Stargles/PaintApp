@@ -1721,7 +1721,7 @@ final class ProjectSaveLogicTests: XCTestCase {
                       + "on another device with a brush that draws nothing")
 
         let builtInOnly = CanvasFixture.manager()
-        builtInOnly.selectBrush(BrushLibrary.square)
+        builtInOnly.selectBrush(TestBrushes.square)
         let squareURL = projectURL(name: "Built In Tip")
         saveAndWait(builtInOnly, to: squareURL)
         let bundled = try? FileManager.default.contentsOfDirectory(

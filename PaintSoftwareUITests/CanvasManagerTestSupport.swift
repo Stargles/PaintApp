@@ -412,3 +412,98 @@ extension XCTestCase {
         }
     }
 }
+
+/// **The five brushes the app shipped before BRUSH.md §12 stage 9, kept as *fixtures* now that it
+/// no longer ships them.**
+///
+/// §12 stage 9 deletes `BrushLibrary.softRound` / `.hardRound` / `.pencil` / `.pen` / `.square`
+/// outright — §2.16 replaces the set wholesale and CLAUDE.md's *"remove cleanly, no archaeology"*
+/// applies to the product. These are not that: they are the **calibration baseline** roughly two
+/// hundred assertions in this target were written against, and they are here for two reasons that
+/// are worth separating, because only the second one is interesting.
+///
+/// 1. **Most of those assertions wanted "a brush", not "the shipped brush".** A lasso-move test
+///    that draws with a hard round and counts pixels is about the lasso. Swapping in whichever new
+///    preset is nearest would move its numbers for a reason that has nothing to do with what it
+///    pins, and re-deriving two hundred expectations by hand is precisely where CLAUDE.md says a
+///    green suite stops meaning anything.
+/// 2. **A shipped preset is now the artist's, and the artist is going to change it.** The owner's
+///    instruction for stage 9 was *"you choose what to ship"* and then to adjust the values on the
+///    device and have them extracted back into the source. A fixture pinned to a shipped preset is
+///    therefore a test that reds on a *tuning pass*, which is the coupling this separation removes.
+///    That is a stronger reason than the first: it would still hold if the suite were being written
+///    from scratch today.
+///
+/// **A test whose subject is the shipped library must use `BrushLibrary` and not these** —
+/// `BrushLibraryLogicTests`, the shipped-set pins in `BrushTipLogicTests`, and the two preset pins
+/// in `BrushModulationLogicTests`, which are claims about *these five values* and the
+/// `BrushDynamics` arithmetic they were migrated off. Everything else here is scaffolding.
+///
+/// The values are verbatim, including the written-down ids — a fixture that round-trips through a
+/// manifest needs an id that is stable across processes for the same reason a preset did.
+enum TestBrushes {
+
+    /// A falloff and a wide pressure ramp. The old `BrushLibrary.softRound`.
+    static let softRound = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000001")!,
+        name: "Soft Round", tip: .round, size: 18,
+        dab: BrushDabSettings(size: 0.5, flow: 0.4, spacing: 0.08, hardness: 0.15),
+        stroke: BrushStrokeSettings(stabilization: 0.25),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.5, atZero: 0.2),
+            .flowFromPressure(amount: 0.6)
+        ])
+    )
+
+    /// **The workhorse: the brush ~150 fixtures in this target draw with.** A small hard disc at a
+    /// tight spacing, which is what makes it a good fixture — its ink is a capsule chain, so the
+    /// eraser's `supportsCleanCut` and `supportsSplitting` gates both open on it.
+    static let hardRound = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000002")!,
+        name: "Hard Round", tip: .round, size: 10,
+        dab: BrushDabSettings(size: 0.6, flow: 0.9, spacing: 0.05, hardness: 0.95),
+        stroke: BrushStrokeSettings(stabilization: 0.1),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.4, atZero: 0.4),
+            .flowFromPressure(amount: 0.1)
+        ])
+    )
+
+    static let pencil = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000003")!,
+        name: "Pencil", tip: .round, size: 6, opacity: 0.9,
+        dab: BrushDabSettings(size: 0.7, flow: 0.5, spacing: 0.04, hardness: 0.7),
+        stroke: BrushStrokeSettings(stabilization: 0.15),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.3, atZero: 0.5),
+            .flowFromPressure(amount: 0.5)
+        ])
+    )
+
+    static let pen = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000004")!,
+        name: "Pen", tip: .round, size: 4, opacity: 1,
+        dab: BrushDabSettings(size: 0.85, flow: 0.95, spacing: 0.03, hardness: 1.0),
+        stroke: BrushStrokeSettings(stabilization: 0.4),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.15, atZero: 0.85),
+            .flowFromPressure(amount: 0.05)
+        ])
+    )
+
+    /// Stamps `BuiltInBrushTexture.square`, which is still committed: it is what `BrushTipImport`
+    /// normalises every artist import against, and the discriminating reference the tip tests
+    /// compare a generated mask to. No `hardness` — a stamped dab's edge is in its own pixels.
+    static let square = Brush(
+        id: UUID(uuidString: "B7051000-0000-4000-A000-000000000005")!,
+        name: "Square", tip: .stamp(.builtIn(.square)), size: 16,
+        dab: BrushDabSettings(size: 0.7, flow: 0.8, spacing: 0.15),
+        stroke: BrushStrokeSettings(stabilization: 0.2),
+        modulations: BrushModulations([
+            .sizeFromPressure(amount: 0.3, atZero: 0.5),
+            .flowFromPressure(amount: 0.2)
+        ])
+    )
+
+    static let all: [Brush] = [softRound, hardRound, pencil, pen, square]
+}

@@ -34,7 +34,7 @@ final class StrokePathFitLogicTests: XCTestCase {
 
     /// A brush that leaves a visible, pressure-driven mark, at the spacing the ink-pen preset uses.
     private func inkBrush() -> Brush {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.08
         brush.dab.scatter = 0
         brush.dab.angle.jitter = 0

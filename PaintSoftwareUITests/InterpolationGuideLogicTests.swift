@@ -22,7 +22,7 @@ final class InterpolationGuideLogicTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private static let brush = BrushLibrary.hardRound
+    private static let brush = TestBrushes.hardRound
 
     /// A guide with evenly spaced timestamps — constant stylus velocity along whatever shape.
     private func guide(_ points: [CGPoint], step: TimeInterval = 0.01) -> [TimedSample] {

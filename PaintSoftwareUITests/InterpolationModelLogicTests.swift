@@ -47,7 +47,7 @@ final class InterpolationModelLogicTests: XCTestCase {
     }
 
     private func sampleStroke(id: UUID = UUID()) -> VectorStroke {
-        VectorStroke(brush: BrushLibrary.softRound,
+        VectorStroke(brush: TestBrushes.softRound,
                      color: CodableColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1),
                      size: 9, opacity: 0.8,
                      samples: [VectorSample(x: 10, y: 12, pressure: 0.5),

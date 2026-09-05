@@ -50,7 +50,7 @@ final class PosedLassoMoveLogicTests: XCTestCase {
     }
 
     private func stroke(from a: CGPoint, to b: CGPoint, size: CGFloat = 4) -> VectorStroke {
-        VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(), size: size, opacity: 1,
+        VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(), size: size, opacity: 1,
                      samples: [VectorSample(x: a.x, y: a.y, pressure: 1),
                                VectorSample(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, pressure: 1),
                                VectorSample(x: b.x, y: b.y, pressure: 1)])

@@ -31,20 +31,70 @@ final class BrushLibraryLogicTests: XCTestCase {
 
     // MARK: - The seeded library
 
-    /// A device that has never held a library gets §8.6's first group with today's five presets in
-    /// it, and nothing else. §12 stage 9 replaces the contents; this pins the container.
-    func testAFreshLibrarySeedsOneBasicsGroupHoldingTheFivePresets() {
+    /// **A device that has never held a library gets §8.6's set** — five groups, sixteen brushes and
+    /// an empty Texture, in the owner's own order. Authored at §12 stage 9; before it this seeded
+    /// one "Basics" group holding the five legacy presets.
+    ///
+    /// The empty group is asserted rather than tolerated: §12 stage 11's CC0 sourcing fills it, and
+    /// an empty group is honest about that where a missing one is not.
+    func testAFreshLibrarySeedsTheShippedGroupsAndTheirBrushes() {
         let store = makeStore()
-        XCTAssertEqual(store.groups.count, 1)
-        XCTAssertEqual(store.groups.first?.name, "Basics")
-        XCTAssertEqual(store.groups.first?.brushes.map(\.name),
-                       ["Soft Round", "Hard Round", "Pencil", "Pen", "Square"])
+        XCTAssertEqual(store.groups.map(\.name),
+                       ["Basics", "Sketching", "Inking", "Painting", "Texture"])
+        XCTAssertEqual(store.groups.map(\.brushes.count), [5, 4, 4, 3, 0])
+        XCTAssertEqual(store.allBrushes.count, 16)
         XCTAssertEqual(store.allBrushes.count, BrushLibrary.defaults.count)
+        XCTAssertEqual(Set(store.allBrushes.map(\.id)).count, 16,
+                       "sixteen written-down ids, and no two the same — a collision makes the "
+                       + "picker highlight two rows and `update(_:)` write to one of them")
+        XCTAssertEqual(Set(store.groups.map(\.id)).count, 5)
+    }
+
+    /// **Every shipped preset's tip resolves to a mask that is actually in the bundle.**
+    ///
+    /// A preset naming a file the app does not carry is a brush that stamps *nothing* —
+    /// `BrushTextureStore.mask(for:)` answers nil and `stampDab` skips the dab, which is the honest
+    /// failure for a deleted import and a silent catastrophe for a shipped preset. No assertion on
+    /// the model can see it: `.stamp(.builtIn(.pencilHard))` is a perfectly well-formed value
+    /// whether or not `brushtip-pencil-hard.png` was ever added to the target.
+    func testEveryShippedPresetsTipIsAMaskTheBundleActuallyCarries() throws {
+        var stamped = 0
+        for brush in BrushLibrary.defaults {
+            switch brush.tip {
+            case .round:
+                continue
+            case .stamp(let ref):
+                stamped += 1
+                guard case .builtIn = ref else {
+                    return XCTFail("\(brush.name) names \(ref): a shipped preset cannot depend on a "
+                                   + "file in the artist's own library")
+                }
+                let mask = BrushTextureStore.mask(for: ref)
+                XCTAssertNotNil(mask, "\(brush.name)'s tip \(ref) is not in the bundle — that brush "
+                                + "stamps nothing at all")
+                XCTAssertEqual(mask?.width, BrushTipImport.maskSide, brush.name)
+                XCTAssertEqual(mask?.height, BrushTipImport.maskSide, brush.name)
+            }
+        }
+        XCTAssertEqual(stamped, 11,
+                       "PREMISE: eleven of §8.6's sixteen carry a picture and five are answered by "
+                       + "arithmetic — if this moves, the count above is stale rather than wrong")
+    }
+
+    /// **And every shipped preset actually lays ink.** The check above says the file is there; this
+    /// says the brush draws with it. A tip whose mask is entirely transparent, a `flow` of zero or a
+    /// `size` base of zero all pass every structural assertion and paint a blank canvas.
+    func testEveryShippedPresetLaysInkOnAPlainStroke() {
+        for brush in BrushLibrary.defaults {
+            let image = BrushPreview.render(brush, size: Self.previewSize, scale: 2, color: .white)
+            let inked = nonTransparentPixelCount(image)
+            XCTAssertGreaterThan(inked, 40, "\(brush.name) drew \(inked) pixels — it is unusable")
+        }
     }
 
     /// Seeding writes no file. A library nobody has touched is one the *next* build's seed may still
-    /// change; persisting it on first read would freeze today's five presets onto every device before
-    /// stage 9 ever got to replace them.
+    /// change; persisting it on first read would freeze today's set onto every device before a later
+    /// stage got to add to it.
     func testSeedingDoesNotWriteAFile() {
         _ = makeStore()
         XCTAssertFalse(FileManager.default.fileExists(
@@ -61,20 +111,25 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// span at all — it sorts to `Int.max` and pins to the top of its container. An artist who makes
     /// a brush group and then fills it would watch it move. Ordering here is an array index, so a
     /// group that holds nothing sits exactly where it was put.
+    ///
+    /// **The two groups are named "Comics" and "Washes" and neither is one of §8.6's**, which was
+    /// not true before §12 stage 9 authored the shipped set: `addGroup(name:)` uniques its argument,
+    /// so asking for "Inking" against a library that now seeds one gets back "Inking 2" and every
+    /// name assertion below reads as a broken ordering.
     func testAnEmptyGroupKeepsThePositionItWasMovedTo() {
         let store = makeStore()
-        let inking = store.addGroup(name: "Inking")
-        let texture = store.addGroup(name: "Texture")
-        XCTAssertEqual(store.groups.map(\.name), ["Basics", "Inking", "Texture"])
-        XCTAssertTrue(inking.brushes.isEmpty, "PREMISE: a new group is empty")
+        let comics = store.addGroup(name: "Comics")
+        let washes = store.addGroup(name: "Washes")
+        XCTAssertEqual(store.groups.suffix(2).map(\.name), ["Comics", "Washes"])
+        XCTAssertTrue(comics.brushes.isEmpty, "PREMISE: a new group is empty")
 
-        store.moveGroup(texture.id, by: -1)
-        XCTAssertEqual(store.groups.map(\.name), ["Basics", "Texture", "Inking"],
+        store.moveGroup(washes.id, by: -1)
+        XCTAssertEqual(store.groups.suffix(2).map(\.name), ["Washes", "Comics"],
                        "An empty group must sit where it was placed, not float to the top")
 
         // And it stays there once it has contents, which is the half a span-derived order gets right.
-        store.add(BrushLibrary.pen, toGroup: inking.id)
-        XCTAssertEqual(store.groups.map(\.name), ["Basics", "Texture", "Inking"])
+        store.add(BrushLibrary.brushPen, toGroup: comics.id)
+        XCTAssertEqual(store.groups.suffix(2).map(\.name), ["Washes", "Comics"])
     }
 
     func testRenamingAGroupKeepsItsIdentityAndItsBrushes() throws {
@@ -99,12 +154,21 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// three-unusable-features section warns about.
     func testTheLastGroupCannotBeDeleted() throws {
         let store = makeStore()
+        let seeded = store.groups.map(\.name)
+        XCTAssertGreaterThan(seeded.count, 1, "PREMISE: §8.6 seeds several groups")
+
+        let added = store.addGroup(name: "Comics")
+        XCTAssertTrue(store.removeGroup(added.id))
+        XCTAssertEqual(store.groups.map(\.name), seeded)
+
+        // Down to one, then refused.
+        for name in seeded.dropFirst() {
+            let group = try XCTUnwrap(store.groups.first { $0.name == name })
+            XCTAssertTrue(store.removeGroup(group.id))
+        }
+        XCTAssertEqual(store.groups.count, 1)
         XCTAssertFalse(store.removeGroup(try XCTUnwrap(store.groups.first).id))
         XCTAssertEqual(store.groups.count, 1)
-
-        let second = store.addGroup(name: "Inking")
-        XCTAssertTrue(store.removeGroup(second.id))
-        XCTAssertEqual(store.groups.map(\.name), ["Basics"])
     }
 
     /// A brush lives in exactly one group, so adding one it already holds moves it rather than
@@ -112,12 +176,14 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// would be unselectable — both rows carry the same id, so both would highlight.
     func testAddingABrushToASecondGroupMovesItRatherThanCopyingIt() {
         let store = makeStore()
-        let inking = store.addGroup(name: "Inking")
-        store.add(BrushLibrary.pen, toGroup: inking.id)
+        let comics = store.addGroup(name: "Comics")
+        store.add(BrushLibrary.brushPen, toGroup: comics.id)
 
-        XCTAssertEqual(store.groups.first?.brushes.map(\.name), ["Soft Round", "Hard Round", "Pencil", "Square"])
-        XCTAssertEqual(store.groups.dropFirst().first?.brushes.map(\.name), ["Pen"])
-        XCTAssertEqual(store.allBrushes.filter { $0.id == BrushLibrary.pen.id }.count, 1)
+        XCTAssertEqual(store.groups.first { $0.name == "Inking" }?.brushes.map(\.name),
+                       ["Technical Pen — Fine", "Rough Ink — Blotchy", "Rough Ink"],
+                       "Brush Pen left the group it was seeded into")
+        XCTAssertEqual(store.groups.last?.brushes.map(\.name), ["Brush Pen"])
+        XCTAssertEqual(store.allBrushes.filter { $0.id == BrushLibrary.brushPen.id }.count, 1)
     }
 
     // MARK: - Persistence
@@ -185,21 +251,25 @@ final class BrushLibraryLogicTests: XCTestCase {
         let custom = Brush(id: UUID(uuidString: "5E5E5E5E-0000-4000-A000-000000000001")!,
                            name: "My Nib", tip: .stamp(.builtIn(.square)), size: 30, opacity: 0.75,
                            dab: BrushDabSettings(spacing: 0.2))
+        var expected: [String] = []
         do {
             let first = makeStore()
             first.renameGroup(try XCTUnwrap(first.groups.first).id, to: "Everyday")
-            let inking = first.addGroup(name: "Inking")
-            first.add(custom, toGroup: inking.id)
+            let comics = first.addGroup(name: "Comics")
+            first.add(custom, toGroup: comics.id)
+            expected = first.groups.map(\.name)
         }
 
         let relaunched = makeStore()
-        XCTAssertEqual(relaunched.groups.map(\.name), ["Everyday", "Inking"])
+        XCTAssertEqual(relaunched.groups.map(\.name), expected)
+        XCTAssertEqual(expected.first, "Everyday")
+        XCTAssertEqual(expected.last, "Comics")
         // `dropFirst().first`, not `[1]`: when this test caught a mutation that stopped the store
         // writing, an index would have trapped and taken the whole class down with it — a red test
         // must fail, not crash the runner out of the fifteen behind it.
-        let restored = try XCTUnwrap(relaunched.groups.dropFirst().first?.brushes.first)
+        let restored = try XCTUnwrap(relaunched.groups.last?.brushes.first)
         XCTAssertEqual(restored, custom, "The brush comes back byte-for-byte, not merely by name")
-        XCTAssertEqual(relaunched.groupToOpen(forSelected: custom.id)?.name, "Inking",
+        XCTAssertEqual(relaunched.groupToOpen(forSelected: custom.id)?.name, "Comics",
                        "…and the menu opens onto the group holding whatever is selected")
     }
 
@@ -207,7 +277,9 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// library that failed to decode into *nothing* is a picker with no rows and a `+` above it.
     func testAnUnreadableLibraryReseedsRatherThanEmptying() throws {
         try Data("{ not json".utf8).write(to: directory.appendingPathComponent(BrushLibraryStore.fileName))
-        XCTAssertEqual(makeStore().groups.map(\.name), ["Basics"])
+        XCTAssertEqual(makeStore().groups.map(\.name),
+                       BrushLibrary.groups.map(\.name),
+                       "a corrupt file reseeds §8.6's whole set, not an empty picker")
     }
 
     /// An imported brush a project restored, on a device whose library has never seen it, is taken in
@@ -216,14 +288,15 @@ final class BrushLibraryLogicTests: XCTestCase {
         let store = makeStore()
         let fromAnotherDevice = Brush(name: "Their Brush", tip: .stamp(.imported(fileName: "x.png")), size: 20)
 
+        let seeded = store.groups.map(\.name)
         store.adopt([fromAnotherDevice], intoGroupNamed: "Imported")
         store.adopt([fromAnotherDevice], intoGroupNamed: "Imported")
-        XCTAssertEqual(store.groups.map(\.name), ["Basics", "Imported"])
-        XCTAssertEqual(store.groups.dropFirst().first?.brushes.count, 1)
+        XCTAssertEqual(store.groups.map(\.name), seeded + ["Imported"])
+        XCTAssertEqual(store.groups.last?.brushes.count, 1)
 
         // A brush the library already holds is not adopted a second time into a new group.
-        store.adopt([BrushLibrary.pen], intoGroupNamed: "Imported")
-        XCTAssertEqual(store.groups.dropFirst().first?.brushes.count, 1)
+        store.adopt([BrushLibrary.brushPen], intoGroupNamed: "Imported")
+        XCTAssertEqual(store.groups.last?.brushes.count, 1)
     }
 
     // MARK: - The row preview
@@ -270,7 +343,7 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// A preview is *ink*, not an empty box. Without this the test above could be satisfied by two
     /// different flavours of nothing.
     func testAPreviewActuallyStampsInk() {
-        let image = BrushPreview.render(BrushLibrary.hardRound, size: Self.previewSize, scale: 2, color: .white)
+        let image = BrushPreview.render(BrushLibrary.roundHard, size: Self.previewSize, scale: 2, color: .white)
         let painted = nonTransparentPixelCount(image)
         XCTAssertGreaterThan(painted, 200, "The row should carry a visible stroke, not a blank")
         XCTAssertLessThan(painted, Int(Self.previewSize.width * 2 * Self.previewSize.height * 2),
@@ -301,7 +374,7 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// stay green against a cache that did nothing at all.
     func testAnEditedBrushRerendersAndAnUneditedOneDoesNot() {
         let cache = BrushPreviewCache()
-        let brush = BrushLibrary.hardRound
+        let brush = BrushLibrary.roundHard
 
         let first = cache.image(for: brush, size: Self.previewSize, scale: 2, color: .white)
         XCTAssertEqual(cache.renderCount, 1)
@@ -328,11 +401,11 @@ final class BrushLibraryLogicTests: XCTestCase {
     /// deciding to go off it.
     func testTheCacheProbeNeverRenders() {
         let cache = BrushPreviewCache()
-        let key = BrushPreviewKey(brush: BrushLibrary.pen, size: Self.previewSize, scale: 2)
+        let key = BrushPreviewKey(brush: BrushLibrary.brushPen, size: Self.previewSize, scale: 2)
         XCTAssertNil(cache.cached(key))
         XCTAssertEqual(cache.renderCount, 0)
 
-        _ = cache.image(for: BrushLibrary.pen, size: Self.previewSize, scale: 2, color: .white)
+        _ = cache.image(for: BrushLibrary.brushPen, size: Self.previewSize, scale: 2, color: .white)
         XCTAssertNotNil(cache.cached(key))
         XCTAssertEqual(cache.renderCount, 1)
     }

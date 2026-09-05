@@ -516,7 +516,7 @@ final class SampleCodingLogicTests: XCTestCase {
     }
 
     private static func stroke() -> VectorStroke {
-        VectorStroke(brush: BrushLibrary.hardRound,
+        VectorStroke(brush: TestBrushes.hardRound,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 9, opacity: 1, samples: realisticRun(count: 12))
     }

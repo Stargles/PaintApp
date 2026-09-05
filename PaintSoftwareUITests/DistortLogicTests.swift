@@ -420,7 +420,7 @@ final class DistortLogicTests: XCTestCase {
         manager.addVectorLayer()
         let layerIndex = manager.currentLayerIndex
         let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
-        vector.addStroke(VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                                       color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                       size: 4, opacity: 1,
                                       samples: [VectorSample(x: 20, y: 32, pressure: 1),

@@ -341,7 +341,7 @@ final class DabRandomLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
         // A short eraser stroke across the far end of the line.
         let nib: StrokeSamples = [VectorSample(x: 190, y: 40, pressure: 1), VectorSample(x: 190, y: 80, pressure: 1)]
-        XCTAssertTrue(canvas.erase(alongPath: nib, brush: BrushLibrary.hardRound, size: 14, mode: .cutPoints),
+        XCTAssertTrue(canvas.erase(alongPath: nib, brush: TestBrushes.hardRound, size: 14, mode: .cutPoints),
                       "Mode 2 must have cut the stroke")
         guard let head = canvas.strokes.first else { return XCTFail("a head piece should survive") }
         XCTAssertEqual(head.seed, Self.seed, "the piece inherits the parent's seed")
@@ -370,7 +370,7 @@ final class DabRandomLogicTests: XCTestCase {
                                   size: 10, opacity: 1, samples: Self.samples(count: 9), seed: Self.seed)
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
         let nib: StrokeSamples = [VectorSample(x: 120, y: 40, pressure: 1), VectorSample(x: 120, y: 80, pressure: 1)]
-        XCTAssertTrue(canvas.erase(alongPath: nib, brush: BrushLibrary.hardRound, size: 14, mode: .cutPoints))
+        XCTAssertTrue(canvas.erase(alongPath: nib, brush: TestBrushes.hardRound, size: 14, mode: .cutPoints))
         let pieces = canvas.strokes
         guard pieces.count == 2 else { return XCTFail("a mid-line punch should leave two pieces, got \(pieces.count)") }
         XCTAssertEqual(pieces[0].arcOffset, 0)

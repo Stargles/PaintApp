@@ -39,7 +39,7 @@ final class ImportedImageMoveBoxLogicTests: XCTestCase {
     /// A stroke well away from the canvas centre, so a whole-cel lift and an image-only lift put the
     /// box in visibly different places.
     private func cornerStroke() -> VectorStroke {
-        VectorStroke(id: UUID(), brush: BrushLibrary.hardRound, color: black(), size: 4, opacity: 1,
+        VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(), size: 4, opacity: 1,
                      samples: [VectorSample(x: 2, y: 2, pressure: 1),
                                VectorSample(x: 4, y: 4, pressure: 1),
                                VectorSample(x: 6, y: 6, pressure: 1)],

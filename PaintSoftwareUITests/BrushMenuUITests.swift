@@ -48,26 +48,31 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(basics.isSelected, "…and it must be the open one, not merely present")
 
         // Its brushes, as rows.
-        let soft = app.buttons["brushPanel.brush.Soft Round"]
-        let pen = app.buttons["brushPanel.brush.Pen"]
+        // **The names moved at §12 stage 9 and the *groups* did too.** §8.6's set is five groups;
+        // Basics holds Round Soft, Opaque Round, Round Hard, Square and Messy Flat, and the Pen this
+        // test used to tap is now Technical Pen — Fine over in Inking.
+        let soft = app.buttons["brushPanel.brush.Round Soft"]
+        let hard = app.buttons["brushPanel.brush.Round Hard"]
         XCTAssertTrue(soft.waitForExistence(timeout: 5))
-        XCTAssertTrue(pen.exists, "Every brush in the open group gets a row")
+        XCTAssertTrue(hard.exists, "Every brush in the open group gets a row")
+        XCTAssertTrue(app.buttons["brushPanel.brush.Messy Flat"].exists,
+                      "…all five of them, including the ones §12 stage 9 authored last")
 
-        // **What is drawn, not only what is stored.** Soft Round is the default selection, so the
+        // **What is drawn, not only what is stored.** Round Soft is the default selection, so the
         // highlight must be on it — a menu whose model was right and whose highlight had gone would
         // make §2.20's second tap unguessable, and is exactly the defect a model assertion misses.
         XCTAssertTrue(soft.isSelected, "The selected brush's row must read as selected")
-        XCTAssertFalse(pen.isSelected)
+        XCTAssertFalse(hard.isSelected)
 
         // One tap selects.
-        tapWhenHittable(pen, "The Pen's row")
-        XCTAssertTrue(pen.isSelected, "One tap moves the selection")
+        tapWhenHittable(hard, "Round Hard's row")
+        XCTAssertTrue(hard.isSelected, "One tap moves the selection")
         XCTAssertFalse(soft.isSelected, "…and takes it off the old row")
         XCTAssertFalse(app.sliders["brushPanel.sizeSlider"].exists,
                        "A first tap selects and does not open the editor")
 
         // A second tap on the already-selected row opens the editor — §2.20.
-        tapWhenHittable(pen, "The Pen's row, a second time")
+        tapWhenHittable(hard, "Round Hard's row, a second time")
         XCTAssertTrue(app.sliders["brushPanel.sizeSlider"].waitForExistence(timeout: 5),
                       "A second tap on the selected brush must open the editor")
         XCTAssertTrue(app.otherElements["brushPanel.editorScreen"].exists,
@@ -77,13 +82,17 @@ final class BrushMenuUITests: PaintUITestCase {
 
         // And back out to the menu, so the door swings both ways.
         tapWhenHittable(app.buttons["brushPanel.editorBack"], "The editor's back chevron")
-        XCTAssertTrue(app.buttons["brushPanel.brush.Pen"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["brushPanel.brush.Round Hard"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.sliders["brushPanel.sizeSlider"].waitForNonExistence(timeout: 3))
     }
 
     /// **Picking a brush changes what is drawn.** The selection is only real if the ink moves: this
-    /// draws the same gesture with Soft Round and with Pen — 18 pt against 4 — and compares how much
-    /// paper each covered.
+    /// draws the same gesture with Round Soft and with Technical Pen — Fine — 22 pt against 4 — and
+    /// compares how much paper each covered.
+    ///
+    /// **It crosses a group to do it, which it could not before §12 stage 9.** The thin nib lives in
+    /// Inking now, so the left column has to be used to reach it — which makes this the one test
+    /// that drives §7.1's two columns *and* the ink in the same gesture.
     ///
     /// Measured on the canvas rather than on `selectedBrush`, because a menu that wrote the right
     /// value into a manager nothing consulted would satisfy every model assertion in the suite.
@@ -93,13 +102,16 @@ final class BrushMenuUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Soft Round is the default: 18 pt against the Pen's 4.
+        // Round Soft is the default: 22 pt against the technical pen's 4.
         let wideY = 0.30, thinY = 0.55
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: wideY), to: CGVector(dx: 0.65, dy: wideY))
 
         openBrushMenu(app)
-        let pen = app.buttons["brushPanel.brush.Pen"]
-        tapWhenHittable(pen, "The Pen's row")
+        tapWhenHittable(app.buttons["brushPanel.group.Inking"], "The Inking group row")
+        let pen = app.buttons["brushPanel.brush.Technical Pen — Fine"]
+        XCTAssertTrue(pen.waitForExistence(timeout: 5),
+                      "The left column has to open Inking before its rows exist")
+        tapWhenHittable(pen, "The technical pen's row")
         XCTAssertTrue(pen.isSelected)
         // Close the menu so it cannot swallow the stroke.
         app.buttons["toolbar.brushButton"].tap()
@@ -110,15 +122,15 @@ final class BrushMenuUITests: PaintUITestCase {
         // **Both strokes measured off one screenshot, in pixels.**
         //
         // Two earlier versions of this test sampled a ladder of normalized offsets and failed on their
-        // own premise: at the default 2048² canvas the view zoom is 0.4668, so an 18 pt brush is about
-        // 17 screenshot pixels wide and a 4 pt one about 4 — a real, large difference that is *under
+        // own premise: at the default 2048² canvas the view zoom is 0.4668, so a 22 pt brush is about
+        // 21 screenshot pixels wide and a 4 pt one about 4 — a real, large difference that is *under
         // one sample step* when the step is a fraction of the host's height. Counting the inked rows
         // of one column measures the thing directly and needs no threshold to be guessed.
         let widths = inkedColumnHeights(of: canvas, dx: 0.50, bands: [wideY, thinY], halfBand: 0.03)
-        XCTAssertGreaterThan(widths[0], 4, "PREMISE: the 18 pt default brush marks the paper and has width")
-        XCTAssertGreaterThan(widths[1], 0, "The Pen should still draw a line")
+        XCTAssertGreaterThan(widths[0], 4, "PREMISE: the 22 pt default brush marks the paper and has width")
+        XCTAssertGreaterThan(widths[1], 0, "The technical pen should still draw a line")
         XCTAssertLessThan(widths[1], widths[0],
-                          "Picking the Pen must reach the ink — its stroke is visibly narrower than the 18 pt brush the document opened with")
+                          "Picking the technical pen must reach the ink — its stroke is visibly narrower than the 22 pt brush the document opened with")
     }
 
     /// A picture of the screen, kept **only when the test fails** — see `BrushEditorUITests`'
@@ -170,12 +182,12 @@ final class BrushMenuUITests: PaintUITestCase {
         let made = app.buttons["brushPanel.group.New Group"]
         XCTAssertTrue(made.waitForExistence(timeout: 5), "The group must appear in the left column")
         XCTAssertTrue(made.isSelected, "…and open, so the artist can see it is empty")
-        XCTAssertFalse(app.buttons["brushPanel.brush.Pen"].exists,
+        XCTAssertFalse(app.buttons["brushPanel.brush.Round Soft"].exists,
                        "An empty group shows no brushes — the right column follows the left")
 
         // And back.
         tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The Basics group row")
-        XCTAssertTrue(app.buttons["brushPanel.brush.Pen"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.buttons["brushPanel.brush.Round Soft"].waitForExistence(timeout: 5),
                       "Tapping a group in the left column shows its brushes in the right")
     }
 
@@ -209,10 +221,10 @@ final class BrushMenuUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchCold(app))
 
-        // Pick the Pen for the *brush*, then switch to the eraser and check its own selection is
-        // untouched — Hard Round, its own default.
+        // Pick Messy Flat for the *brush*, then switch to the eraser and check its own selection is
+        // untouched — Round Hard, its own default.
         openBrushMenu(app)
-        tapWhenHittable(app.buttons["brushPanel.brush.Pen"], "The Pen's row")
+        tapWhenHittable(app.buttons["brushPanel.brush.Messy Flat"], "Messy Flat's row")
         app.buttons["toolbar.brushButton"].tap()
 
         let eraser = app.buttons["toolbar.eraserButton"]
@@ -221,9 +233,9 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(app.scrollViews["eraserPanel.groupList"].waitForExistence(timeout: 5),
                       "The eraser opens the same two-column menu")
         XCTAssertTrue(app.buttons["eraserPanel.group.Basics"].exists)
-        XCTAssertTrue(app.buttons["eraserPanel.brush.Hard Round"].isSelected,
+        XCTAssertTrue(app.buttons["eraserPanel.brush.Round Hard"].isSelected,
                       "The eraser keeps its own selection over the shared library")
-        XCTAssertFalse(app.buttons["eraserPanel.brush.Pen"].isSelected,
+        XCTAssertFalse(app.buttons["eraserPanel.brush.Messy Flat"].isSelected,
                        "…and the brush's choice does not leak into it")
     }
 

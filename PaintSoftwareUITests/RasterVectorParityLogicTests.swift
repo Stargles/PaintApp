@@ -417,7 +417,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// The brush axis. `hardRound` (hardness 0.95) and `softRound` (hardness 0.15) are the two ends
     /// of the falloff that matters — the alpha gate exists because the soft one's edge alpha is below
     /// 1 even at full geometric coverage.
-    private static let brushes = [BrushLibrary.hardRound, BrushLibrary.softRound]
+    private static let brushes = [TestBrushes.hardRound, TestBrushes.softRound]
 
     /// Full opacity, and `0.4` as the case that must produce a real partial fade rather than a binary
     /// cut.
@@ -474,7 +474,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// This pins that each gesture actually removes ink from the vector render.
     func testEachGestureActuallyRemovesInkSoTheMatrixIsNotVacuous() {
         for gesture in Gesture.allCases {
-            let scene = scenario(brush: BrushLibrary.hardRound, eraserOpacity: 1,
+            let scene = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                                  gesture: gesture, backdrop: .none)
             let paint = RasterVectorParity.paintStroke(scene)
             let erase = RasterVectorParity.eraseStroke(scene)
@@ -511,7 +511,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         let alphaIndex = (40 * Int(Self.canvasSize.width) + 64) * 4 + 3
 
         for (name, backdrop) in backdrops {
-            let scene = scenario(brush: BrushLibrary.hardRound, eraserOpacity: 1,
+            let scene = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                                  gesture: .squareCut, backdrop: backdrop)
             guard let element = RasterVectorParity.backdropElement(scene),
                   let intact = RasterVectorParity.premultipliedBytes(
@@ -531,9 +531,9 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// only a claim about a code path nobody measured. Erasing at 0.4 must leave a band of ink that a
     /// full-opacity pass over the same gesture removes completely.
     func testAPartialOpacityEraserFadesRatherThanCuts() {
-        let full = scenario(brush: BrushLibrary.hardRound, eraserOpacity: 1,
+        let full = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                             gesture: .squareCut, backdrop: .none)
-        let partial = scenario(brush: BrushLibrary.hardRound, eraserOpacity: 0.4,
+        let partial = scenario(brush: TestBrushes.hardRound, eraserOpacity: 0.4,
                                gesture: .squareCut, backdrop: .none)
         guard let bytes = RasterVectorParity.premultipliedBytes(of: RasterVectorParity.tiers(partial).vector,
                                                                 size: partial.canvasSize),
@@ -559,7 +559,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// It cannot notice a split, a refit, a spacing edit or a punch moving a draw, because both sides
     /// walk the identical samples; `DabRandomLogicTests` is where those live.
     func testAScatteringBrushMatchesBecauseBothTiersDrawFromOneField() {
-        var scattering = BrushLibrary.hardRound
+        var scattering = TestBrushes.hardRound
         scattering.dab.scatter = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)
         guard let report = RasterVectorParity.parityOfRetainedPunch(scene) else {
@@ -573,7 +573,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// tiers must diverge. Without this, a harness that accidentally compared an image with itself
     /// would look just as green.
     func testADifferentFieldOnTheRasterTierDoesDivergeSoTheFieldTestIsNotVacuous() {
-        var scattering = BrushLibrary.hardRound
+        var scattering = TestBrushes.hardRound
         scattering.dab.scatter = 0.5
         let scene = scenario(brush: scattering, eraserOpacity: 1, gesture: .squareCut, backdrop: .none)
         let paint = RasterVectorParity.paintStroke(scene)
@@ -603,7 +603,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
     /// `RasterVectorParity.parityOfGeometricSplit` runs end to end and returns a report, so the hook
     /// itself is known to work.
     func testTheGeometricSplitHookProducesAReport() {
-        let scene = scenario(brush: BrushLibrary.hardRound, eraserOpacity: 1,
+        let scene = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                              gesture: .squareCut, backdrop: .none)
         guard let report = RasterVectorParity.parityOfGeometricSplit(scene) else {
             return XCTFail("The Phase 4c measurement hook should produce a report")

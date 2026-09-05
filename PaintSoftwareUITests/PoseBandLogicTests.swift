@@ -21,7 +21,7 @@ final class PoseBandLogicTests: XCTestCase {
     private var box: CGRect { CGRect(x: 4, y: 6, width: 16, height: 8) }
 
     private func stroke(_ points: [CGPoint]) -> VectorStroke {
-        VectorStroke(id: UUID(), brush: BrushLibrary.hardRound,
+        VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                      size: 6, opacity: 1,
                      samples: StrokeSamples(points.map { VectorSample(x: $0.x, y: $0.y, pressure: 1) },

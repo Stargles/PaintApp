@@ -648,7 +648,7 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// boundary is a pinned fact rather than a paragraph, and so the survey below can be checked
     /// against the engine instead of against its own arithmetic.
     func testTheSpacingFloorIsWhereAResizeStopsBeingASimilarity() {
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.05
         let line: StrokeSamples = [VectorSample(x: 0, y: 0, pressure: 1), VectorSample(x: 40, y: 0, pressure: 1)]
         func walk(size: CGFloat, scale k: CGFloat) -> Int {
@@ -692,7 +692,7 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// any other. A raster tier contributes nothing — it is resampled, not re-stamped.
     func testTheFloorSurveyReadsVectorStrokesAndLocalEdits() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        var brush = BrushLibrary.hardRound
+        var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.05
         manager.addVectorLayer()
         let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
@@ -1340,7 +1340,7 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// A stroke at known samples, so a test states the geometry it is going to assert on rather than
     /// the eight fields `VectorStroke` needs to exist.
     private static func stroke(at points: [CGPoint], size: CGFloat,
-                               brush: Brush = BrushLibrary.hardRound) -> VectorStroke {
+                               brush: Brush = TestBrushes.hardRound) -> VectorStroke {
         VectorStroke(brush: brush,
                      color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                      size: size, opacity: 1,

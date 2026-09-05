@@ -106,7 +106,14 @@ final class BrushTipGeneratorLogicTests: XCTestCase {
 
             let inked = tip.alpha.reduce(into: 0) { $0 += $1 > 8 ? 1 : 0 }
             let fraction = Double(inked) / Double(n * n)
-            XCTAssertGreaterThan(fraction, 0.02,
+            // **The floor was 0.02 and is 0.01, re-derived at round three rather than relaxed to get
+            // green.** The owner asked for Streaky's dots at *"at least half the radius"*, and six
+            // discs at a quarter of their old area is a sparse mask by construction: MEASURED at
+            // 0.0165 of the tip, against 0.0525 before. So 0.02 was a floor on the old radius and
+            // not on emptiness. 0.01 still catches what this assertion is for — a shape that
+            // silently draws nothing — because the emptiest legitimate mask on the sheet is now
+            // 1.65× it, and a genuinely blank one is zero rather than marginal.
+            XCTAssertGreaterThan(fraction, 0.01,
                                  "\(tip.name) draws almost nothing — `BrushTipImport.Failure"
                                  + ".blankMask` is the shape of this failure and it looks exactly "
                                  + "like a broken renderer")

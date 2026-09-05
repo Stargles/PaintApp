@@ -85,7 +85,7 @@ final class InterpolationMotionGroupLogicTests: XCTestCase {
 
     // MARK: - Document fixtures
 
-    private static let brush = BrushLibrary.hardRound
+    private static let brush = TestBrushes.hardRound
 
     private static let black = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
 

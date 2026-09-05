@@ -58,21 +58,17 @@ struct BrushLibraryDocument: Codable, Equatable {
         self.groups = groups
     }
 
-    /// What a device with no library file gets — BRUSH.md §8.6's first group, holding today's five
-    /// presets. §12 stage 9 replaces the *contents*; this is the container it lands in.
+    /// What a device with no library file gets — BRUSH.md §8.6's five groups, sixteen brushes and
+    /// an empty Texture, authored at §12 stage 9.
     ///
-    /// **The group's id is written down rather than minted**, for exactly the reason
-    /// `BrushLibrary`'s five preset ids are: a `UUID()` in a `static let` is one value per *process*,
-    /// and this id is persisted the moment the library is first saved. A minted one would make the
-    /// seeded group's identity depend on which launch happened to write the file, which is
-    /// unassertable and — the part that bites — makes "is this still the seeded group?" unanswerable
-    /// after a relaunch.
-    static let basicsGroupID = UUID(uuidString: "B7051000-0000-4000-B000-000000000001")!
+    /// **This used to be one "Basics" group holding all five legacy presets**, because the container
+    /// was built a stage before the contents existed. The groups and their ids belong to
+    /// `BrushLibrary` now — the library is what §8.6 names, and having the seed re-declare a group
+    /// name here is how a shipped set and its seeding drift apart.
+    static let basicsGroupID = BrushLibrary.GroupID.basics
 
     static var seeded: BrushLibraryDocument {
-        BrushLibraryDocument(groups: [
-            BrushGroup(id: basicsGroupID, name: "Basics", brushes: BrushLibrary.defaults)
-        ])
+        BrushLibraryDocument(groups: BrushLibrary.groups)
     }
 }
 

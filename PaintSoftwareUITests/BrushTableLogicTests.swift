@@ -416,7 +416,7 @@ final class BrushTableLogicTests: XCTestCase {
         // The palette forgets it — a rename, a future removal, or simply the artist editing on to the
         // next brush. The ink has not forgotten it.
         manager.customBrushes = []
-        manager.selectBrush(BrushLibrary.hardRound)
+        manager.selectBrush(TestBrushes.hardRound)
         XCTAssertFalse(([manager.selectedBrush] + manager.customBrushes)
                         .contains { $0.tip.importedTextureFileName == fileName },
                        "fixture precondition: no palette entry names this file any more")
@@ -557,17 +557,17 @@ final class BrushTableLogicTests: XCTestCase {
         let layerIndex = manager.currentLayerIndex
         let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
 
-        manager.selectBrush(BrushLibrary.hardRound)
+        manager.selectBrush(TestBrushes.hardRound)
         vector.addStroke(stroke(manager.selectedBrush,
                                 from: CGPoint(x: 8, y: 30), to: CGPoint(x: 54, y: 30), size: 10))
-        manager.selectBrush(BrushLibrary.softRound)
+        manager.selectBrush(TestBrushes.softRound)
         manager.selectionMembership = .touching
         select(manager, layerIndex, loop(CGRect(x: 2, y: 2, width: 60, height: 60)))
 
         XCTAssertNil(manager.applyBrushUnavailableReason,
                      "the button the artist can see is live on the state they can reach")
         manager.applyBrushToSelection()
-        XCTAssertEqual(vector.strokes.first?.brush, BrushLibrary.softRound)
+        XCTAssertEqual(vector.strokes.first?.brush, TestBrushes.softRound)
     }
 
     /// A raster layer says why rather than going quietly grey, exactly as Recolour does — and the
