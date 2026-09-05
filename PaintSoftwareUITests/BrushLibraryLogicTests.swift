@@ -431,4 +431,29 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertTrue(samples.positions.allSatisfy { $0.x >= 0 && $0.x <= Self.previewSize.width },
                       "and it stays inside the row it is drawn into")
     }
+    /// **Every shipped brush's density lands inside the control an artist edits it on** — BRUSH.md
+    /// §2.32's stated reason for converting a dropout at *half* gain rather than at full.
+    ///
+    /// The gate `D ≥ u` survives any positive scale of the whole chain, so no assertion about the
+    /// **ink** can see the difference — a mutation of `BrushDensityGate.halfAmount` passed every one
+    /// of them. What the halves buy is reachability: at a whole amount Splatter's converted base is
+    /// **1.2**, past the end of a `0…1` slider, so the one number the artist would reach for to tune
+    /// their dropout could not be dragged to where it already was.
+    func testEveryShippedDensityBaseAndGainSitsInsideItsOwnControl() {
+        for brush in BrushLibrary.defaults {
+            XCTAssertTrue(BrushOutput.density.editorRange.contains(brush.dab.density),
+                          "\(brush.name): density base \(brush.dab.density) is outside "
+                          + "\(BrushOutput.density.editorRange)")
+            for row in brush.modulations.rows where row.output == .density {
+                XCTAssertTrue((-1.0...1.0).contains(row.amount),
+                              "\(brush.name): a density gain of \(row.amount) is off the slider")
+            }
+        }
+        // PREMISE: four of the twenty actually use a dropout, so the loop above is not vacuous.
+        let dropouts = BrushLibrary.defaults.filter { $0.modulations.drives(.density) }
+        XCTAssertEqual(Set(dropouts.map(\.name)),
+                       ["Rough Ink", "Rough Ink — Blotchy", "Splatter", "Stipple"],
+                       "§2.32 converted four presets; this list is what a fifth would have to join")
+    }
+
 }

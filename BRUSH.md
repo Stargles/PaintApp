@@ -188,7 +188,9 @@ long arcs the owner picked out of the comparison sheet. One output may carry sev
 different λ, which is how a rough nib gets slow thick/thin variation and fine edge fuzz out of one input
 with no spectral-slope parameter.
 
-**2.18 `density` is an output — the probability that a dab is stamped at all.** BUILT, §12 stage 7 —
+**2.18 `density` is an output — the probability that a dab is stamped at all. SUPERSEDED by §2.32,
+which makes it a threshold; the ruling below describes what shipped at §12 stage 7 and stood until
+2026-09-05.** BUILT, §12 stage 7 —
 `BrushDabSettings.density` and `.densityWavelength`, drawn on `DabRandom.Channel.density`. The dab is skipped when its
 random draw exceeds it. Nothing special-cases pressure: the owner's *"at very low pressure, segments of the
 brush aren't painted (its noisy), creating a sort of segmented lineart filled with gaps"* is `density ←
@@ -197,8 +199,10 @@ compared against** — modulating `density` by a coherent random while drawing w
 speckle rather than gaps — so λ sits on the `density` row itself.
 
 **2.19 A taper is low pressure, so `density ← pressure` is a threshold curve rather than a ramp.** BUILT —
-`ResponseCurve.threshold(knee:low:high:)` and `BrushModulation.densityFromPressure(knee:floor:)`. Density
-holds flat at 1 above about a third of full pressure and falls below it. Without that the dropout eats the
+`ResponseCurve.threshold(knee:low:high:)` and `BrushModulation.densityFromPressure(knee:floor:)`. **The
+ruling survives §2.32 unchanged and only its arithmetic moved**: the curve still holds flat at 1 above
+about a third of full pressure and falls below it, and what the row now contributes is half of that on
+top of a base sitting on the gate, against a randomiser at minus a half. Without that the dropout eats the
 point of every tapered stroke and a hair spike ends in gaps; with it a taper keeps its point while a stroke
 drawn genuinely light breaks up along its whole length. That is the shape of the curve §6 already gives
 every modulation, not a mechanism of its own.
@@ -1459,11 +1463,22 @@ came before — `amount · curve(input) · reading(second)` — is exactly the c
 `[.curveRamp, .scale]`, so nothing an existing brush said became unsayable and the presets' pixels did
 not move; what became sayable is the other order.
 
-**A scale attenuates.** Its reading is clamped to `0…1` and `amount` is still the only signed,
-unclamped term (§2.22, unchanged by the move). Two chains on one output *add*, so `spacing ← random`
-beside `spacing ← pressure` gives a pressure shift **plus** a fixed-amplitude wobble, where a scale
-*multiplies* and the wobble's amplitude is what pressure moves. A `.random` in any position has its
-channel derived from that position (§6.2).
+**A scale attenuates.** Its shaped reading is clamped to `0…1` and the chain's own `amount` is still
+the only signed, unclamped term (§2.22, unchanged by the move). Two chains on one output *add*, so
+`spacing ← random` beside `spacing ← pressure` gives a pressure shift **plus** a fixed-amplitude
+wobble, where a scale *multiplies* and the wobble's amplitude is what pressure moves. A `.random` in
+any position has its channel derived from that position (§6.2).
+
+**A scale carries an amount of its own since §2.33**, so `BrushModule.scale` is *(input, curve,
+amount)* and the arithmetic is `value · (1 − a + a · curve(reading))`: **0 is inert and 1 is what a
+scale did before the field existed, to the bit**. It is clamped `0…1` — above 1 the mix exceeds 1 and
+a scale would amplify, which §2.22 forbids — and it is off the wire at its default, so no brush's
+bytes moved.
+
+**The chain's `amount` is called *Gain* wherever an artist sees it** (§2.33), and the editor states
+the sum it belongs to: *"Size = Base + each input's chain × its Gain. Inputs on one output add."*
+`BrushOutput.parse` is `format` read backwards and deliberately does not clamp, which is what makes
+this paragraph's "signed and not clamped" reachable from a control rather than only from code.
 
 **What shipped**: `BrushOutput`, `BrushModulation`, `BrushModule`, `BrushModulations` and
 `ResponseCurve` in `Engine/BrushModulation.swift` and `Engine/ResponseCurve.swift`, and
@@ -1484,8 +1499,8 @@ any size** — §2.17. Its value interpolates between hashed lattice points λ o
 still exactly §4's `hash(strokeSeed, arcLength)`; λ = 0 is a fresh draw per dab.
 
 **Outputs**: `size` · `opacity` · `flow` · `angle` · ~~`roundness`~~ · `spacing` · `scatterAcross` ·
-`scatterAlong` · `density` · `hue` / `saturation` / `brightness` shift · `hardness` (procedural tips
-only).
+`scatterAlong` · `density` (a **gate** since §2.32, not a rate) · `hue` / `saturation` / `brightness`
+shift · `hardness` (procedural tips only).
 
 **`scatter` was one output until 2026-09-05 and is two now** — §2.30, which is also where the deletion
 is justified against §2.14 and where the shape change from a disc to a square is measured. The two are
@@ -1519,8 +1534,12 @@ because the toolbar drives them and a lasso resize scales the first, and what th
 value copied into `CanvasManager.brushSize` when it is picked. `BrushDabSettings.size` and `.opacity`
 are the matrix's own outputs — the fractions those are multiplied by — and live with the rest.
 
-`density` (§2.18) is the probability that a dab is stamped at all, and it is the one output whose λ belongs
-to the **row** rather than to a modulation entry, because what has to be coherent is the draw.
+`density` is the level a dab's **gate** is decided by — §2.32. `BrushStamper.stampDab` stamps when it
+resolves to at least `BrushDensityGate.threshold`, 0.5, and takes no draw of its own. It was §2.18's
+*probability* until 2026-09-05, with a λ on the output and a dice roll in the stamper; both are
+deleted, and a dropout is now a base near the gate with a randomiser chain swinging across it. That
+makes it an ordinary output in every respect — the last one whose value was not a pure function of its
+inputs.
 
 Angle has three contributions that sum: a base angle, direction-follow as a 0–100% amount, and jitter.
 Measured in **turns**, so `direction` — which the funnel answers as a fraction of a turn — reaches it
@@ -1589,7 +1608,7 @@ failure a renderer bug looks exactly like.
 `Brush`'s flat scalars group into sub-structs the way `dynamics` and `blendMode` already did, each with a
 `static let default` and defaulted decode. `Brush`'s `Codable` was compiler-synthesized, so every new
 flat key was a decode-compatibility question; a nested field with a default is not. **Three groups
-shipped**: `dab` (`BrushDabSettings` — every output's base, plus `densityWavelength` and the angle's
+shipped**: `dab` (`BrushDabSettings` — every output's base and the angle's
 three contributions), `stroke` (`BrushStrokeSettings` — `stabilization` and `blendMode`, the two
 settings that are not dab outputs and could not be), and `modulations` (`BrushModulations` — the rows).
 
@@ -1651,10 +1670,17 @@ tier, which already approximates the pressure ramp by its mean). `Brush.dabValue
 they call: the matrix with every other sensor at its §5.5 neutral.
 
 **That answer is only *true* for a brush whose rows are all pressure-driven**, so the eraser's two
-gates ask. `supportsSplitting` and `supportsCleanCut` now refuse a brush with any non-pressure row, and
-refuse any `density < 1` outright — a dropout brush stamps *gaps*, so "the eraser covered this
+gates ask. `supportsSplitting` and `supportsCleanCut` refuse a brush with any non-pressure row, and
+refuse one that could drop a dab — a dropout brush stamps *gaps*, so "the eraser covered this
 cross-section" is a claim about paper. Both fall back to the exact alpha punch, which is right whatever
-the dabs did. That is §11's *"gate on brush properties, not on a list of known brushes"* reached
+the dabs did.
+
+**§2.32 changed what "could drop a dab" is, in both directions.** `density < 1` was exactly that while
+density was a rate; under the gate a base of 0.6 with nothing driving it stamps **every** dab, and a
+base of 1 with a chain on it can still drop them. The gate asks for a base at or above the threshold
+**and no chain driving `density` at all** — a chain could dip below the gate at a pressure this call
+never sees, and `isPressureOnly` does not catch a *pressure-driven* dropout, which is the operand
+`BrushModulationLogicTests` had to add. That is §11's *"gate on brush properties, not on a list of known brushes"* reached
 through §6's door.
 
 ---
@@ -1862,9 +1888,52 @@ Three columns, and the middle one is §2.24's own shape rather than a category l
   edge and lands on the side toolbar.
 
 **Every parameter §7 listed as having no UI now has one** — `scatter`, the angle's three contributions,
-`hardness`, `density` and its λ, `blendMode` and the three HSB shifts. §2.18's dropout λ is on the
-`density` output itself and a `random` row's λ is on the row, which is §7's third point: two different
-places by ruling, drawn as two different controls.
+`hardness`, `density`, `blendMode` and the three HSB shifts. §7's third point asked for the dropout's λ
+and a `random` row's λ to be two different controls in two different places, *"by ruling"*; **§2.32
+closed that by deleting one of them**, so there is one λ and it belongs to whichever randomiser the
+artist put on a chain.
+
+### What §2.31, §2.32 and §2.33 changed here — 2026-09-05
+
+- **The screen edits a draft.** `commit()`, which ran on every slider lift and every module edit, is
+  gone; **Done** writes the draft into the library and the selection, **Cancel** discards it and puts
+  the artist's size and opacity back. `ResponseCurveEditorView.onEditEnded` went with it — there is no
+  longer a *"when does this reach the library"* for a control to answer — and so did `onEditBegan`,
+  which no caller had ever passed.
+- **The pad follows the draft** rather than each stroke's own brush, coalesced to a display frame and
+  capped at `BrushPadZoom.maximumStrokes`. §2.31 carries the measurement and the reason the cap is 8.
+- **Amount is Gain**, on every input row, with an editable **value pill** beside it that takes a typed
+  value past either end of the slider. The pill is offered on a row's Gain and an output's Base and
+  **not** on a control whose slider already spans the value's legal range.
+- **The screen states its own arithmetic** — *"Density = Base + each input's chain × its Gain. Inputs
+  on one output add."* — from the first input rather than the second.
+- **`density`'s Dropout Wavelength slider is deleted** and a sentence naming the threshold stands where
+  it was.
+
+**Three defects were found by driving it and none of them could have been found by a model assertion.**
+
+- **The value pill committed twice.** Return committed, resigned focus, and the focus change committed
+  *again* — the second time against an `editing` string the first had already reset — so the typed
+  value was written and then overwritten by the value it replaced. **The control was completely inert
+  while every model assertion about it passed.** Losing focus is the only commit now.
+- **The pill opened holding its own value**, so typing `180` over `50%` meant three backspaces on a
+  tablet keyboard first. Nobody taps a value pill to append to it: it empties on focus and shows the
+  old value as the placeholder.
+- **`density`'s description still said *"the chance a dab is stamped at all. Below 1 the line breaks
+  up"***, two lines above the sentence that says it is a threshold. Under §2.32 that is false in the
+  direction that matters — below the gate *nothing* is stamped — and a stale limit printed beside the
+  control that disproves it is the state this section already calls worse than silence.
+
+**And two identifier renames**, both because the name is what a reader trusts: `amount.<row>` is
+`gain.<output>.<row>`, and `randomLambda`/`Octaves`/`Falloff` were glued onto the prefix without a dot
+(`brushPanelLambda.size.0`) and read as a namespace of their own; they are `lambda`, `octaves` and
+`falloff` under `brushPanel` or `brushPanel.module`.
+
+**`BrushMenuUITests`' identifier census had been red on `main` since §12 stage 9** — it named
+`brushPanel.brush.Soft Round` and `brushPanel.brush.Pen`, two presets that stage replaced — so it had
+been printing its own message about itself: *"it is missing, so every test that names it is asserting
+nothing."* It names `Round Soft` and `Round Hard` now, both of which are in Basics, which is the group
+the menu opens on.
 
 **Three of this section's own instructions did not survive contact.**
 
@@ -1945,10 +2014,13 @@ regression test looks like when it is written the day after rather than the day 
   - **Zoom scales the view and never the brush** (`BrushPadZoom`). The context keeps its pixel
     dimensions and takes a larger scale factor, so its user space is canvas points and the extent it
     covers shrinks; the size reaching `stampStroke` is the artist's own number at every zoom.
-    **Strokes are re-walked rather than magnified** on a change, each with the brush it was drawn with
-    — a bitmap magnify would be a picture of the brush at a resolution it was never drawn at, which is
-    the same lie by another route, and re-walking with the *current* brush would break §2.10 in the one
-    place an artist is watching for it.
+    **Strokes are re-walked rather than magnified** on a change — a bitmap magnify would be a picture
+    of the brush at a resolution it was never drawn at, which is the same lie by another route.
+    **The clause that followed this one is superseded by §2.31**: they were re-walked *"each with the
+    brush it was drawn with"*, on the argument that re-walking with the current brush would break
+    §2.10. The owner asked for the opposite, and §2.31 rules that the pad is the instrument for judging
+    a draft rather than a canvas — so every stroke follows the draft, and §2.10 is protected where it
+    matters, on Done.
   - **Only the logic tier can tell "scaled the view" from "scaled the brush".** Ink pixels cannot: a
     pad that tripled the brush lays down the same count as one that tripled the magnification. So
     `BrushEditorLogicTests`' `testThePadZoomScalesTheViewAndNotTheBrush` measures the stroke in
@@ -2498,6 +2570,7 @@ the `BrushTipGenerator` shape that drew them so any one of them can be regenerat
 | | Brush Pen | `pen-brush` | teardrop along the travel |
 | | Rough Ink — Blotchy | *procedural* | §8.4's first answer, all dynamics and no picture |
 | | **Rough Ink** | `rough-ink-triangle` | **triangle + Blotchy's dynamics**, which is both halves of §8.4's pair *and* both mechanisms |
+
 | Painting | **Painterly** | `paint-dry-load` | speckled interior, broken edges, **spacing 0.095** so the pixels are seen one dab at a time |
 | | **Bristle** | `bristle-open` | **open nib + envelope**. The mask fix alone left the walk dilating the outer boundary; the A/B row with a short-λ size wobble and a coherent scatter won it |
 | | **Streaky** | `streak-dots-6` | six stratified dots at **half** round two's radius, `jitter 0` |
@@ -2528,6 +2601,14 @@ natural reading is *the triangle is more asymmetric, so rotation changes its out
 paragraph is satisfied by both — what separates them is that the square's four flat faces repeat every
 quarter turn while the triangle's three do not, so the square presents a coarser and more *repetitive*
 notch at the same anisotropy. Gross anisotropy is the gate, not the ranking.
+
+**Four of the twenty were rewritten by §2.32 on 2026-09-05, and their ink did not move.** `density`
+became a gate, so a dropout is a base at 50% with two chains — the old signal at half gain and a
+randomiser at minus half — rather than a rate with a λ beside it. **Rough Ink**, **Rough Ink —
+Blotchy**, §12 stage 11's **Splatter** and its **Stipple** are the four; **Grunge and Chalk do not use
+dropout at all**, which is worth writing down because the Texture group's own table above reads as
+though they might. The other sixteen are byte-identical, and the two rough inks are byte-identical at
+*full* pressure — their curve saturates there, so the gate and the rate agree exactly.
 
 **`isPencilPreset` is group membership now**, which is what this section predicted stage 9 would do:
 picking *any* of the four Sketching brushes selects the pencil tool, and a brush the artist adds to
@@ -2873,6 +2954,16 @@ first, which cleanly replaces the old one."*
     range, and neither existing curve control could be pointed at a `ResponseCurve`. **Two defects were
     found only by driving it**: an identifier on the screen's root container that made every control
     below it unreachable, and an edit that survived the editor and not the process.
+    **§2.31, §2.32 and §2.33 landed on this screen on 2026-09-05** and §7.2 records what each changed:
+    the screen edits a **draft** that Done commits and Cancel discards, the pad re-walks **every** stroke
+    from that draft (coalesced to a frame, capped at eight), Amount is **Gain** with a typed value pill
+    beside it, the screen states that inputs are summed, and `density`'s Dropout Wavelength slider is
+    replaced by a sentence naming the threshold. Pinned by four more `BrushEditorUITests` and five more
+    `BrushEditorLogicTests`. **Three more defects were found only by driving it** — a value pill that
+    committed twice and so wrote the typed value and then the value it replaced, a pill that made the
+    artist backspace before typing, and a stale description of `density` printed two lines above the
+    sentence that contradicted it. And the identifier census in `BrushMenuUITests` turned out to have
+    been **red on `main` since stage 9** for naming two deleted presets.
 11. **DONE — the Texture group, and it needed no CC0 assets at all.** §13 asked whether §8.4's *"scanned
     grunge and splatter are genuinely hard to fake"* still held after eleven generated tips; round four's
     contact sheet says it does not, so **this stage's licensing step is deleted rather than performed**

@@ -54,14 +54,16 @@ struct BrushEditorGroup: Hashable, Identifiable {
 /// **Every parameter the editor exposes, in the order it shows them.**
 ///
 /// The grouping is by *what the artist is changing*, which is §7.2's ruling and not Procreate's
-/// tabs: our model has `density`, λ and §2.22's second input and Procreate has none of those, and it
-/// has Wet Mix and Bleed and we have neither.
+/// tabs: our model has `density`, a chain of modules and a gain per input and Procreate has none of
+/// those, and it has Wet Mix and Bleed and we have neither.
 ///
 /// **This list is the answer to §7's *"parameters with no UI at all today"***: scatter, the angle's
-/// three contributions, `hardness`, `density` and its λ, `blendMode` and the three HSB shifts were
-/// all unreachable from any screen before stage 10, and every one of them is here. §2.30 made
-/// `scatter` two rows here as it made it two outputs: the artist reaches the frayed edge and the
-/// uneven spacing separately, which is the whole of that ruling.
+/// three contributions, `hardness`, `density`, `blendMode` and the three HSB shifts were all
+/// unreachable from any screen before stage 10, and every one of them is here. §2.30 made `scatter`
+/// two rows here as it made it two outputs: the artist reaches the frayed edge and the uneven
+/// spacing separately, which is the whole of that ruling. **`density`'s own λ was on this list until
+/// §2.32** and is not a property of the output any more — it belongs to whichever randomiser the
+/// artist puts on the chain, beside that randomiser's octaves and falloff.
 enum BrushEditorCatalog {
 
     static let groups: [BrushEditorGroup] = [
@@ -88,8 +90,13 @@ enum BrushEditorCatalog {
                   "How far a dab may land to either side of the path, in brush widths. Frays the edge of the stroke; the gaps between dabs stay even."),
             entry(.scatterAlong, "Scatter Along",
                   "How far a dab may land forward or back along the path, in brush widths. Widens nothing — it bunches and gaps the dabs instead."),
+            // **§2.32 rewrote this sentence and it had to be rewritten.** It said *"the chance a dab
+            // is stamped at all. Below 1 the line breaks up"*, which was §2.18's meaning and is now
+            // false in the direction that matters: below the gate **nothing** is stamped. Left
+            // alone it sat two lines above the gate sentence and contradicted it — the state §7.2
+            // calls worse than never having said anything.
             entry(.density, "Density",
-                  "The chance a dab is stamped at all. Below 1 the line breaks up; the survivors stay on the same lattice.")
+                  "The level a dab's gate is decided by, not a probability. It is stamped when this reaches 50%; a dropout is a base near that with a Randomiser input swinging across it.")
         ]),
         BrushEditorGroup(name: "Colour", entries: [
             entry(.hue, "Hue Shift", "Turns each dab's colour around the wheel, in turns."),

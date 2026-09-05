@@ -324,9 +324,16 @@ final class BrushModulationLogicTests: XCTestCase {
         brush.dab.scatterAcross = 0.4
         brush.dab.scatterAlong = 0.4
 
+        // **Literals, and that is the whole difference between this test and a tautology.** Written
+        // as `withDensity(BrushDensityGate.threshold)` it passed with the threshold mutated to 0 —
+        // both operands moved with the constant, so it measured a *relation* rather than the
+        // owner's number. §2.32 is a number: *"a rule where threshold of over 50% means the dab
+        // stays"*.
+        XCTAssertEqual(BrushDensityGate.threshold, 0.5, accuracy: 1e-12,
+                       "§2.32 is the owner's own 50%, not whatever the constant happens to say")
         let plain = brush.withDensity(1)
-        let atGate = brush.withDensity(BrushDensityGate.threshold)
-        let below = brush.withDensity(BrushDensityGate.threshold.nextDown)
+        let atGate = brush.withDensity(0.5)
+        let below = brush.withDensity(0.49)
 
         XCTAssertGreaterThan(Self.dabs(plain, samples).count, 100, "the fixture has to lay dabs")
         XCTAssertEqual(Self.dabs(atGate, samples).count, Self.dabs(plain, samples).count,
@@ -334,7 +341,8 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertEqual(Self.render(atGate, samples), Self.render(plain, samples),
                        "…and byte-for-byte the same ink as a brush with no density at all")
         XCTAssertEqual(Self.dabs(below, samples).count, 0,
-                       "§2.32: one ulp below the threshold nothing is stamped — a level, not a rate")
+                       "§2.32: 0.49 stamps nothing at all — a level, not a rate. Under §2.18 it "
+                       + "laid about half the dabs down.")
     }
 
     /// **A randomiser on `density` is what a dropout is now**, and it thins the line the way §2.18's
@@ -862,6 +870,21 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertFalse(VectorEraser.supportsSplitting(strokeBrush: gated),
                        "a density brush stamps gaps, so the chain claims coverage over paper")
         XCTAssertFalse(VectorEraser.supportsCleanCut(brush: gated, opacity: 1, minPressure: 1))
+
+        // **The case the other three cannot see, and the reason the gate asks `drives(.density)`
+        // rather than leaning on `isPressureOnly`.** A dropout driven by *pressure alone* passes
+        // every other clause: it is pressure-only, its base sits on the gate, and it still drops
+        // every dab drawn below the curve's knee. Deleting the `drives` clause leaves the three
+        // above red-free, which is how this operand came to be written.
+        var pressureDropout = pressureOnly
+        pressureDropout.dab.density = BrushDensityGate.threshold
+        pressureDropout.modulations = BrushModulations([.densityFromPressure()])
+        XCTAssertTrue(pressureDropout.modulations.isPressureOnly,
+                      "PREMISE: this is the brush the pressure-only test waves through")
+        XCTAssertFalse(VectorEraser.supportsSplitting(strokeBrush: pressureDropout),
+                       "a pressure-driven dropout still stamps gaps below its knee")
+        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: pressureDropout, opacity: 1,
+                                                     minPressure: 1))
 
         // And the consequence that runs the other way, asserted because it is a *change*: a base
         // between the gate and 1 used to mean a dropout and now means none at all, so the eraser
@@ -1872,6 +1895,20 @@ extension BrushModulationLogicTests {
             XCTAssertEqual(densityRows.count, 2, "\(name): a signal row and a randomiser row")
             XCTAssertTrue(densityRows.contains { $0.input.randomiser != nil },
                           "\(name): without a randomiser the gate is never crossed and nothing drops")
+            // **Why the conversion uses halves, asserted where its reason lives.** The inequality
+            // `D ≥ u` survives *any* positive scale — doubling the base and both gains is the same
+            // gate — so the ink assertions below cannot see `halfAmount` at all, and a mutation of
+            // it passed every one of them. What the halves actually buy is that the converted brush
+            // lands inside the editor's own controls: at a whole amount Splatter's base is 1.2, off
+            // the end of a slider whose range is `0…1`.
+            XCTAssertTrue(BrushOutput.density.editorRange.contains(brush.dab.density),
+                          "\(name): a converted base must sit inside the slider an artist edits it "
+                          + "on — \(brush.dab.density) against \(BrushOutput.density.editorRange)")
+            for row in densityRows {
+                XCTAssertTrue((-1.0...1.0).contains(row.amount),
+                              "\(name): a converted gain must sit inside the row slider's ±1 — "
+                              + "\(row.amount)")
+            }
 
             for (pressure, wasKept, wasRun, wasInk) in rows {
                 let now = Self.dropoutStats(brush, pressure: pressure, seeds: Self.dropoutSeeds)

@@ -1195,6 +1195,13 @@ struct BrushEditorScreen: View {
 /// unfocused and the artist's own characters while focused, and `onChange` of the focus is what
 /// swaps them.
 ///
+/// **Tapping it empties it, and the value it replaces becomes the placeholder.** Found by driving it:
+/// a pill that opens holding `50%` makes the artist backspace three characters on a tablet keyboard
+/// before they can type `180`, which is a control that punishes its own most common use — nobody taps
+/// a value pill to append to it. Empty-and-placeholder is the same information (the old value is
+/// still legible, in grey) and one keystroke instead of four. Leaving it empty parses as nil, so
+/// tapping in and out changes nothing.
+///
 /// **Unparseable text puts the old value back rather than writing zero.** `Double("")` is nil and so
 /// is `Double("-")`, which is what a field holds one keystroke into a negative gain; writing a 0
 /// there would silence the row under the artist's fingers.
@@ -1219,7 +1226,7 @@ private struct BrushValuePill: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("", text: $editing)
+        TextField(text, text: $editing)
             .font(.caption.monospacedDigit())
             .foregroundColor(.white)
             .multilineTextAlignment(.center)
@@ -1234,7 +1241,7 @@ private struct BrushValuePill: View {
             .accessibilityIdentifier(identifier)
             .onSubmit { focused = false }
             .onChange(of: focused) { _, isFocused in
-                if isFocused { editing = text } else { commit() }
+                if isFocused { editing = "" } else { commit() }
             }
             .onChange(of: text) { _, newText in
                 if !focused { editing = newText }
