@@ -26,7 +26,7 @@ final class BrushLibraryLogicTests: XCTestCase {
     private func makeStore() -> BrushLibraryStore {
         // `arguments: []` rather than the process's own: a test must not inherit `-resetBrushLibrary`
         // from whatever launched the runner, and must not be affected by its absence either.
-        BrushLibraryStore(directory: directory, arguments: [])
+        BrushLibraryStore(storage: BrushStorage(root: directory), arguments: [])
     }
 
     // MARK: - The seeded library

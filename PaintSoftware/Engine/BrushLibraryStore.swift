@@ -16,11 +16,16 @@ import os
 /// and it sits beside the tip PNGs it names, so the library and the pictures it depends on are one
 /// folder rather than two unrelated stores.
 ///
-/// **`BrushLibrary.customBrushesDirectory` is under `Documents`, not Application Support.** The brief
+/// **The root is `BrushStorage`'s, under `Documents` rather than Application Support.** The brief
 /// this was built from said Application Support; the directory that actually exists, and that
 /// `ProjectStore` copies imported tips into and restores them from, is `Documents/Brushes`. The
 /// library file goes *in* it — `library.json` — because a group naming
 /// `.stamp(.imported(fileName:))` is meaningless without the file beside it.
+///
+/// **`init(storage:)` is BRUSH.md §2.27's injection, and it was `init(directory:)` before.** The
+/// change is that the root is now a *type's* rather than a URL each caller resolved for itself, so
+/// there is one value to point at an external folder later; this store's own behaviour is unchanged,
+/// including the file it writes and the bytes in it.
 final class BrushLibraryStore: ObservableObject {
     static let shared = BrushLibraryStore()
 
@@ -34,29 +39,32 @@ final class BrushLibraryStore: ObservableObject {
         didSet { persist() }
     }
 
-    private let fileURL: URL
+    /// **The library's root, held rather than resolved** — BRUSH.md §2.27's second requirement. Two
+    /// stores over two storages are two libraries that cannot see each other, which is the state a
+    /// relocation has to be testable against and which a static directory could not express.
+    private let storage: BrushStorage
     /// Off while `init` is populating `groups`, so seeding does not write a file the artist never
     /// asked for — a device that has never opened the menu keeps an empty `Brushes/` folder.
     private var isLoaded = false
 
-    init(directory: URL = BrushLibrary.customBrushesDirectory,
+    init(storage: BrushStorage = .shared,
          arguments: [String] = ProcessInfo.processInfo.arguments) {
-        fileURL = directory.appendingPathComponent(Self.fileName)
+        self.storage = storage
 
         // UI tests pass this so a run starts from the seeded library rather than inheriting groups a
         // previous run added — the same job `-resetPalettes` does for `PaletteStore`, and the same
         // reason: an assertion about "the library on a fresh device" is otherwise a lie the second
         // time it runs. No effect on an ordinary launch.
         if arguments.contains("-resetBrushLibrary") {
-            try? FileManager.default.removeItem(at: fileURL)
+            storage.remove(Self.fileName)
         }
 
-        groups = Self.loadGroups(from: fileURL)
+        groups = Self.loadGroups(from: storage)
         isLoaded = true
     }
 
-    private static func loadGroups(from url: URL) -> [BrushGroup] {
-        guard let data = try? Data(contentsOf: url) else { return BrushLibraryDocument.seeded.groups }
+    private static func loadGroups(from storage: BrushStorage) -> [BrushGroup] {
+        guard let data = storage.read(fileName) else { return BrushLibraryDocument.seeded.groups }
         do {
             let decoded = try JSONDecoder().decode(BrushLibraryDocument.self, from: data)
             // An empty file is a library the artist could not add to and could not pick from, so it
@@ -76,9 +84,7 @@ final class BrushLibraryStore: ObservableObject {
         // compare a written file against a literal rather than against its own encoder.
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
         do {
-            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true)
-            try encoder.encode(document).write(to: fileURL, options: .atomic)
+            try storage.write(encoder.encode(document), to: Self.fileName)
         } catch {
             Self.log.error("The brush library could not be saved: \(String(describing: error), privacy: .public)")
         }
@@ -209,8 +215,8 @@ final class BrushLibraryStore: ObservableObject {
     }
 
     /// Takes in brushes a project restored that this device's library has never seen — a file made
-    /// on another iPad, whose imported tips `ProjectStore` has just copied back into
-    /// `customBrushesDirectory`. Without this they would draw correctly and be unpickable.
+    /// on another iPad, whose imported tips `ProjectStore` has just copied back into the library.
+    /// Without this they would draw correctly and be unpickable.
     ///
     /// Additive and id-keyed, so re-opening the same project twice adds nothing the second time.
     func adopt(_ brushes: [Brush], intoGroupNamed name: String) {

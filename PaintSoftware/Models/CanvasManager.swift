@@ -841,7 +841,7 @@ final class CanvasManager: ObservableObject {
     /// not merely drawable.
     ///
     /// `ProjectStore` restores `customBrushes` from the manifest and copies the project's own tip PNGs
-    /// back into `BrushLibrary.customBrushesDirectory`; on a device whose library has never held them
+    /// back into the brush library (`BrushStorage`); on a device whose library has never held them
     /// — the file came from another iPad — nothing else would ever list them. Additive and id-keyed,
     /// so opening the same project twice adds nothing the second time.
     func adoptRestoredBrushesIntoLibrary() {

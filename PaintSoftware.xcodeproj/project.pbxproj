@@ -118,6 +118,8 @@
 		DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */; };
 		53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF25F37F990F45A8BD53227 /* PaintSoftware/Engine/BrushGroup.swift */; };
 		B260F52A04C5DBC81BB54DFD /* PaintSoftware/Engine/BrushLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83ACBEFCCAAC384FAEC9A331 /* PaintSoftware/Engine/BrushLibraryStore.swift */; };
+		2D76A858173FB1483D0A74A7 /* PaintSoftware/Engine/BrushStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2664AD1A30BE7661E008E5C9 /* PaintSoftware/Engine/BrushStorage.swift */; };
+		0BE11172B90CC261E2833012 /* BrushStorageLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B023BA111E673ACE0C23AB /* BrushStorageLogicTests.swift */; };
 		48AA976125C7A0110E955471 /* PaintSoftware/Engine/BrushPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AF49D9FDA989935C7E9E6B7 /* PaintSoftware/Engine/BrushPreview.swift */; };
 		DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */; };
 		DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */; };
@@ -426,6 +428,8 @@
 		DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibrary.swift; sourceTree = "<group>"; };
 		EAF25F37F990F45A8BD53227 /* PaintSoftware/Engine/BrushGroup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushGroup.swift; sourceTree = "<group>"; };
 		83ACBEFCCAAC384FAEC9A331 /* PaintSoftware/Engine/BrushLibraryStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushLibraryStore.swift; sourceTree = "<group>"; };
+		2664AD1A30BE7661E008E5C9 /* PaintSoftware/Engine/BrushStorage.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushStorage.swift; sourceTree = "<group>"; };
+		A1B023BA111E673ACE0C23AB /* BrushStorageLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushStorageLogicTests.swift; sourceTree = "<group>"; };
 		7AF49D9FDA989935C7E9E6B7 /* PaintSoftware/Engine/BrushPreview.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushPreview.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushStamper.swift; sourceTree = "<group>"; };
 		DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/MetalFillEngine.swift; sourceTree = "<group>"; };
@@ -675,6 +679,7 @@
 			isa = PBXGroup;
 			children = (
 				FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */,
+				A1B023BA111E673ACE0C23AB /* BrushStorageLogicTests.swift */,
 				08371035B0A08F30F0128970 /* BrushTextureLogicTests.swift */,
 				A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */,
 				A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */,
@@ -882,6 +887,7 @@
 				DEC0DE000000000000000009 /* PaintSoftware/Engine/BrushLibrary.swift */,
 				EAF25F37F990F45A8BD53227 /* PaintSoftware/Engine/BrushGroup.swift */,
 				83ACBEFCCAAC384FAEC9A331 /* PaintSoftware/Engine/BrushLibraryStore.swift */,
+				2664AD1A30BE7661E008E5C9 /* PaintSoftware/Engine/BrushStorage.swift */,
 				7AF49D9FDA989935C7E9E6B7 /* PaintSoftware/Engine/BrushPreview.swift */,
 				DEC0DE00000000000000000B /* PaintSoftware/Engine/BrushStamper.swift */,
 				DEC0DE00000000000000000D /* PaintSoftware/Engine/MetalFillEngine.swift */,
@@ -1083,6 +1089,7 @@
 				293F0ADDA4A276276BD6AB16 /* PaintSoftware/Engine/BrushModulation.swift in Sources */,
 				A75FC87AF0FDF6840F6B8144 /* PaintSoftware/Engine/ResponseCurve.swift in Sources */,
 				D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */,
+				0BE11172B90CC261E2833012 /* BrushStorageLogicTests.swift in Sources */,
 				08A09986D040AD201D79E376 /* BrushTextureLogicTests.swift in Sources */,
 				CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */,
 				7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */,
@@ -1255,6 +1262,7 @@
 				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
 				53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */,
 				B260F52A04C5DBC81BB54DFD /* PaintSoftware/Engine/BrushLibraryStore.swift in Sources */,
+				2D76A858173FB1483D0A74A7 /* PaintSoftware/Engine/BrushStorage.swift in Sources */,
 				48AA976125C7A0110E955471 /* PaintSoftware/Engine/BrushPreview.swift in Sources */,
 				DEC0DE00000000000000000C /* PaintSoftware/Engine/BrushStamper.swift in Sources */,
 				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,

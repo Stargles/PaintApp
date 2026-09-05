@@ -8,7 +8,7 @@ import UIKit
 // makes adding a font pack later "append a provider" rather than a change to every call site that
 // wanted a font. `FontLibrary` is structurally `BrushLibrary` (`Engine/BrushLibrary.swift:6-49`):
 // built-in defaults plus, one day, a user directory at `Documents/Fonts/<packID>/` mirroring
-// `customBrushesDirectory`.
+// `BrushStorage`'s root.
 //
 // `SystemFontProvider` is the only implementation this stage ships, and that font packs can be
 // deferred indefinitely without blocking Stages 1-5 is the proof the seam worked.

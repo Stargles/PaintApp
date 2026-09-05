@@ -14,7 +14,7 @@ import Foundation
 /// `.pencil` all called `stampCircle` and differed only in the hardness, spacing and pressure response
 /// their presets carried — every one of which is still a `Brush` field, so the four are
 /// one case. `.square` stopped being procedural in §12 stage 3 and became a committed alpha mask;
-/// `.custom` names a PNG under `BrushLibrary.customBrushesDirectory`. Both are `stampImage` of a
+/// `.custom` names a PNG in the brush library (`BrushStorage`). Both are `stampImage` of a
 /// `BrushTextureRef`, so they are the other, and the difference between "a shipped tip" and "the
 /// artist's own" is now a case of `BrushTextureRef` rather than a case of the brush's shape.
 enum BrushTip: Hashable {
@@ -27,8 +27,8 @@ enum BrushTip: Hashable {
 }
 
 extension BrushTip {
-    /// The file this tip needs to exist under `BrushLibrary.customBrushesDirectory`, or nil for a
-    /// tip the app bundle carries and for the procedural one.
+    /// The file this tip needs the brush library to hold, or nil for a tip the app bundle carries
+    /// and for the procedural one.
     ///
     /// `ProjectStore`'s save-time copy and load-time restore are the callers: what they need is
     /// *the artist's own files*, since a built-in tip travels inside the binary and a round tip is
@@ -191,7 +191,7 @@ struct Brush: Identifiable, Codable, Hashable {
 }
 
 extension Brush {
-    /// **Every file under `BrushLibrary.customBrushesDirectory` this brush needs to exist**, which
+    /// **Every file in the brush library this brush needs to exist**, which
     /// since §2.25 is two questions rather than one: the tip's picture and the texture's sheet.
     ///
     /// `ProjectStore`'s save-time copy and load-time restore are the callers. Stated here, once, for

@@ -17,7 +17,7 @@ struct ProjectManifest: Codable {
     /// The brush active when the project was last saved, and any custom (imported) brushes
     /// associated with it. The actual custom-brush stamp texture image files are copied into this
     /// project's own `brushes/` folder alongside the manifest so a saved project stays
-    /// self-contained even if the shared `BrushLibrary.customBrushesDirectory` entry is later
+    /// self-contained even if the shared brush-library entry (`BrushStorage`) is later
     /// renamed/deleted, or the project moves to another device.
     var selectedBrush: Brush
     var customBrushes: [Brush]

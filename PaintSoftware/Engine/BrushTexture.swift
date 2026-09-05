@@ -49,7 +49,11 @@ enum BuiltInBrushTexture: String, Hashable, CaseIterable {
 enum BrushTextureRef: Hashable {
     /// A tip committed to the app bundle.
     case builtIn(BuiltInBrushTexture)
-    /// A PNG under `BrushLibrary.customBrushesDirectory`, written by `BrushTipImport`.
+    /// A PNG in the brush library — `BrushStorage` — written by `BrushTipImport`.
+    ///
+    /// **A name, never a path**, which is BRUSH.md §2.27's first requirement and the expensive one
+    /// to retrofit: nothing stored here encodes where the library happens to be, so moving the
+    /// library rewrites no brush, no `library.json`, no `brushtable.json` and no project manifest.
     case imported(fileName: String)
 }
 
@@ -116,25 +120,42 @@ enum BrushTextureStore {
         return loaded
     }
 
-    private static func load(_ ref: BrushTextureRef) -> CGImage? {
-        guard let url = url(for: ref), let data = try? Data(contentsOf: url) else { return nil }
-        return UIImage(data: data)?.cgImage
+    /// **Drops everything held**, so the next ask reads the disk again.
+    ///
+    /// `BrushStorage.relocate(to:)` is the caller and the reason: this memo is keyed on a
+    /// `BrushTextureRef`, which is a *name*, and a name means a different file once the library's
+    /// root moves. Nothing in the app calls it otherwise — a file under a fixed root does not
+    /// change under a name that is minted per import.
+    static func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        masks.removeAll()
     }
 
     /// The one resolution step, and the whole of what "the same path an imported texture will use"
     /// means: two ways to name a file, one way to read it.
     ///
+    /// **The artist's arm goes through `BrushStorage`** — BRUSH.md §2.27's third requirement. It
+    /// hands back bytes rather than a URL on purpose: a URL that escaped the storage type would be
+    /// a read that a future external folder's security-scoped bracket does not cover, which is the
+    /// audit that requirement exists to avoid.
+    ///
     /// `Bundle(for:)` rather than `Bundle.main` because this file is compiled into the UI-test
     /// target as well as the app — CLAUDE.md's "an app source a logic test touches is compiled a
     /// second time" — and there `Bundle.main` is the XCUITest *runner*, which carries none of the
     /// app's resources. `Bundle(for:)` answers the bundle the code itself came from in both.
-    static func url(for ref: BrushTextureRef) -> URL? {
+    private static func load(_ ref: BrushTextureRef) -> CGImage? {
+        let data: Data?
         switch ref {
         case .builtIn(let tip):
-            return Bundle(for: BrushTextureBundleToken.self).url(forResource: tip.resourceName, withExtension: "png")
+            data = Bundle(for: BrushTextureBundleToken.self)
+                .url(forResource: tip.resourceName, withExtension: "png")
+                .flatMap { try? Data(contentsOf: $0) }
         case .imported(let fileName):
-            return BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
+            data = BrushStorage.shared.read(fileName)
         }
+        guard let data else { return nil }
+        return UIImage(data: data)?.cgImage
     }
 }
 
@@ -146,7 +167,7 @@ final class BrushTextureBundleToken {}
 ///
 /// Everything downstream of `BrushTextureRef` reads a mask's **alpha** as the dab's coverage — that
 /// is what `DabImageCache` tints and what the committed square is. So the one rule this type exists
-/// to enforce is that *a file under `BrushLibrary.customBrushesDirectory` is a mask*, in exactly the
+/// to enforce is that *a file in the brush library is a mask*, in exactly the
 /// sense the built-in square is, whatever the artist picked. The renderer then has one meaning for a
 /// tip's pixels rather than two, and `BuiltInBrushTexture.square`'s own description doubles as the
 /// specification for every import.
@@ -193,16 +214,21 @@ enum BrushTipImport {
         case couldNotWrite(Error)
     }
 
-    /// Normalises `image`, writes it under `BrushLibrary.customBrushesDirectory`, and answers the
-    /// tip that stamps it. The whole of what "importing a brush" means, in one call, so the import
-    /// UI holds no part of the rule.
+    /// Normalises `image`, writes it into the brush library, and answers the tip that stamps it. The
+    /// whole of what "importing a brush" means, in one call, so the import UI holds no part of the
+    /// rule.
+    ///
+    /// **`BrushStorage.shared` rather than an injected storage, and that is deliberate** — BRUSH.md
+    /// §2.27. The tip this hands back is resolved later by `BrushTextureStore`, which reads the
+    /// app's one library; a storage parameter here would let an import land somewhere the renderer
+    /// never looks, which is a state the global it replaced could not express either.
     static func importTip(from image: UIImage) throws -> BrushTip {
         guard let data = UIImage(cgImage: try mask(from: image)).pngData() else {
             throw Failure.unreadableImage
         }
         let fileName = "custom-\(UUID().uuidString).png"
         do {
-            try data.write(to: BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName))
+            try BrushStorage.shared.write(data, to: fileName)
         } catch {
             throw Failure.couldNotWrite(error)
         }
@@ -282,8 +308,7 @@ enum BrushTipImport {
 // MARK: - BRUSH.md §2.25 — the canvas-anchored texture a stroke merges through
 
 extension BrushTextureRef {
-    /// The file this ref needs to exist under `BrushLibrary.customBrushesDirectory`, or nil for one
-    /// the app bundle carries.
+    /// The file this ref needs the brush library to hold, or nil for one the app bundle carries.
     ///
     /// `BrushTip.importedTextureFileName` is this question asked of a *tip*; a brush's texture asks
     /// it of the same enum, so the rule that decides which files a saved package has to carry is

@@ -17,7 +17,7 @@ final class BrushTipLogicTests: XCTestCase {
     /// **The one test that stops the rest being vacuous.** `stampImage` draws nothing when its mask
     /// will not load, and a mask that is in the app bundle but not the *test* bundle would leave
     /// every pixel assertion below comparing transparent against transparent — the failure that
-    /// reads as success. `BrushTextureStore.url(for:)` resolves through `Bundle(for:)` precisely so
+    /// reads as success. `BrushTextureStore.load` resolves through `Bundle(for:)` precisely so
     /// that both bundles answer, and this is where that is checked.
     func testTheBuiltInSquareTipLoadsAndIsAMaskWithABorderToAntialiasInto() throws {
         let mask = try XCTUnwrap(BrushTextureStore.mask(for: .builtIn(.square)),
@@ -604,11 +604,9 @@ final class BrushTipLogicTests: XCTestCase {
             }
         }
         // …and nothing was written, so a refused import leaves no orphan under Brushes/.
-        let before = (try? FileManager.default.contentsOfDirectory(
-            atPath: BrushLibrary.customBrushesDirectory.path))?.count ?? 0
+        let before = BrushStorage.shared.fileNames().count
         _ = try? BrushTipImport.importTip(from: blank)
-        let after = (try? FileManager.default.contentsOfDirectory(
-            atPath: BrushLibrary.customBrushesDirectory.path))?.count ?? 0
+        let after = BrushStorage.shared.fileNames().count
         XCTAssertEqual(after, before)
     }
 
@@ -797,7 +795,7 @@ final class BrushTipLogicTests: XCTestCase {
         ctx.fill(CGRect(x: inset, y: inset, width: CGFloat(n) - 2 * inset, height: CGFloat(n) - 2 * inset))
         let data = try XCTUnwrap(UIImage(cgImage: try XCTUnwrap(ctx.makeImage())).pngData())
         let fileName = "test-tip-\(UUID().uuidString).png"
-        try data.write(to: BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName))
+        try BrushStorage.shared.write(data, to: fileName)
         return .imported(fileName: fileName)
     }
 }

@@ -105,40 +105,41 @@ enum ProjectStore {
         palette.reduce(into: table.importedTextureFileNames) { $0.formUnion($1.importedTextureFileNames) }
     }
 
-    /// Copies every imported stamp texture the given file names refer to from the shared
-    /// `BrushLibrary.customBrushesDirectory` into this project's own `brushes/` folder, so a saved
-    /// project is self-contained: its custom brushes still render correctly even if the global
-    /// library entry is later renamed/deleted, or the project is moved to another device. Best
-    /// effort — a brush with no matching source file is silently skipped.
+    /// Copies every imported stamp texture the given file names refer to out of the brush library
+    /// (`BrushStorage.shared`) into this project's own `brushes/` folder, so a saved project is
+    /// self-contained: its custom brushes still render correctly even if the library entry is later
+    /// renamed/deleted, or the project is moved to another device. Best effort — a brush with no
+    /// matching source file is silently skipped.
+    ///
+    /// **The library side goes through `BrushStorage` and the package side does not**, which is
+    /// BRUSH.md §2.27's third requirement drawing exactly the line it means to: the package is this
+    /// document's own folder and moves with the document, while the library is the thing that may
+    /// one day be an external folder needing a security-scoped bracket around every read.
     private static func copyCustomBrushTexturesIntoProject(_ fileNames: Set<String>, projectURL: URL) {
         guard !fileNames.isEmpty else { return }
         let fm = FileManager.default
         let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
         try? fm.createDirectory(at: brushesDir, withIntermediateDirectories: true)
         for fileName in fileNames {
-            let source = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
-            guard fm.fileExists(atPath: source.path) else { continue }
-            let destination = brushesDir.appendingPathComponent(fileName)
-            try? fm.removeItem(at: destination) // overwrite if re-saving
-            try? fm.copyItem(at: source, to: destination)
+            guard let data = BrushStorage.shared.read(fileName) else { continue }
+            // `.atomic` rather than remove-then-copy: the same overwrite-if-re-saving, without a
+            // window in which the package holds no file at all.
+            try? data.write(to: brushesDir.appendingPathComponent(fileName), options: .atomic)
         }
     }
 
     /// The inverse of the above, run on load: if a custom brush's texture file is missing from the
-    /// shared `BrushLibrary.customBrushesDirectory` (project moved to another device, or the
-    /// global entry was deleted since this project was last saved), restore it from this
-    /// project's own `brushes/` copy so the brush still renders correctly. Same union as the save
-    /// side, from the same one function, so the two cannot walk different populations again.
+    /// brush library (project moved to another device, or the library entry was deleted since this
+    /// project was last saved), restore it from this project's own `brushes/` copy so the brush
+    /// still renders correctly. Same union as the save side, from the same one function, so the two
+    /// cannot walk different populations again.
     private static func restoreCustomBrushTexturesFromProject(_ fileNames: Set<String>, projectURL: URL) {
         guard !fileNames.isEmpty else { return }
-        let fm = FileManager.default
         let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
         for fileName in fileNames {
-            let destination = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
-            guard !fm.fileExists(atPath: destination.path) else { continue }
-            let source = brushesDir.appendingPathComponent(fileName)
-            guard fm.fileExists(atPath: source.path) else { continue }
-            try? fm.copyItem(at: source, to: destination)
+            guard !BrushStorage.shared.contains(fileName) else { continue }
+            guard let data = try? Data(contentsOf: brushesDir.appendingPathComponent(fileName)) else { continue }
+            try? BrushStorage.shared.write(data, to: fileName)
         }
     }
 

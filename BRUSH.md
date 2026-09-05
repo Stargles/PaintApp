@@ -501,21 +501,54 @@ deleted, then all the files get deleted too. I'd like it to be able to have an e
 the architecture so that in the future when this feature gets added, moving the library from internal
 app storage to this external folder is easy."*
 
-**Not scheduled. It is a constraint on everything that touches a file from now on**, and two of the
-three things it needs are already true by accident rather than by design:
+**The external folder is still not built and is still not scheduled. The architecture is — BUILT,
+`Engine/BrushStorage.swift`**, which owns the root and is the only thing that turns a stored file
+*name* into a location. What each of the three requirements turned out to be is worth writing down,
+because this section was right about two of them and understated the third.
 
-1. **Every stored reference is a *name*, never a path.** `BrushTextureRef.imported(fileName)` carries a
-   file name, so nothing a document stores encodes somebody else's directory layout. **True today, and
-   it is the expensive one to retrofit** — keep it true.
-2. **Every file lives under one root.** True in effect (`Documents/Brushes`) and false in structure:
-   `BrushLibrary.customBrushesDirectory` is a computed `static var` that each caller resolves for
-   itself, so there is no single value to change. **This is the one to fix.** One type owns the root and
-   every reader takes it by injection — `BrushLibraryStore.init(directory:)` is already that shape and
-   is the precedent — and the global static goes.
-3. **Every access goes through that one type**, which is what makes a future external folder a wrapper
-   around one call site rather than an audit of the codebase. On iOS an external folder is a bookmarked
-   URL that has to be opened and closed around each access, and that is only cheap if there is one place
-   to do it.
+1. **Every stored reference is a *name*, never a path — verified rather than assumed, and it held.**
+   Audited across every persisted surface instead of taken on trust: `BrushTip.stamp(.imported(fileName:))`,
+   `BrushTextureSettings.mask`, `library.json`, `brushtable.json`, and `manifest.json`'s `selectedBrush`
+   and `customBrushes`. No brush path is in `UserDefaults` — the library is a file precisely because
+   `BrushLibraryStore`'s own note says a defaults key is invisible and outlives its writer. The only
+   `URL` any document-shaped type in the repo holds is `VectorVideoElement.assetURL`, and it is
+   documented runtime-only with `assetFileName` as the persisted half — the same split, reached
+   independently, for the same reason. **It is the expensive one to retrofit and nothing had to be
+   retrofitted.** What keeps it paying is requirement 3: there is now exactly one place a name becomes
+   a location, so there is nowhere else for a path to be minted and stored.
+2. **Every file lives under one root — this was the work, and it is done.**
+   `BrushLibrary.customBrushesDirectory` is deleted, along with its side effect of creating the
+   directory on every read. `BrushStorage` holds the root; `BrushStorage.shared` is the app's and is
+   still `Documents/Brushes`, pinned by a test because a refactor that quietly moved it to Application
+   Support would read as *"the artist's brushes are gone"* with nothing in a diff to point at.
+   `relocate(to:)` is the verb an external folder arrives through, and
+   `BrushLibraryStore.init(directory:)` became `init(storage:)`, which is the injection this section
+   named.
+3. **Every access goes through that one type.** `read`, `write`, `contains`, `remove` and `fileNames`
+   are between them the whole of what the app does to a library file; `url(for:)` is **private**, so no
+   URL escapes to be read somewhere a bookmark's bracket would not cover. The security-scoped external
+   folder is five one-line brackets rather than an audit.
+
+**Two things this section did not anticipate, and the first is a correctness requirement rather than
+tidiness.**
+
+**A relocation has to drop two caches.** `BrushTextureStore` memoizes a mask against a
+`BrushTextureRef` — which is a *name* — and `BrushTextureMaskCache` holds a depth-adjusted copy of
+that. Neither key names the root, which is exactly right while a process has one root and is
+RENDER.md §3.8's family of bug the moment it does not: the same name under a new root would be served
+the old root's pixels, and a file that was missing before the move would stay missing forever off a
+negative entry. `relocate(to:)` drops both, which is cheaper than keying a root into two caches to
+hold entries a relocation invalidates anyway. **It is also what makes the test discriminating**: with
+the drops removed, *"the ink is identical after the folder moved"* is green against an implementation
+that resolves no file at all.
+
+**The injection is on the instance, not on every call, and the asymmetry is deliberate.**
+`BrushTextureStore` and `BrushTipImport` take no storage parameter. Their cache and their writes are
+process-wide, so a per-call storage would let an import land in a root the renderer never reads from —
+an incoherence the single global being replaced could not express, and inventing a new one for the sake
+of symmetry is what §9.2 forbids. `BrushLibraryStore` takes one because *two libraries over two roots*
+is a state a test has to be able to build, and a test that pointed both stores at one directory would
+be green against an implementation with no root at all.
 
 ---
 

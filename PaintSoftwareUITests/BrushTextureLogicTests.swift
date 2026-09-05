@@ -56,7 +56,7 @@ final class BrushTextureLogicTests: XCTestCase {
     /// translated twin with clear margin, small enough that a byte-for-byte compare is instant.
     private static let canvas = CGSize(width: 192, height: 192)
 
-    /// **A 64×64 checkerboard alpha mask**, written fresh under `BrushLibrary.customBrushesDirectory`
+    /// **A 64×64 checkerboard alpha mask**, written fresh into the brush library (`BrushStorage`)
     /// so no two tests can be served one another's pixels.
     ///
     /// A checker rather than a smooth grain, and hard 0/255 rather than a gradient, because every
@@ -80,7 +80,7 @@ final class BrushTextureLogicTests: XCTestCase {
         }
         let data = try XCTUnwrap(UIImage(cgImage: try XCTUnwrap(ctx.makeImage())).pngData())
         let fileName = "test-texture-\(UUID().uuidString).png"
-        try data.write(to: BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName))
+        try BrushStorage.shared.write(data, to: fileName)
         return .imported(fileName: fileName)
     }
 
@@ -668,12 +668,11 @@ final class BrushTextureLogicTests: XCTestCase {
 
         // The shared library forgets it, which is what moving the package to another device looks
         // like from the document's point of view.
-        let shared = BrushLibrary.customBrushesDirectory.appendingPathComponent(fileName)
-        try FileManager.default.removeItem(at: shared)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: shared.path), "fixture precondition")
+        BrushStorage.shared.remove(fileName)
+        XCTAssertFalse(BrushStorage.shared.contains(fileName), "fixture precondition")
 
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: shared.path),
+        XCTAssertTrue(BrushStorage.shared.contains(fileName),
                       "and a load puts it back, so the next stroke drawn with that brush has paper too")
         let canvas = try XCTUnwrap(reopened.layers.compactMap { $0.cels.first?.vector }
                                                   .first { !$0.strokes.isEmpty })

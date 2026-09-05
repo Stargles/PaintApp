@@ -1,8 +1,9 @@
 import Foundation
 
-/// Built-in brush presets, and the on-disk home for user-imported custom brushes. Real pressure-
-/// curve tuning and the import flow are filled in going forward; the preset values here are
-/// reasonable starting points, not final-tuned.
+/// Built-in brush presets. Real pressure-curve tuning and the import flow are filled in going
+/// forward; the preset values here are reasonable starting points, not final-tuned.
+///
+/// The on-disk home for user-imported brushes is `BrushStorage` — BRUSH.md §2.27.
 ///
 /// **The five ids are written down rather than minted.** `UUID()` in a `static let` is one value per
 /// *process*, so a preset saved into a project's manifest came back with an id no running copy of
@@ -104,13 +105,4 @@ enum BrushLibrary {
     /// §12 stage 9 replaces `defaults` with a group tree, at which point a group answers this and
     /// the identity check goes with the preset it names.
     static func isPencilPreset(_ brush: Brush) -> Bool { brush.id == pencil.id }
-
-    static var customBrushesDirectory: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent("Brushes", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir
-    }
 }

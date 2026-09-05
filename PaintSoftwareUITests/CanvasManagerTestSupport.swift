@@ -49,7 +49,7 @@ enum CanvasFixture {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brushLibrary-fixture-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return BrushLibraryStore(directory: directory, arguments: [])
+        return BrushLibraryStore(storage: BrushStorage(root: directory), arguments: [])
     }
 
     /// Every cel of a layer as `(startFrame, frameCount)` pairs, ordered by start frame — the shape
