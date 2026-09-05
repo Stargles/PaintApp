@@ -435,6 +435,39 @@ be open. Two collections, because a tip is a shape and a texture is paper and an
 at different moments — but **one storage mechanism**, since both are a named bitmap under §2.27's root
 and `BrushTextureRef` already resolves exactly that.
 
+**2.28 A modulation is an input followed by an ordered list of modules, and this supersedes §2.22's
+fixed shape.** Owner, on seeing the editor present a chain over storage that is not one: *"does it
+contain the modular approach? right now there seems to be a hardcoded order for everything. For example
+we may sometimes need the randomizer first, then use curves to remap the range."*
+
+`output = base + Σ chain(input)`, where a chain is the sensor's reading passed through modules **in the
+order the artist put them**: a **curve ramp**, a **randomiser**, a **scale-by-sensor**. §2.22's `second`
+slot becomes the third of those rather than a field, and its ruling survives inside it — a scale
+attenuates, `amount` is still the only signed unclamped term.
+
+**This is the boundary §13 recorded rather than a new idea**, and the owner hit it twice: the shipped row
+evaluates `amount · curve(input) · reading(second)`, which is *one* order and cannot state
+"randomiser, then a curve to remap the result". The editor was honest about that in words on the screen,
+which is what made the limit visible enough to be asked about — that is the argument for a screen that
+states what the engine cannot do rather than hiding it.
+
+**The randomiser carries octaves.** §2.17 rules that every `random` modulation has a wavelength λ, and
+§8.4 found that *"several `random` rows at different λ give multi-scale roughness, so there is no octave
+or spectral-slope parameter"*. That refutation was about not adding a *spectral slope*; it assumed the
+several-rows spelling, which §2.24's one-input-per-output makes unavailable and which in any case asks
+the artist to add three rows and halve each amount by hand. One randomiser with a count and a falloff is
+the same arithmetic, fewer objects, and one control — and it is **cheaper** than three rows, since each
+octave is one hash and one lerp inside a module that is already resolved.
+
+**What must not change**: §4's positional hash. There is still no sequence and no phase, so every octave
+survives a split, a refit, a spacing edit and an eraser punch for the reason §2.13 gives, and each octave
+needs its own channel or two of them are the same number twice.
+
+**The cost is unmeasured and must be measured, not assumed.** `Brush.dabValues` is the hot per-dab loop
+and is one pass over a flat array today; a chain makes it a nested walk. Stage 7 MEASURED the whole
+matrix at 1.42 µs of a 5.44 µs dab, so there is headroom — but PERFORMANCE.md's rule is that a figure
+carries MEASURED or INFERRED, and *"there is headroom"* is not a figure.
+
 **2.27 The library must be relocatable, and the architecture owes that before the feature exists.**
 Owner: *"Right now all the files are stored internally on the app, which means that if the app gets
 deleted, then all the files get deleted too. I'd like it to be able to have an external folder, so build
