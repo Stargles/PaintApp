@@ -77,29 +77,29 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertEqual(store.groups.map(\.name), ["Basics", "Texture", "Inking"])
     }
 
-    func testRenamingAGroupKeepsItsIdentityAndItsBrushes() {
+    func testRenamingAGroupKeepsItsIdentityAndItsBrushes() throws {
         let store = makeStore()
-        let id = store.groups[0].id
+        let id = try XCTUnwrap(store.groups.first).id
         store.renameGroup(id, to: "Everyday")
-        XCTAssertEqual(store.groups[0].name, "Everyday")
-        XCTAssertEqual(store.groups[0].id, id, "A rename is not a new group")
-        XCTAssertEqual(store.groups[0].brushes.count, 5)
+        XCTAssertEqual(store.groups.first?.name, "Everyday")
+        XCTAssertEqual(store.groups.first?.id, id, "A rename is not a new group")
+        XCTAssertEqual(store.groups.first?.brushes.count, 5)
     }
 
     /// An empty rename is refused rather than applied: a group with no name is a row an artist cannot
     /// aim at, and the alert's Cancel is already the way to change nothing.
-    func testAnEmptyRenameIsRefused() {
+    func testAnEmptyRenameIsRefused() throws {
         let store = makeStore()
-        store.renameGroup(store.groups[0].id, to: "   ")
-        XCTAssertEqual(store.groups[0].name, "Basics")
+        store.renameGroup(try XCTUnwrap(store.groups.first).id, to: "   ")
+        XCTAssertEqual(store.groups.first?.name, "Basics")
     }
 
     /// The last group cannot be deleted. With no groups there is no column, and the `+` that would
     /// make one lives above a menu that has nothing to show — the closed loop CLAUDE.md's
     /// three-unusable-features section warns about.
-    func testTheLastGroupCannotBeDeleted() {
+    func testTheLastGroupCannotBeDeleted() throws {
         let store = makeStore()
-        XCTAssertFalse(store.removeGroup(store.groups[0].id))
+        XCTAssertFalse(store.removeGroup(try XCTUnwrap(store.groups.first).id))
         XCTAssertEqual(store.groups.count, 1)
 
         let second = store.addGroup(name: "Inking")
@@ -115,8 +115,8 @@ final class BrushLibraryLogicTests: XCTestCase {
         let inking = store.addGroup(name: "Inking")
         store.add(BrushLibrary.pen, toGroup: inking.id)
 
-        XCTAssertEqual(store.groups[0].brushes.map(\.name), ["Soft Round", "Hard Round", "Pencil", "Square"])
-        XCTAssertEqual(store.groups[1].brushes.map(\.name), ["Pen"])
+        XCTAssertEqual(store.groups.first?.brushes.map(\.name), ["Soft Round", "Hard Round", "Pencil", "Square"])
+        XCTAssertEqual(store.groups.dropFirst().first?.brushes.map(\.name), ["Pen"])
         XCTAssertEqual(store.allBrushes.filter { $0.id == BrushLibrary.pen.id }.count, 1)
     }
 
@@ -169,9 +169,9 @@ final class BrushLibraryLogicTests: XCTestCase {
         let store = makeStore()
         XCTAssertEqual(store.groups.map(\.name), ["Everyday", "Inking"],
                        "The group the artist renamed, and the one they added, both come back")
-        XCTAssertEqual(store.groups[0].brushes.map(\.name), ["Pen"])
+        XCTAssertEqual(store.groups.first?.brushes.map(\.name), ["Pen"])
 
-        let nib = try XCTUnwrap(store.groups[1].brushes.first)
+        let nib = try XCTUnwrap(store.groups.dropFirst().first?.brushes.first)
         XCTAssertEqual(nib.name, "Rough Nib")
         XCTAssertEqual(nib.size, 12)
         XCTAssertEqual(nib.opacity, 0.5, accuracy: 1e-9)
@@ -187,14 +187,17 @@ final class BrushLibraryLogicTests: XCTestCase {
                            dab: BrushDabSettings(spacing: 0.2))
         do {
             let first = makeStore()
-            first.renameGroup(first.groups[0].id, to: "Everyday")
+            first.renameGroup(try XCTUnwrap(first.groups.first).id, to: "Everyday")
             let inking = first.addGroup(name: "Inking")
             first.add(custom, toGroup: inking.id)
         }
 
         let relaunched = makeStore()
         XCTAssertEqual(relaunched.groups.map(\.name), ["Everyday", "Inking"])
-        let restored = try XCTUnwrap(relaunched.groups[1].brushes.first)
+        // `dropFirst().first`, not `[1]`: when this test caught a mutation that stopped the store
+        // writing, an index would have trapped and taken the whole class down with it — a red test
+        // must fail, not crash the runner out of the fifteen behind it.
+        let restored = try XCTUnwrap(relaunched.groups.dropFirst().first?.brushes.first)
         XCTAssertEqual(restored, custom, "The brush comes back byte-for-byte, not merely by name")
         XCTAssertEqual(relaunched.groupToOpen(forSelected: custom.id)?.name, "Inking",
                        "…and the menu opens onto the group holding whatever is selected")
@@ -216,11 +219,11 @@ final class BrushLibraryLogicTests: XCTestCase {
         store.adopt([fromAnotherDevice], intoGroupNamed: "Imported")
         store.adopt([fromAnotherDevice], intoGroupNamed: "Imported")
         XCTAssertEqual(store.groups.map(\.name), ["Basics", "Imported"])
-        XCTAssertEqual(store.groups[1].brushes.count, 1)
+        XCTAssertEqual(store.groups.dropFirst().first?.brushes.count, 1)
 
         // A brush the library already holds is not adopted a second time into a new group.
         store.adopt([BrushLibrary.pen], intoGroupNamed: "Imported")
-        XCTAssertEqual(store.groups[1].brushes.count, 1)
+        XCTAssertEqual(store.groups.dropFirst().first?.brushes.count, 1)
     }
 
     // MARK: - The row preview
