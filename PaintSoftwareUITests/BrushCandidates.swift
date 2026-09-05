@@ -645,7 +645,7 @@ enum BrushCandidates {
         }
         let grungeRows = BrushModulations([
             .sizeFromPressure(amount: 0.2, atZero: 0.7),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.9)), amount: 0.18),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.9)), amount: 0.18),
             .flowFromPressure(amount: 0.35)
         ])
 
@@ -703,7 +703,7 @@ enum BrushCandidates {
                          stroke: BrushStrokeSettings(stabilization: 0.25),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.25, atZero: 0.6),
-                             BrushModulation(.size, .random(.scatterAngle, .plain(1.4)), amount: 0.26)
+                             BrushModulation(.size, .random(.scatterAcross, .plain(1.4)), amount: 0.26)
                          ])),
             note: "A finer hole field than Crust's, denser and blacker. **Round one had this at "
                 + "spacing 0.62 with a 0.55 dropout and it fell apart into islands** — past about "
@@ -714,7 +714,7 @@ enum BrushCandidates {
 
         let splatterRows = BrushModulations([
             .sizeFromPressure(amount: 0.25, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.4)), amount: 0.35),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.4)), amount: 0.35),
             .flowFromPressure(amount: 0.15)
         ])
 
@@ -768,7 +768,7 @@ enum BrushCandidates {
                   stroke: BrushStrokeSettings(stabilization: 0.25),
                   modulations: BrushModulations([
                       .sizeFromPressure(amount: 0.3, atZero: 0.45),
-                      BrushModulation(.size, .random(.scatterAngle, .plain(0.25)), amount: 0.45)
+                      BrushModulation(.size, .random(.scatterAcross, .plain(0.25)), amount: 0.45)
                   ]))
         }
 
@@ -797,7 +797,7 @@ enum BrushCandidates {
                          stroke: BrushStrokeSettings(stabilization: 0.25),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.3, atZero: 0.5),
-                             BrushModulation(.size, .random(.scatterAngle, .plain(0.3)), amount: 0.25)
+                             BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.25)
                          ])),
             note: "What a picture adds over the row above: one stamp is already seventeen "
                 + "hard-edged dots of mixed size, so a drag lays a field rather than a line."))

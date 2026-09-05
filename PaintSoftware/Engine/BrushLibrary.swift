@@ -364,7 +364,7 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.25),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.2, atZero: 0.7),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.9)), amount: 0.18),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.9)), amount: 0.18),
             .flowFromPressure(amount: 0.35)
         ]),
         texture: BrushTextureSettings(mask: .builtIn(.paperTooth), tileSize: 160, depth: 0.6)
@@ -390,7 +390,7 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.2),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.25, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.4)), amount: 0.35),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.4)), amount: 0.35),
             .flowFromPressure(amount: 0.15)
         ])
     )
@@ -411,7 +411,7 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.25),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.3, atZero: 0.5),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.3)), amount: 0.25)
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.25)
         ])
     )
 
