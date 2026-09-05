@@ -3,6 +3,40 @@
 Open items only — fixed entries are pruned, and the fix lives in the commit and the code comment.
 One section per bug, newest first.
 
+## The auto-resign daemon counts its own runs, not the profile's expiry (2026-09-05)
+
+**MEASURED.** The owner's app died with *"PaintSoftware is no longer available"*, which they reported as
+an Apple-side bug because it has happened several times. It is not. The embedded profile expired at
+**2026-09-05T17:53:59Z**; a `devicectl install` fourteen minutes later was refused with
+`0xe8008011 (This provisioning profile has expired)`.
+
+`/Library/LaunchDaemons/com.paintapp.resign.plist` exists to prevent exactly this, and it logged, at
+03:05 that same morning:
+
+> `VERDICT: SKIP — not due, 3d remaining (2d elapsed of 5d); next wake 09/08/2026 03:00:00`
+
+**It reports headroom it computes from its own schedule** — five days since the last resign — **rather
+than from the profile it is guarding.** The two drift apart whenever a build mints a profile the daemon
+did not (every `-allowProvisioningUpdates` build in a session does), so its clock restarts while the
+certificate's does not. Here it claimed three days on a profile with ten hours left, and it was
+scheduled to wake three days *after* the expiry.
+
+**The fix is to read the expiry rather than count days:**
+
+```bash
+security cms -D -i <app>/embedded.mobileprovision | plutil -extract ExpirationDate raw -
+```
+
+Resign when that date is inside the next 48 hours, and log the date itself so a stale verdict is
+visible in the log rather than inferable from it. Anything that reports a *derived* number where the
+*real* one is one command away is the same shape as reading a banner instead of a test count.
+
+**Recovery, which is worth writing down because the obvious move fails:** rebuilding is not enough —
+Xcode reuses the cached profile and embeds the expired one again. Delete
+`~/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision` first, then build with
+`-allowProvisioningUpdates`. Verify the new expiry with the command above **before** installing, since
+the install is where it fails and the build says nothing.
+
 ## A project's restored brush texture can be held down by a negative cache entry (2026-09-05)
 
 **Found while making the brush library relocatable (§2.27), pre-existing, and deliberately not fixed
