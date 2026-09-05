@@ -392,6 +392,11 @@ So: **outputs are the index**, each expands to *one* input followed by an **orde
 a curve ramp, a randomiser, and whatever else earns a place. §13 carries where this and §6 disagree and
 what it costs to close the gap; it is a real difference in both directions, not a skin.
 
+**BUILT 2026-09-05 — §7.2 and §12 stage 10.** The chain and the row turned out to agree on the ordinary
+case rather than merely being mappable onto one another: `amount · curve(input) · reading(second)` read
+left to right *is* input → curve ramp → randomiser. §13's entry is the four places they part, and the
+editor shows the relevant sentence rather than offering a control the engine cannot honour.
+
 **Three outputs the owner named that do not exist yet.** `flow` does and is *"alpha of dab, not to be
 confused with opacity"*, which is exactly what §2.11 built. **Vertical/horizontal stretch** is the
 `roundness` §6 deferred, and it is the expensive one — a second extent through both `DabTarget`
@@ -1196,6 +1201,12 @@ and its λ, `blendMode` and the three HSB shifts — get one here.
 Edits currently apply to a live copy and are lost when the preset changes; §2.9's table plus §2.10's
 minting is what makes an edit persist.
 
+**All four are built, and the first of them is wrong as written — §7.2 carries the correction.** The y
+axis is the *shaped reading's* fixed `0…1`, not the output's own range: a `ResponseCurve` answers before
+the row's `amount` scales it, so labelling the axis with the output's range would be a picture of a
+different number. The fixed half of that instruction is exactly right and is what
+`ResponseCurveEditing.axis` is.
+
 ### 7.1 The brushes menu — the shape, taken from the owner's own reference
 
 **BUILT 2026-09-04** — `StrokeSettingsPanel` *is* this menu now, `BrushEditorView` is the shell behind
@@ -1263,50 +1274,109 @@ reference actually shows, and which of it is a decision rather than decoration:
   silently overwrote both `Menu`s' identifiers, so the `+` and the chevron were unreachable while
   looking perfectly correct in the source.
 
-### 7.2 The editor — three columns, and the middle one is per category
+### 7.2 The editor — BUILT, §12 stage 10
 
-**Not built. What exists behind §2.20's second tap is a shell** (`BrushEditorView`, 2026-09-04) holding
-*exactly* the six controls `StrokeSettingsPanel` used to show inline — Size, Opacity, Pressure → Size,
-Pressure → Flow, Stabilization, Spacing — re-housed with nothing added and nothing removed, every
-accessibility identifier unchanged. Moving them is the point: §2.20 rules that a brush parameter is
-changed in the editor and nowhere else, and until there was a door they had nowhere else to be. An edit
-is written through to the library on slider **lift** rather than per tick, because the store persists on
-every change and a drag is dozens of changes a second — which also fixes a real old defect the panel
-had, that a tweak lived only in `selectedBrush` and vanished the moment another preset was picked.
+**BUILT 2026-09-05.** `Views/BrushEditorScreen.swift` is the editor, `Views/ResponseCurveEditorView.swift`
+the curve ramp's control, `Views/BrushScratchPadView.swift` the pad, and `Models/BrushEditorModel.swift`
+everything a `View` cannot be asked about — the catalog, the chain, `BrushChainLimit` and
+`ResponseCurveEditing`. `BrushEditorView`, the six-slider shell of the day before, is **deleted**.
 
-Procreate's Brush Studio, which the owner named. Three columns:
+**It covers the screen** (§2.24) and it is a layer of `DrawingView`'s own tree rather than a
+`.fullScreenCover`. The reason the shell was a push holds for the screen: the Size slider raises a
+real-size stamp preview drawn by an `overlayPreferenceValue` applied on `DrawingView`'s outer `HStack`,
+and a modal presentation is a separate window *above* that overlay, so the preview would be drawn
+behind it and the control would look inert. An `.overlay` on that same `HStack` keeps one preference
+chain and one coordinate space — and it has to be the `HStack`'s rather than the canvas `ZStack`'s,
+because the 64-point side toolbar is the stack's *first child* and a layer inside the second one leaves
+it showing. MEASURED both ways on the simulator. `ToolsAndSelectionUITests`'
+`testPressingTheBrushSizeSliderRaisesTheRealSizeStampPreview` drives this screen's Size slider and is
+unchanged, which is the pin that the window still comes up.
 
-- **Left: the category list**, with two live preview strips above it — the brush's stroke, and its tip.
-- **Middle: that category's controls** — base sliders each with a value pill, and, where a sensor
-  drives something, a **curve editor** over that sensor's `0…1`. This is the column §7's four numbered
-  points are about.
-- **Right: a drawing pad the artist can draw on**, live, with the brush as edited. **This is the part
-  that makes the editor worth building rather than the panel it replaces**, and it is the owner's own
-  stated reason for wanting the feature at all: *"i can edit aspects of it myself to see which settings
-  are good."* It is a `StrokeCanvasView` over a scratch bitmap with no document behind it.
+Three columns, and the middle one is §2.24's own shape rather than a category list:
 
-  **Four behaviours, from the owner's reading of the reference.** It **opens showing a sample stroke
+- **Left — what the brush *is*.** A live `BrushPreviewRow` of the brush's own stroke at 196×56, and a
+  sentence naming the tip. Cached by the brush's whole value, so a slider moved in the middle column
+  re-renders it and an untouched brush never re-renders.
+- **Middle — every output, grouped, each expanding in place** into its base slider, its input, and the
+  modules on that input. This is §2.24 read literally: *"a dropdown list of all the outputs … Clicking
+  on one of these outputs will expand it down into the controller."* The groups are **Shape** (size,
+  hardness, angle), **Ink** (flow, blend mode, stabilization), **Placement** (spacing, scatter,
+  density), **Colour** (the three HSB shifts). `BrushEditorCatalog` owns the list and
+  `BrushEditorLogicTests` pins that **every** `BrushOutput` case reaches it, so a new output with a
+  renderer and no control is a red test rather than a discovery.
+- **Right — the pad, and the artist's own two numbers.** Size and opacity live here (§2.20 — the side
+  toolbar keeps them and gains nothing) beside the `BrushScratchPadView` they are being tried on. They
+  are on this side rather than the left column because `SizePreviewSide.leading` puts the real-size
+  window past the slider's leading edge, and from the leftmost column that clamps flush to the screen
+  edge and lands on the side toolbar.
+
+**Every parameter §7 listed as having no UI now has one** — `scatter`, the angle's three contributions,
+`hardness`, `density` and its λ, `blendMode` and the three HSB shifts. §2.18's dropout λ is on the
+`density` output itself and a `random` row's λ is on the row, which is §7's third point: two different
+places by ruling, drawn as two different controls.
+
+**Three of this section's own instructions did not survive contact.**
+
+- **The pad is not a `StrokeCanvasView`, and could not be.** That view holds a `weak var canvasManager`,
+  resolves a `layerID` and a cel through it, records undo through `CanvasManager.recordUndo` and writes
+  into the document's `RasterLayerTexture`; with a nil manager it swallows every touch and draws
+  nothing, and with a real one it puts the artist's doodles into their drawing. What actually had to be
+  shared is the **stamper**, and it is: every dab goes through `BrushStamper.stampStroke` over a
+  `CGContextDabTarget`, which is what `BrushPreview.render` already does for a menu row.
+- **§7's first numbered point asks for the wrong y axis.** It says *"y is the output's own range"*. A
+  `ResponseCurve` does not answer in the output's range — it shapes the sensor's reading, and the row's
+  **amount** is what scales the result to the output afterwards. A `size` curve whose key sits at the
+  top does not mean size 2, it means *"this row contributes its whole amount here"*. The axis is a
+  fixed `0…1`, which is both honest and the fixed axis §7's own next sentence asks for.
+- **The curve control could be neither of the two that exist, and that is a fact about both of them.**
+  `TimelineGraphBand` is the right *model* — it is `AnimationCurve`, which is what `ResponseCurve`
+  stores — and its drawing lives in `Views/TimelineTrackView.swift` as a `UIView.draw(_:)` inside the
+  timeline's scroll view, with a `Content` that needs a layer index, an effect, a track table and a
+  descriptor offset. `CurveEditor` (`Views/EffectSection.swift`) is the right *shape* — a square over a
+  normalised `0…1` with the tap grammar — and the wrong model, editing `[CurvePoint]` through
+  `MonotoneCubic`. §7's *"reusing it is what keeps this from being a second curve implementation"* is
+  satisfied where it matters and by construction: one curve **type**, one `evaluate`, one tangent
+  grammar, one codec; `ResponseCurveEditing.y`/`.value` *call* `TimelineGraphBand`'s so the two surfaces
+  cannot drift; and `hitRadius`, `tapSlop`, `isTap`, `lineWidth` and `keyRadius` are that type's
+  constants, which it took from `CurveEditor` in turn. Only the `Path`s are new.
+
+**Two defects were found by driving it, and neither could have been found by a model assertion.**
+
+- **The screen's `accessibilityIdentifier` was on its root `VStack`**, so it was inherited by every
+  descendant and `brushPanel.sizeSlider` existed nowhere — while the editor was plainly on screen and
+  worked perfectly when driven by hand, because a hand uses coordinates. It is on a `Rectangle` now,
+  which is `CurveEditor.curveGraph`'s spelling. CLAUDE.md and §7.1 both already record this trap; this
+  is its third appearance.
+- **An edit survived the editor and did not survive a relaunch.** `CanvasManager.selectedBrush` is
+  initialised from the *literal* `BrushLibrary.softRound`, so after a relaunch the editor showed the
+  shipped preset while the menu row beside it drew the edited stroke — the library file had the edit
+  the whole time. `CanvasManager.adoptLibrarySelections`, called from `DrawingView.onAppear`, is the
+  fix, and it re-baselines size and opacity **only when the value actually moved** so a fresh library
+  cannot change the eraser's default width.
+
+  **Four behaviours the pad still owes, and they are the owner's** — asked for after the brief that
+  built it, so their absence is scheduling rather than refusal. It should **open showing a sample stroke
   with a pressure taper**, so the pad is never blank and a brush's character is visible before the
-  artist touches it. It is **zoomed in by default**, because the details that distinguish two brushes
-  are granular. There is a **toggle to real size**, because zoom lies about what a brush looks like in
-  use. And there is a **clear button**. The default stroke is the same fixed S-curve `BrushPreview`
-  already walks for §7.1's rows — one sample stroke in the codebase, not two, or a brush's row and its
-  pad will disagree about what it looks like.
-
-**The categories are ours, not Procreate's**, because the model underneath is different: Procreate has
-Wet Mix and Bleed and we have neither, and we have `density`, λ and the second input (§2.22) and it has
-none of those. Group by *what the artist is changing*: the **Tip** (which mask, hardness, edge softness,
-angle), the **Stroke** (size, spacing, scatter, blend mode, stabilization), **Dynamics** (the matrix's
-rows, which is where §2.22's two input pickers live), **Colour** (the three HSB shifts), and
-**Properties** (name, the preview stroke, and what an imported file said).
+  artist touches it; be **zoomed in by default**, because the details that distinguish two brushes are
+  granular; carry a **toggle to real size**, because zoom lies about what a brush looks like in use; and
+  it already **clears**. The default stroke must be the same fixed S-curve `BrushPreview` walks for
+  §7.1's rows — one sample stroke in the codebase, not two, or a brush's row and its pad will disagree
+  about what it looks like.
 
 **One thing in the reference is a trap worth naming.** Procreate's Apple Pencil tab organises by
 *sensor* — "Pressure" heading, then Size / Opacity / Flow / Bleed underneath — while its other tabs
 organise by *parameter*. Our model is a flat list of *(output, input, curve, amount, second)* rows, so
 either presentation is a view over the same data and **both must not be built**, or an edit made in one
-has to be found in the other. Pick one. The parameter-first form is the one that matches the model and
-the one that scales to seven sensors; a sensor-first form would need a row's absence to be renderable
-in six places at once.
+has to be found in the other. The parameter-first form is what shipped: it matches the model, it scales
+to seven sensors, and a sensor-first form would need a row's absence to be renderable in six places at
+once.
+
+**And the brushes menu is taller** — 640 points against 420, for the brush and the eraser only
+(`DrawingView.panelMaxHeight`). The owner asked for it and allowed it to be dropped if costly; what it
+is *not* is "fill the space", because the card sits in a `ZStack` with a 60-point top inset and the
+timeline claims the bottom of the same stack, and the stack's height is not available at that branch —
+making it exact would mean moving the panel inside the `GeometryReader` that wraps the toolbar and
+timeline column, which relays every other dropdown.
 
 ---
 
@@ -1807,9 +1877,28 @@ first, which cleanly replaces the old one."*
    procedural tips for Basics, Sketching, Inking and Painting; the variant set §8.5 needs. **`BrushLibrary`'s
    five presets are deleted here, not deprecated.** The generator is a build-time tool whose output is
    committed, not a runtime cost — a tip is a small alpha bitmap and generating it per launch buys nothing.
-10. **The editor.** §7, reusing (38)'s curve control. After the library, because a brush the artist makes has
-    to land in a group. **A row's grammar is two input pickers rather than one** — §7 and §2.22 — and the
-    second needs an explicit *none*, which is its default and the state every shipped preset is in.
+10. **DONE — the editor.** §2.24, §7 and §7.2. A full screen rather than a panel; the outputs are the
+    index, grouped, each expanding in place into a base slider and however many chains drive it; a chain
+    is an input, a curve ramp and a randomiser or gain, which is one stored row read left to right; and a
+    drawing pad the artist can try the result on. Taken **out of order** — §12 put it after the library
+    and the library is stage 9 — because §2.24 arrived from the owner and the shell it replaced was one
+    day old. Nothing here depends on the group tree: a brush the artist makes still lands in a group
+    when stage 9 gives them one.
+    Pinned by `BrushEditorLogicTests` (15) — every `BrushOutput` reaches a control, every base keypath
+    moves what `dabValues` resolves, the curve's axis is fixed and a dragged key moves while its
+    neighbour does not, a key cannot be dragged onto its neighbour, an empty curve materialises to the
+    identity **bit-exactly**, a curve taken below two keys is emptied rather than left a constant, the
+    row accessors re-mint §6.2's channels, and a chain round-trips an ordinary row while
+    `BrushChainLimit` names the four places it cannot — and by `BrushEditorUITests` (5), every one of
+    them from a cold launch with the library file deleted: an edit reaches the ink on the canvas, a
+    curve node moves on screen while the other node does not, the second input can be set and cleared
+    and it changes what is drawn, an edit survives a **relaunch**, and the pad draws with the brush as
+    edited rather than as it was when the screen opened.
+    **Three of §7.2's instructions did not survive contact and §7.2 records all three** — the pad cannot
+    be a `StrokeCanvasView`, the curve's y axis is the *shaped reading's* `0…1` rather than the output's
+    range, and neither existing curve control could be pointed at a `ResponseCurve`. **Two defects were
+    found only by driving it**: an identifier on the screen's root container that made every control
+    below it unreachable, and an edit that survived the editor and not the process.
 11. **The Texture group's CC0 assets.** §8.3 and §8.4 — last of the shipped set, because it is the only part
     with a licensing step, and §8.3's verification happens at this point rather than earlier.
 12. **`.abr`, then Procreate `.brush`.** Last. A parser with no image primitive behind it shapes its model
@@ -1832,6 +1921,33 @@ first, which cleanly replaces the old one."*
   case on `BrushTip` (which already makes illegal states unrepresentable and would make a third
   behaviour a compile error at both sites) or a field beside it — and that is answerable only against a
   real second behaviour, not before.
+
+- **Where §2.24's chain and §6's rows disagree, and what closing the gap would cost.** The two agree on
+  the ordinary case rather than merely being mappable: a row is `amount · curve(input) · reading(second)`,
+  which read left to right **is** the owner's *"select the input … then it passes through an
+  input/output curve ramp module, then a randomizer module"*. `BrushChainLimit` is the list of what does
+  not fit, it is four entries, and the editor **shows the relevant sentence** rather than offering a
+  control the engine cannot honour:
+  - **The module order is fixed.** The row evaluates curve-then-gain and §2.22 rules the second slot
+    uncurved, so *"a randomiser, then a curve ramp"* — randomise, then shape the result — cannot be
+    stated at all. Closing it means a `ResponseCurve` on the second slot, which §2.22 already declined.
+  - **One curve ramp per chain**, because there is one `curve` field. Two in series would need a second
+    one and a rule for their order.
+  - **One randomiser per chain**, because there is one `second` field. Two independent wobbles on one
+    output are two *rows*, which **add** rather than compose.
+  - **Several chains on one output are summed, not chained.** The owner's *"for each output there can
+    only be one input for now"* is true of everything the shipped set carries and is **not enforced by
+    the storage** — §8.4's rough nib is several `random` rows at different λ on one output. So the
+    editor lists however many rows there are rather than hiding the extras behind a picker that can name
+    one, and its `Add input` adds a row.
+  In the other direction, the editor shows one thing the owner's sketch does not name: a **pure
+  randomiser is an input**, not a module, because `.random` is a `BrushInput`. A wobble with no sensor
+  behind it is `Input: Random`, which is the shape the storage has.
+  **The storage was deliberately not changed to fit**, and nothing here is a recommendation to change
+  it: §2.22 chose the flat second slot over a nested `amount` *because* the owner asked for an
+  architecture that could be replaced, and a slot is a one-row nested matrix's degenerate case. If
+  nesting is ever wanted, the four entries above collapse together and the editor's chain becomes what
+  it already draws.
 
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
