@@ -1845,6 +1845,38 @@ neighbour's boundary, which is why the pencils' tooth reads. *(The exemption is 
 sentence: the second sheet found that interior structure survives only when it is a **hole** rather
 than a dimming, and only when it does not vary **along the travel**. See below.)*
 
+**And the rule has an axis, which two rounds of sheets got backwards.** The owner, on the second sheet:
+*"im noticing that the bristle direction for those slab brushes is pointing the wrong way, perpendicular
+to the brush stroke direction."* They are right, and the mistake is worth stating because it is easy to
+make twice:
+
+> **Mask space and stroke space are not the same axes, and which is which is a property of the brush's
+> `angle`, not of the tip.** A nib with `directionFollow 1` and **no base turn** — the painterly nibs,
+> the bristle, the dots — has mask `u` lying *along* the travel, so structure that varies across the
+> stroke varies in `v`. A nib with `directionFollow 1` **plus `base 0.25`** — every slab — has its long
+> side perpendicular to the travel, so mask `u` is the *across-stroke* axis and `v` runs with the drag.
+> The two families want their comb turned through ninety degrees from each other.
+
+Messy Flat had it the wrong way: its dirt was an `fbm2` whose `v` coefficient was `aspect · 5.5` against
+`7.5` in `u`, i.e. structure elongated **along `u`**, which after the quarter turn rakes *across* the
+stroke. That is doubly wrong — it looks like a rake dragged sideways, **and** it is exactly the
+orientation this section says the walk dilates away. It is a comb in `u` now, and each tooth keeps one
+fixed offset from the path and draws a ribbon along the drag. The two orientations now share one
+`BrushTipGenerator.comb`, taking `across:` and `along:` by name, so the rule is written down in one
+place rather than re-derived per nib; every painterly tip is **byte-identical** across that extraction,
+which is what says it moved nothing.
+
+**Turning it the right way is necessary and not sufficient, and the first round-three render is the
+evidence.** The obvious next thought — *a tooth at a fixed offset is presented identically by every dab,
+so the running maximum is the tooth and any depth reads* — is wrong, because the walk **accumulates**
+rather than taking a maximum. Eight overlapping dabs at flow 0.85 each laying 15% of a tooth's dimming
+reach 0.66, and twelve reach 0.81. Blended in as `t + (1 - t) · comb`, the teeth only reached full depth
+in the outermost sliver and the render came back as a row of fine ticks. The comb carries **its own
+envelope** now — full depth over the outer 55% of the fringe, closed by its inner edge — so the holes
+live in a real width. **So this section's *"what survives is a hole, not a dimming"* is orthogonal to
+the axis rule**: orientation decides whether a tooth reads as a ribbon or a rake, depth decides whether
+it is there at all, and a nib needs both.
+
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
@@ -2060,7 +2092,7 @@ contact-sheet row allows"* and every square, flat and bristle nib has the same p
 | **Messy Flat** | Sprite Only *(control)* · + 4° Jitter · + Envelope · + Both · Milder Sprite — one picture, terms added one at a time |
 | **Pencil Hard / Soft / Blunt / Textured** | one each, unchanged and chosen |
 | **Technical Pen Fine · Brush Pen · Rough Ink Blotchy** | one each, unchanged and chosen |
-| **Rough Ink** | Triangle · Triangle No Turn *(control)* · Rough Square · Half-Flat · Eroded Round *(control)* — the 2×2 above — plus Triangle + Blotchy Dynamics, outside it |
+| **Rough Ink** | Triangle · Triangle No Turn *(control)* · Rough Square · Half-Flat · Eroded Round *(control)* — the 2×2 above — plus Triangle + Blotchy Dynamics and, at round three, Rough Square + Blotchy Dynamics, both outside it |
 | **Painterly** | Blotchy · Streaky · Jagged · Soft Slab · Dry Load |
 | **Bristle** | Open · Open + Envelope · Dense |
 | **Streaky** | Six Dots *(stratified)* · Eight Dots *(uniform)* |
@@ -2070,8 +2102,59 @@ The chisel, the two ragged square slabs, the painting flat and the blender are *
 carried: none is among the sixteen, and the first sheet's finding is why the ragged slabs are — a
 direction-locked nib's ragged edge does not survive the walk.
 
-**Nothing here is in `BrushLibrary` and that is still the point** — §12 stage 9 is driven by contact
-sheet at the owner's instruction, so the presets are authored after the picking, not before it.
+**Round three is the same sheet with the owner's three closing tweaks and is what the set was authored
+from**: the Rough Ink slot gains **Rough Square + Blotchy Dynamics** beside the triangle's row, Messy
+Flat's comb is turned through ninety degrees (§8.4), and Streaky's dots are halved. Only four generated
+tips changed — the two Messy Flats and the two dot masks — and the other nineteen are byte-identical to
+round two's, which is the check that the shared-`comb` extraction moved nothing it was not asked to.
+
+**Nothing on that sheet was in `BrushLibrary`, which was the point of it** — §12 stage 9 is driven by
+contact sheet at the owner's instruction, so the presets are authored after the picking. That happened
+below.
+
+### What shipped — §12 stage 9, authored 2026-09-05
+
+**The sixteen are in `BrushLibrary` and the five legacy presets are deleted.** `softRound`,
+`hardRound`, `pencil`, `pen` and the old `square` are gone from the app, their ids are **not** reused,
+and `BrushLibraryDocument.seeded` is `BrushLibrary.groups` rather than a "Basics" group re-declared
+beside it. **Eleven committed PNGs** carry the tips (`Resources/brushtip-*.png`, ~285 KB), named after
+the `BrushTipGenerator` shape that drew them so any one of them can be regenerated byte-for-byte;
+**five brushes need no artwork at all**, which is §8.4's finding paying for itself.
+
+| group | brush | tip | why this one |
+|---|---|---|---|
+| Basics | Round Soft | *procedural* | hardness 0.12 and nothing else |
+| | Opaque Round | *procedural* | flow 1, hardness 0.8, covers in one pass |
+| | Round Hard | *procedural* | a disc |
+| | **Square** | `square-bevel-wide` | round two's recommendation: **2.5:1**, a 0.20 chamfer, falloff matched to Opaque Round. A shorter nib turns visibly, which is what the sheet's 340° stroke is for. No jitter — the owner asked for the clean one |
+| | **Messy Flat** | `flat-messy-ends-dirty` | **sprite + 4° jitter + envelope**. The sheet's Sprite Only row is a CONTROL and failed as predicted; the picture alone cannot tear a direction-locked boundary |
+| Sketching | Pencil Hard / Soft / Blunt / Textured | four generated nibs | settled off the first sheet, unchanged |
+| Inking | Technical Pen — Fine | *procedural* | **no modulation rows at all** — a Rotring |
+| | Brush Pen | `pen-brush` | teardrop along the travel |
+| | Rough Ink — Blotchy | *procedural* | §8.4's first answer, all dynamics and no picture |
+| | **Rough Ink** | `rough-ink-triangle` | **triangle + Blotchy's dynamics**, which is both halves of §8.4's pair *and* both mechanisms |
+| Painting | **Painterly** | `paint-dry-load` | speckled interior, broken edges, **spacing 0.095** so the pixels are seen one dab at a time |
+| | **Bristle** | `bristle-open` | **open nib + envelope**. The mask fix alone left the walk dilating the outer boundary; the A/B row with a short-λ size wobble and a coherent scatter won it |
+| | **Streaky** | `streak-dots-6` | six stratified dots at **half** round two's radius, `jitter 0` |
+| Texture | — | — | empty, and honest: §12 stage 11's CC0 sourcing fills it |
+
+**Rough Square + Blotchy Dynamics was rendered and the triangle kept.** The owner asked to see it —
+*"i wonder what rough ink square with blotchy dynamics will look like"* — so round three carries the
+row with **only the tip swapped** from the triangle's. The square reads slightly heavier and blockier:
+its four flat faces give a coarser, more repetitive notch, where the triangle's larger asymmetry (its
+support ratio is about 2 against the square's 1.4) presents a more varied outline per turn. Neither is
+wrong; the triangle is the more varied line and was already accepted, so it ships.
+
+**`isPencilPreset` is group membership now**, which is what this section predicted stage 9 would do:
+picking *any* of the four Sketching brushes selects the pencil tool, and a brush the artist adds to
+Sketching gets it with nothing to update in code.
+
+**Ship-time reachability was driven, not inferred.** From a cold launch with the library file deleted:
+the menu lists all five groups, every brush has a preview swatch, Texture reads *"No brushes in this
+group yet — add one with +"*, and Rough Ink, Square, Bristle and Streaky each lay their own ink on the
+canvas. That is CLAUDE.md's *"a preset naming a missing file draws nothing and no logic test will tell
+you"* — and it is now also a test: `BrushLibraryLogicTests` resolves every shipped tip through
+`BrushTextureStore` and renders every shipped brush.
 
 ## 9. Grain — the deletion
 
@@ -2362,10 +2445,26 @@ first, which cleanly replaces the old one."*
    coverage whatever the eraser's opacity was. Both now read the stroke's own opacity, so the tier that
    was *accidentally* already §2.11 — one `strokePath` call cannot double-darken — and the `.full` tier
    agree.
-9. **The library: groups, and the tip generator.** §8. The group tree reusing the layer tree's; the
-   procedural tips for Basics, Sketching, Inking and Painting; the variant set §8.5 needs. **`BrushLibrary`'s
-   five presets are deleted here, not deprecated.** The generator is a build-time tool whose output is
-   committed, not a runtime cost — a tip is a small alpha bitmap and generating it per launch buys nothing.
+9. **DONE — the library: groups, the tip generator, and §8.6's sixteen.** §8. `BrushGroup` is a flat
+   `[BrushGroup]` and **§8.2's layer-tree reuse is refuted in the file that argued for it**;
+   `BrushTipGenerator` draws the masks and `BrushContactSheetBench` renders every candidate through the
+   real `BrushStamper`, over three rounds of sheets the owner picked from. `BrushLibrary`'s five presets
+   are **deleted, not deprecated**, and their ids are not reused. Eleven generated PNGs are committed as
+   `BuiltInBrushTexture` cases; five of the sixteen need no artwork at all. §8.6 carries the table.
+   **The generator stayed a build-time tool** — its output is committed, and nothing in the app links it.
+   **Three findings changed what shipped, and §8.4 carries all three.** A comb's axis is a property of
+   the brush's `angle` rather than of the tip, and two rounds had the slab's the wrong way round; turning
+   it right is not sufficient, because the walk accumulates and a shallow tooth is filled back in; and
+   the two mechanisms §8.4 spent two rounds treating as alternatives are **additive** — Rough Ink ships
+   an uneven picture *and* Blotchy's dynamics.
+   **The suite named the deleted five in roughly two hundred places and they are `TestBrushes` now**, in
+   the UI-test target, verbatim. That is a refutation of the obvious instruction — *point each fixture at
+   the nearest new preset* — and the reason is not the two hundred edits: a shipped preset is the
+   artist's, the owner tunes these on the device and has the values extracted back, so a fixture pinned
+   to one is a test that reds on a **tuning pass**. Seven expectations were re-derived rather than
+   repointed, each because its own subject moved, and `BrushLibraryLogicTests` gained the two assertions
+   no model-level test could make: every shipped tip resolves to a mask the bundle actually carries, and
+   every shipped brush lays ink.
 10. **DONE — the editor.** §2.24, §7 and §7.2. A full screen rather than a panel; the outputs are the
     index, grouped, each expanding in place into a base slider and however many chains drive it; a chain
     is an input and an ordered list of modules the artist adds to, reorders and removes (§2.28, which
