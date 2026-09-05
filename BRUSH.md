@@ -1743,13 +1743,15 @@ jitter is what makes the asymmetry survive; neither does anything alone. Pencil 
 So the generator's rule is not "no tip textures". It is: **a tip contributes roughness only through a
 dynamic that varies its presentation** — rotation jitter for an asymmetric silhouette, size jitter for a
 scale-dependent one — and **interior grain is exempt**, because a pit mid-dab is not filled by a
-neighbour's boundary, which is why the pencils' tooth reads.
+neighbour's boundary, which is why the pencils' tooth reads. *(The exemption is narrower than this
+sentence: the second sheet found that interior structure survives only when it is a **hole** rather
+than a dimming, and only when it does not vary **along the travel**. See below.)*
 
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
 **The generator and the first contact sheet are built — §12 stage 9's first half — and four things came
-back from rendering it.** `PaintSoftwareUITests/BrushTipGenerator.swift` draws thirteen masks and
+back from rendering it.** `PaintSoftwareUITests/BrushTipGenerator.swift` draws twenty-three masks and
 `BrushContactSheetBench` renders every candidate through `BrushStamper.stampStroke` itself, so what
 follows is MEASURED against the shipped walk rather than against a prototype.
 
@@ -1774,11 +1776,10 @@ follows is MEASURED against the shipped walk rather than against a prototype.
   the silhouette, so an authoring pass that roughens the long edges roughens nothing an artist will
   see. Author the roughness against the angle the brush will carry.
 
-**And the count of what needs no artwork went up.** Soft round, hard round, both technical pens and
-the opaque round are `BrushTip.round` plus a hardness and a spacing; the three rough ink nibs are this
-section's own refutation; and the blender is arguably a sixth, since what makes it a blender is flow
-0.25 under opacity 0.45 rather than its picture. **That is seven or eight of §8.6's twenty-odd
-answered by arithmetic**, which is worth knowing before anyone sources a pack to fill them.
+**And the count of what needs no artwork went up.** Soft round, hard round, the technical pen and the
+opaque round are `BrushTip.round` plus a hardness and a spacing, and Rough Ink Blotchy is this
+section's own refutation. **That is five of §8.6's sixteen answered by arithmetic**, which is worth
+knowing before anyone sources a pack to fill them.
 
 **Both halves are authored rather than only assembled, and the owner asked for that explicitly**: a
 sourced pack is the starting stock, and the shipped brushes are designed on top of it — tips drawn,
@@ -1788,6 +1789,62 @@ brushes too? As in making the sprites, customizing settings to what it thinks lo
 would be appreciated."* So a group is not "whatever the pack had under that name"; §12 stage 9 owes a
 *designed* set, and the sourced assets are raw material for it. **§8.3's licensing rule is unchanged and
 now has a third source to check** — Krita's bundles, per file, before anything is committed.
+
+**The second sheet rendered the boundary paragraph as a 2×2, and it holds.** Five Rough Ink rows
+carry *identical* brush settings — same size, dab fraction, flow, spacing, one pressure row, and no
+`density` dropout at all — and differ only in their picture and their `angle.jitter`:
+
+| | jitter 1 (±180°) | jitter 0.03 (±5°) |
+|---|---|---|
+| **asymmetric** (a rough triangle) | **rough along the whole line** | a clean line |
+| **symmetric** (an eroded round) | a clean line | (Technical Pen Fine) |
+
+So both terms are necessary and the sheet says so in pictures rather than in prose. The eroded-round
+control is the striking one: its *mask* is a wildly spiked disc and its *stroke* is smooth, which is
+§8.4's original 0.41% measurement seen rather than computed.
+
+**Five further things came back from that sheet, and three of them are the union argument reaching
+somewhere nobody had pointed it.**
+
+- **A union fills in a dimming; it cannot fill in a hole.** The painterly nib's bristle streaks were
+  authored at 30% depth — visibly beautiful on the mask — and every one of the five painterly rows
+  rendered as an identical solid slab. At these spacings a stroke lays twenty-odd overlapping dabs
+  over every point, so a band dimmed to 0.2 of coverage accumulates to **0.92** and is gone. Streaks
+  that reach *zero* survive; shading does not. `streakDepth` therefore sits near 1 on every nib whose
+  streaks are meant to be seen, and the width of the closed band is what separates a comb from a
+  blotch.
+- **Anything that varies along the direction of travel is filled in by its neighbour, including
+  inside the dab.** The same streaks were a band in `v` times a break-up in `u`; since consecutive
+  dabs slide along `u`, one dab's gap sits over the next one's ink. Interior structure is exempt from
+  the union argument only when it is **constant along the travel** — which is why the pencils (whose
+  pits move because the tip turns) and the bristle (whose channels are perpendicular to the slide)
+  both work, and why a `u`-varying streak does not. The surviving `u` term is a slow lateral wobble
+  of the whole comb, a tenth of a band period across the nib.
+- **`flow` is the other half of that, and 0.9 is too much for a nib with structure in it.** Twenty
+  overlapping dabs at flow 0.9 saturate whatever the mask says. §2.11's pair is the fix: drop the
+  *flow* and leave the stroke's opacity at 1, and the tonal range survives while the stroke still
+  covers.
+- **A soft, dirty end falloff survives the walk better than a displaced hard boundary does.** Messy
+  Flat's sprite *alone*, direction-locked, already carries a fine hairy edge — not the clean wobble
+  §8.4 predicts for a displaced boundary. Dilating a hard edge gives a hard edge; dilating a **ramp**
+  gives a ramp whose position still wanders, so the mottle survives as softness even though the
+  boundary noise does not. The full attributable set on that nib (one picture, terms added one at a
+  time) ranks them: the envelope wobble does most, the picture next, ±2° of jitter least.
+- **The two mechanisms make *different* roughness, not more and less of one.** A tipped nib under
+  full jitter draws a **fine, even tooth** along the edge; Rough Ink Blotchy — all dynamics, no
+  picture — draws **coarse lumps and outright breaks**. Neither is the other's weaker version, and
+  the sheet carries a sixth row that is both at once.
+
+**And one thing a slab nib does not do.** Three "Square" rows bracket the owner's *"only falls off in
+the very edges"* from crisper than Opaque Round to softer than it, and at slab widths **the three
+strokes are within about a point of each other**: the falloff is a ~1 pt ramp on a 24 pt band and the
+chamfer shows only at the caps. Pick that nib on its cap and its aspect; the edge softness is not
+where its character is.
+
+**The Bristle defect was in the mask and nowhere else.** *"Right now you can see it fit within a clear
+oval shape"* was literal — every filament was multiplied by one shared elliptical envelope, so the
+silhouette **was** that ellipse however the filaments fell inside it. Giving each filament its own two
+ends and its own taper, and multiplying by nothing shared, fixes it with no dynamics at all.
 
 **Edge softness may be part of the nib rather than a fault in the dab.** The owner, on seeing rough ink
 references: *"some versions of it are heavily aliased thus adding to the rough look... I may settle down on
@@ -1889,22 +1946,34 @@ the nib is a 4:1 rectangle inside a square mask, the perpendicularity is `base 0
 §6's deferral survives its first real test. What the *sheet* added is above, in §8.4: the tear has to
 come from §6 rather than from the picture, because the picture is the same picture at every dab.
 
-**The candidate set as first rendered, for whoever picks from it.** Twenty candidates, thirteen
-generated tips, `BrushContactSheetBench` writes six PNGs.
+**The second contact sheet, which is what the sixteen are picked *into*.** Thirty-four rows over the
+sixteen slots — 11 Basics, 4 Sketching, 9 Inking, 10 Painting — twenty-three generated tips, six PNGs. `BrushContactSheetBench` groups by **slot**
+rather than by group and marks every row `CHOSEN` (settled — nothing competes with it), `VARIANT`
+(competing for an open slot) or `CONTROL` (**on the sheet in order to fail**, isolating one operand
+of §8.4's pair). It also carries a **third stroke that turns 340°**, because the first sheet's report
+recorded the chisel as *"correct but subtle; the thick/thin needs a stroke that turns more than a
+contact-sheet row allows"* and every square, flat and bristle nib has the same problem: a wave reaches
+±18° and a nib's angle only shows across a wide sweep.
 
-| group | candidates |
+| slot | rows |
 |---|---|
-| **Basics** | Round Soft, Round Hard *(procedural)* · Square Slab 4:1 · Square Slab 2.5:1 · Square Slab 4:1 + dynamics · Chisel 5:1 |
-| **Sketching** | Pencil Hard · Pencil Soft · Pencil Blunt · Pencil Textured |
-| **Inking** | Technical Pen Fine, Technical Pen Tapered *(procedural)* · Brush Pen · Rough Ink Dry, Blotchy, Aliased *(dynamics only)* |
-| **Painting** | Opaque Round *(procedural)* · Flat · Bristle · Blender |
+| **Round Soft · Opaque Round · Round Hard** | one each, procedural, unchanged and chosen |
+| **Square** | Crisp · Soft Edge · Wide 2.5:1 — clean bevelled slabs, no jitter, bracketing the falloff |
+| **Messy Flat** | Sprite Only *(control)* · + 4° Jitter · + Envelope · + Both · Milder Sprite — one picture, terms added one at a time |
+| **Pencil Hard / Soft / Blunt / Textured** | one each, unchanged and chosen |
+| **Technical Pen Fine · Brush Pen · Rough Ink Blotchy** | one each, unchanged and chosen |
+| **Rough Ink** | Triangle · Triangle No Turn *(control)* · Rough Square · Half-Flat · Eroded Round *(control)* — the 2×2 above — plus Triangle + Blotchy Dynamics, outside it |
+| **Painterly** | Blotchy · Streaky · Jagged · Soft Slab · Dry Load |
+| **Bristle** | Open · Open + Envelope · Dense |
+| **Streaky** | Six Dots *(stratified)* · Eight Dots *(uniform)* |
 | **Texture** | empty — §12 stage 11's CC0 sourcing |
 
-**Nothing here is in `BrushLibrary` and that is the point** — §12 stage 9 is driven by contact sheet at
-the owner's instruction, so the presets are authored after the picking, not before it. Three
-candidates carry an open question rather than an answer: the two square slabs are the A/B above,
-**Rough Ink — Aliased** is this section's `hardness 1.00` question drawn rather than argued, and
-**Bristle** ships one of three generated variants because §8.5's per-dab pick is not built.
+The chisel, the two ragged square slabs, the painting flat and the blender are **gone** rather than
+carried: none is among the sixteen, and the first sheet's finding is why the ragged slabs are — a
+direction-locked nib's ragged edge does not survive the walk.
+
+**Nothing here is in `BrushLibrary` and that is still the point** — §12 stage 9 is driven by contact
+sheet at the owner's instruction, so the presets are authored after the picking, not before it.
 
 ## 9. Grain — the deletion
 

@@ -15,6 +15,19 @@ import CoreGraphics
 /// modulation — if the sheet is wrong, the app is wrong in the same way, which is the only property
 /// that makes a picture worth ruling from.
 ///
+/// **This is the second sheet, and two things changed because the first one was read.**
+///
+/// - **A third stroke that turns.** The first sheet's report recorded the Chisel as *"correct but
+///   subtle; the thick/thin needs a stroke that turns more than a contact-sheet row allows"* — and
+///   every square, flat and bristle nib has the same problem, because what a direction-following or
+///   fixed-hold nib *does* is only visible where the travel direction sweeps. The two wave strokes
+///   reach about 36° between them; the third is a 340° arc, so a nib held at a fixed angle passes
+///   through every relationship to the travel it can have.
+/// - **Rows are grouped by §8.6's sixteen slots**, not merely by group, and each row is marked
+///   `CHOSEN`, `VARIANT` or `CONTROL`. Sixteen brushes are picked and four slots are open; a sheet
+///   that does not say which is which invites a settled brush and a competing variant to be compared
+///   as if the question were still open.
+///
 /// **Not a `*LogicTests` file, deliberately, and gated on top of that.** The fast tier's selector is
 /// `LogicTests$|CharacterizationTests$|^PerfBaselineTests$`, so the filename keeps this out of it —
 /// which is how `DabCostBench` stays out. The filename alone is not enough here, because the **full**
@@ -35,38 +48,52 @@ final class BrushContactSheetBench: XCTestCase {
 
     // MARK: - Page geometry
 
-    private static let pageWidth: CGFloat = 1120
-    private static let rowHeight: CGFloat = 172
+    private static let pageWidth: CGFloat = 1400
+    private static let rowHeight: CGFloat = 220
     private static let headerHeight: CGFloat = 58
+    private static let slotHeaderHeight: CGFloat = 30
     private static let margin: CGFloat = 20
 
     private static let swatchX: CGFloat = 20
-    private static let swatchSide: CGFloat = 84
-    private static let textX: CGFloat = 116
-    private static let textWidth: CGFloat = 320
-    private static let dabX: CGFloat = 448
-    private static let dabWidth: CGFloat = 88
-    private static let strokeX: CGFloat = 546
-    /// **Two strokes per row, side by side**, which the first sheet rendered made necessary. A
-    /// single ramping stroke spends only about a fifth of its length under §2.19's one-third knee,
-    /// so the three rough ink candidates showed one gap at the very start and read as solid lines —
-    /// the sheet would have hidden the entire mechanism the owner asked for. The second stroke is
-    /// held at a constant light pressure, which is §2.18's own sentence: *"a stroke drawn genuinely
-    /// light breaks up along its whole length"*.
+    private static let swatchSide: CGFloat = 96
+    private static let textX: CGFloat = 128
+    private static let textWidth: CGFloat = 296
+    private static let dabX: CGFloat = 436
+    private static let dabWidth: CGFloat = 96
+    private static let strokeX: CGFloat = 548
+
+    /// **Three strokes per row, side by side.**
     ///
-    /// They are side by side rather than stacked because a *shorter* stroke turns harder for the
-    /// same excursion, and the turn is what makes `angle.directionFollow` and a fixed-hold chisel
-    /// legible at all. The first sheet's single 580 pt wave reached 15° of travel direction; two
-    /// 270 pt ones reach 36°.
+    /// The first two are the first sheet's pair and both of them were made necessary by rendering
+    /// it. A single ramping stroke spends only about a fifth of its length under §2.19's one-third
+    /// knee, so the rough ink candidates showed one gap at the very start and read as solid lines;
+    /// the second is held at a constant light pressure, which is §2.18's own sentence — *"a stroke
+    /// drawn genuinely light breaks up along its whole length"*.
+    ///
+    /// The third is new and it is the **turning** stroke. A wave reaches ±18° of travel direction;
+    /// a nib held at a fixed `angle.base`, or one following the travel with an asymmetric picture,
+    /// only shows what it does across a *wide* sweep of directions. 340° of arc is every one of
+    /// them, so a chisel's thick/thin, a slab's corner behaviour and a bristle's rake are all on the
+    /// page instead of being described in a report.
     private static let strokeGap: CGFloat = 14
-    private static var strokeWidth: CGFloat { (pageWidth - strokeX - margin - strokeGap) / 2 }
+    private static let turnSide: CGFloat = 156
+    private static var waveWidth: CGFloat {
+        (pageWidth - strokeX - margin - turnSide - 2 * strokeGap) / 2
+    }
+    private static let bandHeight: CGFloat = 156
     private static let lightPressure: CGFloat = 0.25
+    private static let turnPressure: CGFloat = 0.7
 
     private static let paper = UIColor.white
     private static let ink = UIColor.black
     private static let rule = UIColor(white: 0.82, alpha: 1)
     private static let dim = UIColor(white: 0.38, alpha: 1)
     private static let pillFill = UIColor(white: 0.90, alpha: 1)
+    private static let controlFill = UIColor(white: 0.80, alpha: 1)
+
+    /// One group's rows, already split into §8.6's slots in the owner's own order.
+    private typealias Section = (group: String, slots: [(slot: String,
+                                                         rows: [BrushCandidates.Candidate])])
 
     // MARK: - The run
 
@@ -80,6 +107,13 @@ final class BrushContactSheetBench: XCTestCase {
         let candidates = BrushCandidates.all(tips: tips)
         let directory = try Self.outputDirectory()
 
+        // **The swatches are drawn from the tips that were just written, not re-rendered per row.**
+        // The first sheet called `BrushTipGenerator.render` inside the swatch, which drew every mask
+        // twice per appearance — once per group sheet and once on the overview — for a picture that
+        // is a function of the catalogue and could not differ.
+        var swatches: [String: UIImage] = [:]
+        for tip in tips { swatches[tip.name] = UIImage(data: tip.png) }
+
         // The tips themselves, so a chosen one can be committed without re-running anything.
         let tipDirectory = directory.appendingPathComponent("tips", isDirectory: true)
         try FileManager.default.createDirectory(at: tipDirectory, withIntermediateDirectories: true)
@@ -90,11 +124,11 @@ final class BrushContactSheetBench: XCTestCase {
         var written: [String] = []
 
         for group in BrushCandidates.groups {
-            let rows = candidates.filter { $0.group == group }
+            let section = Self.section(for: group, in: candidates)
+            let count = section.slots.reduce(0) { $0 + $1.rows.count }
             let image = Self.sheet(title: "Brush candidates — \(group)",
-                                   subtitle: Self.subtitle(for: group, count: rows.count),
-                                   sections: [(group, rows)],
-                                   scale: 2)
+                                   subtitle: Self.subtitle(for: group, count: count),
+                                   sections: [section], swatches: swatches, scale: 2)
             let url = directory.appendingPathComponent("contact-sheet-\(group.lowercased()).png")
             try XCTUnwrap(image.pngData()).write(to: url)
             written.append(url.path)
@@ -102,15 +136,15 @@ final class BrushContactSheetBench: XCTestCase {
         }
 
         // One overview at scale 1: the whole set on one page, for the shape of it rather than for
-        // reading a nib's edge. Deliberately the lower-resolution of the two — 2240 × ~6800 px is
-        // 60 MB of backing store and buys nothing the per-group sheets do not already give.
-        let all = BrushCandidates.groups.map { group in
-            (group, candidates.filter { $0.group == group })
-        }
-        let overview = Self.sheet(title: "Brush candidates — BRUSH.md §12 stage 9",
-                                  subtitle: "\(candidates.count) candidates, \(tips.count) generated tips. "
-                                          + "The owner picks; presets are authored after.",
-                                  sections: all, scale: 1)
+        // reading a nib's edge. Deliberately the lower-resolution of the two — the per-group sheets
+        // are where an edge is judged, and a scale-2 overview is 60 MB of backing store for nothing.
+        let all = BrushCandidates.groups.map { Self.section(for: $0, in: candidates) }
+        let overview = Self.sheet(title: "Brush candidates — BRUSH.md §12 stage 9, round two",
+                                  subtitle: "\(candidates.count) rows over §8.6's sixteen slots, "
+                                          + "\(tips.count) generated tips. CHOSEN is settled; "
+                                          + "VARIANT competes for an open slot; CONTROL is on the "
+                                          + "sheet in order to fail.",
+                                  sections: all, swatches: swatches, scale: 1)
         let overviewURL = directory.appendingPathComponent("contact-sheet-all.png")
         try XCTUnwrap(overview.pngData()).write(to: overviewURL)
         written.append(overviewURL.path)
@@ -121,13 +155,32 @@ final class BrushContactSheetBench: XCTestCase {
         print("TIPSHEET tips: \(tipDirectory.path) (\(tips.count) PNGs)")
     }
 
+    /// **The slot order comes from `BrushCandidates.slots`, not from the candidate list.** A slot
+    /// nobody drew a candidate for renders as an empty header rather than vanishing, which is the
+    /// difference between "we did not build this yet" and a sheet that silently lost a brush.
+    private static func section(for group: String,
+                                in candidates: [BrushCandidates.Candidate]) -> Section {
+        let rows = candidates.filter { $0.group == group }
+        var slots: [(slot: String, rows: [BrushCandidates.Candidate])] = []
+        for slot in BrushCandidates.slots[group] ?? [] {
+            slots.append((slot, rows.filter { $0.slot == slot }))
+        }
+        // Anything whose slot is not in the table would otherwise be dropped silently — the same
+        // class of failure as a tip name that does not resolve.
+        let known = Set(BrushCandidates.slots[group] ?? [])
+        let orphans = rows.filter { !known.contains($0.slot) }
+        if !orphans.isEmpty { slots.append(("Not in §8.6's sixteen", orphans)) }
+        return (group, slots)
+    }
+
     private static func subtitle(for group: String, count: Int) -> String {
         if count == 0 {
             return "§12 stage 11 — the CC0 group. Nothing is generated here: §8.4 rules that "
                  + "scanned grunge and splatter are what is genuinely hard to fake."
         }
-        return "\(count) candidates, each drawn at its own size through BrushStamper.stampStroke. "
-             + "Left stroke: pressure ramps 0.04 → 1 → 0.04. Right stroke: held light at 0.25."
+        return "\(count) rows, each drawn at its own size through BrushStamper.stampStroke. "
+             + "Left: pressure ramps 0.04 → 1 → 0.04. Middle: held light at 0.25. "
+             + "Right: a 340° turn at 0.70, which is where a nib's angle shows."
     }
 
     private static func attachment(_ image: UIImage, named name: String) -> XCTAttachment {
@@ -161,13 +214,20 @@ final class BrushContactSheetBench: XCTestCase {
     // MARK: - Drawing a sheet
 
     private static func sheet(title: String, subtitle: String,
-                              sections: [(String, [BrushCandidates.Candidate])],
+                              sections: [Section], swatches: [String: UIImage],
                               scale: CGFloat) -> UIImage {
         let titleBlock: CGFloat = 76
         var height: CGFloat = titleBlock
-        for (_, rows) in sections {
+        for section in sections {
             height += headerHeight
-            height += rows.isEmpty ? rowHeight * 0.55 : rowHeight * CGFloat(rows.count)
+            if section.slots.isEmpty {
+                height += rowHeight * 0.55
+                continue
+            }
+            for slot in section.slots {
+                height += slotHeaderHeight
+                height += slot.rows.isEmpty ? 26 : rowHeight * CGFloat(slot.rows.count)
+            }
         }
         height += margin
 
@@ -183,13 +243,14 @@ final class BrushContactSheetBench: XCTestCase {
 
             draw(title, at: CGPoint(x: margin, y: 18),
                  font: .systemFont(ofSize: 22, weight: .bold), color: ink)
-            draw(subtitle, in: CGRect(x: margin, y: 48, width: pageWidth - 2 * margin, height: 24),
-                 font: .systemFont(ofSize: 11), color: dim)
+            draw(subtitle, in: CGRect(x: margin, y: 46, width: pageWidth - 2 * margin, height: 30),
+                 font: .systemFont(ofSize: 11), color: dim, wraps: true)
 
             var y: CGFloat = titleBlock
-            for (group, rows) in sections {
-                y = drawHeader(group, count: rows.count, at: y, cg: cg)
-                if rows.isEmpty {
+            for section in sections {
+                let count = section.slots.reduce(0) { $0 + $1.rows.count }
+                y = drawHeader(section.group, count: count, at: y, cg: cg)
+                if section.slots.isEmpty {
                     draw("Empty by design — §12 stage 11 sources this group CC0. "
                          + "§8.6: grunge, splatter, stipple, chalk.",
                          in: CGRect(x: swatchX, y: y + 16, width: pageWidth - 2 * margin, height: 20),
@@ -197,9 +258,19 @@ final class BrushContactSheetBench: XCTestCase {
                     y += rowHeight * 0.55
                     continue
                 }
-                for candidate in rows {
-                    drawRow(candidate, top: y, cg: cg)
-                    y += rowHeight
+                for slot in section.slots {
+                    y = drawSlotHeader(slot.slot, count: slot.rows.count, at: y, cg: cg)
+                    if slot.rows.isEmpty {
+                        draw("No candidate on this sheet.",
+                             in: CGRect(x: swatchX, y: y + 4, width: 400, height: 18),
+                             font: .italicSystemFont(ofSize: 11), color: dim)
+                        y += 26
+                        continue
+                    }
+                    for candidate in slot.rows {
+                        drawRow(candidate, top: y, swatches: swatches, cg: cg)
+                        y += rowHeight
+                    }
                 }
             }
         }
@@ -217,63 +288,86 @@ final class BrushContactSheetBench: XCTestCase {
         return y + headerHeight
     }
 
-    private static func drawRow(_ candidate: BrushCandidates.Candidate, top: CGFloat, cg: CGContext) {
+    private static func drawSlotHeader(_ slot: String, count: Int,
+                                       at y: CGFloat, cg: CGContext) -> CGFloat {
+        UIColor(white: 0.975, alpha: 1).setFill()
+        cg.fill(CGRect(x: 0, y: y, width: pageWidth, height: slotHeaderHeight))
+        UIColor(white: 0.72, alpha: 1).setFill()
+        cg.fill(CGRect(x: 0, y: y + slotHeaderHeight - 1, width: pageWidth, height: 1))
+        draw("SLOT ▸ \(slot.uppercased())", at: CGPoint(x: margin, y: y + 8),
+             font: .systemFont(ofSize: 12, weight: .bold), color: UIColor(white: 0.2, alpha: 1))
+        draw(count == 1 ? "1 row" : "\(count) rows",
+             at: CGPoint(x: pageWidth - margin - 52, y: y + 9),
+             font: .systemFont(ofSize: 11), color: dim)
+        return y + slotHeaderHeight
+    }
+
+    private static func drawRow(_ candidate: BrushCandidates.Candidate, top: CGFloat,
+                                swatches: [String: UIImage], cg: CGContext) {
         rule.setFill()
         cg.fill(CGRect(x: 0, y: top + rowHeight - 1, width: pageWidth, height: 1))
 
         // The tip's own mask, so the owner sees the nib as well as what it draws.
+        let swatchRect = CGRect(x: swatchX, y: top + 16, width: swatchSide, height: swatchSide)
         if let tipName = candidate.kind.tipName {
-            drawSwatch(tipName, in: CGRect(x: swatchX, y: top + 12,
-                                           width: swatchSide, height: swatchSide), cg: cg)
+            rule.setStroke()
+            cg.setLineWidth(1)
+            cg.stroke(swatchRect)
+            swatches[tipName]?.draw(in: swatchRect.insetBy(dx: 3, dy: 3))
+            draw(tipName, in: CGRect(x: swatchX, y: swatchRect.maxY + 3,
+                                     width: swatchSide + 30, height: 14),
+                 font: .monospacedSystemFont(ofSize: 8, weight: .regular), color: dim)
         } else {
             rule.setStroke()
             cg.setLineWidth(1)
             cg.setLineDash(phase: 0, lengths: [3, 3])
-            cg.stroke(CGRect(x: swatchX, y: top + 12, width: swatchSide, height: swatchSide))
+            cg.stroke(swatchRect)
             cg.setLineDash(phase: 0, lengths: [])
-            draw("no tip", at: CGPoint(x: swatchX + 22, y: top + 46),
+            draw("no tip", at: CGPoint(x: swatchX + 28, y: top + 56),
                  font: .systemFont(ofSize: 10), color: dim)
         }
 
         draw(candidate.name, at: CGPoint(x: textX, y: top + 12),
              font: .systemFont(ofSize: 16, weight: .semibold), color: ink)
-        drawPill(candidate.kind.label, at: CGPoint(x: textX, y: top + 36), cg: cg)
+        let standingWidth = drawPill(candidate.standing.label, at: CGPoint(x: textX, y: top + 34),
+                                     fill: candidate.standing == .control ? controlFill : pillFill,
+                                     cg: cg)
+        drawPill(candidate.kind.label, at: CGPoint(x: textX + standingWidth + 6, y: top + 34),
+                 fill: pillFill, cg: cg)
         draw(candidate.note,
-             in: CGRect(x: textX, y: top + 58, width: textWidth, height: 52),
+             in: CGRect(x: textX, y: top + 56, width: textWidth, height: 86),
              font: .systemFont(ofSize: 10.5), color: dim, wraps: true)
 
         drawIsolatedDab(candidate.brush,
-                        in: CGRect(x: dabX, y: top + 12, width: dabWidth, height: swatchSide), cg: cg)
+                        in: CGRect(x: dabX, y: top + 16, width: dabWidth, height: swatchSide), cg: cg)
 
-        let band = CGRect(x: strokeX, y: top + 20, width: strokeWidth, height: 92)
-        draw("pressure 0.04 → 1 → 0.04", at: CGPoint(x: strokeX, y: top + 6),
+        let band = CGRect(x: strokeX, y: top + 26, width: waveWidth, height: bandHeight)
+        let secondX = strokeX + waveWidth + strokeGap
+        let turnX = secondX + waveWidth + strokeGap
+        draw("pressure 0.04 → 1 → 0.04", at: CGPoint(x: strokeX, y: top + 12),
              font: .systemFont(ofSize: 8.5), color: dim)
         draw("held light at \(String(format: "%.2f", Double(lightPressure)))",
-             at: CGPoint(x: strokeX + strokeWidth + strokeGap, y: top + 6),
+             at: CGPoint(x: secondX, y: top + 12),
              font: .systemFont(ofSize: 8.5), color: dim)
-        drawStroke(candidate.brush, in: band, pressure: nil, cg: cg)
-        drawStroke(candidate.brush,
-                   in: band.offsetBy(dx: strokeWidth + strokeGap, dy: 0),
-                   pressure: lightPressure, cg: cg)
+        draw("340° turn at \(String(format: "%.2f", Double(turnPressure)))",
+             at: CGPoint(x: turnX, y: top + 12),
+             font: .systemFont(ofSize: 8.5), color: dim)
+        drawStroke(candidate.brush, in: band, samples: wave(in: band, pressure: nil), cg: cg)
+        drawStroke(candidate.brush, in: band.offsetBy(dx: waveWidth + strokeGap, dy: 0),
+                   samples: wave(in: band.offsetBy(dx: waveWidth + strokeGap, dy: 0),
+                                 pressure: lightPressure), cg: cg)
+        let turnBand = CGRect(x: turnX, y: top + 26, width: turnSide, height: bandHeight)
+        drawStroke(candidate.brush, in: turnBand,
+                   samples: turn(in: turnBand, brushSize: max(candidate.brush.size, 3)), cg: cg)
 
         // The numbers, full width under the row — derived from the brush, never written out.
         draw(BrushCandidates.basesLine(candidate.brush),
-             at: CGPoint(x: swatchX, y: top + rowHeight - 46),
+             at: CGPoint(x: swatchX, y: top + rowHeight - 36),
              font: .monospacedSystemFont(ofSize: 9.5, weight: .medium), color: ink)
         draw(BrushCandidates.rowsLine(candidate.brush),
-             in: CGRect(x: swatchX, y: top + rowHeight - 32,
-                        width: pageWidth - 2 * margin, height: 28),
+             in: CGRect(x: swatchX, y: top + rowHeight - 23,
+                        width: pageWidth - 2 * margin, height: 22),
              font: .monospacedSystemFont(ofSize: 9.5, weight: .regular), color: dim, wraps: true)
-    }
-
-    private static func drawSwatch(_ tipName: String, in rect: CGRect, cg: CGContext) {
-        rule.setStroke()
-        cg.setLineWidth(1)
-        cg.stroke(rect)
-        guard let tip = BrushTipGenerator.shapes.first(where: { $0.name == tipName }),
-              let image = UIImage(data: BrushTipGenerator.render(tip).png)
-        else { return }
-        image.draw(in: rect.insetBy(dx: 3, dy: 3))
     }
 
     /// **One dab, through `BrushStamper.stampDab`.** Bracketed in a stroke group so the brush's own
@@ -295,17 +389,6 @@ final class BrushContactSheetBench: XCTestCase {
         target.endStroke()
     }
 
-    /// **The stroke the owner reads a candidate by.** One gentle wave so `direction` actually
-    /// varies — a straight line renders every direction-following nib as a bar and hides the whole
-    /// mechanism — carrying a pressure ramp from 0.04 up to 1 and back.
-    ///
-    /// The taper is the point, and `BrushPreview` already says why: *"a straight line at constant
-    /// pressure would render four of the five shipped presets as near-identical bars, because what
-    /// separates them is how width and flow answer the pen"*. It is also the only thing that makes
-    /// §2.19's threshold visible — a `density ← pressure` brush is solid at full press and breaks up
-    /// only under about a third of it, so a sheet drawn at constant pressure would show none of the
-    /// three rough ink candidates doing anything at all.
-    ///
     /// **Drawn at the brush's own size**, which is where this parts company with `BrushPreview`.
     /// That one clamps into the row's band, and its reason is good for a 28 pt menu row: a 4 pt Pen
     /// would be a hairline. It is the wrong trade here — the row prints `size 4pt` beside a stroke
@@ -313,12 +396,12 @@ final class BrushContactSheetBench: XCTestCase {
     /// separates a technical pen from a marker. Only a floor survives, against a brush whose size is
     /// zero.
     private static func drawStroke(_ brush: Brush, in rect: CGRect,
-                                   pressure: CGFloat?, cg: CGContext) {
+                                   samples: StrokeSamples, cg: CGContext) {
         cg.saveGState()
         cg.clip(to: rect)
         let target = CGContextDabTarget(cg)
         BrushStamper.stampStroke(into: target,
-                                 samples: samples(in: rect, pressure: pressure),
+                                 samples: samples,
                                  brush: brush,
                                  color: ink,
                                  brushSize: max(brush.size, 3),
@@ -332,11 +415,20 @@ final class BrushContactSheetBench: XCTestCase {
     /// candidate* and two renders of the sheet are the same picture.
     private static let sheetSeed: UInt64 = 0x51_4C_5041_494E_0009
 
-    private static func samples(in rect: CGRect, pressure held: CGFloat?) -> StrokeSamples {
+    /// **The stroke the owner reads a candidate by.** One gentle wave so `direction` actually
+    /// varies — a straight line renders every direction-following nib as a bar and hides the whole
+    /// mechanism — carrying a pressure ramp from 0.04 up to 1 and back, or held at a constant.
+    ///
+    /// The taper is the point, and `BrushPreview` already says why: *"a straight line at constant
+    /// pressure would render four of the five shipped presets as near-identical bars, because what
+    /// separates them is how width and flow answer the pen"*. It is also the only thing that makes
+    /// §2.19's threshold visible — a `density ← pressure` brush is solid at full press and breaks up
+    /// only under about a third of it.
+    private static func wave(in rect: CGRect, pressure held: CGFloat?) -> StrokeSamples {
         let x0 = rect.minX + 14
         let x1 = rect.maxX - 14
         let midY = rect.midY
-        let amplitude = rect.height * 0.26
+        let amplitude = rect.height * 0.24
         let steps = max(Int((x1 - x0) / 1.5), 48)
         var points: [VectorSample] = []
         points.reserveCapacity(steps + 1)
@@ -350,18 +442,51 @@ final class BrushContactSheetBench: XCTestCase {
         return StrokeSamples(points, channels: .pressureOnly)
     }
 
+    /// **The turning stroke — 340° of travel direction at one pressure.**
+    ///
+    /// A wave reaches ±18°, which is enough to tell a direction-following nib from a fixed one and
+    /// not enough to show what either *does*. A nib held at a fixed `angle.base` is thick where the
+    /// travel is perpendicular to it and vanishes where it is parallel, and that whole cycle only
+    /// exists on an arc. Held at a constant pressure so the width is the angle's doing and not the
+    /// ramp's, and left slightly open (340°, on a gentle spiral) so the two ends do not overlap and
+    /// hide the cap.
+    private static func turn(in rect: CGRect, brushSize: CGFloat) -> StrokeSamples {
+        let centre = CGPoint(x: rect.midX, y: rect.midY)
+        // **The radius has to leave room for the brush, and the first render of this sheet did
+        // not.** `drawStroke` clips to the band, so an arc laid out to the band's own half-width
+        // has half a nib hanging outside it and the ring reads as cut on both sides. Every other
+        // stroke on the page is a wave inside a band it never reaches the edge of; this one is
+        // the only one whose extent is the band.
+        let outer = min(rect.width, rect.height) / 2 - 10 - brushSize * 0.55
+        let steps = 220
+        var points: [VectorSample] = []
+        points.reserveCapacity(steps + 1)
+        for step in 0...steps {
+            let t = CGFloat(step) / CGFloat(steps)
+            let angle = (-0.30 + t * (340.0 / 360.0)) * 2 * .pi
+            let radius = max(outer - t * 8, 8)
+            points.append(VectorSample(point: CGPoint(x: centre.x + cos(angle) * radius,
+                                                      y: centre.y + sin(angle) * radius),
+                                       pressure: turnPressure))
+        }
+        return StrokeSamples(points, channels: .pressureOnly)
+    }
+
     // MARK: - Text
 
-    private static func drawPill(_ text: String, at origin: CGPoint, cg: CGContext) {
+    @discardableResult
+    private static func drawPill(_ text: String, at origin: CGPoint,
+                                 fill: UIColor, cg: CGContext) -> CGFloat {
         let font = UIFont.systemFont(ofSize: 9, weight: .bold)
         let width = (text as NSString)
             .size(withAttributes: [.font: font, .kern: 0.6]).width + 14
         let box = CGRect(x: origin.x, y: origin.y, width: width, height: 17)
-        pillFill.setFill()
+        fill.setFill()
         UIBezierPath(roundedRect: box, cornerRadius: 4).fill()
         (text as NSString).draw(at: CGPoint(x: origin.x + 7, y: origin.y + 3.5),
                                 withAttributes: [.font: font, .kern: 0.6,
                                                  .foregroundColor: UIColor(white: 0.15, alpha: 1)])
+        return width
     }
 
     private static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor) {

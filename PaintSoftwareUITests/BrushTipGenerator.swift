@@ -17,16 +17,25 @@ import CoreGraphics
 /// output path. Regenerating gives the identical bytes, so a committed PNG can always be shown to
 /// be the one this file draws. `BrushTipGeneratorLogicTests` is the assertion.
 ///
-/// **What is deliberately not generated, and §8.4 is the reason rather than an omission:**
+/// **§8.4's boundary paragraph is what this catalogue is now organised around, and it moved on the
+/// second contact sheet.** The rule is not *"a tip contributes no roughness"* — it is:
 ///
-/// - **The rough ink nib.** §8.4 MEASURED an eroded disc at 0.41% of a brush width of edge
-///   roughness in a stroke against 3.6% for `random → size`, and found deeper erosion *not even
-///   monotonic*. The nib is §2.17's λ and §2.18's `density` on a clean round tip and needs no
-///   picture. `BrushCandidates` carries three of them and they own no file here.
+/// > Roughness survives when what a dab presents to the silhouette changes from dab to dab.
+///
+/// So an **eroded round** nib buys nothing (every dab offers the same profile, and ten overlapping
+/// dabs take its running maximum), a **direction-locked** nib buys nothing on its swept sides, and
+/// an **asymmetric** nib under `angle.jitter` does: rotating an uneven shape changes its outline
+/// where rotating a disc changes nothing at all. **Asymmetry and rotation multiply; neither works
+/// alone**, and interior grain is exempt because a pit mid-dab is not filled by a neighbour's
+/// boundary. Every rough shape below carries both halves, or is a deliberate control that carries
+/// one — `rough-ink-eroded-round` is §8.4's own refuted nib, drawn so the owner can see the cell of
+/// the 2×2 that is supposed to fail.
+///
+/// **What is still deliberately not generated:**
+///
 /// - **Soft and hard round, the technical pens, and the opaque round.** `BrushTip.round` already
 ///   *is* a disc with a falloff; §8.4's *"a hard round is a disc, a soft round a falloff"* is a
-///   description of the procedural arm, not an instruction to draw one. A generated near-disc would
-///   be the eroded tip §8.4 refuted, one indirection later.
+///   description of the procedural arm, not an instruction to draw one.
 /// - **The Texture group.** §8.6's grunge, splatter, stipple and chalk are §12 stage 11's CC0
 ///   sourcing, because scanned grunge is what §8.4 says is genuinely hard to fake.
 ///
@@ -83,38 +92,45 @@ enum BrushTipGenerator {
 
     static let shapes: [Shape] = [
 
-        // MARK: Basics — the square slab and the chisel
+        // MARK: Basics — §8.6's two square nibs
 
-        // **§8.6's "square", which is not a square.** *"A rectangle whose long side sits
-        // perpendicular to the direction of travel, with deliberately ragged edges. One drag lays
-        // down one rectangular slab."* The long axis is drawn along **u** and the perpendicularity
-        // is the brush's `angle.base = 0.25` turns with `directionFollow = 1` — §8.6's own
-        // arithmetic, and why this nib needs no `roundness`: a rough rectangle drawn inside a square
-        // mask is a rough rectangle.
+        // **"Square" — the clean one.** The owner: *"slab with no noisy edges, and beveled corners,
+        // softness sort of like opaque round in that it only falls off in the very edges."* Round
+        // one's ragged square slabs are gone rather than kept beside these: §8.4's boundary
+        // paragraph says a direction-locked nib's ragged edge cannot survive the walk, the first
+        // sheet showed it washing out, and the owner picked a clean nib in its place.
         //
-        // The raggedness is two octaves on each of the four edges: a coarse tear at ~3 cycles across
-        // the nib and a fine fray at ~11. One octave alone reads either as a wobble or as fuzz; the
-        // reference the owner supplied has both.
-        // **The two roughnesses are not equally visible and the sheet showed which.** With the base
-        // turn at a quarter and follow at 1, the nib's *long* edges sweep along the travel and its
-        // *ends* trace the stroke's two edges — so `endRough` is what an artist sees on a drag and
-        // `edgeRough` only shows at the caps and where a stroke crosses itself. Both are cranked
-        // well past what looked right on the mask for that reason.
-        Shape(name: "square-slab-4to1", seed: 0x5148_0001,
-              body: { u, v, s in slab(u, v, s, aspect: 4.0, edgeRough: 0.20, endRough: 0.26) }),
+        // Three variants, and they differ in the two things the sentence above names: how much
+        // corner is cut, and how wide the falloff band is.
+        // **The falloff numbers are calibrated against Opaque Round rather than chosen**, because
+        // that is what the owner's sentence asks for. Opaque Round is `hardness 0.8`, which is a
+        // gradient over the outer fifth of the radius; a fifth of this nib's *short* half-axis is
+        // about 0.05 in tip units. So 0.028 is crisper than Opaque Round, 0.110 is softer, and
+        // 0.055 is the match — and the first render of this sheet is why they are spread that far:
+        // at 0.028 against 0.075 the two strokes were indistinguishable at 26 pt.
+        Shape(name: "square-bevel-tight", seed: 0x5148_0101,
+              body: { u, v, _ in bevelSlab(u, v, aspect: 4.0, bevel: 0.10, falloff: 0.028) }),
 
-        Shape(name: "square-slab-2p5to1", seed: 0x5148_0002,
-              body: { u, v, s in slab(u, v, s, aspect: 2.5, edgeRough: 0.34, endRough: 0.40) }),
+        Shape(name: "square-bevel-soft", seed: 0x5148_0102,
+              body: { u, v, _ in bevelSlab(u, v, aspect: 4.0, bevel: 0.10, falloff: 0.110) }),
 
-        // **The chisel.** A cut edge, so the long sides are hard and straight and the raggedness the
-        // slab has would be wrong: what makes a chisel a chisel is that one side of the stroke is a
-        // clean line. The ends are slanted, which is what makes it a calligraphy nib rather than a
-        // narrow slab — held at a fixed `angle.base` with no direction-follow, it thickens and thins
-        // as the stroke turns, and that is the whole effect.
-        Shape(name: "chisel-5to1", seed: 0x5148_0003,
-              body: { u, v, _ in chisel(u, v, aspect: 5.0, slant: 0.34) }),
+        Shape(name: "square-bevel-wide", seed: 0x5148_0103,
+              body: { u, v, _ in bevelSlab(u, v, aspect: 2.5, bevel: 0.20, falloff: 0.055) }),
 
-        // MARK: Sketching — four pencils
+        // **"Messy Flat" — the ends, and only the ends.** *"Like the flat brush, except with messier
+        // ends. Still square, but the sprite gives it a unique non monolithic look for the ends,
+        // more of a slightly dirty falloff."* §8.4's fourth finding is why the long sides are left
+        // clean: with `base 0.25` and `directionFollow 1` they sweep *along* the travel and never
+        // reach the silhouette, so roughening them roughens nothing an artist will see.
+        Shape(name: "flat-messy-ends", seed: 0x5148_0111,
+              body: { u, v, s in messyEndSlab(u, v, s, aspect: 4.0, endRough: 0.10,
+                                              endFade: 0.30, dirt: 0.55, sideSoft: 0.035) }),
+
+        Shape(name: "flat-messy-ends-dirty", seed: 0x5148_0112,
+              body: { u, v, s in messyEndSlab(u, v, s, aspect: 3.2, endRough: 0.17,
+                                              endFade: 0.46, dirt: 0.85, sideSoft: 0.055) }),
+
+        // MARK: Sketching — four pencils, unchanged and accepted off the first sheet
 
         // **A pencil is a mid-frequency noise threshold** (§8.4) on an irregular nib. The four differ
         // in the grain's frequency and how hard it is thresholded, which is what separates a hard
@@ -129,11 +145,11 @@ enum BrushTipGenerator {
               body: { u, v, s in nib(u, v, s, radius: 0.95, wobble: 0.07, wobbleFrequency: 4.0,
                                      edge: 1.6 * pixel, falloff: 0.34) }),
 
-        // **Blunt** — a worn nib, flattened on one side and wider than it is tall. The flat is the
-        // discriminating feature: it is what makes the stroke's edge read as a chisel on one side
-        // and a pencil on the other, and it is why this one takes a large `angle.jitter` in
-        // `BrushCandidates` (§8.5 — rotating per dab is what breaks the sawtooth a repeated stamp
-        // otherwise combs onto the stroke's edge).
+        // **Blunt** — a worn nib, flattened on one side and wider than it is tall. **The owner read
+        // this mask off the first sheet and it is what §8.4's boundary paragraph is built from**:
+        // the sharp cutoff along the bottom makes the shape uneven, and under `angle.jitter` an
+        // uneven shape presents a different outline at every dab. It had both halves by accident;
+        // the Rough Ink family below has them on purpose.
         Shape(name: "pencil-blunt", seed: 0x5148_0013,
               grain: Grain(frequency: 9, octaves: 2, floor: 0.22, threshold: 0.26, softness: 0.34),
               body: { u, v, s in
@@ -152,7 +168,7 @@ enum BrushTipGenerator {
               body: { u, v, s in nib(u, v, s, radius: 0.96, wobble: 0.06, wobbleFrequency: 3.0,
                                      edge: 1.6 * pixel, falloff: 0.12) }),
 
-        // MARK: Inking — the brush pen's nib
+        // MARK: Inking — the brush pen's nib, and §8.6's one piece of open design
 
         // **A brush pen's nib is a teardrop that lies along the travel**, which is `directionFollow`
         // at 1 with no base turn. The taper an artist sees is mostly `size ← pressure`; what the
@@ -162,36 +178,105 @@ enum BrushTipGenerator {
               body: { u, v, _ in teardrop(u, v, halfHeight: 0.50, point: 0.72, lean: 0.22,
                                           soft: 0.20) }),
 
-        // MARK: Painting — flat, bristle, blender
+        // **Rough Ink — the three shapes the owner named, plus the control that is meant to fail.**
+        // *"A potential candidate is a triangular sprite … Or maybe a rough squareish shape, or a
+        // half round half flat shape like pencil blunt could just work if its totally isotropically
+        // randomized."* All three are grossly asymmetric on purpose; `BrushCandidates` turns each
+        // of them at `angle.jitter 1`, which is ±half a turn — isotropic.
+        Shape(name: "rough-ink-triangle", seed: 0x5148_0031,
+              grain: Grain(frequency: 7.0, octaves: 2, floor: 0.72, threshold: 0.0, softness: 1.0),
+              body: { u, v, s in roughTriangle(u, v, s, radius: 0.46, rough: 0.15,
+                                               cornerCap: 0.80) }),
 
-        // **The painting flat.** Like the slab but softer at the long edges and cleanly rounded at
-        // the ends: a loaded flat brush does not tear, it feathers. Held at a fixed angle in
-        // `BrushCandidates` rather than following the travel, which is how a flat is actually used.
-        Shape(name: "paint-flat", seed: 0x5148_0031,
-              grain: Grain(frequency: 4.5, octaves: 2, floor: 0.78, threshold: 0.0, softness: 1.0),
-              body: { u, v, s in flat(u, v, s, aspect: 3.0, soft: 0.10, edgeRough: 0.10) }),
+        Shape(name: "rough-ink-square", seed: 0x5148_0032,
+              grain: Grain(frequency: 8.0, octaves: 2, floor: 0.74, threshold: 0.0, softness: 1.0),
+              body: { u, v, s in roughSquarish(u, v, s, rough: 0.17, lean: 0.22) }),
 
-        // **Bristle — several parallel filaments**, which is §8.5's shaped tip and the one place
-        // that section says a *variant set* earns its keep: *"the variant set earns its keep for
-        // shaped tips (bristle, chalk, splatter) and not for a rough round"*. Three are generated so
-        // the set exists; only the first is reachable today, because `BrushTip.stamp` carries one
-        // `BrushTextureRef` and the per-dab pick §8.5 describes is not built.
-        Shape(name: "paint-bristle-0", seed: 0x5148_0041,
-              body: { u, v, s in bristle(u, v, s, filaments: 11) }),
-        Shape(name: "paint-bristle-1", seed: 0x5148_0042,
-              body: { u, v, s in bristle(u, v, s, filaments: 9) }),
-        Shape(name: "paint-bristle-2", seed: 0x5148_0043,
-              body: { u, v, s in bristle(u, v, s, filaments: 13) }),
+        Shape(name: "rough-ink-halfflat", seed: 0x5148_0033,
+              grain: Grain(frequency: 7.5, octaves: 2, floor: 0.76, threshold: 0.0, softness: 1.0),
+              body: { u, v, s in halfRoundFlat(u, v, s, radius: 0.86, cut: 0.30, rough: 0.09) }),
 
-        // **The blender** — a soft, mottled, low-coverage cloud. It has no hard edge anywhere, which
-        // is exactly what makes it a blender rather than a soft round: the mottle means two passes
-        // over the same area do not land the same coverage, so it smears rather than building.
-        Shape(name: "paint-blender", seed: 0x5148_0051,
-              grain: Grain(frequency: 3.2, octaves: 3, floor: 0.30, threshold: 0.0, softness: 1.0),
-              body: { u, v, _ in
-                  let r: Float = sqrt(u * u + v * v)
-                  return 0.62 * smoothFalloff(1 - r, 0.75)
-              })
+        // **The control, and it is a control rather than a candidate.** §8.4 MEASURED an eroded
+        // round nib at 0.41% of a brush width of edge roughness in a stroke against 1.08% as a lone
+        // dab: every dab presents the same profile and a neighbour fills each notch. Drawn here so
+        // that the *sheet* carries the negative result beside the positive ones instead of the
+        // document carrying it alone — if this row reads as rough as the triangle, the boundary
+        // paragraph is wrong and the whole family collapses back to §8.4's first answer.
+        Shape(name: "rough-ink-eroded-round", seed: 0x5148_0034,
+              body: { u, v, s in nib(u, v, s, radius: 0.84, wobble: 0.11, wobbleFrequency: 15.0,
+                                     edge: 1.4 * pixel, falloff: 0) }),
+
+        // MARK: Painting — the painterly nib, five ways
+
+        // **The owner's reference, verbatim**: real paint-stroke sprites are *"a lot more squarish
+        // than slab shaped, though the shape is alot more blotchy than square, with a clear bristle
+        // direction noticeable in them."* So every one of these is a **superellipse** (squarish, not
+        // a slab, not an oval) at an aspect near 1, with a blotchy boundary and horizontal streaks
+        // running along its long axis — which `directionFollow 1` lays along the travel.
+        //
+        // They span §8.6's four sprite families: jagged outlines, bristle streaks, soft slabs and
+        // dry speckle.
+        // **The streak depths are near 1 and the first render is why.** At 0.3 the bands are
+        // *shading* rather than gaps, and a stroke lays twenty-odd overlapping dabs over every
+        // point — so the accumulation fills every band in and all five rows rendered as identical
+        // black slabs. §8.4's exemption for interior structure is real but it is not unconditional:
+        // what survives a union is a **hole**, not a dimming. Streaks that reach zero survive;
+        // streaks at 30% do not.
+        Shape(name: "paint-blotchy", seed: 0x5148_0041,
+              body: { u, v, s in painterly(u, v, s, aspect: 1.15, exponent: 4.0, blob: 0.16,
+                                           streaks: 14, streakDepth: 0.97, streakCut: 0.30,
+                                           edge: 0.045, dry: 0.30) }),
+
+        Shape(name: "paint-streaky", seed: 0x5148_0042,
+              body: { u, v, s in painterly(u, v, s, aspect: 1.35, exponent: 5.0, blob: 0.10,
+                                           streaks: 20, streakDepth: 1.0, streakCut: 0.46,
+                                           edge: 0.030, dry: 0.35) }),
+
+        Shape(name: "paint-jagged", seed: 0x5148_0043,
+              body: { u, v, s in painterly(u, v, s, aspect: 1.10, exponent: 3.5, blob: 0.28,
+                                           streaks: 9, streakDepth: 0.94, streakCut: 0.24,
+                                           edge: 0.025, dry: 0.55) }),
+
+        Shape(name: "paint-soft-slab", seed: 0x5148_0044,
+              body: { u, v, s in painterly(u, v, s, aspect: 1.55, exponent: 4.5, blob: 0.09,
+                                           streaks: 7, streakDepth: 0.55, streakCut: 0.20,
+                                           edge: 0.190, dry: 0.15) }),
+
+        Shape(name: "paint-dry-load", seed: 0x5148_0045,
+              grain: Grain(frequency: 11, octaves: 3, floor: 0.30, threshold: 0.30, softness: 0.45),
+              body: { u, v, s in painterly(u, v, s, aspect: 1.25, exponent: 4.0, blob: 0.21,
+                                           streaks: 12, streakDepth: 0.90, streakCut: 0.26,
+                                           edge: 0.035, dry: 0.70) }),
+
+        // **Bristle, with the oval taken out of it.** The owner on round one's: *"Right now you can
+        // see it fit within a clear oval shape."* That was literal — every filament was multiplied
+        // by one shared elliptical envelope, so the nib's silhouette **was** that ellipse however
+        // the filaments fell inside it. `openBristle` gives each filament its own two ends and its
+        // own taper and multiplies by nothing shared, so the outline is the filaments.
+        Shape(name: "bristle-open", seed: 0x5148_0051,
+              body: { u, v, s in openBristle(u, v, s, filaments: 11, spread: 0.46,
+                                             breakUp: 0.55) }),
+
+        Shape(name: "bristle-open-dense", seed: 0x5148_0052,
+              body: { u, v, s in openBristle(u, v, s, filaments: 17, spread: 0.52,
+                                             breakUp: 0.70) }),
+
+        // **Streaky — *"the sprite being just a bunch of little dots, like 6 or 8 of them placed
+        // randomly. The brush makes many streaks."*** Separated points, so one drag lays parallel
+        // ribbons rather than a band. `BrushCandidates` gives these `directionFollow 1` and
+        // **jitter 0**, which is the one place on this sheet where rotation jitter is wrong: turning
+        // the dot pattern per dab smears the ribbons back into a band.
+        //
+        // The two differ in how the dots are placed, which is the question the ask leaves open.
+        // Stratified across the nib guarantees six distinct ribbons; a uniform draw is what *"placed
+        // randomly"* says literally and lets two dots share a ribbon.
+        Shape(name: "streak-dots-6", seed: 0x5148_0061,
+              body: { u, v, s in dots(u, v, s, count: 6, stratified: true,
+                                      minRadius: 0.10, maxRadius: 0.17) }),
+
+        Shape(name: "streak-dots-8", seed: 0x5148_0062,
+              body: { u, v, s in dots(u, v, s, count: 8, stratified: false,
+                                      minRadius: 0.09, maxRadius: 0.15) })
     ]
 
     // MARK: - The shape vocabulary
@@ -200,34 +285,56 @@ enum BrushTipGenerator {
     // They are pure functions of their arguments and the seed, which is the whole of what "seeded,
     // deterministic" means here.
 
-    /// **§8.6's slab.** A rectangle of the given aspect with all four edges displaced by two octaves
-    /// of seeded noise — a coarse tear plus a fine fray. The displacement is signed (`2n - 1`), not
-    /// an erosion, so the nib keeps its nominal area: an erosion-only edge would quietly make a
-    /// 4:1 slab thinner than 4:1.
-    static func slab(_ u: Float, _ v: Float, _ seed: UInt64,
-                     aspect: Float, edgeRough: Float, endRough: Float) -> Float {
-        let halfV: Float = 1 / aspect
-        let top: Float = -halfV * (1 + edgeRough * ragged(u, seed &+ 1))
-        let bottom: Float = halfV * (1 + edgeRough * ragged(u, seed &+ 2))
-        let left: Float = -1 * (1 + endRough * ragged(v * aspect, seed &+ 3))
-        let right: Float = 1 * (1 + endRough * ragged(v * aspect, seed &+ 4))
-        let dv: Float = max(v - bottom, top - v)
-        let du: Float = max(u - right, left - u)
-        return step(-max(du, dv), 1.2 * pixel)
+    /// **§8.6's "Square"** — a slab with **no noisy edges**, chamfered corners, and a falloff band
+    /// narrow enough that it *"only falls off in the very edges"*.
+    ///
+    /// The three distances are all in **tip units**, not in each axis's own normalised units, which
+    /// is what makes the falloff the same physical width on a long side, an end and a chamfer. A
+    /// normalised-per-axis distance would feather a 4:1 nib's ends four times as wide as its sides
+    /// and read as a lozenge.
+    static func bevelSlab(_ u: Float, _ v: Float,
+                          aspect: Float, bevel: Float, falloff: Float) -> Float {
+        let hu: Float = 0.96
+        let hv: Float = hu / aspect
+        let du: Float = hu - abs(u)
+        let dv: Float = hv - abs(v)
+        // The chamfer is the line through (hu - bevel, hv) and (hu, hv - bevel); this is the
+        // perpendicular distance inward from it, which is what keeps the cut a straight bevel
+        // rather than the rounded corner a radial metric would give.
+        let dc: Float = (hu + hv - bevel - abs(u) - abs(v)) * 0.70710678
+        return smoothFalloff(min(min(du, dv), dc), max(falloff, 1.2 * pixel))
     }
 
-    /// A chisel blade: hard straight long edges, ends cut on a slant. No noise at all — the point of
-    /// a chisel is the clean line, and roughening it makes it a slab.
-    static func chisel(_ u: Float, _ v: Float, aspect: Float, slant: Float) -> Float {
-        let halfV: Float = 1 / aspect
-        let sheared: Float = u + slant * v * aspect
-        let du: Float = abs(sheared) - 0.97
-        let dv: Float = abs(v) - halfV
-        return step(-max(du, dv), 1.1 * pixel)
+    /// **§8.6's "Messy Flat"** — the same slab with the *ends* broken up and the long sides left
+    /// alone, because §8.4's fourth finding is that a direction-locked nib's long sides sweep along
+    /// the travel and never reach the silhouette.
+    ///
+    /// Three things happen at the end and they are separable on purpose: the boundary itself is
+    /// displaced (`endRough`), it fades rather than cuts, and over the last `endFade` of the nib the
+    /// coverage is multiplied by a mottle (`dirt`) so the end is *"non monolithic"* rather than a
+    /// softer straight line.
+    static func messyEndSlab(_ u: Float, _ v: Float, _ seed: UInt64,
+                             aspect: Float, endRough: Float, endFade: Float,
+                             dirt: Float, sideSoft: Float) -> Float {
+        let hu: Float = 0.94
+        let hv: Float = hu / aspect
+        let dv: Float = hv - abs(v)
+        guard dv > 0 else { return 0 }
+        var coverage: Float = smoothFalloff(dv, max(sideSoft, 1.2 * pixel))
+
+        let end: Float = hu * (1 + endRough * ragged(v * aspect * 2.1 + 4.7, seed &+ 3))
+        let du: Float = end - abs(u)
+        guard du > 0 else { return 0 }
+        coverage *= smoothFalloff(du, max(endFade * 0.30, 1.2 * pixel))
+
+        let t: Float = min(max(du / max(endFade, 1e-4), 0), 1)
+        let mottle: Float = fbm2(u * 7.5 + 2.3, v * aspect * 5.5 + 9.1, octaves: 2, seed: seed &+ 9)
+        return coverage * (t + (1 - t) * (1 - dirt + dirt * mottle))
     }
 
     /// A pencil's outline: a disc whose radius wobbles with the angle, optionally fading over the
-    /// last `falloff` of it.
+    /// last `falloff` of it. Also the **eroded round control** — at a high `wobbleFrequency` and no
+    /// falloff this is exactly the nib §8.4 measured and refuted.
     ///
     /// The angular noise is sampled on the **unit circle** rather than on an angle, so it wraps: a
     /// 1-D noise indexed by `atan2` has a seam at `-π`, which shows up as one straight facet on
@@ -245,6 +352,61 @@ enum BrushTipGenerator {
         return hard * smoothFalloff(rr - r, falloff)
     }
 
+    /// **§8.6's triangular Rough Ink candidate.** Three half-planes whose offsets are independently
+    /// displaced by seeded noise, capped by a disc so the three points are trimmed to a blob rather
+    /// than left as spikes that survive a downscale only as flecks.
+    ///
+    /// It is grossly asymmetric under any rotation, which is the whole point: §8.4's boundary
+    /// paragraph is that *rotating an uneven shape changes its outline while rotating a disc changes
+    /// nothing*, so this is the shape half of the pair and `angle.jitter 1` is the other.
+    static func roughTriangle(_ u: Float, _ v: Float, _ seed: UInt64,
+                              radius: Float, rough: Float, cornerCap: Float) -> Float {
+        var d: Float = 3
+        for i in 0..<3 {
+            let a: Float = Float(i) * 2.0943951 + 0.42
+            let nx: Float = cos(a), ny: Float = sin(a)
+            let across: Float = -u * ny + v * nx
+            let offset: Float = radius
+                * (1 + rough * ragged(across * 2.4 + Float(i) * 3.7, seed &+ UInt64(i) &+ 1))
+            d = min(d, offset - (u * nx + v * ny))
+        }
+        d = min(d, cornerCap - sqrt(u * u + v * v))
+        return step(d, 1.4 * pixel)
+    }
+
+    /// **§8.6's "rough squareish shape".** Four half-planes at four **different** distances, so the
+    /// nib has no 4-fold symmetry left: a regular square's silhouette repeats every quarter turn,
+    /// and a jitter that lands on a repeat presents the same outline twice.
+    static func roughSquarish(_ u: Float, _ v: Float, _ seed: UInt64,
+                              rough: Float, lean: Float) -> Float {
+        let sides: [Float] = [0.78, 0.60, 0.86, 0.68]
+        var d: Float = 3
+        for i in 0..<4 {
+            let a: Float = Float(i) * 1.5707963 + lean
+            let nx: Float = cos(a), ny: Float = sin(a)
+            let across: Float = -u * ny + v * nx
+            let offset: Float = sides[i]
+                * (1 + rough * ragged(across * 3.1 + Float(i) * 5.3, seed &+ UInt64(i) &+ 11))
+            d = min(d, offset - (u * nx + v * ny))
+        }
+        return step(d, 1.4 * pixel)
+    }
+
+    /// **§8.6's *"half round half flat shape like pencil blunt"***, at ink weight: a disc with one
+    /// side ground away. Pencil Blunt's cut is clean and the owner read *that* — the sharp cutoff —
+    /// as what makes the shape uneven, so the cut is kept and only slightly torn.
+    static func halfRoundFlat(_ u: Float, _ v: Float, _ seed: UInt64,
+                              radius: Float, cut: Float, rough: Float) -> Float {
+        let r: Float = sqrt(u * u + v * v)
+        guard r > 1e-4 else { return 1 }
+        let cx: Float = u / r, cy: Float = v / r
+        let n: Float = value2(cx * 6.5 + 1.7, cy * 6.5 + 8.3, seed)
+        let rr: Float = radius * (1 + rough * (2 * n - 1))
+        let body: Float = step(rr - r, 1.4 * pixel)
+        let lip: Float = cut * (1 + 0.18 * ragged(u * 3.4 + 2.1, seed &+ 21))
+        return body * step(lip - v, 2 * pixel)
+    }
+
     /// The brush pen's teardrop, long axis along `u`. `point` sharpens the leading end and `lean`
     /// biases the width toward the trailing one.
     static func teardrop(_ u: Float, _ v: Float,
@@ -255,36 +417,118 @@ enum BrushTipGenerator {
         return smoothFalloff(width - abs(v), soft * halfHeight) * step(width - abs(v), 1.2 * pixel)
     }
 
-    /// The painting flat: a rounded-ended bar, softly feathered along its long edges.
-    static func flat(_ u: Float, _ v: Float, _ seed: UInt64,
-                     aspect: Float, soft: Float, edgeRough: Float) -> Float {
-        let halfV: Float = 1 / aspect
-        let edge: Float = halfV * (1 + edgeRough * ragged(u, seed &+ 5))
-        // A superellipse in u so the ends are round rather than cut.
-        let endFade: Float = smoothFalloff(1 - pow(abs(u), 3.0), 0.22)
-        return smoothFalloff(edge - abs(v), soft) * endFade
+    /// **The painterly nib** — §8.6's *"a lot more squarish than slab shaped, though the shape is
+    /// alot more blotchy than square, with a clear bristle direction noticeable in them."* Three
+    /// separable terms, one per clause of that sentence:
+    ///
+    /// - **Squarish**: a superellipse at `exponent` 3.5–5, at an aspect near 1. Not a slab (which
+    ///   would be 3:1 or 4:1) and not the ellipse round one's bristle turned out to be.
+    /// - **Blotchy**: the boundary radius is displaced by three octaves of 2-D noise, so the outline
+    ///   swells and bites rather than wobbling at one frequency.
+    /// - **Bristle direction**: horizontal bands along `u`, broken along their own length, so the
+    ///   streaks are visible *inside* the dab. §8.4 exempts interior structure from the union
+    ///   argument — a pit mid-dab is not filled by a neighbour's boundary — which is why this is the
+    ///   term that survives a stroke rather than the boundary noise.
+    ///
+    /// `streakCut` is the share of the comb that closes completely and therefore the width of the
+    /// channels; `streakDepth` is how far a closed band goes, and it wants to be near 1 for the
+    /// reason written at the line itself.
+    ///
+    /// `dry` breaks the outer band of the nib, which is what makes a loaded flat read as loaded.
+    static func painterly(_ u: Float, _ v: Float, _ seed: UInt64,
+                          aspect: Float, exponent: Float, blob: Float,
+                          streaks: Float, streakDepth: Float, streakCut: Float,
+                          edge: Float, dry: Float) -> Float {
+        let hu: Float = 0.94
+        let hv: Float = hu / aspect
+        let su: Float = abs(u) / hu, sv: Float = abs(v) / hv
+        let sBox: Float = pow(pow(su, exponent) + pow(sv, exponent), 1 / exponent)
+        let warp: Float = 2 * fbm2(u * 2.6 + 4.1, v * aspect * 2.6 + 7.9,
+                                   octaves: 3, seed: seed &+ 31) - 1
+        let d: Float = (1 + blob * warp) - sBox
+        guard d > 0 else { return 0 }
+        var coverage: Float = smoothFalloff(d, max(edge, 1.4 * pixel))
+
+        // **The streaks are a function of `v` and all but a function of `v` alone, and the first
+        // contact sheet is what settled that.** They were a band in `v` times a break-up in `u`,
+        // which reads beautifully on the mask and renders as a solid slab: consecutive dabs slide
+        // along `u`, so one dab's gap sits over its neighbour's ink and the union fills every
+        // channel in. §8.4's argument reaching *inside* the dab. The `u` term survives only as a
+        // slow lateral wobble of the whole comb — a tenth of a band period over the nib, which
+        // moves by about 0.005 of a period between neighbouring dabs and therefore cannot fill.
+        //
+        // **And the channel has to reach zero.** A stroke lays twenty-odd overlapping dabs over
+        // every point at these spacings, so a band dimmed to 0.2 accumulates to 0.92 and is gone.
+        // What survives a union is a hole; a dimming is not one. `streakDepth` is therefore near 1
+        // on every nib whose streaks are meant to be seen, and the *width* of the channel is what
+        // separates a comb from a blotch.
+        let phase: Float = v * streaks + 0.37 + 0.10 * value1(u * 1.7 + 1.9, seed &+ 42)
+        let band: Float = value1(phase, seed &+ 41)
+        let closed: Float = min(max((streakCut - band) / 0.16, 0), 1)
+        // **A comb whose every channel is the same depth is a rake, not a brush.** `amplitude`
+        // varies slowly along `v` only — so one channel is a clean gap, its neighbour a grey drag
+        // and the one after it barely there — which is the *"more blotchy than square"* half of the
+        // owner's sentence. Along `v` only, for the same reason the phase is: anything that varies
+        // along `u` is filled in by the next dab.
+        let amplitude: Float = 0.35 + 0.65 * value1(v * streaks * 0.31 + 5.1, seed &+ 44)
+        coverage *= 1 - streakDepth * amplitude * closed
+
+        guard dry > 1e-4 else { return coverage }
+        let t: Float = min(max(d / 0.30, 0), 1)
+        let pits: Float = fbm2(u * 9.0 + 3.3, v * aspect * 9.0 + 5.5, octaves: 2, seed: seed &+ 43)
+        return coverage * (t + (1 - t) * (1 - dry + dry * pits))
     }
 
-    /// **Several parallel filaments**, running along `u` so the brush's `directionFollow` lays them
-    /// along the travel. Each filament's centre, half-width and alpha are seeded draws, and each is
-    /// broken along its length by 1-D noise: a bristle brush's streaks are not continuous.
-    static func bristle(_ u: Float, _ v: Float, _ seed: UInt64, filaments: Int) -> Float {
-        let envelope: Float = step(1 - sqrt(u * u + (v / 0.44) * (v / 0.44)), 0.12)
-        guard envelope > 0 else { return 0 }
+    /// **Parallel filaments with no shared envelope** — §8.6's *"Right now you can see it fit within
+    /// a clear oval shape"*, which was literal and is the whole of what this rewrites.
+    ///
+    /// Round one multiplied every filament by one elliptical envelope, so whatever the filaments did
+    /// the **silhouette** was that ellipse — the exact defect the owner named, and a nib that
+    /// betrays its bounding shape. Here each filament carries its own two ends, its own taper and
+    /// its own break-up, and nothing multiplies the sum. The outline is therefore the filaments and
+    /// has no closed form to read off it.
+    static func openBristle(_ u: Float, _ v: Float, _ seed: UInt64,
+                            filaments: Int, spread: Float, breakUp: Float) -> Float {
         var coverage: Float = 0
         for i in 0..<filaments {
             let s: UInt64 = seed &+ UInt64(i) &* 0x9E37_79B9
             let slot: Float = (Float(i) + 0.5) / Float(filaments)
-            let centre: Float = (slot * 2 - 1) * 0.42 + (hash01(i, 1, s) - 0.5) * 0.05
-            let halfWidth: Float = 0.010 + 0.022 * hash01(i, 2, s)
-            let peak: Float = 0.55 + 0.45 * hash01(i, 3, s)
-            var f: Float = smoothFalloff(halfWidth - abs(v - centre), 0.9 * halfWidth)
+            let centre: Float = (slot * 2 - 1) * spread + (hash01(i, 1, s) - 0.5) * 0.07
+            let halfWidth: Float = 0.012 + 0.026 * hash01(i, 2, s)
+            guard abs(v - centre) < halfWidth + 0.01 else { continue }
+            let u0: Float = -0.95 + 0.66 * hash01(i, 4, s)
+            let u1: Float = 0.95 - 0.66 * hash01(i, 5, s)
+            guard u > u0, u < u1 else { continue }
+            var f: Float = smoothFalloff(halfWidth - abs(v - centre), 0.85 * halfWidth)
             guard f > 0 else { continue }
-            // Along the filament: a slow break-up, never fully closing.
-            f *= 0.45 + 0.55 * value1(u * 5.5 + Float(i) * 17.0, s &+ 0x51)
-            coverage = max(coverage, f * peak)
+            f *= smoothFalloff(u - u0, 0.24) * smoothFalloff(u1 - u, 0.24)
+            f *= (1 - breakUp) + breakUp * value1(u * 6.5 + Float(i) * 17.0, s &+ 0x51)
+            coverage = max(coverage, f * (0.55 + 0.45 * hash01(i, 3, s)))
         }
-        return coverage * envelope
+        return coverage
+    }
+
+    /// **§8.6's "Streaky"** — *"the sprite being just a bunch of little dots, like 6 or 8 of them
+    /// placed randomly. The brush makes many streaks."*
+    ///
+    /// `stratified` is the one design question the ask leaves open and the sheet asks it: spreading
+    /// the dots one per band across the nib guarantees *n* distinct ribbons, where a uniform draw —
+    /// which is what *"placed randomly"* says literally — lets two dots land on one ribbon and
+    /// leaves a gap elsewhere.
+    static func dots(_ u: Float, _ v: Float, _ seed: UInt64,
+                     count: Int, stratified: Bool, minRadius: Float, maxRadius: Float) -> Float {
+        var coverage: Float = 0
+        for i in 0..<count {
+            let s: UInt64 = seed &+ UInt64(i) &* 0xC2B2_AE35
+            let cy: Float = stratified
+                ? ((Float(i) + 0.5) / Float(count) * 2 - 1) * 0.72 + (hash01(i, 6, s) - 0.5) * 0.11
+                : (hash01(i, 6, s) * 2 - 1) * 0.74
+            let cx: Float = (hash01(i, 7, s) * 2 - 1) * 0.66
+            let radius: Float = minRadius + (maxRadius - minRadius) * hash01(i, 8, s)
+            let dx: Float = u - cx, dy: Float = v - cy
+            coverage = max(coverage, smoothFalloff(radius - sqrt(dx * dx + dy * dy), 0.55 * radius))
+        }
+        return coverage
     }
 
     // MARK: - Edge and falloff helpers
