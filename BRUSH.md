@@ -1970,11 +1970,39 @@ first, which cleanly replaces the old one."*
     below it unreachable, and an edit that survived the editor and not the process.
 11. **The Texture group's CC0 assets.** §8.3 and §8.4 — last of the shipped set, because it is the only part
     with a licensing step, and §8.3's verification happens at this point rather than earlier.
-12. **`.abr`, then Procreate `.brush`.** Last. A parser with no image primitive behind it shapes its model
-    around the wrong renderer. **§2.21 makes this an adapter rather than a parser**: what the file says
-    about pressure, tilt, spacing, jitter and scatter becomes §6 rows, and what it does not say is left
-    at the neutral rather than invented. It is reached from the brushes menu's **Add brush** button
-    (§2.20), not from a settings panel.
+12. **Three formats, and it stays last.** Owner: *"support of clip studio paint, abr, procreate brushes
+    are good enough for now i think"*, and on timing, *"Your choice"*. **Last**, and the reason is
+    sharper than the original one: the model moved twice on the day this was scheduled — §2.28's module
+    chains and §2.29's curved scale modules — and **an adapter aimed at a moving target is written
+    twice**. The original reason stands too: a parser with no image primitive behind it shapes its model
+    around the wrong renderer. Reached from the brushes menu's **Add brush** (§2.20), which §7.1 gives
+    two arms — create manually, or import.
+
+    **§2.21 makes this an adapter rather than a parser, and the adapter is the hard half.** Each
+    format's parameter set only partly overlaps §6's, in both directions: Procreate has Wet Mix and
+    Bleed and this engine has neither; this engine has `density`, noise octaves and orderable chains and
+    none of them do. Every non-overlapping setting is a decision, and §2.21 already rules which way it
+    goes — **what the file states becomes modules, what it does not state stays at the neutral and is
+    never invented**.
+
+    **All three are undocumented and reverse-engineered, so the stage opens with a survey against real
+    files, not with a parser.** What is known going in, to be verified rather than trusted:
+    - **`.abr`** — proprietary binary in several incompatible versions; the modern ones carry
+      Photoshop's serialised descriptor structure (diameter, angle, roundness, spacing, hardness and the
+      dynamics blocks) alongside compressed sampled bitmaps. GIMP and Krita both read it.
+    - **Procreate `.brush` / `.brushset`** — a zip holding a binary-plist archive of the Brush Studio
+      settings plus shape and grain PNGs. **The closest fit to this engine**, because §7.2's editor was
+      designed against Brush Studio.
+    - **Clip Studio `.sut`** — a SQLite database, parameters in tables and materials as blobs. The
+      strangest container and the most *readable*, being a real database rather than a serialisation.
+
+    **Test files are a real dependency and are not urgent.** A reverse-engineered parser can only be
+    trusted against files somebody actually uses, and free packs are simple enough that an adapter can
+    pass on them and still fail on an elaborate commercial brush. The owner can supply Procreate packs
+    but it costs them time, so the instruction is to source freely-licensed samples first and ask only
+    if those prove too thin. **§8.3 is why importing matters at all**: an artist's bought pack is theirs
+    to use and simply cannot travel inside the binary, so the import path is the only lawful route for
+    most of what exists.
 
 ---
 
