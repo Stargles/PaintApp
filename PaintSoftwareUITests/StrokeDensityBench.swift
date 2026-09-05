@@ -918,7 +918,11 @@ final class StrokeDensityBench: XCTestCase {
         // Warm every allocator and gradient cache the first row would otherwise pay for.
         _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
 
-        for n in [200, 500, 1000] {
+        // **Four counts, because one number is a point and the ask is about a shape.** 2,000 is the
+        // top of the owner's *"couple thousand"* and is where §11.2's straight line puts a full
+        // re-walk at 1.13 s on this simulator — so the before/after pair at that row is the one the
+        // report is really about.
+        for n in [200, 500, 1000, 2000] {
             autoreleasepool {
                 let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
                 // A layer on screen has already rendered, so the drag starts from a warm memo.
