@@ -394,6 +394,31 @@ final class BrushLibraryLogicTests: XCTestCase {
         XCTAssertEqual(kept.count, 1, "three launches, one copy — kept: \(kept)")
     }
 
+    /// **Two unreadable libraries inside one second are two files.** The dated name is only accurate
+    /// to the second, so without the uniquing suffix the second preserve writes the first one's name
+    /// and the first artist's bytes are gone — which is precisely the destruction this whole path
+    /// exists to prevent, reintroduced at the last step.
+    ///
+    /// The test above cannot reach this: it removes the original, so the second and third launches
+    /// find nothing to preserve. Only a *fresh* unreadable file written between two launches gets
+    /// there, and the two contents must differ or an overwrite would be undetectable.
+    func testTwoUnreadableLibrariesInTheSameSecondAreBothKept() throws {
+        let first = Data("{ first broken library".utf8)
+        let second = Data("{ second broken library, different bytes".utf8)
+        let path = directory.appendingPathComponent(BrushLibraryStore.fileName)
+
+        try first.write(to: path)
+        _ = makeStore()
+        try second.write(to: path)
+        _ = makeStore()
+
+        let storage = BrushStorage(root: directory)
+        let kept = storage.fileNames().filter { $0.hasPrefix("library-unreadable-") }.sorted()
+        XCTAssertEqual(kept.count, 2, "two different unreadable files, two copies — kept: \(kept)")
+        XCTAssertEqual(Set(kept.compactMap { storage.read($0) }), [first, second],
+                       "…and both artists' bytes are recoverable, not just the later one's")
+    }
+
     // MARK: - BRUSH.md §2.30 and §2.32 — the owner's own library opens
 
     /// **The library pulled off the owner's iPad loads, end to end, through the store.**

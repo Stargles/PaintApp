@@ -819,7 +819,7 @@ enum BrushScatterSplit {
     /// scatter and §2.18's density rate) and again here, 200 seeds at five pressures. Carrying the
     /// number across leaves the **inked pixels 1.2–4.9% heavier** and the mean displacement **59%
     /// larger**; converting by this ratio leaves the inked pixels within **0.8%** at every pressure
-    /// and the mean displacement within 3.7%. §2.32's own pin set 2.9% as the bar for *"their ink
+    /// and the mean displacement within 4.3%. §2.32's own pin set 2.9% as the bar for *"their ink
     /// survived"*, and one of those two numbers is outside it.
     ///
     /// **It does not agree with the three presets §2.30 rewrote by hand, and that is not an

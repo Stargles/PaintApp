@@ -411,4 +411,105 @@ final class BrushMenuUITests: PaintUITestCase {
                             + "underneath it become unaddressable while the screen still works by hand."),
                        file: file, line: line)
     }
+
+    // MARK: - BRUSH.md §8.6 — the owner's own Rough Ink, reached and drawn with
+
+    /// **The tune-and-extract loop's last step, driven rather than asserted.** §8.6's Rough Ink is
+    /// now the brush the owner tuned on their iPad, and every other check of that claim is a model
+    /// comparison against their bytes. This one starts from a device with no library file, walks the
+    /// menu a finger's way to it, and draws.
+    ///
+    /// **The failure it exists to catch is the shape CLAUDE.md's "a feature is not finished" section
+    /// describes**: their brush is a **3.4 pt** nib at spacing **0.01** where the shipped one was an
+    /// 11 pt triangle at 0.045, and every other check of the extraction compares two `Brush` values —
+    /// which are equal whether or not the numbers in them reach the ink.
+    ///
+    /// **It asserts roughness rather than width, and the first draft of it asserting width was
+    /// wrong.** The obvious reading of a 3.4 pt nib replacing an 11 pt one is "their line is
+    /// narrower", and MEASURED it is not: theirs covers 7–8 rows of this band against the default's
+    /// 6, because `scatterAcross` frays the silhouette wider than the nib that walks it. That is a
+    /// property of the brush, not a defect, and an assertion built on the guess would have been a
+    /// red that meant nothing. What actually separates the two is that a plain nib's column profile
+    /// is *constant* and theirs is not.
+    func testTheOwnersRoughInkIsReachableFromAColdStartAndDrawsRough() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // The 22 pt default, as the operand to compare theirs against — an assertion that their
+        // stroke "has width" would pass on any brush at all.
+        let defaultY = 0.30, roughY = 0.55
+        drawLine(on: canvas, from: CGVector(dx: 0.30, dy: defaultY), to: CGVector(dx: 0.70, dy: defaultY))
+
+        openBrushMenu(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Inking"], "The Inking group row")
+        let rough = app.buttons["brushPanel.brush.Rough Ink"]
+        XCTAssertTrue(rough.waitForExistence(timeout: 5),
+                      "Rough Ink must still be a row in Inking — this pass changed its values, not "
+                      + "its name or its group")
+        tapWhenHittable(rough, "Rough Ink's row")
+        XCTAssertTrue(rough.isSelected, "…and one tap selects it")
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 3))
+
+        drawLine(on: canvas, from: CGVector(dx: 0.30, dy: roughY), to: CGVector(dx: 0.70, dy: roughY))
+        attachScreen("owner-rough-ink")
+
+        let plain = inkedRowCounts(of: canvas, band: defaultY, halfBand: 0.03)
+        let roughProfile = inkedRowCounts(of: canvas, band: roughY, halfBand: 0.03)
+
+        XCTAssertGreaterThan(plain.reduce(0, +), 0, "PREMISE: the default brush marks the paper")
+        XCTAssertGreaterThan(roughProfile.reduce(0, +), 0,
+                             "The owner's Rough Ink has to reach the paper. Zero here is the whole "
+                             + "point of driving it: a 3.4 pt nib whose dab size or density came "
+                             + "across wrong lays nothing, and every model test still passes")
+
+        // **MEASURED on this gesture: the default's profile is [6, 6, … 6] and theirs runs 6 to 9.**
+        // The default nib is a disc walked at a constant width, so every column of it is the same
+        // height to the pixel; the roughness is the only thing that can break that, and the 0.3 bar
+        // is between a measured 0.0 and a measured 0.67.
+        XCTAssertLessThan(spread(plain), 0.01,
+                          "PREMISE: a plain round nib draws a line of constant width, so this "
+                          + "comparison has a zero to measure against — profile \(plain)")
+        XCTAssertGreaterThan(spread(roughProfile), 0.3,
+                            "Their Rough Ink has to draw *rough*. This is the assertion the model "
+                            + "tests cannot make: the scatter, the angle jitter and the density gate "
+                            + "all survive the extraction as equal `Brush` values whether or not they "
+                            + "reach the ink, and an even-width line here means they did not — "
+                            + "profile \(roughProfile)")
+    }
+
+    /// How many rows of each of 40 evenly spaced columns are inked, inside one horizontal band of
+    /// `element`'s own screenshot. A clean line is the same count in every column; a rough one is not.
+    private func inkedRowCounts(of element: XCUIElement, band: Double, halfBand: Double,
+                                fromDX: Double = 0.32, toDX: Double = 0.68,
+                                columns: Int = 40) -> [Int] {
+        guard let cg = element.screenshot().image.cgImage else { return [] }
+        let width = cg.width, height = cg.height
+        var buffer = [UInt8](repeating: 0, count: height * width * 4)
+        guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return [] }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let low = max(Int((band - halfBand) * Double(height)), 0)
+        let high = min(Int((band + halfBand) * Double(height)), height - 1)
+        return (0..<columns).map { step in
+            let dx = fromDX + (toDX - fromDX) * Double(step) / Double(columns - 1)
+            let x = min(max(Int(dx * Double(width)), 0), width - 1)
+            return (low...high).count { row in
+                let offset = row * width * 4 + x * 4
+                return !(buffer[offset] > 240 && buffer[offset + 1] > 240 && buffer[offset + 2] > 240)
+            }
+        }
+    }
+
+    /// The standard deviation of a column profile — the number that separates a clean line from a
+    /// broken one without depending on how thick either is.
+    private func spread(_ counts: [Int]) -> Double {
+        guard counts.count > 1 else { return 0 }
+        let mean = Double(counts.reduce(0, +)) / Double(counts.count)
+        let variance = counts.reduce(0.0) { $0 + pow(Double($1) - mean, 2) } / Double(counts.count)
+        return variance.squareRoot()
+    }
 }

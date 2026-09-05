@@ -2575,7 +2575,7 @@ the `BrushTipGenerator` shape that drew them so any one of them can be regenerat
 | Inking | Technical Pen — Fine | *procedural* | **no modulation rows at all** — a Rotring |
 | | Brush Pen | `pen-brush` | teardrop along the travel |
 | | Rough Ink — Blotchy | *procedural* | §8.4's first answer, all dynamics and no picture |
-| | **Rough Ink** | `rough-ink-triangle` | **triangle + Blotchy's dynamics**, which is both halves of §8.4's pair *and* both mechanisms |
+| | **Rough Ink** | `square` | **the owner's own, extracted from their iPad** — a 3.42 pt reference square at spacing 0.01 under a full turn. Superseded the `rough-ink-triangle` row below on 2026-09-05; see *The owner tuned this one and it is theirs now* |
 
 | Painting | **Painterly** | `paint-dry-load` | speckled interior, broken edges, **spacing 0.095** so the pixels are seen one dab at a time |
 | | **Bristle** | `bristle-open` | **open nib + envelope**. The mask fix alone left the walk dilating the outer boundary; the A/B row with a short-λ size wobble and a coherent scatter won it |
@@ -2626,6 +2626,56 @@ group yet — add one with +"*, and Rough Ink, Square, Bristle and Streaky each 
 canvas. That is CLAUDE.md's *"a preset naming a missing file draws nothing and no logic test will tell
 you"* — and it is now also a test: `BrushLibraryLogicTests` resolves every shipped tip through
 `BrushTextureStore` and renders every shipped brush.
+
+### The owner tuned this one and it is theirs now — 2026-09-05
+
+**§8.6's Rough Ink is no longer a brush we authored.** The owner tuned it on their iPad, said it
+*"looks almost exactly like how I want it now"*, and the library was pulled off the device and
+committed as `PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json`. Every number in
+`BrushLibrary.roughInk` is now theirs, put through the app's own two migrations and nothing else, and
+`BrushModulationLogicTests.testTheShippedRoughInkIsTheOwnersTunedBrush` asserts *equality against
+their bytes* rather than describing the result. That is §12 stage 9's own note — *"a shipped preset is
+the artist's, the owner tunes these on the device and has the values extracted back"* — closing.
+
+**What they changed is not a nudge.** Stage 9 shipped an 11 pt `rough-ink-triangle` at spacing 0.045
+with Blotchy's dynamics. They kept the *mechanism* §8.4 argued for — an asymmetric picture under a
+full turn plus a pressure dropout — and rebuilt everything else around the plain reference **square**
+at **3.42 pt** walked at **0.01** of a width, so the roughness now comes out of the overlap of a
+turning square rather than out of one blob's outline. Their `size ← pressure` is a full-gain ramp
+saturating at 585/1024 of the press, with a second long-λ curved `size ← random` above 571/1024 at
+half gain.
+
+**Two conversions were needed to read their file at all, and both are the app's own.** §2.32's density
+gate, and §2.30's scatter split. The split is the one with a judgement in it: a polar draw lands a dab
+on a **disc**, two independent signed draws land it in a **square** of the same half-extent, and the
+same number therefore scatters about half again as hard. `BrushScatterSplit.isotropicToAxis`
+(0.500/0.767) undoes that, and **which of the two to do was measured against their own approved ink
+rather than argued.** Their Rough Ink and their Blotchy were rendered at `f71eeb9` — the commit they
+were authored on — and again after the migration, 200 seeds at five pressures each:
+
+| | worst inked-pixel change | worst mean across-displacement change |
+|---|---|---|
+| **converted** by `isotropicToAxis` | **0.76%** | **4.2%** |
+| carried across unscaled | 1.2–4.9% | **~59%** |
+
+MEASURED 2026-09-05 at `a34669d` against a baseline taken at `f71eeb9` with **byte-identical**
+measurement helpers (`dabs`, `render`, the same 200 golden-ratio seeds and the same stroke), so the
+comparison is of the engine and not of the apparatus. The residual is one-directional — every one of
+the ten rows is 2–4% *high* on displacement — because the constant is built from the **radial** means
+(0.500 against 0.767) while this metric is **per-axis**, where the exact ratio would be nearer 0.637.
+The gap is 2.4%, it is far below anything an artist can see, and it is a sixteenth of what carrying
+the number across costs; re-deriving the constant from the per-axis mean would trade a near-exact ink
+match for a near-exact displacement match and is not worth the churn. **Driven as well as measured**:
+`BrushMenuUITests.testTheOwnersRoughInkIsReachableFromAColdStartAndDrawsRough` reaches it from a cold
+launch and pins that the drawn line is *rough* — the default nib's column profile is `[6, 6, … 6]`
+and theirs runs 6 to 9.
+
+**Their other fifteen were checked too, and thirteen are byte-identical to what ships.** Blotchy and
+Bristle differ only where §2.30 re-authored a scatter row **by hand**, carrying the number across
+where the migration converts it. That is deliberate and is not an inconsistency to fix blind:
+re-authoring a preset is an act with a person in it, and §2.30 recorded drawing Bristle on a simulator
+and keeping it. **But it does mean the same brush now scatters ~53% wider across on a fresh install
+than on the owner's own device**, and nobody has looked at those two side by side. See §13.
 
 ## 9. Grain — the deletion
 
@@ -3084,15 +3134,31 @@ first, which cleanly replaces the old one."*
   `0…1` because above 1 the *finest* octave is the loudest, which is a high-pass and a different feature;
   §8.4's refuted spectral slope is the neighbouring idea and the reason to be careful about reopening it.
 
-- **Whether a library file written before §2.30 should still open.** §2.32's pin found that
-  `owner-tuned-library-2026-09-05.json` — a library pulled off the owner's own iPad — **cannot be
-  decoded by `main` at all**: it names the isotropic `scatter` output §2.30 deleted, so `BrushOutput`
-  throws and the whole file fails. §2.32 shipped a decode migration for its own change (see the
-  ruling, and the reason it is an exception to §2.28's no-legacy-arm note) and deliberately did not
-  ship one for §2.30's, because nobody has asked and no library on a device is known to predate it
-  except that fixture. **The question is whether a brush library is a document (§2.14: expendable) or
-  the artist's tuning (§2.32's answer: not).** If it is the latter, §2.30 owes the same three-line
-  migration §2.32 wrote, and the fixture is the test case.
+- **Whether a library file written before §2.30 should still open. ANSWERED 2026-09-05: yes, and it
+  shipped.** The question was whether a brush library is a document (§2.14: expendable) or the
+  artist's tuning (§2.32's answer: not). It is the latter — §8.1 makes the library app-level rather
+  than per-document, it survives every document, and it holds work done by hand that exists nowhere
+  else — so §2.30 owed the same migration §2.32 wrote and now has it (`BrushScatterSplit`: one legacy
+  key on the dab, one legacy output name on a row read twice, the amount converted rather than
+  copied). **The failure this closes was a live data-loss path, not a hypothetical**: `loadGroups`
+  caught the decode error, logged, and seeded, and the next edit persisted the shipped defaults over
+  the artist's file. A library that still cannot be read is now **moved aside** to a dated sibling
+  under the same root before anything is seeded, so a future reader has the bytes.
+
+- **Whether §2.30's three hand-re-authored presets should have been converted too.** The migration
+  converts an isotropic amount by `BrushScatterSplit.isotropicToAxis`; §2.30 re-authored Rough Ink,
+  Rough Ink — Blotchy and Bristle by carrying the number across unscaled. Rough Ink is moot — §8.6's
+  is the owner's own brush now — but **Blotchy and Bristle therefore scatter about 53% wider across on
+  a fresh install than the same two brushes do on the owner's device**, where the migration converted
+  them. Their Blotchy's mean across-displacement is MEASURED at ~0.20 pt at every pressure; the
+  shipped one's ~0.31 is INFERRED, by dividing through the conversion the two rows differ by.
+  `BrushModulationLogicTests.testEveryOtherBrushInTheOwnersLibraryIsWhatShips`
+  asserts that divergence rather than hiding it. **The case for leaving it is that §2.30 drew Bristle
+  on a simulator and kept it** — re-authoring has a person in it and a migration does not — and the
+  case for converting is that the branch's own argument, *what a brush is worth keeping is what it
+  draws*, does not stop at Rough Ink. Nobody has put the two side by side. **This wants eyes, not
+  arithmetic**; the amounts are small in absolute terms (0.31 pt on an 11 pt nib) and it may well be
+  invisible.
 
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
