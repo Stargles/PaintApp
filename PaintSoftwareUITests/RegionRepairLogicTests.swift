@@ -11,11 +11,20 @@ import CoreGraphics
 /// every element in order and merely declines to stamp the ones whose ink cannot reach the clip.
 /// So the risk is different, and so is what has to be pinned:
 ///
-/// 1. **Byte identity, three ways**, because there are three separate ways to be wrong and no
-///    single fixture sees all of them: an eraser needs the rectangle redrawn from the *bottom* of
-///    the stack, a run of non-`.normal` strokes needs its isolation decided over the whole run
-///    whether or not its members are stamped, and a stroke straddling the rectangle's edge needs
-///    BRUSH.md §12 stage 8's group to merge at its own opacity.
+/// 1. **The picture the walk makes, three ways**, because there are three separate ways to be
+///    wrong and no single fixture sees all of them: an eraser needs the rectangle redrawn from the
+///    *bottom* of the stack, a run of non-`.normal` strokes needs its isolation decided over the
+///    whole run whether or not its members are stamped, and a stroke straddling the rectangle's
+///    edge needs BRUSH.md §12 stage 8's group to merge at its own opacity. Seven of the eleven pin
+///    that byte for byte; the three above are the ones that put a transparency layer across the
+///    rectangle's edge, and there the comparison is exact to within a rounding unit for the reason
+///    `assertMatchesToWithinARoundingUnit` measures.
+///
+///    **All three of those fixtures were blind when they were written and each was found by
+///    mutation**, which is the note worth carrying out of this file: the eraser had nothing left to
+///    erase after the cut, the `.multiply` run had nothing beneath it to blend against, and the
+///    "straddling" stroke did not reach the rectangle. Every one of them was green against a build
+///    with the behaviour it names deleted.
 /// 2. **The bound actually binds** — counted in dabs, never in milliseconds, because the claim is
 ///    about the algorithm and the milliseconds are the machine's.
 /// 3. **A canvas-crossing edit still costs the full walk**, which is the honest half of the
@@ -181,24 +190,24 @@ final class RegionRepairLogicTests: XCTestCase {
     /// assumed.**
     ///
     /// A repair whose rectangle **truncates a transparency layer** disagrees with the full walk by
-    /// one or two units out of 255, on pixels along the rectangle's edge, in both directions —
-    /// MEASURED 2026-09-05 at four bytes of 76,800 with an eraser's group cut by the rectangle, and
-    /// at fifty-two with a `.multiply` run's isolation layer cut by it. CoreGraphics composites a
-    /// transparency layer through a buffer sized by the clip in force, and a layer given a smaller
-    /// buffer does not round identically.
+    /// one or two units out of 255, on pixels along the rectangle's edge, in both directions.
+    /// MEASURED 2026-09-05, on all three of the fixtures that arrange it: four bytes of 76,800 with
+    /// an eraser's `destinationOut` group cut by the rectangle, fifty-two with a `.multiply` run's
+    /// isolation layer, fifteen with a plain source-over stroke group at opacity 0.55. **The blend
+    /// mode does not matter and the layer's purpose does not matter** — what matters is that the
+    /// clip cut it. BRUSH.md §12 stage 8 gave *every* stroke a group, so this reaches any stroke
+    /// long enough to leave the rectangle, which is most of them.
     ///
-    /// **It is rounding at the clip, not a walk that drew the wrong thing**, and three experiments
-    /// say so. Disabling the skip test entirely reproduces the eraser fixture's four bytes *to the
-    /// value*, so it is not an element wrongly left out. Shortening the punch until its group no
-    /// longer straddles the rectangle moves the bytes rather than removing them. And the seven tests
-    /// that still assert byte identity have transparency layers of their own and are exact — every
-    /// stroke merges through one (BRUSH.md §12 stage 8), including the `.normal` straddler at
-    /// opacity 0.55 that this suite cuts the rectangle's edge through on purpose.
+    /// **It is rounding at the clip, not a walk that drew the wrong thing**, and two experiments say
+    /// so. Disabling the skip test entirely reproduces the eraser fixture's four bytes *to the
+    /// value*, so it is not an element wrongly left out. And shortening that fixture's punch until
+    /// its group no longer straddles the rectangle moves the bytes rather than removing them. The
+    /// seven tests that still assert exact identity are the ones where nothing straddles: a mark
+    /// wholly inside the rectangle, or wholly outside and skipped.
     ///
-    /// So what separates the two is the **blend mode the layer merges with**, not the layer: a
-    /// source-over merge truncated by the clip is exact, and `destinationOut` and `multiply` — the
-    /// two that read the destination as well as writing it — are not. That is the measurement; the
-    /// mechanism inside CoreGraphics is INFERRED and nothing here depends on it.
+    /// INFERRED, and nothing here depends on it: CoreGraphics composites a transparency layer
+    /// through a buffer sized by the clip in force, and a layer given a smaller buffer does not
+    /// round identically.
     ///
     /// So the guarantee this suite pins is: **identical everywhere, except at most a rounding unit
     /// inside the rectangle, on no more pixels than its boundary has.** Each of those three is
@@ -434,32 +443,68 @@ final class RegionRepairLogicTests: XCTestCase {
     /// picked up the clip wrongly the straddling stroke would come out at a different alpha on one
     /// side of the seam.
     ///
-    /// Opacity is 0.55 and the marks self-overlap, so the group is doing visible work: at opacity 1
+    /// Opacity is 0.55 and the stroke self-overlaps, so the group is doing visible work: at opacity 1
     /// a group merges to the same pixels as ungrouped dabs and this fixture would be blind.
+    ///
+    /// **And it has to actually cross the rectangle, which the first version did not.** A stroke
+    /// laid "across the whole canvas" straddles nothing if the cut is somewhere it does not go: the
+    /// cut was at cell 3, whose rectangle is y 7–21, and the stroke's own band was y 26–94, so the
+    /// walk skipped it in *both* arms and the two agreed for the wrong reason. MEASURED — it was
+    /// green with the skip test changed to drop every partially-overlapping stroke, which is the one
+    /// defect this test exists to catch. The cut is on a long bar now, so the rectangle is wide and
+    /// thin, and the straddler crosses its top and bottom edges well away from the nib; the setup
+    /// assertion checks that in the stroke's own geometry rather than assuming it.
     func testAStrokeCrossingTheRectanglesEdgeMergesAtItsOwnOpacity() {
         var elements: [VectorElement] = (0..<48).map { .stroke(Self.mark($0, opacity: 0.55)) }
-        // One long, self-crossing stroke laid across the whole canvas, so it necessarily straddles
-        // whatever rectangle a single-cell cut declares.
+        // The bar the nib cuts, and therefore the rectangle: wide, thin, and low on the canvas.
+        var bar = Self.mark(499, opacity: 0.55)
+        bar.size = 8
+        bar.samples = StrokeSamples((0..<32).map { step -> VectorSample in
+            let t = CGFloat(step) / 31
+            return VectorSample(x: 8 + t * (Self.canvasSize.width - 16), y: 90, pressure: 1)
+        }, channels: .pressureOnly)
+        elements.append(.stroke(bar))
+        // A stroke that doubles back on itself, crossing the bar's band top and bottom at x ≈ 120 —
+        // far enough along the bar that the nib, which cuts near x = 40, never reaches it.
         var straddler = Self.mark(500, opacity: 0.55)
         straddler.size = 9
         straddler.samples = StrokeSamples((0..<40).map { step -> VectorSample in
             let t = CGFloat(step) / 39
-            return VectorSample(x: 8 + t * (Self.canvasSize.width - 16),
-                                y: 60 + sin(t * .pi * 3) * 34, pressure: 0.6 + 0.4 * t)
+            return t < 0.5
+                ? VectorSample(x: 112 + t * 24, y: 62 + t * 112, pressure: 1)
+                : VectorSample(x: 124 - (t - 0.5) * 16, y: 118 - (t - 0.5) * 112, pressure: 1)
         }, channels: .pressureOnly)
         elements.append(.stroke(straddler))
 
         let canvas = VectorCanvas(size: Self.canvasSize, elements: elements)
         _ = canvas.render()
-        XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 3), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+        // A short nib near the bar's left end, small enough that the rectangle it declares — the
+        // bar's whole footprint — is far wider than the nib's own reach.
+        let nib = StrokeSamples([VectorSample(x: 40, y: 90, pressure: 1),
+                                 VectorSample(x: 40, y: 91, pressure: 1)], channels: .pressureOnly)
+        XCTAssertTrue(canvas.erase(alongPath: nib, brush: Self.brush(),
+                                   size: 8, opacity: 1, mode: .cutPoints))
         let repaired = canvas.render()
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
         XCTAssertLessThan(regionFraction(canvas), 0.5,
                           "setup: the rectangle must not swallow the straddling stroke")
-        assertIdentical(repaired, fullReWalk(of: canvas).image,
-                        "a stroke crossing the repaired rectangle's edge")
+
+        // **The operand check: the straddler must have ink on both sides of the rectangle's edge.**
+        // Asked of the stroke's own samples, because that is the property whose absence made the
+        // first version of this test agree with a walk that skipped the stroke entirely.
+        let region = canvas.lastRepairedRegion
+        let points = straddler.samples.positions
+        XCTAssertTrue(points.contains { region.contains($0) },
+                      "setup: the straddler must reach inside the repaired rectangle \(region)")
+        XCTAssertTrue(points.contains { !region.contains($0) },
+                      "setup: and must leave it again, or it does not straddle anything")
+        XCTAssertTrue(canvas.elements.contains { $0.stroke?.id == straddler.id },
+                      "setup: the nib must not have cut the straddler, or its footprint joins the rectangle")
+
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: region,
+                                           "a stroke crossing the repaired rectangle's edge")
     }
 
     /// **The owner's own gesture**: *"when I draw a bunch of brushstrokes and then use the cross
