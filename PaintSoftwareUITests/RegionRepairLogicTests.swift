@@ -118,8 +118,24 @@ final class RegionRepairLogicTests: XCTestCase {
         return (layout, data as Data)
     }
 
-    private func assertIdentical(_ repaired: UIImage, _ full: UIImage, _ what: String,
-                                 file: StaticString = #filePath, line: UInt = #line) {
+    /// Where two renders disagree, **in pixels rather than byte offsets**.
+    ///
+    /// A byte index says nothing about *where* the two arms differ, and where is the whole
+    /// diagnosis: a disagreement along the repaired rectangle's edge is a seam, one in its interior
+    /// is a walk that drew different elements, and one outside it is a base whose site
+    /// under-declared. Working that out by hand from a byte offset cost this suite a cycle.
+    private struct PixelDiff {
+        var bytes = 0, worst = 0, total = 0
+        var box = CGRect.null
+        var samples: [String] = []
+        var summary: String {
+            "\(bytes) of \(total) bytes differ, worst \(worst)/255; differing pixels lie in "
+                + "\(box) — \(samples.joined(separator: ", "))"
+        }
+    }
+
+    private func diff(_ repaired: UIImage, _ full: UIImage, _ what: String,
+                      file: StaticString, line: UInt) -> PixelDiff? {
         let a = rawPixels(repaired, "repaired")
         let b = rawPixels(full, "full re-walk")
         XCTAssertEqual(a.layout, b.layout, "\(what): the two arms produced different bitmap layouts",
@@ -127,23 +143,72 @@ final class RegionRepairLogicTests: XCTestCase {
         guard a.bytes.count == b.bytes.count, !a.bytes.isEmpty else {
             XCTFail("\(what): byte counts differ (\(a.bytes.count) vs \(b.bytes.count))",
                     file: file, line: line)
-            return
+            return nil
         }
-        if a.bytes == b.bytes { return }
-        var worst = 0, worstIndex = -1, differing = 0
+        var d = PixelDiff()
+        d.total = a.bytes.count
+        if a.bytes == b.bytes { return d }
+        let bpr = repaired.cgImage?.bytesPerRow ?? 0
+        let bpp = max((repaired.cgImage?.bitsPerPixel ?? 32) / 8, 1)
         a.bytes.withUnsafeBytes { ra in
             b.bytes.withUnsafeBytes { rb in
                 let pa = ra.bindMemory(to: UInt8.self), pb = rb.bindMemory(to: UInt8.self)
                 for i in 0..<pa.count {
                     let delta = abs(Int(pa[i]) - Int(pb[i]))
-                    if delta > 0 { differing += 1 }
-                    if delta > worst { worst = delta; worstIndex = i }
+                    guard delta > 0 else { continue }
+                    d.bytes += 1
+                    d.worst = max(d.worst, delta)
+                    guard bpr > 0 else { continue }
+                    let x = (i % bpr) / bpp, y = i / bpr
+                    d.box = d.box.union(CGRect(x: CGFloat(x), y: CGFloat(y), width: 1, height: 1))
+                    if d.samples.count < 8 {
+                        d.samples.append("(\(x),\(y))ch\((i % bpr) % bpp) \(pa[i])≠\(pb[i])")
+                    }
                 }
             }
         }
-        XCTFail("\(what): \(differing) of \(a.bytes.count) bytes differ, worst \(worst)/255 "
-                + "at byte \(worstIndex) — the repair is not the picture the walk makes",
+        return d
+    }
+
+    private func assertIdentical(_ repaired: UIImage, _ full: UIImage, _ what: String,
+                                 file: StaticString = #filePath, line: UInt = #line) {
+        guard let d = diff(repaired, full, what, file: file, line: line), d.bytes > 0 else { return }
+        XCTFail("\(what): \(d.summary) — the repair is not the picture the walk makes",
                 file: file, line: line)
+    }
+
+    /// **The one place byte identity does not hold, stated as what was measured rather than
+    /// assumed.**
+    ///
+    /// A repair whose rectangle truncates an `.erase` element's stroke group disagrees with the
+    /// full walk by **one or two units out of 255, on a handful of pixels, all of them inside the
+    /// repaired rectangle** — MEASURED 2026-09-05, four bytes of 76,800 on the fixture below, in
+    /// both directions. It is CoreGraphics rounding at the clip, not a walk that drew the wrong
+    /// thing, and two experiments say so: disabling the skip test entirely reproduces the same four
+    /// bytes to the value, so it is not an element wrongly left out; and shortening the punch so its
+    /// group no longer straddles the rectangle moves the bytes rather than removing them. A paint
+    /// stroke straddling the same edge is byte-exact (`testAStrokeCrossingTheRectanglesEdge…`), so
+    /// this is specific to the `destinationOut` merge, which reads the destination as well as
+    /// writing it.
+    ///
+    /// So the guarantee this suite pins is: **identical everywhere, except at most a rounding unit
+    /// inside the rectangle where an eraser's group is cut by it.** That is falsifiable in three
+    /// ways — a bigger delta, a difference *outside* the rectangle, or more than a seam's worth of
+    /// pixels — and each of the three would be a real defect.
+    private func assertMatchesToWithinARoundingUnit(_ repaired: UIImage, _ full: UIImage,
+                                                    inside region: CGRect, _ what: String,
+                                                    file: StaticString = #filePath,
+                                                    line: UInt = #line) {
+        guard let d = diff(repaired, full, what, file: file, line: line), d.bytes > 0 else { return }
+        XCTAssertLessThanOrEqual(d.worst, 2,
+                                 "\(what): \(d.summary) — more than a rounding unit is a wrong picture",
+                                 file: file, line: line)
+        XCTAssertTrue(region.insetBy(dx: -1, dy: -1).contains(d.box),
+                      "\(what): \(d.summary) — a difference outside the repaired rectangle \(region) "
+                      + "is a base the site under-declared, not a seam", file: file, line: line)
+        XCTAssertLessThanOrEqual(d.bytes, 64,
+                                 "\(what): \(d.summary) — a seam is a handful of pixels; this is a "
+                                 + "region drawn differently", file: file, line: line)
     }
 
     private func differs(_ a: UIImage, _ b: UIImage) -> Bool {
@@ -221,48 +286,66 @@ final class RegionRepairLogicTests: XCTestCase {
     ///
     /// An `.erase` element composites `destinationOut` against everything accumulated beneath it, so
     /// a repair that started at the edited element would punch against an empty rectangle and leave
-    /// the ink *under* the punch standing. The fixture is built so that failure is visible: three
-    /// marks stacked in one cell with an eraser over all of them, and a cut made in that same cell.
+    /// the ink *under* the punch standing.
     ///
-    /// The setup assertion is the operand check — without it this would pass against a punch that
-    /// removes nothing at all, which is exactly the shape of a test that measures its own fixture.
+    /// **The operand check is taken after the cut, and that is the whole of what this test is.** It
+    /// was written against the *uncut* list and was green with the eraser skipped entirely from
+    /// every clipped walk — MEASURED by mutation, and the reason is the fixture rather than the
+    /// code. `cutAlongFootprint` leaves `.erase` elements alone but deletes every `.paint` stroke
+    /// its footprint covers, and the marks it covered were shorter than the nib: after the cut
+    /// there was no ink left in the cell for the punch to remove, so the arm that skipped it and
+    /// the arm that drew it agreed. A setup assertion on the state *before* the mutation under test
+    /// is not an operand check — it is the fixture measuring itself.
+    ///
+    /// So the ink here is two **bars** long enough that the flick cuts their middles and leaves
+    /// pieces standing at both ends, inside the rectangle the cut declares; and the punch runs the
+    /// bars' whole length, so those surviving pieces are exactly what it eats.
     func testACutUnderAnEraserRedrawsTheRectangleFromTheBottomOfTheStack() {
         let cell = 27
         let centre = Self.cellCentre(cell)
         var elements: [VectorElement] = (0..<48).map { .stroke(Self.mark($0)) }
-        // Two more marks piled into the target cell, so there is something underneath to lose.
+        // Two bars through the target cell, far longer than the nib that cuts them.
         for offset in 0..<2 {
             var extra = Self.mark(cell + 100 + offset)
-            extra.samples = StrokeSamples((0..<5).map { step -> VectorSample in
-                let t = CGFloat(step) / 4
-                return VectorSample(x: centre.x - 8 + t * 16,
-                                    y: centre.y - 6 + CGFloat(offset) * 3 + t * 10, pressure: 1)
+            extra.samples = StrokeSamples((0..<24).map { step -> VectorSample in
+                let t = CGFloat(step) / 23
+                return VectorSample(x: centre.x - 34 + t * 68,
+                                    y: centre.y - 2 + CGFloat(offset) * 4, pressure: 1)
             }, channels: .pressureOnly)
             elements.append(.stroke(extra))
         }
         var punch = Self.mark(999)
         punch.composite = .erase
         punch.size = 9
-        punch.samples = StrokeSamples((0..<5).map { step -> VectorSample in
-            let t = CGFloat(step) / 4
-            return VectorSample(x: centre.x - 9 + t * 18, y: centre.y + t * 4, pressure: 1)
+        punch.samples = StrokeSamples((0..<24).map { step -> VectorSample in
+            let t = CGFloat(step) / 23
+            return VectorSample(x: centre.x - 25 + t * 50, y: centre.y, pressure: 1)
         }, channels: .pressureOnly)
         elements.append(.stroke(punch))
-
-        let withoutPunch = VectorCanvas(size: Self.canvasSize, elements: Array(elements.dropLast()))
-        let withPunch = VectorCanvas(size: Self.canvasSize, elements: elements)
-        XCTAssertTrue(differs(withoutPunch.render(), withPunch.render()),
-                      "setup: the eraser must actually remove pixels, or this test has no subject")
 
         let canvas = VectorCanvas(size: Self.canvasSize, elements: elements)
         _ = canvas.render()
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: cell), brush: Self.brush(),
                                    size: 12, opacity: 1, mode: .cutPoints))
+
+        // **The operand check, on the list the repair is about to draw.** Two cold canvases over
+        // the post-cut elements, one of them with the punch removed: if they agree, the punch has
+        // nothing left to remove and the byte comparison below has no subject.
+        let survived = canvas.elements
+        let withoutPunch = VectorCanvas(size: Self.canvasSize,
+                                        elements: survived.filter { $0.stroke?.composite != .erase })
+        let withPunch = VectorCanvas(size: Self.canvasSize, elements: survived)
+        XCTAssertTrue(differs(withoutPunch.render(), withPunch.render()),
+                      "setup: after the cut the eraser must still remove pixels, or this test has no subject")
+
         let repaired = canvas.render()
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
-        assertIdentical(repaired, fullReWalk(of: canvas).image,
-                        "a cut inside a rectangle an `.erase` element punches")
+        XCTAssertLessThan(regionFraction(canvas), 0.5,
+                          "setup: the rectangle must be a fraction of the canvas, or nothing is skipped")
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion,
+                                           "a cut inside a rectangle an `.erase` element punches")
     }
 
     /// **Constraint two: a run of non-`.normal` strokes is isolated as a whole.**
