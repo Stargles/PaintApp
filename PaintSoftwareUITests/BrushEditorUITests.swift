@@ -300,6 +300,9 @@ final class BrushEditorUITests: PaintUITestCase {
 
         // And the redraws were coalesced rather than run once per tick of the drag.
         let report = padReport(pad)
+        XCTAssertEqual(report["strokes"], "1",
+                       "PREMISE: the pad is holding exactly the one stroke that was drawn, so the "
+                       + "number above is that stroke re-walked rather than a second one appearing")
         let serviced = report["redraws"].flatMap { Int($0.split(separator: "/").first ?? "") } ?? 0
         let requested = report["redraws"].flatMap { Int($0.split(separator: "/").last ?? "") } ?? 0
         XCTAssertGreaterThan(requested, 0, "PREMISE: the drag asked for redraws")
