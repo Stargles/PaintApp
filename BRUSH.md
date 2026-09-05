@@ -435,6 +435,33 @@ be open. Two collections, because a tip is a shape and a texture is paper and an
 at different moments — but **one storage mechanism**, since both are a named bitmap under §2.27's root
 and `BrushTextureRef` already resolves exactly that.
 
+**2.29 Every module that reads a sensor carries its own input *and its own curve*. This supersedes
+§2.22's "the second input is not curved".** Owner, with the case that forces it:
+
+> *"lets picture a scenario where the spacing is randomized but also driven by brush pressure, where the
+> lighter the pressure is, the more frequent you get segmented lines, but over lets say 30% pressure, it
+> appears as a solid line. Thus It requires two inputs assuming randomizer is an input ... So two inputs:
+> pressure and random, with a curves module to make strokes over 30% pressure as solid lines."*
+
+§2.22 ruled a gain uncurved because *"a second `ResponseCurve` per row for a gain term is expressiveness
+the ask does not need"*. **The ask needs it now**, and this is the whole change: a `scale` module becomes
+*(input, curve)* rather than *(input)*. The owner's scenario is then one flat chain —
+`spacing ← random(λ) → scale by pressure through a threshold curve` — where the curve returns 0 above a
+third pressure, so the wobble vanishes and the line is solid, and returns towards 1 below it.
+
+**This is what keeps a chain a list rather than a graph**, which is the property worth protecting. Two
+sensors meeting inside one mapping is the case that would otherwise force branching nodes and wiring;
+carrying the second sensor *inside the module that consumes it* expresses the same thing in a flat
+ordered list. Three sensors is two `scale` modules. §2.22's other clause survives unchanged: **a scale
+attenuates** — the shaped reading is clamped `0…1` — and `amount` remains the only signed, unclamped
+term.
+
+**The owner's example is also achievable today by a different route, and both should exist.** §2.18's
+`density` with §2.19's threshold curve is exactly *"segments below a third pressure, solid above"*, and
+it is the **broken** line — ink, gap, ink, survivors left where they were. Randomising *spacing* spreads
+the dabs instead, which is a **dotted** line. They are different marks and the difference is §8.4's:
+dropping dabs moves nothing that stays.
+
 **2.28 A modulation is an input followed by an ordered list of modules, and this supersedes §2.22's
 fixed shape.** Owner, on seeing the editor present a chain over storage that is not one: *"does it
 contain the modular approach? right now there seems to be a hardcoded order for everything. For example
