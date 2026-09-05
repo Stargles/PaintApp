@@ -296,6 +296,10 @@
 		293F0ADDA4A276276BD6AB16 /* PaintSoftware/Engine/BrushModulation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B5379F7B114FC84D7AB2328 /* PaintSoftware/Engine/BrushModulation.swift */; };
 		A75FC87AF0FDF6840F6B8144 /* PaintSoftware/Engine/ResponseCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */; };
 		D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */; };
+		67EE7DE586956F8964E5B16D /* BrushTipGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D0675F7D6A62AA74959A0D9 /* BrushTipGenerator.swift */; };
+		7FCF482DBA0368BF7E331A39 /* BrushCandidates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826F4B54C1A09FFC7C30ABDC /* BrushCandidates.swift */; };
+		E9BB7594B0C69F8567100133 /* BrushTipGeneratorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D779BD632A4DD2C43CF0954 /* BrushTipGeneratorLogicTests.swift */; };
+		413ACD9728F657CF4375BB53 /* BrushContactSheetBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA9E1DBA2FA7C689ADDD867 /* BrushContactSheetBench.swift */; };
 		08A09986D040AD201D79E376 /* BrushTextureLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08371035B0A08F30F0128970 /* BrushTextureLogicTests.swift */; };
 		CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */; };
 		7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */; };
@@ -605,6 +609,10 @@
 		4B5379F7B114FC84D7AB2328 /* PaintSoftware/Engine/BrushModulation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BrushModulation.swift; sourceTree = "<group>"; };
 		8FA8F181FD0257E986B2CFA5 /* PaintSoftware/Engine/ResponseCurve.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/ResponseCurve.swift; sourceTree = "<group>"; };
 		FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTipLogicTests.swift; sourceTree = "<group>"; };
+		1D0675F7D6A62AA74959A0D9 /* BrushTipGenerator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTipGenerator.swift; sourceTree = "<group>"; };
+		826F4B54C1A09FFC7C30ABDC /* BrushCandidates.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushCandidates.swift; sourceTree = "<group>"; };
+		0D779BD632A4DD2C43CF0954 /* BrushTipGeneratorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTipGeneratorLogicTests.swift; sourceTree = "<group>"; };
+		EEA9E1DBA2FA7C689ADDD867 /* BrushContactSheetBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushContactSheetBench.swift; sourceTree = "<group>"; };
 		08371035B0A08F30F0128970 /* BrushTextureLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTextureLogicTests.swift; sourceTree = "<group>"; };
 		A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushModulationLogicTests.swift; sourceTree = "<group>"; };
 		A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushLibraryLogicTests.swift; sourceTree = "<group>"; };
@@ -679,6 +687,10 @@
 			isa = PBXGroup;
 			children = (
 				FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */,
+				1D0675F7D6A62AA74959A0D9 /* BrushTipGenerator.swift */,
+				826F4B54C1A09FFC7C30ABDC /* BrushCandidates.swift */,
+				0D779BD632A4DD2C43CF0954 /* BrushTipGeneratorLogicTests.swift */,
+				EEA9E1DBA2FA7C689ADDD867 /* BrushContactSheetBench.swift */,
 				A1B023BA111E673ACE0C23AB /* BrushStorageLogicTests.swift */,
 				08371035B0A08F30F0128970 /* BrushTextureLogicTests.swift */,
 				A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */,
@@ -1089,6 +1101,10 @@
 				293F0ADDA4A276276BD6AB16 /* PaintSoftware/Engine/BrushModulation.swift in Sources */,
 				A75FC87AF0FDF6840F6B8144 /* PaintSoftware/Engine/ResponseCurve.swift in Sources */,
 				D1BAA95FE5E0E1E3BBB75B18 /* BrushTipLogicTests.swift in Sources */,
+				67EE7DE586956F8964E5B16D /* BrushTipGenerator.swift in Sources */,
+				7FCF482DBA0368BF7E331A39 /* BrushCandidates.swift in Sources */,
+				E9BB7594B0C69F8567100133 /* BrushTipGeneratorLogicTests.swift in Sources */,
+				413ACD9728F657CF4375BB53 /* BrushContactSheetBench.swift in Sources */,
 				0BE11172B90CC261E2833012 /* BrushStorageLogicTests.swift in Sources */,
 				08A09986D040AD201D79E376 /* BrushTextureLogicTests.swift in Sources */,
 				CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */,

@@ -1717,6 +1717,38 @@ neighbour's boundary, which is why the pencils' tooth reads.
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
 
+**The generator and the first contact sheet are built — §12 stage 9's first half — and four things came
+back from rendering it.** `PaintSoftwareUITests/BrushTipGenerator.swift` draws thirteen masks and
+`BrushContactSheetBench` renders every candidate through `BrushStamper.stampStroke` itself, so what
+follows is MEASURED against the shipped walk rather than against a prototype.
+
+- **The refutation above is not about round nibs. It is about a picture being the same picture at
+  every dab, and it reaches the square slab too.** The nib's *ends* trace a slab stroke's two edges;
+  they present one fixed profile, ten overlapping dabs take its running maximum, and what an artist
+  sees is a slightly wobbly straight line. The sheet carries the A/B: the same PNG in two rows, one
+  roughened by the drawing and one by `size ← random(λ = 0.6)` plus three degrees of `angle.jitter`.
+  **The second reads torn along its whole length and the first only at the caps and where a stroke
+  crosses itself.** So a ragged tip edge is worth what it adds at a cap, and the tear is §6's.
+- **Interior grain is a different mechanism and it does survive.** The four pencils are mid-frequency
+  noise thresholds *inside* the nib with `angle.jitter` at 1, and the tooth reads plainly in the
+  stroke. A pit in the middle of a dab is not filled by a neighbour's boundary the way a notch in one
+  is, and rotating per dab moves the pits' phase — which is §8.5's variant argument arriving as the
+  reason a generated pencil works at all.
+- **A textured tip carries a minimum spacing, and it is far wider than the presets otherwise use.**
+  The blender was authored at `spacing 0.02` and rendered as a plain soft round: its mottle was
+  unioned away completely. At `0.10` the mottle reads. Anything whose character is in its pixels
+  needs the dabs far enough apart to be seen one at a time.
+- **Which of a tip's edges is visible is decided by the brush's `angle`, not by the tip.** On the slab
+  (`base 0.25`, `directionFollow 1`) the long edges sweep *along* the travel and only the ends are on
+  the silhouette, so an authoring pass that roughens the long edges roughens nothing an artist will
+  see. Author the roughness against the angle the brush will carry.
+
+**And the count of what needs no artwork went up.** Soft round, hard round, both technical pens and
+the opaque round are `BrushTip.round` plus a hardness and a spacing; the three rough ink nibs are this
+section's own refutation; and the blender is arguably a sixth, since what makes it a blender is flow
+0.25 under opacity 0.45 rather than its picture. **That is seven or eight of §8.6's twenty-odd
+answered by arithmetic**, which is worth knowing before anyone sources a pack to fill them.
+
 **Both halves are authored rather than only assembled, and the owner asked for that explicitly**: a
 sourced pack is the starting stock, and the shipped brushes are designed on top of it — tips drawn,
 settings tuned, and each judged by eye against the contact sheet before it enters §8.6's table. Owner:
@@ -1819,6 +1851,29 @@ because the file did not travel: tall roughly-rectangular alpha masks, black on 
 `MoreJaggedSquareBlur`, `TestSquare4/8/10`), and **dotted or speckled fills** (`SpongeDotted`,
 `WobblySquare2`, `TestSquare6`). `SpongeBlob3` — an irregular organic triangle — is named as a Rough Ink
 candidate.
+
+**The slab was drawn and it confirms both consequences.** `roundness` was not needed and never came up:
+the nib is a 4:1 rectangle inside a square mask, the perpendicularity is `base 0.25` with
+`directionFollow 1`, and one drag lays a band as wide as the nib's long side — which is the reference.
+§6's deferral survives its first real test. What the *sheet* added is above, in §8.4: the tear has to
+come from §6 rather than from the picture, because the picture is the same picture at every dab.
+
+**The candidate set as first rendered, for whoever picks from it.** Twenty candidates, thirteen
+generated tips, `BrushContactSheetBench` writes six PNGs.
+
+| group | candidates |
+|---|---|
+| **Basics** | Round Soft, Round Hard *(procedural)* · Square Slab 4:1 · Square Slab 2.5:1 · Square Slab 4:1 + dynamics · Chisel 5:1 |
+| **Sketching** | Pencil Hard · Pencil Soft · Pencil Blunt · Pencil Textured |
+| **Inking** | Technical Pen Fine, Technical Pen Tapered *(procedural)* · Brush Pen · Rough Ink Dry, Blotchy, Aliased *(dynamics only)* |
+| **Painting** | Opaque Round *(procedural)* · Flat · Bristle · Blender |
+| **Texture** | empty — §12 stage 11's CC0 sourcing |
+
+**Nothing here is in `BrushLibrary` and that is the point** — §12 stage 9 is driven by contact sheet at
+the owner's instruction, so the presets are authored after the picking, not before it. Three
+candidates carry an open question rather than an answer: the two square slabs are the A/B above,
+**Rough Ink — Aliased** is this section's `hardness 1.00` question drawn rather than argued, and
+**Bristle** ships one of three generated variants because §8.5's per-dab pick is not built.
 
 ## 9. Grain — the deletion
 
