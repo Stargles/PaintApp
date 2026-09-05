@@ -223,7 +223,7 @@ enum BrushLibrary {
         id: UUID(uuidString: "B7051000-0000-4000-A000-00000000001C")!,
         name: "Rough Ink — Blotchy", tip: .round, size: 11,
         dab: BrushDabSettings(size: 0.5, flow: 0.9, spacing: 0.045, hardness: 0.85,
-                              density: 0, densityWavelength: 4.0),
+                              density: BrushDensityGate.threshold),
         stroke: BrushStrokeSettings(stabilization: 0.3),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.16, atZero: 0.55),
@@ -236,6 +236,7 @@ enum BrushLibrary {
             BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
             BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
             .densityFromPressure(knee: 0.4, floor: 0.45),
+            .randomisedDensity(wavelength: 4.0),
             .flowFromPressure(amount: 0.1)
         ])
     )
@@ -253,7 +254,7 @@ enum BrushLibrary {
         id: UUID(uuidString: "B7051000-0000-4000-A000-00000000001D")!,
         name: "Rough Ink", tip: .stamp(.builtIn(.roughInkTriangle)), size: 11,
         dab: BrushDabSettings(size: 0.6, flow: 1, spacing: 0.045,
-                              density: 0, densityWavelength: 4.0,
+                              density: BrushDensityGate.threshold,
                               angle: BrushAngleSettings(jitter: 1)),
         stroke: BrushStrokeSettings(stabilization: 0.3),
         modulations: BrushModulations([
@@ -267,6 +268,7 @@ enum BrushLibrary {
             BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
             BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
             .densityFromPressure(knee: 0.4, floor: 0.45),
+            .randomisedDensity(wavelength: 4.0),
             .flowFromPressure(amount: 0.1)
         ])
     )
@@ -385,12 +387,13 @@ enum BrushLibrary {
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000022")!,
         name: "Splatter", tip: .stamp(.builtIn(.splatterDrops)), size: 48,
         dab: BrushDabSettings(size: 0.95, flow: 0.95, spacing: 0.46,
-                              density: 0.7, densityWavelength: 1.0,
+                              density: BrushDensityGate.threshold + 0.7 * BrushDensityGate.halfAmount,
                               angle: BrushAngleSettings(jitter: 1)),
         stroke: BrushStrokeSettings(stabilization: 0.2),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.25, atZero: 0.55),
             BrushModulation(.size, .random(.scatterAcross, .plain(0.4)), amount: 0.35),
+            .randomisedDensity(wavelength: 1.0),
             .flowFromPressure(amount: 0.15)
         ])
     )
@@ -406,12 +409,13 @@ enum BrushLibrary {
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000023")!,
         name: "Stipple", tip: .stamp(.builtIn(.stippleSpecks)), size: 30,
         dab: BrushDabSettings(size: 0.9, flow: 0.95, spacing: 0.34,
-                              density: 0.85, densityWavelength: 0.4,
+                              density: BrushDensityGate.threshold + 0.85 * BrushDensityGate.halfAmount,
                               angle: BrushAngleSettings(jitter: 1)),
         stroke: BrushStrokeSettings(stabilization: 0.25),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.3, atZero: 0.5),
-            BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.25)
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.25),
+            .randomisedDensity(wavelength: 0.4)
         ])
     )
 

@@ -43,7 +43,8 @@ enum BrushOutput: String, Codable, CaseIterable, Hashable {
     /// reaches neither alone. The old `scatter`'s behaviour is *both set equal*, and §2.14 governs
     /// what happened to it: it is deleted, not kept beside these.
     case scatterAlong
-    /// **The probability that a dab is stamped at all** — BRUSH.md §2.18.
+    /// **The level a dab's gate is decided by** — BRUSH.md §2.32. A dab is stamped when this resolves
+    /// to at least `BrushDensityGate.threshold`, and it was §2.18's *probability* until then.
     case density
     /// The `.round` tip's edge falloff. A `.stamp` tip carries its edge in its own pixels and does
     /// not read this.
@@ -108,7 +109,7 @@ extension DabRandom.Channel {
     /// The stride is **4096 rows an output**, which is not a round number chosen for looks: at any
     /// stride `s`, row `s` of one output collides with row 0 of the next, and a silent collision here
     /// is two parameters moving together for no visible reason. 4096 is past anything a brush editor
-    /// could produce, and 0–15 stay reserved for the four intrinsic draws.
+    /// could produce, and 0–15 stay reserved for the intrinsic draws (three of them since §2.32).
     ///
     /// **`slot` is the randomiser's position in the chain, and it addresses a whole *plane* per
     /// position rather than a slice of the row block.** BRUSH.md §2.28: a chain may carry several
@@ -185,19 +186,46 @@ enum BrushModule: Hashable {
     ///
     /// **It attenuates.** The **shaped** reading is clamped to `0…1`, so a scale can only ever take
     /// away — §2.22's surviving clause, verbatim: *"a second input attenuates; `amount` is how a row
-    /// is made bigger"*, and `amount` remains the only signed, unclamped term. `.linear` is the
-    /// pass-through and is bit-identical to the uncurved scale this replaced, because
-    /// `ResponseCurve.value(at:)` on an empty curve *is* the clamp.
-    case scale(BrushInput, ResponseCurve)
+    /// is made bigger"*, and the chain's own `amount` remains the only signed, unclamped term.
+    /// `.linear` is the pass-through and is bit-identical to the uncurved scale this replaced,
+    /// because `ResponseCurve.value(at:)` on an empty curve *is* the clamp.
+    ///
+    /// **The third value is §2.33's amount, and it mixes rather than multiplying.** The owner asked
+    /// for a gain on every input; one storey down, a scale carried an input and a curve and **no
+    /// number**, so *"half as much random"* meant drawing a flat curve at 0.5 — a curve editor used
+    /// to enter a number. The arithmetic is `value · (1 − a + a · curve(reading))`, so **0 is inert
+    /// and 1 is exactly what a scale did before this existed**: `1 − 1 + 1 · c` is `c` to the bit in
+    /// IEEE arithmetic, with no early return needed to make it so. It is clamped to `0…1` for the
+    /// same reason the reading is — at `a > 1` the mix exceeds 1 and a scale would *amplify*, which
+    /// is the one thing §2.22 rules it may never do.
+    case scale(BrushInput, ResponseCurve, Double)
 }
 
 extension BrushModule {
     /// A scale with no curve on it — the common case, and what §2.22's second input was.
-    static func scale(_ input: BrushInput) -> BrushModule { .scale(input, .linear) }
+    static func scale(_ input: BrushInput) -> BrushModule { .scale(input, .linear, fullScale) }
+
+    /// A scale at full amount — every construction site written before §2.33, unchanged.
+    static func scale(_ input: BrushInput, _ curve: ResponseCurve) -> BrushModule {
+        .scale(input, curve, fullScale)
+    }
+
+    /// **What a scale's amount is when nobody has moved it**, and what every chain written before
+    /// §2.33 carries. Named rather than written as `1` in six places, because the byte-identity of
+    /// every existing brush rests on it.
+    static let fullScale: Double = 1
+
+    /// The mix §2.33 rules — `1 − a + a · c`, clamped so a scale cannot amplify. Stated once so the
+    /// evaluator and the editor's description cannot drift.
+    static func scaleFactor(reading: CGFloat, curve: ResponseCurve, amount: Double) -> Double {
+        let shaped = Double(min(max(curve.value(at: reading), 0), 1))
+        let mix = min(max(amount, 0), 1)
+        return 1 - mix + mix * shaped
+    }
 }
 
 extension BrushModule: Codable {
-    private enum CodingKeys: String, CodingKey { case kind, curve, input }
+    private enum CodingKeys: String, CodingKey { case kind, curve, input, amount }
     private enum Kind: String, Codable { case curveRamp, scale }
 
     /// Written out rather than synthesized, for `BrushInput`'s reason one level up: a synthesized
@@ -209,12 +237,14 @@ extension BrushModule: Codable {
         case .curveRamp(let curve):
             try c.encode(Kind.curveRamp, forKey: .kind)
             try c.encode(curve, forKey: .curve)
-        case .scale(let input, let curve):
+        case .scale(let input, let curve, let amount):
             try c.encode(Kind.scale, forKey: .kind)
             try c.encode(input, forKey: .input)
-            // §2.29's curve is left off the wire when it is the pass-through, so a scale written
-            // before it existed and one written after are the same two keys.
+            // §2.29's curve is left off the wire when it is the pass-through, and §2.33's amount is
+            // left off when it is full, so a scale written before either existed and one written
+            // after are the same two keys.
             if !curve.isLinear { try c.encode(curve, forKey: .curve) }
+            if amount != BrushModule.fullScale { try c.encode(amount, forKey: .amount) }
         }
     }
 
@@ -224,7 +254,8 @@ extension BrushModule: Codable {
         case .curveRamp: self = .curveRamp(try c.decode(ResponseCurve.self, forKey: .curve))
         case .scale:
             self = .scale(try c.decode(BrushInput.self, forKey: .input),
-                          try c.decodeIfPresent(ResponseCurve.self, forKey: .curve) ?? .linear)
+                          try c.decodeIfPresent(ResponseCurve.self, forKey: .curve) ?? .linear,
+                          try c.decodeIfPresent(Double.self, forKey: .amount) ?? BrushModule.fullScale)
         }
     }
 }
@@ -296,12 +327,14 @@ struct BrushModulation: Codable, Hashable {
             switch module {
             case .curveRamp(let curve):
                 value = Double(curve.value(at: CGFloat(value)))
-            case .scale(let scaled, let curve):
+            case .scale(let scaled, let curve, let amount):
                 // §2.29: the module's own curve shapes its own sensor's reading, and §2.22's
                 // surviving clause clamps the **shaped** value — a scale attenuates. `.linear` is
                 // `ResponseCurve`'s own clamp and nothing else, so an uncurved scale is exactly the
-                // multiply it was before §2.29.
-                value *= Double(min(max(curve.value(at: reading(scaled)), 0), 1))
+                // multiply it was before §2.29. §2.33's amount mixes between 1 and that clamped
+                // reading, and at its default of 1 the expression is the multiply to the bit.
+                value *= BrushModule.scaleFactor(reading: reading(scaled), curve: curve,
+                                                 amount: amount)
             }
         }
         return amount * value
@@ -319,7 +352,7 @@ struct BrushModulation: Codable, Hashable {
     /// own, which is what stops one of them being widened and the other forgotten.
     var readInputs: [BrushInput] {
         var inputs = [input]
-        for module in modules { if case .scale(let scaled, _) = module { inputs.append(scaled) } }
+        for module in modules { if case .scale(let scaled, _, _) = module { inputs.append(scaled) } }
         return inputs
     }
 
@@ -488,10 +521,10 @@ struct BrushModulations: Codable, Hashable {
                 row.input = .random(.modulation(row.output, row: index), randomiser)
             }
             for position in row.modules.indices {
-                guard case .scale(.random(_, let randomiser), let curve) = row.modules[position]
+                guard case .scale(.random(_, let randomiser), let curve, let amount) = row.modules[position]
                 else { continue }
                 row.modules[position] = .scale(.random(
-                    .modulation(row.output, row: index, slot: position + 1), randomiser), curve)
+                    .modulation(row.output, row: index, slot: position + 1), randomiser), curve, amount)
             }
             return row
         }
@@ -642,19 +675,15 @@ struct BrushDabSettings: Codable, Hashable {
     /// bunches the dabs without widening the line at all.
     var scatterAcross: Double = BrushOutput.scatterAcross.neutralBase
     var scatterAlong: Double = BrushOutput.scatterAlong.neutralBase
-    /// **BRUSH.md §2.18** — the probability a dab is stamped at all. 1 stamps every dab, which is
-    /// every brush that does not ask for otherwise.
-    var density: Double = BrushOutput.density.neutralBase
-    /// **λ for `density`'s dropout draw, in brush widths — §2.18, and it sits on the row rather than
-    /// on a modulation entry on purpose.**
+    /// **BRUSH.md §2.32** — the value a dab's gate is decided by. A dab is stamped when the resolved
+    /// `density` is at least `BrushDensityGate.threshold`; 1 stamps every dab, which is every brush
+    /// that does not ask for otherwise.
     ///
-    /// *"The coherence lives in the draw, not in the value compared against — modulating `density` by
-    /// a coherent random while drawing white noise gives a thinned speckle rather than gaps."* At λ = 0
-    /// ten overlapping dabs cover every point of the line, so dropping half of them only roughens the
-    /// edge; at λ ≈ 3–4 widths a contiguous *run* drops and the line breaks into the long arcs the
-    /// owner picked out of the comparison sheet. 3.5 is the middle of the ruled band, and it costs
-    /// nothing while `density` is 1.
-    var densityWavelength: CGFloat = 3.5
+    /// **It was a probability until §2.32 and is a level now**, which is a change of meaning rather
+    /// than of range: 0.4 used to mean four dabs in ten and now means *nothing stamps*. A dropout is
+    /// written as a base near the threshold with a randomiser chain swinging across it, which is what
+    /// puts λ, octaves, a curve and a second sensor on it — none of which the intrinsic draw had.
+    var density: Double = BrushOutput.density.neutralBase
     /// §6's `angle` output, which has three contributions rather than one base.
     var angle: BrushAngleSettings = .default
     /// Signed shifts on the stroke's colour, applied per dab. 0 is the colour as picked.
@@ -667,7 +696,7 @@ struct BrushDabSettings: Codable, Hashable {
 
 extension BrushDabSettings {
     private enum CodingKeys: String, CodingKey {
-        case size, flow, spacing, hardness, scatterAcross, scatterAlong, density, densityWavelength, angle
+        case size, flow, spacing, hardness, scatterAcross, scatterAlong, density, angle
         case hueShift, saturationShift, brightnessShift
     }
 
@@ -683,7 +712,6 @@ extension BrushDabSettings {
         scatterAcross = try c.decodeIfPresent(Double.self, forKey: .scatterAcross) ?? d.scatterAcross
         scatterAlong = try c.decodeIfPresent(Double.self, forKey: .scatterAlong) ?? d.scatterAlong
         density = try c.decodeIfPresent(Double.self, forKey: .density) ?? d.density
-        densityWavelength = try c.decodeIfPresent(CGFloat.self, forKey: .densityWavelength) ?? d.densityWavelength
         angle = try c.decodeIfPresent(BrushAngleSettings.self, forKey: .angle) ?? d.angle
         hueShift = try c.decodeIfPresent(Double.self, forKey: .hueShift) ?? d.hueShift
         saturationShift = try c.decodeIfPresent(Double.self, forKey: .saturationShift) ?? d.saturationShift
@@ -807,17 +835,88 @@ extension BrushModulation {
         BrushModulation(.flow, .pressure, amount: amount)
     }
 
-    /// **`density ← pressure`, BRUSH.md §2.18 and §2.19** — the rough ink nib's dropout.
+    /// **`density ← pressure`, BRUSH.md §2.19 and §2.32** — the rough ink nib's dropout, half of it.
     ///
     /// A *threshold*, not a ramp, and §2.19 is the ruling: *"a taper is low pressure"*, so a linear
-    /// fall would eat the point off every tapered stroke and end a hair spike in gaps. Density holds
+    /// fall would eat the point off every tapered stroke and end a hair spike in gaps. The curve holds
     /// at 1 above `knee` and falls to `floor` at no press, so a taper stays solid while a stroke drawn
     /// genuinely light breaks along its whole length.
     ///
-    /// The base is 0 and the amount 1, so the row *is* the curve: density is entirely what pressure
-    /// says. Its λ is not here — it belongs to the draw, so it is `BrushDabSettings.densityWavelength`.
+    /// **The gain is `BrushDensityGate.halfAmount` rather than 1, and the other half of the pair is
+    /// `randomisedDensity`.** §2.32 made `density` a gate, so a row is not a dropout rate any more: a
+    /// dropout is a base at the threshold, a signal that raises it and a randomiser that lowers it,
+    /// and a dab survives exactly where the signal is above the draw. `BrushDensityGate` carries the
+    /// arithmetic and why the halves keep every base and every gain inside its own slider.
     static func densityFromPressure(knee: Double = 1.0 / 3, floor: Double = 0) -> BrushModulation {
         BrushModulation(.density, .pressure,
-                        modules: [.curveRamp(.threshold(knee: knee, low: floor))], amount: 1)
+                        modules: [.curveRamp(.threshold(knee: knee, low: floor))],
+                        amount: BrushDensityGate.halfAmount)
+    }
+
+    /// **The randomiser half of §2.32's dropout** — the draw the signal above is compared against,
+    /// now an ordinary chain rather than a number the stamper rolled.
+    ///
+    /// The channel is deliberately garbage: `BrushModulations` mints it from where the row sits
+    /// (§6.2), and a hand-picked one is the stale-field defect that derivation exists to prevent.
+    static func randomisedDensity(wavelength: CGFloat) -> BrushModulation {
+        BrushModulation(.density, .random(.modulation(.density, row: 0), .plain(max(wavelength, 0))),
+                        amount: -BrushDensityGate.halfAmount)
+    }
+}
+
+// MARK: - BRUSH.md §2.32 — density is a threshold
+
+/// **What "a dab is stamped" means, and how a dropout written against the old meaning is rewritten.**
+///
+/// §2.32, the owner: *"I cant change the wavelength or octaves etc. of the random density. Could it be
+/// better to just have something like a rule where threshold of over 50% means the dab stays? then you
+/// can control it with modules."*
+///
+/// So `density` is an ordinary §6 output and `BrushStamper.stampDab` asks one question of it. What was
+/// deleted is `BrushDabSettings.densityWavelength`, `DabRandom.Channel.density` and the roll in the
+/// stamper — the one place an output's value was not a pure function of its inputs. §2.18's *"the
+/// coherence lives in the draw, not in the value compared against"* is **superseded rather than
+/// contradicted**: it warned about a hybrid where the threshold moved while the draw stayed white, and
+/// under a fixed threshold there is no separate draw to stay white. The mechanism it argued for is
+/// unchanged — band-limited noise crossing a threshold is still what drops a *run* of dabs — and it is
+/// now stated on the chain, where it can carry octaves, a curve and a second sensor.
+enum BrushDensityGate {
+
+    /// **A dab is stamped when its resolved `density` is at least this.** The owner's own number.
+    static let threshold: Double = 0.5
+
+    /// **What a converted dropout's two gains are, and why they are halves.**
+    ///
+    /// The rule to preserve is `keep ⟺ D ≥ u`, where `D` is everything the old brush resolved
+    /// `density` to and `u` is the draw it was compared against. Writing that as
+    /// `0.5 + ½D − ½u ≥ 0.5` is the same inequality — a threshold does not care about the slope it is
+    /// crossed at — and it is the spelling that keeps **every base inside `0…1` and every gain inside
+    /// the row slider's `−1…1`**. The obvious `0.5 + D − u` needs a base of `0.5 + D`, which is 1.2
+    /// for Splatter's old rate of 0.7: legal (§6 clamps no amount) and off the end of the control an
+    /// artist would look for it on.
+    static let halfAmount: Double = 0.5
+
+    /// **One brush written against §2.18's rate, rewritten to stamp the same ink under §2.32's gate.**
+    ///
+    /// `legacyWavelength` is the deleted `BrushDabSettings.densityWavelength`, which is the *only*
+    /// thing about the old dropout that is not still on the brush. The conversion is exact as an
+    /// inequality — see `halfAmount` — and inexact in one stated way: the draw moves from the
+    /// intrinsic channel 4 to a matrix channel, so **which** runs drop is re-rolled. That is §6.2's
+    /// already-stated cost of moving a row, and the statistics λ controls (the fraction kept, the mean
+    /// length of a gap) are properties of the field rather than of one cell.
+    ///
+    /// A brush that could not drop a dab is returned **untouched**, so an ordinary brush's bytes,
+    /// hash and ink are exactly what they were.
+    static func converted(_ brush: Brush, legacyWavelength: CGFloat) -> Brush {
+        guard brush.dab.density < 1 || brush.modulations.drives(.density) else { return brush }
+        var converted = brush
+        converted.dab.density = threshold + brush.dab.density * halfAmount
+        var rows = brush.modulations.rows
+        for index in rows.indices where rows[index].output == .density {
+            rows[index].amount *= halfAmount
+        }
+        rows.append(.randomisedDensity(wavelength: legacyWavelength))
+        converted.modulations.setRows(rows)
+        return converted
     }
 }

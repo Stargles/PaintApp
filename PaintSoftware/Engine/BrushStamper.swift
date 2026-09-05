@@ -217,10 +217,15 @@ enum BrushStamper {
     /// diameter, an alpha, an angle and a colour.
     ///
     /// **The split is values against draws.** Everything in `values` is a pure function of the brush
-    /// and the sensors; the three things that additionally need a *draw* from the stroke's own random
-    /// field are taken here, because here is where `random` and `arcWidths` are — §2.18's density
-    /// dropout, the scatter offset, and the angle's jitter. That is what lets `BrushDabValues` be
-    /// answerable by a caller with a pressure and no stroke (`Brush.dabValues(atPressure:)`).
+    /// and the sensors; the two things that additionally need a *draw* from the stroke's own random
+    /// field are taken here, because here is where `random` and `arcWidths` are — the scatter offset
+    /// and the angle's jitter. That is what lets `BrushDabValues` be answerable by a caller with a
+    /// pressure and no stroke (`Brush.dabValues(atPressure:)`).
+    ///
+    /// **It was three until §2.32.** The density dropout was the third, and deleting its draw is what
+    /// makes `density` an ordinary output: it is now compared against a fixed threshold rather than
+    /// against a number this function rolls, so a caller that resolves the matrix knows whether a dab
+    /// is stamped without knowing where along a stroke it sits.
     ///
     /// **`tangent` is the fourth thing, and it is a geometry rather than a draw** — BRUSH.md §2.30
     /// resolves the scatter onto the *stroke's* frame, so the direction the walk is travelling in has
@@ -249,17 +254,20 @@ enum BrushStamper {
                          values: BrushDabValues, color: UIColor, brushSize: CGFloat,
                          random: DabRandom, arcWidths: CGFloat,
                          tangent: CGPoint = CGPoint(x: 1, y: 0)) {
-        // **BRUSH.md §2.18 — the dab is skipped when its draw exceeds its density.**
+        // **BRUSH.md §2.32 — the dab is stamped when its resolved `density` is at least 0.5.**
         //
-        // A skip disturbs nothing, and that is §4's design rather than care taken here: there is no
-        // sequence and no phase, so not drawing shifts no value anywhere. The walk's arc length and
-        // its spacing are resolved outside this function and advance over a skip exactly as they
-        // advance over a `visibleRange` one. The `< 1` guard is an early-out only — a density of 1 is
-        // never exceeded by a draw in `0..<1`, so taking the draw would change nothing but the clock.
-        if values.density < 1 {
-            let draw = random.unit(.density, at: arcWidths, wavelength: brush.dab.densityWavelength)
-            guard Double(draw) <= values.density else { return }
-        }
+        // One comparison, and no draw of its own. Until 2026-09-05 this rolled an intrinsic dice
+        // against `values.density` — the one output whose value was not a pure function of its
+        // inputs — and the owner's objection is what deleted it: *"I cant change the wavelength or
+        // octaves etc. of the random density."* The randomness lives on the chain now, where a
+        // randomiser module already carries λ, octaves and a falloff and can itself be curved and
+        // scaled, so what used to be a rate is a **gate**.
+        //
+        // A skip still disturbs nothing, and that is §4's design rather than care taken here: there
+        // is no sequence and no phase, so not drawing shifts no value anywhere. The walk's arc
+        // length and its spacing are resolved outside this function and advance over a skip exactly
+        // as they advance over a `visibleRange` one.
+        guard values.density >= BrushDensityGate.threshold else { return }
         let diameter = max(brushSize * CGFloat(values.size), 0.5)
         let radius = diameter / 2
         let alpha = CGFloat(values.flow)

@@ -343,7 +343,7 @@ final class BrushEditorLogicTests: XCTestCase {
     }
 
     private func moduleChannel(_ row: BrushModulation, _ position: Int) -> UInt64 {
-        guard case .scale(.random(let channel, _), _) = row.modules[position] else { return .max }
+        guard case .scale(.random(let channel, _), _, _) = row.modules[position] else { return .max }
         return channel.rawValue
     }
 
@@ -720,4 +720,177 @@ final class BrushEditorLogicTests: XCTestCase {
         for row in 0..<ctx.height where bytes[row * ctx.bytesPerRow + column * 4 + 3] > 8 { count += 1 }
         return count
     }
+    // MARK: - BRUSH.md §2.33 — the gain the artist types
+
+    /// **The pill's text round-trips through the row's own formatter, and typing past the slider is
+    /// not clamped.**
+    ///
+    /// §2.33: *"make it a slider, but also a place where you can type out the percent past 100%"*,
+    /// and §6 already rules a row's amount *"signed and **not** clamped"*. So the assertion that
+    /// matters is the **absence** of a clamp — a parser that pinned 1.5 to 1 would satisfy the round
+    /// trip and defeat the ruling.
+    func testATypedGainRoundTripsAndIsNotClampedToItsSlider() {
+        for output in BrushOutput.allCases {
+            for value in [-1.5, -0.25, 0, 0.5, 1, 2.5] {
+                let parsed = output.parse(output.format(value))
+                XCTAssertNotNil(parsed, "\(output.rawValue) must read back what it writes")
+                // The formatter rounds — percents to whole ones, turns to three places — so the
+                // round trip is exact to the format's own resolution rather than to the double's.
+                XCTAssertEqual(parsed ?? .nan, value, accuracy: 0.006,
+                               "\(output.rawValue) at \(value) came back as \(parsed ?? .nan)")
+            }
+            // Past both ends of the slider, which is the whole point of the field existing.
+            let range = output.editorRange
+            XCTAssertEqual(output.parse(output.format(range.upperBound * 3)) ?? .nan,
+                           range.upperBound * 3, accuracy: 0.006,
+                           "\(output.rawValue): a typed value past the slider must survive")
+            XCTAssertEqual(output.parse(output.format(-range.upperBound)) ?? .nan,
+                           -range.upperBound, accuracy: 0.006,
+                           "\(output.rawValue): a negative is how a sensor reduces a parameter")
+        }
+    }
+
+    /// **Text that is not a number answers nil rather than zero**, which is what lets the field put
+    /// the old value back instead of silencing the row under the artist's fingers. `"-"` is the case
+    /// that matters: it is what the field holds one keystroke into a negative gain.
+    func testAnUnparseableGainIsNilRatherThanZero() {
+        for text in ["", "-", "  ", "%", "abc", "1.2.3"] {
+            XCTAssertNil(BrushOutput.size.parse(text),
+                         "\"\(text)\" must not be read as a value")
+        }
+        // …and the unit suffix the pill shows is accepted, so its own text round-trips.
+        XCTAssertEqual(BrushOutput.size.parse("150%") ?? .nan, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(BrushOutput.size.parse("150") ?? .nan, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(BrushOutput.angle.parse("0.250 turns") ?? .nan, 0.25, accuracy: 1e-9)
+        XCTAssertEqual(BrushOutput.scatterAcross.parse("1.20 widths") ?? .nan, 1.2, accuracy: 1e-9)
+        XCTAssertEqual(BrushOutput.hue.parse("-0.100 turns") ?? .nan, -0.1, accuracy: 1e-9)
+    }
+
+    /// **A typed gain reaches what the stamper resolves**, which is the half a round-trip test cannot
+    /// say: a parser could be perfect and the row still clamp on the way in.
+    func testATypedGainPastTheSliderReachesTheResolvedDab() {
+        var brush = BrushLibrary.roundHard
+        brush.dab.size = 0.5
+        brush.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: 0.5)])
+        let atHalf = brush.dabValues(atPressure: 1).size
+
+        var raised = brush
+        let typed = try? XCTUnwrap(BrushOutput.size.parse("150%"))
+        raised.modulations.setRows([BrushModulation(.size, .pressure, amount: typed ?? 0)])
+        XCTAssertEqual(raised.dabValues(atPressure: 1).size, 0.5 + 1.5, accuracy: 1e-9,
+                       "a gain of 150% must reach the matrix unclamped")
+        XCTAssertGreaterThan(raised.dabValues(atPressure: 1).size, atHalf)
+
+        var reduced = brush
+        let negative = try? XCTUnwrap(BrushOutput.size.parse("-50%"))
+        reduced.modulations.setRows([BrushModulation(.size, .pressure, amount: negative ?? 0)])
+        XCTAssertEqual(reduced.dabValues(atPressure: 1).size, 0.5 - 0.5, accuracy: 1e-9,
+                       "…and a negative one makes pressure *reduce* the size")
+    }
+
+    /// **Every module kind the menu offers carries the three things §2.33 says a sensor read now
+    /// has** — an input, a curve and an amount — and a ramp carries none of them, because it reads
+    /// no sensor at all.
+    func testEverySensorReadingModuleCarriesAnInputACurveAndAnAmount() {
+        for kind in BrushModuleKind.allCases {
+            let module = kind.module
+            switch kind {
+            case .curveRamp:
+                XCTAssertNil(module.scaleAmount, "a ramp reads no sensor, so it has nothing to mix")
+                XCTAssertNil(module.sensorCurve)
+            case .randomiser, .scale:
+                XCTAssertEqual(module.scaleAmount, BrushModule.fullScale,
+                               "\(kind.rawValue) must arrive at today's behaviour, not at 0")
+                XCTAssertNotNil(module.sensorCurve, "§2.29: it carries its own curve")
+            }
+        }
+    }
+
+    // MARK: - BRUSH.md §2.31 — what a whole-pad re-walk costs
+
+    /// **The measurement §2.31 asks for**: *"A slider fires many updates a second and each one
+    /// re-walks every pad stroke through `BrushStamper`. Coalesce to a frame and measure it; if a pad
+    /// full of strokes cannot keep up, the honest answer is a cap on how many it keeps, not a quietly
+    /// stale preview."*
+    ///
+    /// The pad is 328 × 600 view points at 2× and opens at 3× zoom, so a stroke that crosses it is
+    /// about 110 canvas points — and it is walked with **Chalk**, the shipped brush with the tightest
+    /// spacing (0.09) and a canvas-anchored paper to merge, which is the dearest walk in the library.
+    /// `BrushPadZoom.maximumStrokes` of those is what a full pad costs on one edit.
+    ///
+    /// **It does not fit a frame, and saying so is the point of measuring.** MEASURED here in
+    /// **Debug on the simulator**, one pad-crossing stroke is 18–42 ms depending on the brush — so
+    /// even a single stroke is past 16.7 ms in this configuration, and a full pad is a third of a
+    /// second. CLAUDE.md records Debug at 62× Release on this path and the shipped build is Release,
+    /// so the artist's number is far lower; it could not be taken, because `-configuration Release`
+    /// fails to build this test target on a pre-existing module-import error. What the cap therefore
+    /// does is bound the **worst** case, which is what §2.31 asks of it.
+    ///
+    /// **The assertion is per stroke rather than on the total**, and deliberately loose: a hard
+    /// frame budget on a simulator buys a flaky test. What this catches is the order of magnitude —
+    /// a walk that became several times dearer, which is the change that would make the coalescing
+    /// stop being enough. The numbers are printed and recorded on `BrushPadZoom.maximumStrokes`.
+    func testThePadsWholeRewalkFitsInAFrameAtTheStrokeCapItKeeps() throws {
+        let viewSize = CGSize(width: 328, height: 600)
+        let screenScale: CGFloat = 2
+        let zoom = BrushPadZoom.standard
+        let extent = BrushPadZoom.canvasSize(of: viewSize, at: zoom)
+        // A stroke that crosses the pad corner to corner, sampled the way a finger delivers one.
+        let samples = StrokeSamples((0..<120).map { index in
+            let t = CGFloat(index) / 119
+            return VectorSample(point: CGPoint(x: 4 + t * (extent.width - 8),
+                                               y: 4 + t * (extent.height - 8)),
+                                pressure: 0.5 + 0.5 * sin(t * 6))
+        }, channels: .pressureOnly)
+        for name in ["Round Hard", "Painterly", "Grunge", "Chalk"] {
+            guard let probe = BrushLibrary.defaults.first(where: { $0.name == name }) else { continue }
+            let ctx = try XCTUnwrap(BrushPadZoom.makeContext(viewSize: viewSize,
+                                                             screenScale: screenScale, zoom: zoom))
+            BrushStamper.stampStroke(into: CGContextDabTarget(ctx), samples: samples, brush: probe,
+                                     color: .black, brushSize: 30, brushOpacity: 1,
+                                     isEraser: false, random: DabRandom(seed: 11))
+            let t0 = CFAbsoluteTimeGetCurrent()
+            BrushStamper.stampStroke(into: CGContextDabTarget(ctx), samples: samples, brush: probe,
+                                     color: .black, brushSize: 30, brushOpacity: 1,
+                                     isEraser: false, random: DabRandom(seed: 11))
+            print(String(format: "PADSTROKE %@ paper=%@ spacing=%.3f %.2f ms", name,
+                         probe.texture == nil ? "no " : "yes", probe.dab.spacing,
+                         (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+        }
+        let brush = try XCTUnwrap(BrushLibrary.defaults.first { $0.name == "Chalk" },
+                                  "PREMISE: the dearest shipped walk is still in the library")
+
+        // One untimed pass, so the tip mask and the paper sheet are resolved and cached before the
+        // clock starts — a first-call cost is not what a drag pays.
+        let warm = try XCTUnwrap(BrushPadZoom.makeContext(viewSize: viewSize,
+                                                          screenScale: screenScale, zoom: zoom))
+        BrushStamper.stampStroke(into: CGContextDabTarget(warm), samples: samples, brush: brush,
+                                 color: .black, brushSize: 30, brushOpacity: 1,
+                                 isEraser: false, random: DabRandom(seed: 11))
+
+        let context = try XCTUnwrap(BrushPadZoom.makeContext(viewSize: viewSize,
+                                                             screenScale: screenScale, zoom: zoom))
+        let started = CFAbsoluteTimeGetCurrent()
+        context.clear(CGRect(x: 0, y: 0, width: context.width, height: context.height))
+        for _ in 0..<BrushPadZoom.maximumStrokes {
+            BrushStamper.stampStroke(into: CGContextDabTarget(context), samples: samples,
+                                     brush: brush, color: .black, brushSize: 30, brushOpacity: 1,
+                                     isEraser: false, random: DabRandom(seed: 11))
+        }
+        let elapsed = CFAbsoluteTimeGetCurrent() - started
+        print(String(format: "PADREWALK %d strokes in %.1f ms (%.2f ms a stroke)",
+                     BrushPadZoom.maximumStrokes, elapsed * 1000,
+                     elapsed * 1000 / Double(BrushPadZoom.maximumStrokes)))
+
+        let perStroke = elapsed / Double(BrushPadZoom.maximumStrokes)
+        XCTAssertLessThan(perStroke, 0.15,
+                          "One pad stroke's re-walk is what the cap is multiplied by — "
+                          + String(format: "%.1f ms", perStroke * 1000))
+        XCTAssertGreaterThan(BrushPadZoom.maximumStrokes, 2,
+                             "PREMISE: the cap has to leave a pad worth judging a brush on")
+        XCTAssertLessThanOrEqual(Double(BrushPadZoom.maximumStrokes) * perStroke, 0.5,
+                                 "§2.31: the cap has to bound a full pad's re-walk, and the bound "
+                                 + String(format: "is %.2f s", Double(BrushPadZoom.maximumStrokes) * perStroke))
+    }
+
 }

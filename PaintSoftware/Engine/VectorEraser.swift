@@ -259,7 +259,15 @@ enum VectorEraser {
         // whose coverage depends on anything else is not one it may reason about. `density` is the
         // sharpest case — a dropout brush stamps *gaps*, so "this cross-section was covered" is false
         // of ink the capsule chain says is solid.
-        guard brush.modulations.isPressureOnly, brush.dab.density >= 1 else { return false }
+        //
+        // **§2.32 changed what to ask.** `density >= 1` was the question while density was a rate;
+        // under the gate the honest one is *"can this brush drop a dab at all"*, which is a base at
+        // or above the threshold and **no chain driving it** — a chain could dip below the gate at
+        // some pressure this call never sees. Strictly narrower than the old test in the direction
+        // that matters: a false clean cut deletes ink that should have survived.
+        guard brush.modulations.isPressureOnly,
+              !brush.modulations.drives(.density),
+              brush.dab.density >= BrushDensityGate.threshold else { return false }
         let values = brush.dabValues(atPressure: minPressure)
         // **The merged alpha, and there is only one number to merge since §12 stage 8.** BRUSH.md
         // §2.11 puts the cap on the stroke and the coverage on the dab, so what an eraser actually
@@ -302,7 +310,9 @@ enum VectorEraser {
     static func supportsSplitting(strokeBrush: Brush) -> Bool {
         strokeBrush.dab.scatterAcross <= 0 && strokeBrush.dab.scatterAlong <= 0
             && strokeBrush.dab.angle.jitter <= 0
-            && strokeBrush.dab.density >= 1 && strokeBrush.modulations.isPressureOnly
+            && !strokeBrush.modulations.drives(.density)
+            && strokeBrush.dab.density >= BrushDensityGate.threshold
+            && strokeBrush.modulations.isPressureOnly
     }
 
     /// The eraser footprint the clean-cut test is allowed to rely on: the sweep's capsules with every

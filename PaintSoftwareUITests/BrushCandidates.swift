@@ -340,7 +340,7 @@ enum BrushCandidates {
             name: "Rough Ink — Blotchy", kind: .dynamicsOnly,
             brush: Brush(name: "Rough Ink — Blotchy", tip: .round, size: 11,
                          dab: BrushDabSettings(size: 0.5, flow: 0.9, spacing: 0.045, hardness: 0.85,
-                                               density: 0, densityWavelength: 4.0),
+                                               density: BrushDensityGate.threshold),
                          stroke: BrushStrokeSettings(stabilization: 0.3),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.16, atZero: 0.55),
@@ -351,6 +351,7 @@ enum BrushCandidates {
                              BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)),
                                              amount: 0.14),
                              .densityFromPressure(knee: 0.4, floor: 0.45),
+                             .randomisedDensity(wavelength: 4.0),
                              .flowFromPressure(amount: 0.1)
                          ])),
             note: "Chosen off the first sheet and unchanged. All dynamics, no picture — the other "
@@ -432,7 +433,7 @@ enum BrushCandidates {
                 name: name, kind: kind(tipName),
                 brush: Brush(name: name, tip: stamp(tipName), size: 11,
                              dab: BrushDabSettings(size: 0.6, flow: 1, spacing: 0.045,
-                                                   density: 0, densityWavelength: 4.0,
+                                                   density: BrushDensityGate.threshold,
                                                    angle: BrushAngleSettings(jitter: 1)),
                              stroke: BrushStrokeSettings(stabilization: 0.3),
                              modulations: BrushModulations([
@@ -444,6 +445,7 @@ enum BrushCandidates {
                                  BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)),
                                                  amount: 0.14),
                                  .densityFromPressure(knee: 0.4, floor: 0.45),
+                                 .randomisedDensity(wavelength: 4.0),
                                  .flowFromPressure(amount: 0.1)
                              ])),
                 note: note))
@@ -698,12 +700,13 @@ enum BrushCandidates {
             name: "Grunge — Soot", kind: kind("grunge-soot"),
             brush: Brush(name: "Grunge — Soot", tip: stamp("grunge-soot"), size: 40,
                          dab: BrushDabSettings(size: 0.9, flow: 0.8, spacing: 0.34,
-                                               density: 0.9, densityWavelength: 0.6,
+                                               density: BrushDensityGate.threshold + 0.9 * BrushDensityGate.halfAmount,
                                                angle: BrushAngleSettings(jitter: 1)),
                          stroke: BrushStrokeSettings(stabilization: 0.25),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.25, atZero: 0.6),
-                             BrushModulation(.size, .random(.scatterAcross, .plain(1.4)), amount: 0.26)
+                             BrushModulation(.size, .random(.scatterAcross, .plain(1.4)), amount: 0.26),
+                             .randomisedDensity(wavelength: 0.6)
                          ])),
             note: "A finer hole field than Crust's, denser and blacker. **Round one had this at "
                 + "spacing 0.62 with a 0.55 dropout and it fell apart into islands** — past about "
@@ -712,21 +715,27 @@ enum BrushCandidates {
 
         // MARK: Splatter
 
-        let splatterRows = BrushModulations([
-            .sizeFromPressure(amount: 0.25, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAcross, .plain(0.4)), amount: 0.35),
-            .flowFromPressure(amount: 0.15)
-        ])
+        // **§2.32 moved the dropout out of `BrushDabSettings` and onto the chain**, so the rows
+        // these three share now differ in the one thing the sheet varies between them — λ — and this
+        // takes it as an argument rather than being one shared value.
+        let splatterRows = { (lambda: CGFloat) in
+            BrushModulations([
+                .sizeFromPressure(amount: 0.25, atZero: 0.55),
+                BrushModulation(.size, .random(.scatterAcross, .plain(0.4)), amount: 0.35),
+                .randomisedDensity(wavelength: lambda),
+                .flowFromPressure(amount: 0.15)
+            ])
+        }
 
         out.append(Candidate(
             group: "Texture", slot: "Splatter", standing: .contender,
             name: "Splatter — Spray", kind: kind("splatter-drops"),
             brush: Brush(name: "Splatter — Spray", tip: stamp("splatter-drops"), size: 48,
                          dab: BrushDabSettings(size: 0.95, flow: 0.95, spacing: 0.46,
-                                               density: 0.7, densityWavelength: 1.0,
+                                               density: BrushDensityGate.threshold + 0.7 * BrushDensityGate.halfAmount,
                                                angle: BrushAngleSettings(jitter: 1)),
                          stroke: BrushStrokeSettings(stabilization: 0.2),
-                         modulations: splatterRows),
+                         modulations: splatterRows(1.0)),
             note: "Twenty-six drops off a cube law — one or two carriers, the rest flecks — turned "
                 + "and resized per stamp. The drops' own spread nearly to the mask's edge is what "
                 + "puts ink off the path, since a stamp lands on it."))
@@ -736,10 +745,10 @@ enum BrushCandidates {
             name: "Splatter — Spray, No Turn", kind: kind("splatter-drops"),
             brush: Brush(name: "Splatter — Spray, No Turn", tip: stamp("splatter-drops"), size: 48,
                          dab: BrushDabSettings(size: 0.95, flow: 0.95, spacing: 0.46,
-                                               density: 0.7, densityWavelength: 1.0,
+                                               density: BrushDensityGate.threshold + 0.7 * BrushDensityGate.halfAmount,
                                                angle: BrushAngleSettings(jitter: 0.03)),
                          stroke: BrushStrokeSettings(stabilization: 0.2),
-                         modulations: splatterRows),
+                         modulations: splatterRows(1.0)),
             note: "The same cluster stamped at the same angle every time. §8.5's sawtooth in its "
                 + "purest form — this should read as a repeating pattern rather than as a spray."))
 
@@ -748,10 +757,10 @@ enum BrushCandidates {
             name: "Splatter — Fine", kind: kind("splatter-fine"),
             brush: Brush(name: "Splatter — Fine", tip: stamp("splatter-fine"), size: 34,
                          dab: BrushDabSettings(size: 0.95, flow: 0.9, spacing: 0.34,
-                                               density: 0.7, densityWavelength: 0.6,
+                                               density: BrushDensityGate.threshold + 0.7 * BrushDensityGate.halfAmount,
                                                angle: BrushAngleSettings(jitter: 1)),
                          stroke: BrushStrokeSettings(stabilization: 0.2),
-                         modulations: splatterRows),
+                         modulations: splatterRows(0.6)),
             note: "Twenty smaller drops with no carrier among them, at a tighter spacing — an "
                 + "airbrush mist rather than a flicked loaded brush."))
 
@@ -764,11 +773,12 @@ enum BrushCandidates {
         let stippleDynamics = { (lambda: CGFloat) in
             Brush(name: "Stipple", tip: .round, size: 10,
                   dab: BrushDabSettings(size: 0.55, flow: 1, spacing: 0.70, hardness: 0.92,
-                                        density: 0.42, densityWavelength: lambda),
+                                        density: BrushDensityGate.threshold + 0.42 * BrushDensityGate.halfAmount),
                   stroke: BrushStrokeSettings(stabilization: 0.25),
                   modulations: BrushModulations([
                       .sizeFromPressure(amount: 0.3, atZero: 0.45),
-                      BrushModulation(.size, .random(.scatterAcross, .plain(0.25)), amount: 0.45)
+                      BrushModulation(.size, .random(.scatterAcross, .plain(0.25)), amount: 0.45),
+                      .randomisedDensity(wavelength: lambda)
                   ]))
         }
 
@@ -792,12 +802,13 @@ enum BrushCandidates {
             name: "Stipple — Specks", kind: kind("stipple-specks"),
             brush: Brush(name: "Stipple — Specks", tip: stamp("stipple-specks"), size: 30,
                          dab: BrushDabSettings(size: 0.9, flow: 0.95, spacing: 0.34,
-                                               density: 0.85, densityWavelength: 0.4,
+                                               density: BrushDensityGate.threshold + 0.85 * BrushDensityGate.halfAmount,
                                                angle: BrushAngleSettings(jitter: 1)),
                          stroke: BrushStrokeSettings(stabilization: 0.25),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.3, atZero: 0.5),
-                             BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.25)
+                             BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.25),
+                             .randomisedDensity(wavelength: 0.4)
                          ])),
             note: "What a picture adds over the row above: one stamp is already seventeen "
                 + "hard-edged dots of mixed size, so a drag lays a field rather than a line."))
@@ -887,8 +898,10 @@ enum BrushCandidates {
                                "sp \(f(brush.dab.spacing, 3))"]
         if case .round = brush.tip { parts.append("hard \(f(brush.dab.hardness, 2))") }
         if brush.opacity < 1 { parts.append("op \(f(brush.opacity, 2))") }
-        if brush.dab.density < 1 {
-            parts.append("dens \(f(brush.dab.density, 2)) λ\(f(Double(brush.dab.densityWavelength), 1))")
+        // §2.32: a dropout is a base near the gate plus a chain, so both halves are printed and
+        // the test is "can this drop a dab" rather than "is the base below 1".
+        if brush.dab.density < 1 || brush.modulations.drives(.density) {
+            parts.append("dens \(f(brush.dab.density, 2))")
         }
         let angle = brush.dab.angle
         if angle.base != 0 { parts.append("∠\(f(angle.base, 3))t") }

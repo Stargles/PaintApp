@@ -227,7 +227,12 @@ final class BrushTipGeneratorLogicTests: XCTestCase {
                        + "`random → size`. This nib is dynamics.")
         XCTAssertTrue(blotchy.brush.modulations.drives(.density),
                       "§2.18's dropout is what makes it rough")
-        XCTAssertGreaterThan(blotchy.brush.dab.densityWavelength, 0,
+        // §2.32: λ is on the randomiser that crosses the gate, not on the output — so the question
+        // is whether the density chain carries one at all.
+        let lambdas = blotchy.brush.modulations.rows(for: .density)
+            .flatMap(\.readInputs).compactMap(\.randomiser?.wavelength)
+        XCTAssertFalse(lambdas.isEmpty, "§2.32 — the dropout's randomness is a chain now")
+        XCTAssertGreaterThan(lambdas.max() ?? 0, 0,
                              "§2.17 — λ is what separates a stipple from a segmented line")
     }
 

@@ -8,16 +8,15 @@ import SwiftUI
 /// is reused from the timeline's graph band and what could not be, and for why the y axis is a
 /// constant rather than a fit to the keys.
 struct ResponseCurveEditorView: View {
-    /// The row's curve. Written through on every change; the caller decides when that reaches the
-    /// library (the editor writes on gesture end, exactly as a slider does on lift).
+    /// The row's curve. Written straight through to the editor's draft on every change — since
+    /// §2.31 there is no "when does this reach the library" for a control to answer, because Done is
+    /// the only thing that does.
     @Binding var curve: ResponseCurve
     /// What the x axis is a reading *of* — "Pressure", "Tilt Angle". Drawn under the graph, because a
     /// curve with no sensor named is a shape with no meaning.
     let inputName: String
     /// Prefix for this control's accessibility identifiers.
     let idPrefix: String
-    var onEditBegan: () -> Void = {}
-    var onEditEnded: () -> Void = {}
 
     private var side: CGFloat { ResponseCurveEditing.side }
 
@@ -58,9 +57,7 @@ struct ResponseCurveEditorView: View {
                     .foregroundColor(.white.opacity(0.45))
                 Spacer(minLength: 0)
                 Button("Reset") {
-                    onEditBegan()
                     curve = .linear
-                    onEditEnded()
                 }
                 .font(.caption2)
                 .foregroundColor(.white.opacity(0.8))
@@ -152,10 +149,7 @@ struct ResponseCurveEditorView: View {
                 }
                 guard hypot(value.translation.width, value.translation.height) > ResponseCurveEditing.tapSlop,
                       let frame = dragFrame else { return }
-                if !didMove {
-                    didMove = true
-                    onEditBegan()
-                }
+                didMove = true
                 let moved = ResponseCurveEditing.moving(frame: frame, to: value.location, in: curve.curve)
                 // The key's frame is what identifies it to the next `onChanged`, so it has to travel
                 // with the finger — otherwise the second tick of a sideways drag grabs nothing and
@@ -166,16 +160,13 @@ struct ResponseCurveEditorView: View {
             .onEnded { value in
                 defer { dragFrame = nil; didMove = false }
                 guard TimelineGraphBand.isTap(didMove: didMove, translation: value.translation) else {
-                    if didMove { onEditEnded() }
                     return
                 }
-                onEditBegan()
                 if let frame = dragFrame {
                     curve = ResponseCurve(ResponseCurveEditing.removing(frame: frame, from: curve.curve))
                 } else {
                     curve = ResponseCurve(ResponseCurveEditing.adding(at: value.location, to: curve.curve))
                 }
-                onEditEnded()
             }
     }
 }

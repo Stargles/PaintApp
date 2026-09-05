@@ -264,8 +264,8 @@ final class BrushMenuUITests: PaintUITestCase {
         XCTAssertTrue(sizeRow.label.contains("input"),
                       "PREMISE: a shipped preset drives Size from pressure, and the row says so")
         tapWhenHittable(sizeRow, "The Size row")
-        XCTAssertTrue(app.sliders["brushPanel.amount.size.0"].waitForExistence(timeout: 5),
-                      "PREMISE: …and that chain has an Amount")
+        XCTAssertTrue(app.sliders["brushPanel.gain.size.0"].waitForExistence(timeout: 5),
+                      "PREMISE: …and that chain has a Gain — §2.33 renamed it")
         closeBrushEditor(app)
 
         // The `+`'s first arm.
@@ -287,7 +287,7 @@ final class BrushMenuUITests: PaintUITestCase {
         tapWhenHittable(madeRow, "The Size row")
         XCTAssertTrue(app.buttons["brushPanel.addRow.size"].waitForExistence(timeout: 5),
                       "PREMISE: the row really did expand")
-        XCTAssertFalse(app.sliders["brushPanel.amount.size.0"].exists,
+        XCTAssertFalse(app.sliders["brushPanel.gain.size.0"].exists,
                        "…and there is no chain under it to carry an Amount")
 
         // It is usable, not merely present: the pad beside it draws with it.
@@ -297,11 +297,14 @@ final class BrushMenuUITests: PaintUITestCase {
         pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.35))
             .press(forDuration: 0.1,
                    thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.65)))
+        // **By key, never by position.** The pad's report grew two fields at §2.31 and a
+        // `split(",").last` here read `redraws=0/1` as the stroke's ink — reporting "a brush made
+        // from the + does not paint" against an app that paints perfectly.
         var laid = 0
         for _ in 0..<20 {
             if let value = pad.value as? String,
-               let part = value.split(separator: ",").last,
-               let n = Int(part.replacingOccurrences(of: "last=", with: "")), n > 0 {
+               let field = value.split(separator: ",").first(where: { $0.hasPrefix("last=") }),
+               let n = Int(field.dropFirst("last=".count)), n > 0 {
                 laid = n
                 break
             }
@@ -342,15 +345,24 @@ final class BrushMenuUITests: PaintUITestCase {
 
         // 1. The menu.
         openBrushMenu(app)
+        // **Two of these named brushes that no longer exist, and this test had been red on `main`
+        // since §12 stage 9 replaced the preset set.** `Soft Round` and `Pen` are legacy names; the
+        // shipped library calls the first `Round Soft`, and `Pen` has no successor in this group
+        // at all — the menu lists the **open group**, which is the selected brush's, so a second
+        // name here has to be another Basics brush. A census that names a missing
+        // element fails with the message it prints for exactly that — *"it is missing, so every test
+        // that names it is asserting nothing"* — which is what it had been saying about itself.
         for id in ["brushPanel.groupList", "brushPanel.groupMenu", "brushPanel.addButton",
-                   "brushPanel.group.Basics", "brushPanel.brush.Soft Round", "brushPanel.brush.Pen"] {
+                   "brushPanel.group.Basics", "brushPanel.brush.Round Soft",
+                   "brushPanel.brush.Round Hard"] {
             assertExactlyOne(app, id, "the brushes menu")
         }
 
         // 2. The editor: its root, its three columns' own controls, and §2.26's two pickers.
         openBrushEditor(app)
         XCTAssertTrue(app.otherElements["brushPanel.editorScreen"].waitForExistence(timeout: 5))
-        for id in ["brushPanel.editorScreen", "brushPanel.editorBack", "brushPanel.outputList",
+        for id in ["brushPanel.editorScreen", "brushPanel.editorBack", "brushPanel.editorCancel",
+                   "brushPanel.outputList",
                    "brushPanel.tipPicker", "brushPanel.texturePicker",
                    "brushPanel.sizeSlider", "brushPanel.opacitySlider",
                    "brushPanel.pad", "brushPanel.padClear", "brushPanel.padZoom",
@@ -362,7 +374,13 @@ final class BrushMenuUITests: PaintUITestCase {
         // third place this defect was found.
         tapWhenHittable(app.buttons["brushPanel.output.size"], "The Size row")
         XCTAssertTrue(app.sliders["brushPanel.base.size"].waitForExistence(timeout: 5))
-        for id in ["brushPanel.base.size", "brushPanel.amount.size.0", "brushPanel.input.size.0",
+        // §2.33's three new elements are in this list on purpose: a value pill is a `TextField`
+        // *inside* a row that also carries a slider, and the summation sentence is a `Text` drawn
+        // once per output — both are exactly the shapes that have produced a duplicated identifier
+        // on this screen before.
+        for id in ["brushPanel.base.size", "brushPanel.base.size.field",
+                   "brushPanel.gain.size.0", "brushPanel.gain.size.0.field",
+                   "brushPanel.summed.size", "brushPanel.input.size.0",
                    "brushPanel.removeRow.size.0", "brushPanel.addRow.size",
                    "brushPanel.addModule.size.0", "brushPanel.module.size.0.0",
                    "brushPanel.moduleUp.size.0.0", "brushPanel.moduleDown.size.0.0",

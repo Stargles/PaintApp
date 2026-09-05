@@ -240,5 +240,33 @@ extension Brush {
         // Absent *is* the value, not a default standing in for one: a brush with no texture writes
         // no key and reads back as one with no texture — the same bytes, either way round.
         texture = try c.decodeIfPresent(BrushTextureSettings.self, forKey: .texture)
+
+        // **BRUSH.md §2.32's one migration, and it is here because it is the only place both halves
+        // are reachable.** The gate changed what `density` *means*, so a brush saved against §2.18's
+        // rate stamps different ink under it — 0.4 was four dabs in ten and is now nothing at all.
+        // `BrushDensityGate.converted` rewrites the rate as a base and two gains that resolve to the
+        // same inequality, and the deleted `densityWavelength` is the one input it needs that the
+        // rest of the brush no longer carries.
+        //
+        // **This is a legacy decode arm, which §2.28 deliberately did without, and the difference is
+        // whose bytes they are.** §2.14 rules *documents* expendable; a brush library is the
+        // artist's own tuning, and the owner had tuned Rough Ink and said it *"looks almost exactly
+        // like how I want it now"* two days before this landed. Silently turning that into a brush
+        // that stamps every dab is the regression §2.32 asks to be pinned against.
+        //
+        // A brush with no such key — anything written after this — takes the `nil` arm and is
+        // untouched, and so is one whose density could never drop a dab.
+        if let legacy = try? c.decode(LegacyDensityDab.self, forKey: .dab),
+           let wavelength = legacy.densityWavelength {
+            self = BrushDensityGate.converted(self, legacyWavelength: wavelength)
+        }
+    }
+
+    /// §2.18's deleted λ, read out of a `dab` object written before §2.32. Its own type rather than a
+    /// key on `BrushDabSettings`, because a field there would be exactly the vestigial parameter
+    /// CLAUDE.md's *"remove cleanly, no archaeology"* forbids — this is a reader for old bytes, and
+    /// nothing in the engine can be handed one.
+    private struct LegacyDensityDab: Decodable {
+        var densityWavelength: CGFloat?
     }
 }

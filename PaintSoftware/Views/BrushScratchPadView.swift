@@ -35,8 +35,27 @@ import UIKit
 /// **And the strokes are re-walked on a zoom change rather than magnified as pixels.** Scaling the
 /// bitmap up would be a picture of the brush at a resolution it was never drawn at — the same lie by
 /// a different route — so each stroke keeps its samples in canvas points and the walk runs again.
-/// It keeps `brush` per stroke as well, so re-walking cannot retroactively redraw yesterday's ink
-/// with today's edit, which is BRUSH.md §2.10 falling out of the same store.
+///
+/// ## Every stroke is re-walked from the draft, on every change — §2.31
+///
+/// The owner: *"can you make it so that as you adjust the settings in the edit brush menu, the
+/// strokes in the drawing pad adjusts? too?"* So a stroke drawn ten edits ago shows what the brush
+/// does **now**, and this store keeps nothing but the artist's samples: the brush, the colour and
+/// the two stroke numbers are whatever the editor is holding at the moment of the walk.
+///
+/// **That supersedes what §7.2 shipped**, which kept a `Brush` per stroke so a re-walk could not
+/// retroactively change old ink. That was the right answer for a *zoom* change and the wrong one
+/// here, and §2.31 is explicit that it is a deliberate exception to §2.10: that ruling protects the
+/// artist's **canvas**, where ink is the record of a decision. A pad is the instrument for judging a
+/// draft, and one that kept its old strokes would answer a question nobody asked. §2.10 is untouched
+/// where it matters — on Done the brush mints a new table entry and the document's ink is not
+/// disturbed.
+///
+/// **The cost is in the drag loop and it is coalesced to a frame.** A slider fires dozens of updates
+/// a second and each one would otherwise re-walk every stroke on the pad through `BrushStamper`;
+/// `setNeedsContentRedraw` marks the pad dirty and a paused `CADisplayLink` services it once per
+/// frame, so a burst of writes costs one walk. `maximumStrokes` is the second half of that answer —
+/// see it for the measurement and for why a cap is honest where a stale preview is not.
 ///
 /// ## What it reports, and why
 ///
@@ -83,7 +102,9 @@ struct BrushScratchPadView: UIViewRepresentable {
         pad.strokeSize = strokeSize
         pad.strokeOpacity = strokeOpacity
         pad.zoom = zoom
-        if brushChanged { pad.refreshRestingSample() }
+        // §2.31: **every** stroke follows the draft, not only the resting sample. Coalesced, so a
+        // slider drag pays one re-walk a frame rather than one per tick.
+        if brushChanged { pad.setNeedsContentRedraw() }
         if pad.clearToken != clearToken {
             pad.clearToken = clearToken
             pad.clear()
@@ -129,20 +150,17 @@ final class BrushScratchPad: UIView {
     private var samples: [VectorSample] = []
     private var inkedBefore = 0
 
-    /// **One stroke the artist finished, in canvas points, with the brush it was drawn with.**
+    /// **One stroke the artist finished, in canvas points — and nothing else.**
     ///
-    /// Kept so a zoom change (or a layout change) can re-walk rather than magnify. Carrying the brush
-    /// is what stops a re-walk from being a retroactive edit: BRUSH.md §2.10 rules that a brush edit
-    /// does not change ink already drawn, and a pad that re-rendered its history with the current
-    /// brush would break that in the one place an artist is watching for it.
+    /// It carried a `Brush`, a colour and the two stroke numbers until §2.31, so a re-walk drew each
+    /// stroke as it was made. That is deleted rather than kept beside the new behaviour (§2.14): the
+    /// pad is a picture of the *draft*, so the brush a stroke is walked with is always the one the
+    /// editor is holding, and a stored copy could only ever disagree with it.
     private struct FinishedStroke {
         let samples: [VectorSample]
-        let brush: Brush
-        let color: UIColor
-        let size: CGFloat
-        let opacity: Double
     }
     private var finished: [FinishedStroke] = []
+
 
     /// **True while the only thing on the pad is the opening sample stroke.**
     ///
@@ -171,8 +189,13 @@ final class BrushScratchPad: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// `"ink=<total>,last=<n>,strokes=<k>,redraws=<serviced>/<requested>"`.
+    ///
+    /// The first two are §12 stage 10's operand — a pad that drew with the brush *as saved* would
+    /// look right and be wrong, and only its own pixels tell the two apart. The last two are
+    /// §2.31's: a driver cannot see a coalesced frame, so the pad counts them.
     override var accessibilityValue: String? {
-        get { "ink=\(inkedPixels),last=\(lastStrokeInk)" }
+        get { "ink=\(inkedPixels),last=\(lastStrokeInk),strokes=\(finished.count),redraws=\(redrawsServiced)/\(redrawsRequested)" }
         set { }
     }
 
@@ -215,13 +238,20 @@ final class BrushScratchPad: UIView {
     /// Separate from `rebuild` so a brush edit while the sample is up costs a clear and a walk rather
     /// than a fresh 6 MB context per tick of the slider.
     private func redrawContents() {
-        guard committed != nil else { return }
+        guard let committed else { return }
         strokeBase = nil
         inDevicePixels { context, rect in context.clear(rect) }
         if finished.isEmpty && isShowingRestingSample {
             stampRestingSample()
         } else {
             for stroke in finished { stamp(stroke) }
+        }
+        // A stroke can be under the finger while a redraw arrives — the pad is rebuilt on a layout
+        // change as well as on an edit — so the base it is re-stamped over has to be re-taken here
+        // or the live stroke would vanish until the next touch move.
+        if !samples.isEmpty {
+            strokeBase = committed.makeImage()
+            stamp(FinishedStroke(samples: samples))
         }
         // `lastStrokeInk` is a fact about a *stroke* rather than about this buffer, and this draws no
         // stroke — so it survives, exactly as it survives the keyboard-driven resize `rebuild` was
@@ -265,17 +295,61 @@ final class BrushScratchPad: UIView {
     /// and a view with no bounds has none.
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        if window == nil {
+            redrawLink?.invalidate()
+            redrawLink = nil
+            redrawPending = false
+        }
         guard window != nil, finished.isEmpty, !isShowingRestingSample, inkedPixels == 0 else { return }
         isShowingRestingSample = true
         redrawContents()
     }
 
-    /// Re-renders the resting sample after a brush edit, so *"a brush's character is visible before
-    /// the artist touches it"* keeps being true while they are moving sliders.
-    func refreshRestingSample() {
-        guard isShowingRestingSample, finished.isEmpty else { return }
+    /// **Marks the pad dirty, and services it once a frame** — §2.31's *"coalesce to a frame"*.
+    ///
+    /// A `CADisplayLink` rather than a `DispatchQueue.main.async` hop, because the thing being
+    /// coalesced against is a *frame*: a slider drag delivers several `updateUIView` calls between
+    /// two frames on a 120 Hz iPad, and an async hop would run once per delivery. It stays paused
+    /// except for the one frame it is servicing, so an idle editor costs nothing at all.
+    func setNeedsContentRedraw() {
+        redrawsRequested += 1
+        guard !redrawPending else { return }
+        // With no window there is no frame to coalesce against, so the honest answer is to do it
+        // now — a pad off screen is not in a drag loop.
+        guard window != nil else {
+            redrawsServiced += 1
+            redrawContents()
+            return
+        }
+        redrawPending = true
+        if redrawLink == nil {
+            let link = CADisplayLink(target: self, selector: #selector(serviceRedraw))
+            link.add(to: .main, forMode: .common)
+            redrawLink = link
+        }
+        redrawLink?.isPaused = false
+    }
+
+    @objc private func serviceRedraw() {
+        redrawLink?.isPaused = true
+        guard redrawPending else { return }
+        redrawPending = false
+        redrawsServiced += 1
         redrawContents()
     }
+
+    /// How many coalesced redraws this pad has actually performed, and how many were asked for.
+    /// Read by `BrushEditorUITests` off `accessibilityValue`, which is the only way a driver can see
+    /// that a burst of slider ticks cost one walk rather than thirty.
+    private(set) var redrawsServiced = 0
+    private(set) var redrawsRequested = 0
+
+    private var redrawPending = false
+    /// **Torn down when the pad leaves the window, and that is not tidiness.** `CADisplayLink` retains
+    /// its target, so a link left running holds the pad alive and `deinit` never arrives to stop it —
+    /// the cycle is the leak. The editor is a layer that comes and goes, so `didMoveToWindow` is the
+    /// one moment that is guaranteed to happen.
+    private var redrawLink: CADisplayLink?
 
     /// **The sample is drawn into a band of the curve's own proportions, centred, not into the whole
     /// pad.** `BrushPreview.samples(in:)` fits the S to whatever extent it is handed — a menu row is
@@ -362,27 +436,31 @@ final class BrushScratchPad: UIView {
             context.clear(rect)
             if let strokeBase { context.draw(strokeBase, in: rect) }
         }
-        stamp(FinishedStroke(samples: samples, brush: brush, color: color,
-                             size: strokeSize, opacity: strokeOpacity))
+        stamp(FinishedStroke(samples: samples))
         setNeedsDisplay()
     }
 
+    /// **Walked with the brush the editor is holding right now** — §2.31. The stroke contributes its
+    /// samples and nothing else, which is what makes "the pad is a picture of the draft" a property
+    /// of the store rather than a rule somebody keeps.
     private func stamp(_ stroke: FinishedStroke) {
         guard let committed, !stroke.samples.isEmpty else { return }
         BrushStamper.stampStroke(into: CGContextDabTarget(committed),
                                  samples: StrokeSamples(stroke.samples, channels: .pressureOnly),
-                                 brush: stroke.brush,
-                                 color: stroke.color,
-                                 brushSize: stroke.size,
-                                 brushOpacity: stroke.opacity,
+                                 brush: brush,
+                                 color: color,
+                                 brushSize: strokeSize,
+                                 brushOpacity: strokeOpacity,
                                  isEraser: false,
                                  random: DabRandom(seed: Self.padSeed))
     }
 
     private func finishStroke() {
         guard !samples.isEmpty else { return }
-        finished.append(FinishedStroke(samples: samples, brush: brush, color: color,
-                                       size: strokeSize, opacity: strokeOpacity))
+        finished.append(FinishedStroke(samples: samples))
+        // §2.31's cap, applied where a stroke is added rather than where one is drawn: the oldest
+        // goes, so the newest — the one the artist is judging — is never the one dropped.
+        if finished.count > BrushPadZoom.maximumStrokes { finished.removeFirst(finished.count - BrushPadZoom.maximumStrokes) }
         samples = []
         strokeBase = nil
         lastStrokeInk = max(countInk() - inkedBefore, 0)

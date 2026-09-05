@@ -53,8 +53,9 @@ struct DabRandom: Equatable {
     /// **A struct rather than an enum since §12 stage 7**, because the matrix mints a channel per
     /// modulation row and there is no fixed list of those — `DabRandom.Channel.modulation(_:row:)`
     /// (`BrushModulation.swift`) is the minting rule, kept there so this type stays free of `Brush`.
-    /// The four named below are the intrinsic draws, and their raw values are exactly the enum's.
-    /// 0–15 are reserved for them; the matrix starts at 16.
+    /// The three named below are the intrinsic draws, and their raw values are exactly the enum's.
+    /// 0–15 are reserved for them; the matrix starts at 16. **It was four until §2.32** deleted
+    /// `density`'s — see the gap at 4.
     struct Channel: Hashable {
         let rawValue: UInt64
         init(rawValue: UInt64) { self.rawValue = rawValue }
@@ -74,9 +75,11 @@ struct DabRandom: Equatable {
         static let scatterAlong = Channel(rawValue: 2)
         /// The tip's per-dab angle jitter — `BrushAngleSettings.jitter`.
         static let rotation = Channel(rawValue: 3)
-        /// **BRUSH.md §2.18's dropout draw.** The value a dab's `density` is compared against, and
-        /// the one whose wavelength is carried by the density row itself.
-        static let density = Channel(rawValue: 4)
+        // 4 was §2.18's intrinsic dropout draw, **deleted by §2.32**: `density` is a threshold now
+        // and the randomness that crosses it is an ordinary chain, drawing from a matrix channel
+        // like every other row. The number is not reused, for this type's own stated reason — *add
+        // channels, never renumber* — and 0–15 stay reserved for intrinsic draws, of which there
+        // are three.
 
         /// **One octave of this channel** — BRUSH.md §2.28's *"each octave needs its own channel or
         /// two of them are the same number twice"*.

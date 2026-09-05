@@ -217,9 +217,12 @@ final class BrushModulationLogicTests: XCTestCase {
         for output in BrushOutput.allCases {
             var driven = base
             // A pressure row on every output. The amounts are signed where the base is already at its
-            // ceiling, so each one has somewhere to move to.
-            let amount: Double = (output == .size || output == .flow
-                                  || output == .density || output == .hardness) ? -0.5 : 0.4
+            // ceiling, so each one has somewhere to move to — and `density` needs a **whole** unit
+            // since §2.32, because its base is 1 and the gate is at 0.5: half a unit of pressure
+            // cannot reach the threshold, so the row would be true of the model and invisible in the
+            // dabs, which is precisely what this test is for.
+            let amount: Double = output == .density ? -1
+                : (output == .size || output == .flow || output == .hardness) ? -0.5 : 0.4
             driven.modulations = BrushModulations([BrushModulation(output, .pressure, amount: amount)])
             if output == .angle {
                 // A disc has no orientation, so the `angle` output reaches a picture only — §6, and
@@ -306,41 +309,58 @@ final class BrushModulationLogicTests: XCTestCase {
                        "a walk that cannot know the stroke's length answers the neutral, not zero")
     }
 
-    // MARK: - §2.18 density
+    // MARK: - §2.32 density is a gate
 
-    /// **Density at 1 is bit-identical to no density row at all.** BRUSH.md §2.18's first requirement,
-    /// and the reason a skip can be free: §4 leaves no sequence and no phase, so a draw that is never
-    /// taken shifts nothing.
-    func testDensityAtOneIsBitIdenticalToNoDensityAtAll() {
-        let samples = Self.rampStroke()
-        var scattering = TestBrushes.hardRound
-        scattering.dab.scatterAcross = 0.4          // so any re-phasing of the field would be visible
-        scattering.dab.scatterAlong = 0.4          // so any re-phasing of the field would be visible
-        var withRow = scattering
-        withRow.dab.density = 1
-        withRow.modulations = BrushModulations(withRow.modulations.rows
-                                               + [BrushModulation(.density, .pressure, amount: 0)])
-        XCTAssertEqual(Self.render(scattering, samples), Self.render(withRow, samples),
-                       "density at 1 must draw exactly the stroke with no density row")
+    /// **The gate, at the two values either side of it, with nothing random attached.**
+    ///
+    /// BRUSH.md §2.32, the owner: *"a rule where threshold of over 50% means the dab stays"*. This is
+    /// that sentence and nothing else — 0.49 stamps nothing at all, 0.5 stamps every dab, and 0.5 is
+    /// bit-identical to a brush with no density on it. The step is what makes the number a **level**
+    /// rather than the rate it was: under §2.18, 0.49 laid down about half the dabs.
+    func testDensityIsAGateAtTheThresholdAndNotARate() {
+        let samples = Self.rampStroke(from: 1, to: 1)
+        var brush = TestBrushes.hardRound
+        // Scatter on, so a re-phasing of the field would be visible in the bytes as well as the count.
+        brush.dab.scatterAcross = 0.4
+        brush.dab.scatterAlong = 0.4
+
+        let plain = brush.withDensity(1)
+        let atGate = brush.withDensity(BrushDensityGate.threshold)
+        let below = brush.withDensity(BrushDensityGate.threshold.nextDown)
+
+        XCTAssertGreaterThan(Self.dabs(plain, samples).count, 100, "the fixture has to lay dabs")
+        XCTAssertEqual(Self.dabs(atGate, samples).count, Self.dabs(plain, samples).count,
+                       "§2.32: at the threshold every dab is stamped")
+        XCTAssertEqual(Self.render(atGate, samples), Self.render(plain, samples),
+                       "…and byte-for-byte the same ink as a brush with no density at all")
+        XCTAssertEqual(Self.dabs(below, samples).count, 0,
+                       "§2.32: one ulp below the threshold nothing is stamped — a level, not a rate")
     }
 
-    /// **Lowering density removes dabs and moves none of the ones that remain.** §2.18's second
-    /// requirement, and the one that says the skip is a skip rather than a re-walk.
-    func testLoweringDensityRemovesDabsWithoutMovingTheRest() {
+    /// **A randomiser on `density` is what a dropout is now**, and it thins the line the way §2.18's
+    /// intrinsic roll did: dabs are removed and none of the survivors moves.
+    ///
+    /// The chain is `base 0.75, density ← random(λ=0) at −0.5`, which crosses the gate exactly when
+    /// the draw is above 0.5 — half the dabs, in white noise. That is §2.18's own fixture written in
+    /// §2.32's vocabulary, and the survivors are compared as *whole dabs* (centre, radius, alpha) so
+    /// a re-phasing of the field would fail it rather than a count coincidence passing it.
+    func testARandomiserOnDensityDropsDabsWithoutMovingTheRest() {
         let samples = Self.rampStroke(from: 1, to: 1)
         var solid = TestBrushes.hardRound
         solid.dab.scatterAcross = 0.3
         solid.dab.scatterAlong = 0.3
         var sparse = solid
-        sparse.dab.density = 0.5
-        sparse.dab.densityWavelength = 0      // white noise: individual dabs drop, not runs
+        // 0.75 − ½·u ≥ 0.5 ⟺ u ≤ 0.5: half the draws, and λ = 0 is a fresh one per dab, so
+        // individual dabs drop rather than runs.
+        sparse.dab.density = 0.75
+        sparse.modulations = BrushModulations(sparse.modulations.rows
+                                              + [.randomisedDensity(wavelength: 0)])
 
         let all = Self.dabs(solid, samples)
         let kept = Self.dabs(sparse, samples)
         XCTAssertGreaterThan(all.count, 100, "the fixture has to lay plenty of dabs")
-        XCTAssertLessThan(kept.count, all.count, "half density must drop dabs")
+        XCTAssertLessThan(kept.count, all.count, "a randomiser across the gate must drop dabs")
         XCTAssertGreaterThan(kept.count, 0, "…and not all of them")
-        // Every survivor is one of the originals, unchanged — same centre, same radius, same alpha.
         var remaining = all[...]
         for dab in kept {
             guard let index = remaining.firstIndex(of: dab) else {
@@ -348,12 +368,12 @@ final class BrushModulationLogicTests: XCTestCase {
             }
             remaining = remaining[remaining.index(after: index)...]
         }
-        // The survivor count is a real thinning rather than a rounding: about half.
         let ratio = Double(kept.count) / Double(all.count)
-        XCTAssertEqual(ratio, 0.5, accuracy: 0.12, "half density should keep about half the dabs")
+        XCTAssertEqual(ratio, 0.5, accuracy: 0.12, "half the draws clear the gate")
     }
 
-    /// **λ is what separates a stipple from a segmented line** — BRUSH.md §2.17, and it is read.
+    /// **λ on the randomiser is what separates a stipple from a segmented line** — BRUSH.md §2.17,
+    /// now read off the chain rather than off the output (§2.32).
     ///
     /// The assertion is on the **run length of consecutive skips**, which is the thing λ controls and
     /// the thing an artist sees. It is deliberately *not* "the field differs at two positions": that
@@ -362,19 +382,16 @@ final class BrushModulationLogicTests: XCTestCase {
     func testAWavelengthTurnsScatteredDropoutIntoLongGaps() {
         let samples = Self.rampStroke(from: 1, to: 1, points: 3)
         var brush = TestBrushes.hardRound
-        brush.dab.density = 0.5
+        brush.dab.density = 0.75
         // A 5 pt brush over a 136 pt stroke is **27 brush widths**, so λ = 3 fits nine periods in.
         // The fixture has to span several periods or the whole stroke lands in one cell of the field
         // and the measurement is of a coin toss rather than of a wavelength.
         let size: CGFloat = 5
 
-        /// The mean length of a run of consecutively skipped dabs — the thing λ controls and the thing
-        /// an artist sees. Deliberately **not** "the field differs at two positions", which is true of
-        /// any implementation whatever and is CLAUDE.md's own worked example of an assertion that
-        /// measures a definition.
         func meanSkipRun(wavelength: CGFloat, seed: UInt64) -> Double {
             var sparse = brush
-            sparse.dab.densityWavelength = wavelength
+            sparse.modulations = BrushModulations(sparse.modulations.rows
+                                                  + [.randomisedDensity(wavelength: wavelength)])
             let kept = Set(Self.dabs(sparse, samples, size: size, seed: seed)
                             .map { Int(($0.center.x * 64).rounded()) })
             let all = Self.dabs(brush.withDensity(1), samples, size: size, seed: seed)
@@ -401,9 +418,12 @@ final class BrushModulationLogicTests: XCTestCase {
                              + "line rather than a stipple. white \(white), coherent \(coherent)")
     }
 
-    /// **§2.19's threshold, and why it is not a ramp.** A taper is low pressure, so a linear
-    /// `density ← pressure` eats the point off every tapered stroke. The threshold holds density at 1
+    /// **§2.19's threshold curve, and why it is not a ramp.** A taper is low pressure, so a linear
+    /// `density ← pressure` eats the point off every tapered stroke. The curve holds the signal at 1
     /// above the knee, so the same stroke keeps its taper solid and only genuinely light ink breaks up.
+    ///
+    /// Written in §2.32's vocabulary: base at the gate, the pressure signal at `+½` and the draw at
+    /// `−½`, so a dab survives exactly where the shaped pressure is above the draw.
     func testTheDensityThresholdKeepsATaperSolidWhereARampWouldNot() {
         // A stroke that tapers: full press in the middle, light at both ends.
         let flat = Self.rampStroke(from: 1, to: 1, points: 21)
@@ -414,13 +434,16 @@ final class BrushModulationLogicTests: XCTestCase {
             return tapered
         }, channels: .captured)
         var base = TestBrushes.hardRound
-        base.dab.density = 0
-        base.dab.densityWavelength = 0
+        base.dab.density = BrushDensityGate.threshold
 
         var threshold = base
-        threshold.modulations = BrushModulations([.densityFromPressure()])
+        threshold.modulations = BrushModulations([.densityFromPressure(),
+                                                  .randomisedDensity(wavelength: 0)])
         var ramp = base
-        ramp.modulations = BrushModulations([BrushModulation(.density, .pressure, amount: 1)])
+        ramp.modulations = BrushModulations([
+            BrushModulation(.density, .pressure, amount: BrushDensityGate.halfAmount),
+            .randomisedDensity(wavelength: 0)
+        ])
 
         // The taper's shoulder: where pressure has climbed past the knee but is not yet full.
         func keptFraction(_ brush: Brush, xRange: ClosedRange<CGFloat>) -> Double {
@@ -591,6 +614,11 @@ final class BrushModulationLogicTests: XCTestCase {
     /// the device and have them extracted back into the source, and that moves the digests by
     /// design. What a red says is *"a shipped brush's ink changed"*, and the question to answer is
     /// whether the commit meant it.
+    ///
+    /// **§2.32 is the second commit to mean it**, after §2.30's scatter split. Four of the twenty use
+    /// dropout — the two rough inks, Splatter and Stipple — and the gate re-rolls *which* dabs each
+    /// drops while preserving how many; `testTheOwnersTunedRoughInkSurvivesTheDensityConversion` is
+    /// where that claim is measured rather than asserted by a digest. Sixteen are untouched.
     func testTheShippedTwentyRenderWhatTheyDidWhenTheyWereAuthored() {
         let ramped = Self.rampStroke(from: 0.05, to: 1)
         let flat = Self.rampStroke(from: 1, to: 1)
@@ -616,8 +644,13 @@ final class BrushModulationLogicTests: XCTestCase {
             // the offset: a 1/r disc became a uniform square of the same half-extent, which
             // `ScatterAxesLogicTests` measures at a mean displacement of 0.765 reaches against 0.5.
             // The other thirteen carry no scatter row and are byte-identical below.
-            "Rough Ink — Blotchy": (7_689_208_740_559_802_099, 1_897_689_623_227_238_386),
-            "Rough Ink": (8_419_025_256_513_150_091, 10_085_289_824_272_709_979),
+            // **§2.32 moved the ramped digest of both rough inks and left the flat one alone, and
+            // that asymmetry is the conversion checking itself.** Their `density ← pressure` curve
+            // saturates at 1 above a fifth of full press, so at flat pressure the signal is above
+            // every draw and every dab is stamped either way — byte for byte, on both semantics.
+            // The ramped stroke is where the dropout lives and where the draw's channel moved.
+            "Rough Ink — Blotchy": (10_664_479_671_315_962_948, 1_897_689_623_227_238_386),
+            "Rough Ink": (2_599_573_585_137_153_562, 10_085_289_824_272_709_979),
             "Painterly": (355_751_157_517_627_361, 15_351_890_775_863_647_610),
             "Bristle": (14_533_520_957_403_309_450, 8_260_293_555_180_371_024),
             "Streaky": (16_392_398_184_521_026_234, 8_307_947_881_667_356_676),
@@ -626,8 +659,12 @@ final class BrushModulationLogicTests: XCTestCase {
             // rather than the walk moved. Chalk's digest covers §2.25's merge as well as its dabs —
             // `render` walks a whole `stampStroke`, so the paper is inside the number.
             "Grunge": (13_596_034_156_539_080_871, 13_523_272_526_962_090_298),
-            "Splatter": (16_899_600_055_808_276_393, 13_861_195_677_941_883_625),
-            "Stipple": (2_281_880_113_399_185_065, 10_700_246_836_647_646_257),
+            // These two carried a flat rate rather than a pressure curve, so **both** their strokes
+            // drop dabs and both digests moved. The other sixteen came back unchanged on the same
+            // run, which is what says §2.32 reached the four brushes that use dropout and nothing
+            // else — the walk did not move.
+            "Splatter": (5_182_888_050_553_630_929, 13_324_997_202_027_361_854),
+            "Stipple": (1_452_799_249_971_392_860, 3_586_250_782_538_289_088),
             "Chalk": (9_596_848_185_652_238_267, 15_987_492_500_338_589_173)
         ]
         XCTAssertEqual(BrushLibrary.defaults.count, 20, "PREMISE: §8.6 ships twenty")
@@ -641,6 +678,92 @@ final class BrushModulationLogicTests: XCTestCase {
             XCTAssertEqual(a, wantA, "\(brush.name) on a pressure ramp draws different ink now")
             XCTAssertEqual(b, wantB, "\(brush.name) at full pressure draws different ink now")
         }
+    }
+
+    // MARK: - BRUSH.md §2.33 — a scale module's amount
+
+    /// **A scale at amount 0 is inert and at 1 is byte-identical to what a scale did before §2.33.**
+    ///
+    /// The ruling: *"it mixes rather than multiplying outright, `value · (1 - amount + amount ·
+    /// curve(reading))`, so 0 is inert and 1 is today's behaviour and every existing chain renders
+    /// byte-identically."* Both halves are asserted here, and **the byte-identity is the one that
+    /// matters** — it is what says the field could be added to `BrushModule.scale` without re-rolling
+    /// a single brush an artist already owns.
+    ///
+    /// The identity is arithmetic rather than a guard: `1 - 1 + 1 · c` is exactly `c` in IEEE, so
+    /// there is deliberately no early return making this true by construction. `DabRandom`'s own
+    /// one-octave pin makes the same argument one file over.
+    func testAScaleModulesAmountIsInertAtZeroAndTheOldMultiplyAtOne() {
+        let samples = Self.rampStroke(from: 0.05, to: 1)
+        var bare = TestBrushes.hardRound
+        bare.dab.size = 0.4
+        bare.modulations = BrushModulations([
+            BrushModulation(.size, .pressure, amount: 0.9)
+        ])
+        var scaled = bare
+        // A scale whose sensor is the random field, so the attenuation is plainly visible and
+        // varies along the stroke — a constant one could be matched by a different amount.
+        let sensor = BrushInput.random(.modulation(.size, row: 0), .plain(1.5))
+        func withScale(_ amount: Double) -> Brush {
+            var brush = bare
+            brush.modulations = BrushModulations([
+                BrushModulation(.size, .pressure,
+                                modules: [.scale(sensor, .linear, amount)], amount: 0.9)
+            ])
+            return brush
+        }
+        scaled = withScale(BrushModule.fullScale)
+
+        // 1. Full amount is exactly the multiply a scale was before this field existed — and the
+        //    operand is a brush written the *old* way, through the two-argument spelling every
+        //    pre-§2.33 call site used.
+        var asWritten = bare
+        asWritten.modulations = BrushModulations([
+            BrushModulation(.size, .pressure, modules: [.scale(sensor, .linear)], amount: 0.9)
+        ])
+        XCTAssertEqual(Self.render(scaled, samples), Self.render(asWritten, samples),
+                       "amount 1 must be the multiply a scale always did, to the byte")
+        XCTAssertNotEqual(Self.render(scaled, samples), Self.render(bare, samples),
+                          "PREMISE: the scale is doing something, or every assertion here is vacuous")
+
+        // 2. Zero is inert — the chain renders as if the module were not there at all.
+        XCTAssertEqual(Self.render(withScale(0), samples), Self.render(bare, samples),
+                       "amount 0 must leave the chain exactly as it was, to the byte")
+
+        // 3. And a half is neither, so the control is a control rather than a switch.
+        let half = Self.render(withScale(0.5), samples)
+        XCTAssertNotEqual(half, Self.render(bare, samples))
+        XCTAssertNotEqual(half, Self.render(scaled, samples))
+
+        // 4. It cannot amplify — §2.22's surviving clause. Above 1 it clamps to the full multiply
+        //    rather than lifting the chain past what it would be with no scale at all.
+        XCTAssertEqual(Self.render(withScale(4), samples), Self.render(scaled, samples),
+                       "a scale attenuates: an amount past 1 is the full multiply, not amplification")
+    }
+
+    /// **The amount is off the wire at its default**, so a brush written before §2.33 and one written
+    /// after are the same bytes — the property `.linear`'s absence already gives the curve (§2.29).
+    func testAScalesAmountIsAbsentFromTheWireByDefault() throws {
+        let encoder = JSONEncoder()
+        let plain = BrushModulations([
+            BrushModulation(.spacing, .pressure, modules: [.scale(.velocity)], amount: 0.5)
+        ])
+        let json = String(data: try encoder.encode(plain), encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("\"amount\":1"),
+                       "a scale at full amount must write the bytes it wrote before §2.33: \(json)")
+
+        let mixed = BrushModulations([
+            BrushModulation(.spacing, .pressure,
+                            modules: [.scale(.velocity, .linear, 0.25)], amount: 0.5)
+        ])
+        let mixedJSON = try encoder.encode(mixed)
+        XCTAssertTrue((String(data: mixedJSON, encoding: .utf8) ?? "").contains("0.25"),
+                      "…and one the artist moved must write it")
+        let decoded = try JSONDecoder().decode(BrushModulations.self, from: mixedJSON)
+        guard case .scale(_, _, let amount)? = decoded.rows.first?.modules.first else {
+            return XCTFail("the module did not round-trip as a scale")
+        }
+        XCTAssertEqual(amount, 0.25, accuracy: 1e-12)
     }
 
     /// FNV-1a over the rendered bytes. A digest rather than the array, so the expectation is five
@@ -698,7 +821,7 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertNotEqual(a, DabRandom.Channel.scatterAcross,
                           "a matrix row must not collide with the intrinsic scatter draw")
         XCTAssertNotEqual(b, DabRandom.Channel.scatterAlong)
-        XCTAssertNotEqual(a, DabRandom.Channel.density, "…nor with §2.18's dropout draw")
+        XCTAssertNotEqual(a, DabRandom.Channel.rotation, "…nor with the angle jitter's")
     }
 
     // MARK: - The consumers that have a pressure and no walk
@@ -723,11 +846,32 @@ final class BrushModulationLogicTests: XCTestCase {
                            "…and neither is such an eraser")
         }
 
-        var dropping = pressureOnly
-        dropping.dab.density = 0.5
-        XCTAssertFalse(VectorEraser.supportsSplitting(strokeBrush: dropping),
+        // **§2.32 changed the question, and the two arms of the new one are asserted separately.**
+        // While `density` was a rate, "below 1" was exactly "drops dabs". Under the gate it is not:
+        // a base at or above the threshold with nothing driving it stamps **every** dab, so the gate
+        // now asks for a base below the threshold *or* a chain that could take it there.
+        var belowTheGate = pressureOnly
+        belowTheGate.dab.density = BrushDensityGate.threshold.nextDown
+        XCTAssertFalse(VectorEraser.supportsSplitting(strokeBrush: belowTheGate),
+                       "a brush below the gate stamps nothing at all, let alone a bounded chain")
+        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: belowTheGate, opacity: 1, minPressure: 1))
+
+        var gated = pressureOnly
+        gated.dab.density = BrushDensityGate.threshold
+        gated.modulations = BrushModulations([.randomisedDensity(wavelength: 3)])
+        XCTAssertFalse(VectorEraser.supportsSplitting(strokeBrush: gated),
                        "a density brush stamps gaps, so the chain claims coverage over paper")
-        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: dropping, opacity: 1, minPressure: 1))
+        XCTAssertFalse(VectorEraser.supportsCleanCut(brush: gated, opacity: 1, minPressure: 1))
+
+        // And the consequence that runs the other way, asserted because it is a *change*: a base
+        // between the gate and 1 used to mean a dropout and now means none at all, so the eraser
+        // may reason about it. A test that only checked the refusals would pass against a gate
+        // still written as `density >= 1` — the operand that moved.
+        var solidBelowOne = pressureOnly
+        solidBelowOne.dab.density = 0.6
+        XCTAssertTrue(VectorEraser.supportsSplitting(strokeBrush: solidBelowOne),
+                      "§2.32: 0.6 clears the gate with nothing driving it, so no dab is dropped")
+        XCTAssertTrue(VectorEraser.supportsCleanCut(brush: solidBelowOne, opacity: 1, minPressure: 1))
     }
 
     /// `StrokeGeometry.stampRadius` still mirrors what the renderer draws for the brushes it is
@@ -951,12 +1095,12 @@ final class BrushModulationLogicTests: XCTestCase {
                             modules: [.scale(.random(.scatterAcross, .plain(0)))], amount: 1)
         ])
         guard case .random(let first, _) = brush.modulations.rows[0].input,
-              case .scale(.random(let second, _), _) = brush.modulations.rows[0].modules[0] else {
+              case .scale(.random(let second, _), _, _) = brush.modulations.rows[0].modules[0] else {
             return XCTFail("both positions should still be random")
         }
         XCTAssertNotEqual(first, second, "a randomiser module needs a channel of its own")
         XCTAssertNotEqual(second, DabRandom.Channel.scatterAcross, "…and not an intrinsic draw's")
-        XCTAssertNotEqual(second, DabRandom.Channel.density)
+        XCTAssertNotEqual(second, DabRandom.Channel.rotation)
 
         var products: [Double] = [], lefts: [Double] = [], rights: [Double] = []
         for seed in [UInt64(1), 7, 99, 0xC0FFEE, 0xDEAD, 1 << 40, 12345, 0xFFFF_FFFF] {
@@ -1126,8 +1270,8 @@ final class BrushModulationLogicTests: XCTestCase {
                                       .scale(.random(.scatterAcross, .plain(0)))],
                             amount: 1)
         ])
-        guard case .scale(.random(let first, _), _) = brush.modulations.rows[0].modules[0],
-              case .scale(.random(let second, _), _) = brush.modulations.rows[0].modules[1] else {
+        guard case .scale(.random(let first, _), _, _) = brush.modulations.rows[0].modules[0],
+              case .scale(.random(let second, _), _, _) = brush.modulations.rows[0].modules[1] else {
             return XCTFail("both modules should still be randomisers")
         }
         XCTAssertNotEqual(first, second, "two randomisers in one chain need two channels")
@@ -1328,7 +1472,7 @@ final class BrushModulationLogicTests: XCTestCase {
                           "the order is part of the value, so two orders are two matrices")
 
         // §2.28's octaves are on the wire and they are the authored half.
-        guard case .scale(.random(let channel, let randomiser), _) = randomFirst.rows[0].modules[0] else {
+        guard case .scale(.random(let channel, let randomiser), _, _) = randomFirst.rows[0].modules[0] else {
             return XCTFail("the first module must decode as a randomiser")
         }
         XCTAssertEqual(randomiser.wavelength, 2.5)
@@ -1337,7 +1481,7 @@ final class BrushModulationLogicTests: XCTestCase {
         XCTAssertEqual(channel, .modulation(.size, row: 0, slot: 1),
                        "decode runs the same channel normalisation construction does, and a randomiser "
                        + "at position 0 of the chain is plane 1")
-        guard case .scale(.random(let moved, _), _) = curveFirst.rows[0].modules[1] else {
+        guard case .scale(.random(let moved, _), _, _) = curveFirst.rows[0].modules[1] else {
             return XCTFail("the second module must decode as a randomiser")
         }
         XCTAssertEqual(moved, .modulation(.size, row: 0, slot: 2),
@@ -1449,7 +1593,7 @@ final class BrushModulationLogicTests: XCTestCase {
         [{"output":"size","input":{"kind":"pressure"},"amount":0.4,
           "modules":[{"kind":"scale","input":{"kind":"velocity"}}]}]
         """.utf8)
-        guard case .scale(let input, let curve)? = try decoder.decode(BrushModulations.self, from: bare)
+        guard case .scale(let input, let curve, let bareAmount)? = try decoder.decode(BrushModulations.self, from: bare)
             .rows[0].modules.first else {
             return XCTFail("a scale with no curve key must still decode as a scale")
         }
@@ -1464,7 +1608,7 @@ final class BrushModulationLogicTests: XCTestCase {
                         {"frame":307,"value":0,"interpolation":"linear","tangentMode":"vector"},
                         {"frame":1024,"value":0,"interpolation":"linear","tangentMode":"vector"}]}}]}]
         """.utf8)
-        guard case .scale(_, let shaped)? = try decoder.decode(BrushModulations.self, from: gated)
+        guard case .scale(_, let shaped, _)? = try decoder.decode(BrushModulations.self, from: gated)
             .rows[0].modules.first else {
             return XCTFail("a scale with a curve key must decode as a scale")
         }
@@ -1560,5 +1704,215 @@ private extension Brush {
         var copy = self
         copy.dab.density = density
         return copy
+    }
+}
+
+// MARK: - BRUSH.md §2.32 — the owner's own tuning survives the conversion
+
+/// **The pin §2.32 asks for**, and its operands are on two different commits on purpose.
+///
+/// `Fixtures/owner-tuned-library-2026-09-05.json` is the library pulled off the owner's iPad after
+/// they tuned Rough Ink and said it *"looks almost exactly like how I want it now"*. Under §2.18 its
+/// `density` chain runs a curve from **0.606 at no press to 1 at a fifth of full**, with a base of 0 —
+/// which is a rate, so it drops about a quarter of the dabs at the light end. Read under §2.32's gate
+/// with no conversion at all, **every one of those values clears 0.5 and the dropout vanishes
+/// entirely**: the brush would stamp every dab and look nothing like what the owner tuned. That is the
+/// regression this file exists to catch.
+extension BrushModulationLogicTests {
+
+    /// The fixture's brush, as the app would load it — which since §2.32 means **through the
+    /// migration in `Brush.init(from:)`**. Nothing here converts anything; the decode does.
+    static func ownerFixtureBrush(named name: String) throws -> Brush {
+        let url = try XCTUnwrap(Bundle(for: BrushModulationLogicTests.self)
+            .url(forResource: "owner-tuned-library-2026-09-05", withExtension: "json"),
+                                "fixture is not in the test bundle")
+        let document = try JSONDecoder().decode(BrushLibraryDocument.self,
+                                                from: ownerFixtureBytes(try Data(contentsOf: url)))
+        return try XCTUnwrap(document.groups.flatMap(\.brushes).first { $0.name == name })
+    }
+
+    /// **The fixture is one ruling older than the model and this is the only thing standing in the
+    /// way** — a finding rather than a workaround.
+    ///
+    /// It was saved before §2.30, so it names the **isotropic** `scatter` output that ruling deleted,
+    /// and `BrushOutput` cannot decode the string at all: the whole library throws. This applies
+    /// §2.30's own conversion to the bytes — one isotropic row becomes two, `scatterAcross` and
+    /// `scatterAlong`, at the same amount and the same modules, which is exactly what `BrushLibrary`'s
+    /// presets were rewritten into. It is done **here rather than in the app** because the app has no
+    /// such migration: §2.14 rules documents expendable and §2.30 rewrote the presets by hand. What
+    /// this file needs it for is that the two sides of the comparison must differ in `density` and
+    /// nothing else.
+    static func ownerFixtureBytes(_ data: Data) -> Data {
+        guard var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var groups = root["groups"] as? [[String: Any]] else { return data }
+        for groupIndex in groups.indices {
+            guard var brushes = groups[groupIndex]["brushes"] as? [[String: Any]] else { continue }
+            for brushIndex in brushes.indices {
+                guard let rows = brushes[brushIndex]["modulations"] as? [[String: Any]] else { continue }
+                var converted: [[String: Any]] = []
+                for row in rows {
+                    guard (row["output"] as? String) == "scatter" else { converted.append(row); continue }
+                    for axis in ["scatterAcross", "scatterAlong"] {
+                        var copy = row
+                        copy["output"] = axis
+                        converted.append(copy)
+                    }
+                }
+                brushes[brushIndex]["modulations"] = converted
+            }
+            groups[groupIndex]["brushes"] = brushes
+        }
+        root["groups"] = groups
+        return (try? JSONSerialization.data(withJSONObject: root)) ?? data
+    }
+
+    /// A long stroke at one flat pressure, so the dropout is the only thing varying along it.
+    static func dropoutStroke(pressure: CGFloat, points: Int = 3) -> StrokeSamples {
+        StrokeSamples((0..<points).map { i in
+            let t = CGFloat(i) / CGFloat(points - 1)
+            return VectorSample(x: 12 + t * 136, y: 80, pressure: pressure,
+                                deltaTime: i == 0 ? 0 : 0.02)
+        }, channels: .captured)
+    }
+
+    /// What a dropout *is*, measured three ways at one pressure over many seeds.
+    ///
+    /// - `kept` — the fraction of the dabs a solid walk lays that survive. This is the thing §2.18
+    ///   called the density and §2.32 makes an emergent property of the chain.
+    /// - `meanRun` — the mean length of a run of consecutively skipped dabs, which is what **λ**
+    ///   controls and what an artist sees as the difference between a stipple and a broken line.
+    /// - `ink` — pixels the stroke actually covers, which is the only one of the three that answers
+    ///   for the whole brush rather than for its gate.
+    ///
+    /// **None of the three can be equal by construction**, which is the point: the conversion moves
+    /// the draw from the deleted intrinsic channel 4 to a matrix channel, so *which* dabs drop is
+    /// re-rolled and only the field's statistics carry over. Averaged over `seeds`, and the count is
+    /// what makes that average a measurement — a λ of 2 widths on a 12-width stroke is about six
+    /// independent cells a seed.
+    static func dropoutStats(_ brush: Brush, pressure: CGFloat, seeds: [UInt64],
+                             inkSeeds: Int = 200,
+                             size: CGFloat = 11) -> (kept: Double, meanRun: Double, ink: Double) {
+        let samples = dropoutStroke(pressure: pressure)
+        var solid = brush
+        solid.dab.density = 1
+        solid.modulations = BrushModulations(solid.modulations.rows.filter { $0.output != .density })
+        var keptSum = 0, totalSum = 0
+        var runSum = 0.0, inkSum = 0.0
+        for (index, seed) in seeds.enumerated() {
+            let all = dabs(solid, samples, size: size, seed: seed)
+                .map { Int(($0.center.x * 64).rounded()) }
+            let kept = Set(dabs(brush, samples, size: size, seed: seed)
+                .map { Int(($0.center.x * 64).rounded()) })
+            keptSum += kept.count
+            totalSum += all.count
+            var runs: [Int] = []
+            var run = 0
+            for dab in all {
+                if kept.contains(dab) { if run > 0 { runs.append(run); run = 0 } } else { run += 1 }
+            }
+            if run > 0 { runs.append(run) }
+            runSum += runs.isEmpty ? 0 : Double(runs.reduce(0, +)) / Double(runs.count)
+            // `inkSeeds` exists because a rasterise is dearer than a bake and this is a fast-tier
+            // test. MEASURED, the whole assertion is 3.5 s at every seed rendered, so it renders
+            // every seed — the prefix is here for the next person who lengthens the stroke.
+            guard index < inkSeeds else { continue }
+            let bytes = render(brush, samples, size: size, seed: seed)
+            var ink = 0
+            for byte in stride(from: 3, to: bytes.count, by: 4) where bytes[byte] > 8 { ink += 1 }
+            inkSum += Double(ink)
+        }
+        return (Double(keptSum) / Double(totalSum),
+                runSum / Double(seeds.count),
+                inkSum / Double(min(inkSeeds, seeds.count)))
+    }
+
+    /// **200 seeds, spread by the golden ratio.** The stroke is 12.4 brush widths and the owner's λ
+    /// is 1.99, so one seed is about six independent draws; two hundred of them is what turns a
+    /// kept-fraction into a number worth putting a tolerance on.
+    static let dropoutSeeds: [UInt64] = (1...200).map { UInt64($0) &* 0x9E37_79B9_7F4A_7C15 }
+
+    /// **The owner's two rough inks lay the same ink after the conversion as before it.**
+    ///
+    /// The expected numbers below were **MEASURED at `6c308c6`, the commit before §2.32, in a
+    /// separate worktree** (`../PaintApp-editor2-base`) by running this same measurement there
+    /// against the same fixture — not by comparing two brushes inside one process, which measures the
+    /// evaluator against itself and would pass whatever the conversion did. CLAUDE.md's *"a green
+    /// assertion is only as good as its two operands"*, and §2.28's own preset pin took its digests
+    /// the same way.
+    ///
+    /// **The tolerances are stated because the conversion is exact as an inequality and inexact in
+    /// exactly one way.** `keep ⟺ D ≥ u` is preserved to the arithmetic (see `BrushDensityGate`), but
+    /// `u` moves from the deleted intrinsic channel to a matrix channel, so the *pattern* of gaps is
+    /// re-rolled — §6.2's already-stated cost of moving a row. What survives is the field's
+    /// statistics, and MEASURED they survive well: **every kept fraction within 2.2 percentage
+    /// points, every inked-pixel count within 2.9%, and above the curve's knee the two are identical
+    /// to the byte.** The worst of it is Rough Ink at a twentieth of full pressure — the lightest
+    /// touch of the roughest brush, where the dropout is strongest and a stroke holds fewest
+    /// independent draws.
+    func testTheOwnersTunedRoughInkSurvivesTheDensityConversion() throws {
+        // (pressure, kept fraction, mean skip run, inked pixels) — MEASURED at 6c308c6.
+        let before: [String: [(CGFloat, Double, Double, Double)]] = [
+            "Rough Ink": [(0.05, 0.74000, 22.5167, 1009.3),
+                          (0.15, 0.92533, 7.6242, 1595.6),
+                          (0.25, 0.99719, 0, 2090.8),
+                          (1.00, 0.99642, 0, 3469.6)],
+            "Rough Ink — Blotchy": [(0.05, 0.54708, 51.5375, 764.6),
+                                    (0.15, 0.71117, 34.3425, 979.7),
+                                    (0.25, 0.85416, 17.4275, 1172.5),
+                                    (1.00, 0.99825, 0, 1437.5)]
+        ]
+        for (name, rows) in before {
+            let brush = try Self.ownerFixtureBrush(named: name)
+            // PREMISE, and the reason the whole test exists: a naive port leaves the curve reaching
+            // 0.606…1 against a 0.5 gate, so every dab clears it. The conversion has to have put the
+            // base at the gate and hung a randomiser off it.
+            XCTAssertEqual(brush.dab.density, BrushDensityGate.threshold, accuracy: 1e-12,
+                           "\(name): the migration must sit the base on the gate")
+            let densityRows = brush.modulations.rows(for: .density)
+            XCTAssertEqual(densityRows.count, 2, "\(name): a signal row and a randomiser row")
+            XCTAssertTrue(densityRows.contains { $0.input.randomiser != nil },
+                          "\(name): without a randomiser the gate is never crossed and nothing drops")
+
+            for (pressure, wasKept, wasRun, wasInk) in rows {
+                let now = Self.dropoutStats(brush, pressure: pressure, seeds: Self.dropoutSeeds)
+                print(String(format: "GATEPIN %@ p=%.2f kept=%.5f run=%.4f ink=%.1f",
+                             name, Double(pressure), now.kept, now.meanRun, now.ink))
+                XCTAssertEqual(now.kept, wasKept, accuracy: 0.025,
+                               "\(name) at pressure \(pressure): the fraction of dabs that survive "
+                               + "moved from \(wasKept) to \(now.kept)")
+                XCTAssertEqual(now.ink, wasInk, accuracy: max(wasInk * 0.035, 1),
+                               "\(name) at pressure \(pressure): inked pixels moved from \(wasInk) "
+                               + "to \(now.ink)")
+                XCTAssertEqual(now.meanRun, wasRun, accuracy: max(wasRun * 0.12, 0.001),
+                               "\(name) at pressure \(pressure): the mean length of a gap moved from "
+                               + "\(wasRun) to \(now.meanRun) — that is what λ controls")
+            }
+        }
+    }
+
+    /// **And the gaps are long, which is the half a tolerance cannot say.**
+    ///
+    /// Every assertion above is a comparison against a number, so a conversion that dropped λ *and*
+    /// happened to keep the same fraction would have to be caught by `meanRun` alone. This says the
+    /// thing outright: the owner's Rough Ink at a light touch drops **runs** of twenty-odd dabs, not
+    /// isolated ones, and that is §2.17's whole distinction between a stipple and a broken line.
+    func testTheOwnersRoughInkStillBreaksIntoRunsRatherThanSpeckles() throws {
+        let brush = try Self.ownerFixtureBrush(named: "Rough Ink")
+        let light = Self.dropoutStats(brush, pressure: 0.05, seeds: Array(Self.dropoutSeeds.prefix(40)))
+        XCTAssertGreaterThan(light.meanRun, 8,
+                             "λ = 1.99 widths must drop contiguous runs: mean run \(light.meanRun)")
+        // The same brush with λ taken off its randomiser — the mutation this test exists to fail.
+        var white = brush
+        white.modulations = BrushModulations(brush.modulations.rows.map { row in
+            guard row.output == .density, case .random(let channel, let randomiser) = row.input,
+                  randomiser.wavelength > 0 else { return row }
+            var flattened = row
+            flattened.input = .random(channel, BrushRandomiser(wavelength: 0))
+            return flattened
+        })
+        let speckled = Self.dropoutStats(white, pressure: 0.05,
+                                         seeds: Array(Self.dropoutSeeds.prefix(40)))
+        XCTAssertLessThan(speckled.meanRun, light.meanRun / 4,
+                          "with λ = 0 the same brush speckles instead: \(speckled.meanRun)")
     }
 }

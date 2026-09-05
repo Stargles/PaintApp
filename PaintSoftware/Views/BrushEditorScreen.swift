@@ -36,6 +36,20 @@ struct BrushEditorScreen: View {
     let spec: StrokeSettingsSpec
     let onClose: () -> Void
 
+    /// **§2.31's working copy.** Every control on this screen writes here; **Done** puts it into the
+    /// library and **Cancel** throws it away. Nil only for the instant before `onAppear` fills it,
+    /// which is why `brush` falls back to the selection rather than forcing.
+    ///
+    /// The owner: *"the drawing pad shouldnt save the settings until you click done. There should
+    /// also be a cancel button which exits while discarding your changes."*
+    @State private var draft: Brush?
+    /// What the artist's two numbers (§2.20) were when the screen opened, so Cancel can put them
+    /// back. They are not the brush's — they live on `CanvasManager` and the toolbar shows them —
+    /// but they are edited here, and a Cancel that discarded the brush and kept a size the artist
+    /// only moved to try it would be half a discard.
+    @State private var openedSize: CGFloat?
+    @State private var openedOpacity: Double?
+
     /// Which output is expanded. One at a time, which is what "expand it down into the controller"
     /// means and what keeps the list a list.
     @State private var expanded: String?
@@ -59,7 +73,9 @@ struct BrushEditorScreen: View {
     @State private var assetPickerItem: PhotosPickerItem?
     @State private var assetImportError: String?
 
-    private var brush: Brush { canvasManager[keyPath: spec.selectedBrush] }
+    /// **The draft, never the selection.** The one place the two could be confused, so it is the one
+    /// place either is named: everything else on this screen reads this.
+    private var brush: Brush { draft ?? canvasManager[keyPath: spec.selectedBrush] }
     private var idPrefix: String { spec.idPrefix }
 
     var body: some View {
@@ -97,7 +113,16 @@ struct BrushEditorScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { refreshAssetCollections() }
+        .onAppear {
+            refreshAssetCollections()
+            // Taken once. A second `onAppear` (the layer is rebuilt when the panel behind it
+            // changes) must not throw away edits made since the first.
+            if draft == nil {
+                draft = canvasManager[keyPath: spec.selectedBrush]
+                openedSize = canvasManager[keyPath: spec.size]
+                openedOpacity = canvasManager[keyPath: spec.opacity]
+            }
+        }
         // Raised from a `Menu` item, so it cannot be a `PhotosPicker` button itself — a menu row is
         // not a place a picker can present from. `BrushSettingsPanel`'s tip importer does the same
         // dance for the same reason.
@@ -109,9 +134,12 @@ struct BrushEditorScreen: View {
 
     // MARK: - Header
 
+    /// **§2.31's two verbs.** Done writes the draft into the library; Cancel throws it away and puts
+    /// the artist's two numbers back. Both then leave, because a screen that stayed up after either
+    /// would be showing a draft that no longer means anything.
     private var header: some View {
         HStack(spacing: 10) {
-            Button(action: onClose) {
+            Button(action: done) {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left").font(.caption)
                     Text("Done").font(.subheadline.weight(.semibold))
@@ -127,6 +155,19 @@ struct BrushEditorScreen: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            Text("Nothing here is saved until you press Done.")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.35))
+                .lineLimit(1)
+
+            Button(action: cancel) {
+                Text("Cancel")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("\(idPrefix).editorCancel")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -423,11 +464,16 @@ struct BrushEditorScreen: View {
 
     @ViewBuilder
     private func outputControls(_ output: BrushOutput) -> some View {
+        // The base takes a pill for the same reason a gain does: `editorRange` is a slider's travel
+        // and §12 stage 8 already records what it cost to read one as a guarantee. §2.33's rule
+        // generalises — *"wherever a slider's range is narrower than the value's legal range, the
+        // pill is the escape hatch"*.
         sliderRow(title: "Base",
                   valueText: output.format(brush[keyPath: output.baseKeyPath]),
                   value: brushBinding(output.baseKeyPath),
                   range: output.editorRange,
-                  identifier: "\(idPrefix).base.\(output.rawValue)")
+                  identifier: "\(idPrefix).base.\(output.rawValue)",
+                  typed: { output.parse($0) })
 
         // §6: angle is the one output that is not a plain sum of a base and its rows. Its other two
         // contributions are `BrushAngleSettings` fields, not outputs, and they get controls here
@@ -443,26 +489,41 @@ struct BrushEditorScreen: View {
                       identifier: "\(idPrefix).angleJitter")
         }
 
-        // §2.18 and §7's third point: `density`'s wavelength belongs to the **row** rather than to a
-        // modulation entry, because what has to be coherent is the draw. It is a different control
-        // from a `random` input's λ and must not look like the same one.
+        // **§2.32: the Dropout Wavelength slider that stood here is deleted, and this sentence is
+        // what replaces it.** `density` is a gate now, so its λ is not a property of the output at
+        // all — it belongs to whichever randomiser the artist puts on the chain, where it sits
+        // beside octaves and a falloff. Saying the threshold out loud is what stops the base slider
+        // reading as a percentage of dabs, which is what it meant until this ruling.
         if output == .density {
-            sliderRow(title: "Dropout Wavelength",
-                      valueText: String(format: "%.1f widths", brush.dab.densityWavelength),
-                      value: Binding(get: { Double(brush.dab.densityWavelength) },
-                                     set: { newValue in edit { $0.dab.densityWavelength = CGFloat(newValue) } }),
-                      range: 0...12,
-                      identifier: "\(idPrefix).densityWavelength")
+            Text("A dab is stamped when Density reaches \(Int(BrushDensityGate.threshold * 100))%. "
+                 + "For a broken line, sit the base near that and add a Randomiser input to swing "
+                 + "across it — its wavelength is how long a gap runs.")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(idPrefix).densityGate")
         }
 
         ForEach(brush.modulations.indices(for: output), id: \.self) { index in
             chainCard(output: output, index: index)
         }
 
+        // **§2.33's third owed thing: the editor states its own arithmetic.** *"the two inputs seem
+        // to be mixed together somehow"* is this sentence's absence — the screen drew two Gain
+        // sliders and never said what joins them. Shown from the first input rather than the
+        // second, because the base is already in the sum and a single input is already a balance
+        // against it.
+        if !brush.modulations.indices(for: output).isEmpty {
+            Text("\(entryName(output)) = Base + each input's chain × its Gain. Inputs on one output add.")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(idPrefix).summed.\(output.rawValue)")
+        }
+
         Button {
             edit { $0.modulations.append(BrushModulation(output, .pressure,
                                                          amount: BrushEditorDefaults.amount)) }
-            commit()
         } label: {
             Label("Add input", systemImage: "plus.circle")
                 .font(.caption)
@@ -502,12 +563,10 @@ struct BrushEditorScreen: View {
                                                    ?? BrushEditorDefaults.randomiser)
                         brush.modulations.replace(at: index, with: updated)
                     }
-                    commit()
                 }
                 Spacer(minLength: 0)
                 Button {
                     edit { $0.modulations.remove(at: index) }
-                    commit()
                 } label: {
                     Image(systemName: "trash").font(.caption)
                         .foregroundColor(.red.opacity(0.8))
@@ -528,11 +587,18 @@ struct BrushEditorScreen: View {
                 })
             }
 
-            sliderRow(title: "Amount",
+            // **§2.33: it is called Gain, it is on every input row, and the pill takes a typed
+            // value past either end of the slider.** The owner reached for the right word — *"input
+            // 1 is pressure, which right now has amount, but change that to gain. next input 2 is
+            // random, which also receives a gain"* — and this row is drawn for every input, a
+            // `random` one exactly as a `pressure` one, which is what the second half of that
+            // sentence asks to be true.
+            sliderRow(title: "Gain",
                       valueText: output.format(row.amount),
                       value: amountBinding(index: index),
                       range: -1...1,
-                      identifier: "\(idPrefix).amount.\(rowID)")
+                      identifier: "\(idPrefix).gain.\(rowID)",
+                      typed: { output.parse($0) })
 
             Text("Modules")
                 .font(.caption).foregroundColor(.white.opacity(0.6))
@@ -550,7 +616,6 @@ struct BrushEditorScreen: View {
                             row.modules.append(kind.module)
                             brush.modulations.replace(at: index, with: row)
                         }
-                        commit()
                     }
                     .accessibilityIdentifier("\(idPrefix).addModule.\(rowID).\(kind.rawValue)")
                 }
@@ -609,7 +674,6 @@ struct BrushEditorScreen: View {
                         row.modules.remove(at: position)
                         brush.modulations.replace(at: rowIndex, with: row)
                     }
-                    commit()
                 } label: {
                     Image(systemName: "trash").font(.caption)
                         .foregroundColor(.red.opacity(0.8))
@@ -626,14 +690,14 @@ struct BrushEditorScreen: View {
             case .curveRamp:
                 ResponseCurveEditorView(curve: curveBinding(rowIndex: rowIndex, position: position),
                                         inputName: "the value reaching this module",
-                                        idPrefix: "\(idPrefix).curve.\(moduleID)",
-                                        onEditEnded: { commit() })
-            case .scale(let input, let curve):
+                                        idPrefix: "\(idPrefix).curve.\(moduleID)")
+            case .scale(let input, let curve, let scaleAmount):
                 if let randomiser = input.randomiser {
                     randomiserControls(randomiser, rowID: moduleID, idInfix: "module",
                                        write: { updated in
                         writeModule(rowIndex: rowIndex, position: position,
-                                    .scale(.random(.modulation(.size, row: 0), updated), curve))
+                                    .scale(.random(.modulation(.size, row: 0), updated), curve,
+                                           scaleAmount))
                     })
                 } else {
                     HStack(spacing: 8) {
@@ -642,7 +706,7 @@ struct BrushEditorScreen: View {
                         inputPicker(selection: input.kind,
                                     identifier: "\(idPrefix).moduleSensor.\(moduleID)") { kind in
                             writeModule(rowIndex: rowIndex, position: position,
-                                        .scale(kind.input(), curve))
+                                        .scale(kind.input(), curve, scaleAmount))
                         }
                         Spacer(minLength: 0)
                     }
@@ -654,8 +718,20 @@ struct BrushEditorScreen: View {
                 ResponseCurveEditorView(curve: sensorCurveBinding(rowIndex: rowIndex,
                                                                   position: position),
                                         inputName: input.kind.displayName,
-                                        idPrefix: "\(idPrefix).moduleCurve.\(moduleID)",
-                                        onEditEnded: { commit() })
+                                        idPrefix: "\(idPrefix).moduleCurve.\(moduleID)")
+                // **§2.33's amount, one storey down**: *"a scale carried an input and a curve but no
+                // number, so 'half as much random' meant drawing a flat curve at 0.5 — a curve
+                // editor used to enter a number."* It mixes rather than multiplying, so 0 is inert
+                // and 1 is what every chain written before it does. No pill: `0…1` **is** the legal
+                // range here — a scale may not amplify (§2.22) — so the slider is not narrower than
+                // the value and §2.33's escape hatch would be a promise the model refuses.
+                sliderRow(title: "Amount",
+                          valueText: "\(Int((scaleAmount * 100).rounded()))%",
+                          value: Binding(get: { scaleAmount },
+                                         set: { writeModule(rowIndex: rowIndex, position: position,
+                                                            .scale(input, curve, $0)) }),
+                          range: 0...1,
+                          identifier: "\(idPrefix).moduleAmount.\(moduleID)")
             }
         }
         .padding(10)
@@ -677,6 +753,9 @@ struct BrushEditorScreen: View {
     @ViewBuilder
     private func randomiserControls(_ randomiser: BrushRandomiser, rowID: String, idInfix: String,
                                     write: @escaping (BrushRandomiser) -> Void) -> some View {
+        // `"\(idPrefix)Lambda"` until §2.33's pass, which glued the two words together and read as
+        // a namespace of its own — `brushPanelLambda.size.0`. It is a dotted path now, like every
+        // other identifier on this screen.
         let prefix = idInfix.isEmpty ? "\(idPrefix)" : "\(idPrefix).\(idInfix)"
         sliderRow(title: "Wavelength",
                   valueText: String(format: "%.1f widths", randomiser.wavelength),
@@ -685,7 +764,7 @@ struct BrushEditorScreen: View {
                                                               octaves: randomiser.octaves,
                                                               falloff: randomiser.falloff)) }),
                   range: 0...12,
-                  identifier: "\(prefix)Lambda.\(rowID)")
+                  identifier: "\(prefix).lambda.\(rowID)")
         sliderRow(title: "Octaves",
                   valueText: "\(randomiser.octaves)",
                   value: Binding(get: { Double(randomiser.octaves) },
@@ -694,7 +773,7 @@ struct BrushEditorScreen: View {
                                                               falloff: randomiser.falloff)) }),
                   range: 1...Double(BrushRandomiser.maximumOctaves),
                   step: 1,
-                  identifier: "\(prefix)Octaves.\(rowID)")
+                  identifier: "\(prefix).octaves.\(rowID)")
         if randomiser.octaves > 1 {
             sliderRow(title: "Octave Falloff",
                       valueText: String(format: "%.2f", randomiser.falloff),
@@ -703,7 +782,7 @@ struct BrushEditorScreen: View {
                                                                   octaves: randomiser.octaves,
                                                                   falloff: $0)) }),
                       range: 0...1,
-                      identifier: "\(prefix)Falloff.\(rowID)")
+                      identifier: "\(prefix).falloff.\(rowID)")
         }
     }
 
@@ -716,7 +795,6 @@ struct BrushEditorScreen: View {
             row.modules.insert(module, at: to)
             brush.modulations.replace(at: rowIndex, with: row)
         }
-        commit()
     }
 
     private func writeModule(rowIndex: Int, position: Int, _ module: BrushModule) {
@@ -727,7 +805,6 @@ struct BrushEditorScreen: View {
             row.modules[position] = module
             brush.modulations.replace(at: rowIndex, with: row)
         }
-        commit()
     }
 
     /// One of `BrushChainLimit`'s sentences, drawn where the limit bites.
@@ -741,6 +818,12 @@ struct BrushEditorScreen: View {
             .foregroundColor(.white.opacity(0.35))
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("\(idPrefix).limit.\(limit.rawValue).\(scope)")
+    }
+
+    /// What the index calls this output, so the summation sentence names the thing the artist is
+    /// looking at rather than a raw case name.
+    private func entryName(_ output: BrushOutput) -> String {
+        BrushEditorCatalog.entry(id: output.rawValue)?.name ?? output.rawValue
     }
 
     private func inputPicker(selection: BrushInputKind, identifier: String,
@@ -842,15 +925,35 @@ struct BrushEditorScreen: View {
     // MARK: - Controls
 
     /// `preview` non-nil marks this row as a size slider: holding it raises the real-size stamp
-    /// window. The lift is also when the edit is written through to the library, rather than on every
-    /// tick — `BrushLibraryStore` persists on every change and a drag is dozens a second.
+    /// window.
+    ///
+    /// **`typed` is §2.33's escape hatch and it is offered exactly where a slider's travel is
+    /// narrower than the value's legal range.** The owner: *"making gain a slider means having it
+    /// bounded, which I think may limit freedom, so make it a slider, but also a place where you can
+    /// type out the percent past 100%."* §6 already rules a row's amount signed and unclamped, so it
+    /// was only the UI that had taken it away. Passing `typed` turns the value pill this row already
+    /// drew into a field, which is what §2.33 asks for — an existing element made editable rather
+    /// than a new one. A control whose slider *is* its whole range (a `0…1` mix, an octave count)
+    /// passes nil, because a pill there would promise a freedom that does not exist.
     private func sliderRow(title: String, valueText: String, value: Binding<Double>,
                            range: ClosedRange<Double>, step: Double? = nil, identifier: String,
+                           typed: ((String) -> Double?)? = nil,
                            preview: SizePreviewRequest? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("\(title): \(valueText)")
-                .font(.caption)
-                .foregroundColor(.white)
+            HStack(spacing: 4) {
+                Text("\(title):")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                if let typed {
+                    BrushValuePill(text: valueText, identifier: "\(identifier).field",
+                                   parse: typed, write: { value.wrappedValue = $0 })
+                } else {
+                    Text(valueText)
+                        .font(.caption)
+                        .foregroundColor(.white)
+                }
+                Spacer(minLength: 0)
+            }
             // `step` is for the one control whose values are countable — §2.28's octave count. It is
             // a branch rather than a defaulted argument because SwiftUI's stepped and continuous
             // sliders are two initialisers, and a step small enough to stand in for "none" is a
@@ -870,40 +973,54 @@ struct BrushEditorScreen: View {
     }
 
     private func editingChanged(_ isEditing: Bool, _ preview: SizePreviewRequest?) {
-        if !isEditing { commit() }
         guard let preview else { return }
         canvasManager.sizePreview.editingChanged(isEditing, for: preview)
     }
 
     // MARK: - Writing
 
-    /// Every edit goes through here: mutate the live selection, and let the caller decide when it
-    /// reaches the library.
+    /// **Every edit goes through here, and it reaches the draft and nothing else** — §2.31. Neither
+    /// the library nor `CanvasManager.selectedBrush` moves until Done, so an artist who Cancels
+    /// leaves both exactly as they found them.
     private func edit(_ body: (inout Brush) -> Void) {
-        var updated = canvasManager[keyPath: spec.selectedBrush]
+        var updated = brush
         body(&updated)
-        canvasManager[keyPath: spec.selectedBrush] = updated
+        draft = updated
     }
 
     /// **What makes an edit outlive the screen** — §7's *"edits currently apply to a live copy and
-    /// are lost when the preset changes"*. `BrushLibraryStore.update` replaces by id and persists, so
-    /// the brush the artist just changed is the one the menu offers and the one the next launch
-    /// loads. §2.10 falls out with no rule: the edited value interns to a different `BrushRef`, so
-    /// the ink already on the canvas keeps the brush it was drawn with.
-    private func commit() {
-        library.update(canvasManager[keyPath: spec.selectedBrush])
+    /// are lost when the preset changes"*, and §2.31's Done.
+    ///
+    /// `BrushLibraryStore.update` replaces by id and persists, so the brush the artist just changed
+    /// is the one the menu offers and the one the next launch loads. **§2.10 falls out with no rule
+    /// and this is the moment it does it**: the edited value interns to a different `BrushRef`, so
+    /// the ink already on the canvas keeps the brush it was drawn with. The pad's exception to that
+    /// (§2.31) lives entirely on this side of the button.
+    private func done() {
+        let committed = brush
+        canvasManager[keyPath: spec.selectedBrush] = committed
+        library.update(committed)
+        onClose()
+    }
+
+    /// **§2.31's Cancel: the library is byte-identical afterwards.** Nothing to undo on the brush —
+    /// no edit ever left the draft — so the only state to restore is the artist's own two numbers,
+    /// which are `CanvasManager`'s rather than the brush's and were being written live.
+    private func cancel() {
+        if let openedSize { canvasManager[keyPath: spec.size] = openedSize }
+        if let openedOpacity { canvasManager[keyPath: spec.opacity] = openedOpacity }
+        draft = nil
+        onClose()
     }
 
     // MARK: - §2.26's writes
 
     private func setTip(_ tip: BrushTip) {
         edit { $0.tip = tip }
-        commit()
     }
 
     private func setTexture(_ texture: BrushTextureSettings?) {
         edit { $0.texture = texture }
-        commit()
     }
 
     /// Points the brush's paper at a different sheet, **keeping the tile size and depth the artist
@@ -919,7 +1036,6 @@ struct BrushEditorScreen: View {
                 brush.texture = BrushTextureSettings(mask: ref)
             }
         }
-        commit()
     }
 
     private func beginImport(_ kind: BrushAssetKind) {
@@ -971,11 +1087,14 @@ struct BrushEditorScreen: View {
         textureItems = BrushAssetLibrary.items(in: .texture)
     }
 
+    /// **The artist's own two numbers (§2.20), written to the toolbar live and to the draft.** The
+    /// live half is deliberate: they are `CanvasManager`'s, the side toolbar shows them, and a size
+    /// that only appeared on Done would read as a slider that did nothing. Cancel puts them back.
     private var sizeBinding: Binding<Double> {
         Binding(get: { Double(canvasManager[keyPath: spec.size]) },
                 set: { newValue in
                     canvasManager[keyPath: spec.size] = CGFloat(newValue)
-                    canvasManager[keyPath: spec.selectedBrush].size = CGFloat(newValue)
+                    edit { $0.size = CGFloat(newValue) }
                 })
     }
 
@@ -983,7 +1102,7 @@ struct BrushEditorScreen: View {
         Binding(get: { canvasManager[keyPath: spec.opacity] },
                 set: { newValue in
                     canvasManager[keyPath: spec.opacity] = newValue
-                    canvasManager[keyPath: spec.selectedBrush].opacity = newValue
+                    edit { $0.opacity = newValue }
                 })
     }
 
@@ -996,7 +1115,6 @@ struct BrushEditorScreen: View {
         Binding(get: { brush.stroke.blendMode },
                 set: { newValue in
                     edit { $0.stroke.blendMode = newValue }
-                    commit()
                 })
     }
 
@@ -1020,7 +1138,7 @@ struct BrushEditorScreen: View {
                 guard brush.modulations.rows.indices.contains(rowIndex) else { return .linear }
                 let modules = brush.modulations.rows[rowIndex].modules
                 guard modules.indices.contains(position),
-                      case .scale(_, let curve) = modules[position] else { return .linear }
+                      case .scale(_, let curve, _) = modules[position] else { return .linear }
                 return curve
             },
             set: { newValue in
@@ -1028,8 +1146,8 @@ struct BrushEditorScreen: View {
                     guard brush.modulations.rows.indices.contains(rowIndex) else { return }
                     var row = brush.modulations.rows[rowIndex]
                     guard row.modules.indices.contains(position),
-                          case .scale(let input, _) = row.modules[position] else { return }
-                    row.modules[position] = .scale(input, newValue)
+                          case .scale(let input, _, let amount) = row.modules[position] else { return }
+                    row.modules[position] = .scale(input, newValue, amount)
                     brush.modulations.replace(at: rowIndex, with: row)
                 }
             }
@@ -1057,5 +1175,75 @@ struct BrushEditorScreen: View {
                 }
             }
         )
+    }
+}
+
+/// **BRUSH.md §2.33's typed field** — the value pill beside a slider, made editable.
+///
+/// The owner: *"making gain a slider means having it bounded, which I think may limit freedom, so
+/// make it a slider, but also a place where you can type out the percent past 100%."*
+///
+/// **It is the pill the row already drew**, which is the whole shape of the ask: §7.2 puts a value
+/// beside every control, and what was missing was that you could put one *in*. A second control
+/// beside the slider would have been a second thing to read.
+///
+/// ## Two things it has to get right, and both are about what the artist sees
+///
+/// **The field shows the row's value except while a finger is in it.** A `TextField` bound to its own
+/// `@State` would go stale the moment the slider moved; one bound straight through would rewrite the
+/// artist's half-typed "−" into "0" on the first keystroke. So the text is the formatted value while
+/// unfocused and the artist's own characters while focused, and `onChange` of the focus is what
+/// swaps them.
+///
+/// **Unparseable text puts the old value back rather than writing zero.** `Double("")` is nil and so
+/// is `Double("-")`, which is what a field holds one keystroke into a negative gain; writing a 0
+/// there would silence the row under the artist's fingers.
+///
+/// **There is exactly one committer, and the first version had two.** Return and tapping away are
+/// both ways a person finishes typing, so both have to land the value — but writing `commit()` on
+/// each of them made Return commit, resign focus, and commit *again*, the second time against an
+/// `editing` the first had already reset to the old text. The typed value was written and then
+/// immediately overwritten by the value it replaced, so the control looked completely inert while
+/// every model assertion about it passed. Return resigns focus and **losing focus is the only
+/// commit**.
+private struct BrushValuePill: View {
+    /// The value as the row formats it — what shows when nothing is being typed.
+    let text: String
+    let identifier: String
+    /// `BrushOutput.parse`, which deliberately does not clamp: §6 rules a row's amount signed and
+    /// unclamped, and clamping here would put the bound back that this control exists to remove.
+    let parse: (String) -> Double?
+    let write: (Double) -> Void
+
+    @State private var editing = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $editing)
+            .font(.caption.monospacedDigit())
+            .foregroundColor(.white)
+            .multilineTextAlignment(.center)
+            .keyboardType(.numbersAndPunctuation)
+            .textFieldStyle(.plain)
+            .frame(width: 62)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Color.white.opacity(0.12))
+            .cornerRadius(4)
+            .focused($focused)
+            .accessibilityIdentifier(identifier)
+            .onSubmit { focused = false }
+            .onChange(of: focused) { _, isFocused in
+                if isFocused { editing = text } else { commit() }
+            }
+            .onChange(of: text) { _, newText in
+                if !focused { editing = newText }
+            }
+            .onAppear { editing = text }
+    }
+
+    private func commit() {
+        if let value = parse(editing) { write(value) }
+        editing = text
     }
 }

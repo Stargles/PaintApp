@@ -211,13 +211,18 @@ final class DabCostBench: XCTestCase {
         measureWalk("six rows", brush: loaded)
     }
 
-    /// §2.18's dropout, which adds a draw and a comparison per dab and *removes* dabs — so the cost is
-    /// reported per dab actually stamped, which is what an artist pays for.
+    /// The dropout, which *removes* dabs — so the cost is reported per dab actually stamped, which is
+    /// what an artist pays for.
+    ///
+    /// **§2.32 moved where the draw is taken**: the stamper's intrinsic roll is gone and the
+    /// randomness is a chain, so this brush pays a second `density` row and the stamper pays one
+    /// comparison. The shape of the measurement is unchanged.
     func testADensityBrush() {
         var sparse = TestBrushes.hardRound
-        sparse.dab.density = 0
-        sparse.dab.densityWavelength = 3.5
-        sparse.modulations = BrushModulations(sparse.modulations.rows + [.densityFromPressure()])
+        sparse.dab.density = BrushDensityGate.threshold
+        sparse.modulations = BrushModulations(sparse.modulations.rows
+                                              + [.densityFromPressure(),
+                                                 .randomisedDensity(wavelength: 3.5)])
         measureWalk("density dropout", brush: sparse)
     }
 

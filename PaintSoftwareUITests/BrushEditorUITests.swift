@@ -149,7 +149,7 @@ final class BrushEditorUITests: PaintUITestCase {
 
         openEditor(app)
         expand(app, "size")
-        app.sliders["brushPanel.amount.size.0"].adjust(toNormalizedSliderPosition: 1.0)
+        app.sliders["brushPanel.gain.size.0"].adjust(toNormalizedSliderPosition: 1.0)
 
         let pad = app.otherElements["brushPanel.pad"]
         XCTAssertTrue(pad.waitForExistence(timeout: 5))
@@ -202,6 +202,192 @@ final class BrushEditorUITests: PaintUITestCase {
         let removed = padStroke(app, on: pad)
         XCTAssertGreaterThan(removed, reordered,
                              "…and the ink must come back, or the module was not really removed")
+    }
+
+    // MARK: - 3b. §2.31 — the draft, and the two buttons that end it
+
+    /// **Cancel discards and Done commits, and the half a "the editor closed" assertion misses is
+    /// that the library must be *unchanged* afterwards.**
+    ///
+    /// §2.31, the owner: *"the drawing pad shouldnt save the settings until you click done. There
+    /// should also be a cancel button which exits while discarding your changes."*
+    ///
+    /// Three operands, because two of them are individually satisfiable by a defect. A Cancel that
+    /// merely closed the screen would pass "the editor went away"; a Cancel that reverted the
+    /// *screen* but had already persisted would pass "re-opening shows the old value". So this
+    /// checks the value on re-open, **and** across a relaunch with the library file left alone —
+    /// which is the only way a driver can see the file — **and** that Done through the same path
+    /// does change all three. Without the Done half the test would pass against an editor that
+    /// saved nothing at all.
+    func testCancelDiscardsTheDraftAndDoneCommitsIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+
+        openEditor(app)
+        expand(app, "hardness")
+        let hardness = app.sliders["brushPanel.base.hardness"]
+        XCTAssertTrue(hardness.waitForExistence(timeout: 5))
+        let original = hardness.value as? String
+        XCTAssertNotNil(original, "PREMISE: the base slider reports its value")
+
+        // 1. Move it, then Cancel.
+        hardness.adjust(toNormalizedSliderPosition: 1.0)
+        XCTAssertNotEqual(hardness.value as? String, original,
+                          "PREMISE: the drag moved the control")
+        tapWhenHittable(app.buttons["brushPanel.editorCancel"], "Cancel")
+        XCTAssertTrue(app.sliders["brushPanel.sizeSlider"].waitForNonExistence(timeout: 5),
+                      "Cancel must take the editor down")
+
+        openEditor(app)
+        expand(app, "hardness")
+        XCTAssertEqual(app.sliders["brushPanel.base.hardness"].value as? String, original,
+                       "Cancel must discard the draft — re-opening shows the brush as it was")
+
+        // 2. …and it must not have reached the file either. The library is not wiped this time.
+        closeBrushEditor(app)
+        app.launchArguments = []
+        XCTAssertTrue(launchIntoEditor(app))
+        openEditor(app)
+        expand(app, "hardness")
+        XCTAssertEqual(app.sliders["brushPanel.base.hardness"].value as? String, original,
+                       "Cancel must leave the library exactly as it was — nothing was written")
+
+        // 3. The same edit through Done does reach both. Without this the two above would pass
+        // against an editor that never saved anything.
+        let committed = app.sliders["brushPanel.base.hardness"]
+        committed.adjust(toNormalizedSliderPosition: 1.0)
+        let edited = committed.value as? String
+        XCTAssertNotEqual(edited, original)
+        closeBrushEditor(app)
+        app.launchArguments = []
+        XCTAssertTrue(launchIntoEditor(app))
+        openEditor(app)
+        expand(app, "hardness")
+        XCTAssertEqual(app.sliders["brushPanel.base.hardness"].value as? String, edited,
+                       "Done must commit the draft to the library")
+    }
+
+    /// **A stroke drawn *before* an edit changes when the edit is made** — §2.31's pad.
+    ///
+    /// The owner: *"can you make it so that as you adjust the settings in the edit brush menu, the
+    /// strokes in the drawing pad adjusts? too?"*
+    ///
+    /// **The discriminating operand is the old stroke, and nothing else is touched after the edit.**
+    /// `testThePadDrawsWithTheBrushAsEditedRatherThanAsItWasOpened` clears the pad and draws again,
+    /// so it passes against the behaviour §7.2 shipped — each stroke re-walked with the brush it was
+    /// drawn with. This one draws once, edits, and reads the *same* stroke's pixels: under that old
+    /// behaviour the number cannot move.
+    func testAStrokeDrawnBeforeAnEditFollowsTheDraftAfterIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openEditor(app)
+
+        let pad = app.otherElements["brushPanel.pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+        app.buttons["brushPanel.padClear"].tap()
+        XCTAssertGreaterThan(padStroke(app, on: pad), 0, "PREMISE: a drag on the pad lays ink")
+        let before = padTotalInk(pad)
+        XCTAssertGreaterThan(before, 0)
+
+        // One edit, and then nothing — no clear, no second stroke.
+        expand(app, "size")
+        app.sliders["brushPanel.base.size"].adjust(toNormalizedSliderPosition: 1.0)
+
+        let after = padTotalInk(pad, changedFrom: before)
+        XCTAssertGreaterThan(after, before * 3 / 2,
+                             "§2.31: the stroke already on the pad must be re-walked from the draft "
+                             + "— \(before) → \(after)")
+
+        // And the redraws were coalesced rather than run once per tick of the drag.
+        let report = padReport(pad)
+        let serviced = report["redraws"].flatMap { Int($0.split(separator: "/").first ?? "") } ?? 0
+        let requested = report["redraws"].flatMap { Int($0.split(separator: "/").last ?? "") } ?? 0
+        XCTAssertGreaterThan(requested, 0, "PREMISE: the drag asked for redraws")
+        XCTAssertLessThanOrEqual(serviced, requested,
+                                 "§2.31: a burst of edits must cost at most one walk each, "
+                                 + "\(serviced) serviced of \(requested) asked")
+    }
+
+    // MARK: - 3c. §2.33 — the gain, on every input, typed past its slider
+
+    /// **A gain typed past 100% and a negative one both reach the ink.**
+    ///
+    /// §2.33, the owner: *"making gain a slider means having it bounded, which I think may limit
+    /// freedom, so make it a slider, but also a place where you can type out the percent past
+    /// 100%."* §6 already allowed it — a row's amount is signed and unclamped — so what this test
+    /// is really about is whether the *control* still takes it away.
+    ///
+    /// The measurement is on the pad's pixels rather than on the slider's reported value, because a
+    /// pill that wrote 1.5 into a model the row's evaluator clamped back to 1 would satisfy every
+    /// model assertion. **Three states, not two**: 150% must lay more ink than the default and −50%
+    /// must lay less, so a pill that wrote *anything* would not pass by accident.
+    func testATypedGainPastOneHundredAndANegativeOneBothReachTheInk() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openEditor(app)
+
+        let pad = app.otherElements["brushPanel.pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+        app.buttons["brushPanel.padClear"].tap()
+        XCTAssertGreaterThan(padStroke(app, on: pad), 0, "PREMISE: a drag on the pad lays ink")
+
+        expand(app, "size")
+        tapWhenHittable(app.buttons["brushPanel.addRow.size"], "Add input")
+        let gain = app.sliders["brushPanel.gain.size.0"]
+        XCTAssertTrue(gain.waitForExistence(timeout: 5),
+                      "§2.33: every input row carries a Gain, and it is called that")
+        let field = app.textFields["brushPanel.gain.size.0.field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5),
+                      "§2.33: the value pill beside it must be typeable")
+
+        let atDefault = padTotalInk(pad, changedFrom: 0)
+        XCTAssertGreaterThan(atDefault, 0)
+
+        type("150", into: field)
+        XCTAssertEqual(field.value as? String, "150%",
+                       "the pill must show what was typed, not snap back to the slider's end")
+        let raised = padTotalInk(pad, changedFrom: atDefault)
+        XCTAssertGreaterThan(raised, atDefault,
+                             "A gain of 150% is past the slider's end and must still reach the ink")
+
+        type("-50", into: field)
+        XCTAssertEqual(field.value as? String, "-50%",
+                       "…and a negative one, which is how a sensor is made to reduce a parameter")
+        let reduced = padTotalInk(pad, changedFrom: raised)
+        XCTAssertLessThan(reduced, atDefault,
+                          "A negative gain must make the sensor *reduce* the parameter — "
+                          + "\(reduced) against \(atDefault) at the default")
+    }
+
+    /// **A `random` input carries a Gain exactly as a `pressure` one does, and the screen says the
+    /// inputs are summed.**
+    ///
+    /// §2.33's second and third owed things, and the owner's question is the evidence for both:
+    /// *"input 2 is random, which also receives a gain"* and *"the two inputs seem to be mixed
+    /// together somehow"*. Asserted on the accessibility tree rather than on the model, because the
+    /// model already had the number — what was missing was that an artist could see it.
+    func testEveryInputRowShowsAGainAndTheScreenSaysTheyAreSummed() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchCold(app))
+        openEditor(app)
+        expand(app, "size")
+
+        tapWhenHittable(app.buttons["brushPanel.addRow.size"], "Add input")
+        XCTAssertTrue(app.sliders["brushPanel.gain.size.0"].waitForExistence(timeout: 5),
+                      "a pressure input must show a Gain")
+        XCTAssertTrue(app.staticTexts["brushPanel.summed.size"].waitForExistence(timeout: 5),
+                      "§2.33: the screen must state that inputs add — that sentence is the answer "
+                      + "to \"the two inputs seem to be mixed together somehow\"")
+
+        // Turn it into a randomiser, which is the row the owner said they could not see a gain on.
+        tapWhenHittable(app.buttons["brushPanel.input.size.0"], "the input picker")
+        tapWhenHittable(app.buttons["brushPanel.input.size.0.random"], "Random")
+        XCTAssertTrue(app.sliders["brushPanel.lambda.size.0"].waitForExistence(timeout: 5),
+                      "PREMISE: the row really is a randomiser now")
+        XCTAssertTrue(app.sliders["brushPanel.gain.size.0"].exists,
+                      "§2.33: a random input carries a Gain exactly as a pressure one does")
+        XCTAssertTrue(app.textFields["brushPanel.gain.size.0.field"].exists,
+                      "…including the typed field, or it renders somewhere less than everywhere")
     }
 
     // MARK: - 4. Persistence
@@ -435,13 +621,49 @@ final class BrushEditorUITests: PaintUITestCase {
         return last
     }
 
+    /// The pad's own report, parsed by **key** rather than by position.
+    ///
+    /// It was `parts.count == 2` and a pair of `replacingOccurrences`, and §2.31 added two more
+    /// fields — at which point the whole helper returned nil and every pad test in this file failed
+    /// with "PREMISE: a drag lays ink" against an app that was drawing perfectly. A positional parse
+    /// of a value the app is free to extend is the same shape as a census assertion.
+    private func padReport(_ pad: XCUIElement) -> [String: String] {
+        guard let value = pad.value as? String else { return [:] }
+        return Dictionary(uniqueKeysWithValues: value.split(separator: ",").compactMap { field in
+            let halves = field.split(separator: "=", maxSplits: 1)
+            guard halves.count == 2 else { return nil }
+            return (String(halves[0]), String(halves[1]))
+        })
+    }
+
     private func padInk(_ pad: XCUIElement) -> (total: Int, last: Int)? {
-        guard let value = pad.value as? String else { return nil }
-        let parts = value.split(separator: ",")
-        guard parts.count == 2,
-              let total = Int(parts[0].replacingOccurrences(of: "ink=", with: "")),
-              let last = Int(parts[1].replacingOccurrences(of: "last=", with: "")) else { return nil }
+        let report = padReport(pad)
+        guard let total = report["ink"].flatMap(Int.init),
+              let last = report["last"].flatMap(Int.init) else { return nil }
         return (total, last)
+    }
+
+    /// Waits for the pad's total ink to settle, which under §2.31 is *"the coalesced redraw has
+    /// run"*. A poll rather than a sleep, because the redraw is serviced on a display frame and how
+    /// many of those a simulator delivers in a second is not a thing to assume.
+    private func padTotalInk(_ pad: XCUIElement, changedFrom previous: Int? = nil) -> Int {
+        var total = padInk(pad)?.total ?? 0
+        for _ in 0..<25 {
+            if let previous, total == previous {
+                usleep(120_000)
+                total = padInk(pad)?.total ?? 0
+            } else {
+                break
+            }
+        }
+        return total
+    }
+
+    /// Types a value into a §2.33 pill, clearing whatever the control is showing first.
+    private func type(_ text: String, into field: XCUIElement) {
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "the value pill must be an element")
+        field.tap()
+        field.typeText(String(repeating: "\u{8}", count: 10) + text + "\n")
     }
 
     /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a

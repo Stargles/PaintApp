@@ -677,6 +677,67 @@ dropout, a second input scaling the dropout (so §2.29's *"segments below a thir
 chain rather than a special case), and several randomisers at different λ on one output — §8.4's
 multi-scale roughness, now expressible on the parameter that most wants it.
 
+**BUILT 2026-09-05.** `BrushStamper.stampDab` asks one question — `values.density >=
+BrushDensityGate.threshold` — and takes no draw of its own; `BrushDabSettings.densityWavelength` and
+`DabRandom.Channel.density` are **deleted**, the channel's raw value 4 left as a gap for this file's own
+*add channels, never renumber* rule. `BrushDensityGate` (in `Engine/BrushModulation.swift`) is the
+threshold, the conversion, and the argument for both.
+
+**The conversion is exact as an inequality, and that is the whole of it.** The rule to preserve is
+`keep ⟺ D ≥ u`, where `D` is whatever the old brush resolved `density` to and `u` is the draw it was
+compared against. Writing it as **`0.5 + ½D − ½u ≥ 0.5`** is the same inequality — a threshold does not
+care about the slope it is crossed at — so a dropout becomes *base at the gate, the old signal at half
+gain, and a randomiser at minus half*. The halves are not cosmetic: they keep **every base inside `0…1`
+and every gain inside the row slider's `−1…1`**, where the obvious `0.5 + D − u` needs a base of 1.2 for
+Splatter's old rate of 0.7 — legal, and off the end of the control an artist would look for it on.
+
+**It is inexact in exactly one way and that way is stated rather than hidden.** `u` moves from the
+deleted intrinsic channel to a matrix channel, so **which** runs drop is re-rolled — §6.2's
+already-published cost of moving a row. What survives is the field's statistics, and that is what the
+pin measures.
+
+**MEASURED against the owner's own tuning**, which is the operand §2.32 asks for.
+`PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json` is the library pulled off their iPad
+after they tuned Rough Ink and said it *"looks almost exactly like how I want it now"*; its `density`
+chain runs a curve from **0.606 at no press to 1 at a fifth of full**, over a base of 0. **Read under the
+gate with no conversion at all, every one of those values clears 0.5 and the dropout disappears
+completely.** The before-numbers were taken in a **separate worktree at `6c308c6`**, the commit before
+this, by running the same measurement there — not by comparing two brushes in one process. Over 200
+seeds, at four pressures, for both rough inks:
+
+| | agreement |
+|---|---|
+| fraction of dabs kept | within **2.2 percentage points** (worst: 0.740 → 0.761, Rough Ink at p = 0.05) |
+| inked pixels | within **2.9%** (worst: 1009 → 1038, same row) |
+| mean length of a gap | within **7%** (worst: 22.5 → 20.9 dabs, same row) |
+| above the curve's knee | **identical to the byte**, on both brushes |
+
+The worst row is the lightest touch of the roughest brush, which is where the dropout is strongest and a
+stroke holds fewest independent draws. The byte-identity above the knee is the conversion checking
+itself: there the signal saturates at 1, so it is above every draw on both semantics and the digests do
+not move — which is why `BrushModulationLogicTests`' shipped-preset table shows the two rough inks with a
+**changed ramped digest and an unchanged flat one**.
+
+**A decode migration ships with it, and it is a deliberate exception to §2.28's "no legacy decode arm".**
+That paragraph was about *documents*, which §2.14 makes expendable. A brush library is the artist's own
+tuning, and the owner had tuned Rough Ink two days earlier — silently turning that into a brush that
+stamps every dab is the regression this ruling asks to be pinned against. `Brush.init(from:)` reads the
+deleted `densityWavelength` out of an old `dab` object and runs the conversion; a brush written after
+this takes the nil arm and is untouched, and so is one whose density could never drop a dab.
+
+**Four shipped presets use dropout and all four were rewritten** — §8.6's Rough Ink and Rough Ink —
+Blotchy, and §12 stage 11's Splatter and Stipple. Grunge and Chalk do not use it, which is worth
+recording because the Texture group's write-up reads as though all four did. The sixteen other shipped
+brushes are byte-identical.
+
+**The fixture could not be decoded at all, and that is a finding.** It was saved before §2.30, so it
+names the isotropic `scatter` output that ruling deleted and `BrushOutput` throws on the string — the
+whole library fails to load. The test applies §2.30's own conversion to the bytes (one row becomes two,
+at the same amount and modules). **The app has no such migration**, so a library file written before
+§2.30 is unreadable on `main` today. Nobody has asked for one and §2.14 covers documents rather than
+libraries; it is written down here because the next person to open that fixture will hit it in thirty
+seconds and should not spend longer than that.
+
 **2.33 Every input carries a **gain**, the editor calls it that, and it says the inputs are summed.**
 Owner: *"There is an add input button which adds another input. Each input can have a series of modules,
 then the two inputs seem to be mixed together somehow. I just want a gain option on each input. For
@@ -720,6 +781,37 @@ used to enter a number. It mixes rather than multiplying outright, `value · (1 
 curve(reading))`, so **0 is inert and 1 is today's behaviour** and every existing chain renders
 byte-identically. Every place a sensor is read now carries the same three things.
 
+**BUILT 2026-09-05.**
+
+- **The row's `amount` is called Gain everywhere the editor names it**, its accessibility identifier is
+  `gain.<output>.<row>` rather than `amount.<row>`, and it is drawn for **every** input — a `random` row
+  exactly as a `pressure` one. **That last part was already true, and the premise that it was not is
+  refuted**: `chainCard` drew the slider unconditionally before this pass. What was missing is the third
+  thing below, and the owner's *"the two inputs seem to be mixed together somehow"* is the evidence for
+  which of the two questions they were really asking.
+- **The screen states its own arithmetic**, from the first input rather than the second:
+  *"Size = Base + each input's chain × its Gain. Inputs on one output add."* `BrushChainLimit`'s sentence
+  survives beside it and says a different thing — that the chains do not feed into each other — and it
+  still appears only where an output carries more than one.
+- **The value pill is a `TextField`** (`BrushValuePill`) and takes a typed value past either end of the
+  slider, negatives included, through `BrushOutput.parse` — `format` read backwards, and deliberately
+  **unclamped**, because §6 rules the amount signed and unclamped and it was only the UI that had taken
+  that away. It is offered on the row's Gain and on an output's Base, and **not** on a control whose
+  slider already spans the value's legal range: an octave count, a falloff, a scale's own amount. A pill
+  there would promise a freedom the model refuses.
+- **`BrushModule.scale` is *(input, curve, amount)***, with the amount off the wire at its default so a
+  brush written before this and one written after are the same bytes, and `1 − 1 + 1 · c` is `c` to the
+  bit in IEEE with no early return needed to make it so. It is clamped to `0…1`, because at anything
+  above 1 the mix exceeds 1 and a scale would *amplify* — the one thing §2.22 rules it may never do.
+
+**One defect was found only by driving it, and it is the shape this file keeps recording.** The first
+pill committed on **both** Return and losing focus. Return therefore committed, resigned focus, and
+committed *again* — the second time against an `editing` string the first had already reset — so the
+typed value was written and immediately overwritten by the value it replaced. **The control was
+completely inert while every model assertion about it passed**, because the model half was correct and
+the two writes happened in the right order for the wrong one to win. Losing focus is the only commit
+now, and Return merely resigns.
+
 **2.31 The editor edits a draft, the pad previews that draft, and Done commits where Cancel discards.**
 Owner: *"can you make it so that as you adjust the settings in the edit brush menu, the strokes in the
 drawing pad adjusts? too?"* and *"the drawing pad shouldnt save the settings until you click done. There
@@ -744,6 +836,39 @@ every pad stroke through `BrushStamper`. §7.2 already records `inkedPixels` bei
 1.4M-pixel pass in that loop, which is the same hazard one level down. Coalesce to a frame and measure
 it; if a pad full of strokes cannot keep up, the honest answer is a cap on how many it keeps, not a
 quietly stale preview.
+
+**BUILT 2026-09-05.** `BrushEditorScreen` holds a `draft: Brush?` filled on first appear; every control
+writes there and **nothing else moves** — not `CanvasManager.selectedBrush`, not the library file.
+**Done** writes the draft into both and leaves; **Cancel** discards it and puts the artist's two numbers
+back. `commit()`, which used to run on every slider lift and every module edit, is deleted, and with it
+`ResponseCurveEditorView`'s `onEditEnded` — there is no longer a *"when does this reach the library"* for
+a control to answer.
+
+**Size and opacity are the one thing Cancel has to undo.** They are the artist's (§2.20), they live on
+`CanvasManager` and the side toolbar shows them, so they are written **live** — a size that only appeared
+on Done would read as a slider that did nothing. Cancel restores what they were when the screen opened.
+
+**`FinishedStroke` no longer carries a brush**, which is the deletion that makes §2.31 true rather than
+approximately true. §7.2 kept one per stroke so a re-walk could not change old ink; that is the right
+answer for a zoom change and the wrong one here, and §2.14 governs — it is removed, not kept beside the
+new behaviour.
+
+**The coalescing is a paused `CADisplayLink`**, not a `DispatchQueue.main.async` hop: the thing being
+coalesced against is a *frame*, and a 120 Hz iPad delivers several `updateUIView` calls between two of
+them. It is torn down in `didMoveToWindow` because a live link retains its target, so leaving one running
+is the leak rather than a tidiness question.
+
+**MEASURED, and the honest answer is that a full pad does not fit a frame in the configuration the fast
+tier can measure.** One pad-crossing stroke costs **18 ms** (Grunge), **28–31 ms** (Round Hard),
+**32 ms** (Painterly) and **42 ms** (Chalk) in **Debug on the simulator** — so even one stroke is past
+16.7 ms there. The expected culprit was §2.25's paper and it is not: Grunge lays a canvas-anchored sheet
+and is the cheapest of the four, and the cost tracks the **dab count**. CLAUDE.md records Debug at 62×
+Release on the alpha-mask path and the shipped build is Release, so the artist's number is far lower —
+it could not be taken, because `xcodebuild test -configuration Release` fails on this project with a
+pre-existing `@testable import` module error unrelated to any of this. **So the cap bounds the worst
+case rather than buying a frame**: `BrushPadZoom.maximumStrokes` is **8**, which is 0.14–0.34 s of
+main-thread work on one serviced frame in Debug and 0.04–0.13 s for the two or three strokes an artist
+actually draws before reaching for a slider. The oldest goes, because the newest is the one being judged.
 
 **2.30 Scatter is two amounts oriented to the stroke, not one isotropic disc.** Owner: *"is offset an
 output? like horizontal or vertical offset of the sprite from the center of the stroke oriented relative

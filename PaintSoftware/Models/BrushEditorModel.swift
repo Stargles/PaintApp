@@ -160,7 +160,7 @@ extension BrushOutput {
         }
     }
 
-    /// How the base and a row's amount are written out. Percent for the `0…1` fractions, turns for
+    /// How the base and a row's gain are written out. Percent for the `0…1` fractions, turns for
     /// the two angular ones, plain for the rest.
     func format(_ value: Double) -> String {
         switch self {
@@ -170,6 +170,33 @@ extension BrushOutput {
             return String(format: "%.3f turns", value)
         case .scatterAcross, .scatterAlong:
             return String(format: "%.2f widths", value)
+        }
+    }
+
+    /// **`format` read backwards** — BRUSH.md §2.33's typed field, which is what lets a gain go past
+    /// the end of its slider.
+    ///
+    /// The owner: *"making gain a slider means having it bounded, which I think may limit freedom, so
+    /// make it a slider, but also a place where you can type out the percent past 100%."* So this
+    /// **must not clamp**, and it deliberately does not: §6 rules a row's amount signed and
+    /// unclamped, and a slider that silently pinned a typed 150% would be the control the ask exists
+    /// to remove. A negative is ordinary rather than an edge case — it is how a sensor is made to
+    /// *reduce* a parameter.
+    ///
+    /// The unit suffix is accepted and ignored, so the pill round-trips its own text; anything that
+    /// is not a number at all answers nil and the field puts back what was there.
+    func parse(_ text: String) -> Double? {
+        var trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
+        for suffix in ["%", "turns", "turn", "widths", "width"] where trimmed.hasSuffix(suffix) {
+            trimmed = String(trimmed.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
+            break
+        }
+        guard let value = Double(trimmed), value.isFinite else { return nil }
+        switch self {
+        case .size, .flow, .density, .hardness, .spacing, .saturation, .brightness:
+            return value / 100
+        case .angle, .hue, .scatterAcross, .scatterAlong:
+            return value
         }
     }
 }
@@ -276,9 +303,9 @@ enum BrushModuleKind: String, CaseIterable, Identifiable {
         case .curveRamp:
             return "Remaps the value running through the chain. Put one after a randomiser to reshape the wobble's range."
         case .randomiser:
-            return "Multiplies by a random value that varies along the stroke. Octaves add finer detail on top."
+            return "Multiplies by a random value that varies along the stroke. Octaves add finer detail on top. It can only take away — the input's Gain is what makes a chain bigger."
         case .scale:
-            return "Multiplies by another sensor's reading, shaped by its own curve. It can only take away — Amount is what makes a chain bigger."
+            return "Multiplies by another sensor's reading, shaped by its own curve. It can only take away — the input's Gain is what makes a chain bigger."
         }
     }
 
@@ -287,8 +314,9 @@ enum BrushModuleKind: String, CaseIterable, Identifiable {
         switch self {
         case .curveRamp: return .curveRamp(ResponseCurve.ramp(from: 0, to: 1))
         case .randomiser: return .scale(.random(.modulation(.size, row: 0),
-                                                BrushEditorDefaults.randomiser), .linear)
-        case .scale: return .scale(.pressure, .linear)
+                                                BrushEditorDefaults.randomiser),
+                                        .linear, BrushModule.fullScale)
+        case .scale: return .scale(.pressure, .linear, BrushModule.fullScale)
         }
     }
 }
@@ -299,22 +327,29 @@ extension BrushModule {
     var kind: BrushModuleKind {
         switch self {
         case .curveRamp: return .curveRamp
-        case .scale(let input, _): return input.randomiser == nil ? .scale : .randomiser
+        case .scale(let input, _, _): return input.randomiser == nil ? .scale : .randomiser
         }
     }
 
     /// The randomiser this module draws through, or nil — nil for a curve ramp and for a scale by an
     /// ordinary sensor.
     var randomiser: BrushRandomiser? {
-        guard case .scale(let input, _) = self else { return nil }
+        guard case .scale(let input, _, _) = self else { return nil }
         return input.randomiser
     }
 
     /// **§2.29's own curve** — the one a `.scale` shapes *its own sensor's reading* with, which is a
     /// different thing from a `.curveRamp`'s shaping of the value running through the chain. Nil for
     /// a ramp, because a ramp *is* its curve and the editor binds to it by position instead.
+    /// **§2.33's amount on a scale** — how much of this module's attenuation applies, `0…1`. Nil for
+    /// a ramp, which reads no sensor and so has nothing to mix towards.
+    var scaleAmount: Double? {
+        guard case .scale(_, _, let amount) = self else { return nil }
+        return amount
+    }
+
     var sensorCurve: ResponseCurve? {
-        guard case .scale(_, let curve) = self else { return nil }
+        guard case .scale(_, let curve, _) = self else { return nil }
         return curve
     }
 }
@@ -420,6 +455,37 @@ enum BrushPadZoom {
     static let realSize: CGFloat = 1
 
     static func isRealSize(_ zoom: CGFloat) -> Bool { zoom == realSize }
+
+    /// **How many finished strokes the pad keeps** — BRUSH.md §2.31's *"if a pad full of strokes
+    /// cannot keep up, the honest answer is a cap on how many it keeps, not a quietly stale
+    /// preview."*
+    ///
+    /// Since §2.31 every stroke on the pad is re-walked from the draft on every edit, so this number
+    /// times one stroke's walk is what one serviced frame of a slider drag costs.
+    ///
+    /// **MEASURED by `BrushEditorLogicTests`' `testThePadsWholeRewalkFitsInAFrameAtTheStrokeCapItKeeps`,
+    /// on the simulator in Debug** — one pad-crossing stroke costs **18 ms** (Grunge, spacing 0.30),
+    /// **28 ms** (Round Hard), **32 ms** (Painterly) and **42 ms** (Chalk, the dearest shipped walk).
+    /// The cost tracks the dab count and **not** §2.25's paper, which was the expected culprit and is
+    /// not: Grunge lays a canvas-anchored sheet and is the cheapest of the four.
+    ///
+    /// **That is not the number the artist pays and this file must not pretend otherwise.** CLAUDE.md
+    /// records Debug at **62× Release** on the alpha-mask render path, and the shipped build is
+    /// Release; the honest Release figure could not be taken here, because `xcodebuild test
+    /// -configuration Release` fails in this project on a pre-existing `@testable import` module
+    /// error unrelated to any of this. So what the measurement bounds is the **worst case**, not the
+    /// typical one.
+    ///
+    /// **Eight, and the arithmetic is the reason.** At the measured Debug cost a full pad is
+    /// 0.14–0.34 s of main-thread work on one serviced frame, and a realistic pad — the two or three
+    /// strokes an artist draws before reaching for a slider — is 0.04–0.13 s. Twelve would put the
+    /// worst case past half a second even in Debug, and eight is still more strokes than the pad has
+    /// room to show at 3× before the newest one lands in a mess of older ones. The **oldest** goes,
+    /// because the newest is the one being judged.
+    ///
+    /// It lives here rather than on the pad for this file's own stated reason: a rule written inside
+    /// a `View` is a rule no fast-tier test can reach, and the measurement above is a fast-tier test.
+    static let maximumStrokes = 8
 
     /// The toggle. Two positions rather than a slider: §7.2 asks for *"a toggle to real size"*, and a
     /// continuous zoom would leave the artist unable to say whether what they are looking at is life
