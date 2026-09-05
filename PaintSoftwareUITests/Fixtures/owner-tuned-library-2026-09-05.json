@@ -1,0 +1,1575 @@
+{
+  "groups" : [
+    {
+      "brushes" : [
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.35,
+            "hardness" : 0.12,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.5,
+            "spacing" : 0.06
+          },
+          "id" : "B7051000-0000-4000-A000-000000000011",
+          "modulations" : [
+            {
+              "amount" : 0.5,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.2
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.65,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Round Soft",
+          "opacity" : 1,
+          "size" : 22,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.25
+          },
+          "tip" : {
+            "kind" : "round"
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 1,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.85,
+            "spacing" : 0.05
+          },
+          "id" : "B7051000-0000-4000-A000-000000000012",
+          "modulations" : [
+            {
+              "amount" : 0.15,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.75
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            }
+          ],
+          "name" : "Opaque Round",
+          "opacity" : 1,
+          "size" : 34,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.2
+          },
+          "tip" : {
+            "kind" : "round"
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.9,
+            "hardness" : 0.95,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.6,
+            "spacing" : 0.045
+          },
+          "id" : "B7051000-0000-4000-A000-000000000013",
+          "modulations" : [
+            {
+              "amount" : 0.4,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.4
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Round Hard",
+          "opacity" : 1,
+          "size" : 16,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.1
+          },
+          "tip" : {
+            "kind" : "round"
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0.25,
+              "directionFollow" : 1,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.9,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.75,
+            "spacing" : 0.05
+          },
+          "id" : "B7051000-0000-4000-A000-000000000014",
+          "modulations" : [
+            {
+              "amount" : 0.25,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.6
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.12,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Square",
+          "opacity" : 1,
+          "size" : 36,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.2
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "square-bevel-wide"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0.25,
+              "directionFollow" : 1,
+              "jitter" : 0.012
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.85,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.8,
+            "spacing" : 0.065
+          },
+          "id" : "B7051000-0000-4000-A000-000000000015",
+          "modulations" : [
+            {
+              "amount" : 0.22,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.6
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.1,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 0.5
+              },
+              "output" : "size"
+            },
+            {
+              "amount" : 0.15,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Messy Flat",
+          "opacity" : 1,
+          "size" : 32,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.2
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "flat-messy-ends-dirty"
+            }
+          }
+        }
+      ],
+      "id" : "B7051000-0000-4000-B000-000000000001",
+      "name" : "Basics"
+    },
+    {
+      "brushes" : [
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 1
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.45,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.7,
+            "spacing" : 0.05
+          },
+          "id" : "B7051000-0000-4000-A000-000000000016",
+          "modulations" : [
+            {
+              "amount" : 0.3,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.5
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.55,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Pencil Hard",
+          "opacity" : 0.95,
+          "size" : 8,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.12
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "pencil-hard"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 1
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.3,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.6,
+            "spacing" : 0.04
+          },
+          "id" : "B7051000-0000-4000-A000-000000000017",
+          "modulations" : [
+            {
+              "amount" : 0.4,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.35
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.7,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Pencil Soft",
+          "opacity" : 0.85,
+          "size" : 14,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.2
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "pencil-soft"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0.08,
+              "directionFollow" : 0.35,
+              "jitter" : 0.25
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.4,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.72,
+            "spacing" : 0.055
+          },
+          "id" : "B7051000-0000-4000-A000-000000000018",
+          "modulations" : [
+            {
+              "amount" : 0.28,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.55
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.6,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Pencil Blunt",
+          "opacity" : 0.9,
+          "size" : 18,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.18
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "pencil-blunt"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 1
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.5,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.7,
+            "spacing" : 0.085
+          },
+          "id" : "B7051000-0000-4000-A000-000000000019",
+          "modulations" : [
+            {
+              "amount" : 0.3,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.45
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.5,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Pencil Textured",
+          "opacity" : 0.9,
+          "size" : 20,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.15
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "pencil-textured"
+            }
+          }
+        }
+      ],
+      "id" : "B7051000-0000-4000-B000-000000000002",
+      "name" : "Sketching"
+    },
+    {
+      "brushes" : [
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 1,
+            "hardness" : 1,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 1,
+            "spacing" : 0.03
+          },
+          "id" : "B7051000-0000-4000-A000-00000000001A",
+          "modulations" : [
+
+          ],
+          "name" : "Technical Pen — Fine",
+          "opacity" : 1,
+          "size" : 4,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.45
+          },
+          "tip" : {
+            "kind" : "round"
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 1,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.9,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.35,
+            "spacing" : 0.035
+          },
+          "id" : "B7051000-0000-4000-A000-00000000001B",
+          "modulations" : [
+            {
+              "amount" : 0.65,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.12
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Brush Pen",
+          "opacity" : 1,
+          "size" : 26,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.35
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "pen-brush"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 0,
+            "densityWavelength" : 4,
+            "flow" : 0.9,
+            "hardness" : 0.85,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.5,
+            "spacing" : 0.045
+          },
+          "id" : "B7051000-0000-4000-A000-00000000001C",
+          "modulations" : [
+            {
+              "amount" : 0.16,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.55
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.3,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 2.5
+              },
+              "output" : "size"
+            },
+            {
+              "amount" : 0.1,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 0.3
+              },
+              "output" : "size"
+            },
+            {
+              "amount" : 0.14,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 1.5
+              },
+              "output" : "scatter"
+            },
+            {
+              "amount" : 1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.45
+                      },
+                      {
+                        "frame" : 409,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "density"
+            },
+            {
+              "amount" : 0.1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Rough Ink — Blotchy",
+          "opacity" : 1,
+          "size" : 11,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.3
+          },
+          "tip" : {
+            "kind" : "round"
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 0,
+              "jitter" : 1
+            },
+            "brightnessShift" : 0,
+            "density" : 0,
+            "densityWavelength" : 1.9869282245635986,
+            "flow" : 1,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0.1446623057126999,
+            "size" : 0.3967320919036865,
+            "spacing" : 0.01
+          },
+          "id" : "B7051000-0000-4000-A000-00000000001D",
+          "modulations" : [
+            {
+              "amount" : 1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0
+                      },
+                      {
+                        "frame" : 585,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.14,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 1.5
+              },
+              "output" : "scatter"
+            },
+            {
+              "amount" : 1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.6056701030927836
+                      },
+                      {
+                        "frame" : 232,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "density"
+            },
+            {
+              "amount" : 0.1,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            },
+            {
+              "amount" : 0.5,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 2.4103447794914246
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 571,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            }
+          ],
+          "name" : "Rough Ink",
+          "opacity" : 1,
+          "size" : 3.416158619336784,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.3
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "square"
+            }
+          }
+        }
+      ],
+      "id" : "B7051000-0000-4000-B000-000000000003",
+      "name" : "Inking"
+    },
+    {
+      "brushes" : [
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 1,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.45,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.85,
+            "spacing" : 0.095
+          },
+          "id" : "B7051000-0000-4000-A000-00000000001E",
+          "modulations" : [
+            {
+              "amount" : 0.2,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.7
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.25,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Painterly",
+          "opacity" : 1,
+          "size" : 36,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.25
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "paint-dry-load"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 1,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.55,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.8,
+            "spacing" : 0.04
+          },
+          "id" : "B7051000-0000-4000-A000-00000000001F",
+          "modulations" : [
+            {
+              "amount" : 0.25,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.55
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.16,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 0.6
+              },
+              "output" : "size"
+            },
+            {
+              "amount" : 0.07,
+              "input" : {
+                "kind" : "random",
+                "wavelength" : 1
+              },
+              "output" : "scatter"
+            },
+            {
+              "amount" : 0.45,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Bristle",
+          "opacity" : 0.95,
+          "size" : 34,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.2
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "bristle-open"
+            }
+          }
+        },
+        {
+          "dab" : {
+            "angle" : {
+              "base" : 0,
+              "directionFollow" : 1,
+              "jitter" : 0
+            },
+            "brightnessShift" : 0,
+            "density" : 1,
+            "densityWavelength" : 3.5,
+            "flow" : 0.9,
+            "hardness" : 0.8,
+            "hueShift" : 0,
+            "saturationShift" : 0,
+            "scatter" : 0,
+            "size" : 0.9,
+            "spacing" : 0.04
+          },
+          "id" : "B7051000-0000-4000-A000-000000000020",
+          "modulations" : [
+            {
+              "amount" : 0.25,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "modules" : [
+                {
+                  "curve" : {
+                    "keys" : [
+                      {
+                        "frame" : 0,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 0.55
+                      },
+                      {
+                        "frame" : 1024,
+                        "inHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "interpolation" : "linear",
+                        "outHandle" : {
+                          "deltaFrames" : 0,
+                          "deltaValue" : 0
+                        },
+                        "tangentMode" : "vector",
+                        "value" : 1
+                      }
+                    ],
+                    "step" : 1
+                  },
+                  "kind" : "curveRamp"
+                }
+              ],
+              "output" : "size"
+            },
+            {
+              "amount" : 0.3,
+              "input" : {
+                "kind" : "pressure"
+              },
+              "output" : "flow"
+            }
+          ],
+          "name" : "Streaky",
+          "opacity" : 1,
+          "size" : 30,
+          "stroke" : {
+            "blendMode" : "normal",
+            "stabilization" : 0.25
+          },
+          "tip" : {
+            "kind" : "stamp",
+            "texture" : {
+              "builtIn" : "streak-dots-6"
+            }
+          }
+        }
+      ],
+      "id" : "B7051000-0000-4000-B000-000000000004",
+      "name" : "Painting"
+    },
+    {
+      "brushes" : [
+
+      ],
+      "id" : "B7051000-0000-4000-B000-000000000005",
+      "name" : "Texture"
+    }
+  ],
+  "version" : 1
+}

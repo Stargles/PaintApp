@@ -672,20 +672,30 @@ dropout, a second input scaling the dropout (so §2.29's *"segments below a thir
 chain rather than a special case), and several randomisers at different λ on one output — §8.4's
 multi-scale roughness, now expressible on the parameter that most wants it.
 
-**2.33 A scale module carries its own amount, so two inputs on one output can be balanced.** Owner:
-*"Lets say I have an output controlled by both pressure and random. Pressure has an amount slider, but
-random does not. It may be worth having a gain value for each input, so I can control exactly how much
-the two affect the output."*
+**2.33 Every input carries a **gain**, the editor calls it that, and it says the inputs are summed.**
+Owner: *"There is an add input button which adds another input. Each input can have a series of modules,
+then the two inputs seem to be mixed together somehow. I just want a gain option on each input. For
+example, input 1 is pressure, which right now has amount, but change that to gain. next input 2 is
+random, which also receives a gain."*
 
-A chain is `amount · modules(input)` — **one** amount, applied last, so the row's primary input has a
-number and a `scale` module has only a curve. Setting "half as much random" therefore meant *drawing* a
-flat curve at 0.5, which is using a curve editor to enter a number.
+**This is mostly a naming and legibility fix, not a new number.** An input row already carries `amount`,
+applied after its modules, and that *is* the gain — a `random` input row has one exactly as a `pressure`
+row does. Three things are owed:
 
-So `BrushModule.scale` becomes *(input, curve, amount)*, mixed rather than multiplied outright:
-`value · (1 - amount + amount · curve(reading))`. **At amount 0 the module does nothing and at 1 it is
-today's behaviour**, which is what makes it a strict addition and keeps every existing chain rendering
-byte-identical. Every module that reads a sensor now carries the same three things — input, curve,
-amount — which is the consistency §2.29 started and this finishes.
+1. **Call it Gain.** "Amount" does not say what it does to a signal; the owner reached for the right word
+   and the editor should use it.
+2. **Show it on every input row, uniformly**, including `random`. If the editor renders it anywhere less
+   than everywhere, that is the defect behind the question.
+3. **Say that inputs are summed.** *"the two inputs seem to be mixed together somehow"* is the editor
+   failing to state its own arithmetic: rows on one output **add**, each scaled by its gain, on top of
+   the base. §7.2 already prints the chain's other rules where they bite; this is the missing one, and it
+   is the rule that makes two gains a *balance* rather than two unrelated knobs.
+
+**A `scale` module also gains an amount**, for the same reason one level down: a scale carried an input
+and a curve but no number, so "half as much random" meant *drawing* a flat curve at 0.5 — a curve editor
+used to enter a number. It mixes rather than multiplying outright, `value · (1 - amount + amount ·
+curve(reading))`, so **0 is inert and 1 is today's behaviour** and every existing chain renders
+byte-identically. Every place a sensor is read now carries the same three things.
 
 **2.31 The editor edits a draft, the pad previews that draft, and Done commits where Cancel discards.**
 Owner: *"can you make it so that as you adjust the settings in the edit brush menu, the strokes in the
