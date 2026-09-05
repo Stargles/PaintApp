@@ -977,6 +977,58 @@ and its λ, `blendMode` and the three HSB shifts — get one here.
 Edits currently apply to a live copy and are lost when the preset changes; §2.9's table plus §2.10's
 minting is what makes an edit persist.
 
+### 7.1 The brushes menu — the shape, taken from the owner's own reference
+
+The owner supplied Procreate's brush menu as the reference and §2.20 rules the navigation. What the
+reference actually shows, and which of it is a decision rather than decoration:
+
+- **A card anchored under the brush icon**, with a notch pointing at it. It is the same dropdown
+  geometry `BrushSettingsPanel` already uses; what changes is what is inside it.
+- **Two columns.** The left is the **group list**, scrolling vertically, one row per group with a small
+  glyph and a name, the open group highlighted. The right is **the brushes in that group**, one row
+  each. Both scroll independently, which is what lets thirty groups and thirty brushes coexist in a
+  panel the width of a dropdown.
+- **A brush's row is its name over a rendered stroke of itself.** That preview is the row's whole point
+  — a name tells an artist nothing about a brush and a swatch of its tip tells them little more. It is
+  a real `BrushStamper` walk over a fixed S-curve with a pressure ramp, which makes it the same
+  contact-sheet render §12 stage 9 chooses the set with, at row size. **Cache it by `BrushRef`**: it is
+  the brush's value-addressed identity, so an edited brush re-renders and an unedited one never does.
+- **The selected brush's row is highlighted**, and a second tap on *that* row opens the editor. So the
+  library's own selection state is what makes §2.20's second tap unambiguous — the gesture is "tap the
+  thing that is already chosen", one level down from the tool icon's own version of it.
+- **The set name sits top-left with a chevron**, the **`+` top-right**. §8.1 already rules that the
+  shipped collection and the artist's own are two different things; the chevron is where that shows
+  up, and the `+` is §2.21's importer.
+- **Not copied**: Procreate's per-brush cloud-download glyph. Every brush here is local.
+
+### 7.2 The editor — three columns, and the middle one is per category
+
+Procreate's Brush Studio, which the owner named. Three columns:
+
+- **Left: the category list**, with two live preview strips above it — the brush's stroke, and its tip.
+- **Middle: that category's controls** — base sliders each with a value pill, and, where a sensor
+  drives something, a **curve editor** over that sensor's `0…1`. This is the column §7's four numbered
+  points are about.
+- **Right: a drawing pad the artist can draw on**, live, with the brush as edited. **This is the part
+  that makes the editor worth building rather than the panel it replaces**, and it is the owner's own
+  stated reason for wanting the feature at all: *"i can edit aspects of it myself to see which settings
+  are good."* It is a `StrokeCanvasView` over a scratch bitmap with no document behind it.
+
+**The categories are ours, not Procreate's**, because the model underneath is different: Procreate has
+Wet Mix and Bleed and we have neither, and we have `density`, λ and the second input (§2.22) and it has
+none of those. Group by *what the artist is changing*: the **Tip** (which mask, hardness, edge softness,
+angle), the **Stroke** (size, spacing, scatter, blend mode, stabilization), **Dynamics** (the matrix's
+rows, which is where §2.22's two input pickers live), **Colour** (the three HSB shifts), and
+**Properties** (name, the preview stroke, and what an imported file said).
+
+**One thing in the reference is a trap worth naming.** Procreate's Apple Pencil tab organises by
+*sensor* — "Pressure" heading, then Size / Opacity / Flow / Bleed underneath — while its other tabs
+organise by *parameter*. Our model is a flat list of *(output, input, curve, amount, second)* rows, so
+either presentation is a view over the same data and **both must not be built**, or an edit made in one
+has to be found in the other. Pick one. The parameter-first form is the one that matches the model and
+the one that scales to seven sensors; a sensor-first form would need a row's absence to be renderable
+in six places at once.
+
 ---
 
 ## 8. The library, the groups, and the default set
