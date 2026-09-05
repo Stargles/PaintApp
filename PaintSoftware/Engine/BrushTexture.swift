@@ -336,6 +336,20 @@ struct BrushTextureSettings: Codable, Hashable {
     /// argument `endStrokeGroup`'s `.integral` clip already makes, one level down.
     var tileSize: CGFloat
 
+    /// **The smallest repeat the merge will lay, and it is a cost floor rather than a taste one.**
+    ///
+    /// `BrushTextureMerge` draws one tile per repeat over the stroke's own clip, so the draw count is
+    /// `(clip / tileSize)²`. A stroke that crosses a 16383² canvas — which this app allows, and
+    /// `StrokeScratch`'s whole existence is about — is 1M tiles at 16 points and 268M at 1. The
+    /// pixels are the same either way; it is the per-draw overhead that is not, which is why the
+    /// floor is on the *count* rather than on the blitting.
+    ///
+    /// 16 points is also about where a 256-pixel sheet stops being legible as paper under a
+    /// downscale, so nothing expressible is being taken away. **If the editor's slider ever wants to
+    /// go below it, the fix is not to lower this** — it is to cache the sheet pre-repeated `n×n` so
+    /// one draw lays `n²` tiles, which is exact because a repeat of a repeat is the same field.
+    static let minimumTileSize: CGFloat = 16
+
     /// `0…1` — how much of the texture's shortfall is taken out of the ink. The mask's own alpha `a`
     /// becomes `1 - depth·(1 - a)`, so **0 is exactly no texture** (every pixel survives) and 1 is
     /// the mask as authored.
@@ -472,8 +486,9 @@ enum BrushTextureMerge {
                       over clip: CGRect, canvasOrigin: CGPoint) {
         guard let settings, settings.depth > 0, !clip.isNull, !clip.isEmpty,
               let entry = BrushTextureMaskCache.entry(for: settings) else { return }
-        // Whole points, so every tile lands on the pixel grid — see `BrushTextureSettings.tileSize`.
-        let side = max(1, settings.tileSize.rounded())
+        // Whole points, so every tile lands on the pixel grid — see `BrushTextureSettings.tileSize`
+        // — and never below the floor, which is a bound on the number of draws this loop makes.
+        let side = max(BrushTextureSettings.minimumTileSize, settings.tileSize.rounded())
         let phase = CGPoint(x: canvasOrigin.x.rounded(), y: canvasOrigin.y.rounded())
         // The clip, expressed in canvas points, is what decides which tiles of the sheet are needed.
         let inCanvas = clip.offsetBy(dx: phase.x, dy: phase.y)
@@ -484,6 +499,12 @@ enum BrushTextureMerge {
         // `.high` for `DabImageCache`'s reason: an entry is at its own native resolution and a tile
         // is usually smaller, and point-sampling that downscale aliases the paper into a moiré.
         ctx.interpolationQuality = .high
+        // **One draw per tile, and the two things that costs are written down rather than assumed
+        // away.** The count grows with the clip's area over `tileSize²`, which is what
+        // `minimumTileSize` bounds. And each tile is resampled with its edges *clamped*, so a sheet
+        // laid at less than its native resolution does not blend across a tile boundary — INFERRED
+        // from how `CGContext.draw(_:in:)` samples, not measured in the app, and the same
+        // pre-repeated cache entry that would fix the count would remove it.
         for column in firstColumn...max(firstColumn, lastColumn) {
             for row in firstRow...max(firstRow, lastRow) {
                 ctx.draw(entry, in: CGRect(x: CGFloat(column) * side - phase.x,

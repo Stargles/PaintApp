@@ -590,6 +590,25 @@ final class BrushTextureLogicTests: XCTestCase {
         XCTAssertLessThan(part, plain, "and a half-depth one still takes some")
     }
 
+    /// **The tile floor is a bound on draw calls, so it is asserted where draw calls happen.**
+    /// `BrushTextureMerge` lays one tile per repeat over the stroke's clip, and a 1 pt repeat across
+    /// a large canvas is hundreds of millions of them. Below the floor the sheet is laid at the
+    /// floor, which is a visible change rather than a silent clamp — so it is pinned rather than
+    /// left to a comment.
+    func testARepeatBelowTheFloorIsLaidAtTheFloor() throws {
+        let sheet = try Self.writeTestTexture()
+        let origin = CGPoint(x: 48, y: 96)
+        func render(_ tile: CGFloat) throws -> [UInt8] {
+            try Self.pixels(Self.replayTier(Self.brush(BrushTextureSettings(mask: sheet, tileSize: tile)),
+                                            at: origin)).bytes
+        }
+        let atFloor = try render(BrushTextureSettings.minimumTileSize)
+        XCTAssertEqual(try render(1), atFloor, "a repeat under the floor is laid at the floor")
+        XCTAssertNotEqual(try render(BrushTextureSettings.minimumTileSize * 4), atFloor,
+                          "and a repeat above it is its own size, or the floor is clamping "
+                          + "everything and the assertion above means nothing")
+    }
+
     /// The format. A brush with no texture writes **no key**, which is what makes the field additive
     /// on disk as well as in the renderer; a brush with one round-trips whole.
     func testATexturedBrushRoundTripsAndAnUntexturedOneWritesNoKey() throws {
