@@ -383,8 +383,25 @@ final class BrushEditorLogicTests: XCTestCase {
         // The shipped halves, which are what makes each collection non-empty on a device that has
         // imported nothing — and the reason a paper must not be offered as a tip is that a dab would
         // stamp a dab-shaped patch of grain.
-        XCTAssertEqual(builtIns(of: tips), [.square])
-        XCTAssertEqual(Set(builtIns(of: textures)), Set([.paperGrain, .canvasWeave]))
+        // **The property, not the census.** This asserted `[.square]` when the square was the only
+        // shipped tip, and §12 stage 9 then shipped eleven more — so a literal list makes every new
+        // brush red a test that was never about the set's contents. What must hold is that the two
+        // collections **partition** the built-ins: neither is empty, nothing appears in both, and
+        // nothing is missing from both. A paper offered as a tip stamps a dab-shaped patch of grain,
+        // and a tip offered as paper tiles a nib across the stroke; both are what this rules out.
+        let builtInTips = Set(builtIns(of: tips))
+        let builtInTextures = Set(builtIns(of: textures))
+        XCTAssertFalse(builtInTips.isEmpty, "A device that has imported nothing still has tips")
+        XCTAssertFalse(builtInTextures.isEmpty, "…and still has paper")
+        XCTAssertTrue(builtInTips.isDisjoint(with: builtInTextures), "Nothing is in both collections")
+        XCTAssertEqual(builtInTips.union(builtInTextures), Set(BuiltInBrushTexture.allCases),
+                       "…and nothing the app ships is in neither")
+        XCTAssertTrue(builtInTips.contains(.square), "The reference square is a tip")
+        XCTAssertTrue(builtInTextures.contains(.paperGrain), "Paper grain is paper")
+        // The half that decides which is which, stated where it can go red: a tip travels as a file
+        // in the bundle and a generated paper does not.
+        for tip in builtInTips { XCTAssertNotNil(tip.resourceName, "\(tip) is a tip and must ship a PNG") }
+        for paper in builtInTextures { XCTAssertNil(paper.resourceName, "\(paper) is generated") }
 
         XCTAssertTrue(BrushAssetKind.tip.newFileName().hasPrefix("custom-"),
                       "A tip's name is `custom-`, unchanged — see BrushAssetKind for what a rename costs")
@@ -609,7 +626,11 @@ final class BrushEditorLogicTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(ys.max()), midline + 1, "It dips below the midline")
         XCTAssertLessThan(try XCTUnwrap(ys.min()), midline - 1, "…and rises above it")
 
-        let brush = BrushLibrary.softRound
+        // `TestBrushes`, not a shipped preset: this pins that two *render paths* agree, so it
+        // wants some brush rather than a particular one — and §12 stage 9 moved the fixtures out
+        // of the library precisely so the owner can tune a shipped brush without reddening a test
+        // that was never about it.
+        let brush = TestBrushes.softRound
         let fromRow = BrushPreview.render(brush, size: size, scale: 2, color: .white)
         let format = UIGraphicsImageRendererFormat.preferred()
         format.scale = 2

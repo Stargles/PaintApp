@@ -470,7 +470,12 @@ enum BrushPaperGenerator {
                 switch paper {
                 case .paperGrain: survives = grain(x: x, y: y)
                 case .canvasWeave: survives = weave(x: x, y: y)
-                case .square: survives = 1
+                // Unreachable: the `kind == .texture` guard above returns before this. A `default`
+                // rather than the twelve tip cases on purpose — `BuiltInBrushTexture.kind` is the
+                // exhaustive switch that forces a new case to be *classified*, and duplicating that
+                // list here would make every new tip a compile error in a paper generator that will
+                // never see one.
+                default: survives = 1
                 }
                 let i = (y * side + x) * 4
                 bytes[i] = 0; bytes[i + 1] = 0; bytes[i + 2] = 0
