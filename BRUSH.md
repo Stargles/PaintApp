@@ -227,9 +227,9 @@ rows, and what it does not state is left at the neutral rather than guessed. The
 available"* is the whole licence for that asymmetry — a brush that lands with three rows and an honest
 tip is right, and one that lands with eleven invented ones is not.
 
-**2.22 A modulation row carries a second input, and its reading multiplies the first.** §6 becomes
-`output = base + Σ amount · curve(input) · reading(second)`, where the second input is optional and its
-absence reads 1. That is the smallest thing that says *"how much random wobble there is depends on
+**2.22 A modulation row carries a second input, and its reading multiplies the first.** **BUILT.** §6
+becomes `output = base + Σ amount · curve(input) · reading(second)`, where the second input is optional
+and its absence reads 1. That is the smallest thing that says *"how much random wobble there is depends on
 pressure"* — §7.0's fourth worked example, which the additive form could not state at all.
 
 Owner: *"i really don't know, your call. Get something working that i can interact with on the ipad and
@@ -253,6 +253,28 @@ the second slot needs a channel of its own — §4's channel is derived from (ou
 would square one draw rather than multiply two. And the second input is **not** curved: a curve on it
 would be a second `ResponseCurve` per row for a gain term, which is expressiveness the ask does not need
 and a second thing to keep in step.
+
+**What the build settled, beyond the two traps.**
+
+- **The gain slot is a whole second *plane* of channels, not a second half of the row block.**
+  `DabRandom.Channel.modulation` takes a `slot` and offsets by `1 << 20`, which is past the matrix's
+  whole 49,167-value span, so **no row count whatever can make slot 0 meet slot 1**. Halving the 4096
+  stride would have worked and is the wrong shape: it reintroduces, at half the distance, exactly the
+  collision that function's own doc reasons about. Slot 0's arithmetic is unchanged to the bit and is
+  pinned against the literals it produced before the parameter existed, because a change there re-rolls
+  every stroke ever drawn with a randomised brush.
+- **Two scanners over the rows had to widen, and both guard something real.**
+  `BrushModulations.isPressureOnly` asks the gain slot because `dabValues(atPressure:)` answers every
+  other sensor with its neutral: a `size ← pressure × velocity` row contributes *nothing* there and
+  plenty along a real stroke, so §6.3's capsule chain would bound the ink at the wrong width and
+  `VectorEraser` would cut away faded ink it never saw. `readsTaper` asks it for the mirror reason —
+  `StrokeSensors` answers `taper`'s neutral, **1**, where the stroke's length was not measured, so a
+  gain of `taper` would sit at full gain for the whole stroke and a brush that does not taper would
+  render green.
+- **The gain is clamped to `0…1` and the first reading's clamp is its curve's.** Every `BrushInput` is
+  defined to answer inside that range, so leaving the second slot alone would treat one sensor
+  differently in the two slots: a stray reading above 1 is flattened as an *input* and would *amplify*
+  as a *gain*. A second input attenuates; raising `amount` is how a row is made bigger.
 
 **2.23 Not every brush is a dab walk, and the architecture must survive the first one that is not.**
 Owner: *"There are also some special brush types I want to add which may follow custom brush logic, so
@@ -767,11 +789,19 @@ a decision could have preserved.
 
 ## 6. The brush model — a modulation matrix — BUILT, §12 stage 7
 
-Every parameter is `base value + [modulation]`, where a modulation is **(input, curve, amount)**. That is
-the brief's *"every parameter should be able to be sensor driven"*, and it is the CSP model.
+Every parameter is `base value + [modulation]`, where a modulation is **(input, curve, amount, second
+input)**. That is the brief's *"every parameter should be able to be sensor driven"*, and it is the CSP
+model.
 
-**What shipped**: `BrushOutput`, `BrushModulation`, `BrushModulations` and `ResponseCurve` in
-`Engine/BrushModulation.swift` and `Engine/ResponseCurve.swift`; `Brush` regrouped into `dab`, `stroke`
+**The fourth of those is §2.22 and it is optional — its absence reads 1**, so a row is
+`amount · curve(input) · reading(second)` and a row without one is the plain `amount · curve(input)` it
+was before, to the bit. It is a *gain*, not a second row: two rows add, so `spacing ← random` beside
+`spacing ← pressure` gives a pressure shift **plus** a fixed-amplitude wobble, where a second input
+scales and the wobble's *amplitude* is what pressure moves. It is not curved, and for `.random` its
+channel is derived from the row's position in the second slot exactly as the first slot's is (§6.2).
+
+**What shipped**: `BrushOutput`, `BrushModulation` (whose `second` is §2.22's gain), `BrushModulations`
+and `ResponseCurve` in `Engine/BrushModulation.swift` and `Engine/ResponseCurve.swift`; `Brush` regrouped into `dab`, `stroke`
 and `modulations`; `BrushDynamics` **deleted in full**. `Brush.dabValues(_:)` is the evaluator and
 `BrushStamper.stampDab` turns its answer into a stamp. Every sentence below that is not marked
 otherwise describes what is there.
@@ -910,6 +940,12 @@ channel, and here it would silently delete the row.
 and §8.4's rough nib is *built* from several `random` rows at different λ. So `DabRandom.Channel` is a
 struct now rather than an enum — the three intrinsic draws keep their raw values 1–3, §2.18's dropout
 takes 4, and `DabRandom.Channel.modulation(_:row:)` mints one per *(output, position)* from 16 up.
+
+**§2.22's gain slot is minted the same way, one plane up.** `modulation(_:row:slot:)` offsets slot 1 by
+`1 << 20` — past the whole matrix's span, so the two planes cannot meet at any row count — and
+`BrushModulations` rewrites the second slot's channel on construction and on decode exactly as it
+rewrites the first's. Without that rewrite a row randomised on both sides could square a single draw
+rather than multiply two, which is the trap §2.22 names.
 
 **Derived rather than stored** is what makes "no two rows share a channel" a fact instead of an
 invariant somebody maintains, and `BrushInput`'s codec leaves the channel off the wire entirely so a
@@ -1495,7 +1531,8 @@ first, which cleanly replaces the old one."*
    five presets are deleted here, not deprecated.** The generator is a build-time tool whose output is
    committed, not a runtime cost — a tip is a small alpha bitmap and generating it per launch buys nothing.
 10. **The editor.** §7, reusing (38)'s curve control. After the library, because a brush the artist makes has
-    to land in a group.
+    to land in a group. **A row's grammar is two input pickers rather than one** — §7 and §2.22 — and the
+    second needs an explicit *none*, which is its default and the state every shipped preset is in.
 11. **The Texture group's CC0 assets.** §8.3 and §8.4 — last of the shipped set, because it is the only part
     with a licensing step, and §8.3's verification happens at this point rather than earlier.
 12. **`.abr`, then Procreate `.brush`.** Last. A parser with no image primitive behind it shapes its model
@@ -1508,8 +1545,8 @@ first, which cleanly replaces the old one."*
 
 ## 13. Open
 
-- ~~**Whether a modulation's `amount` may itself be modulated.**~~ **Answered — a row carries a second
-  input, and its reading multiplies the first.** §2.22.
+- ~~**Whether a modulation's `amount` may itself be modulated.**~~ **Answered and built — a row carries a
+  second input, and its reading multiplies the first.** §2.22.
 
 - **What a brush that is not a dab walk needs — §2.23's fill brush and its siblings.** Unscheduled by
   the owner and deliberately not designed here, because a mechanism nobody has measured a need for is
