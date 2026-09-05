@@ -93,17 +93,39 @@ extension DabRandom.Channel {
     /// stride `s`, row `s` of one output collides with row 0 of the next, and a silent collision here
     /// is two parameters moving together for no visible reason. 4096 is past anything a brush editor
     /// could produce, and 0–15 stay reserved for the four intrinsic draws.
-    static func modulation(_ output: BrushOutput, row: Int) -> DabRandom.Channel {
-        DabRandom.Channel(rawValue: 16 &+ output.channelBase &* 4096 &+ UInt64(max(row, 0)))
+    ///
+    /// **`slot` is BRUSH.md §2.22's second input, and it addresses a whole second *plane* rather than
+    /// a second half of the row block.** A row with `random` in both slots must draw two independent
+    /// values — reusing one channel would **square** a single draw rather than multiply two — so the
+    /// second slot needs a channel of its own. Splitting the 4096 rows in half would work and is the
+    /// wrong shape: it reintroduces exactly the collision the paragraph above reasons about, at half
+    /// the distance. `slotStride` is instead larger than the whole matrix's span
+    /// (`16 + 11 · 4096 + 4095 = 49,167`), so **no row count whatever can make slot 0 meet slot 1**.
+    /// Slot 0's arithmetic is unchanged to the bit, which is what keeps every brush drawn before
+    /// §2.22 drawing the same ink.
+    static func modulation(_ output: BrushOutput, row: Int, slot: Int = 0) -> DabRandom.Channel {
+        DabRandom.Channel(rawValue: 16
+                          &+ UInt64(max(slot, 0)) &* DabRandom.Channel.slotStride
+                          &+ output.channelBase &* DabRandom.Channel.outputStride
+                          &+ UInt64(max(row, 0)))
     }
+
+    /// Rows an output may carry before it would meet the next output. See above.
+    static let outputStride: UInt64 = 4096
+    /// The distance between one row's first input's channel and its second's — a power of two past
+    /// the whole matrix's span, so the two planes cannot meet at any row count.
+    static let slotStride: UInt64 = 1 << 20
 }
 
 /// **One row of BRUSH.md §6's matrix** — *(input, curve, amount)* driving one output.
 ///
-/// `output = base + Σ amount · curve(input)`. The sensor's reading is clamped to `0…1` and shaped by
-/// the curve; the amount is signed and is **not** clamped, and neither is the sum — every output
-/// enforces its own legal range where it is used, which is the same division `ResponseCurve` makes
-/// and `AnimationCurve` made before it.
+/// `output = base + Σ amount · curve(input) · reading(second)` — BRUSH.md §2.22. The sensor's reading
+/// is clamped to `0…1` and shaped by the curve; the amount is signed and is **not** clamped, and
+/// neither is the sum — every output enforces its own legal range where it is used, which is the same
+/// division `ResponseCurve` makes and `AnimationCurve` made before it.
+///
+/// **The second input is optional and its absence reads 1**, so a row without one is the plain
+/// `amount · curve(input)` it was before §2.22, to the bit — `x * 1` is exactly `x`.
 struct BrushModulation: Codable, Hashable {
     /// Which parameter this row drives.
     var output: BrushOutput
@@ -116,20 +138,49 @@ struct BrushModulation: Codable, Hashable {
     var curve: ResponseCurve
     /// How much of the shaped reading reaches the output. Signed.
     var amount: Double
+    /// **BRUSH.md §2.22's second input — a *gain* on the first, not a second row.** Optional; absent
+    /// reads 1.
+    ///
+    /// Two rows *add*, so `spacing ← random` beside `spacing ← pressure` is a pressure shift **plus**
+    /// a fixed-amplitude wobble. A second input *scales*, so the wobble's amplitude is what pressure
+    /// moves — which is §7.0's fourth worked example, *"how much random wobble there is depends on
+    /// pressure"*, and the one thing the additive matrix could not state at all.
+    ///
+    /// **It is not curved, by ruling.** A second `ResponseCurve` per row for a gain term is
+    /// expressiveness the ask does not need and a second thing to keep in step. And for `.random`,
+    /// the channel here is derived exactly as `input`'s is — `BrushModulations` rewrites it from the
+    /// row's position *in the second slot*, so a row randomised on both sides draws two independent
+    /// values rather than squaring one.
+    var second: BrushInput?
 
-    init(_ output: BrushOutput, _ input: BrushInput, amount: Double, curve: ResponseCurve = .linear) {
+    init(_ output: BrushOutput, _ input: BrushInput, second: BrushInput? = nil,
+         amount: Double, curve: ResponseCurve = .linear) {
         self.output = output
         self.input = input
+        self.second = second
         self.curve = curve
         self.amount = amount
     }
 
-    /// This row's contribution, given a sensor reading.
-    func contribution(_ reading: CGFloat) -> Double { amount * Double(curve.value(at: reading)) }
+    /// This row's contribution, given a reading of each of its inputs.
+    ///
+    /// `secondReading` defaults to 1, which is what the absence of a second input reads — and `x * 1`
+    /// is exactly `x` in IEEE arithmetic, so a row without one contributes the identical `Double` it
+    /// contributed before §2.22 rather than a nearby one.
+    ///
+    /// **The gain is clamped to `0…1` and the first reading's clamp is the curve's.** Every
+    /// `BrushInput` is *defined* to answer inside `0…1`, so this is the same belt-and-braces
+    /// `ResponseCurve.value(at:)` applies to its own input — and without it the two slots would treat
+    /// one sensor differently: a stray reading above 1 would be flattened as an input and would
+    /// *amplify* the row as a gain. A second input attenuates; raising `amount` is how a row is made
+    /// bigger.
+    func contribution(_ reading: CGFloat, second secondReading: CGFloat = 1) -> Double {
+        amount * Double(curve.value(at: reading)) * Double(min(max(secondReading, 0), 1))
+    }
 
     // MARK: - Codable
 
-    private enum CodingKeys: String, CodingKey { case output, input, curve, amount }
+    private enum CodingKeys: String, CodingKey { case output, input, second, curve, amount }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -137,6 +188,9 @@ struct BrushModulation: Codable, Hashable {
         input = try c.decode(BrushInput.self, forKey: .input)
         // A row with no curve drawn on it is the common case and the default; leaving the key out is
         // what keeps a plain ramp two numbers on the wire.
+        // §2.22: absent-by-default, so every brush written before the second input existed decodes
+        // to a row with none and renders unchanged.
+        second = try c.decodeIfPresent(BrushInput.self, forKey: .second)
         curve = try c.decodeIfPresent(ResponseCurve.self, forKey: .curve) ?? .linear
         amount = try c.decode(Double.self, forKey: .amount)
     }
@@ -145,6 +199,9 @@ struct BrushModulation: Codable, Hashable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(output, forKey: .output)
         try c.encode(input, forKey: .input)
+        // Left off the wire entirely when there is none — a row without a second input writes the
+        // same four keys it always wrote.
+        if let second { try c.encode(second, forKey: .second) }
         if !curve.isLinear { try c.encode(curve, forKey: .curve) }
         try c.encode(amount, forKey: .amount)
     }
@@ -192,7 +249,12 @@ struct BrushModulations: Codable, Hashable {
     /// input that needs a number the walk does not otherwise have (`StrokeSensors.totalArcWidths`), and
     /// measuring it is a second flattening pass over the curve. Asking first means a brush that does
     /// not taper pays nothing at all, and one that does pays a walk it could not be drawn without.
-    var readsTaper: Bool { rows.contains { $0.input == .taper } }
+    /// **Both slots are asked**, and that is not defensive. §2.22's second input reaches the funnel by
+    /// the same door as the first, so a row whose *gain* is `taper` needs `totalArcWidths` measured
+    /// exactly as much — and `StrokeSensors` answers `taper`'s neutral, **1**, where the length is
+    /// missing. A scan of first inputs alone would leave such a row silently at full gain for the
+    /// whole stroke, which is a green render of a brush that does not taper.
+    var readsTaper: Bool { rows.contains { $0.input == .taper || $0.second == .taper } }
 
     /// Whether every row is driven by `pressure` alone.
     ///
@@ -202,8 +264,13 @@ struct BrushModulations: Codable, Hashable {
     /// that is the *true* answer only for a brush this returns true for. Everything else falls back to
     /// the exact alpha punch, which is BRUSH.md §11's *"`supportsCleanCut` / `supportsSplitting` gate
     /// on brush properties, not on a list of known brushes"* reached through one more door.
+    /// **A row's *second* input (§2.22) is asked too, and it has to be.** `dabValues(atPressure:)`
+    /// answers every non-pressure sensor with its neutral, so a `size ← pressure × velocity` row
+    /// contributes nothing at all there while contributing along the whole of a real stroke — the
+    /// capsule chain would then claim a coverage the ink does not have, and `VectorEraser` would cut
+    /// away faded ink it cannot see. `nil` is pressure-only because its absence reads a constant 1.
     var isPressureOnly: Bool {
-        rows.allSatisfy { $0.input == .pressure }
+        rows.allSatisfy { $0.input == .pressure && ($0.second ?? .pressure) == .pressure }
     }
 
     /// The amount of the first row driving `output` from `input`, or 0 where there is none.
@@ -233,6 +300,12 @@ struct BrushModulations: Codable, Hashable {
             perOutput[row.output] = index + 1
             if case .random(_, let wavelength) = row.input {
                 row.input = .random(.modulation(row.output, row: index), wavelength: wavelength)
+            }
+            // §2.22's second slot is rewritten here for the same reason the first is, and leaving it
+            // out is the failure the mechanism exists to prevent: a hand-written or stale channel in
+            // the gain slot could make two rows move together, or make one row square a single draw.
+            if case .random(_, let wavelength)? = row.second {
+                row.second = .random(.modulation(row.output, row: index, slot: 1), wavelength: wavelength)
             }
             return row
         }
@@ -308,7 +381,11 @@ extension Brush {
             values.angleTurns += dab.angle.directionFollow * Double(reading(.direction))
         }
         for row in modulations.rows {
-            let contribution = row.contribution(reading(row.input))
+            // §2.22: `amount · curve(input) · reading(second)`, and the second input's absence reads
+            // 1. The `map` is what keeps a row without one from paying a *sensor* evaluation — the
+            // multiply itself is exact either way, but `reading` is §5.5's funnel and a `direction`
+            // read walks the curve's tangent.
+            let contribution = row.contribution(reading(row.input), second: row.second.map(reading) ?? 1)
             switch row.output {
             case .size: values.size += contribution
             case .flow: values.flow += contribution
