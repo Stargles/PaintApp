@@ -2334,40 +2334,44 @@ gain, and it is why the numbers above were taken on an idle machine under `simlo
 different corpus into a 2048² canvas, so 4.018 is not the 2.40 §11.2 measured. What is comparable is
 the **ratio between two builds of the same bench**, which is what the table reports.
 
-### 11.2b BRUSH.md §2.28 made the row a chain, and it cost 4% of a dab
+### 11.2b BRUSH.md §2.28 made the row a chain, and it cost 3–4% of a dab
 
-**MEASURED on this Mac's simulator, `4791204` against `tmp/chain`, the same dedicated device back to
-back under `simlock` with nothing else running** — the same `DabCostBench`, which exists so this can be
-re-taken rather than re-derived. §2.28 turned `Brush.dabValues`' one pass over a flat array of
-*(input, curve, amount, second)* rows into a **nested walk** over a chain's ordered modules, and the
-ruling was accepted on the understanding that the cost would be measured rather than assumed.
+**MEASURED on this Mac's simulator, `4791204` and then `860a4a0` against `tmp/chain`, each pair taken on
+a dedicated device back to back under `simlock` with nothing else running** — the same `DabCostBench`,
+which exists so this can be re-taken rather than re-derived. §2.28 turned `Brush.dabValues`' one pass
+over a flat array of *(input, curve, amount, second)* rows into a **nested walk** over a chain's ordered
+modules, and §2.29 then gave every `.scale` a `ResponseCurve` of its own; the rulings were accepted on
+the understanding that the cost would be measured rather than assumed.
 
-| brush (walk only) | before — the fixed row | after — the chain | Δ |
+**Two independent pairs, so the columns carry both.** The second was taken after §2.29 landed and this
+branch rebased onto it, and it says the second curve added nothing measurable.
+
+| brush (walk only) | before | after | Δ |
 |---|---|---|---|
-| no rows at all | 0.304 µs/dab | 0.305 | **+0.3%** |
-| one row, no modules | 1.161 | 1.155 | −0.5% |
-| two rows, no modules | 2.002 | 2.037 | +1.7% |
-| `hardRound` — two chains, one carrying a curve ramp | 2.260 | 2.387 | **+5.6%** |
-| six chains, one module each | 5.781 | 6.121 | **+5.9%** |
-| §2.18's dropout | 3.412 | 3.656 | +7.2% |
-| a colour-jittering brush | 2.811 | 3.121 | +11.0% |
-| **the whole re-walk, rasterization included** | **5.652** | **5.893** | **+4.3%** |
+| no rows at all | 0.304 / 0.320 µs/dab | 0.305 / 0.312 | **flat** |
+| one row, no modules | 1.161 / 1.157 | 1.155 / 1.146 | −1% |
+| two rows, no modules | 2.002 / 2.047 | 2.037 / 2.002 | flat |
+| `hardRound` — two chains, one carrying a curve ramp | 2.260 / 2.288 | 2.387 / 2.379 | **+4.0 to +5.6%** |
+| six chains, one module each | 5.781 / 5.716 | 6.121 / 6.179 | **+5.9 to +8.1%** |
+| §2.18's dropout | 3.412 / 3.435 | 3.656 / 3.622 | +5.4 to +7.2% |
+| a colour-jittering brush | 2.811 / 2.771 | 3.121 / 3.169 | +11 to +14% |
+| **the whole re-walk, rasterization included** | **5.652 / 5.615** | **5.893 / 5.803** | **+3.3 to +4.3%** |
 
-**So a module costs about 0.06 µs and an empty chain costs nothing at all** — the loop over `modules`
-is not entered for a chain that has none, which is why the unmodulated and single-bare-row rows are flat
-to within noise. The shipped presets each carry exactly one module (the curve ramp that used to be the
-`curve` field), and the whole-dab cost of the feature to them is **+0.24 µs, 4.3%**.
+**So a module costs about 0.06 µs and an empty chain costs nothing at all** — the loop over `modules` is
+not entered for a chain with none, which is why the unmodulated and single-bare-row rows are flat to
+within noise in both pairs. The shipped presets each carry exactly one module (the curve ramp that used
+to be the `curve` field), and the whole-dab cost of the feature to them is **+0.19 to +0.24 µs, 3–4%**.
 
 **Two new bench cases, and they are the ones to watch.**
 
 | | µs/dab, walk only |
 |---|---|
-| six chains carrying **eleven** modules between them | **10.98** |
-| a randomiser at **1** octave | 2.927 |
-| …at **4** | 3.771 |
-| …at **8** (the cap) | 4.602 |
+| six chains carrying **eleven** modules between them | **10.98 / 10.99** |
+| a randomiser at **1** octave | 2.927 / 2.919 |
+| …at **4** | 3.771 / 3.734 |
+| …at **8** (the cap) | 4.602 / 4.710 |
 
-**An octave costs 0.24 µs**, which is one more `DabRandom.unit` — two splitmix64 avalanches and a
+**An octave costs 0.24–0.26 µs**, which is one more `DabRandom.unit` — two splitmix64 avalanches and a
 smoothstep — and it is the steepest thing an artist can buy on this path: eight octaves is +1.7 µs a
 dab, about a third of a whole dab. That is a *deliberate* purchase with a slider beside it, and it is
 what the type's cap of 8 exists to bound; §2.28's own argument stands, that one randomiser with a count
@@ -2379,12 +2383,14 @@ built to find the slope rather than to describe a brush, and no artist has yet m
 §1's 1.3× device multiplier, the owner's iPad pays about **7.7 µs a dab** for that brush against 3.1 for
 a shipped preset.
 
-**The variance is stated because this section has been wrong about it before.** A second pass taken while
-another session's work crept back onto the machine put the *base* commit at 8.882 µs on the whole re-walk
-against its own 5.652 twenty minutes earlier — a 57% swing with nothing changed — while the `tmp/chain`
-numbers repeated to within 1% across both passes. The table above is the pass where both trees were
-measured back to back on a quiet machine; CLAUDE.md's *"a run measured against a busy machine is not a
-measurement"* is the reason the other one is named here rather than used.
+**The variance is stated because this section has been wrong about it before.** A pass taken while
+another session's work crept back onto the machine put the *base* commit at 8.882 µs on the whole
+re-walk against its own 5.652 twenty minutes earlier — a 57% swing with nothing changed — while the
+`tmp/chain` numbers repeated to within 1% across the same two passes. The table above uses only the
+pairs where both trees were measured back to back on a quiet machine; CLAUDE.md's *"a run measured
+against a busy machine is not a measurement"* is why the other one is named here rather than used. One
+cell is still an outlier and is left visible rather than dropped: `no rows` read **0.521** on the second
+base pass against 0.304, 0.307 and 0.320 on three others, and it is the first test of that run.
 
 ### 11.3 The upper bound: nothing breaks, and memory is not the story
 

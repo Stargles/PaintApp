@@ -540,7 +540,9 @@ final class BrushModulationLogicTests: XCTestCase {
     /// The digests below were taken in a **separate worktree at `4791204`**, the commit before the
     /// chain existed, by running this same function there and reading its printed output — not by
     /// comparing two brushes inside one process, which measures the evaluator against itself and
-    /// would pass whatever the walk did. CLAUDE.md's *"a green assertion is only as good as its two
+    /// would pass whatever the walk did. **Re-taken at `860a4a0`** after §2.29 landed on main and this
+    /// branch rebased onto it, and all ten came back the same, which is the pin that neither §2.28's
+    /// chain nor §2.29's second curve moved a preset's ink. CLAUDE.md's *"a green assertion is only as good as its two
     /// operands"* is the reason; §12 stage 5 records the same mistake being made on this path.
     ///
     /// Two stroke shapes each, because a preset's rows are pressure-driven and a flat stroke would
@@ -548,7 +550,7 @@ final class BrushModulationLogicTests: XCTestCase {
     func testTheFivePresetsRenderExactlyWhatTheyDidBeforeTheChain() {
         let ramped = Self.rampStroke(from: 0.05, to: 1)
         let flat = Self.rampStroke(from: 1, to: 1)
-        // MEASURED at 4791204 by printing them from this function.
+        // MEASURED at 4791204, and again at 860a4a0, by printing them from this function.
         let expected: [String: (UInt64, UInt64)] = [
             "Soft Round": (4_005_986_340_422_896_468, 15_099_783_732_785_567_829),
             "Hard Round": (857_427_189_099_703_352, 12_793_331_967_159_332_770),

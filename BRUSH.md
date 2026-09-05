@@ -229,7 +229,9 @@ tip is right, and one that lands with eleven invented ones is not.
 
 **2.22 A modulation row carries a second input, and its reading multiplies the first.** **BUILT, and
 its `second` field became §2.28's scale module on 2026-09-05 — the ruling below survives inside it
-unchanged and only its storage moved.** §6 became `output = base + Σ amount · curve(input) ·
+except for one clause, which §2.29 reversed the same day: the module *is* curved now, and what it
+curves is its own sensor's reading. A scale still attenuates and `amount` is still the only signed,
+unclamped term.** §6 became `output = base + Σ amount · curve(input) ·
 reading(second)`, where the second input is optional and its absence reads 1. That is the smallest thing that says *"how much random wobble there is depends on
 pressure"* — §7.0's fourth worked example, which the additive form could not state at all.
 
@@ -437,7 +439,9 @@ at different moments — but **one storage mechanism**, since both are a named b
 and `BrushTextureRef` already resolves exactly that.
 
 **2.29 Every module that reads a sensor carries its own input *and its own curve*. This supersedes
-§2.22's "the second input is not curved".** Owner, with the case that forces it:
+§2.22's "the second input is not curved".** **BUILT 2026-09-05, in the same pass as §2.28** —
+`BrushModule.scale(BrushInput, ResponseCurve)`, with `.linear` left off the wire so a scale written
+before this and one written after are the same two keys. Owner, with the case that forces it:
 
 > *"lets picture a scenario where the spacing is randomized but also driven by brush pressure, where the
 > lighter the pressure is, the more frequent you get segmented lines, but over lets say 30% pressure, it
@@ -456,6 +460,14 @@ carrying the second sensor *inside the module that consumes it* expresses the sa
 ordered list. Three sensors is two `scale` modules. §2.22's other clause survives unchanged: **a scale
 attenuates** — the shaped reading is clamped `0…1` — and `amount` remains the only signed, unclamped
 term.
+
+**What the build settled.** `.linear` is not a special case: `ResponseCurve.value(at:)` on an empty
+curve **is** the `0…1` clamp §2.22 asks for, so an uncurved scale is the plain multiply it was, to the
+bit, and the clamp is applied once rather than twice. The editor draws the curve **inside** the module,
+because a curve outside it is a `.curveRamp` and means something else — the two would be
+indistinguishable side by side, and `BrushModulationLogicTests` pins that they *are* different by
+rendering the owner's own chain against the same curve worn as a ramp after the scale. That second brush
+is the operand: without it the test would pass against an implementation that shaped the wrong value.
 
 **The owner's example is also achievable today by a different route, and both should exist.** §2.18's
 `density` with §2.19's threshold curve is exactly *"segments below a third pressure, solid above"*, and
@@ -491,8 +503,9 @@ octave is one hash and one lerp inside a module that is already resolved.
 survives a split, a refit, a spacing edit and an eraser punch for the reason §2.13 gives, and each octave
 needs its own channel or two of them are the same number twice.
 
-**BUILT 2026-09-05.** `BrushModulation` is *(output, input, [BrushModule], amount)`; `BrushModule` is
-`.curveRamp(ResponseCurve)` and `.scale(BrushInput)`; `BrushRandomiser` is *(λ, octaves, falloff)* and
+**BUILT 2026-09-05.** `BrushModulation` is *(output, input, [BrushModule], amount)*; `BrushModule` is
+`.curveRamp(ResponseCurve)` and `.scale(BrushInput, ResponseCurve)` — the second curve is §2.29, ruled
+the same evening and built in the same pass; `BrushRandomiser` is *(λ, octaves, falloff)* and
 `BrushInput.random` carries one. The editor's chain is **add / remove / reorder** over the stored list,
 with no mapping layer between what is drawn and what is evaluated.
 
@@ -520,13 +533,15 @@ an artist can build makes two of them meet. **Position 0 is the input and positi
 bit. The five presets were pinned by rendering them in a **separate worktree at the commit before this**
 and comparing digests, not by comparing two brushes in one process.
 
-**The cost, MEASURED** — `4791204` against `tmp/chain`, same device, back to back, idle machine;
-PERFORMANCE.md §11.2b carries the table and the provenance. An empty chain costs **nothing** (0.304 →
-0.305 µs/dab, and the module loop is not entered); a module costs about **0.06 µs**; the whole re-walk
-of a shipped preset went **5.652 → 5.893 µs a dab, +4.3%**. **An octave costs 0.24 µs** and is the
-steepest thing on the path — eight of them is +1.7 µs, about a third of a dab — which is why the count
-is capped at 8 and sits behind a slider the artist moves deliberately. A deliberately extreme brush,
-six chains carrying eleven modules, measures **10.98 µs a dab** against a shipped preset's 2.39.
+**The cost, MEASURED** — two pairs, `4791204` and then `860a4a0` against `tmp/chain`, each taken on one
+device back to back on an idle machine; PERFORMANCE.md §11.2b carries the tables and the provenance. An
+empty chain costs **nothing** (0.30 → 0.31 µs/dab, and the module loop is not entered); a module costs
+about **0.06 µs**; the whole re-walk of a shipped preset went **5.65 → 5.89 and 5.62 → 5.80 µs a dab,
++3.3 to +4.3%**. **An octave costs 0.24–0.26 µs** and is the steepest thing on the path — eight of them
+is +1.7 µs, about a third of a dab — which is why the count is capped at 8 and sits behind a slider the
+artist moves deliberately. A deliberately extreme brush, six chains carrying eleven modules, measures
+**10.99 µs a dab** against a shipped preset's 2.38. §2.29's second curve added nothing measurable: the
+second pair was taken after it landed and reads the same as the first.
 
 **2.27 The library must be relocatable, and the architecture owes that before the feature exists.**
 Owner: *"Right now all the files are stored internally on the app, which means that if the app gets
@@ -1081,7 +1096,8 @@ and it is the CSP model.
 
 **The list is §2.28 and it replaced a fixed `curve` and `second` field on 2026-09-05.** A chain is
 `amount · chain(input)` where the sensor's reading passes through the modules **in the order the artist
-put them**: `.curveRamp` shapes it, `.scale` multiplies it by another sensor's reading. The row that
+put them**: `.curveRamp` shapes it, `.scale` multiplies it by another sensor's reading **shaped by that
+sensor's own curve** (§2.29). The row that
 came before — `amount · curve(input) · reading(second)` — is exactly the chain
 `[.curveRamp, .scale]`, so nothing an existing brush said became unsayable and the presets' pixels did
 not move; what became sayable is the other order.
@@ -2143,8 +2159,9 @@ first, which cleanly replaces the old one."*
   a chain carrying a scale, and identically for every chain that does not — which is every shipped preset,
   pinned digest-for-digest against a worktree at the commit before.
   **What it cost is MEASURED, not assumed** — PERFORMANCE.md §11.2b. An empty chain is free, a module is
-  ~0.06 µs, a shipped preset's whole re-walk went **5.652 → 5.893 µs a dab (+4.3%)**, and an **octave is
-  0.24 µs**, the steepest purchase on the path, which is why the count caps at 8.
+  ~0.06 µs, a shipped preset's whole re-walk went **5.65 → 5.89 µs a dab (+3.3 to +4.3% over two
+  independently taken pairs)**, and an **octave is 0.24–0.26 µs**, the steepest purchase on the path,
+  which is why the count caps at 8.
 
 - **Whether the octave cap of 8 is the right number, and whether a falloff above 1 should ever be
   reachable.** Both are INFERRED from arithmetic rather than from a drawing. The cap is where λ/2ᵏ falls
