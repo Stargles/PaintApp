@@ -438,6 +438,37 @@ be open. Two collections, because a tip is a shape and a texture is paper and an
 at different moments — but **one storage mechanism**, since both are a named bitmap under §2.27's root
 and `BrushTextureRef` already resolves exactly that.
 
+**2.30 Scatter is two amounts oriented to the stroke, not one isotropic disc.** Owner: *"is offset an
+output? like horizontal or vertical offset of the sprite from the center of the stroke oriented relative
+to direction of the stroke. This being randomized is a well known feature of many paint apps, so the
+sprites arent just rotated randomly, but also randomly translated to an extent."*
+
+`scatter` today is **isotropic and unaware of the path**: `BrushStamper.applyScatter` draws a free angle
+and a distance, so a dab lands anywhere on a disc. The two axes are therefore coupled at equal weight and
+neither is reachable alone. They do different things:
+
+- **Across** (along the normal) widens and frays the stroke — the silhouette goes hairy while the ink
+  stays evenly spaced.
+- **Along** (along the tangent) widens nothing; it bunches and gaps the dabs, so density goes irregular
+  without the line getting thicker.
+
+So `scatter` is replaced by **`scatterAcross` and `scatterAlong`**, two outputs modulatable
+independently, with the old isotropic behaviour expressible as both set equal. §2.14 governs: the old
+single output is deleted rather than kept beside them.
+
+**§8.4's negative result stands and does not cover this.** It measured that *coherent* `scatter` and a
+pure perpendicular offset are indistinguishable, so a separate `offset` output bought nothing **for the
+rough ink nib**. That is a statement about one brush under coherent noise, not about independent per-axis
+amounts, and §7.2 already carries the qualification that an offset the artist *aims* does not inherit the
+refutation.
+
+**It costs nothing measurable**: the same two draws, resolved onto the tangent and normal instead of a
+free angle, and `StrokeGeometry.tangent(atParameter:)` is already computed because `angle`'s
+direction-follow reads it. **The one thing it does touch is the merge bound** — §12 stage 8's stroke
+group clips to a rectangle derived from the brush's own maximum reach, and that derivation must take the
+larger of the two axes rather than one `scatter`, or a heavily across-scattered stroke loses ink at the
+clip. That is the failure direction the bound was written to avoid.
+
 **2.29 Every module that reads a sensor carries its own input *and its own curve*. This supersedes
 §2.22's "the second input is not curved".** **BUILT 2026-09-05, in the same pass as §2.28** —
 `BrushModule.scale(BrushInput, ResponseCurve)`, with `.linear` left off the wire so a scale written
