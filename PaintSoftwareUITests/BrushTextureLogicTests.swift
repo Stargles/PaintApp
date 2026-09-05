@@ -213,34 +213,57 @@ final class BrushTextureLogicTests: XCTestCase {
     /// "nothing outside changed" is green against one that does nothing at all. Together they say the
     /// texture is multiplied *into* the stroke — which is exactly the owner's *"uses the untextured
     /// brush as a transparency mask"* — and nothing else.
+    ///
+    /// **Drawn onto a cel that already has ink on it, and that is the version that catches things.**
+    /// The first draft drew onto an empty canvas, where "outside the stroke" is transparent — and a
+    /// `.destinationIn` applied at the wrong moment multiplies transparency by anything and is still
+    /// transparent, so the whole class of *"the paper reached past the stroke"* defect was invisible
+    /// to it. MEASURED: with the merge's texture pass moved outside its own transparency layer, the
+    /// empty-canvas form of this test stayed green and this one does not.
     func testATexturedStrokeDiffersFromAnUntexturedOneAndOnlyWhereTheInkIs() throws {
         let sheet = try Self.writeTestTexture()
         let origin = CGPoint(x: 48, y: 96)
-        let plain = try Self.pixels(Self.replayTier(Self.brush(nil), at: origin))
+        // Existing artwork the stroke is laid over: a band that crosses the stroke and extends well
+        // past both of its ends, so there are pixels inside the merge's own clip that the new stroke
+        // does not reach and that a bug can be caught destroying.
+        let existing = UIGraphicsImageRenderer(size: Self.canvas, format: PixelOps.transparentFormat())
+            .image { ctx in
+                ctx.cgContext.setFillColor(UIColor.blue.cgColor)
+                ctx.cgContext.fill(CGRect(x: 0, y: 84, width: Self.canvas.width, height: 24))
+            }
+        let base = try Self.pixels(existing)
+        let plain = try Self.pixels(Self.replayTier(Self.brush(nil), at: origin, over: existing))
         let textured = try Self.pixels(
-            Self.replayTier(Self.brush(BrushTextureSettings(mask: sheet, tileSize: 64)), at: origin))
+            Self.replayTier(Self.brush(BrushTextureSettings(mask: sheet, tileSize: 64)), at: origin,
+                            over: existing))
 
         XCTAssertFalse(plain.isBlank, "fixture precondition: the untextured stroke drew something")
         XCTAssertFalse(textured.isBlank,
                        "a textured stroke still draws — the texture masks the ink, it does not delete it")
 
-        var differing = 0, outsideTheInk = 0
+        var differing = 0, outsideTheInk = 0, untouchedByTheStroke = 0
         for y in 0..<plain.height {
             for x in 0..<plain.width {
                 let i = (y * plain.width + x) * 4
-                let same = plain.bytes[i..<i + 4].elementsEqual(textured.bytes[i..<i + 4])
-                if !same { differing += 1 }
-                // "Outside the ink" is judged by the **untextured** render, which is the only honest
-                // reading of it: the textured one is short of ink precisely where the paper rejected
-                // it, so using it would exempt every pixel the bug would have to touch.
-                if plain.alpha(x, y) == 0 && !same { outsideTheInk += 1 }
+                let plainSame = plain.bytes[i..<i + 4].elementsEqual(textured.bytes[i..<i + 4])
+                if !plainSame { differing += 1 }
+                // "Outside the ink" is judged by where the **untextured** stroke left the cel exactly
+                // as it found it. That is the only honest reading: the textured render is short of
+                // ink precisely where the paper rejected it, so judging by *it* would exempt every
+                // pixel the defect would have to touch.
+                guard base.bytes[i..<i + 4].elementsEqual(plain.bytes[i..<i + 4]) else { continue }
+                untouchedByTheStroke += 1
+                if !base.bytes[i..<i + 4].elementsEqual(textured.bytes[i..<i + 4]) { outsideTheInk += 1 }
             }
         }
         XCTAssertGreaterThan(differing, 200,
                              "the texture has to reach the ink — \(differing) pixels moved")
+        XCTAssertGreaterThan(untouchedByTheStroke, 1000,
+                             "fixture precondition: there are pixels the stroke did not touch, so "
+                             + "the assertion below has something to be true of")
         XCTAssertEqual(outsideTheInk, 0,
-                       "the texture may not appear outside the stroke; \(outsideTheInk) pixels the "
-                       + "untextured stroke never reached were changed")
+                       "the texture may not reach past the stroke; \(outsideTheInk) pixels the "
+                       + "untextured stroke left alone were changed")
     }
 
     // MARK: - 2. The anchoring — the assertion the feature exists for
@@ -366,6 +389,37 @@ final class BrushTextureLogicTests: XCTestCase {
                        + "— \(differing) bytes differ")
     }
 
+    /// **The grouped walk *through* a scratch, which is a fourth path and not a repeat of the third.**
+    ///
+    /// `VectorCanvas.applyPreview` runs whole `stampStroke` calls into a `StrokeScratch` — an erase
+    /// walk and a restamp per surviving piece — so the group is opened on the *window*, in window
+    /// coordinates, and the paper's phase can only come from `RasterLayerTexture.canvasOrigin`. The
+    /// scratch's own `texture` is deliberately nil here, exactly as it is for that role: the texture
+    /// arrives on the group, the way it does on a cel.
+    ///
+    /// **This test exists because a mutation went unpunished.** Setting a grown window's
+    /// `canvasOrigin` to `.zero` reddened nothing in the first draft of this file — every other test
+    /// reaches the window either ungrouped (where `windowRect.origin` is read directly) or not at
+    /// all. A field with no assertion on it is a field that will be wrong later.
+    func testAGroupedWalkThroughTheScratchPutsTheTextureWhereTheCelTierDoes() throws {
+        let sheet = try Self.writeTestTexture()
+        let brush = Self.brush(BrushTextureSettings(mask: sheet, tileSize: 64))
+        let origin = CGPoint(x: 53, y: 91)
+        let cel = RasterLayerTexture(size: Self.canvas)
+        let scratch = StrokeScratch(canvasSize: Self.canvas, role: .additive, opacity: 1)
+        BrushStamper.stampStroke(into: scratch, samples: Self.samples(from: origin), brush: brush,
+                                 color: .black, brushSize: brush.size, brushOpacity: 1,
+                                 random: DabRandom(seed: 0x51A7))
+        scratch.commit(into: cel)
+
+        let viaScratch = try Self.pixels(cel)
+        let direct = try Self.pixels(Self.replayTier(brush, at: origin))
+        XCTAssertFalse(viaScratch.isBlank, "fixture precondition: the grouped walk drew something")
+        XCTAssertEqual(viaScratch.bytes, direct.bytes,
+                       "a group merged inside a window has to land the paper on the canvas pixels a "
+                       + "group merged into the cel does")
+    }
+
     /// And the third buffer kind: `CGContextDabTarget`, which is what a vector cel's own render draws
     /// through. Same stroke, same paper, same pixels — so the anchoring is a property of the canvas
     /// and not of `RasterLayerTexture`.
@@ -398,12 +452,25 @@ final class BrushTextureLogicTests: XCTestCase {
         let origin = CGPoint(x: 53, y: 91)
         let replay = try Self.pixels(Self.replayTier(plain, at: origin))
         let renderLocal = try Self.pixels(Self.renderLocalTier(plain, at: origin))
+        // **A picture tip as well as a round one, and it is not symmetry for its own sake.**
+        // `dabCircleBounds` is exact — a round dab paints nothing at the edge of its own box — so the
+        // outermost row of a round stroke's merge clip is already transparent and *any* damage to
+        // that clip multiplies zero by something. An image dab spills past its geometric bound
+        // (`dabImageBounds`' measured allowance), so its ink genuinely reaches the boundary and the
+        // clip is observable. MEASURED: with `endStrokeGroup`'s `.integral` removed, the round arm
+        // above stays green and this one does not.
+        var stamped = plain
+        stamped.tip = .stamp(.builtIn(.square))
+        let picture = try Self.pixels(Self.replayTier(stamped, at: origin))
         XCTAssertFalse(replay.isBlank, "fixture precondition: the untextured stroke drew something")
+        XCTAssertFalse(picture.isBlank, "fixture precondition: the untextured stamp stroke drew something")
 
         XCTAssertEqual(Self.digest(replay.bytes), Self.replayDigestBeforeTextures,
                        "an untextured stroke's cel-tier pixels moved")
         XCTAssertEqual(Self.digest(renderLocal.bytes), Self.renderLocalDigestBeforeTextures,
                        "an untextured stroke's render-local pixels moved")
+        XCTAssertEqual(Self.digest(picture.bytes), Self.stampTipDigestBeforeTextures,
+                       "an untextured *stamp* stroke's pixels moved")
     }
 
     /// FNV-1a over the whole render. A digest rather than a stored image because the operand is
@@ -430,6 +497,7 @@ final class BrushTextureLogicTests: XCTestCase {
     /// re-measured rather than adjusting the number quietly.
     private static let replayDigestBeforeTextures: UInt64 = 16_765_771_397_875_139_493
     private static let renderLocalDigestBeforeTextures: UInt64 = 16_765_771_397_875_139_493
+    private static let stampTipDigestBeforeTextures: UInt64 = 16_847_025_589_130_065_381
 
     // MARK: - 6. The eraser textures its removal, and cannot cleanly cut
 
