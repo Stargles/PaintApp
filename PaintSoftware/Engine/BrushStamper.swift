@@ -119,7 +119,7 @@ enum BrushStamper {
     /// to travel before it arrives anywhere to ask.
     ///
     /// It is resolved for a dab the walk **skips** as well as one it draws — whether skipped by
-    /// `visibleRange` or by §2.18's density — for exactly the reason arc length advances over a
+    /// `visibleRange` or by §2.32's density gate — for exactly the reason arc length advances over a
     /// skipped dab: the lattice is a property of the walk, not of what came out of it. A cut piece and
     /// the uncut stroke march identically or the zero-tolerance parity net fails on the first dab past
     /// the cut.

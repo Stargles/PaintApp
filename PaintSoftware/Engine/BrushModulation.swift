@@ -548,9 +548,10 @@ struct BrushModulations: Codable, Hashable {
 ///
 /// The line between this and `BrushStamper.stampDab` is **values against draws**: everything here is
 /// a pure function of the brush and the sensors at this site, and the three things that additionally
-/// need a *draw* from the stroke's random field — the two scatter offsets, the angle's jitter and §2.18's
-/// dropout — are taken in the stamper, from `DabRandom`. That keeps this type answerable by a caller
-/// that has a pressure and no stroke (`Brush.dabValues(atPressure:)`).
+/// need a *draw* from the stroke's random field — the two scatter offsets and the angle's jitter —
+/// are taken in the stamper, from `DabRandom`. That keeps this type answerable by a caller that has a
+/// pressure and no stroke (`Brush.dabValues(atPressure:)`). **§2.18's dropout was a third until
+/// §2.32**; it is a threshold on `density` now, so the gate is decidable from this type alone.
 struct BrushDabValues: Equatable {
     /// Fraction of the stroke's own diameter.
     var size: Double

@@ -113,7 +113,7 @@ enum BuiltInBrushTexture: String, Hashable, CaseIterable {
     case splatterDrops = "splatter-drops"
 
     /// **Texture ▸ Stipple.** Seventeen hard-edged dots of mixed size. The dynamics-only route —
-    /// §2.18's dropout on a round tip — is a beaded *line*, because nothing in the engine spreads
+    /// the dropout on a round tip — is a beaded *line*, because nothing in the engine spreads
     /// ink across the path; the picture is what makes a stipple a field.
     case stippleSpecks = "stipple-specks"
 

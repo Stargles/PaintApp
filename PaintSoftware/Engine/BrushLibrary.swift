@@ -216,7 +216,9 @@ enum BrushLibrary {
     /// **§8.4's first answer to §2.16's rough ink ask, and it ships beside the tipped one on
     /// purpose.** All dynamics and no picture: two `size ← random` rows at two wavelengths, a
     /// coherent scatter — §2.30's two axes at one amount, which is what the isotropic row it was
-    /// authored as became — and §2.18's `density` dropout under a pressure threshold. The two are not
+    /// authored as became — and a `density` dropout under a pressure threshold, written as §2.32's
+    /// gate: a base sitting on it, the pressure curve at half gain and a randomiser at minus a half.
+    /// The two are not
     /// weaker versions of each other — this one makes coarse lumps and outright breaks where the
     /// tipped nib makes a fine even tooth.
     static let roughInkBlotchy = Brush(
@@ -373,7 +375,8 @@ enum BrushLibrary {
     )
 
     /// **§8.6's Splatter.** Twenty-six drops off a cube law, stamped every 0.46 of a width with
-    /// §2.18's dropout under it, each stamp turned and resized.
+    /// §2.32's dropout under it — a base above the gate and a randomiser swinging back across it —
+    /// each stamp turned and resized.
     ///
     /// **The size draw is doing more of the work than the turn**, which is §8.4's own measurement
     /// arriving in the one family where it can be seen: a drop is nearly a disc, and rotating a disc
@@ -401,9 +404,9 @@ enum BrushLibrary {
     /// **§8.6's Stipple.** Seventeen hard-edged dots a stamp, at spacing 0.34 with a short-λ dropout.
     ///
     /// **The picture is what makes it a stipple, and the sheet's dynamics-only row is the
-    /// refutation.** §2.18's `density` on a small round tip at spacing 0.7 is a *beaded line* — the
+    /// refutation.** A `density` dropout on a small round tip at spacing 0.7 is a *beaded line* — the
     /// dots all sit on the path, because nothing spreads them across it. The tip is where the spread
-    /// comes from. λ is 0.4 rather than §2.17's shipped 3.5 for §2.18's own reason: a long λ drops
+    /// comes from. λ is 0.4 rather than §2.17's shipped 3.5 for §2.18's own surviving reason: a long λ drops
     /// contiguous runs, which is a segmented line rather than a stipple.
     static let stipple = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-000000000023")!,
