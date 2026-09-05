@@ -248,9 +248,19 @@ amplitude is what pressure moves. `density` reaches the same place by a differen
 coherence-lives-in-the-draw — and that road is not general, which is why segmentation works today and
 spacing jitter does not.
 
+**A second input attenuates; `amount` is how a row is made bigger.** The gain is clamped to `0…1`,
+which the ruling did not originally say and which building it made necessary: without it one sensor
+could be flattened as an *input* by its curve and then *amplify* as a gain, so the same reading would
+mean two opposite things depending on which slot it sat in. `amount` is the signed, unclamped term and
+stays the only one.
+
 **Two traps it carries.** A row whose *both* inputs are `random` must draw two independent values, so
 the second slot needs a channel of its own — §4's channel is derived from (output, row), and reusing it
-would square one draw rather than multiply two. And the second input is **not** curved: a curve on it
+would square one draw rather than multiply two. **An offset inside the output's own 4096-row block is
+the wrong shape and that same doc says why** — at any stride `s`, row `s` of one output collides with
+row 0 of the next, so halving the stride reintroduces the collision at half the distance. The gain is a
+whole second **plane**, `1 << 20`, past the matrix's entire span, so no row count can make the slots
+meet. And the second input is **not** curved: a curve on it
 would be a second `ResponseCurve` per row for a gain term, which is expressiveness the ask does not need
 and a second thing to keep in step.
 
