@@ -658,29 +658,57 @@ final class RegionRepairLogicTests: XCTestCase {
         assertIdentical(appended, fullReWalk(of: canvas).image, "an append onto a repaired cel")
     }
 
-    /// **Undo clears the measured footprints, and it has to.** A wholesale `elements =` can put
-    /// different content under an id that already has an entry, and an entry is a promise that the
-    /// element has not changed — so a stale one would let a *changed* element be skipped, which is
-    /// the one way this design draws a wrong picture rather than a slow one.
-    func testAWholesaleReplacementDropsTheMeasuredFootprints() {
+    /// **A wholesale `elements =` before the render lands drops the base, and it has to.**
+    ///
+    /// `regionBase` lives only between an edit and the render that consumes it — the render clears
+    /// it, because from then on `cachedImage` holds the same object. So the window this is about is
+    /// narrow and it is real: the cut invalidates on the main thread and
+    /// `StrokeCanvasView.renderQueue` draws behind it, so an undo can arrive first. If
+    /// `.everything` did not drop the base, that render would repair a rectangle **against a
+    /// picture of a different display list**, and every pixel outside the rectangle would be the old
+    /// list's.
+    ///
+    /// **The first version of this test rendered before the undo and therefore pinned nothing** —
+    /// MEASURED, it was green with the base kept, because by then the base was already nil and
+    /// keeping nil is keeping nothing. The list restored here differs *outside* the rectangle the
+    /// cut declared, which is where a stale base shows.
+    ///
+    /// The sibling line, `paintedBounds.removeAll` on the same case, is a guard whose absence this
+    /// suite could **not** make observable — also MEASURED, by mutation. The reason is structural
+    /// and worth writing down rather than deleting the line over: `.everything` drops both bases, so
+    /// the next `.full` render is an unclipped walk of the whole list, and an unclipped walk
+    /// re-measures every stroke it draws before any repair can read a stale entry. That invariant is
+    /// what makes the line dead, so a change that lets a *clipped* walk follow `.everything` without
+    /// a full one in between brings it back to life.
+    func testAnUndoBeforeTheRenderLandsDropsTheRegionBase() {
         let canvas = Self.drawnCanvas(24)
         let snapshot = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints))
-        _ = canvas.render()
+        XCTAssertTrue(isRegion(canvas.lastDamage), "setup: the cut must have taken a region base")
 
-        canvas.elements = snapshot
+        // **No render here, and that is the whole fixture.** The base is standing and unconsumed.
+        // The list that replaces it is short one stroke in a far cell, so it differs from the base
+        // outside the rectangle the cut declared — which is exactly where a repair would not look.
+        var replacement = snapshot
+        replacement.remove(at: 20)
+        canvas.elements = replacement
         canvas.bumpVersion()
         XCTAssertEqual(canvas.lastDamage, .everything)
-        let restored = canvas.render()
-        XCTAssertEqual(canvas.regionRepairs, 1, "the restore must not have repaired anything")
-        assertIdentical(restored, fullReWalk(of: canvas).image, "the cel restored by undo")
 
-        // And the next cut cannot use anything the walk before the restore measured.
+        let restored = canvas.render()
+        XCTAssertEqual(canvas.regionRepairs, 0,
+                       "a base taken against one display list must not be used against another")
+        assertIdentical(restored, fullReWalk(of: canvas).image,
+                        "the cel replaced before the cut's render landed")
+
+        // And the cel still works afterwards: the next cut repairs, and still draws the walk's
+        // picture over a base taken from the list it actually belongs to.
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints))
         _ = canvas.render()
+        XCTAssertEqual(canvas.regionRepairs, 1, "the cut after the replacement should repair")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
-        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "a cut after an undo")
+        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "a cut after a replacement")
     }
 }
