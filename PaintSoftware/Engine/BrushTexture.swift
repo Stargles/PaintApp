@@ -278,3 +278,219 @@ enum BrushTipImport {
         return true
     }
 }
+
+// MARK: - BRUSH.md §2.25 — the canvas-anchored texture a stroke merges through
+
+extension BrushTextureRef {
+    /// The file this ref needs to exist under `BrushLibrary.customBrushesDirectory`, or nil for one
+    /// the app bundle carries.
+    ///
+    /// `BrushTip.importedTextureFileName` is this question asked of a *tip*; a brush's texture asks
+    /// it of the same enum, so the rule that decides which files a saved package has to carry is
+    /// stated once and both consumers read it. Adding the texture without this was the shape of
+    /// BUGS.md's *"copied by the palette, not by what is drawn"* — a reopened document whose ink
+    /// names a file that never travelled.
+    var importedFileName: String? {
+        guard case .imported(let fileName) = self else { return nil }
+        return fileName
+    }
+}
+
+/// **The texture a brush lays its ink through — BRUSH.md §2.25.**
+///
+/// The owner: *"its a texture that gets applied over your brush ... Texture is applied relative to
+/// canvas, and uses the untextured brush as a transparency mask, then is scaled with opacity."*
+///
+/// So this is not a tip and not grain. A tip is *one dab's* shape and travels with the dab; this is
+/// **paper**, fixed to the canvas, and the ink is what shows it. It is applied once, where a stroke
+/// merges (`DabTarget.beginStrokeGroup`), by multiplying the mask's alpha into the alpha the whole
+/// walk accumulated — which is exactly *"uses the untextured brush as a transparency mask"* — and
+/// the stroke's own opacity then scales the result, because the merge is where that opacity is
+/// applied anyway.
+///
+/// **§2.4 deleted grain and this reverses it, in a different place and by a different mechanism.**
+/// §2.4's reason was structural: *"a sprite travels with the stroke, paper does not"*, and with the
+/// ink composited dab by dab straight onto the layer there was no moment at which the whole stroke
+/// existed as a mask, so paper could only ever have been faked per dab. §12 stage 8 built that
+/// moment. Nothing here is per dab, nothing here is in a dab cache's key, and nothing here is
+/// stored on a sample — which is the whole of why it is affordable now and was not then.
+///
+/// **Three fields, and §9.2 is why there are not more.** *"None of them is speculative generality,
+/// and none should be built beyond what §12's stages need."* An offset, a rotation, a contrast, an
+/// invert and a per-tip variant were all candidates and are all absent: the arithmetic below reads
+/// `mask`, `tileSize` and `depth` and nothing else, so nothing else exists.
+struct BrushTextureSettings: Codable, Hashable {
+    /// Which bitmap. The **same** enum a tip names, resolved by the **same**
+    /// `BrushTextureStore.mask(for:)`, written by the same import — BRUSH.md §12 stage 5 built one
+    /// route for a brush's pixels to reach the renderer and this is a second consumer of it, not a
+    /// second scheme.
+    var mask: BrushTextureRef
+
+    /// **The side of one repeat, in canvas points.** Not a multiplier on the mask's own resolution:
+    /// a number that means "canvas points" is the number the anchoring is expressed in, and it makes
+    /// the tiling independent of what a given asset happens to be authored at.
+    ///
+    /// Rounded to whole points where it is used. Tiles laid on a fractional grid are drawn into
+    /// fractional rectangles, and CoreGraphics antialiases those — which under `.destinationIn`
+    /// carves a faint grid of *seams* out of the ink rather than merely blurring one. The same
+    /// argument `endStrokeGroup`'s `.integral` clip already makes, one level down.
+    var tileSize: CGFloat
+
+    /// `0…1` — how much of the texture's shortfall is taken out of the ink. The mask's own alpha `a`
+    /// becomes `1 - depth·(1 - a)`, so **0 is exactly no texture** (every pixel survives) and 1 is
+    /// the mask as authored.
+    ///
+    /// That `0` is the identity is not a nicety: it is what lets one arithmetic serve the whole
+    /// range without a second path, and it is asserted rather than assumed.
+    var depth: Double
+
+    init(mask: BrushTextureRef, tileSize: CGFloat = 256, depth: Double = 1) {
+        self.mask = mask
+        self.tileSize = tileSize
+        self.depth = depth
+    }
+}
+
+extension BrushTextureSettings {
+    private enum CodingKeys: String, CodingKey { case mask, tileSize, depth }
+
+    /// `mask` is strict — a texture that names no bitmap is not a texture, and the field is optional
+    /// on `Brush` precisely so "no texture" has its own spelling. The other two default, which is
+    /// §6's grouping doctrine: a setting added inside here later is one field rather than a
+    /// decode-compatibility question.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mask = try c.decode(BrushTextureRef.self, forKey: .mask)
+        tileSize = try c.decodeIfPresent(CGFloat.self, forKey: .tileSize) ?? 256
+        depth = try c.decodeIfPresent(Double.self, forKey: .depth) ?? 1
+    }
+}
+
+/// **The depth-adjusted, pre-flipped masks a merge tiles, loaded and adjusted once per process.**
+///
+/// `BrushTextureStore` holds the mask as the file has it. This holds `1 - depth·(1 - a)` of that
+/// mask, flipped for a UIKit-space context, which is the image the merge actually draws — and both
+/// of those are per *brush*, not per dab or per stroke, so one entry serves every stroke ever drawn
+/// with that brush.
+///
+/// **The key names the texture and the depth, and it does not name a size.** RENDER.md §3.8 records
+/// three memos in this repo keyed on a buffer's size alone, each of which silently serves one
+/// content's pixels for another's; this one cannot be the fourth, because size is not in it at all —
+/// an entry is always the mask's own resolution and the tiling scales at draw time.
+enum BrushTextureMaskCache {
+
+    private struct Key: Hashable {
+        let mask: BrushTextureRef
+        /// Quantised to a thousandth so a slider's float noise cannot mint an entry per frame. Far
+        /// finer than a byte of alpha, which is all the adjustment can express.
+        let depthThousandths: Int
+    }
+
+    private static let lock = NSLock()
+    private static var entries: [Key: CGImage?] = [:]
+    /// Ceiling on distinct entries, on `DabImageCache`'s contract: texture and depth change at human
+    /// speed, so this is never approached, and something pathological degrades to "rebuild
+    /// sometimes" rather than growing without bound.
+    private static let limit = 16
+
+    /// The image the merge tiles, or nil when the mask's file is missing or unreadable.
+    ///
+    /// **Nil draws nothing rather than drawing everything**, and the direction matters more here
+    /// than it does for a tip: the merge multiplies with `.destinationIn`, so a mask that came back
+    /// as "no coverage anywhere" would delete the stroke. The caller leaves the ink untextured
+    /// instead — a brush whose texture file the artist deleted paints, which is the same honest
+    /// failure `BrushTextureStore` gives a missing tip, pointed the safe way.
+    static func entry(for settings: BrushTextureSettings) -> CGImage? {
+        let key = Key(mask: settings.mask,
+                      depthThousandths: Int((min(max(settings.depth, 0), 1) * 1000).rounded()))
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = entries[key] { return cached }
+        let built = build(mask: settings.mask, depth: CGFloat(key.depthThousandths) / 1000)
+        if entries.count >= limit { entries.removeAll(keepingCapacity: true) }
+        entries[key] = built
+        return built
+    }
+
+    /// Drops everything held. Tests that write a mask file and then rewrite it need this; nothing in
+    /// the app calls it, for the same reason nothing clears `BrushTextureStore`.
+    static func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.removeAll()
+    }
+
+    private static func build(mask ref: BrushTextureRef, depth: CGFloat) -> CGImage? {
+        guard let mask = BrushTextureStore.mask(for: ref), mask.width > 0, mask.height > 0 else { return nil }
+        let width = mask.width, height = mask.height
+        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        // **Pre-flipped, because every context a merge runs in is flipped to UIKit's top-left
+        // space** (`RasterLayerTexture.ensureContext`, `UIGraphicsImageRenderer`). A `CGContext.draw`
+        // there lands an image upside down; doing the flip once, here, is what makes the paper the
+        // artist authored the paper that lands. `DabImageCache` does not bother because a tip's mask
+        // is drawn through a rotation anyway and the committed square is symmetric — a tiling sheet
+        // is neither.
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(mask, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let raw = ctx.data else { return nil }
+        let bytes = raw.bindMemory(to: UInt8.self, capacity: width * height * 4)
+        // `1 - depth·(1 - a)`, in bytes. Colour is irrelevant — `.destinationIn` reads source alpha
+        // only — and is left at the premultiplied black the draw produced.
+        for i in stride(from: 0, to: width * height * 4, by: 4) {
+            let a = CGFloat(bytes[i + 3]) / 255
+            let survives = 1 - depth * (1 - a)
+            bytes[i] = 0; bytes[i + 1] = 0; bytes[i + 2] = 0
+            bytes[i + 3] = UInt8(max(0, min(255, (survives * 255).rounded())))
+        }
+        return ctx.makeImage()
+    }
+}
+
+/// **Multiplies a brush's texture into whatever alpha is already in `ctx`, in canvas coordinates.**
+///
+/// The one place BRUSH.md §2.25 happens, called from every merge: the two `endStrokeGroup`s and
+/// `StrokeScratch`'s window pass. `clip` is the region being merged, **in the context's own space**;
+/// `canvasOrigin` is the canvas point that space's `(0, 0)` sits on, which is `.zero` for a cel and
+/// the window's origin for a `StrokeScratch`.
+///
+/// **`canvasOrigin` is the whole of "canvas-anchored", and it is why the phase is a parameter rather
+/// than an assumption.** A live stroke draws into a window whose origin is wherever the pen started
+/// and which *moves* as the stroke grows; anchoring to the context would make the paper slide under
+/// the ink and would differ between the live tier and the replay. Anchoring to the canvas makes the
+/// same canvas point sample the same texel however the stroke was drawn, which is the property that
+/// makes this paper rather than a sprite, and is what the tests discriminate on.
+///
+/// `.destinationIn` is `R = D · Sa`, so this scales the accumulated ink by the mask and touches
+/// nothing the ink did not already reach — the texture cannot appear outside the stroke, by
+/// construction rather than by clipping.
+enum BrushTextureMerge {
+    static func apply(_ settings: BrushTextureSettings?, into ctx: CGContext,
+                      over clip: CGRect, canvasOrigin: CGPoint) {
+        guard let settings, settings.depth > 0, !clip.isNull, !clip.isEmpty,
+              let entry = BrushTextureMaskCache.entry(for: settings) else { return }
+        // Whole points, so every tile lands on the pixel grid — see `BrushTextureSettings.tileSize`.
+        let side = max(1, settings.tileSize.rounded())
+        let phase = CGPoint(x: canvasOrigin.x.rounded(), y: canvasOrigin.y.rounded())
+        // The clip, expressed in canvas points, is what decides which tiles of the sheet are needed.
+        let inCanvas = clip.offsetBy(dx: phase.x, dy: phase.y)
+        let firstColumn = Int(floor(inCanvas.minX / side)), lastColumn = Int(floor((inCanvas.maxX - 0.001) / side))
+        let firstRow = Int(floor(inCanvas.minY / side)), lastRow = Int(floor((inCanvas.maxY - 0.001) / side))
+        ctx.saveGState()
+        ctx.setBlendMode(.destinationIn)
+        // `.high` for `DabImageCache`'s reason: an entry is at its own native resolution and a tile
+        // is usually smaller, and point-sampling that downscale aliases the paper into a moiré.
+        ctx.interpolationQuality = .high
+        for column in firstColumn...max(firstColumn, lastColumn) {
+            for row in firstRow...max(firstRow, lastRow) {
+                ctx.draw(entry, in: CGRect(x: CGFloat(column) * side - phase.x,
+                                           y: CGFloat(row) * side - phase.y,
+                                           width: side, height: side))
+            }
+        }
+        ctx.restoreGState()
+    }
+}

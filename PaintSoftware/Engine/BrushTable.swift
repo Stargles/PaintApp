@@ -185,12 +185,14 @@ struct BrushTable: Equatable {
         return remap
     }
 
-    /// The artist's own imported tip files this document's ink needs, which is the honest answer to
+    /// The artist's own imported files this document's ink needs, which is the honest answer to
     /// *"which textures does this document use"* that BUGS.md says the palette was standing in for.
     /// A built-in tip travels inside the binary and a round tip is arithmetic, so neither is named —
-    /// `BrushTip.importedTextureFileName` is the whole of that rule and it is stated once.
+    /// `Brush.importedTextureFileNames` is the whole of that rule and it is stated once. **Since
+    /// BRUSH.md §2.25 a brush names up to two files**, its tip's and its paper's, and the accessor is
+    /// where that became true rather than here.
     var importedTextureFileNames: Set<String> {
-        Set(entries.values.compactMap(\.tip.importedTextureFileName))
+        entries.values.reduce(into: Set<String>()) { $0.formUnion($1.importedTextureFileNames) }
     }
 
     // MARK: - Collecting

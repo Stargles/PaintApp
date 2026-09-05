@@ -270,6 +270,13 @@ enum VectorEraser {
         // whole comment block is about. One guard, on the product, is the honest test.
         guard opacity * values.flow >= 0.999 else { return false }
         guard values.scatter <= 0, brush.dab.angle.jitter <= 0 else { return false }
+        // **BRUSH.md §2.25's paper, and it belongs on the strict side of this gate.** A textured
+        // eraser removes `depth·(1 - texel)` less than its footprint claims, at every canvas point
+        // the paper is short of 1 — so the ink a clean cut would delete is ink the punch would have
+        // *left behind*, which is this comment block's asymmetric direction exactly. A `depth` of 0
+        // is the identity and would be safe, but it is also the state the optional exists to spell,
+        // so this reads the field rather than its arithmetic.
+        guard brush.texture == nil else { return false }
         return true
     }
 

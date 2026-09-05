@@ -843,7 +843,10 @@ final class StrokeCanvasView: UIView {
                                     role: isEraser ? .subtractive(backdrop: raster.renderIfNonEmpty())
                                                    : .additive,
                                     opacity: CGFloat(brushOpacity),
-                                    blendMode: isEraser ? .normal : brush.stroke.blendMode.cgBlendMode)
+                                    blendMode: isEraser ? .normal : brush.stroke.blendMode.cgBlendMode,
+                                    // BRUSH.md §2.25 — the live walk is ungrouped, so the paper is
+                                    // the scratch's and is applied where the window merges.
+                                    texture: brush.texture)
         self.scratch = scratch
         lastStampPoint = nil
         lastLiveSample = nil
@@ -1164,12 +1167,13 @@ final class StrokeCanvasView: UIView {
                 let isModeOne = (inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode) != .cutPoints
                 return isModeOne
                     ? StrokeScratch(canvasSize: vectorCanvas.size, role: .subtractive(backdrop: backdrop),
-                                    opacity: CGFloat(brushOpacity))
+                                    opacity: CGFloat(brushOpacity), texture: brush.texture)
                     : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing(backdrop: backdrop))
             }
             return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive,
                                  opacity: CGFloat(brushOpacity),
-                                 blendMode: brush.stroke.blendMode.cgBlendMode)
+                                 blendMode: brush.stroke.blendMode.cgBlendMode,
+                                 texture: brush.texture)
         }()
         currentVectorSamples = StrokeSamples(channels: .captured)
         lastSampleTime = nil

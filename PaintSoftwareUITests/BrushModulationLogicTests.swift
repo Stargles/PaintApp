@@ -161,7 +161,8 @@ final class BrushModulationLogicTests: XCTestCase {
         // put BRUSH.md §2.11's merge inside `stampStroke`; a hand-rolled walk that calls `stampDab`
         // directly would have no buffer while its counterpart had one, and the byte comparison would
         // go red for a reason that has nothing to do with where the numbers came from.
-        texture.beginStrokeGroup(opacity: CGFloat(opacity), blendMode: brush.stroke.blendMode.cgBlendMode)
+        texture.beginStrokeGroup(opacity: CGFloat(opacity), blendMode: brush.stroke.blendMode.cgBlendMode,
+                                 texture: brush.texture)
 
         func stamp(at point: CGPoint, site: DabSite) {
             var values = brush.dabValues { sensors.value(of: $0, at: site) }

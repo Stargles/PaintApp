@@ -96,10 +96,13 @@ enum ProjectStore {
     ///     travel, or the picker comes back on another device pointing at a file that is not there.
     ///
     /// Neither subsumes the other, which is why this takes the union rather than choosing. What the
-    /// two have in common is the *filter*, and that has one statement: `BrushTip.importedTextureFileName`
-    /// is nil for a built-in tip (it travels inside the binary) and for a round one (it is arithmetic).
+    /// two have in common is the *filter*, and that has one statement:
+    /// `Brush.importedTextureFileNames` is empty for a built-in tip (it travels inside the binary)
+    /// and for a round one (it is arithmetic), and since BRUSH.md §2.25 it answers for the brush's
+    /// **paper** as well as its tip — a textured brush whose sheet did not travel is the same defect
+    /// this method was written to close, one field along.
     private static func importedTextureFileNames(table: BrushTable, palette: [Brush]) -> Set<String> {
-        table.importedTextureFileNames.union(palette.compactMap(\.tip.importedTextureFileName))
+        palette.reduce(into: table.importedTextureFileNames) { $0.formUnion($1.importedTextureFileNames) }
     }
 
     /// Copies every imported stamp texture the given file names refer to from the shared

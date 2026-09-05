@@ -153,6 +153,20 @@ struct Brush: Identifiable, Codable, Hashable {
     /// §6's matrix: the rows, each *(output, input, curve, amount)*.
     var modulations: BrushModulations
 
+    /// **The paper this brush lays its ink through — BRUSH.md §2.25**, or nil for a brush that lays
+    /// ink flat. See `BrushTextureSettings`.
+    ///
+    /// **Optional rather than a neutral value, and that is what makes the feature additive.** A
+    /// brush with no texture takes no branch at any merge, hashes to what it hashed before, and
+    /// renders byte-identically on every tier — which is the pin §2.25 is worth having. A
+    /// `depth: 0` default would have been the same pixels through a different code path, and this
+    /// repo has a section on what two paths to one answer cost.
+    ///
+    /// It is at the top level rather than inside `stroke` for the reason `opacity` is: it belongs to
+    /// the merge, which is a property of the whole walk, and `BrushStrokeSettings` is what the brush
+    /// does to the *gesture*.
+    var texture: BrushTextureSettings?
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -161,7 +175,8 @@ struct Brush: Identifiable, Codable, Hashable {
         opacity: Double = 1,
         dab: BrushDabSettings = .default,
         stroke: BrushStrokeSettings = .default,
-        modulations: BrushModulations = .default
+        modulations: BrushModulations = .default,
+        texture: BrushTextureSettings? = nil
     ) {
         self.id = id
         self.name = name
@@ -171,12 +186,30 @@ struct Brush: Identifiable, Codable, Hashable {
         self.dab = dab
         self.stroke = stroke
         self.modulations = modulations
+        self.texture = texture
+    }
+}
+
+extension Brush {
+    /// **Every file under `BrushLibrary.customBrushesDirectory` this brush needs to exist**, which
+    /// since §2.25 is two questions rather than one: the tip's picture and the texture's sheet.
+    ///
+    /// `ProjectStore`'s save-time copy and load-time restore are the callers. Stated here, once, for
+    /// the reason `BrushTip.importedTextureFileName` was: two consumers re-deriving *"which files
+    /// does this brush use"* is exactly how the second half of a brush stops travelling, and BUGS.md
+    /// already carried that defect once for tips — a document reopened on another device whose ink
+    /// names a file the package never carried.
+    var importedTextureFileNames: Set<String> {
+        var names = Set<String>()
+        if let tipFile = tip.importedTextureFileName { names.insert(tipFile) }
+        if let textureFile = texture?.mask.importedFileName { names.insert(textureFile) }
+        return names
     }
 }
 
 extension Brush {
     private enum CodingKeys: String, CodingKey {
-        case id, name, tip, size, opacity, dab, stroke, modulations
+        case id, name, tip, size, opacity, dab, stroke, modulations, texture
     }
 
     /// **Written out so the three sub-structs decode to their defaults**, which is the property §6
@@ -193,5 +226,8 @@ extension Brush {
         dab = try c.decodeIfPresent(BrushDabSettings.self, forKey: .dab) ?? .default
         stroke = try c.decodeIfPresent(BrushStrokeSettings.self, forKey: .stroke) ?? .default
         modulations = try c.decodeIfPresent(BrushModulations.self, forKey: .modulations) ?? .default
+        // Absent *is* the value, not a default standing in for one: a brush with no texture writes
+        // no key and reads back as one with no texture — the same bytes, either way round.
+        texture = try c.decodeIfPresent(BrushTextureSettings.self, forKey: .texture)
     }
 }

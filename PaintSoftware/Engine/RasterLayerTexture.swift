@@ -46,7 +46,14 @@ protocol DabTarget: AnyObject {
     /// `StrokeScratch`, because `VectorCanvas.applyPreview` runs several `stampStroke` calls into one
     /// scratch. A group per `stampStroke` call is exactly the right granularity there: the erase walk
     /// gets its own `.destinationOut` group and each restamp its own normal one.
-    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode)
+    ///
+    /// **`texture` is BRUSH.md §2.25's paper, and it rides the group because the group is the
+    /// moment.** The owner's rule is that the texture *"uses the untextured brush as a transparency
+    /// mask, then is scaled with opacity"* — so it multiplies into the finished buffer, in canvas
+    /// coordinates, immediately before the one merge that applies the opacity. It is on this call
+    /// rather than on a dab for exactly the reason `opacity` is: a per-dab texture would travel with
+    /// the stroke, which is a sprite, which is the thing §2.4 deleted.
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?)
     func endStrokeGroup()
 
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
@@ -122,13 +129,16 @@ struct StrokeGroupBuffer {
     let opacity: CGFloat
     /// How the finished stroke meets what is under it.
     let blendMode: CGBlendMode
+    /// The paper it lays its ink through — BRUSH.md §2.25, nil for a brush with none.
+    let texture: BrushTextureSettings?
     private(set) var dabs: [BrushStamper.BakedDab] = []
     /// Union of every dab's painted rectangle; `.null` while nothing has been laid.
     private(set) var bounds: CGRect = .null
 
-    init(opacity: CGFloat, blendMode: CGBlendMode) {
+    init(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings? = nil) {
         self.opacity = opacity
         self.blendMode = blendMode
+        self.texture = texture
     }
 
     mutating func add(_ dab: BrushStamper.BakedDab, painting rect: CGRect) {
@@ -463,6 +473,15 @@ final class DabImageCache {
 /// context has no such state and nothing reads a stroke count off it.
 final class CGContextDabTarget: DabTarget {
     private let ctx: CGContext
+    /// **Where this context's own `(0, 0)` sits in canvas points** — BRUSH.md §2.25's phase, and the
+    /// whole of what "canvas-anchored" needs from a target.
+    ///
+    /// `.zero` for every caller today and the field is still not redundant: `VectorCanvas`'s render
+    /// is 1:1 in the cel's own space, `BrushPreview` and `SizePreview` draw into a swatch whose
+    /// origin is its own, and the number that distinguishes those two cases has to be *somewhere*.
+    /// It is here rather than inferred, because a target that guessed would guess wrong the first
+    /// time someone renders a strip (RENDER.md §3.8) or a tile.
+    private let canvasOrigin: CGPoint
     private let gradients = DabGradientCache()
     private let images = DabImageCache()
 
@@ -471,7 +490,10 @@ final class CGContextDabTarget: DabTarget {
     /// correctly excluded: this counts cost, not calls.
     private(set) var dabCount = 0
 
-    init(_ ctx: CGContext) { self.ctx = ctx }
+    init(_ ctx: CGContext, canvasOrigin: CGPoint = .zero) {
+        self.ctx = ctx
+        self.canvasOrigin = canvasOrigin
+    }
 
     func beginStroke() {}
     func endStroke() {}
@@ -479,8 +501,8 @@ final class CGContextDabTarget: DabTarget {
     /// The stroke's own buffer while §2.11's group is open — see `DabTarget.beginStrokeGroup`.
     private var group: StrokeGroupBuffer?
 
-    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
-        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode)
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
+        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode, texture: texture)
     }
 
     /// One transparency layer over exactly the pixels the stroke painted, composited into the
@@ -498,11 +520,17 @@ final class CGContextDabTarget: DabTarget {
         // the group's outermost row of pixels would come out at partial coverage — MEASURED at
         // alpha 193 where 255 was drawn, which is ink lost at a seam rather than a rounding
         // difference. Rounded out to the pixel grid the clip lands between pixels and takes nothing.
-        ctx.clip(to: group.bounds.integral)
+        let clip = group.bounds.integral
+        ctx.clip(to: clip)
         ctx.setAlpha(group.opacity)
         ctx.setBlendMode(group.blendMode)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
         for dab in group.dabs { draw(dab) }
+        // **BRUSH.md §2.25, and this is the moment §2.4 said did not exist.** The layer now holds the
+        // untextured stroke — every dab's flow, accumulated, and nothing else — which is exactly the
+        // transparency mask the owner's rule names. Multiplying the paper in here and not one line
+        // later is what makes the stroke's own opacity scale the *textured* result.
+        BrushTextureMerge.apply(group.texture, into: ctx, over: clip, canvasOrigin: canvasOrigin)
         ctx.endTransparencyLayer()
         ctx.restoreGState()
     }
@@ -574,6 +602,16 @@ final class RasterLayerTexture: DabTarget {
     let size: CGSize
     let pixelWidth: Int
     let pixelHeight: Int
+
+    /// **Where this bitmap's own `(0, 0)` sits in canvas points** — BRUSH.md §2.25's phase.
+    ///
+    /// `.zero` for a cel, which *is* the canvas. Non-zero for exactly one owner: `StrokeScratch`
+    /// backs its window with one of these, sized and positioned to the stroke rather than to the
+    /// canvas, and that window moves as the stroke grows. Without this number a live stroke's paper
+    /// would be anchored to wherever the pen happened to start and would *slide* every time the
+    /// window was reallocated — which is precisely the sprite behaviour §2.4 deleted, reached by
+    /// accident instead of on purpose.
+    let canvasOrigin: CGPoint
     private(set) var version: Int = 0
     private(set) var strokeCount: Int
     private var isMidStroke = false
@@ -682,12 +720,13 @@ final class RasterLayerTexture: DabTarget {
 
     private static let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
 
-    init(size: CGSize, image: UIImage? = nil, strokeCount: Int = 0) {
+    init(size: CGSize, image: UIImage? = nil, strokeCount: Int = 0, canvasOrigin: CGPoint = .zero) {
         let clamped = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         self.size = clamped
         self.pixelWidth = Int(clamped.width.rounded())
         self.pixelHeight = Int(clamped.height.rounded())
         self.strokeCount = strokeCount
+        self.canvasOrigin = canvasOrigin
         if image != nil { setContents(image) }
     }
 
@@ -933,10 +972,10 @@ final class RasterLayerTexture: DabTarget {
     /// `endStrokeGroup`, and only ever touched under `lock`.
     private var group: StrokeGroupBuffer?
 
-    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
         lock.lock()
         defer { lock.unlock() }
-        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode)
+        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode, texture: texture)
     }
 
     /// Merges the group's dabs into the bitmap once, at the group's own alpha and blend mode.
@@ -956,11 +995,15 @@ final class RasterLayerTexture: DabTarget {
         // the group's outermost row of pixels would come out at partial coverage — MEASURED at
         // alpha 193 where 255 was drawn, which is ink lost at a seam rather than a rounding
         // difference. Rounded out to the pixel grid the clip lands between pixels and takes nothing.
-        ctx.clip(to: group.bounds.integral)
+        let clip = group.bounds.integral
+        ctx.clip(to: clip)
         ctx.setAlpha(group.opacity)
         ctx.setBlendMode(group.blendMode)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
         for dab in group.dabs { draw(dab, into: ctx) }
+        // BRUSH.md §2.25 — the paper, multiplied into the untextured stroke while it is still the
+        // transparency mask the owner's rule names, and before the opacity that scales it.
+        BrushTextureMerge.apply(group.texture, into: ctx, over: clip, canvasOrigin: canvasOrigin)
         ctx.endTransparencyLayer()
         ctx.restoreGState()
         cachedImage = nil

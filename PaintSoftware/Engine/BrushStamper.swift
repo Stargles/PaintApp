@@ -141,9 +141,13 @@ enum BrushStamper {
                             random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) {
         guard !samples.isEmpty else { return }
         raster.beginStroke()
+        // BRUSH.md §2.25: the brush's paper rides the group, so it multiplies into the finished walk
+        // in canvas coordinates and the cap below scales the textured result. An eraser carries it
+        // too — the eraser is a stroke here, and what the paper rejects is ink it does not remove.
         raster.beginStrokeGroup(opacity: CGFloat(brushOpacity),
                                 blendMode: isEraser ? .destinationOut
-                                                    : brush.stroke.blendMode.cgBlendMode)
+                                                    : brush.stroke.blendMode.cgBlendMode,
+                                texture: brush.texture)
         defer {
             raster.endStrokeGroup()
             raster.endStroke()
@@ -442,12 +446,16 @@ extension BrushStamper {
         /// the cap exists to prevent.
         private(set) var opacity: CGFloat = 1
         private(set) var blendMode: CGBlendMode = .normal
+        /// BRUSH.md §2.25's paper, kept beside the dabs for the same reason the two above are: it is
+        /// a property of the merge, and a per-dab copy would be the sprite §2.4 deleted.
+        private(set) var texture: BrushTextureSettings?
         init() {}
         func beginStroke() {}
         func endStroke() {}
-        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
+        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
             self.opacity = opacity
             self.blendMode = blendMode
+            self.texture = texture
         }
         func endStrokeGroup() {}
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
@@ -493,8 +501,8 @@ extension BrushStamper {
         /// the finished stroke may reach or how it meets what is under it — and because the merge's
         /// buffer is sized from the dabs it is actually handed (`DabTarget.beginStrokeGroup`), the
         /// posed dabs bound it with no transform of a rectangle to get wrong.
-        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode) {
-            inner.beginStrokeGroup(opacity: opacity, blendMode: blendMode)
+        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
+            inner.beginStrokeGroup(opacity: opacity, blendMode: blendMode, texture: texture)
         }
         func endStrokeGroup() { inner.endStrokeGroup() }
 
@@ -525,6 +533,11 @@ extension BrushStamper {
         var dabs: [BakedDab]
         var opacity: CGFloat
         var blendMode: CGBlendMode
+        /// BRUSH.md §2.25's paper. **Baked strokes carry it unbaked, and that is the point of
+        /// canvas-anchoring**: a posed frame maps the dabs and the paper stays exactly where it was,
+        /// so there is nothing to re-sample per frame — which is §2.5's argument, and the reason the
+        /// owner's stroke-anchored alternative was the expensive one.
+        var texture: BrushTextureSettings?
     }
 
     /// Walks a stroke in **rest space** and keeps its dabs instead of drawing them. Same arguments as
@@ -537,7 +550,7 @@ extension BrushStamper {
                     brushSize: brushSize, brushOpacity: brushOpacity, isEraser: isEraser,
                     random: random, visibleRange: visibleRange)
         return BakedStroke(dabs: collector.dabs, opacity: collector.opacity,
-                           blendMode: collector.blendMode)
+                           blendMode: collector.blendMode, texture: collector.texture)
     }
 
     /// Draws a baked walk through a pose. The replay entry point §4.2 asks for, and the same
@@ -551,7 +564,8 @@ extension BrushStamper {
     /// line, where there is no answer to draw.
     static func replay(_ stroke: BakedStroke, into target: DabTarget, through pose: DabPose) {
         target.beginStroke()
-        target.beginStrokeGroup(opacity: stroke.opacity, blendMode: stroke.blendMode)
+        target.beginStrokeGroup(opacity: stroke.opacity, blendMode: stroke.blendMode,
+                                texture: stroke.texture)
         for dab in stroke.dabs {
             guard let moved = pose.applied(to: dab) else { continue }
             switch moved.tip {

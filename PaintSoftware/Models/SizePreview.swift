@@ -293,9 +293,16 @@ enum SizePreviewStampRenderer {
             // `.destinationOut` for the eraser — are applied by the group's merge. Without the
             // bracket this preview would draw at full flow with a normal blend, so the size and
             // eraser previews would stop matching the ink the same brush actually lays down.
+            // BRUSH.md §2.25's paper too, so the swatch shows the ink the brush actually lays.
+            // **Anchored to the swatch's own origin rather than to the canvas**, which is not the
+            // rule §2.25 states and is the only honest reading of it here: a preview sits in no
+            // canvas, so there is no canvas point for it to be anchored to. `CGContextDabTarget`
+            // takes the phase as a parameter for exactly this reason — a target that assumed one
+            // could not have expressed the difference.
             target.beginStrokeGroup(opacity: CGFloat(opacity),
                                     blendMode: isEraser ? .destinationOut
-                                                        : brush.stroke.blendMode.cgBlendMode)
+                                                        : brush.stroke.blendMode.cgBlendMode,
+                                    texture: brush.texture)
             BrushStamper.stampDab(into: target,
                                   at: CGPoint(x: side / 2, y: side / 2),
                                   brush: brush,
