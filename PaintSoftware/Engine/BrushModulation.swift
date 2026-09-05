@@ -31,8 +31,18 @@ enum BrushOutput: String, Codable, CaseIterable, Hashable {
     case angle
     /// Distance to the next dab, as a fraction of the stroke's diameter.
     case spacing
-    /// Random displacement off the path, as a fraction of the dab's diameter.
-    case scatter
+    /// **Random displacement *across* the stroke** — along the normal at this dab — as a fraction of
+    /// the dab's diameter. BRUSH.md §2.30: this is the axis that widens and frays the silhouette
+    /// while the ink stays evenly spaced.
+    case scatterAcross
+    /// **Random displacement *along* the stroke** — along the tangent at this dab. §2.30: this one
+    /// widens nothing; it bunches and gaps the dabs, so the density goes irregular without the line
+    /// getting thicker.
+    ///
+    /// Two outputs rather than one because the two do different things and a single isotropic amount
+    /// reaches neither alone. The old `scatter`'s behaviour is *both set equal*, and §2.14 governs
+    /// what happened to it: it is deleted, not kept beside these.
+    case scatterAlong
     /// **The probability that a dab is stamped at all** — BRUSH.md §2.18.
     case density
     /// The `.round` tip's edge falloff. A `.stamp` tip carries its edge in its own pixels and does
@@ -54,12 +64,17 @@ enum BrushOutput: String, Codable, CaseIterable, Hashable {
         case .flow: return 3
         case .angle: return 4
         case .spacing: return 5
-        case .scatter: return 6
+        // 6 was the isotropic `scatter`, and `scatterAcross` takes it rather than leaving a gap:
+        // §2.30 replaces one output with two, so the row that drove `scatter` becomes the row that
+        // drives this one and draws from the cell it always drew from. `scatterAlong` is the case
+        // that is genuinely new and takes the next free number, 12.
+        case .scatterAcross: return 6
         case .density: return 7
         case .hardness: return 8
         case .hue: return 9
         case .saturation: return 10
         case .brightness: return 11
+        case .scatterAlong: return 12
         }
     }
 
@@ -70,7 +85,7 @@ enum BrushOutput: String, Codable, CaseIterable, Hashable {
         case .size, .flow, .density: return 1
         case .spacing: return 0.1
         case .hardness: return 0.8
-        case .angle, .scatter, .hue, .saturation, .brightness: return 0
+        case .angle, .scatterAcross, .scatterAlong, .hue, .saturation, .brightness: return 0
         }
     }
 }
@@ -82,7 +97,8 @@ extension DabRandom.Channel {
     /// BRUSH.md §4: *"A channel is what replaces 'the next draw off the stream', and it is not
     /// optional. Scatter angle and scatter distance are two values at one arc length; a stream told
     /// them apart by order, and with no order the channel has to be in the hash or they would be the
-    /// same number. §6's matrix adds a row per modulation on top of the three that exist."*
+    /// same number. §6's matrix adds a row per modulation on top of the three that exist."* §2.30's
+    /// two axes are that sentence's own example, now spelled as two outputs as well as two draws.
     ///
     /// **Derived from where the row sits rather than stored on it**, which is what makes "no two rows
     /// share a channel" a fact instead of an invariant somebody has to maintain. The cost is stated
@@ -499,7 +515,7 @@ struct BrushModulations: Codable, Hashable {
 ///
 /// The line between this and `BrushStamper.stampDab` is **values against draws**: everything here is
 /// a pure function of the brush and the sensors at this site, and the three things that additionally
-/// need a *draw* from the stroke's random field — the scatter offset, the angle's jitter and §2.18's
+/// need a *draw* from the stroke's random field — the two scatter offsets, the angle's jitter and §2.18's
 /// dropout — are taken in the stamper, from `DabRandom`. That keeps this type answerable by a caller
 /// that has a pressure and no stroke (`Brush.dabValues(atPressure:)`).
 struct BrushDabValues: Equatable {
@@ -511,7 +527,11 @@ struct BrushDabValues: Equatable {
     /// Fraction of the stroke's own diameter — the gap leading **away** from this dab.
     var spacing: Double
     var hardness: Double
-    var scatter: Double
+    /// **How far off the path, across it and along it** — BRUSH.md §2.30's two amounts, each a
+    /// fraction of the dab's diameter. The *draws* they are multiplied by, and the stroke frame they
+    /// are resolved onto, are the stamper's; these are only the amplitudes.
+    var scatterAcross: Double
+    var scatterAlong: Double
     /// `≥ 1` stamps every dab. See `BrushStamper`, which is where the draw it is compared against is
     /// taken.
     var density: Double
@@ -538,7 +558,8 @@ extension Brush {
     /// all for a brush with no rows, which is what every dab of an unmodulated brush costs.
     func dabValues(_ reading: (BrushInput) -> CGFloat) -> BrushDabValues {
         var values = BrushDabValues(size: dab.size, flow: dab.flow,
-                                    spacing: dab.spacing, hardness: dab.hardness, scatter: dab.scatter,
+                                    spacing: dab.spacing, hardness: dab.hardness,
+                                    scatterAcross: dab.scatterAcross, scatterAlong: dab.scatterAlong,
                                     density: dab.density, angleTurns: dab.angle.base,
                                     hueShift: dab.hueShift, saturationShift: dab.saturationShift,
                                     brightnessShift: dab.brightnessShift)
@@ -560,7 +581,8 @@ extension Brush {
             case .flow: values.flow += contribution
             case .angle: values.angleTurns += contribution
             case .spacing: values.spacing += contribution
-            case .scatter: values.scatter += contribution
+            case .scatterAcross: values.scatterAcross += contribution
+            case .scatterAlong: values.scatterAlong += contribution
             case .density: values.density += contribution
             case .hardness: values.hardness += contribution
             case .hue: values.hueShift += contribution
@@ -612,8 +634,14 @@ struct BrushDabSettings: Codable, Hashable {
     var spacing: Double = BrushOutput.spacing.neutralBase
     /// `0…1` edge falloff — 0 fully feathered, 1 crisp. A `.round` tip's parameter only.
     var hardness: Double = BrushOutput.hardness.neutralBase
-    /// `0…1` random position jitter, as a fraction of the dab's diameter.
-    var scatter: Double = BrushOutput.scatter.neutralBase
+    /// **BRUSH.md §2.30's two scatter amounts**, each a fraction of the dab's diameter and each the
+    /// *maximum* displacement on its own axis of the stroke's frame — across the stroke and along it.
+    ///
+    /// Setting both to one number is the isotropic scatter this replaced, said out loud; setting only
+    /// `scatterAcross` frays the silhouette at even spacing, and setting only `scatterAlong` gaps and
+    /// bunches the dabs without widening the line at all.
+    var scatterAcross: Double = BrushOutput.scatterAcross.neutralBase
+    var scatterAlong: Double = BrushOutput.scatterAlong.neutralBase
     /// **BRUSH.md §2.18** — the probability a dab is stamped at all. 1 stamps every dab, which is
     /// every brush that does not ask for otherwise.
     var density: Double = BrushOutput.density.neutralBase
@@ -639,7 +667,7 @@ struct BrushDabSettings: Codable, Hashable {
 
 extension BrushDabSettings {
     private enum CodingKeys: String, CodingKey {
-        case size, flow, spacing, hardness, scatter, density, densityWavelength, angle
+        case size, flow, spacing, hardness, scatterAcross, scatterAlong, density, densityWavelength, angle
         case hueShift, saturationShift, brightnessShift
     }
 
@@ -652,7 +680,8 @@ extension BrushDabSettings {
         flow = try c.decodeIfPresent(Double.self, forKey: .flow) ?? d.flow
         spacing = try c.decodeIfPresent(Double.self, forKey: .spacing) ?? d.spacing
         hardness = try c.decodeIfPresent(Double.self, forKey: .hardness) ?? d.hardness
-        scatter = try c.decodeIfPresent(Double.self, forKey: .scatter) ?? d.scatter
+        scatterAcross = try c.decodeIfPresent(Double.self, forKey: .scatterAcross) ?? d.scatterAcross
+        scatterAlong = try c.decodeIfPresent(Double.self, forKey: .scatterAlong) ?? d.scatterAlong
         density = try c.decodeIfPresent(Double.self, forKey: .density) ?? d.density
         densityWavelength = try c.decodeIfPresent(CGFloat.self, forKey: .densityWavelength) ?? d.densityWavelength
         angle = try c.decodeIfPresent(BrushAngleSettings.self, forKey: .angle) ?? d.angle

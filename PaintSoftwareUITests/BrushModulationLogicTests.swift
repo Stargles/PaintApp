@@ -251,7 +251,7 @@ final class BrushModulationLogicTests: XCTestCase {
             ("pressure", .pressure),
             ("velocity", .velocity),
             ("direction", .direction),
-            ("random", .random(.scatterAngle, .plain(0)))
+            ("random", .random(.scatterAcross, .plain(0)))
         ]
         // A stroke that turns, so `direction` is not constant along it.
         let turning = StrokeSamples(samples.enumerated().map { index, sample -> VectorSample in
@@ -314,7 +314,8 @@ final class BrushModulationLogicTests: XCTestCase {
     func testDensityAtOneIsBitIdenticalToNoDensityAtAll() {
         let samples = Self.rampStroke()
         var scattering = TestBrushes.hardRound
-        scattering.dab.scatter = 0.4          // so any re-phasing of the field would be visible
+        scattering.dab.scatterAcross = 0.4          // so any re-phasing of the field would be visible
+        scattering.dab.scatterAlong = 0.4          // so any re-phasing of the field would be visible
         var withRow = scattering
         withRow.dab.density = 1
         withRow.modulations = BrushModulations(withRow.modulations.rows
@@ -328,7 +329,8 @@ final class BrushModulationLogicTests: XCTestCase {
     func testLoweringDensityRemovesDabsWithoutMovingTheRest() {
         let samples = Self.rampStroke(from: 1, to: 1)
         var solid = TestBrushes.hardRound
-        solid.dab.scatter = 0.3
+        solid.dab.scatterAcross = 0.3
+        solid.dab.scatterAlong = 0.3
         var sparse = solid
         sparse.dab.density = 0.5
         sparse.dab.densityWavelength = 0      // white noise: individual dabs drop, not runs
@@ -606,10 +608,17 @@ final class BrushModulationLogicTests: XCTestCase {
             // Technical Pen — Fine carries no modulation rows at all, so pressure reaches nothing.
             "Technical Pen — Fine": (6_432_432_205_937_772_741, 6_432_432_205_937_772_741),
             "Brush Pen": (13_213_744_725_641_260_825, 1_548_782_417_872_889_637),
-            "Rough Ink — Blotchy": (2_811_490_964_214_552_533, 6_693_005_144_034_532_530),
-            "Rough Ink": (11_321_709_665_543_946_915, 5_431_125_670_970_736_223),
+            // **The three that §2.30 moved, re-taken at that commit, and the only three that moved.**
+            // Each carried one isotropic `scatter` row and now carries two — `scatterAcross` and
+            // `scatterAlong` at the amount and λ the owner picked. The row's *value* is untouched
+            // (the across row draws the cell the old row drew, §6.2), so what moved is the shape of
+            // the offset: a 1/r disc became a uniform square of the same half-extent, which
+            // `ScatterAxesLogicTests` measures at a mean displacement of 0.765 reaches against 0.5.
+            // The other thirteen carry no scatter row and are byte-identical below.
+            "Rough Ink — Blotchy": (7_689_208_740_559_802_099, 1_897_689_623_227_238_386),
+            "Rough Ink": (8_419_025_256_513_150_091, 10_085_289_824_272_709_979),
             "Painterly": (355_751_157_517_627_361, 15_351_890_775_863_647_610),
-            "Bristle": (5_470_370_236_309_926_412, 13_171_590_424_428_297_766),
+            "Bristle": (14_533_520_957_403_309_450, 8_260_293_555_180_371_024),
             "Streaky": (16_392_398_184_521_026_234, 8_307_947_881_667_356_676)
         ]
         XCTAssertEqual(BrushLibrary.defaults.count, 16, "PREMISE: §8.6 ships sixteen")
@@ -644,8 +653,8 @@ final class BrushModulationLogicTests: XCTestCase {
     func testTwoRandomRowsOnOneOutputAreIndependentDraws() {
         var brush = TestBrushes.hardRound
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2)
+            BrushModulation(.size, .random(.scatterAcross, .plain(0)), amount: 0.2),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0)), amount: 0.2)
         ])
         guard case .random(let first, _) = brush.modulations.rows[0].input,
               case .random(let second, _) = brush.modulations.rows[1].input else {
@@ -669,17 +678,17 @@ final class BrushModulationLogicTests: XCTestCase {
     func testRandomRowsOnDifferentOutputsDrawDifferentValues() {
         var brush = TestBrushes.hardRound
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: 0.2),
-            BrushModulation(.scatter, .random(.scatterAngle, .plain(0)), amount: 0.2)
+            BrushModulation(.size, .random(.scatterAcross, .plain(0)), amount: 0.2),
+            BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(0)), amount: 0.2)
         ])
         guard case .random(let a, _) = brush.modulations.rows[0].input,
               case .random(let b, _) = brush.modulations.rows[1].input else {
             return XCTFail("both rows should still be random rows")
         }
         XCTAssertNotEqual(a, b)
-        XCTAssertNotEqual(a, DabRandom.Channel.scatterAngle,
+        XCTAssertNotEqual(a, DabRandom.Channel.scatterAcross,
                           "a matrix row must not collide with the intrinsic scatter draw")
-        XCTAssertNotEqual(b, DabRandom.Channel.scatterDistance)
+        XCTAssertNotEqual(b, DabRandom.Channel.scatterAlong)
         XCTAssertNotEqual(a, DabRandom.Channel.density, "…nor with §2.18's dropout draw")
     }
 
@@ -695,7 +704,7 @@ final class BrushModulationLogicTests: XCTestCase {
                       "a pressure-only brush is bounded by the chain, as it always was")
 
         for (name, row) in [("velocity", BrushModulation(.size, .velocity, amount: -0.5)),
-                            ("random", BrushModulation(.size, .random(.scatterAngle, .plain(0)), amount: -0.5)),
+                            ("random", BrushModulation(.size, .random(.scatterAcross, .plain(0)), amount: -0.5)),
                             ("taper", BrushModulation(.size, .taper, amount: -0.5))] {
             var driven = pressureOnly
             driven.modulations = BrushModulations([row])
@@ -890,10 +899,10 @@ final class BrushModulationLogicTests: XCTestCase {
             brush.modulations = BrushModulations(rows)
             return brush
         }
-        let wobble = BrushModulation(.spacing, .random(.scatterAngle, .plain(0)), amount: 0.15)
+        let wobble = BrushModulation(.spacing, .random(.scatterAcross, .plain(0)), amount: 0.15)
         let plain = brush([])
         let single = brush([wobble])
-        let scaled = brush([BrushModulation(.spacing, .random(.scatterAngle, .plain(0)),
+        let scaled = brush([BrushModulation(.spacing, .random(.scatterAcross, .plain(0)),
                                             modules: [.scale(.pressure)], amount: 0.15)])
         let paired = brush([wobble, BrushModulation(.spacing, .pressure, amount: 0.15)])
 
@@ -929,15 +938,15 @@ final class BrushModulationLogicTests: XCTestCase {
         var brush = TestBrushes.hardRound
         brush.dab.size = 0
         brush.modulations = BrushModulations([
-            BrushModulation(.size, .random(.scatterAngle, .plain(0)),
-                            modules: [.scale(.random(.scatterAngle, .plain(0)))], amount: 1)
+            BrushModulation(.size, .random(.scatterAcross, .plain(0)),
+                            modules: [.scale(.random(.scatterAcross, .plain(0)))], amount: 1)
         ])
         guard case .random(let first, _) = brush.modulations.rows[0].input,
               case .scale(.random(let second, _), _) = brush.modulations.rows[0].modules[0] else {
             return XCTFail("both positions should still be random")
         }
         XCTAssertNotEqual(first, second, "a randomiser module needs a channel of its own")
-        XCTAssertNotEqual(second, DabRandom.Channel.scatterAngle, "…and not an intrinsic draw's")
+        XCTAssertNotEqual(second, DabRandom.Channel.scatterAcross, "…and not an intrinsic draw's")
         XCTAssertNotEqual(second, DabRandom.Channel.density)
 
         var products: [Double] = [], lefts: [Double] = [], rights: [Double] = []
@@ -1055,7 +1064,7 @@ final class BrushModulationLogicTests: XCTestCase {
             return brush
         }
         let ramp = BrushModule.curveRamp(.threshold(knee: 0.5, low: 0.35))
-        let wobble = BrushModule.scale(.random(.scatterAngle, .plain(2)))
+        let wobble = BrushModule.scale(.random(.scatterAcross, .plain(2)))
 
         let curveFirst = brush([ramp, wobble])
         let randomFirst = brush([wobble, ramp])
@@ -1104,8 +1113,8 @@ final class BrushModulationLogicTests: XCTestCase {
         brush.dab.size = 0
         brush.modulations = BrushModulations([
             BrushModulation(.size, .pressure,
-                            modules: [.scale(.random(.scatterAngle, .plain(0))),
-                                      .scale(.random(.scatterAngle, .plain(0)))],
+                            modules: [.scale(.random(.scatterAcross, .plain(0))),
+                                      .scale(.random(.scatterAcross, .plain(0)))],
                             amount: 1)
         ])
         guard case .scale(.random(let first, _), _) = brush.modulations.rows[0].modules[0],
@@ -1195,7 +1204,7 @@ final class BrushModulationLogicTests: XCTestCase {
     /// band-limited at all**: a fresh draw per dab has a tilt of ~1.0, sixteen times the three-octave
     /// field's, because it has no scale structure to tilt.
     func testOctavesTiltTheFieldsEnergyWithoutMakingItWhite() {
-        let channel = DabRandom.Channel.modulation(.scatter, row: 0)
+        let channel = DabRandom.Channel.modulation(.scatterAcross, row: 0)
         let seeds: [UInt64] = [1, 5, 17, 0xABCD, 0x1234_5678, 1 << 20, 987_654, 0xF00D]
         func structure(_ randomiser: BrushRandomiser, step: CGFloat, seed: UInt64) -> Double {
             let field = DabRandom(seed: seed)
@@ -1328,7 +1337,7 @@ final class BrushModulationLogicTests: XCTestCase {
         // And the whole brush, through `Brush`'s own codec, encoded and decoded.
         var brush = TestBrushes.pencil
         brush.modulations = BrushModulations([
-            BrushModulation(.spacing, .random(.scatterAngle, BrushRandomiser(wavelength: 1.5, octaves: 4,
+            BrushModulation(.spacing, .random(.scatterAcross, BrushRandomiser(wavelength: 1.5, octaves: 4,
                                                                             falloff: 0.6)),
                             modules: [.scale(.pressure),
                                       .curveRamp(.threshold(knee: 0.3))],
@@ -1343,7 +1352,7 @@ final class BrushModulationLogicTests: XCTestCase {
         // consumer that would hand two different brushes one ref if the order fell out of the hash.
         var reversed = brush
         reversed.modulations = BrushModulations([
-            BrushModulation(.spacing, .random(.scatterAngle, BrushRandomiser(wavelength: 1.5, octaves: 4,
+            BrushModulation(.spacing, .random(.scatterAcross, BrushRandomiser(wavelength: 1.5, octaves: 4,
                                                                             falloff: 0.6)),
                             modules: [.curveRamp(.threshold(knee: 0.3)),
                                       .scale(.pressure)],
@@ -1376,7 +1385,7 @@ final class BrushModulationLogicTests: XCTestCase {
             var brush = TestBrushes.hardRound
             brush.dab.spacing = 0.1
             brush.modulations = BrushModulations([
-                BrushModulation(.spacing, .random(.scatterAngle, .plain(3)), modules: modules,
+                BrushModulation(.spacing, .random(.scatterAcross, .plain(3)), modules: modules,
                                 amount: 0.2)
             ])
             return brush
@@ -1492,7 +1501,7 @@ final class BrushModulationLogicTests: XCTestCase {
                       "pressure in every position is still answerable at a bare pressure")
         XCTAssertTrue(VectorEraser.supportsSplitting(strokeBrush: pressureOnly))
 
-        for gain in [BrushInput.velocity, .taper, .random(.scatterAngle, .plain(0)), .direction] {
+        for gain in [BrushInput.velocity, .taper, .random(.scatterAcross, .plain(0)), .direction] {
             var driven = pressureOnly
             driven.modulations = BrushModulations([
                 BrushModulation(.size, .pressure, modules: [.scale(gain)], amount: -0.4)

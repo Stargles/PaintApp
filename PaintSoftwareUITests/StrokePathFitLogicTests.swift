@@ -36,7 +36,8 @@ final class StrokePathFitLogicTests: XCTestCase {
     private func inkBrush() -> Brush {
         var brush = TestBrushes.hardRound
         brush.dab.spacing = 0.08
-        brush.dab.scatter = 0
+        brush.dab.scatterAcross = 0
+        brush.dab.scatterAlong = 0
         brush.dab.angle.jitter = 0
         return brush
     }

@@ -312,7 +312,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// condition fails on that row alone.
     func testDeletionIsSkippedWhereverTheAlphaGateFails() {
         var scattering = TestBrushes.hardRound
-        scattering.dab.scatter = 0.4
+        scattering.dab.scatterAcross = 0.4
+        scattering.dab.scatterAlong = 0.4
         var jittering = TestBrushes.hardRound
         jittering.dab.angle.jitter = 0.5
         var square = TestBrushes.hardRound
@@ -396,7 +397,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// a claim about the wrong shape. Such a stroke is never deleted, only punched.
     func testAScatteringPaintStrokeIsNeverDeleted() {
         var scattering = TestBrushes.hardRound
-        scattering.dab.scatter = 0.5
+        scattering.dab.scatterAcross = 0.5
+        scattering.dab.scatterAlong = 0.5
         let along = Self.ramp(from: CGPoint(x: 8, y: 64), to: CGPoint(x: 120, y: 64), count: 15,
                               from: 1, to: 1)
         let scene = scenario(brush: scattering, eraserBrush: TestBrushes.hardRound,
@@ -769,7 +771,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// hybrid is broken.
     func testAScatteringEraserPunchIsANewStrokeRatherThanTheGesture() {
         var scattering = TestBrushes.hardRound
-        scattering.dab.scatter = 0.5
+        scattering.dab.scatterAcross = 0.5
+        scattering.dab.scatterAlong = 0.5
         let scene = scenario(brush: TestBrushes.hardRound, eraserBrush: scattering)
         let (canvas, _, _) = erased(scene)
         let punches = strokes(canvas, .erase)

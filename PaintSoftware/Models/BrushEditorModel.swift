@@ -59,7 +59,9 @@ struct BrushEditorGroup: Hashable, Identifiable {
 ///
 /// **This list is the answer to §7's *"parameters with no UI at all today"***: `scatter`, the angle's
 /// three contributions, `hardness`, `density` and its λ, `blendMode` and the three HSB shifts were
-/// all unreachable from any screen before stage 10, and every one of them is here.
+/// all unreachable from any screen before stage 10, and every one of them is here. §2.30 made
+/// `scatter` two rows here as it made it two outputs: the artist reaches the frayed edge and the
+/// uneven spacing separately, which is the whole of that ruling.
 enum BrushEditorCatalog {
 
     static let groups: [BrushEditorGroup] = [
@@ -82,8 +84,10 @@ enum BrushEditorCatalog {
         BrushEditorGroup(name: "Placement", entries: [
             entry(.spacing, "Spacing",
                   "The gap between dabs as a fraction of the stroke's diameter — so a brush lays the same relative gaps at size 4 and at size 80."),
-            entry(.scatter, "Scatter",
-                  "How far off the path a dab may land, in brush widths."),
+            entry(.scatterAcross, "Scatter Across",
+                  "How far a dab may land to either side of the path, in brush widths. Frays the edge of the stroke; the gaps between dabs stay even."),
+            entry(.scatterAlong, "Scatter Along",
+                  "How far a dab may land forward or back along the path, in brush widths. Widens nothing — it bunches and gaps the dabs instead."),
             entry(.density, "Density",
                   "The chance a dab is stamped at all. Below 1 the line breaks up; the survivors stay on the same lattice.")
         ]),
@@ -124,7 +128,8 @@ extension BrushOutput {
         case .size: return \Brush.dab.size
         case .flow: return \Brush.dab.flow
         case .spacing: return \Brush.dab.spacing
-        case .scatter: return \Brush.dab.scatter
+        case .scatterAcross: return \Brush.dab.scatterAcross
+        case .scatterAlong: return \Brush.dab.scatterAlong
         case .density: return \Brush.dab.density
         case .hardness: return \Brush.dab.hardness
         case .angle: return \Brush.dab.angle.base
@@ -146,7 +151,7 @@ extension BrushOutput {
         case .size: return 0...2
         case .flow: return 0...1
         case .spacing: return 0.01...1
-        case .scatter: return 0...2
+        case .scatterAcross, .scatterAlong: return 0...2
         case .density: return 0...1
         case .hardness: return 0...1
         case .angle: return 0...1
@@ -163,7 +168,7 @@ extension BrushOutput {
             return "\(Int((value * 100).rounded()))%"
         case .angle, .hue:
             return String(format: "%.3f turns", value)
-        case .scatter:
+        case .scatterAcross, .scatterAlong:
             return String(format: "%.2f widths", value)
         }
     }

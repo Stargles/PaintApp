@@ -469,9 +469,9 @@ final class SampleRecordLogicTests: XCTestCase {
 
         // `random` is BRUSH.md §4's field, reached through the funnel like everything else.
         let field = DabRandom(seed: 7)
-        XCTAssertEqual(sensors(run).value(of: .random(.scatterAngle, .plain(0)),
+        XCTAssertEqual(sensors(run).value(of: .random(.scatterAcross, .plain(0)),
                                           at: DabSite(parameter: 0, arcWidths: 12.5)),
-                       field.unit(.scatterAngle, at: 12.5))
+                       field.unit(.scatterAcross, at: 12.5))
     }
 
     // MARK: - Struct-of-arrays

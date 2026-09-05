@@ -60,7 +60,7 @@ final class VideoElementLogicTests: XCTestCase {
     }
 
     private func stroke() -> VectorStroke {
-        VectorStroke(brush: Brush(name: "Test", tip: .round, size: 8, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, scatter: 0, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal)),
+        VectorStroke(brush: Brush(name: "Test", tip: .round, size: 8, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal)),
                      color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                      size: 8, opacity: 1,
                      samples: [VectorSample(x: 4, y: 4, pressure: 1),

@@ -300,6 +300,7 @@
 		7FCF482DBA0368BF7E331A39 /* BrushCandidates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 826F4B54C1A09FFC7C30ABDC /* BrushCandidates.swift */; };
 		E9BB7594B0C69F8567100133 /* BrushTipGeneratorLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D779BD632A4DD2C43CF0954 /* BrushTipGeneratorLogicTests.swift */; };
 		413ACD9728F657CF4375BB53 /* BrushContactSheetBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA9E1DBA2FA7C689ADDD867 /* BrushContactSheetBench.swift */; };
+		AA483456B6F3E6D47929FE77 /* ScatterAxesLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0C7F749C76E66B3E6CCFF41 /* ScatterAxesLogicTests.swift */; };
 		08A09986D040AD201D79E376 /* BrushTextureLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08371035B0A08F30F0128970 /* BrushTextureLogicTests.swift */; };
 		CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */; };
 		7080BC0992EC65DCFCE74706 /* BrushLibraryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */; };
@@ -624,6 +625,7 @@
 		826F4B54C1A09FFC7C30ABDC /* BrushCandidates.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushCandidates.swift; sourceTree = "<group>"; };
 		0D779BD632A4DD2C43CF0954 /* BrushTipGeneratorLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTipGeneratorLogicTests.swift; sourceTree = "<group>"; };
 		EEA9E1DBA2FA7C689ADDD867 /* BrushContactSheetBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushContactSheetBench.swift; sourceTree = "<group>"; };
+		F0C7F749C76E66B3E6CCFF41 /* ScatterAxesLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScatterAxesLogicTests.swift; sourceTree = "<group>"; };
 		08371035B0A08F30F0128970 /* BrushTextureLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushTextureLogicTests.swift; sourceTree = "<group>"; };
 		A871EB63CD1B1FB0DC503C8F /* BrushModulationLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushModulationLogicTests.swift; sourceTree = "<group>"; };
 		A5DFB10B2661C2695DB412DD /* BrushLibraryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrushLibraryLogicTests.swift; sourceTree = "<group>"; };
@@ -711,6 +713,7 @@
 				FA83E4E592E400F916185AAE /* BrushTipLogicTests.swift */,
 				1D0675F7D6A62AA74959A0D9 /* BrushTipGenerator.swift */,
 				826F4B54C1A09FFC7C30ABDC /* BrushCandidates.swift */,
+				F0C7F749C76E66B3E6CCFF41 /* ScatterAxesLogicTests.swift */,
 				0D779BD632A4DD2C43CF0954 /* BrushTipGeneratorLogicTests.swift */,
 				EEA9E1DBA2FA7C689ADDD867 /* BrushContactSheetBench.swift */,
 				A1B023BA111E673ACE0C23AB /* BrushStorageLogicTests.swift */,
@@ -1149,6 +1152,7 @@
 				7FCF482DBA0368BF7E331A39 /* BrushCandidates.swift in Sources */,
 				E9BB7594B0C69F8567100133 /* BrushTipGeneratorLogicTests.swift in Sources */,
 				413ACD9728F657CF4375BB53 /* BrushContactSheetBench.swift in Sources */,
+				AA483456B6F3E6D47929FE77 /* ScatterAxesLogicTests.swift in Sources */,
 				0BE11172B90CC261E2833012 /* BrushStorageLogicTests.swift in Sources */,
 				08A09986D040AD201D79E376 /* BrushTextureLogicTests.swift in Sources */,
 				CD08E702769150C7A2F0AB5D /* BrushModulationLogicTests.swift in Sources */,

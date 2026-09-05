@@ -1289,7 +1289,7 @@ final class LassoFillLogicTests: XCTestCase {
     private func vectorSceneManager() throws -> (CanvasManager, VectorCanvas) {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.layers[0].kind = .vector
-        let brush = Brush(name: "Test", tip: .round, size: 20, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, scatter: 0, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
+        let brush = Brush(name: "Test", tip: .round, size: 20, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
         let stroke = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                   size: 20, opacity: 1,
                                   samples: [VectorSample(x: 32, y: 32, pressure: 1),

@@ -121,7 +121,7 @@ extension BrushInput: Codable {
         case .velocity: self = .velocity
         case .random:
             // The channel is re-derived by `BrushModulations`; anything here would be overwritten.
-            self = .random(.scatterAngle, BrushRandomiser(
+            self = .random(.scatterAcross, BrushRandomiser(
                 wavelength: try c.decode(CGFloat.self, forKey: .wavelength),
                 octaves: try c.decodeIfPresent(Int.self, forKey: .octaves) ?? 1,
                 falloff: try c.decodeIfPresent(Double.self, forKey: .falloff)

@@ -180,7 +180,8 @@ enum BrushStamper {
         var resolved = values(at: DabSite(parameter: 0, arcWidths: 0))
         if draws(at: 0) {
             stampDab(into: raster, at: samples.positions[0], brush: brush, values: resolved,
-                     color: color, brushSize: brushSize, random: random, arcWidths: arcWidths)
+                     color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
+                     tangent: path.tangent(at: 0))
         }
         var carry = WalkCarry(spacing: stampSpacing(brushSize: brushSize, fraction: resolved.spacing))
         for index in 0..<max(samples.count - 1, 0) {
@@ -199,8 +200,12 @@ enum BrushStamper {
                 // in both width and opacity. The ramp is the funnel's, so a stroke with no pressure
                 // channel gets the neutral here and nowhere else.
                 if draws(at: site.parameter) {
+                    // BRUSH.md §2.30's frame, from the same `StrokePath.tangent` the `direction`
+                    // sensor reads through `StrokeSensors` — one function, so the scatter's axes and
+                    // a direction-following tip cannot disagree about which way the stroke is going.
                     stampDab(into: raster, at: dab, brush: brush, values: resolved,
-                             color: color, brushSize: brushSize, random: random, arcWidths: arcWidths)
+                             color: color, brushSize: brushSize, random: random, arcWidths: arcWidths,
+                             tangent: path.tangent(at: site.parameter))
                 }
                 return stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             }
@@ -216,6 +221,14 @@ enum BrushStamper {
     /// field are taken here, because here is where `random` and `arcWidths` are — §2.18's density
     /// dropout, the scatter offset, and the angle's jitter. That is what lets `BrushDabValues` be
     /// answerable by a caller with a pressure and no stroke (`Brush.dabValues(atPressure:)`).
+    ///
+    /// **`tangent` is the fourth thing, and it is a geometry rather than a draw** — BRUSH.md §2.30
+    /// resolves the scatter onto the *stroke's* frame, so the direction the walk is travelling in has
+    /// to arrive here. It is a **unit** vector; both walks take it from the same place the `direction`
+    /// sensor does (`StrokePath.tangent(at:)`), so the two cannot drift apart by having two ways to
+    /// compute it. Its default is `+x`, which is the honest answer for the callers that stamp one dab
+    /// with no stroke around it at all — the size preview and the contact sheet — and is exactly the
+    /// heading `BrushInput.direction`'s own neutral of 0 turns names.
     ///
     /// **A dab lays down its `flow` and nothing else — BRUSH.md §2.11.** *"Flow is what one stamp
     /// lays down"*; the stroke's own opacity and its blend mode are the group's business
@@ -234,7 +247,8 @@ enum BrushStamper {
     /// from a replayed one, and the seed exists at pen-down.
     static func stampDab(into raster: DabTarget, at point: CGPoint, brush: Brush,
                          values: BrushDabValues, color: UIColor, brushSize: CGFloat,
-                         random: DabRandom, arcWidths: CGFloat) {
+                         random: DabRandom, arcWidths: CGFloat,
+                         tangent: CGPoint = CGPoint(x: 1, y: 0)) {
         // **BRUSH.md §2.18 — the dab is skipped when its draw exceeds its density.**
         //
         // A skip disturbs nothing, and that is §4's design rather than care taken here: there is no
@@ -251,8 +265,9 @@ enum BrushStamper {
         let alpha = CGFloat(values.flow)
         guard alpha > 0, radius > 0 else { return }
 
-        let stampPoint = applyScatter(to: point, radius: radius, scatter: values.scatter,
-                                      random: random, arcWidths: arcWidths)
+        let stampPoint = applyScatter(to: point, radius: radius,
+                                      across: values.scatterAcross, along: values.scatterAlong,
+                                      tangent: tangent, random: random, arcWidths: arcWidths)
         let hardness = CGFloat(values.hardness)
         // `.normal` on every dab, brush and eraser alike: the stroke's blend mode is the group's.
         let blendMode = CGBlendMode.normal
@@ -292,17 +307,38 @@ enum BrushStamper {
         }
     }
 
-    /// The dab's centre, thrown off the path by up to `radius · 2 · scatter`.
+    /// **The dab's centre, thrown off the path by up to `radius · 2 · amount` on each axis of the
+    /// stroke's own frame** — BRUSH.md §2.30.
     ///
-    /// Angle and distance are two draws at one arc length and so come from two `DabRandom` channels —
-    /// with no stream to take "the next value" off, the channel is what keeps them independent.
-    static func applyScatter(to point: CGPoint, radius: CGFloat, scatter: Double,
-                             random: DabRandom, arcWidths: CGFloat) -> CGPoint {
-        guard scatter > 0 else { return point }
-        let maxOffset = radius * 2 * CGFloat(scatter)
-        let angle = random.unit(.scatterAngle, at: arcWidths) * 2 * .pi
-        let distance = random.unit(.scatterDistance, at: arcWidths) * maxOffset
-        return CGPoint(x: point.x + cos(angle) * distance, y: point.y + sin(angle) * distance)
+    /// `across` displaces along the **normal**, which widens and frays the silhouette while the ink
+    /// stays evenly spaced; `along` displaces down the **tangent**, which widens nothing and instead
+    /// bunches and gaps the dabs. They are two independent draws on two `DabRandom` channels — with
+    /// no stream to take "the next value" off, the channel is what keeps them independent, and one
+    /// channel used twice would put every dab on the same 45° diagonal.
+    ///
+    /// **The draws are signed, so an amount is a half-extent about the path rather than a push.** A
+    /// one-sided offset would bend the stroke rather than fray it.
+    ///
+    /// **What this deliberately is *not* is the old isotropic disc with two radii.** That version —
+    /// keep the free angle, scale its two components — reproduces the old ink exactly when the two
+    /// amounts are equal, and it cannot make the axes independent: `cos θ` and `sin θ` come from one
+    /// draw, so the along offset is a function of the across one and a brush asking for across alone
+    /// still gets a correlated wobble down the path. Two draws is what §2.30's *"modulatable
+    /// independently"* means, and the price is the one that ruling states: equal amounts give a
+    /// filled square rather than a disc.
+    ///
+    /// The normal is `(-t.y, t.x)`, the convention `StrokeGeometry.normal(ofSampleAt:)` already uses,
+    /// so "across" means the same side of the stroke here as it does everywhere else in the engine.
+    static func applyScatter(to point: CGPoint, radius: CGFloat, across: Double, along: Double,
+                             tangent: CGPoint, random: DabRandom, arcWidths: CGFloat) -> CGPoint {
+        guard across != 0 || along != 0 else { return point }
+        let reach = radius * 2
+        // Both draws are taken even when one amount is zero. §4 has no stream to keep in phase, so a
+        // skipped draw shifts nothing after it and the multiply is cheaper than a second branch.
+        let acrossOffset = reach * CGFloat(across) * random.signedUnit(.scatterAcross, at: arcWidths)
+        let alongOffset = reach * CGFloat(along) * random.signedUnit(.scatterAlong, at: arcWidths)
+        return CGPoint(x: point.x + tangent.x * alongOffset - tangent.y * acrossOffset,
+                       y: point.y + tangent.y * alongOffset + tangent.x * acrossOffset)
     }
 
 }
@@ -475,7 +511,9 @@ extension BrushStamper {
     /// bake-then-replay, and what the render path uses.
     ///
     /// Wrapping the sink rather than the walk is the whole trick, and it is what makes this stage
-    /// small: `stampStroke`, `stampDab` and `applyScatter` all run **unchanged, in rest space**, so
+    /// small: `stampStroke`, `stampDab` and `applyScatter` all run **unchanged, in rest space** —
+    /// §2.30's stroke frame included, so a posed dab is scattered about the *rest* tangent and then
+    /// mapped, which is what stops the offset re-rolling as a pose turns the stroke — so
     /// the dab count, the dab phase and the arc lengths the random field is addressed at — including
     /// the rotation jitter an image dab draws — are invariant across every frame of an animation *by
     /// construction* rather than by arithmetic that happens to agree. Only the three numbers a pose

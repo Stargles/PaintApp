@@ -23,7 +23,7 @@ final class DabRandomLogicTests: XCTestCase {
     /// rounding difference. Round rather than square: `stampApproximateSquare` puts sixteen dabs down
     /// per stamp and the arithmetic below wants one.
     private static func scatteringBrush(spacingFraction: Double = 0.1, scatter: Double = 0.6) -> Brush {
-        Brush(name: "scatter", tip: .round, size: 10, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: spacingFraction, hardness: 1, scatter: scatter, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
+        Brush(name: "scatter", tip: .round, size: 10, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: spacingFraction, hardness: 1, scatterAcross: scatter, scatterAlong: scatter, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
     }
 
     private static func samples(count: Int, from x0: CGFloat = 20, to x1: CGFloat = 220,
@@ -57,7 +57,8 @@ final class DabRandomLogicTests: XCTestCase {
                                 random: DabRandom) -> [CGPoint] {
         let stamperSamples = StrokeSamples(samples, channels: .pressureOnly)
         var clean = brush
-        clean.dab.scatter = 0
+        clean.dab.scatterAcross = 0
+        clean.dab.scatterAlong = 0
         let scattered = BrushStamper.bake(samples: stamperSamples, brush: brush, color: .black,
                                           brushSize: size, brushOpacity: 1, random: random)
         let straight = BrushStamper.bake(samples: stamperSamples, brush: clean, color: .black,
@@ -91,8 +92,8 @@ final class DabRandomLogicTests: XCTestCase {
         let field = DabRandom(seed: Self.seed)
         for step in 0..<200 {
             let arc = CGFloat(step) * 0.037
-            XCTAssertEqual(field.unit(.scatterAngle, at: arc, wavelength: 0),
-                           field.unit(.scatterAngle, at: arc, wavelength: DabRandom.quantum),
+            XCTAssertEqual(field.unit(.scatterAcross, at: arc, wavelength: 0),
+                           field.unit(.scatterAcross, at: arc, wavelength: DabRandom.quantum),
                            "λ = 0 must be λ = one quantum exactly, at arc \(arc)")
         }
     }
@@ -105,8 +106,8 @@ final class DabRandomLogicTests: XCTestCase {
         var collisions = 0
         for step in 0..<500 {
             let arc = CGFloat(step) * 0.11
-            let angle = field.unit(.scatterAngle, at: arc)
-            let distance = field.unit(.scatterDistance, at: arc)
+            let angle = field.unit(.scatterAcross, at: arc)
+            let distance = field.unit(.scatterAlong, at: arc)
             let rotation = field.unit(.rotation, at: arc)
             if angle == distance || angle == rotation || distance == rotation { collisions += 1 }
         }
@@ -118,8 +119,8 @@ final class DabRandomLogicTests: XCTestCase {
     func testTwoSeedsDrawDifferentValues() {
         let a = DabRandom(seed: Self.seed), b = DabRandom(seed: Self.seed &+ 1)
         var same = 0
-        for step in 0..<500 where a.unit(.scatterAngle, at: CGFloat(step) * 0.07)
-            == b.unit(.scatterAngle, at: CGFloat(step) * 0.07) { same += 1 }
+        for step in 0..<500 where a.unit(.scatterAcross, at: CGFloat(step) * 0.07)
+            == b.unit(.scatterAcross, at: CGFloat(step) * 0.07) { same += 1 }
         XCTAssertEqual(same, 0, "two seeds must not agree at 500 arc lengths")
     }
 
@@ -134,9 +135,9 @@ final class DabRandomLogicTests: XCTestCase {
         let field = DabRandom(seed: Self.seed)
         func meanStep(wavelength: CGFloat) -> CGFloat {
             var total: CGFloat = 0
-            var previous = field.unit(.scatterDistance, at: 0, wavelength: wavelength)
+            var previous = field.unit(.scatterAlong, at: 0, wavelength: wavelength)
             for i in 1...2000 {
-                let value = field.unit(.scatterDistance, at: CGFloat(i) * 0.1, wavelength: wavelength)
+                let value = field.unit(.scatterAlong, at: CGFloat(i) * 0.1, wavelength: wavelength)
                 total += abs(value - previous)
                 previous = value
             }
@@ -162,9 +163,9 @@ final class DabRandomLogicTests: XCTestCase {
         var worst: CGFloat = 0
         for cell in 0..<40 {
             let base = CGFloat(cell) * lambda
-            let atBase = field.unit(.scatterDistance, at: base, wavelength: lambda)
-            let near = abs(field.unit(.scatterDistance, at: base + lambda * 0.01, wavelength: lambda) - atBase)
-            let far = abs(field.unit(.scatterDistance, at: base + lambda * 0.10, wavelength: lambda) - atBase)
+            let atBase = field.unit(.scatterAlong, at: base, wavelength: lambda)
+            let near = abs(field.unit(.scatterAlong, at: base + lambda * 0.01, wavelength: lambda) - atBase)
+            let far = abs(field.unit(.scatterAlong, at: base + lambda * 0.10, wavelength: lambda) - atBase)
             guard far > 1e-4 else { continue }
             worst = max(worst, near / far)
         }
@@ -180,8 +181,8 @@ final class DabRandomLogicTests: XCTestCase {
         let origin = DabRandom(seed: Self.seed)
         for step in 0..<200 {
             let arc = CGFloat(step) * DabRandom.quantum * 37
-            XCTAssertEqual(shifted.unit(.scatterAngle, at: arc),
-                           origin.unit(.scatterAngle, at: arc + offset),
+            XCTAssertEqual(shifted.unit(.scatterAcross, at: arc),
+                           origin.unit(.scatterAcross, at: arc + offset),
                            "a field offset by \(offset) must read at \(arc) what the unshifted one reads at \(arc + offset)")
         }
     }
@@ -234,6 +235,25 @@ final class DabRandomLogicTests: XCTestCase {
     ///
     /// Red before this change, and not marginally: live drawing rolled its jitter off an unseeded
     /// generator, so the offsets below shared nothing but a distribution.
+    ///
+    /// **BRUSH.md §2.30 changed what "the same value" can be compared as, and this test had to say so
+    /// rather than loosen a tolerance.** A scatter offset is now the two draws resolved onto the
+    /// stroke's own frame, and the two walks have *different frames* — the live one reads the chord
+    /// between two input samples, the replay reads the refitted curve. So:
+    ///
+    /// - **the magnitude** of the offset is frame-free, and is the operand that pins the draws. It is
+    ///   asserted at 1e-9, unchanged from what this test always demanded;
+    /// - **the offset itself** past the first dab agrees to the refit's own angular error, MEASURED
+    ///   at 0.020 pt on this fixture against a 10 pt brush scattering 0.6 diameters, i.e. about
+    ///   0.3% of one dab's reach — the same
+    ///   *"what is left between them is the refit's 0.25 pt of geometry"* §4 already writes down,
+    ///   reached through the frame instead of through the position;
+    /// - **the first dab is a real asymmetry and is asserted as one.** At pen-down the live walk has
+    ///   exactly one sample, so it has no direction at all and scatters about `+x`, while the replay
+    ///   scatters about the fitted tangent. That is the same shape as `taper` (§12 stage 7: *"the live
+    ///   walk genuinely cannot and answers the neutral"*), it already applies to a direction-following
+    ///   tip's first dab, and it is one dab of one live raster stroke — on a vector layer the stored
+    ///   stroke replaces the scratch on lift.
     func testTheLiveWalkAndTheRefittedReplayDrawTheSameRandomValues() {
         let brush = Self.scatteringBrush()
         let size: CGFloat = 10
@@ -254,23 +274,34 @@ final class DabRandomLogicTests: XCTestCase {
         // one carry point, one arc-length accumulator.
         func liveOffsets(scatter: Double) -> [CGPoint] {
             var live = brush
-            live.dab.scatter = scatter
+            live.dab.scatterAcross = scatter
+            live.dab.scatterAlong = scatter
             let collector = BrushStamper.CollectingDabTarget()
             let values = live.dabValues(atPressure: 1)
             var spacing = BrushStamper.stampSpacing(brushSize: size, fraction: values.spacing)
             var arc: CGFloat = 0
             var last: CGPoint?
+            var previousSample: VectorSample?
             for sample in raw {
+                // The two-point run `stampPath` builds per touch sample, and the tangent BRUSH.md
+                // §2.30 resolves the scatter onto. Mirrored rather than approximated: a hand-rolled
+                // walk that stamped in canvas axes would compare the replay's stroke frame against
+                // no frame at all, and would red for a reason that is not this test's subject.
+                let run = StrokeSamples([previousSample ?? sample, sample], channels: .pressureOnly)
+                let livePath = StrokePath(points: run.positions)
+                previousSample = sample
                 guard let previous = last else {
                     BrushStamper.stampDab(into: collector, at: sample.point, brush: live, values: values,
-                                          color: .black, brushSize: size, random: random, arcWidths: arc)
+                                          color: .black, brushSize: size, random: random, arcWidths: arc,
+                                          tangent: livePath.tangent(at: 0))
                     last = sample.point
                     continue
                 }
-                let walk = BrushStamper.advance(from: previous, to: sample.point, spacing: spacing) { dab, _, walked in
+                let walk = BrushStamper.advance(from: previous, to: sample.point, spacing: spacing) { dab, t, walked in
                     arc += walked / size
                     BrushStamper.stampDab(into: collector, at: dab, brush: live, values: values,
-                                          color: .black, brushSize: size, random: random, arcWidths: arc)
+                                          color: .black, brushSize: size, random: random, arcWidths: arc,
+                                          tangent: livePath.tangent(at: t))
                     return spacing
                 }
                 last = walk.carry
@@ -278,7 +309,7 @@ final class DabRandomLogicTests: XCTestCase {
             }
             return collector.dabs.map(\.center)
         }
-        let liveScattered = liveOffsets(scatter: brush.dab.scatter)
+        let liveScattered = liveOffsets(scatter: brush.dab.scatterAcross)
         let liveClean = liveOffsets(scatter: 0)
         let live = zip(liveScattered, liveClean).map {
             CGPoint(x: $0.x - $1.x, y: $0.y - $1.y)
@@ -287,10 +318,32 @@ final class DabRandomLogicTests: XCTestCase {
 
         let shared = min(live.count, replayed.count)
         XCTAssertGreaterThan(shared, 60, "both walks should lay plenty of dabs")
+        XCTAssertGreaterThan(live.map { hypot($0.x, $0.y) }.max() ?? 0, 1,
+                             "PREMISE: the brush actually scatters, or every bound below is 0 == 0")
+
+        var worstMagnitude: CGFloat = 0
+        var worstOffset: CGFloat = 0
         for index in 0..<shared {
-            Self.assertEqual(live[index], replayed[index], accuracy: Self.cancellation,
-                             "dab \(index) draws a different random live than replayed")
+            let l = live[index], r = replayed[index]
+            worstMagnitude = max(worstMagnitude, abs(hypot(l.x, l.y) - hypot(r.x, r.y)))
+            if index > 0 { worstOffset = max(worstOffset, hypot(l.x - r.x, l.y - r.y)) }
         }
+        print("LIVEREPLAY magnitude=\(worstMagnitude) offset=\(worstOffset) "
+              + "firstDab=\(hypot(live[0].x - replayed[0].x, live[0].y - replayed[0].y))")
+        XCTAssertLessThan(worstMagnitude, Self.cancellation,
+                          "the two walks must draw the same two numbers — a scatter offset's length "
+                          + "does not depend on the frame it is resolved in, so this is the draws alone")
+        XCTAssertLessThan(worstOffset, 0.05,
+                          "…and past the first dab the two frames agree to the refit's angular error")
+        // The first dab, asserted rather than tolerated. A change that gave the live walk a direction
+        // at pen-down would red here, which is the point: it would be a behavioural change and should
+        // be read about rather than absorbed by a tolerance.
+        XCTAssertGreaterThan(hypot(live[0].x - replayed[0].x, live[0].y - replayed[0].y), 0.1,
+                             "the live walk has one sample at pen-down and so no direction: its first "
+                             + "dab scatters about +x while the replay scatters about the fitted tangent")
+        XCTAssertLessThan(abs(hypot(live[0].x, live[0].y) - hypot(replayed[0].x, replayed[0].y)),
+                          Self.cancellation,
+                          "…and it is only the frame — the two draws behind it are the same numbers")
     }
 
     // MARK: - Pin 3 — a spacing edit moves which arc lengths carry a dab, not their randomness
@@ -428,8 +481,8 @@ final class DabRandomLogicTests: XCTestCase {
         let field = DabRandom(seed: Self.seed)
         var repeats = 0
         for index in 1...4000 {
-            let here = field.unit(.scatterAngle, at: CGFloat(index) * tightest)
-            let previous = field.unit(.scatterAngle, at: CGFloat(index - 1) * tightest)
+            let here = field.unit(.scatterAcross, at: CGFloat(index) * tightest)
+            let previous = field.unit(.scatterAcross, at: CGFloat(index - 1) * tightest)
             if here == previous { repeats += 1 }
         }
         XCTAssertEqual(repeats, 0, "no two consecutive dabs at the tightest allowed spacing may draw one value")

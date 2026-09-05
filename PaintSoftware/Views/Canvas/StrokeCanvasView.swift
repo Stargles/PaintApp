@@ -1101,9 +1101,14 @@ final class StrokeCanvasView: UIView {
         defer { lastLiveSample = sample }
         guard let last = lastStampPoint else {
             let resolved = values(at: 0)
+            // BRUSH.md §2.30's stroke frame. The first dab of a gesture has only one sample, so
+            // `run` is that point twice and `StrokePath.tangent` answers its `+x` fallback — which is
+            // the same heading `BrushInput.direction`'s neutral names, and is the honest answer: a
+            // stroke one point long has no direction yet.
             BrushStamper.stampDab(into: target, at: sample.point, brush: brush, values: resolved,
                                   color: brushColor, brushSize: brushSize,
-                                  random: random, arcWidths: strokeArcWidths)
+                                  random: random, arcWidths: strokeArcWidths,
+                                  tangent: sensors.path.tangent(at: 0))
             liveSpacing = BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
             lastStampPoint = sample.point
             return
@@ -1115,9 +1120,13 @@ final class StrokeCanvasView: UIView {
             // points of the field even though their geometry differs by the refit's tolerance.
             strokeArcWidths += brushSize > 0 ? walked / brushSize : walked
             let resolved = values(at: t)
+            // The same `StrokePath.tangent` the replay walk reads, off this walk's own two-point
+            // path — so the live tier and the stored stroke differ in the scatter's *frame* only by
+            // the refit's geometry, which is the difference BRUSH.md §4 already names between them.
             BrushStamper.stampDab(into: target, at: dab, brush: brush, values: resolved,
                                   color: brushColor, brushSize: brushSize,
-                                  random: random, arcWidths: strokeArcWidths)
+                                  random: random, arcWidths: strokeArcWidths,
+                                  tangent: sensors.path.tangent(at: t))
             return BrushStamper.stampSpacing(brushSize: brushSize, fraction: resolved.spacing)
         }
         lastStampPoint = walk.carry

@@ -203,9 +203,9 @@ final class DabCostBench: XCTestCase {
     func testAHeavilyModulatedBrush() {
         var loaded = TestBrushes.hardRound
         loaded.modulations = BrushModulations(loaded.modulations.rows + [
-            BrushModulation(.scatter, .velocity, amount: 0.3),
+            BrushModulation(.scatterAcross, .velocity, amount: 0.3),
             BrushModulation(.spacing, .tiltAngle, amount: 0.05),
-            BrushModulation(.size, .random(.scatterAngle, .plain(2)), amount: 0.1),
+            BrushModulation(.size, .random(.scatterAcross, .plain(2)), amount: 0.1),
             BrushModulation(.hardness, .tiltDirection, amount: -0.2)
         ])
         measureWalk("six rows", brush: loaded)
@@ -233,20 +233,20 @@ final class DabCostBench: XCTestCase {
         chained.modulations = BrushModulations([
             BrushModulation(.size, .pressure,
                             modules: [.curveRamp(.ramp(from: 0.4, to: 1)),
-                                      .scale(.random(.scatterAngle, .plain(2))),
+                                      .scale(.random(.scatterAcross, .plain(2))),
                                       .curveRamp(.threshold(knee: 0.4))],
                             amount: 0.4),
             BrushModulation(.flow, .pressure,
                             modules: [.curveRamp(.ramp(from: 0.2, to: 1)), .scale(.velocity)],
                             amount: 0.1),
-            BrushModulation(.scatter, .velocity,
-                            modules: [.scale(.random(.scatterAngle, .plain(1)))], amount: 0.3),
+            BrushModulation(.scatterAcross, .velocity,
+                            modules: [.scale(.random(.scatterAcross, .plain(1)))], amount: 0.3),
             BrushModulation(.spacing, .tiltAngle,
                             modules: [.curveRamp(.threshold(knee: 0.5))], amount: 0.05),
             BrushModulation(.hardness, .tiltDirection,
                             modules: [.scale(.pressure), .curveRamp(.ramp(from: 0, to: 1))],
                             amount: -0.2),
-            BrushModulation(.hue, .random(.scatterAngle, .plain(3)),
+            BrushModulation(.hue, .random(.scatterAcross, .plain(3)),
                             modules: [.scale(.taper)], amount: 0.1)
         ])
         measureWalk("six chains, eleven modules", brush: chained)
@@ -260,7 +260,7 @@ final class DabCostBench: XCTestCase {
         for octaves in [1, 4, BrushRandomiser.maximumOctaves] {
             var noisy = TestBrushes.hardRound
             noisy.modulations = BrushModulations(noisy.modulations.rows + [
-                BrushModulation(.size, .random(.scatterAngle,
+                BrushModulation(.size, .random(.scatterAcross,
                                                BrushRandomiser(wavelength: 3.5, octaves: octaves)),
                                 amount: 0.2)
             ])
@@ -274,7 +274,7 @@ final class DabCostBench: XCTestCase {
     func testAColourJitteringBrush() {
         var jittering = TestBrushes.hardRound
         jittering.modulations = BrushModulations(jittering.modulations.rows + [
-            BrushModulation(.hue, .random(.scatterAngle, .plain(1)), amount: 0.2)
+            BrushModulation(.hue, .random(.scatterAcross, .plain(1)), amount: 0.2)
         ])
         measureWalk("colour jitter", brush: jittering)
     }

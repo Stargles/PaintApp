@@ -115,7 +115,7 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.2),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.22, atZero: 0.6),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.5)), amount: 0.10),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.5)), amount: 0.10),
             .flowFromPressure(amount: 0.15)
         ])
     )
@@ -221,9 +221,14 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.3),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.16, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAngle, .plain(2.5)), amount: 0.30),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.3)), amount: 0.10),
-            BrushModulation(.scatter, .random(.scatterAngle, .plain(1.5)), amount: 0.14),
+            BrushModulation(.size, .random(.scatterAcross, .plain(2.5)), amount: 0.30),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.10),
+            // **§2.30's migration of one isotropic `scatter` row, and it is two rows now.** The
+            // amount and the wavelength are the ones the owner picked on the contact sheet; what
+            // moved is the shape of the draw, from a disc to a square, which §2.30 rules is what
+            // "both set equal" means. The across row keeps the channel the old row drew from.
+            BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
+            BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
             .densityFromPressure(knee: 0.4, floor: 0.45),
             .flowFromPressure(amount: 0.1)
         ])
@@ -247,9 +252,14 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.3),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.16, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAngle, .plain(2.5)), amount: 0.30),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.3)), amount: 0.10),
-            BrushModulation(.scatter, .random(.scatterAngle, .plain(1.5)), amount: 0.14),
+            BrushModulation(.size, .random(.scatterAcross, .plain(2.5)), amount: 0.30),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.3)), amount: 0.10),
+            // **§2.30's migration of one isotropic `scatter` row, and it is two rows now.** The
+            // amount and the wavelength are the ones the owner picked on the contact sheet; what
+            // moved is the shape of the draw, from a disc to a square, which §2.30 rules is what
+            // "both set equal" means. The across row keeps the channel the old row drew from.
+            BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
+            BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.5)), amount: 0.14),
             .densityFromPressure(knee: 0.4, floor: 0.45),
             .flowFromPressure(amount: 0.1)
         ])
@@ -290,8 +300,9 @@ enum BrushLibrary {
         stroke: BrushStrokeSettings(stabilization: 0.2),
         modulations: BrushModulations([
             .sizeFromPressure(amount: 0.25, atZero: 0.55),
-            BrushModulation(.size, .random(.scatterAngle, .plain(0.6)), amount: 0.16),
-            BrushModulation(.scatter, .random(.scatterAngle, .plain(1.0)), amount: 0.07),
+            BrushModulation(.size, .random(.scatterAcross, .plain(0.6)), amount: 0.16),
+            BrushModulation(.scatterAcross, .random(.scatterAcross, .plain(1.0)), amount: 0.07),
+            BrushModulation(.scatterAlong, .random(.scatterAcross, .plain(1.0)), amount: 0.07),
             .flowFromPressure(amount: 0.45)
         ])
     )

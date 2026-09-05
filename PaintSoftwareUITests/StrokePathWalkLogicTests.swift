@@ -15,7 +15,8 @@ final class StrokePathWalkLogicTests: XCTestCase {
     private func inkBrush(spacing: Double = 0.08) -> Brush {
         var brush = TestBrushes.hardRound
         brush.dab.spacing = spacing
-        brush.dab.scatter = 0
+        brush.dab.scatterAcross = 0
+        brush.dab.scatterAlong = 0
         brush.dab.angle.jitter = 0
         // Fixed width and full coverage: no rows, and both bases back at 1 — clearing the rows alone
         // would leave the preset's own `1 - amount` bases behind.

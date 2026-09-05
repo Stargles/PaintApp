@@ -166,8 +166,8 @@ final class BrushEditorLogicTests: XCTestCase {
     /// the same number twice and is invisible in every other assertion.
     func testAddingAndRemovingRowsRemintsTheRandomChannels() {
         var modulations = BrushModulations([
-            BrushModulation(.scatter, .random(.modulation(.scatter, row: 0), .plain(2)), amount: 0.3),
-            BrushModulation(.scatter, .random(.modulation(.scatter, row: 1), .plain(5)), amount: 0.2)
+            BrushModulation(.scatterAcross, .random(.modulation(.scatterAcross, row: 0), .plain(2)), amount: 0.3),
+            BrushModulation(.scatterAcross, .random(.modulation(.scatterAcross, row: 1), .plain(5)), amount: 0.2)
         ])
         let secondChannel = channel(of: modulations.rows[1].input)
 
@@ -176,11 +176,11 @@ final class BrushEditorLogicTests: XCTestCase {
         XCTAssertNotEqual(channel(of: modulations.rows[0].input), secondChannel,
                           "The surviving row moved to position 0, so its cell must move with it")
         XCTAssertEqual(channel(of: modulations.rows[0].input),
-                       channel(of: BrushInput.random(.modulation(.scatter, row: 0), .plain(5))))
+                       channel(of: BrushInput.random(.modulation(.scatterAcross, row: 0), .plain(5))))
         XCTAssertEqual(modulations.rows[0].input.randomiser?.wavelength, 5,
                        "…and its authored λ is untouched")
 
-        modulations.append(BrushModulation(.scatter, .random(.modulation(.size, row: 9), .plain(1)), amount: 0.1))
+        modulations.append(BrushModulation(.scatterAcross, .random(.modulation(.size, row: 9), .plain(1)), amount: 0.1))
         XCTAssertNotEqual(channel(of: modulations.rows[0].input), channel(of: modulations.rows[1].input),
                           "No two rows of one output may share a cell")
     }
@@ -212,7 +212,7 @@ final class BrushEditorLogicTests: XCTestCase {
                            "\(kind.displayName) must read back as the kind that made it")
             XCTAssertFalse(kind.detail.isEmpty, "every module says what it does")
         }
-        XCTAssertEqual(BrushModule.scale(.random(.scatterAngle, .plain(2))).kind, .randomiser,
+        XCTAssertEqual(BrushModule.scale(.random(.scatterAcross, .plain(2))).kind, .randomiser,
                        "a scale carrying a random *is* the randomiser — there is no third case")
         XCTAssertEqual(BrushModule.scale(.pressure).kind, .scale)
         XCTAssertNil(BrushModule.scale(.pressure).randomiser)
@@ -224,7 +224,7 @@ final class BrushEditorLogicTests: XCTestCase {
         }
         XCTAssertNil(BrushModuleKind.curveRamp.module.sensorCurve,
                      "a curve ramp *is* its curve — it does not also carry a sensor's")
-        XCTAssertEqual(BrushModule.scale(.random(.scatterAngle, .plain(2))).randomiser?.wavelength, 2)
+        XCTAssertEqual(BrushModule.scale(.random(.scatterAcross, .plain(2))).randomiser?.wavelength, 2)
         XCTAssertNil(BrushModule.curveRamp(.linear).randomiser)
     }
 
@@ -251,8 +251,8 @@ final class BrushEditorLogicTests: XCTestCase {
     /// two randomisers end up sharing one cell and draw the same number twice, which is invisible in
     /// every other assertion.
     func testReorderingAChainRemintsTheRandomiserChannels() {
-        let wobbleA = BrushModule.scale(.random(.scatterAngle, .plain(2)))
-        let wobbleB = BrushModule.scale(.random(.scatterAngle, .plain(5)))
+        let wobbleA = BrushModule.scale(.random(.scatterAcross, .plain(2)))
+        let wobbleB = BrushModule.scale(.random(.scatterAcross, .plain(5)))
         let forward = BrushModulations([
             BrushModulation(.spacing, .pressure, modules: [wobbleA, wobbleB], amount: 0.4)
         ])
@@ -288,7 +288,7 @@ final class BrushEditorLogicTests: XCTestCase {
     func testAFreshRowIsAudible() {
         var brush = TestBrushes.hardRound
         let before = brush.dabValues { _ in 0.5 }
-        brush.modulations.append(BrushModulation(.scatter, .pressure, amount: BrushEditorDefaults.amount))
+        brush.modulations.append(BrushModulation(.scatterAcross, .pressure, amount: BrushEditorDefaults.amount))
         XCTAssertNotEqual(before, brush.dabValues { _ in 0.5 })
     }
 

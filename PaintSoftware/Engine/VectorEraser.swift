@@ -227,9 +227,10 @@ enum VectorEraser {
     /// "residue" is only a retained element — so every condition below is checked in the strict
     /// direction.
     ///
-    /// `scatter` and the angle's jitter are here because the capsule chain models the *un-scattered*
-    /// sweep. `BrushStamper.applyScatter` displaces each dab by up to `radius · 2 · scatter` off the
-    /// centreline, so the chain is wrong in both directions at once: it claims coverage where a
+    /// **Both of §2.30's scatter axes** and the angle's jitter are here because the capsule chain
+    /// models the *un-scattered* sweep. `BrushStamper.applyScatter` displaces each dab by up to
+    /// `radius · 2 · amount` across the stroke *and* along it, so the chain is wrong in both
+    /// directions at once: it claims coverage where a
     /// displaced dab left a gap, and misses coverage where one landed outside. Neither is a margin that
     /// can be tuned away.
     ///
@@ -269,7 +270,8 @@ enum VectorEraser {
         // "clean cut" **deletes ink that should have faded**, which is the asymmetric direction this
         // whole comment block is about. One guard, on the product, is the honest test.
         guard opacity * values.flow >= 0.999 else { return false }
-        guard values.scatter <= 0, brush.dab.angle.jitter <= 0 else { return false }
+        guard values.scatterAcross <= 0, values.scatterAlong <= 0,
+              brush.dab.angle.jitter <= 0 else { return false }
         // **BRUSH.md §2.25's paper, and it belongs on the strict side of this gate.** A textured
         // eraser removes `depth·(1 - texel)` less than its footprint claims, at every canvas point
         // the paper is short of 1 — so the ink a clean cut would delete is ink the punch would have
@@ -282,7 +284,8 @@ enum VectorEraser {
 
     /// Whether a *paint* stroke may be split or deleted, as opposed to left to the punch.
     ///
-    /// A scattering or jittering brush throws its dabs up to `radius · 2 · scatter` off the centreline,
+    /// A scattering or jittering brush throws its dabs up to `radius · 2 · amount` off the centreline
+    /// on either of §2.30's two axes,
     /// so the capsule chain the coverage test measures against does not bound the stroke's ink: both
     /// "the eraser covers this cross-section" and "the eraser covers this stroke entirely" become claims
     /// about the wrong shape. Such a stroke is left whole and erased by the punch alone, which is exact
@@ -297,7 +300,8 @@ enum VectorEraser {
     /// objection scatter always raised, reached through §6's own door. And a `density` brush stamps
     /// gaps, so the chain claims coverage over paper. All of them fall back to the exact alpha punch.
     static func supportsSplitting(strokeBrush: Brush) -> Bool {
-        strokeBrush.dab.scatter <= 0 && strokeBrush.dab.angle.jitter <= 0
+        strokeBrush.dab.scatterAcross <= 0 && strokeBrush.dab.scatterAlong <= 0
+            && strokeBrush.dab.angle.jitter <= 0
             && strokeBrush.dab.density >= 1 && strokeBrush.modulations.isPressureOnly
     }
 

@@ -40,11 +40,12 @@ struct DabRandom: Equatable {
 
     /// Which of a dab's several random values is being drawn.
     ///
-    /// **A channel is what replaces "the next draw off the stream".** Scatter angle and scatter
-    /// distance are two values at one arc length, and a stream distinguished them by *order*; with no
-    /// stream there is no order, so the channel has to be part of the hash or the two would be the
-    /// same number. BRUSH.md §6's modulation matrix adds a row per modulation on top of these, which
-    /// is the reason this is an identifier folded into the hash rather than three separate seeds.
+    /// **A channel is what replaces "the next draw off the stream".** A dab's two scatter offsets are
+    /// two values at one arc length, and a stream distinguished them by *order*; with no stream there
+    /// is no order, so the channel has to be part of the hash or the two would be the same number —
+    /// and BRUSH.md §2.30's two axes would collapse onto one diagonal. BRUSH.md §6's modulation
+    /// matrix adds a row per modulation on top of these, which is the reason this is an identifier
+    /// folded into the hash rather than three separate seeds.
     ///
     /// Raw values are the hash's input and are therefore **stable**: renumbering one re-rolls every
     /// stroke drawn with it. Add channels, never renumber them.
@@ -58,8 +59,19 @@ struct DabRandom: Equatable {
         let rawValue: UInt64
         init(rawValue: UInt64) { self.rawValue = rawValue }
 
-        static let scatterAngle = Channel(rawValue: 1)
-        static let scatterDistance = Channel(rawValue: 2)
+        /// **BRUSH.md §2.30's displacement *across* the stroke** — along the normal, the axis that
+        /// widens and frays the silhouette.
+        ///
+        /// It carries raw value 1, which the deleted `scatterAngle` carried, and `scatterAlong`
+        /// carries 2 from `scatterDistance`, because the rule above is *add channels, never
+        /// renumber* and the pair being replaced is exactly a pair: two draws at one arc length. The
+        /// arithmetic they feed changed — a free angle and a distance became two signed amounts on
+        /// the stroke's own frame — so a scattering stroke's ink moves whatever these are numbered;
+        /// what reusing them buys is that nothing *else* in the field shifts.
+        static let scatterAcross = Channel(rawValue: 1)
+        /// **BRUSH.md §2.30's displacement *along* the stroke** — along the tangent, the axis that
+        /// bunches and gaps the dabs without widening anything.
+        static let scatterAlong = Channel(rawValue: 2)
         /// The tip's per-dab angle jitter — `BrushAngleSettings.jitter`.
         static let rotation = Channel(rawValue: 3)
         /// **BRUSH.md §2.18's dropout draw.** The value a dab's `density` is compared against, and

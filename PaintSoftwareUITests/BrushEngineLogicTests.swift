@@ -342,7 +342,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// A fully deterministic, fully opaque brush: no pressure dynamics, no scatter, no
     /// rotation jitter, hard edge. Any of those would make a single-pixel colour assertion flaky.
     private static func opaqueTestBrush(blendMode: BrushBlendMode) -> Brush {
-        Brush(name: "Test", tip: .round, size: 20, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, scatter: 0, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: blendMode))
+        Brush(name: "Test", tip: .round, size: 20, opacity: 1, dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, angle: BrushAngleSettings(jitter: 0)), stroke: BrushStrokeSettings(stabilization: 0, blendMode: blendMode))
     }
 
     private func rgbaPixels(of image: UIImage, width: Int, height: Int) -> (bytes: [UInt8], width: Int, height: Int)? {
@@ -1638,33 +1638,59 @@ final class BrushEngineLogicTests: XCTestCase {
     /// buffer and then source-over onto the destination, which is associative, so the two agree; a
     /// bound that fell short would take a dab's edge — or a whole dab — off one side.
     func testAScatteringStrokeLosesNoInkToTheMerge() {
-        var brush = Self.flatBrush(flow: 0.7, spacing: 0.3)
-        brush.dab.scatter = 0.9
-        brush.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: -0.7),
-                                              BrushModulation(.scatter, .pressure, amount: 0.5)])
-        let samples = StrokeSamples((0..<12).map {
-            VectorSample(x: 8 + CGFloat($0) * 4, y: 14 + CGFloat($0) * 3,
-                         pressure: 0.12 + CGFloat($0) * 0.08)
-        }, channels: .pressureOnly)
+        // **All three of §2.30's configurations, and the across-only one is the point.** The bound is
+        // the union of the rectangles the dabs actually painted, so it cannot under-bound *any* of
+        // these — but a bound derived from a brush's stated reach could take the larger of the two
+        // axes, or one of them, or an isotropic amount that no longer exists, and only an
+        // asymmetric brush tells those apart. Under-bounding clips ink and is silent, which is the
+        // failure direction the assertion exists for.
+        for (label, across, along) in [("isotropic", 0.9, 0.9), ("across only", 0.9, 0.0),
+                                       ("along only", 0.0, 0.9)] {
+            var brush = Self.flatBrush(flow: 0.7, spacing: 0.3)
+            brush.dab.scatterAcross = across
+            brush.dab.scatterAlong = along
+            brush.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: -0.7),
+                                                  BrushModulation(across > 0 ? .scatterAcross : .scatterAlong,
+                                                                  .pressure, amount: 0.5)])
+            let samples = StrokeSamples((0..<12).map {
+                VectorSample(x: 8 + CGFloat($0) * 4, y: 14 + CGFloat($0) * 3,
+                             pressure: 0.12 + CGFloat($0) * 0.08)
+            }, channels: .pressureOnly)
 
-        let grouped = RasterLayerTexture(size: Self.canvasSize)
-        BrushStamper.stampStroke(into: grouped, samples: samples, brush: brush, color: .black,
-                                 brushSize: 14, brushOpacity: 1, random: DabRandom(seed: 4242))
+            let grouped = RasterLayerTexture(size: Self.canvasSize)
+            BrushStamper.stampStroke(into: grouped, samples: samples, brush: brush, color: .black,
+                                     brushSize: 14, brushOpacity: 1, random: DabRandom(seed: 4242))
 
-        let direct = RasterLayerTexture(size: Self.canvasSize)
-        let walk = BrushStamper.bake(samples: samples, brush: brush, color: .black, brushSize: 14,
-                                     brushOpacity: 1, random: DabRandom(seed: 4242))
-        XCTAssertGreaterThan(walk.dabs.count, 10, "Setup: there are dabs, at a range of widths")
-        XCTAssertGreaterThan(Set(walk.dabs.map(\.radius)).count, 5,
-                             "Setup: the size row is actually moving the dabs' widths")
-        for dab in walk.dabs {
-            guard case .round(let hardness) = dab.tip else { continue }
-            direct.stampCircle(at: dab.center, radius: dab.radius, color: dab.color,
-                               alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
+            let direct = RasterLayerTexture(size: Self.canvasSize)
+            let walk = BrushStamper.bake(samples: samples, brush: brush, color: .black, brushSize: 14,
+                                         brushOpacity: 1, random: DabRandom(seed: 4242))
+            XCTAssertGreaterThan(walk.dabs.count, 10, "\(label): there are dabs, at a range of widths")
+            XCTAssertGreaterThan(Set(walk.dabs.map(\.radius)).count, 5,
+                                 "\(label): the size row is actually moving the dabs' widths")
+            // **The setup assertion that makes the asymmetric arms discriminating**: the dabs really
+            // do leave the centreline on the axis this arm asked for. The samples run along
+            // (4, 3)/5, so the perpendicular distance from that line is the across displacement and
+            // nothing else — an along-only brush leaves it at zero, and an across-only brush must
+            // not. Without this an arm could bound nothing because it scattered nothing.
+            let perpendicular = walk.dabs.map { dab in
+                abs((dab.center.x - 8) * 0.6 - (dab.center.y - 14) * 0.8)
+            }.max() ?? 0
+            if across > 0 {
+                XCTAssertGreaterThan(perpendicular, 3,
+                                     "\(label): the dabs must actually leave the centreline sideways")
+            } else {
+                XCTAssertLessThan(perpendicular, 0.001,
+                                  "\(label): an along-only brush displaces nothing across the stroke")
+            }
+            for dab in walk.dabs {
+                guard case .round(let hardness) = dab.tip else { continue }
+                direct.stampCircle(at: dab.center, radius: dab.radius, color: dab.color,
+                                   alpha: dab.alpha, hardness: hardness, blendMode: dab.blendMode)
+            }
+
+            assertPixelsMatch(grouped, direct,
+                              "\(label): the merge must not clip a scattered dab that landed off the centreline")
         }
-
-        assertPixelsMatch(grouped, direct,
-                          "the merge must not clip a scattered dab that landed off the centreline")
     }
 
     /// **The clean-cut gate still refuses a brush that would not remove the ink outright**, which is
@@ -1679,7 +1705,8 @@ final class BrushEngineLogicTests: XCTestCase {
         var solid = TestBrushes.hardRound
         solid.dab.hardness = 1
         solid.dab.flow = 1
-        solid.dab.scatter = 0
+        solid.dab.scatterAcross = 0
+        solid.dab.scatterAlong = 0
         solid.modulations = BrushModulations()
 
         XCTAssertTrue(VectorEraser.supportsCleanCut(brush: solid, opacity: 1, minPressure: 1),
