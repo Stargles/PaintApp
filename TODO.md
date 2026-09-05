@@ -202,10 +202,12 @@ LAYER_TRANSFORM.md.
       opens the library of folders with its **Add brush** button, one tap selects a brush and a second tap
       on the selected one opens the editor. §2.21: **an imported brush arrives with its dynamics mapped,
       not merely its tip**, so stage 12 is an adapter onto §6's matrix rather than a bitmap reader.
-      **§7.0 is the owner's four worked examples**, and the fourth of them is not expressible: §6 sums its
-      contributions, so nothing states *"how much random wobble there is depends on pressure"*. §13 holds
-      that open and it has to be settled **before the editor starts**, because each of its three answers
-      draws a different editor.
+      **§7.0 is the owner's four worked examples**, and the fourth of them — *"how much random wobble
+      there is depends on pressure"* — could not be stated at all by a model that adds its contributions.
+      §2.22 answers it: **a row carries a second input whose reading multiplies the first**, chosen over
+      CSP's nested-amount model because the owner asked for architecture that is easy to replace and a
+      flat second slot *is* a one-row nested matrix, so nothing has to be un-built if nesting is wanted
+      later. Unbuilt; it is what stage 10's editor needs under it.
 
       **Three rulings shape what is left.** The rough ink nib is a **dynamics effect, not a tip effect** —
       §8.4, refuted by measurement — so it needs no texture and is built from §2.17's wavelength and §2.18's

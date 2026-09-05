@@ -10,25 +10,25 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first — the brush engine, and there is a decision owed before the next stage starts
 
-**[BRUSH.md](BRUSH.md) is the specification. §2 is twenty-one owner rulings — read them rather than
+**[BRUSH.md](BRUSH.md) is the specification. §2 is twenty-two owner rulings — read them rather than
 re-deriving them**, §12 is the build order with a DONE marker per stage, §13 is what is still open.
 
 **Stages 0 through 8 are merged.** TODO (37) describes what that means in one paragraph.
 
-**Do not start stage 9 or 10 by building. Settle §13's sum-versus-product question first.** §6 is
-`base + Σ amount · curve(input)` — a **sum** — and §7.0 records four worked examples the owner gave for
-the editor, of which **the fourth is not expressible**: nothing in the model states *"how much random
-wobble there is depends on pressure"*. Two rows give a pressure-driven shift **plus** a fixed-amplitude
-wobble, never a wobble whose amplitude grows as pressure falls. `density` escapes it by construction,
-which is exactly why segmentation works today and spacing jitter would not; *"pressure to taper"* is the
-same shape from the other end, since `taper` is an input rather than an output.
+**§13's sum-versus-product question is answered — §2.22, and it is unbuilt.** A modulation row gains a
+**second input whose reading multiplies the first**, so `output = base + Σ amount · curve(input) ·
+reading(second)`. The owner handed the choice back — *"i really don't know, your call ... clean
+architecture is critical so it could be replaced easily"* — and that last clause is what chose it over
+CSP's nested `amount`: a flat second slot is one multiply in `Brush.dabValues`, which is the hot per-dab
+loop, and it **is** a one-row nested matrix, so nesting can subsume it later with nothing un-built.
+Build it before the editor; §2.22 carries the two traps (a row with `random` in *both* slots needs a
+second channel, and the second input is not curved).
 
-Three answers, none chosen: a row's `amount` becomes itself a small matrix (one level of nesting, CSP's
-model); a row gains a **second** input whose reading multiplies the first; or the answer stays *"use
-`density`"*. **Each draws a different editor** — a row that opens into rows, two input pickers per row,
-or neither — so the editor cannot be designed before it is answered. The cost is not the editor but
-`Brush.dabValues`, the hot per-dab loop, which is one pass over a flat array today. **Put it to the
-owner with pictures**, per their standing instruction 7.
+**The owner's steer for what comes next is explicit**: *"Get something working that i can interact with
+on the ipad and ill tell you if i want changes."* So the editor and the library — §2.20's brushes menu,
+reached by a second tap on the already-selected brush icon — are worth more than any amount of offline
+brush tuning, and §12's ordering of the library before the editor should be re-read against that rather
+than followed out of habit.
 
 **Then stage 9, and it is driven by contact sheet.** Render candidates through the real stamper, put
 them in front of the owner, build only what they pick. That is the loop that settled §8.4 and it is the

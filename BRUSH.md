@@ -227,6 +227,33 @@ rows, and what it does not state is left at the neutral rather than guessed. The
 available"* is the whole licence for that asymmetry — a brush that lands with three rows and an honest
 tip is right, and one that lands with eleven invented ones is not.
 
+**2.22 A modulation row carries a second input, and its reading multiplies the first.** §6 becomes
+`output = base + Σ amount · curve(input) · reading(second)`, where the second input is optional and its
+absence reads 1. That is the smallest thing that says *"how much random wobble there is depends on
+pressure"* — §7.0's fourth worked example, which the additive form could not state at all.
+
+Owner: *"i really don't know, your call. Get something working that i can interact with on the ipad and
+ill tell you if i want changes. Thus clean architecture is critical so it could be replaced easily."*
+**The last sentence is what chose between the three candidates**, not expressiveness. A nested `amount`
+— one row opening into its own rows, which is CSP's model — is strictly more expressive and is the
+wrong first answer here: it makes `Brush.dabValues` recursive, and that is the hot per-dab loop, one
+pass over a flat array. A second slot is a **flat** field, one multiply in the loop that already exists,
+one picker per row in the editor. And it is replaceable in the exact sense the owner asked for: a second
+slot **is** a one-row nested matrix, so if nesting is wanted later the slot becomes its degenerate case
+and nothing is un-built.
+
+**The second input is not a second row, and the difference is the whole point.** Two rows *add*, so they
+give a pressure shift **plus** a fixed-amplitude wobble; a second input *scales*, so the wobble's
+amplitude is what pressure moves. `density` reaches the same place by a different road — §2.18's
+coherence-lives-in-the-draw — and that road is not general, which is why segmentation works today and
+spacing jitter does not.
+
+**Two traps it carries.** A row whose *both* inputs are `random` must draw two independent values, so
+the second slot needs a channel of its own — §4's channel is derived from (output, row), and reusing it
+would square one draw rather than multiply two. And the second input is **not** curved: a curve on it
+would be a second `ResponseCurve` per row for a gain term, which is expressiveness the ask does not need
+and a second thing to keep in step.
+
 ---
 
 ## 3. The pipeline — four stages, one of them stored
@@ -1376,17 +1403,8 @@ first, which cleanly replaces the old one."*
 
 ## 13. Open
 
-- **Whether a modulation's `amount` may itself be modulated — the sum-versus-product question, and it
-  is the one the editor's design turns on.** §7.0's fourth worked example is an owner ask that §6
-  cannot express: the matrix adds contributions, so nothing states *"how much random wobble there is
-  depends on pressure"*. Three answers are on the table and none is chosen. A row's `amount` becomes
-  itself a small matrix — one level of nesting, which is CSP's model and the most expressive. A row
-  gains a **second** input whose reading multiplies the first — cheaper, and it covers both of the
-  owner's examples. Or the answer stays *"use `density`"*, which genuinely covers segmentation and
-  covers nothing else. **Decide it with pictures before §12 stage 10 starts**, because every one of
-  the three draws a different editor: the first needs a row that opens into rows, the second needs two
-  input pickers per row, the third needs neither. Note the cost of the first two is not the editor but
-  `Brush.dabValues`, which is the hot per-dab loop and is one pass over a flat array today.
+- ~~**Whether a modulation's `amount` may itself be modulated.**~~ **Answered — a row carries a second
+  input, and its reading multiplies the first.** §2.22.
 
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
