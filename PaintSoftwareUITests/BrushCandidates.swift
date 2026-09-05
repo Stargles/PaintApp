@@ -141,7 +141,7 @@ enum BrushCandidates {
                          stroke: BrushStrokeSettings(stabilization: 0.2),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.24, atZero: 0.55),
-                             BrushModulation(.size, .random(.scatterAngle, wavelength: 0.6),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(0.6)),
                                              amount: 0.14),
                              .flowFromPressure(amount: 0.15)
                          ])),
@@ -256,11 +256,11 @@ enum BrushCandidates {
                          stroke: BrushStrokeSettings(stabilization: 0.3),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.22, atZero: 0.5),
-                             BrushModulation(.size, .random(.scatterAngle, wavelength: 1.2),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(1.2)),
                                              amount: 0.16),
-                             BrushModulation(.size, .random(.scatterAngle, wavelength: 0.25),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(0.25)),
                                              amount: 0.07),
-                             BrushModulation(.scatter, .random(.scatterAngle, wavelength: 2.0),
+                             BrushModulation(.scatter, .random(.scatterAngle, .plain(2.0)),
                                              amount: 0.10),
                              .densityFromPressure(knee: 1.0 / 3, floor: 0),
                              .flowFromPressure(amount: 0.05)
@@ -275,11 +275,11 @@ enum BrushCandidates {
                          stroke: BrushStrokeSettings(stabilization: 0.3),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.16, atZero: 0.55),
-                             BrushModulation(.size, .random(.scatterAngle, wavelength: 2.5),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(2.5)),
                                              amount: 0.30),
-                             BrushModulation(.size, .random(.scatterAngle, wavelength: 0.3),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(0.3)),
                                              amount: 0.10),
-                             BrushModulation(.scatter, .random(.scatterAngle, wavelength: 1.5),
+                             BrushModulation(.scatter, .random(.scatterAngle, .plain(1.5)),
                                              amount: 0.14),
                              .densityFromPressure(knee: 0.4, floor: 0.45),
                              .flowFromPressure(amount: 0.1)
@@ -294,9 +294,9 @@ enum BrushCandidates {
                          stroke: BrushStrokeSettings(stabilization: 0.25),
                          modulations: BrushModulations([
                              .sizeFromPressure(amount: 0.2, atZero: 0.6),
-                             BrushModulation(.size, .random(.scatterAngle, wavelength: 1.5),
+                             BrushModulation(.size, .random(.scatterAngle, .plain(1.5)),
                                              amount: 0.22),
-                             BrushModulation(.scatter, .random(.scatterAngle, wavelength: 2.5),
+                             BrushModulation(.scatter, .random(.scatterAngle, .plain(2.5)),
                                              amount: 0.08),
                              .densityFromPressure(knee: 0.3, floor: 0.15)
                          ])),
@@ -383,7 +383,7 @@ enum BrushCandidates {
         let rows = brush.modulations.rows
         guard !rows.isEmpty else { return "no modulation rows" }
         return rows.map { row -> String in
-            let curve = row.curve.isLinear ? "" : "↗"
+            let curve = row.modules.contains { if case .curveRamp(let c) = $0 { return !c.isLinear }; return false } ? "↗" : ""
             return "\(short(row.output))←\(short(row.input))\(curve) \(f(row.amount, 2))"
         }.joined(separator: "  ")
     }
@@ -411,7 +411,7 @@ enum BrushCandidates {
         case .direction: return "dir"
         case .taper: return "taper"
         case .velocity: return "vel"
-        case .random(_, let wavelength): return "rnd(λ\(f(Double(wavelength), 2)))"
+        case .random(_, let r): return "rnd(λ\(f(Double(r.wavelength), 2)))"
         }
     }
 
