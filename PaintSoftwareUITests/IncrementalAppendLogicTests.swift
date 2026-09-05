@@ -248,8 +248,13 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let cut = Self.canvas(4)
         XCTAssertTrue(cut.erase(alongPath: path, brush: Self.brush(), size: 40, opacity: 1,
                                 mode: .cutPoints))
+        // **`.everything` here for a reason that is about this fixture**, not about Mode 2: since
+        // TODO (41) a cut declares `.region`, but the rectangle is derived from what the strokes it
+        // replaced last *painted*, and `cut` has never rendered so nothing has been measured. That
+        // is `Damage`'s own rule — a mutation that cannot say what it changed says `.everything` —
+        // and `RegionRepairLogicTests` pins both halves against each other.
         XCTAssertEqual(cut.lastDamage, .everything,
-                       "Mode 2 replaces strokes with the pieces it cut them into")
+                       "a cel that has never drawn itself cannot bound the damage of a cut")
     }
 
     // MARK: - (2) The fast path draws the picture the walk would
