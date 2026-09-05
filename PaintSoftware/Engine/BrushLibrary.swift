@@ -210,7 +210,8 @@ enum BrushLibrary {
 
     /// **§8.4's first answer to §2.16's rough ink ask, and it ships beside the tipped one on
     /// purpose.** All dynamics and no picture: two `size ← random` rows at two wavelengths, a
-    /// coherent `scatter`, and §2.18's `density` dropout under a pressure threshold. The two are not
+    /// coherent scatter — §2.30's two axes at one amount, which is what the isotropic row it was
+    /// authored as became — and §2.18's `density` dropout under a pressure threshold. The two are not
     /// weaker versions of each other — this one makes coarse lumps and outright breaks where the
     /// tipped nib makes a fine even tooth.
     static let roughInkBlotchy = Brush(
@@ -291,7 +292,8 @@ enum BrushLibrary {
     /// and is fixed there. But a mask with no bounding shape still has its *outer* boundary dilated
     /// by the walk, about thirty dabs deep at this spacing, so the sheet's A/B was the same picture
     /// with and without dynamics. The envelope row won it: a short-λ `size ← random` and a coherent
-    /// `scatter`, §8.4's two MEASURED-to-work mechanisms.
+    /// scatter, §8.4's two MEASURED-to-work mechanisms. The scatter is two rows since §2.30 —
+    /// `scatterAcross` and `scatterAlong` at the one amount the sheet was judged on.
     static let bristle = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-00000000001F")!,
         name: "Bristle", tip: .stamp(.builtIn(.bristleOpen)), size: 34, opacity: 0.95,

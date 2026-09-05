@@ -57,7 +57,7 @@ struct BrushEditorGroup: Hashable, Identifiable {
 /// tabs: our model has `density`, λ and §2.22's second input and Procreate has none of those, and it
 /// has Wet Mix and Bleed and we have neither.
 ///
-/// **This list is the answer to §7's *"parameters with no UI at all today"***: `scatter`, the angle's
+/// **This list is the answer to §7's *"parameters with no UI at all today"***: scatter, the angle's
 /// three contributions, `hardness`, `density` and its λ, `blendMode` and the three HSB shifts were
 /// all unreachable from any screen before stage 10, and every one of them is here. §2.30 made
 /// `scatter` two rows here as it made it two outputs: the artist reaches the frayed edge and the
