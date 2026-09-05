@@ -534,6 +534,51 @@ final class BrushModulationLogicTests: XCTestCase {
                        "an authored curve is not the pass-through")
     }
 
+
+    /// **Every shipped preset renders byte-for-byte what it rendered before §2.28.**
+    ///
+    /// The digests below were taken in a **separate worktree at `4791204`**, the commit before the
+    /// chain existed, by running this same function there and reading its printed output — not by
+    /// comparing two brushes inside one process, which measures the evaluator against itself and
+    /// would pass whatever the walk did. CLAUDE.md's *"a green assertion is only as good as its two
+    /// operands"* is the reason; §12 stage 5 records the same mistake being made on this path.
+    ///
+    /// Two stroke shapes each, because a preset's rows are pressure-driven and a flat stroke would
+    /// exercise one point of every curve.
+    func testTheFivePresetsRenderExactlyWhatTheyDidBeforeTheChain() {
+        let ramped = Self.rampStroke(from: 0.05, to: 1)
+        let flat = Self.rampStroke(from: 1, to: 1)
+        // MEASURED at 4791204 by printing them from this function.
+        let expected: [String: (UInt64, UInt64)] = [
+            "Soft Round": (4_005_986_340_422_896_468, 15_099_783_732_785_567_829),
+            "Hard Round": (857_427_189_099_703_352, 12_793_331_967_159_332_770),
+            "Pencil": (12_498_164_517_061_422_913, 2_269_653_271_545_728_849),
+            "Pen": (2_676_786_774_523_550_981, 6_432_432_205_937_772_741),
+            "Square": (9_328_559_346_825_169_403, 17_314_037_651_872_200_229)
+        ]
+        for brush in BrushLibrary.defaults {
+            let a = Self.fnv1a(Self.render(brush, ramped))
+            let b = Self.fnv1a(Self.render(brush, flat))
+            print("PRESETDIGEST \(brush.name) ramped=\(a) flat=\(b)")
+            guard let (wantA, wantB) = expected[brush.name] else {
+                return XCTFail("\(brush.name) has no digest recorded — take one at the base commit")
+            }
+            XCTAssertEqual(a, wantA, "\(brush.name) on a pressure ramp must render what it did at 4791204")
+            XCTAssertEqual(b, wantB, "\(brush.name) at full pressure must render what it did at 4791204")
+        }
+    }
+
+    /// FNV-1a over the rendered bytes. A digest rather than the array, so the expectation is five
+    /// numbers a person can read rather than a megabyte of pixels.
+    static func fnv1a(_ bytes: [UInt8]) -> UInt64 {
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+        for byte in bytes {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        return hash
+    }
+
     // MARK: - The random channel is derived, not authored
 
     /// **Two `random` rows on one output draw different values.** BRUSH.md §4: with no stream there is

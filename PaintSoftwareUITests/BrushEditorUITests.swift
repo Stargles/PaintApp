@@ -94,13 +94,14 @@ final class BrushEditorUITests: PaintUITestCase {
         openEditor(app)
         expand(app, "size")
 
-        // The shipped presets carry `size ← pressure` with a two-key ramp, so the first chain's
-        // curve has exactly the two nodes this test is about.
-        let graph = app.otherElements["brushPanel.curve.size.0.graph"]
+        // The shipped presets carry `size ← pressure` whose chain is one curve-ramp module holding a
+        // two-key ramp — so the identifier names the chain (`size.0`) *and the module's position in
+        // it* (`.0`), which is §2.28's addressing showing through to the accessibility tree.
+        let graph = app.otherElements["brushPanel.curve.size.0.0.graph"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5),
                       "An input's chain must show the curve ramp module — §2.24")
-        let anchored = app.otherElements["brushPanel.curve.size.0.key.0"]
-        let dragged = app.otherElements["brushPanel.curve.size.0.key.1"]
+        let anchored = app.otherElements["brushPanel.curve.size.0.0.key.0"]
+        let dragged = app.otherElements["brushPanel.curve.size.0.0.key.1"]
         XCTAssertTrue(dragged.waitForExistence(timeout: 5), "A two-key ramp draws two nodes")
 
         let curveBefore = graph.value as? String
@@ -113,53 +114,94 @@ final class BrushEditorUITests: PaintUITestCase {
                    thenDragTo: graph.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.6)))
 
         XCTAssertNotEqual(graph.value as? String, curveBefore, "The drag must reach the curve")
-        XCTAssertGreaterThan(app.otherElements["brushPanel.curve.size.0.key.1"].frame.midY,
+        XCTAssertGreaterThan(app.otherElements["brushPanel.curve.size.0.0.key.1"].frame.midY,
                              draggedBefore + 8,
                              "The node must move down the graph — a fitted axis would put it back under the finger")
-        XCTAssertEqual(app.otherElements["brushPanel.curve.size.0.key.0"].frame.midY,
+        XCTAssertEqual(app.otherElements["brushPanel.curve.size.0.0.key.0"].frame.midY,
                        anchoredBefore, accuracy: 1.5,
                        "…and the other node must not move at all, which is what a fixed axis means")
     }
 
-    // MARK: - 3. §2.22's second input
+    // MARK: - 3. §2.28's chain — add, remove, reorder
 
-    /// **The second input can be set and cleared from the screen, and setting one changes the ink.**
+    /// **A module can be added, reordered and removed by tapping, and each of the three changes the
+    /// ink.** BRUSH.md §2.28, the owner: *"does it contain the modular approach? right now there
+    /// seems to be a hardcoded order for everything. For example we may sometimes need the randomizer
+    /// first, then use curves to remap the range."*
     ///
-    /// §12 stage 10: *"a row's grammar is two input pickers rather than one, and the second needs an
-    /// explicit none, which is its default and the state every shipped preset is in"*. Before this
-    /// screen the slot was reachable only from code.
-    func testASecondInputCanBeSetAndClearedAndItChangesTheInk() throws {
+    /// The fixture is built so the **order** has a large, predictable effect rather than a subtle one.
+    /// `size ← pressure` starts as one curve-ramp module holding the preset's `0.2 → 1` ramp, and the
+    /// Amount is dragged to full. A `Scale by Sensor` module set to **Velocity** reads its neutral —
+    /// **0** — for a synthesised drag, so:
+    ///
+    /// | chain | contribution at full pressure | dab size |
+    /// |---|---|---|
+    /// | ramp | `1 · ramp(1)` = 1 | 1.5 |
+    /// | ramp → scale | `1 · ramp(1) · 0` = 0 | 0.5 |
+    /// | scale → ramp | `1 · ramp(1 · 0)` = 0.2 | 0.7 |
+    ///
+    /// So the three states are ordered `scaled < reordered < bare`, by 40% and by 3×, and **a
+    /// reordering that did not reach the engine would put the middle one on top of the bottom one.**
+    /// Asserting only that "the ink changed" would not tell those apart.
+    func testAModuleCanBeAddedReorderedAndRemovedAndEachChangesTheInk() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchCold(app))
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         openEditor(app)
         expand(app, "size")
-        let picker = app.buttons["brushPanel.second.size.0"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 5), "Every chain must offer the second slot")
-        XCTAssertEqual(picker.value as? String, "None",
-                       "None is its default and the state every shipped preset is in")
+        app.sliders["brushPanel.amount.size.0"].adjust(toNormalizedSliderPosition: 1.0)
 
-        // Set it to Velocity — which a synthesised drag reads at its neutral, 0, so the whole row's
-        // contribution is scaled away and the stroke falls back to its base width.
-        tapWhenHittable(picker, "The second-input picker")
-        tapWhenHittable(app.buttons["brushPanel.second.size.0.velocity"], "Velocity")
-        XCTAssertEqual(picker.value as? String, "Velocity", "The pick must land on the row")
+        let pad = app.otherElements["brushPanel.pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["brushPanel.module.size.0.0"].exists,
+                      "The preset's chain must already show its curve ramp as a module")
+        let bare = padStroke(app, on: pad)
+        XCTAssertGreaterThan(bare, 0, "PREMISE: a drag on the pad lays down ink")
 
-        let padded = app.otherElements["brushPanel.pad"]
-        XCTAssertTrue(padded.waitForExistence(timeout: 5))
-        let gained = padStroke(app, on: padded)
-
-        // And clear it again.
-        tapWhenHittable(picker, "The second-input picker, again")
-        tapWhenHittable(app.buttons["brushPanel.second.size.0.none"], "None")
-        XCTAssertEqual(picker.value as? String, "None", "…and an explicit None must clear it")
+        // Add a Scale by Sensor module and point it at Velocity.
+        tapWhenHittable(app.buttons["brushPanel.addModule.size.0"], "Add module")
+        tapWhenHittable(app.buttons["brushPanel.addModule.size.0.scale"], "Scale by Sensor")
+        let secondCard = app.staticTexts["brushPanel.module.size.0.1"]
+        XCTAssertTrue(secondCard.waitForExistence(timeout: 5),
+                      "Adding a module must put a second card in the chain")
+        XCTAssertEqual(secondCard.label, "2. Scale by Sensor",
+                       "…and it must say where it sits, because the position is the feature")
+        let sensor = app.buttons["brushPanel.moduleSensor.size.0.1"]
+        tapWhenHittable(sensor, "The module's sensor picker")
+        tapWhenHittable(app.buttons["brushPanel.moduleSensor.size.0.1.velocity"], "Velocity")
+        XCTAssertEqual(sensor.value as? String, "Velocity")
 
         app.buttons["brushPanel.padClear"].tap()
-        let cleared = padStroke(app, on: padded)
-        XCTAssertGreaterThan(cleared, gained,
-                             "A second input attenuates: with it the pressure row contributes nothing, so the same gesture lays down less ink")
+        let scaled = padStroke(app, on: pad)
+        XCTAssertLessThan(scaled, bare * 2 / 3,
+                          "A scale by a sensor reading 0 must take the row's whole contribution away")
+
+        // Move it up. The two cards must swap names — the drawn assertion — and the ink must land
+        // between the other two states.
+        tapWhenHittable(app.buttons["brushPanel.moduleUp.size.0.1"], "Move the module up")
+        XCTAssertEqual(app.staticTexts["brushPanel.module.size.0.0"].label, "1. Scale by Sensor",
+                       "The module the artist moved up must be drawn first")
+        XCTAssertEqual(app.staticTexts["brushPanel.module.size.0.1"].label, "2. Curve Ramp",
+                       "…and the one it passed must be drawn second")
+
+        app.buttons["brushPanel.padClear"].tap()
+        let reordered = padStroke(app, on: pad)
+        XCTAssertGreaterThan(reordered, Int(Double(scaled) * 1.1),
+                             "Scaling first and shaping after lets the ramp's floor lift the result, "
+                             + "so the same two modules in the other order lay down more ink")
+        XCTAssertLessThan(reordered, bare,
+                          "…and still less than the chain with no scale in it at all")
+
+        // And remove it: the chain goes back to one module and the ink comes back.
+        tapWhenHittable(app.buttons["brushPanel.moduleRemove.size.0.0"], "Remove the module")
+        XCTAssertTrue(app.staticTexts["brushPanel.module.size.0.1"].waitForNonExistence(timeout: 5),
+                      "Removing a module must take its card away")
+        XCTAssertEqual(app.staticTexts["brushPanel.module.size.0.0"].label, "1. Curve Ramp")
+
+        app.buttons["brushPanel.padClear"].tap()
+        let removed = padStroke(app, on: pad)
+        XCTAssertGreaterThan(removed, reordered,
+                             "…and the ink must come back, or the module was not really removed")
     }
 
     // MARK: - 4. Persistence

@@ -221,6 +221,53 @@ final class DabCostBench: XCTestCase {
         measureWalk("density dropout", brush: sparse)
     }
 
+    /// **BRUSH.md §2.28's chain, and this is the number the ruling was accepted on.**
+    ///
+    /// `Brush.dabValues` was one pass over a flat array of *(input, curve, amount, second)* rows; a
+    /// chain makes it a nested walk, and §2.28 says plainly that the cost *"is unmeasured and must be
+    /// measured, not assumed"*. Six chains carrying **eleven modules between them**, which is far more
+    /// than any shipped preset and more than an artist is likely to build: compare it against
+    /// `six rows` above, whose chains carry one module each.
+    func testAHeavilyChainedBrush() {
+        var chained = BrushLibrary.hardRound
+        chained.modulations = BrushModulations([
+            BrushModulation(.size, .pressure,
+                            modules: [.curveRamp(.ramp(from: 0.4, to: 1)),
+                                      .scale(.random(.scatterAngle, .plain(2))),
+                                      .curveRamp(.threshold(knee: 0.4))],
+                            amount: 0.4),
+            BrushModulation(.flow, .pressure,
+                            modules: [.curveRamp(.ramp(from: 0.2, to: 1)), .scale(.velocity)],
+                            amount: 0.1),
+            BrushModulation(.scatter, .velocity,
+                            modules: [.scale(.random(.scatterAngle, .plain(1)))], amount: 0.3),
+            BrushModulation(.spacing, .tiltAngle,
+                            modules: [.curveRamp(.threshold(knee: 0.5))], amount: 0.05),
+            BrushModulation(.hardness, .tiltDirection,
+                            modules: [.scale(.pressure), .curveRamp(.ramp(from: 0, to: 1))],
+                            amount: -0.2),
+            BrushModulation(.hue, .random(.scatterAngle, .plain(3)),
+                            modules: [.scale(.taper)], amount: 0.1)
+        ])
+        measureWalk("six chains, eleven modules", brush: chained)
+    }
+
+    /// **§2.28's octaves, which are the one part of the chain that costs a *hash* rather than a
+    /// multiply.** Each octave is one more `DabRandom.unit` — a splitmix64 avalanche pair and a
+    /// smoothstep — so this is the marginal cost of a scale the artist asked for. Three brushes, so
+    /// the slope is visible rather than inferred: one octave, four, and the eight the type caps at.
+    func testAMultiOctaveRandomiser() {
+        for octaves in [1, 4, BrushRandomiser.maximumOctaves] {
+            var noisy = BrushLibrary.hardRound
+            noisy.modulations = BrushModulations(noisy.modulations.rows + [
+                BrushModulation(.size, .random(.scatterAngle,
+                                               BrushRandomiser(wavelength: 3.5, octaves: octaves)),
+                                amount: 0.2)
+            ])
+            measureWalk("randomiser, \(octaves) octave\(octaves == 1 ? "" : "s")", brush: noisy)
+        }
+    }
+
     /// §6's colour outputs, which are the one thing on this path that can defeat a dab cache — see
     /// `BrushColorShift`. Timed on the walk, so what is reported here is the shift arithmetic alone;
     /// the cache cost lands in the rasterizer and is stated in PERFORMANCE.md rather than measured here.

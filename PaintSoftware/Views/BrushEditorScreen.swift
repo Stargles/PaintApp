@@ -475,7 +475,13 @@ struct BrushEditorScreen: View {
         .padding(10)
         .background(Color.white.opacity(0.06))
         .cornerRadius(6)
-        .accessibilityIdentifier("\(idPrefix).moduleCard.\(moduleID)")
+        // **No identifier on this `VStack`, deliberately.** An `accessibilityIdentifier` on a SwiftUI
+        // *container* is inherited by every descendant rather than making an element of its own —
+        // CLAUDE.md records it, `StrokeSettingsPanel` was bitten by it, this screen's own root
+        // `Rectangle` exists because it was bitten by it again, and putting one here for the fourth
+        // time made **every control inside a module answer to the card's name**: the module's label
+        // and its curve graph both vanished from the tree while the card was plainly on screen and
+        // worked perfectly by hand. The label below is this module's element.
     }
 
     /// **λ, octaves and falloff** — §2.17's wavelength and §2.28's octaves, wherever a randomiser
