@@ -218,9 +218,8 @@ enum BrushLibrary {
     /// coherent scatter — §2.30's two axes at one amount, which is what the isotropic row it was
     /// authored as became — and a `density` dropout under a pressure threshold, written as §2.32's
     /// gate: a base sitting on it, the pressure curve at half gain and a randomiser at minus a half.
-    /// The two are not
-    /// weaker versions of each other — this one makes coarse lumps and outright breaks where the
-    /// tipped nib makes a fine even tooth.
+    /// The two are not weaker versions of each other — this one makes coarse lumps and outright
+    /// breaks where the tipped nib makes a fine even tooth.
     static let roughInkBlotchy = Brush(
         id: UUID(uuidString: "B7051000-0000-4000-A000-00000000001C")!,
         name: "Rough Ink — Blotchy", tip: .round, size: 11,
