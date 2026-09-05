@@ -227,9 +227,10 @@ rows, and what it does not state is left at the neutral rather than guessed. The
 available"* is the whole licence for that asymmetry — a brush that lands with three rows and an honest
 tip is right, and one that lands with eleven invented ones is not.
 
-**2.22 A modulation row carries a second input, and its reading multiplies the first.** **BUILT.** §6
-becomes `output = base + Σ amount · curve(input) · reading(second)`, where the second input is optional
-and its absence reads 1. That is the smallest thing that says *"how much random wobble there is depends on
+**2.22 A modulation row carries a second input, and its reading multiplies the first.** **BUILT, and
+its `second` field became §2.28's scale module on 2026-09-05 — the ruling below survives inside it
+unchanged and only its storage moved.** §6 became `output = base + Σ amount · curve(input) ·
+reading(second)`, where the second input is optional and its absence reads 1. That is the smallest thing that says *"how much random wobble there is depends on
 pressure"* — §7.0's fourth worked example, which the additive form could not state at all.
 
 Owner: *"i really don't know, your call. Get something working that i can interact with on the ipad and
@@ -490,10 +491,42 @@ octave is one hash and one lerp inside a module that is already resolved.
 survives a split, a refit, a spacing edit and an eraser punch for the reason §2.13 gives, and each octave
 needs its own channel or two of them are the same number twice.
 
-**The cost is unmeasured and must be measured, not assumed.** `Brush.dabValues` is the hot per-dab loop
-and is one pass over a flat array today; a chain makes it a nested walk. Stage 7 MEASURED the whole
-matrix at 1.42 µs of a 5.44 µs dab, so there is headroom — but PERFORMANCE.md's rule is that a figure
-carries MEASURED or INFERRED, and *"there is headroom"* is not a figure.
+**BUILT 2026-09-05.** `BrushModulation` is *(output, input, [BrushModule], amount)`; `BrushModule` is
+`.curveRamp(ResponseCurve)` and `.scale(BrushInput)`; `BrushRandomiser` is *(λ, octaves, falloff)* and
+`BrushInput.random` carries one. The editor's chain is **add / remove / reorder** over the stored list,
+with no mapping layer between what is drawn and what is evaluated.
+
+**Three modules were asked for and two cases shipped, which is a refutation rather than a shortfall.**
+`.random` is a `BrushInput` — §13's own *"a pure randomiser is an input, not a module"* — so
+`.scale(.random(…))` **is** the randomiser, and a third case would be two spellings of one behaviour
+with two codecs and two channel derivations to keep in step, which is §10's two-ways-to-compute trap.
+The *editor* offers three things to add, because that is the artist's vocabulary; the storage has two,
+because that is how many behaviours there are. It also means one randomiser description serves both
+positions, so §8.4's rough nib — a pure `random` input — gets octaves for free rather than being the one
+place that cannot have them.
+
+**Order is the artist's, and it is the whole feature**: a chain of *curve then randomiser* and the same
+two modules reversed render different ink, MEASURED, and the difference is not subtle — with a threshold
+curve whose floor is 0.35, randomising first and shaping after contributes **29×** what shaping first and
+randomising after does at a low reading, because the scaled-down value lands where the curve's floor
+lifts it back.
+
+**What did not move**: §4's positional hash, and every shipped preset's pixels. A chain position is a
+whole *plane* of channels (`slotStride`, `1 << 20`) and an octave a whole plane above that
+(`octaveStride`, `1 << 40`), so the three coordinates read as digits of one base-2²⁰ number and no chain
+an artist can build makes two of them meet. **Position 0 is the input and position *m + 1* is module
+*m*, which is why §2.22's second slot and a chain's first randomiser draw the identical channel**;
+**octave 0 is the channel itself**, so a one-octave randomiser is the single draw it replaces to the
+bit. The five presets were pinned by rendering them in a **separate worktree at the commit before this**
+and comparing digests, not by comparing two brushes in one process.
+
+**The cost, MEASURED** — `4791204` against `tmp/chain`, same device, back to back, idle machine;
+PERFORMANCE.md §11.2b carries the table and the provenance. An empty chain costs **nothing** (0.304 →
+0.305 µs/dab, and the module loop is not entered); a module costs about **0.06 µs**; the whole re-walk
+of a shipped preset went **5.652 → 5.893 µs a dab, +4.3%**. **An octave costs 0.24 µs** and is the
+steepest thing on the path — eight of them is +1.7 µs, about a third of a dab — which is why the count
+is capped at 8 and sits behind a slider the artist moves deliberately. A deliberately extreme brush,
+six chains carrying eleven modules, measures **10.98 µs a dab** against a shipped preset's 2.39.
 
 **2.27 The library must be relocatable, and the architecture owes that before the feature exists.**
 Owner: *"Right now all the files are stored internally on the app, which means that if the app gets
@@ -1042,20 +1075,27 @@ a decision could have preserved.
 
 ## 6. The brush model — a modulation matrix — BUILT, §12 stage 7
 
-Every parameter is `base value + [modulation]`, where a modulation is **(input, curve, amount, second
-input)**. That is the brief's *"every parameter should be able to be sensor driven"*, and it is the CSP
-model.
+Every parameter is `base value + [modulation]`, where a modulation is **(input, an ordered list of
+modules, amount)** — §2.28. That is the brief's *"every parameter should be able to be sensor driven"*,
+and it is the CSP model.
 
-**The fourth of those is §2.22 and it is optional — its absence reads 1**, so a row is
-`amount · curve(input) · reading(second)` and a row without one is the plain `amount · curve(input)` it
-was before, to the bit. It is a *gain*, not a second row: two rows add, so `spacing ← random` beside
-`spacing ← pressure` gives a pressure shift **plus** a fixed-amplitude wobble, where a second input
-scales and the wobble's *amplitude* is what pressure moves. It is not curved, and for `.random` its
-channel is derived from the row's position in the second slot exactly as the first slot's is (§6.2).
+**The list is §2.28 and it replaced a fixed `curve` and `second` field on 2026-09-05.** A chain is
+`amount · chain(input)` where the sensor's reading passes through the modules **in the order the artist
+put them**: `.curveRamp` shapes it, `.scale` multiplies it by another sensor's reading. The row that
+came before — `amount · curve(input) · reading(second)` — is exactly the chain
+`[.curveRamp, .scale]`, so nothing an existing brush said became unsayable and the presets' pixels did
+not move; what became sayable is the other order.
 
-**What shipped**: `BrushOutput`, `BrushModulation` (whose `second` is §2.22's gain), `BrushModulations`
-and `ResponseCurve` in `Engine/BrushModulation.swift` and `Engine/ResponseCurve.swift`; `Brush` regrouped into `dab`, `stroke`
-and `modulations`; `BrushDynamics` **deleted in full**. `Brush.dabValues(_:)` is the evaluator and
+**A scale attenuates.** Its reading is clamped to `0…1` and `amount` is still the only signed,
+unclamped term (§2.22, unchanged by the move). Two chains on one output *add*, so `spacing ← random`
+beside `spacing ← pressure` gives a pressure shift **plus** a fixed-amplitude wobble, where a scale
+*multiplies* and the wobble's amplitude is what pressure moves. A `.random` in any position has its
+channel derived from that position (§6.2).
+
+**What shipped**: `BrushOutput`, `BrushModulation`, `BrushModule`, `BrushModulations` and
+`ResponseCurve` in `Engine/BrushModulation.swift` and `Engine/ResponseCurve.swift`, and
+`BrushRandomiser` in `Engine/DabRandom.swift`; `Brush` regrouped into `dab`, `stroke` and
+`modulations`; `BrushDynamics` **deleted in full**. `Brush.dabValues(_:)` is the evaluator and
 `BrushStamper.stampDab` turns its answer into a stamp. Every sentence below that is not marked
 otherwise describes what is there.
 
@@ -1201,11 +1241,19 @@ and §8.4's rough nib is *built* from several `random` rows at different λ. So 
 struct now rather than an enum — the three intrinsic draws keep their raw values 1–3, §2.18's dropout
 takes 4, and `DabRandom.Channel.modulation(_:row:)` mints one per *(output, position)* from 16 up.
 
-**§2.22's gain slot is minted the same way, one plane up.** `modulation(_:row:slot:)` offsets slot 1 by
-`1 << 20` — past the whole matrix's span, so the two planes cannot meet at any row count — and
-`BrushModulations` rewrites the second slot's channel on construction and on decode exactly as it
-rewrites the first's. Without that rewrite a row randomised on both sides could square a single draw
-rather than multiply two, which is the trap §2.22 names.
+**Every position in a chain is minted the same way, one plane up each.** `modulation(_:row:slot:)`
+offsets by `1 << 20` per position — past the whole matrix's span, so the planes cannot meet at any row
+count — and `BrushModulations` rewrites *every* position's channel on construction and on decode, not
+just the input's. **Position 0 is the input and position *m + 1* is module *m***, which is why §2.22's
+second slot and a chain's first randomiser are the same channel and no randomised brush re-rolled when
+the chain replaced the row. Without the rewrite a chain randomised twice could square a single draw
+rather than multiply two, which is the trap §2.22 named and §2.28 inherits at every position.
+
+**§2.28's octaves are a third digit.** `DabRandom.Channel.octave(_:)` offsets by `1 << 40`, so an
+address is (matrix span, position, octave) in base 2²⁰ and is unique as long as each is under 2²⁰ —
+which no brush approaches. **Octave 0 is the channel unchanged**, so a one-octave randomiser draws
+exactly what the single draw it replaces drew, and the reordering cost is the one already stated: moving
+a randomiser along a chain moves the plane it draws from, so both it and whatever it passed re-roll.
 
 **Derived rather than stored** is what makes "no two rows share a channel" a fact instead of an
 invariant somebody maintains, and `BrushInput`'s codec leaves the channel off the wire entirely so a
@@ -1373,8 +1421,17 @@ reference actually shows, and which of it is a decision rather than decoration:
 
 **BUILT 2026-09-05.** `Views/BrushEditorScreen.swift` is the editor, `Views/ResponseCurveEditorView.swift`
 the curve ramp's control, `Views/BrushScratchPadView.swift` the pad, and `Models/BrushEditorModel.swift`
-everything a `View` cannot be asked about — the catalog, the chain, `BrushChainLimit` and
+everything a `View` cannot be asked about — the catalog, `BrushModuleKind`, `BrushChainLimit` and
 `ResponseCurveEditing`. `BrushEditorView`, the six-slider shell of the day before, is **deleted**.
+
+**And the chain became real the same day.** The screen first shipped drawing a *fixed* curve-then-gain
+shape with sentences explaining why the order could not change; the owner read those sentences and asked
+for the modular approach, which is §2.28. What is there now is **add / remove / reorder** over
+`BrushModulation.modules` — `BrushModulationChain`, the type that mapped a row onto a chain, is
+**deleted**, because the storage *is* the chain and a mapping layer is what hid the limit in the first
+place. Reordering is two arrow buttons rather than a drag: the module list sits inside a `ScrollView`
+inside a column that also scrolls, a long-press-to-reorder there fights both, and two taps are reachable
+from the accessibility tree where a drag inside two scroll views is not.
 
 **It covers the screen** (§2.24) and it is a layer of `DrawingView`'s own tree rather than a
 `.fullScreenCover`. The reason the shell was a push holds for the screen: the Size slider raises a
@@ -1441,6 +1498,13 @@ places by ruling, drawn as two different controls.
   grammar, one codec; `ResponseCurveEditing.y`/`.value` *call* `TimelineGraphBand`'s so the two surfaces
   cannot drift; and `hitRadius`, `tapSlop`, `isTap`, `lineWidth` and `keyRadius` are that type's
   constants, which it took from `CurveEditor` in turn. Only the `Path`s are new.
+
+**A third defect was found by driving §2.28's module list, and it is this file's own trap for the
+fourth time.** The module card's `VStack` carried an `accessibilityIdentifier`, so **every control
+inside a module inherited it** — the module's own label and its curve graph both vanished from the
+accessibility tree while the card was plainly on screen and worked perfectly by hand. CLAUDE.md records
+this, `StrokeSettingsPanel` was bitten by it, the screen's root `Rectangle` exists because it was bitten
+by it, and it happened again one file down. The card carries no identifier now; its label does.
 
 **Two defects were found by driving it, and neither could have been found by a model assertion.**
 
@@ -1600,7 +1664,18 @@ reads as a rendering artifact rather than as ink.
 no tip texture at all**, which is why §2.17 and §2.18 are where it lives. Two negative results from the same
 measurement, both worth not re-deriving: coherent `scatter` and a pure perpendicular offset are
 indistinguishable, so there is no `offset` output; and several `random` rows at different λ give multi-scale
-roughness, so there is no octave or spectral-slope parameter.
+roughness, so there is no **spectral-slope** parameter.
+
+**The octave half of that second result was reversed on 2026-09-05, and saying why matters.** The
+measurement refuted a *spectral slope* — a knob that tilts the mix — and it was right to. What it
+quietly assumed was the **several-rows spelling**, and §2.24's one-input-per-output makes that spelling
+unavailable: it asks an artist to add three chains and halve each amount by hand. §2.28's randomiser
+carries a **count** and a **falloff** instead, which is the same arithmetic in one object and one
+control, and MEASURED **cheaper** than the rows it replaces — an octave is 0.24 µs (one more hash and
+one lerp inside a module already resolved) against a whole chain's sensor read and hash for a row. Its
+own band-limiting is MEASURED rather than asserted: three octaves at a falloff of 0.5 tilt the field's
+structure function by **1.48×** against a predicted 1.51, and stay a sixteenth of the way to a fresh
+draw per dab.
 
 So: **generate Basics, Sketching, Inking and Painting; source CC0 only for Texture**, where scanned grunge
 and splatter are genuinely hard to fake.
@@ -1981,7 +2056,8 @@ first, which cleanly replaces the old one."*
    committed, not a runtime cost — a tip is a small alpha bitmap and generating it per launch buys nothing.
 10. **DONE — the editor.** §2.24, §7 and §7.2. A full screen rather than a panel; the outputs are the
     index, grouped, each expanding in place into a base slider and however many chains drive it; a chain
-    is an input, a curve ramp and a randomiser or gain, which is one stored row read left to right; and a
+    is an input and an ordered list of modules the artist adds to, reorders and removes (§2.28, which
+    landed the day after and replaced the fixed curve-then-gain shape this stage first shipped); and a
     drawing pad the artist can try the result on. Taken **out of order** — §12 put it after the library
     and the library is stage 9 — because §2.24 arrived from the owner and the shell it replaced was one
     day old. Nothing here depends on the group tree: a brush the artist makes still lands in a group
@@ -1990,12 +2066,13 @@ first, which cleanly replaces the old one."*
     moves what `dabValues` resolves, the curve's axis is fixed and a dragged key moves while its
     neighbour does not, a key cannot be dragged onto its neighbour, an empty curve materialises to the
     identity **bit-exactly**, a curve taken below two keys is emptied rather than left a constant, the
-    row accessors re-mint §6.2's channels, and a chain round-trips an ordinary row while
-    `BrushChainLimit` names the four places it cannot — and by `BrushEditorUITests` (5), every one of
-    them from a cold launch with the library file deleted: an edit reaches the ink on the canvas, a
-    curve node moves on screen while the other node does not, the second input can be set and cleared
-    and it changes what is drawn, an edit survives a **relaunch**, and the pad draws with the brush as
-    edited rather than as it was when the screen opened.
+    row accessors re-mint §6.2's channels, every module kind the menu offers reads back as itself, a
+    reorder re-mints the randomisers' planes, and `BrushChainLimit` is down to the one place a chain
+    still cannot reach — and by `BrushEditorUITests` (5), every one of them from a cold launch with the
+    library file deleted: an edit reaches the ink on the canvas, a curve node moves on screen while the
+    other node does not, **a module can be added, reordered and removed and each changes the ink**, an
+    edit survives a **relaunch**, and the pad draws with the brush as edited rather than as it was when
+    the screen opened.
     **Three of §7.2's instructions did not survive contact and §7.2 records all three** — the pad cannot
     be a `StrokeCanvasView`, the curve's y axis is the *shaped reading's* `0…1` rather than the output's
     range, and neither existing curve control could be pointed at a `ResponseCurve`. **Two defects were
@@ -2052,32 +2129,30 @@ first, which cleanly replaces the old one."*
   behaviour a compile error at both sites) or a field beside it — and that is answerable only against a
   real second behaviour, not before.
 
-- **Where §2.24's chain and §6's rows disagree, and what closing the gap would cost.** The two agree on
-  the ordinary case rather than merely being mappable: a row is `amount · curve(input) · reading(second)`,
-  which read left to right **is** the owner's *"select the input … then it passes through an
-  input/output curve ramp module, then a randomizer module"*. `BrushChainLimit` is the list of what does
-  not fit, it is four entries, and the editor **shows the relevant sentence** rather than offering a
-  control the engine cannot honour:
-  - **The module order is fixed.** The row evaluates curve-then-gain and §2.22 rules the second slot
-    uncurved, so *"a randomiser, then a curve ramp"* — randomise, then shape the result — cannot be
-    stated at all. Closing it means a `ResponseCurve` on the second slot, which §2.22 already declined.
-  - **One curve ramp per chain**, because there is one `curve` field. Two in series would need a second
-    one and a rule for their order.
-  - **One randomiser per chain**, because there is one `second` field. Two independent wobbles on one
-    output are two *rows*, which **add** rather than compose.
-  - **Several chains on one output are summed, not chained.** The owner's *"for each output there can
-    only be one input for now"* is true of everything the shipped set carries and is **not enforced by
-    the storage** — §8.4's rough nib is several `random` rows at different λ on one output. So the
-    editor lists however many rows there are rather than hiding the extras behind a picker that can name
-    one, and its `Add input` adds a row.
-  In the other direction, the editor shows one thing the owner's sketch does not name: a **pure
-  randomiser is an input**, not a module, because `.random` is a `BrushInput`. A wobble with no sensor
-  behind it is `Input: Random`, which is the shape the storage has.
-  **The storage was deliberately not changed to fit**, and nothing here is a recommendation to change
-  it: §2.22 chose the flat second slot over a nested `amount` *because* the owner asked for an
-  architecture that could be replaced, and a slot is a one-row nested matrix's degenerate case. If
-  nesting is ever wanted, the four entries above collapse together and the editor's chain becomes what
-  it already draws.
+- ~~**Where §2.24's chain and §6's rows disagree, and what closing the gap would cost.**~~ **Closed by
+  §2.28, built 2026-09-05, and three of its four entries are gone rather than reworded.** A modulation is
+  an input and an ordered `[BrushModule]`, so the module order is the artist's, a chain may carry as many
+  curve ramps as it likes and as many randomisers as it likes. `BrushChainLimit` is one case now —
+  **several chains on one output are summed, not chained** — which is a fact about how the *matrix* adds
+  outputs rather than about how one chain evaluates, and closing it would be a change to the former.
+  Two things the build settled that the entry did not predict. **The third module is the second with a
+  random input**: `.random` is a `BrushInput`, so `.scale(.random(…))` *is* the randomiser and a separate
+  case would be two spellings of one behaviour — the editor offers three kinds and the storage has two.
+  And **`amount` multiplies last now**, `amount · (chain)` where the row was `(amount · curve) · second`;
+  floating-point multiplication is not associative, so the two differ by an ulp of the *contribution* for
+  a chain carrying a scale, and identically for every chain that does not — which is every shipped preset,
+  pinned digest-for-digest against a worktree at the commit before.
+  **What it cost is MEASURED, not assumed** — PERFORMANCE.md §11.2b. An empty chain is free, a module is
+  ~0.06 µs, a shipped preset's whole re-walk went **5.652 → 5.893 µs a dab (+4.3%)**, and an **octave is
+  0.24 µs**, the steepest purchase on the path, which is why the count caps at 8.
+
+- **Whether the octave cap of 8 is the right number, and whether a falloff above 1 should ever be
+  reachable.** Both are INFERRED from arithmetic rather than from a drawing. The cap is where λ/2ᵏ falls
+  below the tightest spacing the app can walk (0.027 widths against 0.02 at §2.17's shipped λ of 3.5), so
+  every octave past it is per-dab hash noise wearing a wavelength's name — but nobody has drawn with
+  eight, and the honest test is a contact sheet rather than an inequality. The falloff is clamped to
+  `0…1` because above 1 the *finest* octave is the loudest, which is a high-pass and a different feature;
+  §8.4's refuted spectral slope is the neighbouring idea and the reason to be careful about reopening it.
 
 - **A brush imported into one document and used in another.** §12 stage 6 settled where the table lives
   (`brushtable.json` in the package root) and made a document self-contained for the tips its own ink names,
