@@ -1165,6 +1165,15 @@ reference actually shows, and which of it is a decision rather than decoration:
 - **The selected brush's row is highlighted**, and a second tap on *that* row opens the editor. So the
   library's own selection state is what makes §2.20's second tap unambiguous — the gesture is "tap the
   thing that is already chosen", one level down from the tool icon's own version of it.
+- **The `+` offers two things, and only one of them existed before.** Owner: *"the create brush right
+  now makes you import a brush, but this library feature opens up the possibility of just taking you
+  straight to the edit menu of a default brush, and you being able to fully customize it, so new brush
+  should be two options: create manually, and import brush."* **Create manually** mints a brush from
+  `BrushDabSettings.default` — every output at §6's neutral, a round tip, no rows — adds it to the open
+  group, and opens §7.2's editor on it. **Import brush** is §2.21's adapter. The first is the one the
+  library makes possible: before there was a library there was nowhere for a made-up brush to live, so
+  importing was the only way to get a new one and the `+` could only mean that.
+
 - **The set name sits top-left with a chevron**, the **`+` top-right**. §8.1 already rules that the
   shipped collection and the artist's own are two different things; the chevron is where that shows
   up, and the `+` is §2.21's importer. **BUILT**: the chevron opens the *open group's* own menu —
