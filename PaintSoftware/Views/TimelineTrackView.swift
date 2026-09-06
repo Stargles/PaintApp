@@ -359,6 +359,14 @@ struct TimelineTrackView: UIViewRepresentable {
                 // two lines in a trace incomparable. See `makeUIView` for what a name buys.
                 row.nameRecognizers(poolSlot: rowViews.count)
                 contentView.addSubview(row)
+                // **This is called once per row view ever created and UIKit has no un-require API,
+                // and it still does not accumulate.** Two investigations of TODO (39)(c) reached
+                // the opposite conclusion from the same two facts, so the measurement is written
+                // down rather than left to be re-derived: `_failureRequirements` is a **weak** set
+                // that deduplicates, and `UIGestureRecognizer` does not retain its action target,
+                // so a row that leaves the pool below takes its recogniser and its entry with it.
+                // `TimelineGestureArbitrationLogicTests` pins that through public API — it goes red
+                // if a future UIKit starts retaining, which is the day this *would* become a leak.
                 scrollView.panGestureRecognizer.require(toFail: row.panRecognizer)
                 rowViews.append(row)
             }

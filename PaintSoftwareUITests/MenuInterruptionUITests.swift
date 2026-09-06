@@ -138,7 +138,70 @@ final class MenuInterruptionUITests: PaintUITestCase {
             """)
     }
 
+    /// **TODO (39)(c), the timeline freeze — this is what the owner's trace is, and it is a
+    /// characterization of a defect that is still open.** It goes red when somebody fixes it, and
+    /// that is the point: the fix has to be a deliberate one, and this is the note that says so.
+    ///
+    /// The touch measurement is the same one this class exists for, taken on the *other* family. A
+    /// `.popover` swallows a **drag** that lands outside it completely — the timeline does not
+    /// scroll, the ruler does not scrub, and the popover does not go away — while it dismisses on a
+    /// **tap**. So an artist who raises a timeline menu by accident (a second tap where the playhead
+    /// already is, which is `handleTapOnCel`'s own two-stage design) and then reacts by swiping the
+    /// track gets a timeline that is dead for as long as they keep swiping.
+    ///
+    /// MEASURED against the owner's `docs/bug-evidence/timeline-freeze-2026-09-06.jsonl`, which
+    /// carries exactly this: a `_UIPassthroughGateGestureRecognizer` appears at t=21.02, every
+    /// touch after it is a swipe of 6–200 pt that changes nothing (including one drag on the ruler
+    /// at t=21.98 that is carrying the ruler's own recogniser), and the app comes back the moment
+    /// the owner *taps* the toolbar at t=26.57.
+    ///
+    /// **The last two steps are the control**, and without them `cel.frame.minX == parked` would be
+    /// true of a drag that never scrolls anything. They are what make "nothing moved" a fact about
+    /// the popover rather than about this test's gesture.
+    func testADragOnTheTimelineWhileABlockMenuIsUpIsSwallowedWhole() {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let cel = app.otherElements["timeline.cel.0.0"]
+        XCTAssertTrue(cel.waitForExistence(timeout: 10))
+        let trackY = cel.frame.midY
+        let copy = app.buttons["Copy"]
+
+        let spot = cel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        spot.tap()
+        _ = app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 2)
+        spot.tap()
+        XCTAssertTrue(copy.waitForExistence(timeout: 5),
+                      "PREMISE: a second tap where the playhead already is raises the block menu")
+
+        let parked = cel.frame.minX
+        dragTimelineLeft(app, y: trackY)
+        XCTAssertEqual(cel.frame.minX, parked,
+                       "the track did not scroll — the popover ate the drag whole")
+        XCTAssertTrue(copy.exists,
+                      "and the drag did not dismiss the popover either, so the next one is eaten too")
+
+        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 700, dy: trackY)).tap()
+        XCTAssertTrue(copy.waitForNonExistence(timeout: 5),
+                      "CONTROL: the same place, tapped rather than dragged, does dismiss it")
+
+        dragTimelineLeft(app, y: trackY)
+        XCTAssertNotEqual(cel.frame.minX, parked,
+                          "CONTROL: and with the popover gone that identical drag scrolls the track, "
+                          + "so the assertion above is about the popover and not about the gesture")
+    }
+
     // MARK: - Fixture
+
+    /// A 200 pt leftward drag across the cel row, well clear of the block itself. `press(forDuration:
+    /// thenDragTo:)` rather than `swipeLeft()` because a swipe needs an element and the point of this
+    /// is to touch the track wherever the popover is not.
+    private func dragTimelineLeft(_ app: XCUIApplication, y: CGFloat) {
+        let start = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 700, dy: y))
+        start.press(forDuration: 0.02, thenDragTo: start.withOffset(CGVector(dx: -200, dy: 0)))
+        Thread.sleep(forTimeInterval: 0.5)
+    }
 
     /// Opens the layer rail, the first layer's options panel, and its blend-mode `Menu` — the pull-down
     /// `LayerUITests.testSettingLayerBlendModeShowsOnRowAndPersists` already drives, stopped one tap

@@ -304,8 +304,10 @@ twenty-six owner rulings; do not re-litigate any of them.**
 
 ## (39) The timeline freeze
 
-**Status** — (a) and (b) are fixed; the recorder now watches the timeline's own recognizers. **(c) is the whole of what is left, it did not reproduce, and the analysis it was filed
-under is wrong** — see below before spending anything on it.
+**Status** — (a) and (b) are fixed, and the recorder watches the timeline's own recognizers
+(`timeline.scroll`, `timeline.pinch`, `timeline.rulerScrub`, `timeline.graphBand`, and every row's
+`timeline.row<N>.tap` / `.press` / `.resize`). **(c) is the whole of what is left. It is now
+reproduced and its cause is known; what remains is a design decision, not an investigation.**
 
 The pinch anchors on the frame it started on at any scroll offset
 (`TimelineKeyMarkers.PinchAnchor`), and the track fills its viewport rather than stopping at the last
@@ -313,45 +315,40 @@ row (`TimelineRowLayout.contentHeight(filling:)`), so there is no dead strip and
 the bottom of the panel.
 
 **Left to build**
-- [ ] **(c) The timeline stops responding.** The owner captured it:
+- [ ] **(c) A timeline menu eats every drag on the timeline and only a tap dismisses it.**
       [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
-      is the analysis and the `.jsonl` beside it is the trace. In the fifteen seconds they describe as
-      frozen, 34 touch-downs land on a `TimelineRowView` and `currentFrame` moves twice. That much
-      holds. **What that document concludes from it does not.**
+      is the trace, the reproduction and the two refutations; read its last three sections.
 
-      **The "detached row view" reading is refuted by its own data.** It says the row is on screen but
-      its ancestor chain no longer holds the scroll views. Three things in the same trace say
-      otherwise. `TimelineRowView.tapRecognizer` has **no delegate** and is added in `init`, so a live
-      row offers it to every touch — MEASURED present in 100% of row touch-downs in a clean simulator
-      capture — and it is **missing from 9 of the 14 dead touches**. Re-parenting a view cannot remove
-      *its own* recogniser from `touch.gestureRecognizers`; it can only remove its ancestors'. At
-      t=21.98 a `TimelineRulerView` keeps its own long press while carrying none of its ancestors'
-      recognizers, so the ruler is affected too and it is not a recycled row. And the recogniser set
-      already drifts *inside* the healthy window — one scroll pan at t=5.80, two at t=8.23; no
-      delayed-touches at t=6.45, two at t=8.23 — so `grNames` is a noisier signal than the 17/17
-      table implies. **What all of that does fit is the timeline's recognizers wedged in a
-      non-`.possible` state**, which is why they stop being offered touches while the views stay
-      hit-testable; a clean capture shows `timeline.scroll` sitting in `.failed` for seconds at a time
-      between sweeps, so the state is reachable in the ordinary course of events.
+      **Reproduced 2026-09-06.** While one of the four timeline menus is up, a drag anywhere on the
+      timeline is swallowed whole — the track does not scroll, the ruler does not scrub, and the
+      popover does not go away. Only a **tap** dismisses it. MEASURED from a new document: two 200 pt
+      drags on the track leave the cel block at x 188.0 and the playhead at frame 7 with the menu
+      still standing; a tap in the same place dismisses it; the identical drag then scrolls the track
+      to −181.5. `MenuInterruptionUITests.testADragOnTheTimelineWhileABlockMenuIsUpIsSwallowedWhole`
+      is that measurement and is **a characterization of a defect that is still open** — it goes red
+      when this is fixed, deliberately.
 
-      **The `sceneFrameCount` lead is refuted too.** Driven in the simulator — scrub to frame 20 with
-      the scene still 12 long, draw there, then tap rows — the timeline keeps scrubbing. Five driven
-      sequences in all (plain taps; a cel past the scene end; a gap menu raised and dismissed; repeated
-      two-finger swipes across the track; a pinch), and none froze. `relayout` cannot orphan a row
-      either: `rowViews` is only appended to, or truncated from the end when the layer count drops.
+      That is exactly the owner's trace. A tap 14 pt from the previous one raised the block menu at
+      t≈20.5, `_UIPassthroughGateGestureRecognizer` appears at t=21.02, no timeline gesture fires
+      again until they **tap** the toolbar at t=26.57. Reconstructing the gestures rather than the
+      `grNames` column is what settles it: almost every "dead" touch is a **swipe** of 24–282 pt, and
+      **every genuine tap in the trace worked**, so the freeze is five seconds long and not fifteen.
 
-      **The concrete suspect worth starting from** is `scrollView.panGestureRecognizer.require(toFail:)`,
-      which `relayout` calls once per row view **ever created** and never undoes — there is no
-      un-require API. A pool that grows, shrinks and grows again therefore leaves the scroll pan
-      requiring recognizers whose view is gone. Unproven, and it is a different shape of bug from the
-      one this item was filed as.
+      **Two published analyses of this are refuted and both are worth not repeating.** The row view is
+      *not* detached — 15 hit-tests during the dead drags all carry the row's own three recognizers,
+      the pinch, `timeline.scroll` and both scroll pans, and `TimelineRowView.touchesBegan` never
+      fires, so UIKit is declining to *offer* the touch, not missing the views. And
+      `relayout`'s un-removable `require(toFail:)` does **not** accumulate: `_failureRequirements` is
+      a deduplicating **weak** set and a recogniser does not retain its target, so a row leaving the
+      pool takes its entry with it (`TimelineGestureArbitrationLogicTests`; the harness that seemed to
+      show 3, 6, 9, … was measuring its own autorelease pool).
 
-      **The next capture is decisive and the instrument for it is in.** `timeline.scroll`,
-      `timeline.pinch`, `timeline.rulerScrub`, `timeline.graphBand` and every row's
-      `timeline.row<N>.tap` / `.press` / `.resize` are named for `ActionRecorder`, so a recording now
-      carries their state transitions per touch instead of only the `grNames` column. Ask the owner
-      for one capture of the freeze with the recorder on; it will say in one line whether a recogniser
-      is stuck and which.
+      **What is left is an owner decision**, because there is no in-app seam — the touch never reaches
+      the timeline. `.presentationBackgroundInteraction(.enabled)` is a sheet API and measurably does
+      nothing here. The two real options are to reach
+      `UIPopoverPresentationController.passthroughViews` (not exposed by SwiftUI's `.popover`) and
+      dismiss from the timeline once the touch arrives, or to stop using `.popover` for the four
+      timeline menus and draw them as an overlay the timeline panel dismisses itself.
 
 ---
 
