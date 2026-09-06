@@ -960,6 +960,16 @@ it is the dependency order.
    stage: the compression ratio against the owner's own "UI Test" document rather than the synthetic fixtures,
    and a decode of a **compositor-produced** frame at their canvas size.
 
+   MEASURED on a dedicated iOS 26.5 simulator, erased first: fast tier **3385 tests, 3382 passed, 0 failed,
+   3 skipped**, reconciled against a static count of 3385 `func test` across the 143 selected files, and
+   against **3371 / 3368 / 0 / 3 at `61c1b17`** — a delta of exactly the 14 new cases in
+   `MemoryBudgetLogicTests`. **Seventeen mutations MEASURED red**, each restored after, and **four of them
+   came back green the first time**: the headroom assertion held whether or not the valve doubled; the mask
+   fixture varied an opacity `CacheKey` does not carry, so six resolutions were one entry; and two registry
+   hooks — the invalidation's and the hand-drop's — had no test at all until the sweep asked. Two more went
+   green *after* a refactor rather than before it, on the use-order touch, because a memo hit through
+   `render()` and one through `cachedRender()` are two entry points and only one was covered.
+
 ## 6. Superseded
 
 LAYER_COMPOSITING §9.2 and KEYFRAMES §4.6 are replaced by §3.5-3.7 above: the store is one, the policy is
