@@ -507,13 +507,14 @@ extension CanvasManager {
     /// two halves of one cause: an HSV Shift merged down did nothing at all, and a Screen layer merged
     /// down gave Normal's answer. `CoreGraphicsCompositor.mergedDown` is where both now come from.
     ///
-    /// **Two things are still dropped, and they are named rather than silently lost.** An `AlphaMask`
-    /// on either layer is not applied and not preserved — it names other layers by id and resolving
-    /// one needs a whole `RenderRequest`, which a merge does not build. And a contribution the merge
-    /// cannot bake at all (`MergeContribution.nothing`: a transformation layer, or a grading layer in
-    /// the *lower* position, whose backdrop is everything this merge deliberately excludes) reaches
-    /// the result as nothing. `mergeLossKind` is the predicate that warns about the second before the
-    /// artist gets here.
+    /// **Two things are still dropped, and `mergeLossKind` warns about both before the artist gets
+    /// here.** A clip on the *upper* layer — an `AlphaMask`, which names other layers by id and needs a
+    /// whole `RenderRequest` to resolve, or `.clipToBelow`, which `compositedMode` turns into `.normal`
+    /// — is not applied and not preserved, so that layer's ink is baked in unclipped. And a
+    /// contribution the merge cannot bake at all (`MergeContribution.nothing`: a transformation layer,
+    /// or a grading layer in the *lower* position, whose backdrop is everything this merge deliberately
+    /// excludes) reaches the result as nothing. The survivor's own mask is not in that list: it rides
+    /// through untouched and keeps applying to everything the merge put under it.
     @discardableResult
     func mergeLayers(_ firstID: UUID, _ secondID: UUID) -> Bool {
         guard let canvasSize, firstID != secondID,
@@ -543,40 +544,36 @@ extension CanvasManager {
             // into the display lists this reads, and the alignment decides which cels it pairs up.
             stayedVector = vectorMergeIsExact(bottomIndex: bottomIndex, topIndex: topIndex)
 
-            if stayedVector {
-                mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
-                                 asVector: true, canvasSize: canvasSize)
-                layers[bottomIndex].opacity = 1
-                layers[bottomIndex].isVisible = true
-                deleteLayer(at: topIndex)
-                repointActiveLayer(at: survivorID)
-                return
+            if !stayedVector {
+                rasterizeLayer(layerIndex: bottomIndex)
+                rasterizeLayer(layerIndex: topIndex)
             }
-
-            rasterizeLayer(layerIndex: bottomIndex)
-            rasterizeLayer(layerIndex: topIndex)
             mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
-                             asVector: false, canvasSize: canvasSize)
+                             asVector: stayedVector, canvasSize: canvasSize)
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
-            // **The survivor comes out `.raster`, which for a `.value` lower layer it did not.**
-            // `rasterizeLayer` above only converts `.vector`, so a flat-colour or grading layer in the
-            // lower position kept its kind — and `leafSnapshots` elides a `.value` layer's cel, so the
-            // pixels this method had just baked into it rendered nowhere at all. That is the same
-            // "merging a value layer does nothing" the owner reported, reached from the other side of
-            // the pair. The three payloads go with the kind for `Layer.effect`'s reason: presence is
-            // the discriminant, so one left behind is a layer that reads as `.raster` here and as an
-            // adjustment layer to the next thing that flips its kind. The animation trio goes with
-            // them for `duplicateLayer`'s reason read backwards — `effectTracks`, `keyframeMarks` and
-            // `pendingBaselines` are one feature, and marks with no channel left to key are exactly
-            // KEYFRAMES.md §2.28's divergence: an indicator in the timeline with nothing behind it.
-            layers[bottomIndex].kind = .raster
-            layers[bottomIndex].effect = nil
-            layers[bottomIndex].transform = nil
-            layers[bottomIndex].fill = nil
-            layers[bottomIndex].effectTracks = [:]
-            layers[bottomIndex].keyframeMarks = []
-            layers[bottomIndex].pendingBaselines = [:]
+
+            if !stayedVector {
+                // **The survivor comes out `.raster`, which for a `.value` lower layer it did not.**
+                // `rasterizeLayer` above only converts `.vector`, so a flat-colour or grading layer in
+                // the lower position kept its kind — and `leafSnapshots` elides a `.value` layer's cel,
+                // so the pixels this method had just baked into it rendered nowhere at all. That is the
+                // same "merging a value layer does nothing" the owner reported, reached from the other
+                // side of the pair. The three payloads go with the kind for `Layer.effect`'s reason:
+                // presence is the discriminant, so one left behind is a layer that reads as `.raster`
+                // here and as an adjustment layer to the next thing that flips its kind. The animation
+                // trio goes with them for `duplicateLayer`'s reason read backwards — `effectTracks`,
+                // `keyframeMarks` and `pendingBaselines` are one feature, and marks with no channel
+                // left to key are exactly KEYFRAMES.md §2.28's divergence: an indicator in the timeline
+                // with nothing behind it.
+                layers[bottomIndex].kind = .raster
+                layers[bottomIndex].effect = nil
+                layers[bottomIndex].transform = nil
+                layers[bottomIndex].fill = nil
+                layers[bottomIndex].effectTracks = [:]
+                layers[bottomIndex].keyframeMarks = []
+                layers[bottomIndex].pendingBaselines = [:]
+            }
 
             deleteLayer(at: topIndex)
             repointActiveLayer(at: survivorID)

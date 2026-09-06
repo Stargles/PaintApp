@@ -84,44 +84,34 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 
 ## (43) Merging two vector layers produces a raster layer
 
-**Status** — not started. Investigated and designed 2026-09-06; three further defects found in the
-same code, two of them silent data loss.
+**Status** — **all three stages built on `tmp/vecmerge`, not merged.** Full fast tier green there; the
+item stays here until the branch lands, per this file's own rule that an item leaves when it is merged
+and not when a branch exists.
 
 > *"when you merge two layers it doesnt work for vector layers, the merged layer turns out as a raster
 > layer. Make it vector compatible."*
 
-`CanvasManager.mergeLayers` has **no vector arm at all** — it calls `rasterizeLayer` on both inputs
-unconditionally, then hard-writes `kind = .raster`. This is deliberate and pinned by
-`testMergeDownFromVectorLayerRasterizesTheSurvivor`, so it is a decision to re-open rather than an
-oversight to patch.
+**What shipped on the branch.** `CanvasManager.vectorMergeIsExact` is the design: two vector layers
+merge to a vector layer wherever concatenating their display lists draws what compositing their two
+renders draws, and everywhere else the pixel bake runs as it always has with a
+`CanvasNotice.mergedAsPixels` saying so. `VectorCanvas.splitPreservesTheWalk` is
+`appendPreservesTheWalk` lifted rather than a second copy of the isolation rules.
+`VectorMergeLogicTests` holds the predicate to its claim byte for byte in both directions.
 
-**"Vector compatible" means vector when it can be and raster when it cannot, and the predicate is the
-design.** Concatenating two display lists is genuinely the same picture for plain strokes — but not
-when the upper layer carries a non-normal blend mode, opacity below 1, an alpha mask, `.clipToBelow`,
-an effect, or **any `.erase` stroke**: a punch composites `destinationOut` against everything beneath
-it *in its own list*, so after concatenation it starts eating the lower layer's ink. The repo already
-computes exactly this question for the incremental-append path — `appendPreservesTheWalk` — so it is a
-predicate to lift, not to derive.
+Two silent losses in the same code went with it. "Merge Down" called `mergeLayers` bare while the
+pinch consulted `mergeLossKind`, so one pair prompted on a pinch and discarded on a tap —
+`requestMerge` is the single entry point now, and the predicate gained the clip on the upper layer
+(an `AlphaMask` or `.clipToBelow`, both of which the bake has always dropped in as many words). And a
+merge flattened only the cel pair under the playhead before deleting the upper layer whole, losing its
+ink at every other frame; `alignCelBoundaries` + `mergeAlignedCels` walk the union of both timelines,
+so a merge can now *increase* the survivor's block count where the spans disagree.
 
-**Three traps that will cost a cycle each if missed.** `VectorCanvas` is a `final class` and
-`captureStructure` snapshots `layers` by value, so an in-place `elements =` makes both undo snapshots
-alias one object and the undo a silent no-op — write a fresh canvas. The float settle
-(`commitVectorFloatIfLifted`) currently lives *inside* `rasterizeLayer`, so a vector arm that skips it
-bakes away a lifted lasso selection. And element ids are unique only within a cel, so the upper
-layer's elements need re-iding, with `motionGroupID`/`animationGroupID` cleared or its ink silently
-joins the lower layer's animation channels.
-
-**Left to build**
-- [ ] **Stage 0** — route Merge Down through `mergeLossKind` (only the *pinch* consults it today, so
-      the same pair prompts on a pinch and discards silently on a menu tap), and add an `AlphaMask`
-      case to it. Half a day, independently shippable, fixes live silent loss.
-- [ ] **Stage 1** — the predicate `vectorMergeIsExact`, the vector arm, a `CanvasNotice` when it falls
-      back to pixels, and the two existing UI tests rewritten. This is what the owner asked for.
-- [ ] **Stage 2** — merge every frame. Today it flattens only the cel pair at the current frame and
-      then deletes the whole upper layer, **losing its ink at every other frame**, and rasterizes all
-      of the lower layer's frames to serve one merge. Write the characterization test against `main`
-      first; it goes red today.
-- [ ] Deferred, no measured need: `ValueFill` as a canvas-sized `.fill` element; relaxing the erase case.
+**Left**
+- [ ] Merge `tmp/vecmerge` to `main`.
+- [ ] Deferred, no measured need: `ValueFill` as a canvas-sized `.fill` element; relaxing the erase
+      case; and relaxing `splitPreservesTheWalk`, which is conservative when the prefix ends in
+      something that is not a paint stroke (it is shared with the incremental append, so tightening it
+      moves that too).
 
 ---
 
