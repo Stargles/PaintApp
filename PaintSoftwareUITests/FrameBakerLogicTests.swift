@@ -888,6 +888,33 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(baker.dedupedCount, 4)
     }
 
+    /// **A scene that grows re-marks the frames it just admitted, including the empty ones.**
+    ///
+    /// The other half of the shrink test below, and it needs saying separately because the cel diff
+    /// alone does not cover it: adding a block at frame 12 changes exactly one `CelStamp`, so the
+    /// diff marks 12…14 and nothing else — while frames 6…12, which were outside `BakeQueue`'s
+    /// universe a moment ago and are inside it now, hold nothing and would never be asked for. What
+    /// covers them is the scene's length being a field of `StructuralStamp`, which turns "the scene
+    /// grew" into `markAllDirty()`.
+    ///
+    /// **Hard-coding that field passed the whole suite** when it was tried as a mutation, which is
+    /// what this test exists to stop: the shrink direction was pinned and the grow direction was not.
+    func testASceneThatGrowsMarksTheFramesItJustAdmitted() {
+        let manager = perFrameDocument(frames: 6)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertEqual(pending(baker, manager), [], "Setup: the six-frame scene is fully baked.")
+
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 12, frameCount: 2),
+                      "A block out past the end grows the scene to fourteen frames")
+        baker.syncDirty()
+
+        XCTAssertEqual(baker.bakeQueue.frameCount, 14, "The queue's universe followed the scene…")
+        XCTAssertEqual(pending(baker, manager), Array(0..<14),
+                       "…and every frame of it is asked for, not only the two the new block covers")
+    }
+
     /// A scene that shrinks must not leave the baker asking for frames the document no longer has.
     func testASceneThatShrinksDropsTheFramesItNoLongerHas() {
         let manager = perFrameDocument(frames: 10)

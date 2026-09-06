@@ -320,6 +320,32 @@ final class SceneEndLogicTests: XCTestCase {
         XCTAssertEqual(manager.contentEndFrame, 2, "…and the animation is still two frames long")
     }
 
+    // MARK: - What the transport says
+
+    /// **"Frame n/N" counts the scene, and the scene shortens.** Pinned as its own test because the
+    /// arithmetic used to live inside `AnimationTimeline.frameLabel`, where the fast tier could not
+    /// see it — hard-coding the old twelve there passed the entire suite when it was tried as a
+    /// mutation.
+    func testTheFrameLabelDenominatorFollowsTheScene() {
+        let manager = self.manager([[(start: 0, length: 12)]])
+        XCTAssertEqual(manager.displayedSceneLength, 12, "PREMISE: twelve frames of drawing")
+
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+
+        XCTAssertEqual(manager.displayedSceneLength, 3, "…and it comes down with them")
+    }
+
+    /// …and widens for a playhead parked past the end, so the counter never reads the impossible
+    /// "Frame 40/3".
+    func testTheFrameLabelDenominatorWidensToAdmitAParkedPlayhead() {
+        let manager = self.manager([[(start: 0, length: 3)]])
+
+        manager.goToFrame(39)
+
+        XCTAssertEqual(manager.displayedSceneLength, 40, "Frame 40/40, not Frame 40/3")
+        XCTAssertEqual(manager.contentEndFrame, 3, "…and the widening is display-only")
+    }
+
     // MARK: - The default twelve
 
     /// The twelve did not vanish with the field: it is the length of a **new document's** first

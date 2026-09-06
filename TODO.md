@@ -194,7 +194,8 @@ a finger tap does *outside* a Move (pan, or nothing), never commit.
 
 ## (50) `sceneFrameCount` is a high-water mark that never falls
 
-**Status** — not started. Diagnosed by the owner from behaviour, and the code agrees exactly.
+**Status** — **built on `tmp/sceneend`, not merged.** The item stays here until the branch lands, per
+this file's own rule that an item leaves when it is merged and not when a branch exists.
 
 > *"The end of the animation timeline should be the last frame… if I do an extend to end on a cel, then
 > it extends that cel to the 12th frame even if the last cel is not on frame 12. If I manually extend a
@@ -203,32 +204,25 @@ a finger tap does *outside* a Move (pan, or nothing), never commit.
 > 12, and increases whenever a cel gets put higher, but never falls back down when the last cel
 > changes, only expands."*
 
-**Confirmed.** `CanvasManager.sceneFrameCount` is `@Published var sceneFrameCount: Int = 12`, and
-**every single write to it in the app is `sceneFrameCount = max(sceneFrameCount, …)`** — eight of them
-across `CanvasManager+Timeline` and `CanvasManager+BlockDrag`. Nothing ever lowers it. It is also
-**persisted** in `ProjectManifest`, so a document carries its high-water mark across save and reload,
-and `captureStructure` snapshots it so undo restores the old mark rather than recomputing.
+**The diagnosis was exactly right and the field is deleted.** `CanvasManager.contentEndFrame` — which
+already existed, and which playback already used, which is why the owner saw playback escape the bug —
+is now the only account of where the scene ends. Every reader that meant "the end of the timeline"
+asks it: extend-to-end, the gap menu's range, the loop clamp, the frame label, `BakeQueue`'s universe,
+the export range, the graph band's drawn bound, and the length of a new layer's first block. The
+twelve survives as `CanvasManager.defaultNewSceneFrameCount`, applied at the one moment it ever meant
+anything — the first layer of a document that has none.
 
-The owner's read that playback is unaffected is right and is the clue to the shape of the fix:
-playback stops at the last cel, so **the true end is already derivable** — `layers.flatMap(\.cels).map(\.endFrame).max()`.
-Nine files read `sceneFrameCount`; the question is whether each one wants the derived end, a
-deliberately larger *canvas* of empty frames the artist can drag into, or nothing at all.
+**The empty track past the last drawing was never this field**, which is what made deleting it safe:
+it is `TimelineTrackExtent.displayedFrameCount`, two screenfuls past wherever the artist has scrolled,
+now a testable static rather than a rule living inside `TimelineTrackView.Coordinator`.
 
-**Left to build**
-- [ ] Establish what each of the nine readers actually means by it — `gapFrameRange` uses it as "the
-      end", the timeline views may want scrollable empty space past the last cel, and those are
-      different quantities wearing one name.
-- [ ] Either make it derived and delete the stored field, or keep a stored *scene length* that the
-      artist sets deliberately and make everything that means "the last frame" ask for that instead.
-      **Do not simply add a recompute** — a value that is sometimes derived and sometimes stored is
-      how this went wrong.
-- [ ] Decide what a saved document with an inflated mark does on open, under the standing
-      expendable-documents permission.
-- [ ] Pin extend-to-end against a document whose last cel is short of the mark. That test goes red
-      today, so write it first.
+**Two things the brief did not expect.** The field had **fifteen** app-side readers, not nine. And
+`effectiveLoopRange` must *not* be re-pointed at the derived end: a loop marker placed in the empty
+track is intent, and clamping it to the content silently retracts it — caught by
+`testMarkersSetPastTheContentAreStillHonoured`, so the markers are floored at zero and not ceilinged.
 
-**Related** (39), which is the other three timeline defects, but this one is architectural rather than
-a UI bug and does not share their causes.
+**A saved document with an inflated mark** loses it: the key is gone from `ProjectManifest` and the
+end is recomputed from the cels on load, under the standing expendable-documents permission.
 
 ---
 

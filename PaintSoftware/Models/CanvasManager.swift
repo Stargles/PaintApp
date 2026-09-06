@@ -2104,7 +2104,7 @@ final class CanvasManager: ObservableObject {
         }
         // Not clamped to the scene either — `goToFrame` is the one place the playhead's bounds are
         // decided, so the transport button and a ruler scrub cannot disagree about where the timeline
-        // ends. It walks out into the empty track and the track grows to meet it.
+        // ends. It walks out into the empty track the view lays out past the last drawing.
         goToFrame(next)
     }
 
@@ -2171,6 +2171,19 @@ final class CanvasManager: ObservableObject {
     var newLayerBlockLength: Int {
         max(contentEndFrame, layers.isEmpty ? Self.defaultNewSceneFrameCount : 1)
     }
+
+    /// **The denominator the transport's "Frame n/N" shows** — the scene, widened to admit a playhead
+    /// parked past the end of it.
+    ///
+    /// A model accessor rather than three tokens inside `AnimationTimeline.frameLabel`, because a rule
+    /// a view holds is a rule the fast tier cannot see: hard-coding the old `12` here passed the whole
+    /// suite when it was tried as a mutation, which is precisely the "assert what is drawn, not only
+    /// what is stored" hole CLAUDE.md describes.
+    ///
+    /// **The widening is display-only and must stay so.** Parking out past the end reads "Frame 40/40"
+    /// rather than the impossible "Frame 40/12"; nothing is written back, because scrubbing is not
+    /// authoring (`goToFrame`).
+    var displayedSceneLength: Int { max(contentEndFrame, currentFrame + 1) }
 
     /// Whether the user has placed either loop marker.
     var hasLoopBoundary: Bool { loopStartFrame != nil || loopEndFrame != nil }

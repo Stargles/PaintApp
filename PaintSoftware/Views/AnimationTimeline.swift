@@ -962,7 +962,7 @@ struct AnimationTimeline: View {
     /// counter stops describing the scene's length out there, which is honest, because out there the
     /// playhead is not in the scene.
     private var frameLabel: some View {
-        let shown = max(canvasManager.contentEndFrame, canvasManager.currentFrame + 1)
+        let shown = canvasManager.displayedSceneLength
         return Text("Frame \(canvasManager.currentFrame + 1)/\(shown)")
             .font(.caption)
             .foregroundColor(.gray)
