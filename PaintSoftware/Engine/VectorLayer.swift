@@ -1384,6 +1384,29 @@ final class VectorCanvas {
         for id in ids { paintedBounds.removeValue(forKey: id) }
     }
 
+    /// **The damage a site declares when it replaces `strokes` with pieces of themselves** — the
+    /// union of what they last painted, widened by the largest of their brush diameters, or
+    /// `.everything` when any of them has never been measured. Caller must hold `lock`.
+    ///
+    /// **The margin is an optimisation and could not be a correctness claim.** BRUSH.md §12 stage 8
+    /// refuted a box derived from the brush — `ResponseCurve` does not clamp, so no size-derived
+    /// number bounds what a dab paints — and `renderLocalContent`'s escape check is still the whole
+    /// of why the rectangle is true. What the margin buys is the *retry*: a cut piece re-anchors its
+    /// dab walk (`detachedPiece`), so its dabs sit at arc offsets its parent's did not and one near
+    /// an end reaches a little past the parent's union. Without the margin that happened on **40–50%
+    /// of repairs**, and each one paid a whole second clipped walk.
+    ///
+    /// MEASURED 2026-09-05 on the cross-eraser drag (PERFORMANCE.md §11.10): widened repairs 19 of
+    /// 40 → **0**, render total for the drag at 2,000 strokes 21.3 s → **15.9 s**, worst single
+    /// render **938 ms → 494 ms** — for 2.6% more dabs stamped, which is the extra area the margin
+    /// redraws. The spike the owner reported is the worst single render, so that halving is the
+    /// number this exists for.
+    private func regionDamage(replacing strokes: [VectorStroke]) -> Damage {
+        guard let union = paintedBounds(of: strokes.lazy.map(\.id)) else { return .everything }
+        let margin = strokes.reduce(CGFloat(0)) { Swift.max($0, $1.size) }
+        return .region(union.insetBy(dx: -margin, dy: -margin))
+    }
+
     /// The union of what `ids` last painted, or nil if any of them has no measured footprint — in
     /// which case the caller cannot bound its own damage and must declare `.everything`.
     /// Caller must hold `lock`.
@@ -2371,7 +2394,7 @@ final class VectorCanvas {
         guard !candidates.isEmpty else { return (false, .everything) }
 
         var changed = false
-        var replacedIDs: [UUID] = []
+        var replaced: [VectorStroke] = []
         var result: [VectorElement] = []
         result.reserveCapacity(_elements.count)
         for (index, element) in _elements.enumerated() {
@@ -2385,7 +2408,7 @@ final class VectorCanvas {
                                           in: stroke.samples)
             guard !cuts.isEmpty else { result.append(element); continue }
             changed = true
-            replacedIDs.append(stroke.id)
+            replaced.append(stroke)
             // Mode 2 removes geometry, so a piece re-stamps from its own first sample rather than
             // inheriting the parent's lattice, which would keep drawing dabs just cut away. Its
             // randomness stays where it was regardless — see `detachedPiece`.
@@ -2395,9 +2418,9 @@ final class VectorCanvas {
             }
         }
         guard changed else { return (false, .everything) }
-        let damage: Damage = paintedBounds(of: replacedIDs).map { .region($0) } ?? .everything
+        let damage = regionDamage(replacing: replaced)
         _elements = result
-        forgetPaintedBounds(replacedIDs)
+        forgetPaintedBounds(replaced.map(\.id))
         return (true, damage)
     }
 
@@ -3655,8 +3678,8 @@ final class VectorCanvas {
 
         // The ids about to stop existing, and what they last put on the canvas. Taken *before* the
         // splice, because afterwards the list no longer holds them.
-        let replacedIDs = splices.compactMap { _elements[$0.index].stroke?.id }
-        let damage: Damage = paintedBounds(of: replacedIDs).map { .region($0) } ?? .everything
+        let replaced = splices.compactMap { _elements[$0.index].stroke }
+        let damage = regionDamage(replacing: replaced)
 
         // Descending, so an earlier splice cannot invalidate a later index.
         for splice in splices.sorted(by: { $0.index > $1.index }) {
@@ -3666,7 +3689,7 @@ final class VectorCanvas {
         }
         // These ids are gone; the pieces that replaced them have never been measured. Both halves
         // matter: a stale entry under a *reused* id would let a changed element be skipped.
-        forgetPaintedBounds(replacedIDs)
+        forgetPaintedBounds(replaced.map(\.id))
         return (.cut, underTip, damage)
     }
 

@@ -15,10 +15,16 @@ import CoreGraphics
 ///    wrong and no single fixture sees all of them: an eraser needs the rectangle redrawn from the
 ///    *bottom* of the stack, a run of non-`.normal` strokes needs its isolation decided over the
 ///    whole run whether or not its members are stamped, and a stroke straddling the rectangle's
-///    edge needs BRUSH.md §12 stage 8's group to merge at its own opacity. Seven of the eleven pin
-///    that byte for byte; the three above are the ones that put a transparency layer across the
-///    rectangle's edge, and there the comparison is exact to within a rounding unit for the reason
-///    `assertMatchesToWithinARoundingUnit` measures.
+///    edge needs BRUSH.md §12 stage 8's group to merge at its own opacity.
+///
+///    **What the comparison is, and why it is not byte identity everywhere.** A repair whose
+///    rectangle cuts a transparency layer disagrees with the full walk by a rounding unit along the
+///    rectangle's edge, and `regionDamage(replacing:)`'s margin — which is what removed the retry
+///    that was costing half the repairs a second walk — puts more layers across that edge on
+///    purpose. So the comparison used by the seven tests that repair is
+///    `assertMatchesToWithinARoundingUnit`, whose three bounds are each a different real defect;
+///    exact identity is still demanded of the two renders that are *full walks*, where nothing is
+///    clipped and nothing may differ.
 ///
 ///    **All three of those fixtures were blind when they were written and each was found by
 ///    mutation**, which is the note worth carrying out of this file: the eraser had nothing left to
@@ -302,7 +308,9 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.regionRepairs, 1, "the repair must have run, or this pins nothing")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0,
                        "an abandoned repair costs both walks and would hide a bad bound behind a good picture")
-        assertIdentical(repaired, fullReWalk(of: canvas).image, "a Mode 2 cut, repaired in place")
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion,
+                                           "a Mode 2 cut, repaired in place")
     }
 
     /// **Constraint one: inside the rectangle the redraw starts at the bottom of the stack.**
@@ -530,7 +538,15 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertGreaterThan(canvas.regionRepairs, 2,
                              "every cutting sample should have repaired rather than re-walked")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
-        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "a whole To Cross drag")
+        // **Ten repairs in a row, and the bound is the same as one repair's.** That is the
+        // property that makes the seam acceptable rather than merely small: each repair starts from
+        // the previous one's picture, so an error that compounded would show here as a worst delta
+        // that grew with the drag. It does not — MEASURED at one unit after ten, the same as after
+        // one — because the difference is CoreGraphics rounding the *edge* of each clip, and each
+        // clip is somewhere else.
+        assertMatchesToWithinARoundingUnit(canvas.render(), fullReWalk(of: canvas).image,
+                                           inside: CGRect(origin: .zero, size: Self.canvasSize),
+                                           "a whole To Cross drag")
     }
 
     // MARK: - (3) The bound binds
@@ -655,7 +671,9 @@ final class RegionRepairLogicTests: XCTestCase {
         let appended = canvas.render()
         XCTAssertEqual(canvas.lastRenderDabCount, soloDabs,
                        "the append after a repair must still stamp only the new stroke's dabs")
-        assertIdentical(appended, fullReWalk(of: canvas).image, "an append onto a repaired cel")
+        assertMatchesToWithinARoundingUnit(appended, fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion,
+                                           "an append onto a repaired cel")
     }
 
     /// **A wholesale `elements =` before the render lands drops the base, and it has to.**
@@ -709,6 +727,8 @@ final class RegionRepairLogicTests: XCTestCase {
         _ = canvas.render()
         XCTAssertEqual(canvas.regionRepairs, 1, "the cut after the replacement should repair")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
-        assertIdentical(canvas.render(), fullReWalk(of: canvas).image, "a cut after a replacement")
+        assertMatchesToWithinARoundingUnit(canvas.render(), fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion,
+                                           "a cut after a replacement")
     }
 }
