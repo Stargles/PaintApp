@@ -48,29 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (47) A finger tap bakes a Move while the pen-only toggle is on
-
-**Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
-
-> *"when you are moving an object with pen only draw on and then tap somewhere else on the canvas with
-> your hand, it bakes the move. It should only do that when the pen is tapped on the canvas. Currently
-> the pen part works, its just the finger tap bake that I want to change."*
-
-`pencilOnlyDrawing` already reaches the canvas views (`CanvasManager.pencilOnlyDrawing`, pushed onto
-`strokeView` and the overlay in `CanvasView`), so the setting is known where the tap is handled — the
-commit-on-tap path simply is not consulting it. A finger tap while the toggle is on should do whatever
-a finger tap does *outside* a Move (pan, or nothing), never commit.
-
-**Left to build**
-- [ ] Find the tap that commits a float and gate it on touch type when `pencilOnlyDrawing` is set.
-- [ ] Check the same hole in the other commit-on-tap gestures — text, shape, the interactive fill —
-      rather than fixing only the one that was reported.
-- [ ] A test that a finger tap with the toggle on leaves the float lifted. **XCUITest cannot synthesise
-      a pencil**, so the pen half cannot be driven from a test; assert on the touch-type decision
-      directly rather than writing a UI test that silently downgrades to a finger.
-
----
-
 ## (12) Distort keyed across frames
 
 **Status** — partly built. **The raster tier and the ink tier both ship.** What is left is the
