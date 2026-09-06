@@ -239,6 +239,12 @@ extension CanvasManager {
     /// that has already been superseded would otherwise composite the whole canvas and upload a GPU
     /// session for a gesture nobody is waiting on, which is time the *live* tap is queued behind on a
     /// serial queue.
+    func isCurrentFillGeneration(_ generation: UInt64) -> Bool {
+        fillLock.lock()
+        defer { fillLock.unlock() }
+        return generation == fillGeneration
+    }
+
     /// **Tells the artist the fill is not going to happen** — the one place the four ways
     /// `makeSession` can decline become a banner.
     ///
@@ -255,12 +261,6 @@ extension CanvasManager {
             self.raise(.fillNeedsMoreMemory)
             self.cancelInteractiveFill()
         }
-    }
-
-    func isCurrentFillGeneration(_ generation: UInt64) -> Bool {
-        fillLock.lock()
-        defer { fillLock.unlock() }
-        return generation == fillGeneration
     }
 
     /// The Edge Overlap value the slider shows and writes: the bucket's or the lasso's, whichever mode
