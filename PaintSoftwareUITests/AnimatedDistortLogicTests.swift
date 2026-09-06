@@ -431,6 +431,105 @@ final class AnimatedDistortLogicTests: XCTestCase {
                      "…and the commit keeps it rather than flattening on the way out")
     }
 
+    /// **A plain drag at a keystoned in-between is conjugated through the keystone**, which is the
+    /// arm the mutation sweep found nothing covering.
+    ///
+    /// `applyToVectorFloat` conjugates every nudge by the pose the artist is looking at — `P·D·P⁻¹`,
+    /// so a screen delta lands as a screen delta. With `P` a keystone that conjugate is a homography
+    /// whatever the drag was, and the gesture here is *not* a Distort: the finger only slides the box.
+    /// Before stage 5b the pose was already flattened by the time it got here, so the arm did not
+    /// exist; route it back through `mapping(_:throughStretch:)` and the invariant below breaks.
+    ///
+    /// The invariant is the one the artist can see: whatever the rest geometry becomes, **the posed
+    /// picture of it moves by exactly the delta**.
+    func testAPlainDragAtAKeystonedInBetweenIsConjugatedThroughTheKeystone() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.addVectorLayer()
+        let at = manager.currentLayerIndex
+        let vector = try XCTUnwrap(manager.layers[at].cels[0].vector)
+        vector.addStroke(stroke([CGPoint(x: 12, y: 40), CGPoint(x: 40, y: 40)], size: 4))
+        let layerID = manager.layers[at].id
+        let celID = manager.layers[at].cels[0].id
+
+        // A keystone on the whole-cel channel, held at every frame by the single-key rule.
+        let celBox = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        let pulled = Quad(CGPoint(x: celBox.width / 4, y: 0), CGPoint(x: celBox.width * 3 / 4, y: 0),
+                          CGPoint(x: celBox.maxX, y: celBox.maxY), CGPoint(x: 0, y: celBox.maxY))
+        manager.setTransformPoseKey(layerID: layerID, celID: celID, channel: .cel,
+                                    atCelLocalFrame: 0, pose: PoseQuad(box: celBox, corners: pulled))
+        let pose = try XCTUnwrap(manager.layers[at].cels[0]
+            .transformTracks["cel"]?.mapping(atCelLocalFrame: 0))
+        XCTAssertTrue(pose.isProjective, "Fixture: the frame the artist is standing on is a keystone")
+
+        let before = try XCTUnwrap(vector.elements.first?.stroke).samples.positions
+        manager.setTransformMode(.uniform)
+        XCTAssertTrue(manager.beginVectorWholeCelMove(), "Move lifts at a posed frame")
+        let float = try XCTUnwrap(manager.vectorFloat)
+        var moved = float.frame.transform
+        moved.position = CGPoint(x: moved.position.x + 7, y: moved.position.y - 3)
+        manager.nudgeVectorFloat(to: moved)
+
+        let after = try XCTUnwrap(vector.elements.first?.stroke).samples.positions
+        XCTAssertEqual(after.count, before.count)
+        for (rest, restMoved) in zip(before, after) {
+            let shown = try XCTUnwrap(pose.applied(to: rest))
+            let shownAfter = try XCTUnwrap(pose.applied(to: restMoved))
+            XCTAssertEqual(shownAfter.x - shown.x, 7, accuracy: 0.05,
+                           "a screen delta has to land as a screen delta through a keystone too")
+            XCTAssertEqual(shownAfter.y - shown.y, -3, accuracy: 0.05)
+        }
+        XCTAssertNotEqual(after, before, "…and the rest geometry did move")
+    }
+
+    // MARK: - The raster tier (§2.12's other currency)
+
+    /// **A keystoned container pose warps the raster tier rather than shearing it.**
+    ///
+    /// §2.12: a transformation layer *resamples* raster content and *re-poses* vector content.
+    /// CoreGraphics has no projective CTM, so the affine arm's `context.concatenate` cannot express a
+    /// keystone at all — `PixelOps.warpedPosedTiers` rasterises the tiers flat and carries them onto
+    /// the quad through `ImageWarp`, the same call the floating piece's bake and the text box already
+    /// make.
+    ///
+    /// The two operands are both computed here rather than hardcoded: where the square's own corners
+    /// land under the homography, and where they land under the linearisation the affine arm would
+    /// have had to use. MEASURED on this quad, those two are far enough apart that a shear cannot
+    /// pass for a warp.
+    func testAKeystonedContainerPoseWarpsTheRasterTierRatherThanShearingIt() throws {
+        let size = CanvasFixture.canvasSize
+        let celBox = CGRect(origin: .zero, size: size)
+        // A square low and to the left, where this quad's map is nearly the identity and the
+        // linearisation is furthest off.
+        let square = CGRect(x: 4, y: 48, width: 12, height: 12)
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: 12, raster: .empty(size: size))
+        cel.bakedImage = CanvasFixture.solidImage(.red, rect: square)
+
+        let quad = Quad(CGPoint(x: size.width / 4, y: 0), CGPoint(x: size.width * 3 / 4, y: 0),
+                        CGPoint(x: size.width, y: size.height), CGPoint(x: 0, y: size.height))
+        let map = try XCTUnwrap(PoseQuad(box: celBox, corners: quad).map)
+        XCTAssertTrue(map.isProjective, "Fixture: the container pose is a keystone")
+
+        let warped = PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, pose: map)
+        let drawn = try XCTUnwrap(PixelOps.opaqueContentBounds(warped),
+                                  "the tier is on screen somewhere")
+
+        func centre(_ rect: CGRect) -> CGPoint { CGPoint(x: rect.midX, y: rect.midY) }
+        let corners = [CGPoint(x: square.minX, y: square.minY), CGPoint(x: square.maxX, y: square.minY),
+                       CGPoint(x: square.maxX, y: square.maxY), CGPoint(x: square.minX, y: square.maxY)]
+        let exact = try corners.map { try XCTUnwrap(map.applied(to: $0)) }
+        let exactBox = Quad(exact[0], exact[1], exact[2], exact[3]).boundingBox
+        let linearised = try XCTUnwrap(map.homography.linearised(at: centre(celBox)))
+        let shearedBox = Quad(corners[0].applying(linearised), corners[1].applying(linearised),
+                              corners[2].applying(linearised), corners[3].applying(linearised)).boundingBox
+
+        XCTAssertEqual(distance(centre(drawn), centre(exactBox)), 0, accuracy: 2,
+                       "the pixels are where the homography puts them")
+        XCTAssertGreaterThan(distance(centre(drawn), centre(shearedBox)), 8, """
+            …and nowhere near where a CTM shear would have put them. If this stops being true the \
+            fixture's quad has gone mild and the test has stopped distinguishing the two arms.
+            """)
+    }
+
     // MARK: - Cold start: can an artist get here at all
 
     /// **From a document with nothing in it, in the order the artist presses things** — CLAUDE.md's
