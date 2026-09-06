@@ -178,6 +178,188 @@ either what protects them or exactly the bug.
 
 ---
 
+## (46) A fill should treat a stroke's path as a wall, not just its ink
+
+**Status** — not started.
+
+> *"Lets say a brush is segmented, and that brush creates an enclosure, and that enclosure gets filled.
+> Right now the fill would leak through the gaps in the segmented line. I want the fill tool to also
+> make the line path itself behave like a wall too, so that if I fill the enclosure with the segmented
+> lines, then it still fills the shape properly, bridging those gaps. (rough ink on low pressure does
+> this segmentated line for example)"*
+
+The fill works on **pixels** — it thresholds what is painted and floods between it. A brush whose dabs
+do not overlap paints a dotted line, so pixel-wise there is no wall there and the flood walks straight
+through. The **Gap Closing** slider is the existing answer and it is the wrong tool for this: it closes
+gaps by radius, so a gap wide enough to matter needs a radius that also closes gaps the artist wanted
+open, and Rough Ink at low pressure can leave gaps far wider than any safe radius.
+
+**The ask is different in kind and that is what makes it a good one: a vector layer knows where the
+stroke *is*, whatever it painted.** `StrokePath` is the curve every tier walks and it is continuous by
+construction, so a fill on a vector layer can rasterize the stroke's *centre line* into the barrier
+mask alongside the painted pixels. Segmentation stops mattering, and no radius has to be guessed.
+
+**Questions to settle before building**
+- Vector layers only — a raster layer has no path. Say so in the UI or accept that the two tiers fill
+  differently. This is the kind of silent divergence CLAUDE.md's "a refusal with no notice" section is
+  about.
+- Which strokes count as walls: every stroke in the cel, only the visible ones, only ones above some
+  opacity? A stroke at 5% opacity is invisible and would become an invisible wall.
+- Does the centre line get the stroke's width, or a hairline? Width interacts with **Edge Overlap**,
+  which for a lasso is an *erosion* radius — see (44).
+- Does this replace Gap Closing on vector layers, or sit beside it? Two controls that do overlapping
+  things is what §2.20 of BRUSH.md pushed back on elsewhere.
+
+**Spec** LASSO_FILL.md §6 is the algorithm; step 3's collar flood is where a path-derived barrier
+would join it.
+
+---
+
+## (47) A finger tap bakes a Move while the pen-only toggle is on
+
+**Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
+
+> *"when you are moving an object with pen only draw on and then tap somewhere else on the canvas with
+> your hand, it bakes the move. It should only do that when the pen is tapped on the canvas. Currently
+> the pen part works, its just the finger tap bake that I want to change."*
+
+`pencilOnlyDrawing` already reaches the canvas views (`CanvasManager.pencilOnlyDrawing`, pushed onto
+`strokeView` and the overlay in `CanvasView`), so the setting is known where the tap is handled — the
+commit-on-tap path simply is not consulting it. A finger tap while the toggle is on should do whatever
+a finger tap does *outside* a Move (pan, or nothing), never commit.
+
+**Left to build**
+- [ ] Find the tap that commits a float and gate it on touch type when `pencilOnlyDrawing` is set.
+- [ ] Check the same hole in the other commit-on-tap gestures — text, shape, the interactive fill —
+      rather than fixing only the one that was reported.
+- [ ] A test that a finger tap with the toggle on leaves the float lifted. **XCUITest cannot synthesise
+      a pencil**, so the pen half cannot be driven from a test; assert on the touch-type decision
+      directly rather than writing a UI test that silently downgrades to a finger.
+
+---
+
+## (48) A Move node outside the canvas cannot be grabbed
+
+**Status** — not started. Small, and it makes a too-large selection awkward to fix.
+
+> *"right now I cannot grab a move node that is outside of the canvas. If the box is too big to fit on
+> the canvas, then I got to first move the box to bring one of the nodes inside the canvas and then tap
+> that node to scale it down."*
+
+The handles are hit-tested inside the canvas view's bounds, so a node past the edge has nowhere to
+receive a touch. Two shapes of answer, and the choice is worth making deliberately rather than
+reaching for the first: let the overlay extend past the canvas and receive touches out there, or clamp
+the *drawn* handle to the canvas edge so it stays reachable while the box itself stays where it is. The
+second keeps every node grabbable at any zoom and is what several editors do; it also means the handle
+is no longer at the corner it represents, which needs to read correctly while dragging.
+
+**Left to build**
+- [ ] Pick the approach; the clamped-handle one probably wants a visual cue that the node is off-canvas.
+- [ ] Applies to the raster float, the vector float and the container-pose box — check all three, since
+      they do not share an overlay yet (see (12)'s last bullet).
+
+---
+
+## (49) The bottom options panel is too tall and does not follow the timeline
+
+**Status** — not started. Affects Lasso, Move, Add Text and the compositor effect settings — one panel
+style, so one fix.
+
+> *"the options panel that pops up on the bottom of the screen in lasso, move, add text, effect
+> settings for compositor effects (that type of options panel UI) is too tall and obstructs your view.
+> Make all of them wider and flatter. Additionally, make it move with the timeline expansion. If the
+> timeline gets expanded vertically, then the menu should follow it up to always be on top of the
+> timeline. This is required because the move menu for example blocks my timeline graphs when I want to
+> edit the move's keyframe."*
+
+The second half is the load-bearing one: the panel is positioned against the screen rather than against
+the timeline, so expanding the timeline slides the graph band *under* it — and the Move panel is
+exactly the one an artist has open while editing a Move's keyframes, so the two features fight.
+
+**Left to build**
+- [ ] Re-lay the shared panel wider and flatter — this is one style used four places, so do it once.
+- [ ] Anchor the panel's bottom to the **timeline's top edge** rather than to the safe area, so it
+      rides up as the timeline expands.
+- [ ] Check it against the graph editor open at full height, which is the case that motivated it.
+
+---
+
+## (50) `sceneFrameCount` is a high-water mark that never falls
+
+**Status** — not started. Diagnosed by the owner from behaviour, and the code agrees exactly.
+
+> *"The end of the animation timeline should be the last frame… if I do an extend to end on a cel, then
+> it extends that cel to the 12th frame even if the last cel is not on frame 12. If I manually extend a
+> frame to a further frame, then retract it back, then do an extend to end, then the extend to end goes
+> up to that last frame I extended to. This points at a deeper issue… This variable is default set to
+> 12, and increases whenever a cel gets put higher, but never falls back down when the last cel
+> changes, only expands."*
+
+**Confirmed.** `CanvasManager.sceneFrameCount` is `@Published var sceneFrameCount: Int = 12`, and
+**every single write to it in the app is `sceneFrameCount = max(sceneFrameCount, …)`** — eight of them
+across `CanvasManager+Timeline` and `CanvasManager+BlockDrag`. Nothing ever lowers it. It is also
+**persisted** in `ProjectManifest`, so a document carries its high-water mark across save and reload,
+and `captureStructure` snapshots it so undo restores the old mark rather than recomputing.
+
+The owner's read that playback is unaffected is right and is the clue to the shape of the fix:
+playback stops at the last cel, so **the true end is already derivable** — `layers.flatMap(\.cels).map(\.endFrame).max()`.
+Nine files read `sceneFrameCount`; the question is whether each one wants the derived end, a
+deliberately larger *canvas* of empty frames the artist can drag into, or nothing at all.
+
+**Left to build**
+- [ ] Establish what each of the nine readers actually means by it — `gapFrameRange` uses it as "the
+      end", the timeline views may want scrollable empty space past the last cel, and those are
+      different quantities wearing one name.
+- [ ] Either make it derived and delete the stored field, or keep a stored *scene length* that the
+      artist sets deliberately and make everything that means "the last frame" ask for that instead.
+      **Do not simply add a recompute** — a value that is sometimes derived and sometimes stored is
+      how this went wrong.
+- [ ] Decide what a saved document with an inflated mark does on open, under the standing
+      expendable-documents permission.
+- [ ] Pin extend-to-end against a document whose last cel is short of the mark. That test goes red
+      today, so write it first.
+
+**Related** (39), which is the other three timeline defects, but this one is architectural rather than
+a UI bug and does not share their causes.
+
+---
+
+## (40) Onion skin z-order — ruled, and the ruling makes it small
+
+**Status** — not started, **and no longer blocked.** The owner settled the design 2026-09-06.
+
+`CanvasView` fronts the onion-skin view and then fronts every layer host over it, and
+`updateOnionSkin` fronts only the *In Front* view. So `.behind` currently means "under all artwork,
+including the layers below the active one" — the reported defect, untouched since the item was filed.
+
+**The design, in the owner's own words** — and it dissolves the objection that blocked this rather
+than answering it:
+
+> *"the onion skin always renders on top of the compositor. This is the idea for the 'in front'
+> option. For the 'Behind' option, it is still rendered on top of the compositor, but then uses the
+> inverse of the current drawing layer as an alpha mask. Thus, the onion skin is not affected by the
+> compositor giving the animator a clear view at their art. When they set it to below, the onion skin
+> gets masked out in the areas that the current layer is drawn."*
+
+**Why this is better than what the item asked for before.** The blocking objection was that at rest,
+with the compositor engaged, there is no separate active-layer ink for the skin to sit *under* — so
+"behind the current layer" had no z-order to express. This does not need one: **both modes render on
+top, and Behind differs only by a mask.** The compositor never has to interleave the skin, the skin
+never picks up a blend mode or a grade meant for artwork, and the artist always sees the skin at full
+strength except exactly where their own ink covers it.
+
+**Left to build**
+- [ ] Both placements front the onion-skin view above every layer host — delete the interleaving.
+- [ ] Behind takes the **current layer's own alpha, inverted**, as a mask on the skin view. The active
+      layer's alpha is already available per frame; find the cheapest source that does not force an
+      extra render.
+- [ ] Check what this means for the *paper*, per EFFECT_BACKDROP.md — the paper is a `UIView` behind
+      the composite, so a skin above the composite is unaffected by it, which is the point.
+- [ ] Assert what is **drawn**, not only what is stored: a test that fails if the mask stops being
+      applied while the placement setting still reads Behind.
+
+---
+
 ## (12) Distort on ink, and Distort keyed across frames
 
 **Status** — partly built. The raster tier ships. **The ink tier's stated blocker has lifted and the
@@ -358,21 +540,6 @@ its suite, and the import path ships.
 - [ ] VIDEO.md §9's seven open questions.
 
 **Spec** VIDEO.md §8.
-
----
-
-## (40) Onion skin z-order, and what Behind should mean
-
-**Status** — **not started. This one is not fixed**, and the owner believed it was.
-
-`CanvasView` fronts the onion-skin view and then fronts every layer host over it, and `updateOnionSkin`
-fronts only the *In Front* view. So `.behind` still means "under all artwork, including the layers
-below the active one" — exactly the reported defect. No commit since the item was filed touches it.
-
-**One design objection is unanswered and blocks the build**, which is why this sits here rather than
-higher: the owner's clarification is that Behind should mean *behind the current layer, not behind
-everything* — but at rest, with the compositor engaged, there is no separate active-layer ink for the
-skin to sit under. Answer that, then it is a small change.
 
 ---
 
