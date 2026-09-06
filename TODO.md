@@ -386,10 +386,11 @@ which is the same failure the audit exists to catch, pointed at itself.
       orphans). Both are gone: this bullet was the only remaining citation of either. Sweep for others
       when the spec sweep above runs.
 - [ ] Decide whether BRUSH_ENGINE_EXTENSIBILITY.md and REFACTOR_BASELINE.md still earn their place.
-- [ ] `git stash list` holds one entry from 2026-08-14 — *"Abandoned vector-interpolation index
-      snapshot, 134 commits behind"* — labelled as cleared with the owner's approval but still present.
-      CLAUDE.md bans stash in this repo because it is shared across worktrees. Needs the owner's word
-      before it is dropped.
+- [x] The stash stack is empty. It held **two** entries, not the one this bullet recorded: the
+      2026-08-14 vector-interpolation snapshot (48 files, 134 commits behind, superseded by interp
+      phases 6-7) and a 2026-07-21 pre-rewrite working tree (5 files). Both were labelled cleared with
+      the owner's approval and neither had been dropped. The owner ruled to drop both on 2026-09-06;
+      their SHAs are `1b8845c` and `2e4e2ff` in that commit's message if either is ever wanted back.
 - [ ] Re-run the 2026-09-06 audit itself. It found fourteen false assertions in this file and a dozen
       more across the specs; a session that shipped this much will have introduced its own.
 
