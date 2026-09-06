@@ -397,6 +397,36 @@ LAYER_TRANSFORM.md.
 - [ ] > "The want is that they all stand reasonably real time in terms of performance no matter the
       amount of strokes for UX."
 
+      **The eraser half shipped 2026-09-05 and the numbers are [PERFORMANCE.md](PERFORMANCE.md)
+      §11.10.** `VectorCanvas.Damage.region` is the third case, `repairableBase(quality:)` repairs
+      that rectangle in the standing picture, and both eraser cuts — Mode 2 `cutAlongFootprint` and
+      Mode 3 `cutToIntersection`, the *To Cross* the owner reported — declare one. MEASURED against
+      the same commit with the repair switched off: **2.1-3.5x fewer dabs, 2.2-5.2x less wall
+      clock**, and the worst single render of a 40-sample To Cross drag at 2,000 strokes **1274 ms →
+      463 ms** (INFERRED ~1.68 s → ~0.61 s on the owner's iPad).
+
+      **Three things to know before building on it.**
+
+      *The prize shrinks as the drawing gets denser, and that is the guarantee rather than a fault.*
+      A cut's damage is the footprint of every stroke it replaced, and To Cross cuts every stroke
+      under the tip — so the rectangle is 10% of the canvas at 200 strokes and 25% at 2,000. Quote
+      the 2.1x row, not the 3.5x one.
+
+      *The remaining spike has moved to the main thread.* `resolveShare` went 13% → 31% at n = 2000
+      because the render half fell and the resolve half did not: the per-sample intersection search
+      is ~237 ms worst at 2,000 strokes (INFERRED ~312 ms on the iPad) and, unlike the render, does
+      not run on `StrokeCanvasView.renderQueue`. That is the next lever on this path.
+
+      *Byte identity against a full re-walk is gone, on purpose.* A repair whose rectangle cuts a
+      transparency layer differs by one or two units out of 255 along that edge, it does not
+      accumulate, and `RegionRepairLogicTests` pins the bound three ways. §11.10 has the trade.
+
+      **What is left: every mutation site that is not an eraser cut still says `.everything`** —
+      select-and-move, Clear, and recolour, which is the one item (42) is waiting on. Each needs the
+      same two lines the eraser cuts needed: measure what the strokes being replaced last painted,
+      and forget their footprints before splicing. `regionDamage(replacing:)` is the shared helper
+      and there is no design left to do.
+
       **The append half is done; this is the rest of it.** MEASURED on the owner's iPad 9
       ([PERFORMANCE.md](PERFORMANCE.md) §11): a vector cel re-stamps every dab it holds whenever its memo
       is missed, at **3.16 µs a dab and no per-stroke term at all** — 3,200 strokes carrying 7.67 M dabs

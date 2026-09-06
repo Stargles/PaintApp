@@ -2731,3 +2731,93 @@ in place would remove both, and would cost the memo its immutability - which is 
 [RENDER.md](RENDER.md) §3.8 makes carefully elsewhere, and is **not** proposed here: 3.4 ms a pen-up
 is four frames' headroom at 60 Hz and nothing in §11.7 is waiting on it. Recorded so the next person
 does not re-derive it.
+
+### 11.10 The cross eraser: bounding a middle-of-list edit by the area it touched (2026-09-05)
+
+The owner, on a build carrying everything from the previous session: *"right now when I draw a bunch
+of brushstrokes and then use the cross eraser on them, I get a lagspike."* §11.8 made an **append**
+incremental; every other edit still dropped the memo and re-walked the cel. TODO (41) is the rest of
+it, and this is what it bought.
+
+*"Cross eraser"* is `VectorEraserMode.cutToIntersection`, labelled **To Cross** — Mode 3, which
+resolves and invalidates **once per touch sample**, so a 40-sample drag pays whatever one cut costs
+forty times. Mode 2 (**Cut**) commits once at lift. Both now declare `VectorCanvas.Damage.region`
+instead of `.everything`, and `repairableBase(quality:)` repairs that rectangle in the standing
+picture rather than walking the list.
+
+**Provenance.** MEASURED on an iPad Pro 13-inch M4 simulator, iOS 26.5, **Release**
+(`ENABLE_TESTABILITY=YES`, which leaves `-O` on and only re-enables `@testable`), canvas 2048x1024,
+the same 400 pt / 40-sample / size-18 fixture as the rest of §11 —
+`StrokeDensityBench.testWhereACrossEraserDragSpendsItsTime`. **The before arm is the same commit with
+`repairableBase` forced to return nil**, so the two arms differ in the feature and in nothing else:
+not the compiler, not the brush chain, not the per-stroke transparency layer this session's other
+work added. This Mac was at 84.4% idle for the before arm and 82.7% for the after arm, with one other
+session's `xcodebuild` alive in both.
+
+**The before arm reproduces §11.2's line, which is what says the harness is measuring the right
+thing.** Its n = 1000 single-cut re-walk is 564.8 ms; times §11.2's measured 1.32 device ratio that
+is **745 ms**, against §11.2's own iPad figure of **744.8 ms**. At n = 2000 it is 1142.9 x 1.32 =
+1509 ms against 1489.4. So the "before" here is the same full re-walk this section has always
+measured, reached by a different door.
+
+**To Cross — a 40-sample drag across the densest part of the canvas.**
+
+| n strokes | dabs before | dabs after | render total before | after | **worst single render** before | after | mean rectangle |
+|---|---|---|---|---|---|---|---|
+| 200 | 1,595,374 | **454,568** | 3.77 s | **0.73 s** | 137.3 ms | **40.8 ms** | 10.0% |
+| 500 | 4,504,208 | **1,704,803** | 10.50 s | **2.80 s** | 283.2 ms | **96.8 ms** | 16.6% |
+| 1000 | 9,040,998 | **3,932,797** | 22.36 s | **6.62 s** | 608.8 ms | **225.8 ms** | 21.6% |
+| **2000** | 18,579,138 | **8,743,517** | 45.48 s | **15.20 s** | **1274.5 ms** | **463.2 ms** | 25.3% |
+
+**Mode 2, a short flick through one or two lines — one cut, one render, which is the ordinary edit.**
+
+| n strokes | dabs before | dabs after | render before | after | rectangle |
+|---|---|---|---|---|---|
+| 200 | 47,124 | **12,904** | 109.9 ms | **21.2 ms** | 10.8% |
+| 500 | 117,567 | **62,579** | 296.5 ms | **109.8 ms** | 26.3% |
+| 1000 | 235,284 | **147,020** | 564.8 ms | **259.2 ms** | 35.6% |
+| 2000 | 470,664 | **293,664** | 1142.9 ms | **513.9 ms** | 35.6% |
+
+**2.1-3.5x in dabs and 2.2-5.2x in wall clock — an order of magnitude less than §11.8's append got,
+and the reason is in the rectangle column.** The append's prize was 105-832x because a new stroke's
+damage is its own 236 dabs whatever the cel holds. A cut's damage is *the footprint of every stroke
+it replaced*, and To Cross cuts **every** stroke whose centreline passes under the tip — so the
+rectangle is the union of several 400 pt arcs' bounding boxes, and it **grows with density**: 10% of
+the canvas at n = 200, 25% at n = 2000. The saving shrinks accordingly, and that is the guarantee
+working rather than failing: cost scales with the area touched, and a denser drawing means a cut
+touches more area. **Anyone quoting the 3.5x row should quote the 2.1x row beside it.**
+
+**Half the repairs used to pay for two walks, and a margin removed it.** A cut piece re-anchors its
+dab walk (`detachedPiece`), so its dabs sit at arc offsets its parent's did not and one near an end
+reaches past the parent's measured union; the render then widens the clip by what escaped and goes
+round again. MEASURED at **19 of 40 repairs**. `regionDamage(replacing:)` now declares the rectangle
+widened by the largest brush diameter among the strokes it replaced — **not** a bound, since §12
+stage 8 refuted a box derived from the brush, but a hint that makes the escape check pass first time.
+
+| n = 2000, To Cross drag | widened | render total | worst single render | dabs |
+|---|---|---|---|---|
+| repair, no margin | 19 of 40 | 21.34 s | 938.1 ms | 8,414,133 |
+| repair, with margin | **0 of 40** | **15.20 s** | **463.2 ms** | 8,743,517 (+2.6%) |
+
+**The worst single render is the number this feature exists for** and it halved again for 2.6% more
+dabs. INFERRED at §11.2's 1.32: on the owner's iPad 9 the worst render of a To Cross drag at 2,000
+strokes goes from **~1.68 s to ~0.61 s**.
+
+**What is left of the spike is now the *other* half, and it is on the main thread.** `resolveShare`
+went from 13% to **31%** at n = 2000 because the render half fell and the resolve half did not:
+worst single resolve **250.1 ms before, 236.7 ms after** (INFERRED ~330 and ~312 ms on the iPad). The
+bench's own split says the spatial-index rebuild is only 8.2 ms of that at n = 2000, so the rest is
+the per-sample intersection search `VectorLayer.swift` already flags as *"if a drag ever stutters in
+a dense drawing, this loop is where to look first."* **It is now the largest single term the artist
+can feel, because unlike the render it does not run on `StrokeCanvasView.renderQueue`.** That is the
+next lever on this path and nothing here touches it.
+
+**And the guarantee is no longer byte identity, which is a deliberate trade rather than a
+regression.** A repair whose rectangle cuts a transparency layer disagrees with the full walk by one
+or two units out of 255 on pixels along the rectangle's edge — MEASURED on an eraser's
+`destinationOut` group, a `.multiply` run's isolation layer and a plain source-over stroke group, so
+it is the truncation and not the blend mode. It does not accumulate: ten repairs in a row come out at
+the same one unit as one. The margin above widens the rectangle and so puts more layers across that
+edge, which is the cost side of the trade. `RegionRepairLogicTests` pins the bound three ways — a
+bigger delta, a difference outside the rectangle, or more differing pixels than the rectangle has
+boundary pixels — and still demands exact identity of the renders that are full walks.
