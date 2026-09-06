@@ -10,13 +10,37 @@ Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you 
 
 ## Do this first — two things about measurement, before any feature
 
-**1. The test target cannot build in Release, and nobody has ever measured this app in the
-configuration it ships.** `xcodebuild test -configuration Release` fails with a pre-existing
-`@testable import` module error. **Every figure taken this pass is Debug** — the per-dab costs, the
-0.24 µs octave, the pad re-walk, TODO (41)'s before/after. Debug has MEASURED **62x slower** than
-Release on this project's alpha-mask path, so those numbers are sound as *ratios* and worthless as
-absolutes. Fixing the module error is small, unglamorous, and makes every future measurement mean
-something.
+**1. ~~The test target cannot build in Release~~ — fixed 2026-09-05, and the "62x" that justified
+the caveat turns out not to apply to the paths it was attached to.** `xcodebuild test -configuration
+Release` builds and runs: **3177 total / 3174 passed / 0 failed / 3 skipped**, reconciled against a
+static count of the selected classes.
+
+**It was one line, and it was not pre-existing.** A single `@testable import PaintSoftware` in
+`SampleRecordLogicTests.swift`, which `ENABLE_TESTABILITY` — a Debug-only setting — makes legal in
+Debug and illegal in Release (*"module built without '-enable-testing'"*). It arrived at `96adbe8`
+on 2026-09-04 05:56 with BRUSH.md §12 stage 4, about 26 hours before the handoff that called it
+pre-existing; PERFORMANCE.md §11's Release simulator rows were taken at `912340a` and `eeefdee`
+earlier that same night, which is the proof Release worked until then. **The import resolved
+nothing** — every type that file names is compiled a second time into the test target, which is this
+repo's documented convention (`BrushEngineLogicTests`' header) and the reason no other test file has
+one. Deleting it changes no build setting, so the shipping binary is untouched.
+
+**The interesting half is what Release then measured.** The 62x is real but it is a figure about
+*Swift* code, and it was being applied to paths that are mostly CoreGraphics. MEASURED on an idle
+machine, three samples each way, alternated, same warm device — see PERFORMANCE.md §12:
+
+| `DabCostBench` | Debug | Release | Debug ÷ Release |
+|---|---|---|---|
+| the dab walk alone, no rasterization | 2.85 µs/dab | **0.115 µs/dab** | **~25x** |
+| the same walk **with** rasterization | 6.40 µs/dab | 3.44 µs/dab | **1.86x** |
+| a pad stroke (`PADREWALK`) | 43.7 ms | 43.1 ms | **1.01x** |
+
+So **the pad re-walk figures were already right and the caveat on them was the error**: 18–44 ms is
+what the artist pays, not a worst case sixty times too high. `BrushEditorModel.maximumStrokes` and
+`BrushEditorLogicTests` both said the honest number "could not be taken"; both now carry the taken
+one. **The rule to carry forward is that the Debug penalty is not one number** — it is ~25x on Swift,
+~1x on framework work, and any given figure is a mixture. PERFORMANCE.md §7 argued exactly this from
+first principles and can now cite a measurement.
 
 **2. The full suite is green and the tree is verified.** MEASURED at `c26efc9` on an erased simulator:
 **3363 tests, 3342 passed, 0 failed, 21 skipped, 36.5 min** — the third run in CLAUDE.md's history with no

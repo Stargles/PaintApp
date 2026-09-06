@@ -226,6 +226,17 @@ before something was deleted will silently resurrect it, and the count is the on
   reconcile the xcresult's `totalTestCount` against a static `func test` count at your own head — the
   arithmetic is what catches it, and nothing else will.
 
+  **Never write `@testable import PaintSoftware` in `PaintSoftwareUITests`.** It resolves nothing —
+  every app source a logic test touches is already compiled a second time into this target, so the
+  types are local to the module — and it **breaks `-configuration Release` outright**, because
+  `ENABLE_TESTABILITY` is set for Debug only and the app's Release `.swiftmodule` is then *"built
+  without '-enable-testing'"*. The damage is invisible where anyone would look: Debug compiles it
+  happily, the fast tier is green, and the only symptom is that nobody can measure the app in the
+  configuration it ships. One such import landed 2026-09-04 and cost a full pass of Debug-only
+  figures before it was found; see PERFORMANCE.md §12 for what those figures were worth. **Take a
+  Release fast tier before merging anything that adds a test file** — it is the only run that catches
+  this, and the one-line diff is all it takes to break again.
+
   **`-parallel-testing-enabled NO` on every run that is not the full suite.** The scheme carries
   `parallelizable = "YES"` (PaintSoftware.xcscheme:48) and that is correct — it is the whole cost
   model above — but clones only earn their keep when there are many classes to distribute across

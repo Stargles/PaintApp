@@ -470,18 +470,20 @@ enum BrushPadZoom {
     /// Since §2.31 every stroke on the pad is re-walked from the draft on every edit, so this number
     /// times one stroke's walk is what one serviced frame of a slider drag costs.
     ///
-    /// **MEASURED by `BrushEditorLogicTests`' `testThePadsWholeRewalkFitsInAFrameAtTheStrokeCapItKeeps`,
-    /// on the simulator in Debug** — one pad-crossing stroke costs **18 ms** (Grunge, spacing 0.30),
-    /// **28 ms** (Round Hard), **32 ms** (Painterly) and **42 ms** (Chalk, the dearest shipped walk).
+    /// **MEASURED by `DabCostBench`' `testWhatThePadsRewalkCostsAtItsStrokeCap`, on the simulator** —
+    /// one pad-crossing stroke costs **19 ms** (Grunge, spacing 0.30), **27 ms** (Round Hard),
+    /// **34 ms** (Painterly) and **44 ms** (Chalk, the dearest shipped walk).
     /// The cost tracks the dab count and **not** §2.25's paper, which was the expected culprit and is
     /// not: Grunge lays a canvas-anchored sheet and is the cheapest of the four.
     ///
-    /// **That is not the number the artist pays and this file must not pretend otherwise.** CLAUDE.md
-    /// records Debug at **62× Release** on the alpha-mask render path, and the shipped build is
-    /// Release; the honest Release figure could not be taken here, because `xcodebuild test
-    /// -configuration Release` fails in this project on a pre-existing `@testable import` module
-    /// error unrelated to any of this. So what the measurement bounds is the **worst case**, not the
-    /// typical one.
+    /// **That is also the number the artist pays, which this comment used to deny.** It read Debug at
+    /// 62× Release — CLAUDE.md's figure for the alpha-mask path — and called the measurement a worst
+    /// case pending a Release run that could not then be built. The Release run was taken 2026-09-05
+    /// and **this path is 1.01× Debug**: MEASURED, three samples each way alternated on a warm
+    /// device, `PADREWALK` 44.05 / 44.08 / 43.05 ms in Debug against 42.20 / 42.48 / 44.63 ms in
+    /// Release. The dab *walk* alone is ~25× faster in Release, but a pad stroke is dominated by the
+    /// CoreGraphics compositing underneath it, and framework code does not notice the configuration.
+    /// PERFORMANCE.md §12 has the table and the reason.
     ///
     /// **Eight, and the arithmetic is the reason.** At the measured Debug cost a full pad is
     /// 0.14–0.34 s of main-thread work on one serviced frame, and a realistic pad — the two or three

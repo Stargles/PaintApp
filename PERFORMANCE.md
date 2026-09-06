@@ -2821,3 +2821,60 @@ the same one unit as one. The margin above widens the rectangle and so puts more
 edge, which is the cost side of the trade. `RegionRepairLogicTests` pins the bound three ways — a
 bigger delta, a difference outside the rectangle, or more differing pixels than the rectangle has
 boundary pixels — and still demands exact identity of the renders that are full walks.
+
+---
+
+## 12. What Debug actually costs, measured instead of remembered (2026-09-05)
+
+This file has leaned on one remembered figure in a dozen places — CLAUDE.md's *"Debug measured 62x
+slower than Release"* on the alpha-mask render path — and every Debug number here carries a caveat
+built on it. **It could not be checked, because `xcodebuild test -configuration Release` did not
+build.** A single `@testable import PaintSoftware` in `SampleRecordLogicTests.swift` was illegal in
+Release (`ENABLE_TESTABILITY` is a Debug-only setting) and failed the whole test target; it was
+deleted 2026-09-05 and nothing else changed, so the shipping build is untouched. §11's own Release
+simulator rows date from `912340a` and `eeefdee`, both taken *before* that import landed at
+`96adbe8` — Release worked, then stopped, and the handoff that inherited the breakage called it
+pre-existing.
+
+**MEASURED 2026-09-05** on an iPad Pro 13-inch M4 simulator, iOS 26.5, a dedicated warm device (**not**
+erased — §6's timing exception), this Mac at 92–93% idle with no other `xcodebuild` running, checked
+before and after. `DabCostBench`, **three samples each way, alternated Debug/Release/Debug/Release**
+so drift would show as disagreement between the pairs; spread within a configuration was under 5% on
+every row.
+
+| what is being timed | Debug | Release | Debug ÷ Release |
+|---|---|---|---|
+| `testAShippedPresetsPerDabCost` — the dab walk into a `CollectingDabTarget`, **no CoreGraphics at all** | 2.794, 2.913 µs/dab | **0.121, 0.109** µs/dab | **~25x** |
+| `testTheWholeReWalkIncludingRasterization` — the same walk, stamped into a `RasterLayerTexture` | 6.463, 6.352, 6.375 µs/dab | 3.338, 3.485, 3.502 µs/dab | **1.86x** |
+| `testWhatThePadsRewalkCostsAtItsStrokeCap` — `PADREWALK`, a Chalk stroke across the brush pad | 44.05, 44.08, 43.05 ms | 42.20, 42.48, 44.63 ms | **1.01x** |
+
+**The Debug penalty is not one number, and §7 said so before anyone could measure it.** §7 argued
+that each of its rows is a sum of a Swift half — *"tight scalar loops with bounds-checking and no
+inlining in Debug"* — and an already-optimised CoreGraphics/Metal half that barely notices the
+configuration, and that a quotient therefore cannot cancel the penalty. **That is now measured rather
+than argued**: the Swift half is ~25x, the framework half is 1.0x, and a realistic mixture lands
+wherever its proportions put it. §7's instruction to treat 1.86x as a ceiling stands, and the reason
+it stands is this table.
+
+**Two consequences worth acting on.**
+
+**Every Debug figure in this document is a mixture, so "divide by 62" was never available** — and the
+figures most in need of correction are the ones that look least in need. The pad re-walk is the
+example: `BrushEditorModel.maximumStrokes` and `BrushEditorLogicTests` both recorded 18–44 ms a stroke
+and both said, correctly and uselessly, that the artist's real number could not be taken and this was
+therefore a worst case. It is not a worst case. It is **the** number, to within a percent, because
+`BrushStamper` on that path is dominated by CoreGraphics compositing rather than by its own walk. Both
+comments now carry the measurement instead of the caveat.
+
+**Conversely the pure-walk numbers were up to 25x too pessimistic**, and those are the ones §11.2 and
+§11.2a/b are built out of. §11's rows were taken in Release and are unaffected; anything taken this
+pass with `CollectingDabTarget` or with a bench that excludes rasterization is not, and wants dividing
+by something near 25 rather than by 1.86 before it is compared to a §11 row. **The rule: name what the
+timed region is made of before quoting a Debug÷Release ratio at it.**
+
+**The mechanics, for the next session.** A Release test run costs more wall clock to *build* than a
+Debug one and the same to run: `SWIFT_COMPILATION_MODE = wholemodule` plus `-O` over the test target's
+~300 files, and `ONLY_ACTIVE_ARCH = YES` is set for Debug only, so Release compiles arm64 **and**
+x86_64. Pass `ONLY_ACTIVE_ARCH=YES` on the command line for a simulator run if that matters; do not
+put it in the project, where it also reaches the device build. Nothing else about the two
+configurations differs for the test target.

@@ -818,13 +818,15 @@ final class BrushEditorLogicTests: XCTestCase {
     /// spacing (0.09) and a canvas-anchored paper to merge, which is the dearest walk in the library.
     /// `BrushPadZoom.maximumStrokes` of those is what a full pad costs on one edit.
     ///
-    /// **It does not fit a frame, and saying so is the point of measuring.** MEASURED here in
-    /// **Debug on the simulator**, one pad-crossing stroke is 18–42 ms depending on the brush — so
-    /// even a single stroke is past 16.7 ms in this configuration, and a full pad is a third of a
-    /// second. CLAUDE.md records Debug at 62× Release on this path and the shipped build is Release,
-    /// so the artist's number is far lower; it could not be taken, because `-configuration Release`
-    /// fails to build this test target on a pre-existing module-import error. What the cap therefore
-    /// does is bound the **worst** case, which is what §2.31 asks of it.
+    /// **It does not fit a frame, and saying so is the point of measuring.** MEASURED on the
+    /// simulator, one pad-crossing stroke is 18–44 ms depending on the brush — so even a single
+    /// stroke is past 16.7 ms, and a full pad is a third of a second. **That holds in Release too,
+    /// which this comment used to assume it would not.** It said the artist's number was far lower
+    /// on the strength of CLAUDE.md's 62× and could not be taken because `-configuration Release`
+    /// would not build this target. Release builds since 2026-09-05, and `PADREWALK` came back
+    /// **1.01×** Debug: a pad stroke is CoreGraphics compositing, not the Swift dab walk, and only
+    /// the walk carries the Debug penalty (~25× on its own — PERFORMANCE.md §12). So the cap bounds
+    /// the real case rather than a worst one, which is a stronger reason for it than §2.31 asked for.
     ///
     /// **The assertion is per stroke rather than on the total**, and deliberately loose: a hard
     /// frame budget on a simulator buys a flaky test. What this catches is the order of magnitude —

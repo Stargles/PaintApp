@@ -1,7 +1,13 @@
 import XCTest
 import CoreGraphics
 import UIKit
-@testable import PaintSoftware
+
+// No `@testable import PaintSoftware`, per `BrushEngineLogicTests`' header: every type this file
+// names — `StrokeSamples`, `VectorSample`, `StrokeSensors`, `Brush` — is compiled a second time
+// directly into this target, so they are local to this module and the import resolves nothing. It
+// was here from stage 4 until 2026-09-05 and was the single reason `xcodebuild test -configuration
+// Release` could not build at all: testability is a Debug-only setting, so the app's Release
+// `.swiftmodule` is "built without '-enable-testing'" and the whole test target failed to compile.
 
 /// **The sample record** — BRUSH.md §12 stage 4: the channel set, struct-of-arrays, Δt, tilt, and
 /// §5.5's evaluation funnel with its defined neutral.
