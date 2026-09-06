@@ -148,6 +148,11 @@ enum MaskResolver {
     /// instrument on the caches either side of this one.
     static var cacheEntryCount: Int { cache.entryCount }
 
+    /// Coverage bytes this is holding — the byte budget's counterpart to `cacheEntryCount`, and what
+    /// `MemoryBudgetLogicTests` reads to assert the bound is bytes rather than entries. Nothing in
+    /// the render path reads it; `PixelOps.rasterizeCacheBytes` is the same instrument next door.
+    static var cacheBytes: Int { cache.bytesResident }
+
     // MARK: - Resolution
 
     private static func resolveUncached(_ masks: [AlphaMask], of request: RenderRequest,
@@ -342,15 +347,28 @@ enum MaskResolver {
     /// 4.2 MB at 2048² and 16 MB at 4000² — and a document with more than a handful of distinct masks
     /// in one frame is not the case worth holding memory for.
     ///
-    /// **Entries and not bytes, unlike the two large caches, and that is a deliberate difference
-    /// rather than an oversight.** `PixelOps.rasterizeCache` and `CompositorMetalEngine`'s upload
-    /// cache both carry byte budgets because their entries are canvas-sized RGBA — 64 MiB apiece at
-    /// 4096², where counting entries stops being a bound. A coverage buffer is a quarter of that per
-    /// pixel and the count is eight, so at the owner's canvas this whole cache is ~16 MiB against
-    /// 192 MiB apiece for those two. At 4096² it would be ~128 MiB, which is the figure PERFORMANCE.md
-    /// item 6 flagged as 4K arithmetic; if a future session works at that size routinely, a byte
-    /// budget borrowed from `CompositorBudget` the way `PixelOps` borrows one is the shape of the fix.
+    /// **A second ceiling now, not the bound** — `cacheBudgetBytes` below is what bounds this, exactly
+    /// as `PixelOps.sharedRasterizeEntryLimit` is a second ceiling beside that cache's byte budget.
+    /// Eight canvas-sized coverage buffers is 16 MiB at the owner's 2048x1024 and **128 MiB at
+    /// 4096²**, two thirds of a 3 GB iPad's whole texture budget, held by a cache of masks — which is
+    /// the asymmetry BUGS.md recorded on 2026-08-20 and RENDER.md §5 stage 7 came back for.
     static let cacheEntryLimit = 8
+
+    /// **What this cache may hold, in bytes** — an eighth of `CompositorBudget.textureBudgetBytes`.
+    ///
+    /// **The fraction is derived rather than picked, which is what BUGS.md's entry said was missing.**
+    /// A coverage buffer is one byte per pixel where a flatten is four, so an eighth of the texture
+    /// budget buys this cache *half* as many canvas-sized entries as `PixelOps.rasterizeCache` gets
+    /// from the whole of it — and half is the right ratio because a frame carries at most one mask per
+    /// masked node and many more flattens than masked nodes. On the owner's iPad 9 that is 23 MiB,
+    /// so the entry count of 8 (16 MiB at their canvas) still binds and nothing about their documents
+    /// changes; at 4096² it is 11 entries' worth of budget against entries of 16 MiB apiece, so the
+    /// bytes bind at one entry and the 128 MiB is gone.
+    ///
+    /// Borrowed from `CompositorBudget` rather than invented for the reason `PixelOps` gives: these
+    /// are the same working set seen through different channels, and two numbers that must move
+    /// together should be one number.
+    static var cacheBudgetBytes: Int { CompositorBudget.textureBudgetBytes / 8 }
 
     /// Evicts in insertion order, as `PixelOps.rasterizeCache` does and for the same reason.
     private static let cache = MaskCache(limit: cacheEntryLimit)
@@ -359,38 +377,29 @@ enum MaskResolver {
         private let limit: Int
         private var entries: [CacheKey: ResolvedMask] = [:]
         private var order: [CacheKey] = []
+        private var residentBytes = 0
         private let lock = NSLock()
+        private var pressureToken: MemoryPressure.Token?
 
         init(limit: Int) {
             self.limit = limit
             // **Nothing dropped these before**, exactly as nothing dropped `PixelOps`'s rasterize
             // memo before that one was wired: `clearCache`'s doc comment said "and for a memory
-            // warning" while every caller in the tree was a test. Two instances of one defect from
-            // one cause, so this block is that file's verbatim, down to where it lives — registered
-            // in the cache's own initialiser rather than in a view or the app delegate, because this
-            // is what knows it is a cache. The observer's lifetime is the cache's, and both are the
-            // process's, so there is nothing to remove and no ordering to get wrong.
+            // warning" while every caller in the tree was a test. Registered in the cache's own
+            // initialiser rather than in a view or the app delegate, because this is what knows it is
+            // a cache: the responder's lifetime is the cache's, and both are the process's.
+            //
+            // **Through `MemoryPressure` rather than two `UIApplication` notifications** — RENDER.md
+            // §2.6 and BUGS.md's census item 6, which counts six caches each naming the same two
+            // constants. A warning halves and a background clears; see `MemoryPressurePolicy` for why
+            // those differ, and `PixelOps.RasterizeCache.init` for the identical registration.
             //
             // Correctness-neutral by construction: a `ResolvedMask` is derived from the masks and the
             // content versions in the key, so dropping one costs the resolution again and nothing
-            // else. The bytes are modest at the canvas the owner works at — 8 entries × 1 byte per
-            // pixel is ≤16 MiB at 2048×1024 (INFERRED) — and closing the lie is the point rather than
-            // the recovery.
-            NotificationCenter.default.addObserver(
-                forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
-            ) { [weak self] _ in
-                self?.removeAll()
-            }
-            // **The event that actually arrives** — `PixelOps.RasterizeCache.init` and
-            // `CompositorMetalEngine.init` both carry this line for the reason PERFORMANCE.md item 12
-            // records: the memory warning never fires on the owner's device, so a cache that drops
-            // only on one sits at its high-water mark against a document nobody is looking at for as
-            // long as the app is backgrounded. Same `removeAll()`, same correctness-neutral
-            // guarantee, paid back as one cold resolve per mask when the artist comes back.
-            NotificationCenter.default.addObserver(
-                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
-            ) { [weak self] _ in
-                self?.removeAll()
+            // else.
+            MemoryPressure.startObservingSystemEvents()
+            pressureToken = MemoryPressure.register("MaskResolver.cache") { [weak self] level in
+                self?.trim(toBytes: MemoryPressurePolicy.budget(level, normalBytes: MaskResolver.cacheBudgetBytes))
             }
         }
 
@@ -399,22 +408,50 @@ enum MaskResolver {
             return entries[key]
         }
 
+        /// **The byte budget first, then the count** — `PixelOps.RasterizeCache.store`'s rule
+        /// verbatim, including its `order.count > 1` guard: a cache that refuses to hold a single
+        /// coverage buffer has stopped memoizing the thing it exists for, and at 4096² one entry
+        /// alone is 16 MiB against a 23 MiB budget on the owner's device.
         func store(_ mask: ResolvedMask, for key: CacheKey) {
             lock.lock(); defer { lock.unlock() }
-            if entries.updateValue(mask, forKey: key) == nil { order.append(key) }
-            while order.count > limit {
-                entries.removeValue(forKey: order.removeFirst())
+            let bytes = mask.coverage.count
+            if let replaced = entries.updateValue(mask, forKey: key) {
+                residentBytes -= replaced.coverage.count
+            } else {
+                order.append(key)
+            }
+            residentBytes += bytes
+            let budget = MaskResolver.cacheBudgetBytes
+            while order.count > 1, order.count > limit || residentBytes > budget {
+                let evicted = order.removeFirst()
+                if let removed = entries.removeValue(forKey: evicted) { residentBytes -= removed.coverage.count }
             }
         }
 
         func removeAll() {
             lock.lock(); defer { lock.unlock() }
-            entries.removeAll(); order.removeAll()
+            entries.removeAll(); order.removeAll(); residentBytes = 0
+        }
+
+        /// Evicts oldest-first until the cache holds at most `bytes` — the memory-pressure response.
+        /// No "keep the newest whatever it costs" exemption, for `PixelOps`' reason: nothing is being
+        /// returned on this path.
+        func trim(toBytes bytes: Int) {
+            lock.lock(); defer { lock.unlock() }
+            while residentBytes > bytes, !order.isEmpty {
+                let evicted = order.removeFirst()
+                if let removed = entries.removeValue(forKey: evicted) { residentBytes -= removed.coverage.count }
+            }
         }
 
         var entryCount: Int {
             lock.lock(); defer { lock.unlock() }
             return entries.count
+        }
+
+        var bytesResident: Int {
+            lock.lock(); defer { lock.unlock() }
+            return residentBytes
         }
     }
 }

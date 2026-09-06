@@ -82,7 +82,7 @@ final class FillBoundaryLogicTests: XCTestCase {
         let engine = try XCTUnwrap(MetalFillEngine.shared,
                                    "No Metal device, or Fill.metal is not a member of this test target")
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference,
-                                                       width: side, height: side))
+                                                       width: side, height: side).session)
         let seedColour = session.seedColor(atX: seed.x, y: seed.y)
         return try XCTUnwrap(session.fill(seedX: seed.x, seedY: seed.y, seedColor: seedColour,
                                           threshold: threshold, gapRadius: gapRadius,

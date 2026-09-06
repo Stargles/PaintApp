@@ -92,6 +92,9 @@ struct CanvasNoticeBanner: View {
         // Not a warning either: the merge happened and gave the artist a layer. What the glyph says
         // is *which kind* of layer came back, which is the whole content of the message.
         case .mergedAsPixels:   return "square.on.square"
+        // The third case where something genuinely has gone wrong, and it takes the warning triangle
+        // for that reason: the artist asked for a fill and did not get one.
+        case .fillNeedsMoreMemory: return "exclamationmark.triangle"
         }
     }
 }

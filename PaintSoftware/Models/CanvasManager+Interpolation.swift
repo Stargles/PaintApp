@@ -484,40 +484,6 @@ extension CanvasManager {
         return true
     }
 
-    // MARK: - Render-cache eviction
-
-    /// How many vector cels may keep a memoized render at once. A canvas-sized RGBA image is ~16 MB
-    /// at 2048² and ~64 MB at 4000²; twelve covers the frames a scrub or onion skin actually reaches.
-    static let vectorRenderCacheLimit = 12
-
-    /// Drops memoized renders from the vector cels furthest from the current frame, keeping at most
-    /// `limit` of them. Distance from `currentFrame` rather than LRU: no per-canvas bookkeeping, and
-    /// it matches how scrubbing and onion skin reach caches — outward from the current frame.
-    func evictDistantVectorRenderCaches(limit: Int = CanvasManager.vectorRenderCacheLimit) {
-        // Counted before locking anything — `hasCachedImage` takes each canvas's lock, which a
-        // background `render()` can hold for tens of ms.
-        let vectorCels = layers.reduce(0) { $0 + $1.cels.lazy.filter { $0.vector != nil }.count }
-        guard vectorCels > max(0, limit) else { return }
-
-        var cached: [(distance: Int, canvas: VectorCanvas)] = []
-        for layer in layers {
-            for cel in layer.cels {
-                guard let canvas = cel.vector, canvas.hasCachedImage else { continue }
-                cached.append((distance: Self.frameDistance(from: currentFrame, to: cel), canvas: canvas))
-            }
-        }
-        guard cached.count > max(0, limit) else { return }
-        for entry in cached.sorted(by: { $0.distance < $1.distance }).dropFirst(max(0, limit)) {
-            entry.canvas.dropCachedImage()
-        }
-    }
-
-    /// Frames between `frame` and the nearest frame `cel` occupies. Zero while the cel is on screen.
-    private static func frameDistance(from frame: Int, to cel: Cel) -> Int {
-        if frame >= cel.startFrame && frame < cel.endFrame { return 0 }
-        return frame < cel.startFrame ? cel.startFrame - frame : frame - (cel.endFrame - 1)
-    }
-
     // MARK: - Interpolate mode
 
     /// Enters interpolate mode with a clean reference selection.

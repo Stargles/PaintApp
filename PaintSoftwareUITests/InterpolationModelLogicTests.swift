@@ -411,33 +411,42 @@ final class InterpolationModelLogicTests: XCTestCase {
 
     // MARK: - Cache eviction
 
-    /// `VectorCanvas.cachedImage` had no eviction, which PLAN §8 flags as the thing to fix before a
-    /// feature that multiplies live cels ships. The policy keeps the frames near the playhead.
-    func testEvictionKeepsTheCelsNearestTheCurrentFrameAndDropsTheRest() throws {
+    /// **A scrub through a document does not leave every cel it touched memoized.**
+    ///
+    /// This is the document-level statement of `VectorRenderCache`'s policy — the interpolation
+    /// feature is what multiplies live cels, which is why the test lives here — and the policy itself
+    /// is pinned in `MemoryBudgetLogicTests`. It replaces a test of
+    /// `CanvasManager.evictDistantVectorRenderCaches`, deleted by RENDER.md §5 stage 7: eviction
+    /// happened on every write to `currentFrame` and now happens where a render is memoized, so a
+    /// document scan 24 times a second became nothing at all.
+    ///
+    /// Each cel gets a stroke: an empty `VectorCanvas` renders to a shared 1x1 and memoizes nothing,
+    /// so a timeline of blank cels would have nothing for eviction to evict and this would pass
+    /// vacuously.
+    func testAScrubDoesNotLeaveEveryCelItTouchedMemoized() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
         let layerIndex = 1
         // Assigned directly rather than built with `addCel`: the fixture's layers start with one cel
-        // spanning the whole scene, so every add would collide with it. The timeline here is the
-        // premise of the test, not the thing under test.
-        // Each cel gets a stroke: an empty `VectorCanvas` renders to a shared 1x1 and memoizes
-        // nothing (PLAN §8.1), so a timeline of blank cels would have nothing for eviction to evict
-        // and the test would pass vacuously.
+        // spanning the whole scene, so every add would collide with it.
         manager.layers[layerIndex].cels = (0..<6).map { frame in
             Cel(id: UUID(), startFrame: frame, frameCount: 1,
                 raster: .empty(size: CanvasFixture.canvasSize),
                 vector: VectorCanvas(size: CanvasFixture.canvasSize, strokes: [sampleStroke()]))
         }
         let cels = manager.layers[layerIndex].cels
-        for cel in cels { _ = cel.vector?.render() }
-        XCTAssertTrue(cels.allSatisfy { $0.vector?.hasCachedImage == true }, "Setup: every cel is cached")
+        // A budget of two entries' worth, so the scrub below has to evict. The fixture canvas is
+        // 64x64, so a memo is 16 KiB and the entry ceiling of 12 would never bind on six cels.
+        let entryBytes = 64 * 64 * 4
+        CompositorBudget.budgetOverrideBytes = entryBytes * 2
+        defer { CompositorBudget.budgetOverrideBytes = nil }
 
-        manager.currentFrame = 0
-        manager.evictDistantVectorRenderCaches(limit: 2)
+        for cel in cels { _ = cel.vector?.render() }
 
         let kept = cels.filter { $0.vector?.hasCachedImage == true }
-        XCTAssertEqual(kept.count, 2, "Only the limit survives")
-        XCTAssertEqual(kept.map(\.startFrame), [0, 1], "And it is the frames nearest the playhead that do")
+        XCTAssertEqual(kept.count, 2, "The byte budget bounds it, and it is bytes rather than a count of cels")
+        XCTAssertEqual(kept.map(\.startFrame), [4, 5],
+                       "And it is the two rendered most recently that survive, not the two nearest frame 0")
     }
 
     /// Dropping a cache is a memory decision, never a content one: `version` must not move, or every

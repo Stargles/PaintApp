@@ -614,9 +614,12 @@ extension CanvasManager {
         if let sel = selection, !(sel.layerID == activeLayerID && sel.celID == activeCelID) {
             selection = nil
         }
-        // The working set of vector cels has just moved, so this is the moment the ones left behind
-        // stop being worth a cached render. See `evictDistantVectorRenderCaches`.
-        evictDistantVectorRenderCaches()
+        // **Render-cache eviction used to happen here and deliberately does not any more.**
+        // `currentFrame.didSet` calls this, so `evictDistantVectorRenderCaches` ran on every playback
+        // tick — counting every vector cel in the document and then walking them all again taking
+        // each canvas's lock, MEASURED at 0.154 ms a tick on 300 cels (RENDER.md §5 stage 7). It is
+        // `VectorRenderCache` now, driven by a canvas memoizing a render rather than by the playhead
+        // moving, so a tick that changes nothing costs nothing.
     }
 
     // MARK: Making a selection

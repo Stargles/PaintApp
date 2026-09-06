@@ -457,7 +457,10 @@ extension CanvasManager {
                                     oldElements: [VectorElement], newElements: [VectorElement],
                                     layerID: UUID, celID: UUID, label: HistoryActionLabel,
                                     swap: ElementSwap) {
-        let cost = (oldElements.count + newElements.count) * 512
+        // See `VectorUndoCost`: the flat 512 an element it replaces was a proxy for
+        // `MemoryLayout<VectorElement>.stride`, which is 576 today, and it charged the two lists
+        // where a run of steps holds one array apiece.
+        let cost = VectorUndoCost.bytes(from: oldElements, to: newElements)
         guard case .addsAndRemoves(let ink) = swap else {
             recordUndo(label: label, cost: cost, undo: { [weak self] in
                 vectorCanvas.elements = oldElements

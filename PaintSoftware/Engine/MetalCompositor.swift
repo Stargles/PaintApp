@@ -409,24 +409,30 @@ final class CompositorMetalEngine {
         // Delivered on the posting thread, so this can block main for as long as a composite takes if
         // one is in flight. That is the right way round: a jettison that waits ~30 ms is cheaper than
         // the termination it is trying to avoid.
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
-        ) { [weak self] _ in
+        //
+        // **Through `MemoryPressure` rather than two `UIApplication` notifications** — RENDER.md §2.6,
+        // and BUGS.md's census item 6, which counted six caches each naming the same two constants.
+        // The second of those, backgrounding, is the event that actually arrives: the memory warning
+        // is the one the owner reports never firing on their device, and the artist switching apps is
+        // the moment this doc comment already describes.
+        //
+        // **This one purges on either level rather than halving on a warning**, unlike the two CPU
+        // caches, and the asymmetry is real rather than an omission. What is held here is a *pool* of
+        // scratch textures and effect intermediates as much as it is a cache; halving a pool means
+        // choosing which scratch to keep, which the pool has no ordering for, and a partial purge
+        // leaves a fragmented Metal heap rather than a smaller one. The cost of giving all of it back
+        // is one cold composite (~53 ms at 2048², MEASURED, iPad 9 — PERFORMANCE.md item 12), which
+        // the fallback path already tabulates.
+        pressureToken = MemoryPressure.register("CompositorMetalEngine") { [weak self] _ in
             self?.purge()
         }
-
-        // **The event that actually arrives.** The memory warning above is the one the owner reports
-        // never firing on their device; backgrounding is the moment this doc comment already
-        // describes — the artist switches apps and these caches sit at their high-water mark against
-        // a document nobody is looking at. Same `purge()`, same correctness-neutral guarantee; the
-        // only new cost is one cold composite (~53 ms at 2048², MEASURED, iPad 9, Metal — see
-        // PERFORMANCE.md item 12) on the frame after the artist returns.
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
-        ) { [weak self] _ in
-            self?.purge()
-        }
+        MemoryPressure.startObservingSystemEvents()
     }
+
+    /// Holds this engine's registration with `MemoryPressure`; releasing it unregisters. The engine is
+    /// process-lived, so in practice this is held forever — exactly as the two `NotificationCenter`
+    /// observers it replaces were.
+    private var pressureToken: MemoryPressure.Token?
 
     /// Drops everything held between composites. Correctness-neutral by construction — see the
     /// registration in `init` — so this is safe to call at any time and from any thread.

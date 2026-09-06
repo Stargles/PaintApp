@@ -1009,7 +1009,7 @@ enum OnionSkinRasterCache {
     private static let lock = NSLock()
     private static var entries: [Key: UIImage] = [:]
     private static var order: [Key] = []
-    private static var pressureObservers: [NSObjectProtocol] = []
+    private static var pressureToken: MemoryPressure.Token?
 
     /// `cel`'s content at `size`, from the cache when it can be.
     ///
@@ -1070,20 +1070,21 @@ enum OnionSkinRasterCache {
     /// Registered lazily rather than in a static initialiser so a process that never turns onion skin
     /// on never registers at all. Called under `lock`.
     ///
-    /// **Two events, because the warning is the one that never arrives.** PERFORMANCE.md item 12
-    /// records that the owner's device does not post a memory warning; `PixelOps.RasterizeCache` and
-    /// `CompositorMetalEngine` both drop on backgrounding for that reason, and a ghost cache holding
-    /// canvas-reduced flattens against a document nobody is looking at is the same shape of debt.
-    /// Correctness-neutral either way — an entry here is derived from its key and costs one
-    /// re-rasterize to rebuild.
+    /// **Through `MemoryPressure`, on either level.** RENDER.md §2.6 and BUGS.md's census item 6: six
+    /// caches each named `UIApplication.didReceiveMemoryWarningNotification` and
+    /// `didEnterBackgroundNotification` in their own initialisers, and a host that is not iOS had
+    /// nothing to signal and no list of who to signal. The subscription lives in one place now.
+    ///
+    /// **Purges on a warning rather than halving, unlike the two byte-budgeted CPU caches.** This one
+    /// is bounded by `OnionSkinBudget` rather than by `CompositorBudget`, and its entries are the
+    /// *whole* onion window — halving it leaves an onion skin with holes in it, which reads as a bug
+    /// rather than as a saving. All or nothing is the honest response for a cache whose entries are
+    /// only useful as a set. Correctness-neutral either way: an entry is derived from its key and
+    /// costs one re-rasterize to rebuild.
     private static func installMemoryObserverIfNeeded() {
-        guard pressureObservers.isEmpty else { return }
-        pressureObservers = [UIApplication.didReceiveMemoryWarningNotification,
-                             UIApplication.didEnterBackgroundNotification].map { name in
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
-                removeAll()
-            }
-        }
+        guard pressureToken == nil else { return }
+        MemoryPressure.startObservingSystemEvents()
+        pressureToken = MemoryPressure.register("OnionSkinRasterCache") { _ in removeAll() }
     }
 }
 

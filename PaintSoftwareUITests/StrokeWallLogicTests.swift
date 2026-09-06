@@ -117,7 +117,7 @@ final class StrokeWallLogicTests: XCTestCase {
         let engine = try XCTUnwrap(MetalFillEngine.shared,
                                    "No Metal device, or Fill.metal is not a member of this test target")
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: Self.side,
-                                                       height: Self.side, pathWall: pathWall))
+                                                       height: Self.side, pathWall: pathWall).session)
         XCTAssertEqual(session.hasPathWall, pathWall != nil,
                        "the session must actually be holding the wall this test thinks it handed over")
         let seedColour = session.seedColor(atX: seed.x, y: seed.y)

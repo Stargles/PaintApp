@@ -122,7 +122,7 @@ final class LassoFillLogicTests: XCTestCase {
         let mask = try XCTUnwrap(LassoFillMask.rasterize(path: loop, width: Self.w, height: Self.h))
         let engine = try XCTUnwrap(MetalFillEngine.shared)
         return try XCTUnwrap(engine.makeSession(referenceRGBA: reference, width: Self.w, height: Self.h,
-                                                lassoMask: mask))
+                                                lassoMask: mask).session)
     }
 
     /// Runs a lasso fill exactly as `beginInteractiveLassoFill` does. `seedColor` is deliberately
@@ -398,7 +398,7 @@ final class LassoFillLogicTests: XCTestCase {
     func testTheOrdinaryFloodStopsAtTheLineTheLassoPaintsOver() throws {
         let engine = try XCTUnwrap(MetalFillEngine.shared)
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: bandAcrossTheMiddle(),
-                                                       width: Self.w, height: Self.h))
+                                                       width: Self.w, height: Self.h).session)
         let region = try XCTUnwrap(session.fill(seedX: 64, seedY: 40, seedColor: session.seedColor(atX: 64, y: 40),
                                                 threshold: 0.15, gapRadius: 8, edgeOverlap: 0,
                                                 canvasEdgeIsWall: true, fillColor: SIMD4<Float>(1, 0, 0, 1)))
@@ -1389,7 +1389,7 @@ final class LassoFillLogicTests: XCTestCase {
     func testTheCollarMaskIsNilForABucketFill() throws {
         let engine = try XCTUnwrap(MetalFillEngine.shared)
         let session = try XCTUnwrap(engine.makeSession(referenceRGBA: box(breakInRightWall: 0),
-                                                       width: Self.w, height: Self.h))
+                                                       width: Self.w, height: Self.h).session)
         _ = session.fill(seedX: 60, seedY: 60, seedColor: .zero, threshold: 0.15,
                          gapRadius: 0, edgeOverlap: 0, fillColor: SIMD4<Float>(1, 0, 0, 1))
 

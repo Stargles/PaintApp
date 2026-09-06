@@ -359,6 +359,7 @@ enum PixelOps {
         private var order: [RasterizeKey] = []
         private var residentBytes = 0
         private let lock = NSLock()
+        private var pressureToken: MemoryPressure.Token?
 
         init(limit: Int) {
             self.limit = limit
@@ -366,21 +367,21 @@ enum PixelOps {
             // comment said "and for a memory warning" — but no code anywhere subscribed, so the
             // largest CPU-side cache in the app was the one thing a memory warning could not reach.
             // Registered here rather than in a view or the app delegate because this is what knows it
-            // is a cache: the observer's lifetime is the cache's, and both are the process's.
-            NotificationCenter.default.addObserver(
-                forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
-            ) { [weak self] _ in
-                self?.removeAll()
-            }
-            // The event that actually arrives — see `CompositorMetalEngine.init`'s identical addition
-            // and PERFORMANCE.md item 12. This cache sits at its high-water mark against a document
-            // nobody is looking at exactly as long as the memory warning above never fires; purging on
-            // backgrounding instead is the same `removeAll()`, correctness-neutral, paid back as one
-            // cache-cold flatten the next time each cel is touched.
-            NotificationCenter.default.addObserver(
-                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil
-            ) { [weak self] _ in
-                self?.removeAll()
+            // is a cache: the responder's lifetime is the cache's, and both are the process's.
+            //
+            // **One seam rather than two `UIApplication` notifications** — RENDER.md §2.6, and
+            // BUGS.md's census item 6, which counts six caches each naming the same two constants.
+            // `MemoryPressure` owns the subscription now; this owns the response.
+            //
+            // **A warning trims and does not clear, which is a change.** Dropping the whole memo is
+            // right for a backgrounded app and wrong for a live one: the entries this cache is most
+            // likely to be asked for next are the ones it stored most recently, so halving under
+            // `MemoryPressurePolicy` gives the bytes back and leaves the current frame's flattens in
+            // place, where `removeAll()` charged the artist a full re-flatten on the exact turn the
+            // device was struggling.
+            MemoryPressure.startObservingSystemEvents()
+            pressureToken = MemoryPressure.register("PixelOps.rasterizeCache") { [weak self] level in
+                self?.trim(toBytes: MemoryPressurePolicy.budget(level, normalBytes: CompositorBudget.textureBudgetBytes))
             }
         }
 
@@ -412,6 +413,21 @@ enum PixelOps {
         func removeAll() {
             lock.lock(); defer { lock.unlock() }
             entries.removeAll(); order.removeAll(); residentBytes = 0
+        }
+
+        /// Evicts oldest-first until the cache holds at most `bytes` — the memory-pressure response,
+        /// and the only place `removeAll()`'s wholesale drop is *not* what happens.
+        ///
+        /// **No "never evict the entry just stored" exemption here**, unlike `store`. That rule exists
+        /// so a caller's own return value is memoized however large it is; nothing is being returned
+        /// on this path, and a device asking for memory is not the moment to keep an entry that on its
+        /// own exceeds what it is being asked to fit into.
+        func trim(toBytes bytes: Int) {
+            lock.lock(); defer { lock.unlock() }
+            while residentBytes > bytes, !order.isEmpty {
+                let evicted = order.removeFirst()
+                if let removed = entries.removeValue(forKey: evicted) { residentBytes -= removed.bytes }
+            }
         }
 
         var bytesResident: Int {

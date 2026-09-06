@@ -166,6 +166,22 @@ struct CanvasNotice: Identifiable, Equatable {
         /// raster layer into anything, produces pixels because one side already is pixels; saying so
         /// would be a banner on every ordinary merge in the app.
         case mergedAsPixels
+
+        /// **The fill tool could not get the memory it needs, and used to say nothing at all.**
+        ///
+        /// `MetalFillSession` allocates 38 bytes per canvas pixel for a bucket fill and 42 for a
+        /// lasso one (MEASURED, RENDER.md §5 stage 7) — 76 MB at the owner's 2048x1024 and 608 MB at
+        /// 4096². `MetalFillEngine.makeSession` refuses past `fillBudgetBytes`, refuses when
+        /// `CompositorBudget.hasHeadroom` declines, and used to return a bare nil when `makeBuffer`
+        /// came back nil at 16383² — so on a large canvas the artist tapped the bucket and *nothing
+        /// happened*, with no error and no mark. This is that refusal given a voice.
+        ///
+        /// **One case for all three reasons.** The artist's next act is the same whichever it was —
+        /// work smaller, or close something else — and CLAUDE.md's own rule about notices is that a
+        /// message which cannot say what to do is worth less than none. The distinction between "this
+        /// canvas is too big for this device" and "this moment is" is in
+        /// `MetalFillEngine.SessionOutcome`, where a debugger can read it.
+        case fillNeedsMoreMemory
     }
 
     init(_ kind: Kind) {
@@ -191,6 +207,7 @@ struct CanvasNotice: Identifiable, Equatable {
             return "Couldn't resize — \(refusal.phrase) on this canvas can't be moved. Nothing was changed."
         case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
+        case .fillNeedsMoreMemory: return "Not enough memory to fill on a canvas this large — try a smaller canvas, or close other apps."
         }
     }
 
@@ -244,6 +261,10 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor this one. It reports what already happened, and the one thing a button could offer —
         // undo — is on the top toolbar where it always is.
         case .mergedAsPixels:   return nil
+        // Nor this one. Neither of the two fixes it names is a button: "a smaller canvas" is a
+        // decision about the document the artist has to make with it in front of them, and "close
+        // other apps" is not this app's to do.
+        case .fillNeedsMoreMemory: return nil
         }
     }
 
@@ -268,6 +289,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .resizeRefused:    return "resizeRefused"
         case .resizeResampled:  return "resizeResampled"
         case .mergedAsPixels:   return "mergedAsPixels"
+        case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"
         }
     }
 

@@ -214,7 +214,17 @@ enum CompositorBudget {
     /// before the next composite starts. Asking for exactly what the textures cost would let a frame
     /// begin that cannot finish.
     static func hasHeadroom(for bytes: Int) -> Bool {
-        let available = os_proc_available_memory()
+        hasHeadroom(for: bytes, available: os_proc_available_memory())
+    }
+
+    /// The rule above **as a function of its argument, so a test can ask what a nearly-full iPad
+    /// would decide while running on a Mac** — `textureBudgetBytes(physicalMemory:)`'s split, one
+    /// valve along, and here for the same reason: the thing under test is a decision about a device
+    /// that no test host is, and on the simulator `os_proc_available_memory()` answers 0.
+    ///
+    /// `available == 0` is "no information" rather than "no memory", which is what keeps this inert
+    /// on the simulator and in the fast tier.
+    static func hasHeadroom(for bytes: Int, available: Int) -> Bool {
         guard available > 0 else { return true }
         return available > bytes * 2
     }

@@ -134,9 +134,68 @@ final class MetalFillEngine {
     ///   Per gesture like the lasso mask, and for the same reason: the artwork cannot change while
     ///   the artist drags a slider, so a sweep re-runs only the GPU stages.
     func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
-                     lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) -> MetalFillSession? {
-        MetalFillSession(engine: self, referenceRGBA: referenceRGBA, width: width, height: height,
-                         lassoMask: lassoMask, pathWall: pathWall)
+                     lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) -> SessionOutcome {
+        let needed = MetalFillSession.predictedBytes(width: width, height: height,
+                                                     isLasso: lassoMask != nil)
+        let budget = Self.fillBudgetBytes
+        guard needed <= budget else { return .tooLarge(needed: needed, budget: budget) }
+        guard CompositorBudget.hasHeadroom(for: needed) else {
+            return .noHeadroom(needed: needed, available: os_proc_available_memory())
+        }
+        guard let session = MetalFillSession(engine: self, referenceRGBA: referenceRGBA,
+                                             width: width, height: height,
+                                             lassoMask: lassoMask, pathWall: pathWall) else {
+            return .unavailable(needed: needed)
+        }
+        return .ready(session)
+    }
+
+    /// **What one fill gesture may allocate** — BUGS.md's census item 3, which found the fill path
+    /// with "no budget and no headroom check at all", and RENDER.md §5 stage 7.
+    ///
+    /// MEASURED on an iOS 26.5 simulator, 2026-09-06, summed off `MTLBuffer.length`: a bucket session
+    /// is **38.0 bytes per canvas pixel** and a lasso one **42.0** — 76 MB and 84 MB at the owner's
+    /// 2048x1024, **608 MB at 4096²** and 9.7 GB at 16383², where `makeBuffer` returns nil and the
+    /// whole gesture used to become a silent no-op. (The census read ~34 and 44 out of the source; the
+    /// four it missed are the CPU copy of the reference the session keeps for `seedColor(atX:y:)`.)
+    ///
+    /// **Borrowed from `CompositorBudget` rather than invented**, like every other budget in the app:
+    /// a fill session is a transient working set held *beside* the document, the compositor's
+    /// textures and the caches, so it should scale with the device on the one rule they all use. On
+    /// the owner's iPad 9 that is 183.7 MB, which admits their canvas (76 MB) and 2048² (152 MB) and
+    /// refuses 4096² — where the alternative is 3.3× the compositor's whole allowance allocated in
+    /// `.storageModeShared` buffers that are resident the moment they are made (PERFORMANCE.md §9
+    /// item 8), on top of a document and a rebuild the census already puts at 850–950 MB.
+    ///
+    /// **The budget and the valve are two mechanisms and both are here**, which is `CompositorBudget`'s
+    /// own doctrine rather than belt and braces: the budget is static and says what shape of fill this
+    /// device supports at all, and `hasHeadroom` is dynamic and says whether *right now* is the moment
+    /// — a fill the budget allows can still be declined because another app took the memory.
+    static var fillBudgetBytes: Int { CompositorBudget.textureBudgetBytes }
+
+    /// What `makeSession` decided, and **why**, because the three ways it can fail are three different
+    /// things to tell the artist and returning nil for all of them told them nothing at all. Before
+    /// this the 16383² case was `makeBuffer` answering nil inside a `guard`, so the fill tool simply
+    /// did not work and said so nowhere — CLAUDE.md's "a refusal with no notice", reached by a door
+    /// nobody had checked.
+    enum SessionOutcome {
+        case ready(MetalFillSession)
+        /// This canvas is too big for a fill on this device, whatever the memory situation is.
+        case tooLarge(needed: Int, budget: Int)
+        /// The canvas is within budget but the process cannot afford the allocation at this moment.
+        case noHeadroom(needed: Int, available: Int)
+        /// Metal declined, or the arguments do not describe a canvas.
+        case unavailable(needed: Int)
+
+        /// The session, or nil — for the tests and benches that only care whether one was made.
+        var session: MetalFillSession? {
+            if case .ready(let session) = self { return session }
+            return nil
+        }
+
+        /// Whether the artist should be told. Every non-`ready` outcome means the fill they asked for
+        /// is not going to happen, and every one of them used to be silent.
+        var isRefusal: Bool { session == nil }
     }
 
     // MARK: - Encoding helpers (used by MetalFillSession)
@@ -409,6 +468,62 @@ final class MetalFillSession {
         self.outBuf = outBuf
         self.changedBuf = changedBuf
         self.paramsBuf = paramsBuf
+    }
+
+    /// **Every `MTLBuffer` this session holds, summed off `MTLBuffer.length`** — what a fill gesture
+    /// costs, from the objects rather than from arithmetic about them.
+    ///
+    /// The buffers are `.storageModeShared`, so this is resident the moment the session exists rather
+    /// than lazily faulted the way a `CGBitmapContext` is (PERFORMANCE.md §9 item 8) — which is what
+    /// makes it the one site in BUGS.md's census whose `w·h·4` column *understates*.
+    ///
+    /// The CPU copy of the reference is counted too: `referenceRGBA` is held for the life of the
+    /// session so `seedColor(atX:y:)` needs no round trip, and it is another `count * 4`.
+    var allocatedBytes: Int {
+        let required = [refBuf, pathWallBuf, wallBuf, dilatedBuf, closedBuf, bridgeBuf,
+                        regionBuf, regionTmpBuf, jfaA, jfaB, outBuf, changedBuf, paramsBuf]
+        let optional = [lassoBuf, ringBuf, barrierBuf, alphaBuf, filledBuf, params2Buf,
+                        wall2Buf, closed2Buf, barrier2Buf, region2Buf]
+        return required.reduce(0) { $0 + $1.length }
+            + optional.reduce(0) { $0 + ($1?.length ?? 0) }
+            + referenceRGBA.count
+    }
+
+    /// **What a session of this shape will cost, before a byte of it is allocated** — the number
+    /// `MetalFillEngine.makeSession` weighs against the budget.
+    ///
+    /// Derived from the same buffer list `allocatedBytes` sums, and
+    /// `MetalFillBudgetLogicTests.testThePredictedCostIsWhatASessionActuallyAllocates` pins the two
+    /// equal on a real device. A prediction that drifted from the allocation would be a budget about
+    /// a session nobody makes.
+    ///
+    /// - Parameter twoReferenceColours: whether the lasso's ring resolves to two colours rather than
+    ///   one (LASSO_FILL.md §6 2a caps `|C|` at 2), which is four more `count`-sized buffers. Not
+    ///   knowable before the ring is built, so the budget assumes the worst case for a lasso.
+    static func predictedBytes(width: Int, height: Int, isLasso: Bool,
+                               twoReferenceColours: Bool = true) -> Int {
+        let count = max(0, width) * max(0, height)
+        // refBuf, pathWallBuf, outBuf: 4 bytes a pixel each. wall/dilated/closed/bridge/region/
+        // regionTmp: 1 each. jfaA/jfaB: 8 each. Plus the CPU reference copy at 4. **38 a pixel**,
+        // MEASURED equal to `allocatedBytes` by
+        // `MemoryBudgetLogicTests.testAFillSessionsPredictedCostIsWhatItActuallyAllocates`.
+        var bytes = count * (4 + 4 + 4) + count * 6 + count * 16 + count * 4
+        // The two that do not scale — the atomic change counter and one `FillParams` — which are 68
+        // bytes together and are here so the prediction is exact rather than nearly right. A budget
+        // that is "close" is a budget a test cannot pin against the allocation.
+        bytes += MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride
+        if isLasso {
+            // lasso, ring, barrier, alpha: 1 byte a pixel each, plus a second `FillParams` and the
+            // filled-pixel counter.
+            bytes += count * 4
+            bytes += MemoryLayout<UInt32>.stride + MemoryLayout<MetalFillEngine.FillParams>.stride
+            // wall2, closed2, barrier2, region2: 1 each, only when the ring holds two colours — which
+            // is not knowable until the ring is built, so the budget assumes the worst case. A lasso
+            // session over a uniform reference resolves to one colour and allocates 42 bytes a pixel
+            // rather than 46; the prediction may only over-estimate, never under.
+            if twoReferenceColours { bytes += count * 4 }
+        }
+        return bytes
     }
 
     /// The straight-RGBA colour at `(x, y)` in the reference (0..1), used as the flood seed colour.

@@ -214,10 +214,16 @@ extension CanvasManager {
                 // serialises `elements`/`transform` on its lock and documents a background reader.
                 let pathWall = StrokeWallMask.mask(of: Self.pathWallSources(references),
                                                    width: width, height: height)
-                let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
-                                                                  height: height, pathWall: pathWall)
-                self.fillSession = session
-                self.fillSeedColor = session?.seedColor(atX: seedX, y: seedY) ?? .zero
+                let outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
+                                                                   height: height, pathWall: pathWall)
+                // **A refused session is announced now.** It used to be a bare nil that reached
+                // `drainFillWork`, which produced no preview and no message, so on a canvas too big
+                // for the buffers the artist tapped the bucket and nothing at all happened — see
+                // `CanvasNotice.Kind.fillNeedsMoreMemory`. `MetalFillEngine.shared` being nil is the
+                // fourth way and takes the same notice: no Metal device is no fill either.
+                if outcome?.isRefusal ?? true { self.reportFillRefusal(context) }
+                self.fillSession = outcome?.session
+                self.fillSeedColor = outcome?.session?.seedColor(atX: seedX, y: seedY) ?? .zero
             }
             // A tap has no fence to redraw. Cleared beside the session it belongs to, so the two can
             // never describe different gestures — see `fillGestureLoopPath`.
@@ -233,6 +239,24 @@ extension CanvasManager {
     /// that has already been superseded would otherwise composite the whole canvas and upload a GPU
     /// session for a gesture nobody is waiting on, which is time the *live* tap is queued behind on a
     /// serial queue.
+    /// **Tells the artist the fill is not going to happen** — the one place the four ways
+    /// `makeSession` can decline become a banner.
+    ///
+    /// Called from `fillQueue`, so it hops to main the way every other answer that queue produces
+    /// does, and it checks the generation on arrival for the same reason `drainFillWork`'s hop does:
+    /// a refusal belonging to a gesture the artist has already abandoned is not news.
+    ///
+    /// It also ends the gesture. A fill with no session can never produce a preview or a commit, so
+    /// leaving `fillGestureActive` set would leave the sliders live over a fill that does not exist
+    /// and the undo affordance armed for a step that will never be recorded.
+    func reportFillRefusal(_ context: FillGestureContext) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, context.generation == self.fillGeneration, self.fillGestureActive else { return }
+            self.raise(.fillNeedsMoreMemory)
+            self.cancelInteractiveFill()
+        }
+    }
+
     func isCurrentFillGeneration(_ generation: UInt64) -> Bool {
         fillLock.lock()
         defer { fillLock.unlock() }
@@ -673,9 +697,11 @@ extension CanvasManager {
                 // through the gaps between dabs.
                 let pathWall = StrokeWallMask.mask(of: Self.pathWallSources(references),
                                                    width: width, height: height)
-                let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
-                                                                  height: height, lassoMask: lassoMask,
-                                                                  pathWall: pathWall)
+                let outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
+                                                                   height: height, lassoMask: lassoMask,
+                                                                   pathWall: pathWall)
+                if outcome?.isRefusal ?? true { self.reportFillRefusal(context) }
+                let session = outcome?.session
                 self.fillSession = session
                 // The session derives the collar's reference colours from the ring itself (§6 2a) and
                 // ignores whatever is handed to `fill(seedColor:)`. Mirroring its answer here keeps

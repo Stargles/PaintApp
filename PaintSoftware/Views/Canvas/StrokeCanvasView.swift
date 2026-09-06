@@ -1603,7 +1603,9 @@ final class StrokeCanvasView: UIView {
     /// bound, which is measured there rather than declared here.
     private func registerVectorUndo(canvas: VectorCanvas, from: [VectorElement], to: [VectorElement]) {
         let label: HistoryActionLabel = isEraser ? .erase : .brushStroke
-        let cost = (from.count + to.count) * 512
+        // `VectorUndoCost` rather than `(from.count + to.count) * 512`, which was 1.8x over on an
+        // ordinary stroke and 265x *under* on a long one — RENDER.md §5 stage 7 carries both figures.
+        let cost = VectorUndoCost.bytes(from: from, to: to)
         let changedInk = vectorGestureDamage
         canvasManager?.recordUndo(label: label, cost: cost, undo: { [weak self] in
             canvas.restoreElements(from, changedInk: changedInk)

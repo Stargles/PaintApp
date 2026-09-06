@@ -1366,6 +1366,12 @@ final class CanvasManager: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
+    /// Holds this document's registration with `MemoryPressure`; releasing it unregisters, so a
+    /// closed document stops answering warnings the moment it is deallocated. A `NotificationCenter`
+    /// subscription needed the same lifetime and got it from `cancellables`; this is that, one seam
+    /// along.
+    private var memoryPressureToken: MemoryPressure.Token?
+
     init() {
         thumbnailRegenSubject
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
@@ -1402,13 +1408,21 @@ final class CanvasManager: ObservableObject {
         // because that also makes the hop observable in order — a test that posts the warning and
         // then enqueues its own block on the same serial queue is guaranteed to see the trim first,
         // where a run-loop source and a queue block have no defined ordering between them.
-        NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+        //
+        // **`MemoryPressure` rather than the notification, and `.warning` only** — RENDER.md §2.6.
+        // Undo is the one responder in the app that does not answer `.background`, and that exception
+        // is the whole of `UndoBudget.pressuredMaxCostBytes`'s argument: dropping a cache costs one
+        // recomputation and dropping history costs the artist work they cannot get back, so a
+        // backgrounded app keeps every step it has room for while every cache gives everything back.
+        // Registered on this object rather than statically, because a history belongs to a document.
+        MemoryPressure.startObservingSystemEvents()
+        memoryPressureToken = MemoryPressure.register("UndoHistory") { [weak self] level in
+            guard case .warning = level else { return }
+            DispatchQueue.main.async {
                 guard let self else { return }
                 if self.history.trimUnderMemoryPressure() > 0 { self.refreshUndoRedoState() }
             }
-            .store(in: &cancellables)
+        }
     }
 
     // MARK: - Layers

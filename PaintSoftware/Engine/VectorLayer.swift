@@ -873,6 +873,88 @@ enum VectorElement: Identifiable {
         case .stroke, .fill, .text: return nil
         }
     }
+
+    /// **The heap this element owns beyond the slot it occupies in an `elements` array** — what an
+    /// undo step uniquely retains when this element is in one of its two lists and not the other.
+    ///
+    /// The slot itself is `MemoryLayout<VectorElement>.stride` and is charged by `VectorUndoCost`,
+    /// once per step; this is the out-of-line storage, which varies by two orders of magnitude
+    /// between element kinds and is the whole reason a flat per-element constant could not work.
+    ///
+    /// **`.fill`, `.text` and `.video` are charged their inline payloads and nothing more, on
+    /// purpose.** A fill's `pathData` is an archived bezier — kilobytes for a lasso-shaped path, and
+    /// it is counted; a text object's recipe is a string and a font name; a video's payload is a
+    /// filename, and its pixels live in a file the undo step does not hold.
+    var retainedHeapBytes: Int {
+        switch self {
+        case .stroke(let stroke):
+            // One `CGPoint` per sample, plus one `CGFloat` per sample per populated channel — the
+            // arrays `StrokeSamples` actually stores, rather than `VectorSample`'s width, which
+            // counts five channels whether or not the run carries them.
+            let n = stroke.samples.count
+            return n * MemoryLayout<CGPoint>.stride
+                + stroke.samples.channels.channels.count * n * MemoryLayout<CGFloat>.stride
+        case .image(let image):
+            guard let cg = image.image.cgImage else { return 0 }
+            return cg.bytesPerRow * cg.height
+        case .fill(let fill):
+            return fill.pathData.count
+        case .text(let text):
+            return text.recipe.string.utf8.count
+        case .video:
+            return 0
+        }
+    }
+}
+
+/// **What one vector undo step actually retains** — BUGS.md's "Undo charges 3-6x what a vector edit
+/// retains", measured rather than estimated, and the answer is not 3–6× and not in that direction.
+///
+/// `StrokeCanvasView.registerVectorUndo` and `CanvasManager.registerVectorElementsUndo` both charged
+/// `(from.count + to.count) * 512`. MEASURED on an iOS 26.5 simulator, 2026-09-06 (RENDER.md §5
+/// stage 7), two ways that agree:
+///
+/// | edit | charged | retained | |
+/// |---|---|---|---|
+/// | one stroke onto a 1,000-stroke cel | 0.98 MB | **0.55 MB** | 1.8× **over** |
+/// | one 5,631-sample stroke onto an empty cel | 512 B | **135,720 B** | 265× **under** |
+///
+/// The retained figure for the first row is `phys_footprint` over thirty real steps, which is the
+/// only measurement here that argues with arithmetic and wins: `MemoryLayout` says two arrays of
+/// 1,000 × 576 bytes, and the allocator says **one**. Both are right — step *k*'s `to` array is step
+/// *k+1*'s `from`, the same buffer, so a run of N steps holds N+1 buffers and not 2N. That is why
+/// this charges `max` rather than the sum, and it is a fact about a *run* of steps rather than about
+/// any one of them, which is the level a budget cares about.
+///
+/// PERFORMANCE.md §11.5's table put the retained figure at 0.30 MB per step at a thousand strokes and
+/// concluded the charge was 3–6× too high. Half of that is right — it *is* one array per step — and
+/// the per-element figure was low: `MemoryLayout<VectorElement>.stride` is 576 bytes today, so a
+/// thousand-element array is 0.55 MB rather than 0.30. The type has grown since; the constant did
+/// not, and that is the general failure a stride reads its way out of.
+enum VectorUndoCost {
+
+    /// Bytes to charge `UndoHistory` for a step that swaps `from` for `to` on one vector canvas.
+    ///
+    /// - The **array buffer**, once: `max(from.count, to.count) × MemoryLayout<VectorElement>.stride`.
+    ///   A stride rather than a constant, so the number cannot go stale the next time an element kind
+    ///   gains a field — which is exactly how 512 came to be wrong.
+    /// - The **heap of every element in one list and not the other**, by id. An element in both is
+    ///   copy-on-write shared with the live canvas and costs the step nothing; an element only this
+    ///   step can reach is bytes only this step is holding.
+    ///
+    /// A rewritten element — same id, different content, `ElementSwap.rewritesInPlace` — is charged
+    /// only its slot, which understates a recolour of a long stroke by that stroke's samples. Chosen
+    /// knowingly: catching it means comparing content rather than ids, which is O(samples) on every
+    /// edit, to correct a case where the *old* content is what is retained and the new one is in the
+    /// canvas anyway. The 265× case above is the one that mattered and it is an add, not a rewrite.
+    static func bytes(from: [VectorElement], to: [VectorElement]) -> Int {
+        let slots = max(from.count, to.count) * MemoryLayout<VectorElement>.stride
+        let fromIDs = Set(from.map(\.id)), toIDs = Set(to.map(\.id))
+        var heap = 0
+        for element in from where !toIDs.contains(element.id) { heap += element.retainedHeapBytes }
+        for element in to where !fromIDs.contains(element.id) { heap += element.retainedHeapBytes }
+        return slots + heap
+    }
 }
 
 /// **Which of three rules decides what a lasso move carries** — how much of a drawing travels when
@@ -1233,18 +1315,23 @@ final class VectorCanvas {
     ///
     /// The prune keeps the table sized by what is *out* of the display list, which is what an artist
     /// can still redo — but not quite: `UndoHistory.trim()` evicts old steps, and an entry whose step
-    /// has been evicted is unreachable and stays. This is where that leak is cut. Every swap that
-    /// feeds this table charges the history **512 bytes an element** (`StrokeCanvasView
-    /// .registerVectorUndo`'s `cost`, and `registerVectorElementsUndo`'s) against
-    /// `UndoBudget.maxCostBytes`, so that quotient is an upper bound — a generous one, since the cost
-    /// counts each step's old *and* new lists — on how many element ids the whole history can name at
-    /// once. Beyond it the surplus is dead by arithmetic.
+    /// has been evicted is unreachable and stays. This is where that leak is cut.
     ///
-    /// Derived rather than picked, so it moves with the budget it is about; on the 64 MiB floor it is
-    /// ~131k entries, which at 48 bytes each (a `UUID` and a `CGRect`) is under a tenth of the bytes
-    /// the history is holding for the same ids. Dropping the table is free by construction anyway: an
-    /// entry is a hint, and the walk re-measures what it bounds.
-    private static let vacatedInkLimit = UndoBudget.maxCostBytes / 512
+    /// **The bound is arithmetic over what a step costs.** `VectorUndoCost.bytes(from:to:)` charges a
+    /// step at least `max(from.count, to.count) × MemoryLayout<VectorElement>.stride`, and a step can
+    /// name at most `from.count + to.count ≤ 2 × max(…)` ids — so a history sitting at
+    /// `UndoBudget.maxCostBytes` can name at most `2 × budget / stride` element ids at once, and past
+    /// that the surplus is dead by arithmetic.
+    ///
+    /// **A stride rather than a literal, which is the correction.** This read `budget / 512` while the
+    /// two undo registrars charged a flat 512 bytes an element: one guess in two places. RENDER.md §5
+    /// stage 7 measured the real per-element figure at **576** — the stride today — so the guess was
+    /// wrong in both. Reading the stride is what stops that recurring the next time an element kind
+    /// gains a field. On the 64 MiB floor it is ~233k entries, which at 48 bytes each (a `UUID` and a
+    /// `CGRect`) is a fraction of the bytes the history is holding for the same ids. Dropping the
+    /// table is free by construction anyway: an entry is a hint, and the walk re-measures what it
+    /// bounds.
+    private static var vacatedInkLimit: Int { 2 * UndoBudget.maxCostBytes / MemoryLayout<VectorElement>.stride }
 
     /// The `.preview` render, memoized separately from `cachedImage` — releasing the slider renders
     /// `.full` and must not discard `.preview`, and starting a drag must not discard `.full`.
@@ -1551,6 +1638,11 @@ final class VectorCanvas {
         cachedPreviewImage = nil
         lastDamage = damage
         applyToIncrementalBase(damage)
+        // The memo is gone but a base may have survived it, and a base is a canvas-sized bitmap. The
+        // registry has to be told the new figure rather than simply forgetting this canvas, or a cel
+        // between an append and the render that consumes it would be charged nothing while holding
+        // 8 MB. `noteBytes` never evicts, which is what makes it safe to call under this lock.
+        VectorRenderCache.noteBytes(self, cachedImageBytesLocked())
     }
 
     /// Carries `damage` onto `regionBase` and `paintedBounds`. Caller must hold `lock`.
@@ -1845,10 +1937,48 @@ final class VectorCanvas {
             || incrementalBase != nil || regionBase != nil
     }
 
+    /// **Bytes of memoized render this canvas is holding** — what `VectorRenderCache` charges it.
+    ///
+    /// `hasCachedImage`'s question asked in bytes, and it has to be bytes rather than a count for the
+    /// same reason the cache does: a canvas can hold **two** canvas-sized pictures at once (`.full`
+    /// and `.preview`), so counting canvases understates a document mid-slider-drag by a factor of
+    /// two. `incrementalBase` and `regionBase` are deliberately *not* added on top — at the identity
+    /// transform each is the very object `cachedImage` holds (see their doc comments), so adding them
+    /// would charge one bitmap three times.
+    ///
+    /// Measured off the `CGImage` rather than from `size`, so a memo at a reduced render size is
+    /// charged what it is rather than what the canvas would be.
+    var cachedImageBytes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return cachedImageBytesLocked()
+    }
+
+    /// `cachedImageBytes` for the callers that already hold the lock. Caller must hold `lock`.
+    private func cachedImageBytesLocked() -> Int {
+        func bytes(_ image: UIImage?) -> Int {
+            guard let cg = image?.cgImage else { return 0 }
+            return cg.bytesPerRow * cg.height
+        }
+        var total = bytes(cachedImage) + bytes(cachedPreviewImage)
+        // The one window in which a base is the *only* reference to a bitmap: between an append or a
+        // region edit and the render that consumes it. `hasCachedImage` counts these for exactly this
+        // reason, and leaving them out would let the budget read 0 bytes off a cel holding 8 MB.
+        if cachedImage == nil {
+            if let incrementalBase { total += bytes(incrementalBase.image) }
+            else if let regionBase { total += bytes(regionBase.image) }
+        }
+        return total
+    }
+
     /// Frees the memoized render without touching the content. Deliberately not `invalidate()`:
     /// `version` means "the content changed", and bumping it would make version-keyed consumers
     /// believe an edit happened when nothing did. See `CanvasManager.evictDistantVectorRenderCaches`.
     func dropCachedImage() {
+        // Before the lock: `VectorRenderCache` takes its own lock and never a canvas's, so the
+        // ordering rule (canvas → cache, never cache → canvas) holds either way, and doing it first
+        // means a canvas is out of the registry for the whole window in which it holds nothing.
+        VectorRenderCache.noteDropped(self)
         lock.lock()
         defer { lock.unlock() }
         cachedImage = nil
@@ -4539,8 +4669,13 @@ final class VectorCanvas {
     /// that make an eraser correct are identical for both.
     func render(quality: RenderQuality = .full) -> UIImage {
         lock.lock()
-        defer { lock.unlock() }
-        return renderLocked(quality: quality)
+        let image = renderLocked(quality: quality)
+        lock.unlock()
+        // **After the unlock, never inside it.** `VectorRenderCache` may evict *other* canvases,
+        // which takes their locks; doing that while holding this one is the only way this pair could
+        // deadlock, and the ordering rule that prevents it is written down there.
+        VectorRenderCache.noteRendered(self)
+        return image
     }
 
     /// `render(quality:)`, but **only while this canvas is still at `version`** — nil the moment the
@@ -4559,9 +4694,11 @@ final class VectorCanvas {
     /// image handed back could be of a version other than the one that was checked.
     func render(quality: RenderQuality, ifStillAtVersion version: Int) -> UIImage? {
         lock.lock()
-        defer { lock.unlock() }
-        guard self.version == version else { return nil }
-        return renderLocked(quality: quality)
+        guard self.version == version else { lock.unlock(); return nil }
+        let image = renderLocked(quality: quality)
+        lock.unlock()
+        VectorRenderCache.noteRendered(self)   // outside the lock — see `render(quality:)`
+        return image
     }
 
     /// What `render(quality:)` would hand back **without rasterizing anything** — the question
@@ -4596,11 +4733,17 @@ final class VectorCanvas {
 
     func cachedRender(quality: RenderQuality = .full) -> CachedRender {
         lock.lock()
-        defer { lock.unlock() }
-        guard !_elements.isEmpty else { return .empty(version: version) }
+        guard !_elements.isEmpty else { lock.unlock(); return .empty(version: version) }
         let memo = quality == .full ? cachedImage : cachedPreviewImage
-        if let memo { return .ready(memo, version: version) }
-        return .needsRasterize(version: version)
+        let answer: CachedRender = memo.map { .ready($0, version: version) }
+            ?? .needsRasterize(version: version)
+        lock.unlock()
+        // A memo read is a use, and `VectorRenderCache` evicts by use order — without this a cel the
+        // artist keeps coming back to would age out behind cels rendered once and never looked at
+        // again. Outside the lock, for `render(quality:)`'s reason, though this one takes no other
+        // canvas's lock.
+        if memo != nil { VectorRenderCache.noteUsed(self) }
+        return answer
     }
 
     /// One canvas's render inputs, read under a **single** lock acquisition — what a `LeafSnapshot`
