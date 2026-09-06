@@ -27,6 +27,12 @@ the transcript of the argument that produced it — what happened this pass belo
 citations and 5 of another's 11 no longer resolved — every named fact still true, every anchor wrong,
 two of them because a file moved directory. A symbol name survives a refactor and a line does not.
 
+**A bare item number in a spec or a code comment may name an item that has already left this file.**
+That is the merge rule working, not a dangling reference: `git log` and the spec documents are where a
+completed number resolves. Two are cited often enough to name here — **(10a)**, the Oklab colour ramps,
+and **(38)**, the graph editor's bezier tangent handles and their tap grammar. Do not re-add a finished
+item to this file to make a citation resolve.
+
 **Verify a status before trusting it, including this file's own.** That same audit found fourteen
 assertions here that the code contradicted — features called unbuilt that shipped weeks ago, a blocker
 called live that had lifted, and two commit shas that are not on `main`.
@@ -319,8 +325,10 @@ cel-selection state exists. The keyframe half of the same idea is real and shipp
 No colour-pipeline setting, no sRGB/linear enum, no transfer LUT, no `Composite.metal` change.
 
 **One adjacent strand did ship**: `ColorMath`'s sRGB↔linear and Oklab conversions feed the gradient
-map, which is this item's own "Oklab still gets built, for interpolation" half. The code credits that
-to a "TODO (10a)" that does not exist in this file — either add it or change the comment.
+map, which is this item's own "Oklab still gets built, for interpolation" half. The code calls that
+**(10a)** in nine places — `Effect.gradientTable`, `EffectSection`, `ColorMathOklabLogicTests`,
+`EffectParityLogicTests` and `tools/oklab_ramp_ab.swift` among them. It is finished, so it left this
+file by the merge rule and the citations stand; see the convention above.
 
 ---
 
@@ -349,25 +357,34 @@ were offered on 2026-09-06 and declined.
 
 ## (45) Prune the repository into a state that can be read
 
-**Status** — not started. Named by the owner 2026-09-06:
+**Status** — partly done. Named by the owner 2026-09-06:
 
 > *"A lot of things are messy right now, so it may be worth sifting through to prune, organize, and
 > just get the repository in a completely clean and up to date state at some point."*
 
 This file was the first slice and is done. The 2026-09-06 audit that produced it found the same rot in
-the specs, so the scope is now known rather than guessed.
+the specs, so the scope is now known rather than guessed — and the four checked boxes below were the
+slice that needs no simulator. **Two of those four were already true when the audit wrote them down**,
+which is the same failure the audit exists to catch, pointed at itself.
 
 **Left to build**
-- [ ] **Fix what the specs assert that the code contradicts.** Known: `SelectionModels`'
-      `distortUnavailableReason` and LASSO_MOVE.md both cite a blocker that lifted on 2026-09-02;
-      RENDER.md §5 stage 6 says export is untested when it has 13 logic tests and an XCUITest;
-      BRUSH.md §12 stage 2 has no DONE marker and is done.
+- [x] **Fix what the specs assert that the code contradicts.** RENDER.md §5 stage 6 said the export
+      driver was untested with no XCUITest; `FrameExportSessionLogicTests` is 13 tests and
+      `ToolsAndSelectionUITests.testExportIsInTheActionsMenuAndRunsThroughToAShareableFile` drives it,
+      so only `ExportSheet` and the device run are still owed. BRUSH.md §12 stage 2 had no DONE marker
+      and §9.1's row was the only one in that table not struck through; all five names are absent from
+      the app target and the two that survive — `noiseValue`, `supportsCleanCut` — are different
+      tenants. **The third known item was already false**: neither `SelectionModels` nor LASSO_MOVE.md
+      cites the lifted blocker any more, which is this list going stale in the direction of looking
+      unfinished. Sweep the rest of the specs the same way — that is the last checkbox here.
 - [ ] **Citation rot.** ~10 of one deleted item's 15 anchors and 5 of another's 11 had drifted, two
       because a file moved directory. Sweep the specs the same way and prefer symbols to line numbers.
-- [ ] **Dangling references.** `Effect.swift` cites a "TODO (10a)" that does not exist; item (38) is
-      referenced twice from the specs with no section anywhere.
-- [ ] **Two commit shas cited in this repo's docs are not on `main`** (`2fa1725`, `83f7c0d` — pre-rewrite
-      orphans). Sweep for others.
+- [x] **Dangling references.** Neither was rot. (10a) and (38) are **completed** items whose numbers
+      survive in nine and six citations respectively; the convention note at the top of this file says
+      so, and item (10)'s text no longer leaves the question open.
+- [x] **Two commit shas cited in this repo's docs are not on `main`** (`2fa1725`, `83f7c0d` — pre-rewrite
+      orphans). Both are gone: this bullet was the only remaining citation of either. Sweep for others
+      when the spec sweep above runs.
 - [ ] Decide whether BRUSH_ENGINE_EXTENSIBILITY.md and REFACTOR_BASELINE.md still earn their place.
 - [ ] `git stash list` holds one entry from 2026-08-14 — *"Abandoned vector-interpolation index
       snapshot, 134 commits behind"* — labelled as cleared with the owner's approval but still present.

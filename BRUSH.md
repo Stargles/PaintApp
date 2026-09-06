@@ -2731,7 +2731,7 @@ deferred to a cleanup pass is exactly how legacy accumulates, and there is no cl
 | ~~`BrushStamper.DabRNG`~~ **gone**, both initialisers | `DabRandom` — §4 | 1 |
 | ~~`BrushStamper.seed(for:)`~~ **moved** to `DabRandom`, and no longer how a stroke gets its seed | `VectorStroke.seed`, minted and inherited — §4.2 | 1 |
 | ~~`DabLattice.seedID`~~ **gone** | the stroke's own `seed`, which a piece inherits by being a copy — §4.2 | 1 |
-| `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto | nothing — §9 | 2 |
+| ~~`BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth slider, the `supportsCleanCut` grain veto~~ **gone** | nothing — §9 | 2 |
 | ~~`stampApproximateSquare`~~ **gone**, and with it `Brush.hardness` reaching a square dab at all | `stampImage`; `.square` is a committed alpha mask — §3.5 | 3 |
 | ~~`PackedSampleRun`'s fixed record and its `.quarterPixel` / `.float32` mode flag~~ **gone** | `SampleChannelSet`, one header byte, `preciseCoordinates` as bit 0 — §5.5 | 4 |
 | ~~`BrushStamper.Sample`~~ **gone** | `StrokeSamples`; the stamper walks the stroke's own storage — §5.5 | 4 |
@@ -2830,8 +2830,11 @@ first, which cleanly replaces the old one."*
    have caught what §4 is about** — two hand one walk to two rasterizers, three assert a scattering stroke
    is *refused* the split path, and every other fixture is `scatter: 0`. So the mechanism
    `DiscardedDabTarget` existed to protect was green against fixtures that could not have moved.
-2. **Delete grain.** §9. Independent of everything else, and it shrinks the surface every later stage
-   touches.
+2. **DONE — grain deleted.** §9. `BrushGrain`, `noiseValue`, `grainAlphaMultiplier`, the Grain Depth
+   slider and the `supportsCleanCut` grain veto are all absent from the app target; the two names that
+   still appear are different tenants — `noiseValue` is now an effect kernel in `Composite.metal`, and
+   `supportsCleanCut` vetoes on density, scatter, jitter and paper rather than on grain. §9's ledger
+   above already recorded this and this marker had not caught up.
 3. **DONE — `stampImage` on `DabTarget`**, the tinted cache and its hit-rate test. `.square` is a
    committed alpha mask and `stampApproximateSquare` is gone; `BakedDab` carries a tip with an angle
    and `DabPose` turns it by its Jacobian's polar rotation. Two of this section's instructions were

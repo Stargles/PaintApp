@@ -927,8 +927,11 @@ it is the dependency order.
    simulator. One mutation MEASURED red, restored after: deleting the three `straighten` calls from
    `unpremultipliedRGBA` reds two, and the informative one reads **127.5 back out of the PNG where
    255 belongs** — the dark fringe as a number, taken from the file through ImageIO rather than from
-   the suite's own arithmetic. **Owed: the driver and the sheet are untested** (the frame walk, the
-   focus hand-back, the progress phases), there is no XCUITest, and nothing has run on the device.
+   the suite's own arithmetic. **The driver is tested and there is an XCUITest**, both landed since:
+   `FrameExportSessionLogicTests` is 13 tests over the frame walk, the focus hand-back and the
+   progress phases, and `ToolsAndSelectionUITests.testExportIsInTheActionsMenuAndRunsThroughToAShareableFile`
+   drives the Actions menu through to a shareable file. **Owed: `ExportSheet` itself has no test, and
+   nothing has run on the device.**
 7. ~~**The rest of the memory audit** (BUGS.md)~~ **Done 2026-09-06.** [PERFORMANCE.md](PERFORMANCE.md) §13 is
    the measurement and BUGS.md's census carries the per-item verdicts. **Four built, two declined with numbers.**
 
