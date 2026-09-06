@@ -8,110 +8,104 @@ what is true now and what is next. -->
 Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you pick up.
 [TODO.md](TODO.md) is the owner's asks; [BUGS.md](BUGS.md) is what we find.
 
-## Do this first — two things about measurement, before any feature
-
-**1. ~~The test target cannot build in Release~~ — fixed 2026-09-05, and the "62x" that justified
-the caveat turns out not to apply to the paths it was attached to.** `xcodebuild test -configuration
-Release` builds and runs: **3177 total / 3174 passed / 0 failed / 3 skipped**, reconciled against a
-static count of the selected classes.
-
-**It was one line, and it was not pre-existing.** A single `@testable import PaintSoftware` in
-`SampleRecordLogicTests.swift`, which `ENABLE_TESTABILITY` — a Debug-only setting — makes legal in
-Debug and illegal in Release (*"module built without '-enable-testing'"*). It arrived at `96adbe8`
-on 2026-09-04 05:56 with BRUSH.md §12 stage 4, about 26 hours before the handoff that called it
-pre-existing; PERFORMANCE.md §11's Release simulator rows were taken at `912340a` and `eeefdee`
-earlier that same night, which is the proof Release worked until then. **The import resolved
-nothing** — every type that file names is compiled a second time into the test target, which is this
-repo's documented convention (`BrushEngineLogicTests`' header) and the reason no other test file has
-one. Deleting it changes no build setting, so the shipping binary is untouched.
-
-**The interesting half is what Release then measured.** The 62x is real but it is a figure about
-*Swift* code, and it was being applied to paths that are mostly CoreGraphics. MEASURED on an idle
-machine, three samples each way, alternated, same warm device — see PERFORMANCE.md §12:
-
-| `DabCostBench` | Debug | Release | Debug ÷ Release |
-|---|---|---|---|
-| the dab walk alone, no rasterization | 2.85 µs/dab | **0.115 µs/dab** | **~25x** |
-| the same walk **with** rasterization | 6.40 µs/dab | 3.44 µs/dab | **1.86x** |
-| a pad stroke (`PADREWALK`) | 43.7 ms | 43.1 ms | **1.01x** |
-
-So **the pad re-walk figures were already right and the caveat on them was the error**: 18–44 ms is
-what the artist pays, not a worst case sixty times too high. `BrushEditorModel.maximumStrokes` and
-`BrushEditorLogicTests` both said the honest number "could not be taken"; both now carry the taken
-one. **The rule to carry forward is that the Debug penalty is not one number** — it is ~25x on Swift,
-~1x on framework work, and any given figure is a mixture. PERFORMANCE.md §7 argued exactly this from
-first principles and can now cite a measurement.
-
-**2. The full suite is green and the tree is verified.** MEASURED at `c26efc9` on an erased simulator:
-**3363 tests, 3342 passed, 0 failed, 21 skipped, 36.5 min** — the third run in CLAUDE.md's history with no
-environmental red at all, after a pass that rewrote the dab alpha, the modulation walk, the scatter output
-and the whole library. The class table is re-taken in CLAUDE.md, and it carries a finding: **`BrushEditorUITests`
-did not exist this morning and is now the suite's second-heaviest class at 516 s across 11 tests.** It is
-the split candidate, and ~120 new tests cost +1,190 class-seconds, which ends the "a new test is close to
-free" run that section had recorded five times — UI tests that drive a full-screen editor are not free.
-
 ## State
 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**`main` is `c26efc9`. 89 commits this pass. Fast tier 3177 total / 3174 passed / 0 failed / 3 skipped.
-No worktrees, no `tmp/*` branches, nothing uncommitted.**
+**`main` is `25e8e23`, pushed. Fast tier 3190 total / 3187 passed / 0 failed / 3 skipped, reconciled
+against a static count of the 135 selected classes. No worktrees, no `tmp/*` branches, no simulator
+clones, nothing uncommitted.**
 
-**A Release build of `c26efc9` is on the owner's iPad, provisioning valid until 2026-09-12.** It carries
-everything below.
+**No full suite this pass.** Two commits, both narrow, both covered by the fast tier — but the vector
+render path changed, so **the next session owes one**, and CLAUDE.md's class table is due a re-take with
+it (`BrushEditorUITests` is the split candidate at 516 s across 11 tests).
 
-## The brush engine is built — §12 stages 0 through 11 are DONE
+**The iPad build is `c26efc9` and is now three commits stale.** Provisioning valid until 2026-09-12.
+Neither of this pass's two changes is on it.
 
-[BRUSH.md](BRUSH.md) is the specification. **§2 is thirty-three owner rulings; read them rather than
-re-deriving them.** Eleven were made this pass and four supersede earlier ones: §2.28 supersedes §2.22's
-fixed shape, §2.29 supersedes §2.22's uncurved clause, §2.31 carves a deliberate exception out of §2.10,
-and §2.32 supersedes §2.18's intrinsic draw.
+## Two things about measurement that are now settled, and change how you read every figure here
 
-**What shipped**: opacity and flow split with a per-stroke buffer; canvas-anchored texture; the brushes
-menu with groups and the owner's two-tap navigation; the full-screen editor with orderable module chains,
-noise octaves, second inputs carrying their own curves, typed values past 100% and a working Cancel;
-relocatable storage; **twenty brushes in five groups, every asset generated, no third-party content at
-all**; `density` as a threshold driven from the chain; and two-axis scatter oriented to the stroke.
+**1. The test target builds in Release again.** `xcodebuild test -configuration Release` runs: 3177 /
+3174 passed / 0 failed / 3 skipped. One `@testable import PaintSoftware` in
+`SampleRecordLogicTests.swift` was the whole of it — illegal in Release because `ENABLE_TESTABILITY` is
+a Debug-only setting, and **resolving nothing**, since every type that file names is compiled a second
+time into the test target (this repo's documented convention). Deleting it changed no build setting, so
+the shipping binary is untouched. It was **not** pre-existing as the last handoff claimed: it arrived at
+`96adbe8` about 26 hours earlier with BRUSH.md §12 stage 4, and PERFORMANCE.md §11's Release rows, taken
+that same night, are the proof Release worked until then.
 
-**What is left of (37): §12 stage 12 only** — the `.abr` / Procreate `.brushset` / Clip Studio `.sut`
-importers. The owner named those three and left the timing to me; it stayed last because the model moved
-five times in one day and an adapter aimed at a moving target is written twice. **Stage 12 records what
-is known about each container, to be verified rather than trusted.** Test files are a real dependency:
-source freely-licensed samples first and only ask the owner for their Procreate packs if those are too
-thin. **§8.3 is why this matters more than "last stage" sounds** — bought packs cannot ship inside the
-binary, so the importer is the only lawful route to most of what exists.
+**2. "Debug is 62x slower than Release" is a fact about *Swift*, and it was being quoted at paths that
+are mostly CoreGraphics.** MEASURED on an idle warm device, three samples each way, alternated — see
+PERFORMANCE.md §12:
+
+| `DabCostBench` | Debug | Release | ratio |
+|---|---|---|---|
+| the dab walk alone, no rasterization | 2.85 µs/dab | **0.115** | **~25x** |
+| the same walk **with** rasterization | 6.40 | 3.44 | **1.86x** |
+| a brush-pad stroke | 43.7 ms | 43.1 | **1.01x** |
+
+**The pad re-walk figures were already the artist's number and the caveat on them was the error** — 18–44
+ms, not a worst case sixty times too high. Two comments said the honest number "could not be taken"; both
+now carry it. **Carry the rule forward: the Debug penalty is not one number**, it is ~25x on Swift and ~1x
+on framework work, and any given figure is a mixture. Say which when you write one down.
+
+## What shipped this pass
+
+**TODO (41)'s second half — undo and redo of an eraser cut cost the rectangle rather than the cel.** The
+owner, on the build §11.10 measured: *"right now, erasing in a vector layer with a lot of strokes is
+relatively good, but undo and redo causes some lag."* The cut had its rectangle; its **undo** went through
+`elements = snapshot` + `bumpVersion()`, which declares `.everything`, so one press paid the whole-cel
+re-walk the cut had just avoided.
+
+`VectorCanvas.restoreElements(_:changedInk:)` is the seam now. **One rectangle serves both directions**,
+because it bounds every pixel where the two lists differ and that reads the same way forwards and
+backwards; `StrokeCanvasView.foldGestureDamage` accumulates it from what the gesture's own edits declared.
+**The half the caller cannot bound is measured rather than declared** — what *departs* is still in the
+list with its footprint measured — which is why an undone append is cheap with no rectangle from anybody.
+
+MEASURED, both arms alternating in one process on an idle machine, Debug, 2048x1024: **1.6–4.8x fewer
+dabs, 1.8–6.7x less wall clock**; an undo press at 2,000 strokes 1,709.9 → **919.6 ms**. Plainly: **half,
+not an order of magnitude**, and the prize shrinks with density for §11.10's reason — the rectangle is
+3.5% of the canvas at 200 strokes and a third of it at 2,000. PERFORMANCE.md §11.11.
+
+**The re-walk is off the main thread**, so what the artist was experiencing is not a freeze but the old
+picture standing there for that long before the ink comes back. That does not change the fix; it changes
+how you reproduce it.
 
 ## Ask the owner these
 
-- **Their tuning pass.** Their Rough Ink is now the shipped one, pinned to within 0.76% of inked pixels.
-  They have the build; ask them to go through the other nineteen. The loop they specified is tune,
-  extract, done — `PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json` is how the last
-  extraction was carried.
-- **Blotchy and Bristle scatter ~53% wider on a fresh install than on their device.** §2.30 re-authored
-  those two by hand and carried the number across rather than converting it. Deliberate, asserted, and
-  written up in §13 — it wants their eye, not more arithmetic.
+- **Which eraser mode was the report about?** It decides whether anything is left of it. The two *cut*
+  modes are cheap in both directions now. **Mode 1 — the eraser-that-is-a-stroke — appends, so its undo
+  is cheap and its redo still pays the full walk**, and that limit is inherent rather than unfinished:
+  the ink coming back has never been drawn on that canvas, so no footprint exists for it, and BRUSH.md
+  §12 stage 8 refuted deriving a box from the brush (`ResponseCurve` does not clamp). Fixing it needs a
+  new mechanism — a one-round-trip memory of what a restore vacated — which is worth building **only if
+  they are actually using Mode 1**.
+- **The importer is dropped for now, by the owner, this pass**: *"skip the importer for now."* BRUSH.md
+  §12 stage 12 stands unbuilt and its survey is still the right way to start it.
+- **§13's three open brush questions were offered and declined** (*"Nothing go build"*): Splatter and
+  Stipple re-rendered with §2.30's scatter, Blotchy and Bristle's 53% divergence, and whether eight noise
+  octaves is the right cap. All three want their eye rather than more arithmetic, so they keep.
+- **Their tuning pass.** Their Rough Ink is the shipped one, pinned to within 0.76% of inked pixels; the
+  other nineteen have not been through their hands. The loop is tune, extract, done —
+  `PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json` is how the last extraction went.
 - **Drive a real Pencil and lean it over.** The simulator cannot synthesise pencil input, so **tilt has
   never been exercised by hardware** — two stages store and read it and nothing has confirmed the
   hardware end. Ten seconds closes a gap no test here can.
-- **Splatter and Stipple want revisiting now that §2.30 exists.** Stage 11 shipped them as pictures
-  because nothing could offset a dab *across* the path; two-axis scatter merged the same hour.
 
-## What TODO (41) did and did not fix
+## What is next, and none of it is chosen
 
-**MEASURED, Debug, 2048x1024**: a cut's worst single render at 1,000 strokes went **608.8 → 225.8 ms**,
-at 2,000 **1274.5 → 463.2 ms**; 2.1–3.5x fewer dabs. INFERRED on the owner's iPad 9, ~1.68 s → ~0.61 s.
+The brush engine has nothing actionable left with stage 12 dropped. Ready to start, in no order:
 
-**It is an order of magnitude short of the append's 105–832x and the reason is structural**: a cut's
-damage is the footprint of *every* stroke it replaced, so the rectangle grows with density — 10% of the
-canvas at 200 strokes, 25% at 2,000. The honest guarantee is *cost scales with the area touched*.
-
-**The spike has moved to the main thread.** `resolveShare` went 13% → 31% at n=2000 because the render
-half fell and the per-sample intersection search did not (237 ms worst; ~312 ms INFERRED on the iPad),
-and unlike the render it does not run on `renderQueue`. **That is the next lever.** Only the two eraser
-cuts declare `.region`; select-and-move, Clear and recolour still say `.everything`, and
-`regionDamage(replacing:)` is the shared helper with no design left to do. **TODO (42) waits on
-recolour.**
+- **(29) stage 7** — the rest of the memory audit. Stages 0–6 are merged, export included.
+- **(39)** — three timeline defects, all reported from the device.
+- **(40)** — onion skin z-order, and what Behind should mean.
+- **(41)'s remainder** — select-and-move, Clear and recolour still say `.everything`, and so does
+  `registerVectorElementsUndo` (the fill/text/Clear counterpart of the seam this pass built, which can
+  adopt it as soon as those sites can name their own rectangle). **TODO (42) waits on recolour.**
+- **The main-thread spike §11.10 left behind** — `resolveShare` at 31% of a To Cross drag at n=2000,
+  ~237 ms worst, and unlike the render it does not run on `renderQueue`. Untouched this pass.
 
 ## Filed rather than fixed
 
@@ -122,30 +116,32 @@ recolour.**
   `ExpirationDate` *before* installing, since the build succeeds either way.
 - **BUGS.md — a restored project texture can be held down by a negative cache entry.** Pre-existing;
   wants fixing with §13's document-opened-on-a-second-device case, which is the only way to reach it.
-- **§13 — a repair that truncates a transparency layer differs from a full walk by 1–2/255** on pixels
-  along the rectangle's edge. MEASURED as CoreGraphics rounding, non-accumulating, pinned three ways.
+- **A repair that truncates a transparency layer differs from a full walk by 1–2/255** on pixels along
+  the rectangle's edge. MEASURED as CoreGraphics rounding, non-accumulating, pinned three ways.
+- **`ONLY_ACTIVE_ARCH` is Debug-only**, so a Release *test* run compiles arm64 and x86_64 both. Pass it
+  on the command line if build time matters; do not put it in the project, where it also reaches the
+  device build.
 
 ## Traps this pass paid for
 
-- **Four of eleven tests in one branch were blind** — green against builds with the behaviour they name
-  deleted. A fixture whose setup check was taken on the *uncut* list, a blend-mode test whose marks never
-  overlapped, a "straddling stroke" that straddled nothing, and an undo test that rendered before the
-  undo. **Mutation testing is what found them**, and one guarded the eraser-under-a-stack rule.
-- **The triage recipe has an exception it did not know about.** CLAUDE.md's erase-then-re-run is right
-  for a state flake and the **worst** case for a timing one: a wall-clock assertion read 43 ms warm and
-  **207 ms after an erase**, so the prescribed confirmation failed 4.7x worse than the suite and read as
-  a real regression. Wall-clock assertions now live in the bench files, which the fast tier excludes.
-- **The simulator you are *driving* is a binary too** — `simctl install` ships whatever the last
-  `xcodebuild` wrote, including a mutation run's build. One session diagnosed a defect that existed only
-  in the installed bundle.
-- **An assertion can be true of the world when written rather than of the thing it names.** A test called
-  "the collections are disjoint" asserted a tip list was exactly `[.square]`; eleven shipped tips
-  reddened it. It asserts the partition now.
-- **A test written to catch a defect class can be broken and say so about itself** — the identifier
-  census was red on `main` for hours because it named deleted presets.
-- **Cross-branch collisions surface at the merge as compile errors, not before.** Four this pass: two
-  enums grown independently, a preset deleted by one branch and named by another's new test, and a
-  channel renamed by one and used by two others.
-- **A green check is evidence about the tree that existed when you ran it.** A rebase output filtered to
-  two lines hid a conflict and a suite was run on a half-rebased tree; separately, a result file was read
-  because a notification arrived that belonged to a *different* task's stale wait.
+- **A mutation sweep found three things reading could not**, and all three were in code and tests that
+  had already been read carefully. The union of the vacated and the declared rectangle looks redundant on
+  a single split and is not, because `departing` is a union over the *whole gesture* and a stroke deleted
+  outright leaves no piece to bound it. `testACutMintsFreshIdsRatherThanRewritingInPlace` did not redden
+  its own stated mutation — the grid's marks are shorter than the eraser nib, so its cut *deleted* rather
+  than split and its "survivors" were the marks nobody touched, equal under any implementation. And
+  `dropIncrementalBase()` in the new seam was dead on arrival. **Re-run the sweep after adding a test,
+  not only after writing one**: two of these surfaced only on the second sweep.
+- **A bench harness can be a no-op for the path it is measuring.** `medianSeconds(runs: 3)` repeats one
+  restore three times — right for `bumpVersion()`, where every run is the same full walk, and wrong for
+  the region path, where the second identical restore has nothing arriving and nothing departing and
+  falls through to a full walk. The median of three would have reported **no improvement at all**.
+  Alternating undo and redo is both correct and what the artist does.
+- **A one-line diagnosis in this file went unchecked for a day and was wrong in the useful direction.**
+  "Pre-existing `@testable import` module error" was neither pre-existing nor in need of a build-setting
+  change, and finding out which cost less than the caveats it had been generating.
+- **A green check is evidence about the tree that existed when you ran it**, which a rebase invalidates.
+  This pass's fast tier was re-run on the rebased bytes before the merge, and CLAUDE.md's warning about a
+  filtered rebase output hiding a conflict is why.
+- **`SendMessage` can be unavailable**, so a running agent cannot be corrected mid-flight. Put everything
+  a worker needs in the brief; if a finding lands while it is running, plan to reconcile at the merge.
