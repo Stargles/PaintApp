@@ -3132,6 +3132,11 @@ budget are re-taken with `budgetOverrideBytes` set to the iPad 9's, and say so.
 | at rest | 8.0 MB (1 entry) | 8.0 MB | 16.0 MB | +24 MB |
 | after a 100-frame scrub | **104.0 MB (13 entries)** | 192.0 MB (24 entries) | **296.0 MB** | +321 MB |
 
+**The scrub row is the *baseline*, taken at `61c1b17` before this stage.** `MemoryAuditBench` is one
+file and the same test reports **96.0 MB in 12 entries** on the current tree, because the registry
+below is what evicts now; §13.8 is that number and what it is worth. The thirteenth entry is the one
+the old evictor kept because it ran a playhead tick behind the render that made it.
+
 **The counted total explains 92% of the footprint, and it only does because of an autorelease pool.**
 The first run of this reported **+1,617 MB** for the same scrub and would have gone into this document
 as unbounded growth; wrapping each frame in `autoreleasepool` took it to +321 MB with the counted
