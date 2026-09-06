@@ -208,7 +208,14 @@ extension CanvasManager {
         fillQueue.async { [weak self] in
             guard let self, self.isCurrentFillGeneration(context.generation) else { return }
             if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
-                let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width, height: height)
+                // Built on this queue beside the reference composite, off the same `references` list
+                // and from the same `VectorCanvas` objects `render()` was just called on — see
+                // `pathWallSources`. Safe here for `VectorCanvas.render`'s own reason: the canvas
+                // serialises `elements`/`transform` on its lock and documents a background reader.
+                let pathWall = StrokeWallMask.mask(of: Self.pathWallSources(references),
+                                                   width: width, height: height)
+                let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
+                                                                  height: height, pathWall: pathWall)
                 self.fillSession = session
                 self.fillSeedColor = session?.seedColor(atX: seedX, y: seedY) ?? .zero
             }
@@ -306,10 +313,28 @@ extension CanvasManager {
         if fillGestureActive { scheduleFillRender() }
     }
 
+    /// The vector canvases whose stroke paths wall this fill — **TODO (46)**, and exactly the
+    /// reference set the pixels come from.
+    ///
+    /// Derived from `fillReferenceSources`'s own list rather than from the layer stack again, so the
+    /// wall and the reference composite cannot describe different documents: a layer the artist has
+    /// unticked as a reference contributes neither its pixels nor its paths. Raster layers have no
+    /// path and contribute nothing, which is the whole of the vector/raster divergence the owner
+    /// ruled on — *"let it be. It's just a property with vector layers."*
+    ///
+    /// A cel carrying a display list on a layer whose `kind` is not `.vector` is skipped, because the
+    /// reference composite draws `cel.vector` for any kind and the *property* is the layer's. That
+    /// guard is load-bearing rather than defensive: the app can put a display list on a raster layer
+    /// (see `VectorMergeLogicTests`' fixture), and a raster layer that silently walled by path would
+    /// be the divergence appearing where the ruling says it does not.
+    static func pathWallSources(_ references: [(layer: Layer, cel: Cel)]) -> [VectorCanvas] {
+        references.compactMap { $0.layer.kind == .vector ? $0.cel.vector : nil }
+    }
+
     /// The layers whose content bounds the fill, bottom-to-top: every layer marked `isFillReference`, at
     /// its active cel for the current frame. Empty when nothing is a reference (the fill then floods the
     /// whole canvas).
-    private func fillReferenceSources() -> [(layer: Layer, cel: Cel)] {
+    func fillReferenceSources() -> [(layer: Layer, cel: Cel)] {
         layers.indices.compactMap { i in
             let layer = layers[i]
             guard layer.isFillReference,
@@ -643,8 +668,14 @@ extension CanvasManager {
             self.lassoFillReportedEmpty = false
             self.fillGestureLoopPath = path
             if let refBytes = Self.compositeReferenceRGBA(references: references, width: width, height: height) {
+                // The lasso's collar flood runs against the same wall set the bucket does, so it
+                // gets (46) for free — a segmented enclosure lassoed no longer leaks its collar out
+                // through the gaps between dabs.
+                let pathWall = StrokeWallMask.mask(of: Self.pathWallSources(references),
+                                                   width: width, height: height)
                 let session = MetalFillEngine.shared?.makeSession(referenceRGBA: refBytes, width: width,
-                                                                 height: height, lassoMask: lassoMask)
+                                                                  height: height, lassoMask: lassoMask,
+                                                                  pathWall: pathWall)
                 self.fillSession = session
                 // The session derives the collar's reference colours from the ring itself (§6 2a) and
                 // ignores whatever is handed to `fill(seedColor:)`. Mirroring its answer here keeps

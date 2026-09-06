@@ -117,7 +117,7 @@ so a merge can now *increase* the survivor's block count where the spans disagre
 
 ## (46) A fill should treat a stroke's path as a wall, not just its ink
 
-**Status** — not started.
+**Status** — **built on `tmp/skinfill`, not merged.** The item stays here until the branch lands.
 
 > *"Lets say a brush is segmented, and that brush creates an enclosure, and that enclosure gets filled.
 > Right now the fill would leak through the gaps in the segmented line. I want the fill tool to also
@@ -125,31 +125,47 @@ so a merge can now *increase* the survivor's block count where the spans disagre
 > lines, then it still fills the shape properly, bridging those gaps. (rough ink on low pressure does
 > this segmentated line for example)"*
 
-The fill works on **pixels** — it thresholds what is painted and floods between it. A brush whose dabs
-do not overlap paints a dotted line, so pixel-wise there is no wall there and the flood walks straight
-through. The **Gap Closing** slider is the existing answer and it is the wrong tool for this: it closes
-gaps by radius, so a gap wide enough to matter needs a radius that also closes gaps the artist wanted
-open, and Rough Ink at low pressure can leave gaps far wider than any safe radius.
+**What shipped on the branch.** `StrokeWallMask.mask` rasterises every wall stroke's **centre line** —
+`StrokePath.flattened`, the same flattening the dab march walks — in **the colour that stroke paints**,
+and `computeWalls` puts each path pixel through the same threshold test the reference's own pixels
+take. So the rule is *"the path behaves as if the stroke had painted a continuous line of its own
+colour"*, applied upstream of gap closing, of the bucket flood and of the lasso's collar flood, so all
+three obey it and none of them needed changing. **No new control**, and the owner ruled the
+vector/raster divergence needs no notice: *"let it be. It's just a property with vector layers."*
 
-**The ask is different in kind and that is what makes it a good one: a vector layer knows where the
-stroke *is*, whatever it painted.** `StrokePath` is the curve every tier walks and it is continuous by
-construction, so a fill on a vector layer can rasterize the stroke's *centre line* into the barrier
-mask alongside the painted pixels. Segmentation stops mattering, and no radius has to be guessed.
+**Carrying the colour rather than a flag is the load-bearing part, and the first build got it wrong.**
+An unconditional wall took the **Threshold** slider away on every vector layer;
+`FillLiveAdjustUITests.testAdjustingThresholdAfterFillReappliesToUncommittedFill` caught it. That is
+now pinned headlessly too.
 
-**Questions to settle before building**
-- Vector layers only — a raster layer has no path. Say so in the UI or accept that the two tiers fill
-  differently. This is the kind of silent divergence CLAUDE.md's "a refusal with no notice" section is
-  about.
-- Which strokes count as walls: every stroke in the cel, only the visible ones, only ones above some
-  opacity? A stroke at 5% opacity is invisible and would become an invisible wall.
-- Does the centre line get the stroke's width, or a hairline? Width interacts with **Edge Overlap**,
-  which for a lasso is an *erosion* radius — maximum means radius zero, so *lowering* it manufactures
-  more of the diagonal pinch points that (44) turned out to be about.
-- Does this replace Gap Closing on vector layers, or sit beside it? Two controls that do overlapping
-  things is what §2.20 of BRUSH.md pushed back on elsewhere.
+**The other decisions, each argued in `StrokeWallMask`'s own doc comment.** A **hairline** (1.5 px,
+antialiasing off — a 1 px stroke on an integer coordinate can rasterise to nothing at all), not the
+stroke's width, because the dabs already wall as far as they cover and a wider wall would move the
+flood boundary without moving the coverage ramp LASSO_FILL.md §6 step 7 anchors on. **Beside Gap
+Closing, not replacing it** — no control added or removed. Paint strokes only: erase strokes, fills,
+images, text and video are not lines, and a **suppressed** element is not drawn. A stroke that paints
+nothing walls nothing, *derived* from the colour it writes rather than ruled by a threshold.
 
-**Spec** LASSO_FILL.md §6 is the algorithm; step 3's collar flood is where a path-derived barrier
-would join it.
+**Cost, MEASURED** (Debug, simulator, 2048x1024): 28 / 51 / 177 ms at 200 / 1,000 / 4,000 strokes,
+once per gesture on `fillQueue`, against 621 / 3,097 / 12,345 ms for the cold `VectorCanvas.render()`
+beside it. Not optimised; the lever if one is ever needed is a memo on `contentVersion`.
+
+**One behaviour change that is not about gaps, and it is the thing to look at on the device**: a line
+*inside* a flat region now splits it for a recolour wherever that line's own colour is outside
+Threshold of the tapped one, where the flood used to cross it once the *pixels* were within tolerance
+and the gaps between dabs were open. Same rule seen from the other side.
+
+**Left**
+- [ ] Merge `tmp/skinfill` to `main`.
+- [ ] Nobody has yet drawn a segmented enclosure **with a pencil on the device** and filled it.
+      XCUITest cannot synthesise pressure — `StrokeInput.init(touch:in:)` gives a finger 1.0 — so the
+      low-pressure Rough Ink case cannot be driven from a UI test at all. It is pinned headlessly
+      instead (`StrokeWallLogicTests`, which attaches a three-panel contact sheet of the drawn
+      fixture, the leak and the containment through the production render and the production GPU
+      session), and the app-level regression is `FillContainmentUITests` / `FillLiveAdjustUITests` /
+      `FillUndoRedoUITests`, green.
+
+**Spec** LASSO_FILL.md §6 step 2d.
 
 ---
 

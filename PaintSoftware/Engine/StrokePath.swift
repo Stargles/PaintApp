@@ -246,6 +246,32 @@ struct StrokePath {
         return total
     }
 
+    /// **The curve as a polyline, at `flatness`** — the same subdivision `length(ofSegment:)` and the
+    /// dab march walk, so anything derived from this sits where the dabs sit rather than near them.
+    ///
+    /// Its caller is TODO (46): a fill on a vector layer treats a stroke's *path* as a wall as well as
+    /// its painted pixels, so a brush whose dabs do not overlap still encloses a region. That is only
+    /// sound if the wall follows the curve the dabs were placed along — which is this one, by
+    /// construction, because there is one flattening in the app and this is it.
+    ///
+    /// Empty for a run with fewer than two knots: a single stored point is a dab, not a line, and it
+    /// bridges nothing. The path's own pixels are still walls by colour.
+    var flattened: [CGPoint] {
+        guard points.count > 1 else { return [] }
+        var out: [CGPoint] = [points[0]]
+        out.reserveCapacity(points.count * 4)
+        for index in 0..<(points.count - 1) {
+            let p1 = points[index], p2 = points[index + 1]
+            let (m1, m2) = tangents(segment: index)
+            let steps = StrokePath.subdivisions(p1: p1, p2: p2, m1: m1, m2: m2)
+            for step in 1...steps {
+                out.append(StrokePath.hermite(p1: p1, p2: p2, m1: m1, m2: m2,
+                                              u: CGFloat(step) / CGFloat(steps)))
+            }
+        }
+        return out
+    }
+
     /// The arc length from the start of the path to `parameter`, in the "knot index + fraction"
     /// domain this shares with `StrokeGeometry`.
     ///

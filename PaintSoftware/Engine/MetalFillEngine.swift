@@ -122,10 +122,21 @@ final class MetalFillEngine {
     ///   seeded from its one-pixel ring, and the result is the mask minus everything that flood
     ///   reached. The session derives the ring and the reference colours from it here, once, because
     ///   neither can change while the artist drags a slider.
+    ///
+    /// - Parameter pathWall: premultiplied-last RGBA, carrying the colour a vector stroke's **centre
+    ///   line** paints — `StrokeWallMask.mask`, TODO (46). `computeWalls` puts that colour through the
+    ///   same threshold test the reference's own pixels get, so the path behaves as if the stroke had
+    ///   painted a continuous line — which is what lets a segmented brush enclose a region its dabs
+    ///   left gaps in, without taking Threshold's meaning away. `nil` — every raster document, and any
+    ///   vector cel with no paint stroke in it — is the pre-(46) fill byte for byte, and copies
+    ///   nothing.
+    ///
+    ///   Per gesture like the lasso mask, and for the same reason: the artwork cannot change while
+    ///   the artist drags a slider, so a sweep re-runs only the GPU stages.
     func makeSession(referenceRGBA: [UInt8], width: Int, height: Int,
-                     lassoMask: [UInt8]? = nil) -> MetalFillSession? {
+                     lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) -> MetalFillSession? {
         MetalFillSession(engine: self, referenceRGBA: referenceRGBA, width: width, height: height,
-                         lassoMask: lassoMask)
+                         lassoMask: lassoMask, pathWall: pathWall)
     }
 
     // MARK: - Encoding helpers (used by MetalFillSession)
@@ -201,6 +212,15 @@ final class MetalFillSession {
     private let referenceRGBA: [UInt8]
 
     private let refBuf: MTLBuffer
+    /// **TODO (46)'s path wall** — premultiplied-last RGBA, carrying the colour a vector stroke's
+    /// centre line paints, so `computeWalls` can put the path through the same threshold test the
+    /// painted pixels get and a segmented brush encloses a region its dabs do not. Always allocated
+    /// because Metal has no unbound argument; all zeros when there is none, which is every raster
+    /// document. `StrokeWallMask` builds it and says which strokes count.
+    private let pathWallBuf: MTLBuffer
+    /// Whether `pathWallBuf` holds anything — for a test that wants to prove a session was handed one
+    /// rather than inferring it from the pixels it produced. Nothing in the render path reads it.
+    let hasPathWall: Bool
     private let wallBuf: MTLBuffer
     private let dilatedBuf: MTLBuffer
     private let closedBuf: MTLBuffer
@@ -298,9 +318,10 @@ final class MetalFillSession {
     }
 
     fileprivate init?(engine: MetalFillEngine, referenceRGBA: [UInt8], width: Int, height: Int,
-                      lassoMask: [UInt8]? = nil) {
+                      lassoMask: [UInt8]? = nil, pathWall: [UInt8]? = nil) {
         guard width > 0, height > 0, referenceRGBA.count >= width * height * 4 else { return nil }
         if let lassoMask, lassoMask.count < width * height { return nil }
+        if let pathWall, pathWall.count < width * height * 4 { return nil }
         let count = width * height
         let device = engine.device
         func buffer(_ bytes: Int) -> MTLBuffer? { device.makeBuffer(length: max(bytes, 4), options: .storageModeShared) }
@@ -312,6 +333,20 @@ final class MetalFillSession {
               let jfaB = buffer(count * MemoryLayout<SIMD2<Float>>.stride),
               let outBuf = buffer(count * 4), let changedBuf = buffer(MemoryLayout<UInt32>.stride),
               let paramsBuf = buffer(MemoryLayout<MetalFillEngine.FillParams>.stride) else { return nil }
+        // **An RGBA buffer is bound at index 3 of `computeWalls` on every fill**, because Metal has no
+        // such thing as an unbound argument: the alternative to always having one is a second
+        // pipeline, or a function constant, for a kernel that costs one extra texel read. When there
+        // is no path wall this is `count * 4` zero bytes — 8 MiB at 2048x1024, beside the `count * 4`
+        // output buffer and two `count * 8` jump-flood buffers this session already holds — and the
+        // kernel's answer is unchanged, since alpha 0 fails its own test.
+        guard let pathWallBuf = buffer(count * 4) else { return nil }
+        if let pathWall {
+            pathWall.withUnsafeBytes { memcpy(pathWallBuf.contents(), $0.baseAddress!, count * 4) }
+        } else {
+            memset(pathWallBuf.contents(), 0, count * 4)
+        }
+        self.pathWallBuf = pathWallBuf
+        self.hasPathWall = pathWall != nil
         self.engine = engine
         self.width = width
         self.height = height
@@ -601,7 +636,8 @@ final class MetalFillSession {
                                      wall: MTLBuffer, closed: MTLBuffer,
                                      gapRadius: Float, canvasEdgeIsWall: Bool) -> MTLBuffer {
         let p = engine.pipelines
-        engine.encode2D(enc, p.walls, width: width, height: height, buffers: [(refBuf, 0), (wall, 1), (params, 2)])
+        engine.encode2D(enc, p.walls, width: width, height: height,
+                        buffers: [(refBuf, 0), (wall, 1), (params, 2), (pathWallBuf, 3)])
         guard Int(gapRadius.rounded()) >= 1 else {
             // No *bridge* at a zero radius — the artist has said "bridge nothing" — but the barrier
             // still applies: it lives inside `floodHoriz`/`floodVert`, which always run, and it is

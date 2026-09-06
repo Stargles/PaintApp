@@ -298,3 +298,193 @@ struct LassoFillDiagnostic: Identifiable {
     /// spends its most legible moment on a screen nobody is looking at yet.
     static let holdFraction: Double = 0.65
 }
+
+// MARK: - The path wall
+
+/// **A stroke's path is a wall as well as its pixels** — TODO (46), the owner's ask:
+///
+/// > *"Lets say a brush is segmented, and that brush creates an enclosure, and that enclosure gets
+/// > filled. Right now the fill would leak through the gaps in the segmented line. I want the fill
+/// > tool to also make the line path itself behave like a wall too, so that if I fill the enclosure
+/// > with the segmented lines, then it still fills the shape properly, bridging those gaps."*
+///
+/// The fill works on pixels: it thresholds what is painted and floods between it. A brush whose dabs
+/// do not overlap — Rough Ink at low pressure — paints a dotted line, so pixel-wise there is no wall
+/// and the flood walks straight through. **Gap Closing is the existing answer and it is the wrong
+/// tool**: it seals by radius, so a gap wide enough to matter needs a radius that also seals gaps the
+/// artist wanted open.
+///
+/// A **vector** layer knows where the stroke *is*, whatever it painted. `StrokePath` is the curve
+/// every tier walks and it is continuous by construction, so rasterising its centre line into the
+/// wall set makes segmentation stop mattering with no radius to guess. Raster layers have no path and
+/// are unchanged; the owner ruled that divergence needs no notice — *"let it be. It's just a property
+/// with vector layers."*
+///
+/// The centre line goes in **in the colour the stroke paints**, and `computeWalls` puts it through the
+/// same threshold test the reference's own pixels take — so the rule is *"the path behaves as if the
+/// stroke had painted a continuous line of its own colour"*, and the Threshold slider still means what
+/// it always meant. That is upstream of gap closing, of the bucket flood and of the lasso's collar
+/// flood, so all three obey it and none of them needed to learn about it.
+///
+/// ## What it costs
+///
+/// **MEASURED** (Debug, iPad Pro 13-inch M4 simulator, 2048x1024, straight 8-knot strokes) — one
+/// `mask(of:width:height:)` against the cold and warm `VectorCanvas.render()` it is built beside:
+///
+/// | strokes | this mask | `render()` cold | `render()` warm |
+/// |---|---|---|---|
+/// | 200 | 27.6 ms | 621 ms | 0.0 ms |
+/// | 1,000 | 50.9 ms | 3,097 ms | 0.0 ms |
+/// | 4,000 | 177.1 ms | 12,345 ms | 0.0 ms |
+///
+/// Linear in strokes, and **once per gesture rather than per render**: the artwork cannot change
+/// while the artist drags Threshold or Gap Closing, so a slider sweep re-runs only the GPU stages —
+/// the same argument `MetalFillSession` makes for the lasso's ring. It runs on `fillQueue`, never on
+/// the main thread.
+///
+/// So against a *cold* cel it is 1.4% of what the reference composite beside it already pays, and
+/// against a warm one — which is the ordinary case, since the canvas the artist is looking at has
+/// just been rendered — it is the whole new cost of starting a fill: **177 ms at 4,000 strokes**, in
+/// Debug on a simulator. Not optimised, because PERFORMANCE.md's rule is a measured need and there is
+/// none yet; the lever if one appears is a memo keyed on the canvas's `contentVersion` plus its
+/// transform and suppressed set, which is exactly the tuple `appendWalls` reads.
+///
+/// Carrying the colour rather than a flag cost **12 ms at 4,000 strokes** against the boolean version
+/// (161.4 → 177.1) and a `count * 4` buffer instead of `count`. It is what keeps Threshold working;
+/// see `mask`.
+enum StrokeWallMask {
+
+    /// **A hairline, not the stroke's own width, and the two are not interchangeable.**
+    ///
+    /// The wall only has to restore *connectivity* the dabs failed to provide; the dabs' own pixels
+    /// are already walls by colour, so a path drawn at the stroke's width would add nothing there and
+    /// would push the barrier outward everywhere else. That matters because the flood boundary and
+    /// the fill's alpha are computed from different things: the bucket's `edgeDilate` and the lasso's
+    /// `lassoEdgeErode` are both anchored on the *painted* silhouette (LASSO_FILL.md §6 step 6-7), so
+    /// a wall wider than the ink moves the boundary without moving the ramp — which is exactly the
+    /// detached-halo family §6's fourth specification measured and rejected. One pixel changes the
+    /// connectivity and leaves the ramp where the artwork put it. INFERRED from that measurement, not
+    /// re-measured.
+    ///
+    /// **1.5 rather than 1, and the half-pixel is load-bearing.** With antialiasing off — which this
+    /// needs, see `mask` — a stroke exactly 1 wide centred on an integer coordinate covers
+    /// `[y - 0.5, y + 0.5]`, whose only pixel centres sit on its boundary, and CoreGraphics can
+    /// rasterise it to **nothing at all**. MEASURED doing exactly that on a horizontal line at y = 80.
+    /// At 1.5 the band always contains at least one pixel centre wherever it sits, and at most two, so
+    /// it is still a hairline; a 45° run spans about 2.1 px across a row, which is what keeps a
+    /// diagonal 8-connected instead of leaking between its own steps.
+    static let hairlineWidth: CGFloat = 1.5
+
+    /// **The colour each centre line paints**, as premultiplied-last RGBA — the same layout and the
+    /// same byte order as the reference composite the fill reads, and alpha 0 where no path runs. Nil
+    /// when there is no wall to draw at all, which is every raster document and every vector cel that
+    /// holds no paint stroke: the caller then allocates nothing and the fill is byte-for-byte what it
+    /// was.
+    ///
+    /// **A colour rather than a flag, and that is the fix for a regression this feature caused before
+    /// it shipped.** The first version wrote one boolean byte and `computeWalls` OR'd it in
+    /// unconditionally — so on a vector layer the **Threshold** slider could no longer release a
+    /// border, and `FillLiveAdjustUITests.testAdjustingThresholdAfterFillReappliesToUncommittedFill`
+    /// caught it: raising Threshold to its maximum left the fill contained where it used to flood.
+    /// Carrying the colour puts the path through *exactly the test the painted pixels get*, so the
+    /// path behaves as if the stroke had painted a continuous line of its own colour — which is the
+    /// literal statement of the ask — and every control downstream keeps its meaning.
+    ///
+    /// The colour is `stroke.color` at `color.alpha x stroke.opacity`. Not the per-dab flow, which
+    /// varies along a stroke and is the brush's business rather than the stroke's; this is the
+    /// stroke's own declared ink and it is what an artist would name if asked what colour the line is.
+    ///
+    /// **Antialiasing is OFF, as it is in `rasterize(path:width:height:)` one tier up, and here the
+    /// reason is the colour.** A half-covered pixel would carry a half-alpha version of the ink, and
+    /// the threshold test would then read the line as fainter than the artist drew it — thinner
+    /// coverage along a diagonal would silently open the wall. Full colour or nothing; `hairlineWidth`
+    /// is 1.5 so that "nothing" cannot happen to a line sitting on an integer coordinate.
+    static func mask(of canvases: [VectorCanvas], width: Int, height: Int) -> [UInt8]? {
+        guard width > 0, height > 0 else { return nil }
+        var strokes: [(path: CGPath, colour: UIColor)] = []
+        for canvas in canvases { appendWalls(of: canvas, to: &strokes) }
+        guard !strokes.isEmpty else { return nil }
+
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let ok: Bool = bytes.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: PixelOps.deviceRGBColorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            // The same flip `rasterize` documents: a bare `CGContext` has its origin bottom-left and
+            // row 0 of the buffer is the image's top row, so a path in top-left-origin canvas
+            // coordinates lands upside down without it.
+            ctx.translateBy(x: 0, y: CGFloat(height))
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.setShouldAntialias(false)
+            ctx.setLineWidth(hairlineWidth)
+            ctx.setLineCap(.round)
+            ctx.setLineJoin(.round)
+            // **Source-over, not `.copy`, and the display list's own order.** The reference composite
+            // draws these same strokes back to front with source-over, so where two translucent lines
+            // cross this accumulates exactly as the pixels do — which is the whole principle here: the
+            // path behaves as if the stroke had painted a continuous line. `.copy` was tried first and
+            // is wrong twice over: it replaces a crossing with the upper stroke's colour alone, and a
+            // stroke that paints *nothing* would punch a transparent hole through a wall that is
+            // really there. With source-over a stroke that paints nothing writes nothing, so "an
+            // invisible stroke is not a wall" is derived rather than a second rule to keep in step.
+            //
+            // (`Brush.stroke.blendMode` is not consulted. A wall is a question about where the ink is,
+            // and source-over is the honest summary of a line drawn in any mode that adds ink.)
+            ctx.setBlendMode(.normal)
+            for stroke in strokes {
+                ctx.setStrokeColor(stroke.colour.cgColor)
+                ctx.beginPath()
+                ctx.addPath(stroke.path)
+                ctx.strokePath()
+            }
+            return true
+        }
+        return ok ? bytes : nil
+    }
+
+    /// Appends the centre lines of `canvas`'s wall strokes, in canvas coordinates.
+    ///
+    /// **Which elements are walls, and why each of the others is not.**
+    ///
+    /// - A **paint stroke** is a wall. That is the feature.
+    /// - An **erase** stroke is not: it removes ink, and a hole the artist punched through a line is
+    ///   a hole the fill should be able to walk through. This is also what makes "a genuine gap"
+    ///   expressible — cut a line and the surviving pieces are two strokes with nothing between them.
+    /// - A **fill**, a placed **image**, a **text** object and a **video** are not. None of them is a
+    ///   line: they have an area or a quad rather than a centre line, and their painted pixels
+    ///   already wall the flood exactly as far as they cover. Rasterising a quad's outline as a wall
+    ///   would invent a barrier where a transparent PNG shows nothing.
+    /// - A **suppressed** element is not, because it is not drawn — it is the piece the artist is
+    ///   dragging in a lasso move, or the text they are editing, and the reference composite this
+    ///   wall accompanies (`CanvasManager.compositeReferenceRGBA`, via `VectorCanvas.render`) skips
+    ///   it for exactly the same reason.
+    ///
+    /// **A stroke that paints nothing is not a wall, and that is derived rather than ruled.** Its
+    /// colour goes into the mask at `color.alpha x opacity`, so a stroke at zero opacity or in a
+    /// fully transparent colour writes nothing at all — and `computeWalls` needs a non-zero alpha
+    /// before it will look at a path pixel. There is no threshold anywhere in that: **5% ink is a
+    /// wall exactly as far as 5% ink is a wall for the painted pixels**, which is the same answer the
+    /// artist already gets from the Threshold slider, and it is why this needed no cut-off nobody
+    /// could predict from looking at the canvas.
+    private static func appendWalls(of canvas: VectorCanvas,
+                                    to strokes: inout [(path: CGPath, colour: UIColor)]) {
+        let suppressed = canvas.suppressedElementIDs
+        // The layer's own affine, which `renderLocked` applies to the whole content after the walk —
+        // so the wall lands where the reference composite drew the ink rather than where the cel
+        // stores it.
+        let transform = canvas.transform
+        for element in canvas.elements {
+            guard case .stroke(let stroke) = element,
+                  stroke.composite == .paint,
+                  !suppressed.contains(stroke.id) else { continue }
+            let points = StrokePath(stroke.samples).flattened
+            guard points.count > 1 else { continue }
+            let path = CGMutablePath()
+            path.addLines(between: points, transform: transform)
+            strokes.append((path, stroke.color.uiColor.withAlphaComponent(
+                CGFloat(stroke.color.alpha * stroke.opacity))))
+        }
+    }
+}

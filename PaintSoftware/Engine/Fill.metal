@@ -47,14 +47,34 @@ static inline float colourDistance(float4 a, float4 b) {
 // (and the close, and the flood) once per reference against its own buffers, rather than widening
 // the test here to "passable under any `c`". Merging them into one passability field would let a
 // collar walk paper → flat → paper and hold out an interior pocket the spec says to fill.
+//
+// **`pathWall` is TODO (46): a stroke's centre line, drawn in the colour the stroke paints.**
+// Premultiplied-last RGBA from `StrokeWallMask.mask` — the same layout as `reference` — non-zero
+// alpha along the path of every paint stroke on a vector reference layer, and zero everywhere on a
+// raster document. A segmented brush paints a dotted line, so pixel-wise there is no wall between the
+// dabs and the flood walks through the gaps; the path is continuous by construction and closes them
+// with no radius to guess.
+//
+// **The path takes the same threshold test the pixels take, and that is not a detail.** Treating it
+// as an unconditional wall made a vector layer's **Threshold** slider unable to release a border —
+// caught by `FillLiveAdjustUITests.testAdjustingThresholdAfterFillReappliesToUncommittedFill`. With
+// the colour carried, the rule is exactly "the path behaves as if the stroke had painted a continuous
+// line of its own colour", which is the literal statement of the ask and leaves every control
+// downstream meaning what it meant.
+//
+// Folded in *here* rather than anywhere later because this is the one place the wall set is defined,
+// so gap closing, the bucket flood and the lasso's collar flood all obey it without knowing it exists.
 kernel void computeWalls(const device uchar4* reference [[buffer(0)]],
                          device uchar*        wall      [[buffer(1)]],
                          constant FillParams& params    [[buffer(2)]],
+                         const device uchar4* pathWall  [[buffer(3)]],
                          uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= params.width || gid.y >= params.height) return;
     uint i = pixelIndex(gid.x, gid.y, params.width);
     float4 c = float4(reference[i]) / 255.0;
-    wall[i] = colourDistance(c, params.seedColor) > params.threshold ? 1 : 0;
+    float4 p = float4(pathWall[i]) / 255.0;
+    bool pathIsWall = p.w > 0.0 && colourDistance(p, params.seedColor) > params.threshold;
+    wall[i] = (pathIsWall || colourDistance(c, params.seedColor) > params.threshold) ? 1 : 0;
 }
 
 // MARK: - Jump Flooding Algorithm (approximate Euclidean distance transform)
