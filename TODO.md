@@ -224,6 +224,10 @@ track is intent, and clamping it to the content silently retracts it — caught 
 **A saved document with an inflated mark** loses it: the key is gone from `ProjectManifest` and the
 end is recomputed from the cels on load, under the standing expendable-documents permission.
 
+**Driven, not only asserted.** `SceneEndReachabilityUITests` starts at the gallery, makes a canvas,
+drags the block shorter and uses the real Extend to End row — and then puts a second drawing in the
+empty track past it, which is the check that the shorter scene is not a shorter *timeline*.
+
 ---
 
 ## (40) Onion skin z-order — ruled, and built
