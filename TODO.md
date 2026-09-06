@@ -106,22 +106,6 @@ own art — without the ghost vanishing under strokes you can barely see.
 
 ---
 
-## (52) Merging a hidden layer keeps the cels the survivor does not reach
-
-**Status** — ruled 2026-09-06, unbuilt.
-
-`mergeContribution`'s `isVisible` guard drops a hidden layer's ink where the two layers overlap, and
-`mergeLossKind` correctly says visibility is not a loss. But the per-frame merge adopts an
-upper-layer-only cel through `copyTiers` **without that guard**, so a hidden layer's ink survives at
-every frame the survivor has no cel of its own — inconsistent, and it silently reveals art that was
-deliberately hidden.
-
-**The owner ruled: drop hidden ink everywhere.** What you see is what you merge.
-
-**Left to build**
-- [ ] Apply the visibility guard to the adopted-cel arm.
-- [ ] Pin it: a hidden upper layer with a cel past the survivor's last frame contributes nothing.
-
 ## (47) A finger tap bakes a Move while the pen-only toggle is on
 
 **Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
