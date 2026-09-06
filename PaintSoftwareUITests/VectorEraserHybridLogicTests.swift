@@ -797,9 +797,10 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// the artist has filled *is* interleaved. `splicing` is therefore positional: it replaces the
     /// i-th element of a kind where that element already sits, which is the identity for any
     /// arrangement rather than only for a contiguous one. This scene builds its backdrop fill
-    /// directly, so it is still the contiguous case — kept because it is what
-    /// `CanvasManager+Shape.registerVectorStrokeUndo` relies on, and because a punch is the original
-    /// interleaving that made the question worth asking.
+    /// directly, so it is still the contiguous case — kept because a punch is the original
+    /// interleaving that made the question worth asking. The last caller that leaned on the
+    /// contiguity, the shape bake's `registerVectorStrokeUndo`, is gone: it swaps the whole element
+    /// array through `registerVectorElementsUndo` now, which has nothing to reconstruct.
     func testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip() {
         let scene = scenario(brush: TestBrushes.hardRound,
                              backdrop: .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),

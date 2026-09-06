@@ -387,7 +387,18 @@ extension CanvasManager {
 
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: before,
                                    newElements: vectorCanvas.elements, layerID: layerID, celID: celID,
-                                   label: editingID == nil ? .addText : .editText)
+                                   label: editingID == nil ? .addText : .editText,
+                                   // **A re-edit is a same-id rewrite and a new object is not.**
+                                   // `upsertTextLocked` replaces `_elements[index]` under the id the
+                                   // artist is editing, so `editingID` is exactly the question
+                                   // `ElementSwap` asks. **The new-object arm buys nothing today and
+                                   // is written down anyway**: a text object's extent is its glyphs,
+                                   // nothing measures those, and `vacatedInk` holds strokes alone —
+                                   // so `restoreDamage` answers `.everything` in both directions
+                                   // exactly as `bumpVersion()` did. What the line is worth is the
+                                   // other arm, which was silently unsafe, and a place for a glyph
+                                   // measurement to land if one is ever taken.
+                                   swap: editingID == nil ? .addsAndRemoves(ink: nil) : .rewritesInPlace)
         // Committing never goes through `strokeEnded`, so the layer panel keeps showing the cel as
         // it was unless the thumbnail is refreshed here — `commitInteractiveShape`'s reason, verbatim.
         scheduleThumbnailRegen(layerID: layerID, celID: celID)
@@ -407,19 +418,66 @@ extension CanvasManager {
     /// Clear-on-selection. Resolves the cel by ID (not a captured index) when the thumbnail regen
     /// fires, since other structural edits may have shifted indices by then.
     ///
+    /// **What a caller knows about the shape of its own edit** — the answer
+    /// `registerVectorElementsUndo` needs before it can put the swap through
+    /// `VectorCanvas.restoreElements(_:changedInk:)` instead of `bumpVersion()`.
+    ///
+    /// There are two questions and they are separate, which is why this is one type rather than two
+    /// parameters: a rectangle is meaningless from a caller whose edit `restoreElements` cannot read at
+    /// all, and the pair `(rewritesInPlace: true, ink: someRect)` should not be expressible.
+    enum ElementSwap {
+        /// **At least one element in the new list carries the old list's id with different content**
+        /// — a recolour, an Apply Brush, a text object re-edited under the id it already had.
+        ///
+        /// `restoreElements` chooses the footprints it drops by *id difference*, so a rewritten
+        /// element keeps a measured footprint that is no longer true of it, and a later region edit
+        /// may skip it on that footprint and draw the wrong picture. `bumpVersion()`'s `.everything`
+        /// clears the table wholesale, which is the only answer that is safe here.
+        case rewritesInPlace
+        /// **The new list is the old one with elements added and removed, none rewritten.**
+        ///
+        /// - Parameter ink: a rectangle containing the ink of every element the *new* list carries
+        ///   that the old one does not, or nil when the caller cannot prove one. Nil is right — not
+        ///   merely permitted — when what arrives is a **stroke that has been in this canvas before**:
+        ///   `VectorCanvas.vacatedInk` kept what it painted on the way out and bounds it exactly,
+        ///   where a caller could only estimate. Nil is wrong for a fill, an image or a text object,
+        ///   which the walk never measures and which therefore has nothing behind it.
+        case addsAndRemoves(ink: CGRect?)
+    }
+
     /// Coarse-grained is what every other element kind already does; this adds no new undo machinery,
     /// only a wider slice of the same one.
+    ///
+    /// **`swap` is what decides whether a press costs the rectangle or the cel**, and it has no
+    /// default on purpose: `bumpVersion()` declares `Damage.everything`, so before it was asked for,
+    /// undoing a fill on a 2,000-stroke cel re-stamped all 472,000 dabs — MEASURED at 1.1 s a press
+    /// (PERFORMANCE.md §11.11). Every call site now answers, and the ones that answer
+    /// `.rewritesInPlace` say in one line why.
     func registerVectorElementsUndo(vectorCanvas: VectorCanvas,
                                     oldElements: [VectorElement], newElements: [VectorElement],
-                                    layerID: UUID, celID: UUID, label: HistoryActionLabel) {
+                                    layerID: UUID, celID: UUID, label: HistoryActionLabel,
+                                    swap: ElementSwap) {
         let cost = (oldElements.count + newElements.count) * 512
+        guard case .addsAndRemoves(let ink) = swap else {
+            recordUndo(label: label, cost: cost, undo: { [weak self] in
+                vectorCanvas.elements = oldElements
+                vectorCanvas.bumpVersion()
+                self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+            }, redo: { [weak self] in
+                vectorCanvas.elements = newElements
+                vectorCanvas.bumpVersion()
+                self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+            })
+            return
+        }
+        // One rectangle for both closures, for `StrokeCanvasView.registerVectorUndo`'s reason: it
+        // bounds every pixel where the two lists differ, and that reads the same way in either
+        // direction.
         recordUndo(label: label, cost: cost, undo: { [weak self] in
-            vectorCanvas.elements = oldElements
-            vectorCanvas.bumpVersion()
+            vectorCanvas.restoreElements(oldElements, changedInk: ink)
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
-            vectorCanvas.elements = newElements
-            vectorCanvas.bumpVersion()
+            vectorCanvas.restoreElements(newElements, changedInk: ink)
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
     }

@@ -311,9 +311,13 @@ final class UndoRepairBench: XCTestCase {
     /// `.everything`, which clears `paintedBounds` outright, and without measured footprints a
     /// restore has nothing to derive its vacated half from. One walk puts the canvas back in the
     /// state an artist's is actually in — the cut drawn and its ink measured.
+    ///
+    /// **`changedInk` is optional here because the case that matters most does not have one.** A
+    /// drawn stroke's gesture declares `.appended`, so both closures are handed nil, and the arriving
+    /// half is bounded by `VectorCanvas.vacatedInk` — what the walk measured before the id left.
     private func measureRestoreElementsArm(_ canvas: VectorCanvas,
                                            before: [VectorElement], after: [VectorElement],
-                                           changedInk: CGRect)
+                                           changedInk: CGRect?)
     -> (undoSeconds: Double, redoSeconds: Double, undoDabs: Int, redoDabs: Int,
         repairs: Int, widened: Int, abandoned: Int, rectangle: String) {
         canvas.elements = after
@@ -336,6 +340,75 @@ final class UndoRepairBench: XCTestCase {
                 canvas.regionRepairsWidened - widenedBefore,
                 canvas.regionRepairsAbandoned - abandonedBefore,
                 rectangleShare(canvas))
+    }
+
+    // MARK: - A drawn stroke — the commonest undo/redo pair there is
+
+    /// **Draw, undo, redo.** Not an eraser at all, which is the correction the owner had to make
+    /// twice: *"My bit about the undo/redo being slow was just it being slow in general, not
+    /// specifically tied to an undo/redo of an erase."*
+    ///
+    /// It is the pair `testWhatAnUndoPressSpendsOnTheMainThreadAgainstWhatTheRenderCosts` measures the
+    /// wait of, and its two halves were wildly asymmetric: the undo declared a rectangle from the
+    /// departing stroke's own measured footprint, and the redo declared `.everything` because nothing
+    /// could bound ink arriving from a snapshot. MEASURED before this pass at 60.5 ms against 571.2 ms
+    /// at 1,000 strokes — the redo was 9.4x the undo, on the same one stroke.
+    func testUndoAndRedoAfterADrawnStroke() {
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
+
+        for n in Self.strokeCounts {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                _ = canvas.render()
+                let wholeLayerDabs = canvas.lastRenderDabCount
+
+                let before = canvas.elements
+                canvas.addStroke(Self.benchStroke(n))
+                _ = canvas.render()
+                let after = canvas.elements
+
+                let old = measureBumpVersionArm(canvas, before: before, after: after)
+                // Nil, and that is the whole point: `foldGestureDamage` drops the gesture's rectangle
+                // on an append, so this is exactly what `registerVectorUndo` hands both closures.
+                let new = measureRestoreElementsArm(canvas, before: before, after: after,
+                                                    changedInk: nil)
+
+                report("drawn stroke + undo + redo — n=\(n)", [
+                    ("strokes", "\(n)"),
+                    ("wholeLayerDabs", "\(wholeLayerDabs)"),
+                    ("undoBefore", ms(old.undoSeconds)),
+                    ("undoDabsBefore", "\(old.undoDabs)"),
+                    ("redoBefore", ms(old.redoSeconds)),
+                    ("redoDabsBefore", "\(old.redoDabs)"),
+                    ("undoAfter", ms(new.undoSeconds)),
+                    ("undoDabsAfter", "\(new.undoDabs)"),
+                    ("redoAfter", ms(new.redoSeconds)),
+                    ("redoDabsAfter", "\(new.redoDabs)"),
+                    ("rectangle", new.rectangle),
+                    ("repairsWidened", "\(new.widened)"),
+                    ("repairsAbandoned", "\(new.abandoned)"),
+                    ("redoSpeedup", String(format: "%.1fx",
+                                           old.redoSeconds / max(new.redoSeconds, 1e-9))),
+                    ("undoSpeedup", String(format: "%.1fx",
+                                           old.undoSeconds / max(new.undoSeconds, 1e-9))),
+                ])
+
+                XCTAssertEqual(Double(old.redoDabs), Double(wholeLayerDabs), accuracy: 300,
+                              "the before arm at n=\(n) must re-stamp the whole list plus the one "
+                              + "stroke coming back")
+                XCTAssertEqual(new.repairs, 6,
+                               "three pairs, six presses, and every one of them must have repaired "
+                               + "a rectangle — the redo included, which is what this pass added")
+                XCTAssertEqual(new.widened, 0,
+                               "a redone stroke is the same value that left, so its remembered "
+                               + "rectangle must not need widening the way a cut piece's does")
+                XCTAssertEqual(new.abandoned, 0,
+                               "an abandoned repair at n=\(n) pays both walks and hides a bad bound")
+                XCTAssertLessThan(new.redoDabs * 2, old.redoDabs,
+                                  "the after arm at n=\(n) re-stamped \(new.redoDabs) dabs on the redo "
+                                  + "against the before arm's \(old.redoDabs)")
+            }
+        }
     }
 
     // MARK: - Mode 3 (To Cross) — a single per-sample cut, then undo and redo of it
@@ -412,6 +485,227 @@ final class UndoRepairBench: XCTestCase {
                 XCTAssertLessThan(new.undoDabs, old.undoDabs,
                                   "the after arm at n=\(n) stamped \(new.undoDabs) dabs against the "
                                   + "before arm's \(old.undoDabs)")
+            }
+        }
+    }
+
+    // MARK: - What the artist is actually waiting for
+    //
+    // The owner: *"Undoing and redoing while there are a lot of strokes can be laggy, a few hundred
+    // milliseconds sluggish."* A few hundred milliseconds is either a **frozen** app or a **late
+    // picture**, and which one it is decides whether the work below is worth anything: the render an
+    // undo triggers is dispatched off the main thread (`StrokeCanvasView.refreshDisplay`, RENDER.md
+    // §2.13), so if the model half of a press is sub-millisecond the app never stops responding and
+    // what the artist sees is the *previous* frame standing there while the rasterize runs.
+    //
+    // These two tests separate the press from the picture and time both.
+
+    /// A `CanvasManager` holding one vector layer whose only cel is `canvas`, with the history
+    /// cleared (`addVectorLayer` records a structural step of its own) and one full render already
+    /// paid so `paintedBounds` is populated — a cold cel has no measured footprints and every restore
+    /// would fall back to `.everything` regardless of what it declared.
+    private func benchManager(_ canvas: VectorCanvas)
+    -> (manager: CanvasManager, layerID: UUID, celID: UUID) {
+        let manager = CanvasManager()
+        // Never the shared store — `CanvasFixture.isolatedBrushLibrary`'s doc has the reason.
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.canvasSize
+        manager.addVectorLayer()
+        manager.layers[0].cels[0].vector = canvas
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        _ = canvas.render()
+        return (manager, manager.layers[0].id, manager.layers[0].cels[0].id)
+    }
+
+    /// **A press and the render it causes, timed apart, alternating.** `press(false)` is undo and
+    /// `press(true)` is redo; `render()` returns the dabs its walk stamped.
+    ///
+    /// The render runs *between* the timed presses rather than being skipped, because skipping it
+    /// would measure a canvas the app never has: `restoreDamage` derives the vacated half from
+    /// footprints the last walk measured, so two restores with no walk between them are the second
+    /// one falling through to `.everything` for want of a table.
+    private func alternatingPressAndRender(runs: Int, press: (Bool) -> Void, render: () -> Int)
+    -> (undoPress: Double, redoPress: Double, undoRender: Double, redoRender: Double,
+        undoDabs: Int, redoDabs: Int) {
+        var undoPresses: [Double] = [], redoPresses: [Double] = []
+        var undoRenders: [Double] = [], redoRenders: [Double] = []
+        var undoDabs = 0, redoDabs = 0
+        for _ in 0..<runs {
+            autoreleasepool {
+                var start = CFAbsoluteTimeGetCurrent()
+                press(false)
+                undoPresses.append(CFAbsoluteTimeGetCurrent() - start)
+                start = CFAbsoluteTimeGetCurrent()
+                undoDabs = render()
+                undoRenders.append(CFAbsoluteTimeGetCurrent() - start)
+                start = CFAbsoluteTimeGetCurrent()
+                press(true)
+                redoPresses.append(CFAbsoluteTimeGetCurrent() - start)
+                start = CFAbsoluteTimeGetCurrent()
+                redoDabs = render()
+                redoRenders.append(CFAbsoluteTimeGetCurrent() - start)
+            }
+        }
+        undoPresses.sort(); redoPresses.sort(); undoRenders.sort(); redoRenders.sort()
+        return (undoPresses[runs / 2], redoPresses[runs / 2],
+                undoRenders[runs / 2], redoRenders[runs / 2], undoDabs, redoDabs)
+    }
+
+    /// **The main-thread span of an undo press, held apart from the render that follows it** — the
+    /// question the owner's "laggy" is ambiguous about and the one that decides whether a cheaper
+    /// render is the right fix at all.
+    ///
+    /// The step timed is a **drawn stroke**, which is the commonest undo there is: an append, undone
+    /// and redone. `manager.undo()` here runs the whole production press —
+    /// `finalizePendingGesturesForHistoryAction`, the closure `registerVectorUndo` records,
+    /// `raise(.historyUndo(…))`, `refreshUndoRedoState` — with only the two lines that live on a
+    /// `UIView` left out: `refreshDisplay()`, which is what dispatches the rasterize off main and is
+    /// exactly what this test exists to hold separate, and `onStrokeEnded?()`, whose model half
+    /// (`refreshUndoRedoState` + `strokeEnded`'s thumbnail schedule) is kept.
+    ///
+    /// `canvas.rasterizations` across the press is the operand that says the split is real rather
+    /// than assumed: a press that rendered would move it.
+    func testWhatAnUndoPressSpendsOnTheMainThreadAgainstWhatTheRenderCosts() {
+        _ = autoreleasepool { VectorCanvas(size: Self.canvasSize, strokes: Self.scene(4)).render() }
+
+        for n in [200, 1000, 2000, 4000] {
+            autoreleasepool {
+                let canvas = VectorCanvas(size: Self.canvasSize, strokes: Self.scene(n))
+                let fixture = benchManager(canvas)
+                let manager = fixture.manager
+                let layerID = fixture.layerID, celID = fixture.celID
+                let wholeLayerDabs = canvas.lastRenderDabCount
+
+                let before = canvas.elements
+                canvas.addStroke(Self.benchStroke(n))
+                let after = canvas.elements
+                _ = canvas.render()
+
+                // `StrokeCanvasView.registerVectorUndo`'s closures. `changedInk` is nil because
+                // `foldGestureDamage` drops the gesture's rectangle on an append — `addStroke`
+                // declares `.appended`, not `.region` — which is the honest state of the shipped
+                // code and the thing task (a) is about.
+                manager.recordUndo(label: .brushStroke, cost: (before.count + after.count) * 512,
+                                   undo: { [weak manager] in
+                    canvas.restoreElements(before, changedInk: nil)
+                    manager?.refreshUndoRedoState()
+                    manager?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                }, redo: { [weak manager] in
+                    canvas.restoreElements(after, changedInk: nil)
+                    manager?.refreshUndoRedoState()
+                    manager?.scheduleThumbnailRegen(layerID: layerID, celID: celID)
+                })
+
+                let rasterizationsBefore = canvas.rasterizations
+                let timed = alternatingPressAndRender(runs: 5, press: { isRedo in
+                    if isRedo { manager.redo() } else { manager.undo() }
+                }, render: {
+                    _ = canvas.render()
+                    return canvas.lastRenderDabCount
+                })
+                // Five pairs, one render each side of each press: ten rasterizations and not one more.
+                let pressRasterizations = canvas.rasterizations - rasterizationsBefore - 10
+
+                // What the debounced thumbnail regen the press queued costs when it fires, 400 ms
+                // later and on main. Not part of the press, but it is main-thread work an undo
+                // causes and would not be fixed by anything cheaper in the render.
+                let thumbnailStart = CFAbsoluteTimeGetCurrent()
+                manager.flushPendingThumbnailRegens()
+                let thumbnailSeconds = CFAbsoluteTimeGetCurrent() - thumbnailStart
+
+                report("undo press vs render — n=\(n)", [
+                    ("strokes", "\(n)"),
+                    ("wholeLayerDabs", "\(wholeLayerDabs)"),
+                    ("undoPress", ms(timed.undoPress)),
+                    ("redoPress", ms(timed.redoPress)),
+                    ("undoRender", ms(timed.undoRender)),
+                    ("redoRender", ms(timed.redoRender)),
+                    ("undoDabs", "\(timed.undoDabs)"),
+                    ("redoDabs", "\(timed.redoDabs)"),
+                    ("pressShareOfUndo", String(format: "%.2f%%",
+                                                100 * timed.undoPress
+                                                / max(timed.undoPress + timed.undoRender, 1e-9))),
+                    ("pressShareOfRedo", String(format: "%.2f%%",
+                                                100 * timed.redoPress
+                                                / max(timed.redoPress + timed.redoRender, 1e-9))),
+                    ("thumbnailFlush", ms(thumbnailSeconds)),
+                    ("extraRasterizationsInPresses", "\(pressRasterizations)"),
+                ])
+
+                XCTAssertEqual(pressRasterizations, 0,
+                               "a press at n=\(n) rasterized \(pressRasterizations) times beyond the "
+                               + "renders this harness asked for — the model half is not separable "
+                               + "from the picture and this test's whole premise is wrong")
+                // **50 ms, and the number is chosen against the claim rather than against the
+                // measurement.** What this pins is that the press is not where the owner's *few
+                // hundred milliseconds* live; anything under a tenth of that says so. A bound tight
+                // to the measurement would be configuration-dependent, which this bench is not — it
+                // ran at 7.8 ms in Release and 13.2 ms in Debug at n=4000, and a 10 ms bound written
+                // against the first reddened on the second while nothing had changed.
+                XCTAssertLessThan(timed.undoPress, 0.050,
+                                  "the model half of an undo press at n=\(n) took "
+                                  + "\(ms(timed.undoPress)) — if this is where the owner's few "
+                                  + "hundred milliseconds live, the app is freezing and the render "
+                                  + "is not the bug")
+                XCTAssertLessThan(timed.redoPress, 0.050,
+                                  "the model half of a redo press at n=\(n) took \(ms(timed.redoPress))")
+            }
+        }
+    }
+
+    /// **The raster arm, which none of this work touches** — an undo there swaps a
+    /// `RasterLayerTexture` reference rather than re-walking a display list
+    /// (`SelectionModels.registerCelReversal` → `applyCelChange`), so it should be flat in canvas
+    /// size and independent of everything above. If it is not, that is a separate finding.
+    ///
+    /// The raster half of `refreshDisplay` is timed alongside, because it is the one display path
+    /// that rasterizes **on the main thread** — `raster?.renderIfNonEmpty()` is called inline, with no
+    /// `DeferredVectorRender` hop. Whether that costs anything is the question; a texture built from
+    /// an image memoizes it, so the expectation is that it does not.
+    func testWhatARasterUndoPressSpendsOnTheMainThread() {
+        for size in [CGSize(width: 2048, height: 1024), CGSize(width: 4096, height: 4096)] {
+            autoreleasepool {
+                let manager = CanvasManager()
+                manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+                manager.canvasSize = size
+                manager.addLayer()
+                let whole = CGRect(origin: .zero, size: size)
+                let old = RasterLayerTexture(size: size,
+                                             image: CanvasFixture.solidImage(.red, rect: whole, size: size))
+                let new = RasterLayerTexture(size: size,
+                                             image: CanvasFixture.solidImage(.blue, rect: whole, size: size))
+                manager.layers[0].cels[0].raster = old
+                manager.history.removeAll()
+                manager.registerUndoableCelChange(layerID: manager.layers[0].id,
+                                                  celID: manager.layers[0].cels[0].id,
+                                                  oldRaster: old, oldBaked: nil, oldFill: nil,
+                                                  newRaster: new, newBaked: nil, newFill: nil,
+                                                  label: .clearSelection)
+
+                let timed = alternatingPressAndRender(runs: 5, press: { isRedo in
+                    if isRedo { manager.redo() } else { manager.undo() }
+                }, render: {
+                    // What `refreshDisplay` does for a raster layer, on the main thread, inline.
+                    _ = manager.layers[0].cels[0].raster.renderIfNonEmpty()
+                    return 0
+                })
+
+                let thumbnailStart = CFAbsoluteTimeGetCurrent()
+                manager.flushPendingThumbnailRegens()
+                let thumbnailSeconds = CFAbsoluteTimeGetCurrent() - thumbnailStart
+
+                report("raster undo press — \(Int(size.width))x\(Int(size.height))", [
+                    ("undoPress", ms(timed.undoPress)),
+                    ("redoPress", ms(timed.redoPress)),
+                    ("undoDisplay", ms(timed.undoRender)),
+                    ("redoDisplay", ms(timed.redoRender)),
+                    ("thumbnailFlush", ms(thumbnailSeconds)),
+                ])
+
+                XCTAssertLessThan(timed.undoPress, 0.010,
+                                  "a raster undo at \(size) took \(ms(timed.undoPress)) on main — it "
+                                  + "swaps one reference and should be flat in canvas size")
             }
         }
     }

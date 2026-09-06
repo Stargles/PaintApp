@@ -493,10 +493,16 @@ extension CanvasManager {
             let elementsBefore = vectorCanvas.elements
             // The mask is measured against the *rendered* canvas, so it's canvas-space — this
             // overload maps it back through the layer's transform (see its doc comment).
-            vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
+            let landed = vectorCanvas.addFill(canvasSpacePath: path, color: fillColor)
             registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                        newElements: vectorCanvas.elements,
-                                       layerID: layerID, celID: celID, label: label)
+                                       layerID: layerID, celID: celID, label: label,
+                                       // One fill appended and nothing rewritten, and `addFill` says
+                                       // exactly where it went — so redoing this costs the fill's own
+                                       // rectangle rather than every dab on the cel. The *undo* is
+                                       // still `.everything`, because a departing fill carries no
+                                       // measured footprint; see `restoreDamage`.
+                                       swap: .addsAndRemoves(ink: landed))
         } else {
             let cel = layers[layerIndex].cels[celIndex]
             guard let preview = cel.fillImage else { return }

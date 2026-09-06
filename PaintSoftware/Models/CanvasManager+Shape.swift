@@ -178,15 +178,32 @@ extension CanvasManager {
                 let stroke = VectorStroke(brush: savedBrush, color: shapeGestureColor,
                                           size: shapeGestureStrokeWidth, opacity: shapeGestureOpacity,
                                           samples: collapsed, seed: shapeGestureSeed)
-                let strokesBefore = vectorCanvas.strokes
+                let elementsBefore = vectorCanvas.elements
                 // The shape outline is in canvas space (it was dragged there) — same mapping the
                 // live vector-stroke path uses, so a shape drawn on a moved layer lands where the
                 // preview showed it.
                 vectorCanvas.addStroke(canvasSpaceStroke: stroke)
-                // Same undo/redo shape as an ordinary vector stroke (swap the whole strokes array).
-                registerVectorStrokeUndo(vectorCanvas: vectorCanvas, oldStrokes: strokesBefore,
-                                         newStrokes: vectorCanvas.strokes, layerID: layerID, celID: celID,
-                                         label: .shape)
+                // **The whole display list, not the `strokes` bucket**, which is
+                // `registerVectorElementsUndo`'s own argument: `addFill` and `upsertText` append, so
+                // the list is not kind-sorted and a bucket-shaped undo has to invent a z-position for
+                // the stroke it puts back. That was already true of a shape baked onto a cel holding
+                // a fill; what makes it worth changing now is that the whole-list seam is also the
+                // one that can bound itself.
+                //
+                // It re-prices the step, and deliberately: `registerVectorStrokeUndo` charged the
+                // history 2,048 bytes a stroke where every other whole-array swap charges 512 an
+                // element. Both are the rough estimates `UndoHistory.trim` asks for, and a shape's
+                // snapshot is the same array a brush stroke's is, so one number for the two of them
+                // is the honest one.
+                registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
+                                           newElements: vectorCanvas.elements,
+                                           layerID: layerID, celID: celID, label: .shape,
+                                           // One stroke appended and nothing rewritten, and no
+                                           // rectangle needed in either direction: the undo measures
+                                           // what leaves, and the redo is bounded by what the undo
+                                           // remembered it painted. Same as a drawn stroke, because
+                                           // it is one.
+                                           swap: .addsAndRemoves(ink: nil))
                 // Baking a shape never goes through `strokeEnded` (the stroke that produced it was
                 // reverted when detection fired), so the thumbnail has to be refreshed here or the
                 // layer panel keeps showing the cel as it was before the shape landed.
@@ -222,22 +239,6 @@ extension CanvasManager {
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             raster.reset(to: after, strokeCount: strokeCountAfter)
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        })
-    }
-
-    /// Registers one undo step that swaps a vector layer's `.strokes` between `oldStrokes`/`newStrokes`.
-    private func registerVectorStrokeUndo(vectorCanvas: VectorCanvas,
-                                           oldStrokes: [VectorStroke], newStrokes: [VectorStroke],
-                                           layerID: UUID, celID: UUID, label: HistoryActionLabel) {
-        let cost = (oldStrokes.count + newStrokes.count) * 2048
-        recordUndo(label: label, cost: cost, undo: { [weak self] in
-            vectorCanvas.strokes = oldStrokes
-            vectorCanvas.bumpVersion()
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        }, redo: { [weak self] in
-            vectorCanvas.strokes = newStrokes
-            vectorCanvas.bumpVersion()
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         })
     }

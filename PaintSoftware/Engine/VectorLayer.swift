@@ -1054,6 +1054,60 @@ final class VectorCanvas {
     /// becomes two pieces and every index after it moves.
     private var paintedBounds: [UUID: CGRect] = [:]
 
+    /// **What a stroke painted the last time it was in the display list, kept after it left** — the
+    /// bound a *redo* uses, and the only way a returning stroke can be bounded at all.
+    ///
+    /// A redone append is the commonest press in the app and was the last whole-cel walk left on the
+    /// drawing path: `restoreDamage` can measure what *departs*, because it is still in the list with
+    /// a footprint, and what *arrives* has to be bounded by the caller. An append's caller has no
+    /// rectangle — `addStroke` declares `.appended`, so `StrokeCanvasView.foldGestureDamage` drops the
+    /// gesture's rectangle — and BRUSH.md §12 stage 8 refuted deriving one from the brush. But the
+    /// ink coming back *has* been drawn: immediately before, by the walk that measured it. This is
+    /// that measurement, kept across the round trip.
+    ///
+    /// **It is a hint, not a promise, and the distinction is the whole safety argument.** A
+    /// `paintedBounds` entry says "this element is in the list and has not changed", which is why a
+    /// walk may *skip* on it. An entry here says only "this rectangle is where that id last painted",
+    /// and it is spent on one thing: sizing the damage rectangle. The arriving element still has no
+    /// `paintedBounds` entry, so `renderLocalContent` draws it, measures it, and widens the clip if it
+    /// escaped — a stale rectangle therefore costs a retry and cannot draw a wrong picture. That is
+    /// also why `.everything` does not clear this table while it does clear `paintedBounds`: a promise
+    /// that no longer holds must go, a hint that has gone stale need not.
+    ///
+    /// **Only strokes are ever in here**, because only strokes are ever in `paintedBounds` — a fill,
+    /// an image, a text object and a video are always drawn and never measured, so they cannot escape
+    /// a clip either and must not be bounded by a hint. `rememberedInk(ofArrivalsIn:standing:)` asks
+    /// each arrival for its `stroke` rather than trusting that — MEASURED by a two-mutation
+    /// experiment: dropping the check alone leaves the suite green, because nothing puts a non-stroke
+    /// in the table today, and dropping it *together with* a fallback rectangle for unmeasured
+    /// departures reddens `testRedoingAFillIsNotBoundedByAHintBecauseAFillIsNeverMeasured`. So it is
+    /// what stands between a future measurement of some other kind and a rectangle no escape check
+    /// can correct.
+    ///
+    /// **Entries live until their id comes back or the table is dropped whole.** Keeping only the last
+    /// restore's would make exactly the first redo of a run cheap and leave the rest at `.everything`,
+    /// which is the owner's own case — *"undoing and redoing while there are a lot of strokes"* is a
+    /// run of presses, not one. The cap below is what stops that being unbounded.
+    private var vacatedInk: [UUID: CGRect] = [:]
+
+    /// When `vacatedInk` is dropped whole rather than grown — **the point past which it is provably
+    /// holding rectangles no undo step can ever ask for.**
+    ///
+    /// The prune keeps the table sized by what is *out* of the display list, which is what an artist
+    /// can still redo — but not quite: `UndoHistory.trim()` evicts old steps, and an entry whose step
+    /// has been evicted is unreachable and stays. This is where that leak is cut. Every swap that
+    /// feeds this table charges the history **512 bytes an element** (`StrokeCanvasView
+    /// .registerVectorUndo`'s `cost`, and `registerVectorElementsUndo`'s) against
+    /// `UndoBudget.maxCostBytes`, so that quotient is an upper bound — a generous one, since the cost
+    /// counts each step's old *and* new lists — on how many element ids the whole history can name at
+    /// once. Beyond it the surplus is dead by arithmetic.
+    ///
+    /// Derived rather than picked, so it moves with the budget it is about; on the 64 MiB floor it is
+    /// ~131k entries, which at 48 bytes each (a `UUID` and a `CGRect`) is under a tenth of the bytes
+    /// the history is holding for the same ids. Dropping the table is free by construction anyway: an
+    /// entry is a hint, and the walk re-measures what it bounds.
+    private static let vacatedInkLimit = UndoBudget.maxCostBytes / 512
+
     /// The `.preview` render, memoized separately from `cachedImage` — releasing the slider renders
     /// `.full` and must not discard `.preview`, and starting a drag must not discard `.full`.
     private var cachedPreviewImage: UIImage?
@@ -1095,6 +1149,15 @@ final class VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
         return paintedBounds.count
+    }
+
+    /// How many remembered rectangles `vacatedInk` is holding — the same kind of seam as
+    /// `measuredFootprintCount`, for the same invisible-to-a-picture reason, and about the table
+    /// whose whole risk is that it grows.
+    var rememberedInkCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return vacatedInk.count
     }
 
     /// How many canvas-sized rasterizations this canvas has actually performed — `render()` calls that
@@ -1483,16 +1546,21 @@ final class VectorCanvas {
     /// rectangle that bounded the edit bounds its undo too, because it bounds the difference between
     /// the two lists whichever way you read it.
     ///
-    /// **The vacated half needs no rectangle from the caller and is measured here.** What leaves the
-    /// list is in the list right now, with its footprint measured by the last walk, so an *undone
-    /// append* — nothing arrives, one stroke departs — is bounded even when `changedInk` is nil.
-    /// That is the brush stroke's undo as well as the eraser's.
+    /// **Neither half needs a rectangle from the caller when the elements have been drawn before.**
+    /// What leaves the list is in the list right now with its footprint measured by the last walk, so
+    /// an *undone append* — nothing arrives, one stroke departs — is bounded with `changedInk` nil.
+    /// What comes back was measured too, on the walk before it left, and `vacatedInk` is where that
+    /// measurement is kept: a *redone append* is therefore bounded with `changedInk` nil as well.
+    /// Between them that is the whole of the brush stroke's round trip, which is the commonest pair
+    /// of presses in the app and the one the owner reported.
     ///
     /// - Parameters:
     ///   - newValue: the list to put back.
     ///   - changedInk: a rectangle containing the ink of every element `newValue` carries that the
     ///     standing list does not, or nil when the caller cannot prove one. For an undo or a redo
-    ///     this is what the *forward* edit declared. Ignored when nothing arrives.
+    ///     this is what the *forward* edit declared. Ignored when nothing arrives, and needed only
+    ///     for ink this canvas has never walked — an element returning from a previous restore is
+    ///     bounded by `vacatedInk` instead.
     ///
     /// **A caller must not rewrite an element in place under its own id.** The footprints dropped
     /// here are chosen by id difference, so an element that stays under its own id keeps its measured
@@ -1513,16 +1581,64 @@ final class VectorCanvas {
         // returns only `.everything` or `.region` and `applyToIncrementalBase` drops the base for
         // both, so the call was unobservable. MEASURED by mutation — deleting it left all thirteen
         // of `UndoRepairLogicTests` green, which is what a line that cannot be reddened means.
+        //
+        // **Before the forget, which is the only ordering constraint here**: the footprints being
+        // handed to `vacatedInk` are the ones about to be removed.
+        rememberVacatedInk(departed: departed, arriving: arriving)
         forgetPaintedBounds(departed.lazy.map(\.id))
         invalidate(damage)
+    }
+
+    /// Moves the departing elements' measured footprints into `vacatedInk`, and takes out the ids
+    /// that have just come back. Caller must hold `lock`.
+    ///
+    /// An id in the list again is `paintedBounds`' business: it will have a real measurement after
+    /// the next walk, and a hint left here would be a second answer to a question that now has a
+    /// first one. Dropping it is also what keeps the table's size a function of what is *out* of the
+    /// list rather than of how long the session has been running.
+    ///
+    /// **Walks the table rather than the arrivals**, which is the difference between a few lookups and
+    /// one per element in the document. `arriving` is the whole new list — thousands of ids on the
+    /// canvas this exists for — and `vacatedInk` holds one entry per stroke currently undone, which is
+    /// a handful. MEASURED: the press span is 2 µs an element before this method exists at all
+    /// (PERFORMANCE.md §11.11), so a second pass over the list would be a measurable share of it.
+    private func rememberVacatedInk(departed: [VectorElement], arriving: Set<UUID>) {
+        guard !departed.isEmpty || !vacatedInk.isEmpty else { return }
+        for id in vacatedInk.keys where arriving.contains(id) { vacatedInk.removeValue(forKey: id) }
+        for element in departed {
+            guard let rect = paintedBounds[element.id] else { continue }
+            vacatedInk[element.id] = rect
+        }
+        if vacatedInk.count > Self.vacatedInkLimit { vacatedInk.removeAll(keepingCapacity: false) }
+    }
+
+    /// The union of what `arriving` last painted before it left the list, or nil when any of them is
+    /// not a stroke or has no remembered rectangle — in which case the caller cannot bound the half
+    /// of a restore it did not measure. Caller must hold `lock`.
+    ///
+    /// **No margin, unlike `regionDamage(replacing:)`'s.** That one widens because a cut piece
+    /// re-anchors its dab walk and stamps at arc offsets its parent's did not. Nothing re-anchors
+    /// here: the element arriving is the same `VectorStroke` *value* that left, restored from a
+    /// snapshot, so its dabs land where the walk that measured this rectangle put them. MEASURED —
+    /// `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the operand
+    /// that would move if this were an estimate rather than a measurement.
+    private func rememberedInk(ofArrivalsIn newValue: [VectorElement],
+                               standing: Set<UUID>) -> CGRect? {
+        var union = CGRect.null
+        for element in newValue where !standing.contains(element.id) {
+            guard let stroke = element.stroke, let rect = vacatedInk[stroke.id] else { return nil }
+            union = union.union(rect)
+        }
+        return union.isNull ? nil : union
     }
 
     /// The tightest damage a restore to `newValue` can prove. Caller must hold `lock`.
     ///
     /// Four things make it `.everything`: something departs that the walk never measures (a fill, an
     /// image, a text object or a video — `renderLocalContent` deliberately measures no footprint for
-    /// them), the survivors are re-ordered, something arrives and the caller could not bound it, or a
-    /// stroke departs that was never measured, which is `regionDamage(replacing:)`'s own answer.
+    /// them), the survivors are re-ordered, something arrives that neither the caller nor `vacatedInk`
+    /// can bound, or a stroke departs that was never measured, which is `regionDamage(replacing:)`'s
+    /// own answer.
     ///
     /// **The union on the last line is the one thing here that reads as redundant and is not**, so
     /// the experiment is recorded rather than the argument. Reasoning about one stroke says it *is*
@@ -1563,6 +1679,13 @@ final class VectorCanvas {
             arrivingInk = .null
         } else if let changedInk {
             arrivingInk = changedInk
+        } else if let remembered = rememberedInk(ofArrivalsIn: newValue, standing: standing) {
+            // **The caller has no rectangle and the canvas remembers one.** A redone append is this
+            // case and nothing else is: the gesture declared `.appended`, so `foldGestureDamage`
+            // handed both closures a nil, and the ink coming back is ink this canvas measured on the
+            // walk that first drew it. See `vacatedInk` for why a stale answer here costs a retry
+            // rather than a picture.
+            arrivingInk = remembered
         } else {
             return .everything
         }
@@ -1881,13 +2004,32 @@ final class VectorCanvas {
     /// or it would go through `transform` twice at render time.
     ///
     /// On top of everything already here, for the reasons `addFill(_:)` gives.
-    func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) {
+    /// - Returns: **where the fill landed, in this canvas's own space** — the rectangle its undo step
+    ///   declares, and the one thing a caller in canvas space cannot work out for itself, since the
+    ///   mapping through `_transform` happens in here.
+    ///
+    ///   It is exact rather than an estimate, which is what separates a fill from a stroke: `draw
+    ///   (fill:into:)` adds this very path and fills it, and a fill's antialiasing is per-pixel
+    ///   coverage of the path — a pixel the path does not reach has none — so nothing lands outside
+    ///   `boundingBoxOfPath` at all. A stroke's extent is a dab walk and is *measured*
+    ///   (`paintedBounds`) for BRUSH.md §12 stage 8's reason; a fill's is its geometry.
+    ///
+    ///   **The inset is not an antialiasing margin, which is what it was written as.** MEASURED by
+    ///   mutation: dropping it reddens `testAddingAFillReportsWhereItLandedSoItsRedoCanBeBounded` on
+    ///   its *containment* assertion, not its picture — the box measured here is of the **stored**
+    ///   path, whose coordinates are float32, so it comes back a fraction *smaller* than the rect the
+    ///   caller asked to fill (20.3 stores as 20.299999237). One point of slack covers that with room
+    ///   to spare, and costs nothing: `repairClip` rounds the clip out to integral regardless.
+    @discardableResult
+    func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) -> CGRect {
         lock.lock()
         defer { lock.unlock() }
         let fill = VectorFillElement(path: Self.localPath(path, through: _transform), color: color,
                                      opacity: opacity, evenOddFill: evenOddFill)
         _elements.append(.fill(fill))
         invalidate(.appended(count: 1))
+        guard let placed = fill.cgPath else { return .null }
+        return placed.boundingBoxOfPath.insetBy(dx: -1, dy: -1)
     }
 
     /// Maps a canvas-space path into this canvas's local (pre-`transform`) space — see

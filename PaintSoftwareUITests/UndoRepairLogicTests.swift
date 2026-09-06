@@ -317,13 +317,18 @@ final class UndoRepairLogicTests: XCTestCase {
                       "nothing arrives, so the vacated ink is the whole of the difference and it is measured")
     }
 
-    /// **And redoing that append cannot be bounded by anybody, so it says so.**
+    /// **And redoing that append is bounded by what it painted before it left.**
     ///
-    /// The ink coming back has never been drawn on this canvas: no footprint exists for it and the
-    /// gesture declared no rectangle. Guessing a box from the stroke's geometry is what BRUSH.md §12
-    /// stage 8 refuted — `ResponseCurve` does not clamp, so no size-derived number bounds what a dab
-    /// paints. Mutation that reddens it: treat a nil `changedInk` as `.null`.
-    func testRedoingAnAppendCannotBeBoundedAndSaysEverything() {
+    /// This test said the opposite until the general pass, and the sentence it was written to defend
+    /// was true of the canvas and false of the *history*: the ink coming back has never been drawn
+    /// *in this list*, but it was drawn immediately before, by the walk that measured it, and
+    /// `restoreElements` keeps that measurement in `vacatedInk` when the id leaves. Guessing a box
+    /// from the stroke's geometry is still what BRUSH.md §12 stage 8 refuted and is still not what
+    /// happens here — this is the measurement, not a derivation from the brush.
+    ///
+    /// Mutation that reddens it: return nil from `rememberedInk(of:)`, or stop calling
+    /// `rememberVacatedInk`.
+    func testRedoingAnAppendIsBoundedByWhatItPaintedBeforeItLeft() {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         canvas.addStroke(Self.mark(50))
@@ -333,8 +338,194 @@ final class UndoRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         canvas.restoreElements(after, changedInk: nil)
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "the stroke coming back is the one that just left, and what it painted was "
+                      + "measured on the way out — declaring .everything here is the whole-cel walk "
+                      + "the owner reported")
+    }
+
+    /// **A hint only exists for ink the walk measures, so a returning fill still says `.everything`.**
+    ///
+    /// `renderLocalContent` measures footprints for strokes alone, on its own stated grounds, and a
+    /// fill is therefore never in `paintedBounds` and never in `vacatedInk`. It is also the kind that
+    /// *cannot* be caught by the escape check — it is always drawn and never measured — so bounding
+    /// one on a hint would be a wrong picture rather than a retry. `rememberedInk(ofArrivalsIn:
+    /// standing:)` asks each arrival for its `stroke` rather than looking the id up and hoping.
+    ///
+    /// **Reddening this took two mutations, and finding that out is what the sweep is for.** Dropping
+    /// the `element.stroke` guard on its own leaves it green, because nothing puts a fill in the table
+    /// to be found — the guard is protecting an invariant that holds one level down. It is
+    /// load-bearing rather than dead, and the pair that shows it is: record a fallback rectangle for
+    /// a departing element with no measured footprint (`vacatedInk[element.id] = CGRect(origin: .zero,
+    /// size: size)` in `rememberVacatedInk`) **and** drop the guard, and this goes red; record the
+    /// fallback with the guard in place and it stays green. So the guard is what stands between a
+    /// future measurement of some other kind and a rectangle no escape check can correct.
+    func testRedoingAFillIsNotBoundedByAHintBecauseAFillIsNeverMeasured() {
+        let canvas = Self.drawnCanvas(12)
+        let withoutFill = canvas.elements
+        canvas.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 20, y: 20, width: 40, height: 30),
+                                                      transform: nil),
+                                         color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1),
+                                         opacity: 1))
+        let withFill = canvas.elements
+        _ = canvas.render()
+
+        canvas.restoreElements(withoutFill, changedInk: nil)
+        _ = canvas.render()
+        canvas.restoreElements(withFill, changedInk: nil)
         XCTAssertEqual(canvas.lastDamage, .everything,
-                       "an arrival nobody can bound is the case that must pay, not the case that guesses")
+                       "a fill arriving with no rectangle from its caller has nothing that could "
+                       + "bound it, and no escape check to catch a guess")
+    }
+
+    /// **A run of undos followed by a run of redos: every redo is bounded, not just the first.**
+    ///
+    /// This is the owner's own sentence — *"undoing and redoing while there are a lot of strokes"* —
+    /// and it is a run of presses rather than one round trip. A `vacatedInk` that held only the last
+    /// restore's departures would make redo #1 cheap and leave #2, #3 and #4 at `.everything`, which
+    /// is three quarters of the case still broken. Mutation that reddens it: `removeAll` before the
+    /// insert in `rememberVacatedInk` instead of pruning the arrivals.
+    func testARunOfRedosIsBoundedAllTheWayBackNotJustTheFirstPress() {
+        let canvas = Self.drawnCanvas(24)
+        var lists: [[VectorElement]] = [canvas.elements]
+        for step in 0..<4 {
+            canvas.addStroke(Self.mark(30 + step))
+            _ = canvas.render()
+            lists.append(canvas.elements)
+        }
+
+        for step in stride(from: 3, through: 0, by: -1) {
+            canvas.restoreElements(lists[step], changedInk: nil)
+            XCTAssertTrue(isRegion(canvas.lastDamage), "undo #\(4 - step) must be bounded")
+            _ = canvas.render()
+        }
+        for step in 1...4 {
+            canvas.restoreElements(lists[step], changedInk: nil)
+            XCTAssertTrue(isRegion(canvas.lastDamage),
+                          "redo #\(step) fell back to .everything — the run is the case, not the pair")
+            _ = canvas.render()
+        }
+    }
+
+    /// **The redone append draws what a full re-walk draws** — the assertion the hint's safety is
+    /// really made of, since everything above is about what the canvas *says*.
+    ///
+    /// `regionRepairsWidened` and `regionRepairsAbandoned` are asserted beside the picture for
+    /// `RegionRepairLogicTests`' reason: the escape check keeps the picture right whatever rectangle
+    /// is declared, so a picture assertion alone would be green against a hint that was nonsense and
+    /// merely expensive. Widened at 0 is also the operand that says the remembered rectangle needs no
+    /// margin — a redone stroke does not re-anchor its dab walk the way a cut piece does.
+    ///
+    /// **The region asserted against is the union of both presses' rectangles, and finding out why is
+    /// what this test was worth.** Every sibling of this test repairs *once*, from a base that a full
+    /// walk produced, so a rounding difference can only live along the one clip that cut a
+    /// transparency layer. A redo repairs from the base the *undo's* repair produced, so it inherits
+    /// that press's seam wherever it is not redrawing — pixels the undo's clip cut and this one does
+    /// not reach. MEASURED here: 15 bytes, worst by 1 out of 255, in a 3x5 box two points outside the
+    /// redo's clip and inside the undo's. So **repairs compose and their seams do too**, which is a
+    /// property of chaining them rather than of this rectangle, and the honest bound on a chain is
+    /// the union of its clips. It cannot grow past a rounding unit: each press redraws its own clip
+    /// from the bottom of the stack.
+    func testTheRedoneAppendDrawsWhatAFullReWalkDraws() {
+        let canvas = Self.drawnCanvas(48)
+        let before = canvas.elements
+        canvas.addStroke(Self.mark(50))
+        let after = canvas.elements
+        _ = canvas.render()
+
+        canvas.restoreElements(before, changedInk: nil)
+        let undone = canvas.render()
+        let undoRegion = canvas.lastRepairedRegion
+        // The control, and the operand that says the seam below is the undo's rather than the redo's:
+        // this press repairs from a full walk's base, so its own picture is right inside its own clip.
+        assertMatchesToWithinARoundingUnit(undone, fullReWalk(of: canvas).image,
+                                           inside: undoRegion, "the undone append")
+
+        let widenedBefore = canvas.regionRepairsWidened
+        let abandonedBefore = canvas.regionRepairsAbandoned
+        canvas.restoreElements(after, changedInk: nil)
+        let repaired = canvas.render()
+
+        XCTAssertEqual(canvas.regionRepairsWidened, widenedBefore,
+                       "the remembered rectangle is a measurement of the same stroke value and must "
+                       + "not need widening")
+        XCTAssertEqual(canvas.regionRepairsAbandoned, abandonedBefore,
+                       "an abandoned repair costs both walks and hides a bad bound behind a good picture")
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: undoRegion.union(canvas.lastRepairedRegion),
+                                           "a redone append")
+    }
+
+    /// **A fill says where it landed, which is the only rectangle its undo step can carry.**
+    ///
+    /// A stroke's extent is a dab walk and has to be measured; a fill's is the path being filled, and
+    /// `draw(fill:into:)` adds that very path and fills it — so `addFill(canvasSpacePath:…)` returns
+    /// an exact bound, widened by the one point of antialiased fringe. `CanvasManager`'s two fill
+    /// commits pass it straight to `registerVectorElementsUndo`, which is what makes redoing a fill on
+    /// a dense cel cost the fill rather than the cel.
+    ///
+    /// The picture assertion is the half that matters: a rectangle that missed part of the fill would
+    /// clip it, and unlike a stroke there is no escape check to catch that. Mutation that reddens it:
+    /// return `.null` from `addFill`, or drop the `insetBy`.
+    ///
+    /// **The fixture is an ellipse on fractional coordinates, and the sweep is what made it one.**
+    /// Written against an axis-aligned rectangle on integers, dropping the `insetBy` changed nothing
+    /// and the mutation came back green — and chasing that down refuted the reason the inset had been
+    /// given. It is not an antialiasing margin: a fill's antialiasing is per-pixel coverage of the
+    /// path, so it never reaches a pixel the path does not, and `repairClip` rounds out to integral
+    /// besides. What the inset actually covers is that this box is measured from the **stored** path,
+    /// whose coordinates are float32 — MEASURED, 20.3 comes back as 20.299999237, so without the
+    /// slack the rectangle does not contain the one the caller asked to fill.
+    func testAddingAFillReportsWhereItLandedSoItsRedoCanBeBounded() {
+        let canvas = Self.drawnCanvas(48)
+        let withoutFill = canvas.elements
+        let rect = CGRect(x: 20.3, y: 20.7, width: 40.4, height: 30.2)
+        let landed = canvas.addFill(canvasSpacePath: CGPath(ellipseIn: rect, transform: nil),
+                                    color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1))
+        XCTAssertTrue(landed.contains(rect),
+                      "\(landed) does not contain the path it was told to fill")
+        XCTAssertLessThan(landed.width * landed.height, rect.width * rect.height * 1.5,
+                          "\(landed) is a great deal larger than the \(rect) it bounds — a rectangle "
+                          + "that loose buys nothing")
+        let withFill = canvas.elements
+        _ = canvas.render()
+
+        canvas.restoreElements(withoutFill, changedInk: landed)
+        _ = canvas.render()
+        let repairsBefore = canvas.regionRepairs
+        canvas.restoreElements(withFill, changedInk: landed)
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "the fill coming back is bounded by where it landed, and nothing else could "
+                      + "bound it")
+        let repaired = canvas.render()
+        XCTAssertEqual(canvas.regionRepairs, repairsBefore + 1,
+                       "the redo must actually repair rather than declare a rectangle and walk anyway")
+        assertMatchesToWithinARoundingUnit(repaired, fullReWalk(of: canvas).image,
+                                           inside: canvas.lastRepairedRegion, "a redone fill")
+    }
+
+    /// **The payoff on the redo side, counted in dabs.** The sibling of
+    /// `testUndoingACutStampsFarFewerDabsThanTheCelHolds`, on the press that was still paying the
+    /// whole cel after that one stopped.
+    ///
+    /// Mutation that reddens it: return nil from `rememberedInk(of:)`, which makes the two counts equal.
+    func testRedoingAnAppendStampsFarFewerDabsThanTheCelHolds() {
+        let canvas = Self.drawnCanvas(48)
+        let before = canvas.elements
+        canvas.addStroke(Self.mark(50))
+        let after = canvas.elements
+        _ = canvas.render()
+        canvas.restoreElements(before, changedInk: nil)
+        _ = canvas.render()
+
+        canvas.restoreElements(after, changedInk: nil)
+        _ = canvas.render()
+        let repairDabs = canvas.lastRenderDabCount
+        let fullDabs = fullReWalk(of: canvas).dabs
+        XCTAssertGreaterThan(fullDabs, 0, "the reference walk must have stamped something")
+        XCTAssertLessThan(repairDabs * 4, fullDabs,
+                          "redoing one mark on a 49-mark grid re-stamped \(repairDabs) dabs against "
+                          + "the cel's \(fullDabs) — the bound is not binding")
     }
 
     /// **A departing fill cannot be bounded, because the walk deliberately never measured it.**
@@ -637,6 +828,76 @@ final class UndoRepairLogicTests: XCTestCase {
                        + "for \(canvas.elements.count) elements — the ones that left are still held")
     }
 
+    /// **And a round trip must not grow the remembered ones either** — `vacatedInk`'s counterpart to
+    /// the test above, and the one thing about that table that no picture assertion can see.
+    ///
+    /// The rule is that an entry exists only while its id is *out* of the display list, so the count
+    /// is a function of the document's state and not of how many presses have happened. Four round
+    /// trips must therefore leave exactly what one does. Without the prune each trip adds the cut's
+    /// parent *and* its two pieces, and the count climbs by three a press.
+    ///
+    /// **It is one rather than zero, and that is the rule rather than a slack bound**: the loop ends
+    /// on the post-cut list, where the parent stroke has been replaced by two pieces and is genuinely
+    /// out of the display list. Mutation that reddens it: delete the `for id in vacatedInk.keys` loop
+    /// in `rememberVacatedInk`.
+    func testARoundTripDoesNotGrowTheRememberedFootprints() {
+        let canvas = Self.drawnStripes()
+        let before = canvas.elements
+        XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
+                                   size: 8, opacity: 1, mode: .cutPoints))
+        guard case .region(let cutRegion) = canvas.lastDamage else {
+            return XCTFail("the fixture must cut and bound itself")
+        }
+        let after = canvas.elements
+        _ = canvas.render()
+
+        var afterOneTrip = 0
+        for trip in 0..<4 {
+            canvas.restoreElements(before, changedInk: cutRegion)
+            _ = canvas.render()
+            canvas.restoreElements(after, changedInk: cutRegion)
+            _ = canvas.render()
+            if trip == 0 { afterOneTrip = canvas.rememberedInkCount }
+        }
+        XCTAssertEqual(canvas.rememberedInkCount, afterOneTrip,
+                       "four round trips left \(canvas.rememberedInkCount) remembered rectangles "
+                       + "where one left \(afterOneTrip) — the table is counting presses, not the "
+                       + "ids that are out of the list")
+        XCTAssertEqual(afterOneTrip, strokeIDs(before).subtracting(strokeIDs(after)).count,
+                       "one trip ends on the post-cut list, so exactly the ids that list has lost — "
+                       + "the parent the cut replaced — are out of it")
+    }
+
+    /// **An undo that is never redone keeps its hint, and that is the shape the cap is for.**
+    ///
+    /// The prune above takes an entry out when its id comes back. Nothing takes one out when it does
+    /// not, which is exactly the state a run of undos leaves — so this pins the count as a function of
+    /// what is out of the list rather than of how many presses have happened, and it is the operand a
+    /// future leak would move. Mutation that reddens it: keep only the last restore's departures.
+    func testARunOfUndosRemembersOneRectanglePerStrokeStillOutOfTheList() {
+        let canvas = Self.drawnCanvas(24)
+        var lists: [[VectorElement]] = [canvas.elements]
+        for step in 0..<4 {
+            canvas.addStroke(Self.mark(30 + step))
+            _ = canvas.render()
+            lists.append(canvas.elements)
+        }
+        XCTAssertEqual(canvas.rememberedInkCount, 0, "control: nothing has left the list yet")
+
+        for step in stride(from: 3, through: 0, by: -1) {
+            canvas.restoreElements(lists[step], changedInk: nil)
+            _ = canvas.render()
+            XCTAssertEqual(canvas.rememberedInkCount, 4 - step,
+                           "after \(4 - step) undo(s) exactly that many strokes are out of the list")
+        }
+        for step in 1...4 {
+            canvas.restoreElements(lists[step], changedInk: nil)
+            _ = canvas.render()
+            XCTAssertEqual(canvas.rememberedInkCount, 4 - step,
+                           "each redo puts one id back and takes its hint with it")
+        }
+    }
+
     /// **The payoff, counted in dabs rather than in milliseconds** — the claim is about the algorithm
     /// and the milliseconds are the machine's.
     ///
@@ -698,5 +959,119 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertEqual(redone.regionRepairs, repairsAfterTheCut,
                        "the parents arriving are bounded only by what the caller said, and a "
                        + "canvas-sized rectangle is a full walk with extra bookkeeping")
+    }
+
+    // MARK: - (6) The other seam — every vector undo that is not a drawing gesture
+
+    /// A manager holding one vector layer whose only cel is `canvas`, with the history cleared
+    /// (`addVectorLayer` records a structural step of its own).
+    private func manager(around canvas: VectorCanvas) -> CanvasManager {
+        let manager = CanvasManager()
+        // Never the shared store — `CanvasFixture.isolatedBrushLibrary`'s doc has the reason.
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = canvas.size
+        manager.addVectorLayer()
+        manager.layers[0].cels[0].vector = canvas
+        manager.history.removeAll()
+        manager.refreshUndoRedoState()
+        return manager
+    }
+
+    /// **`registerVectorElementsUndo` bounds a swap when its caller says nothing was rewritten**, and
+    /// this drives it through `CanvasManager.undo()`/`redo()` rather than calling the closures, so the
+    /// press is the artist's press.
+    ///
+    /// The fill commits, the text commit, Clear-on-selection and the shape bake all come through here;
+    /// before this pass every one of them declared `.everything` in both directions, which is the
+    /// whole-cel walk PERFORMANCE.md §11.11 measures at 1.1 s a press on a 2,000-stroke cel. Mutation
+    /// that reddens it: hand `.rewritesInPlace` instead.
+    func testAnElementsUndoThatOnlyAddsAndRemovesIsBoundedInBothDirections() {
+        let canvas = Self.drawnCanvas(24)
+        let before = canvas.elements
+        canvas.addStroke(Self.mark(30))
+        let after = canvas.elements
+        _ = canvas.render()
+
+        let manager = manager(around: canvas)
+        manager.registerVectorElementsUndo(vectorCanvas: canvas, oldElements: before,
+                                           newElements: after, layerID: manager.layers[0].id,
+                                           celID: manager.layers[0].cels[0].id, label: .shape,
+                                           swap: .addsAndRemoves(ink: nil))
+        manager.undo()
+        XCTAssertTrue(isRegion(canvas.lastDamage), "the undo must bound itself off what departs")
+        _ = canvas.render()
+        manager.redo()
+        XCTAssertTrue(isRegion(canvas.lastDamage),
+                      "and the redo off what the undo remembered that stroke had painted")
+    }
+
+    /// **And refuses to, when the caller says an element came back under its own id with different
+    /// content.** A recolour and an Apply Brush are that case, and it is the one where a bound would
+    /// be a wrong picture rather than a slow one: the footprints `restoreElements` drops are chosen by
+    /// id difference, so a rewritten element keeps a measurement that is no longer true of it, and a
+    /// later region edit may skip it on that measurement.
+    ///
+    /// Mutation that reddens it: hand `.addsAndRemoves(ink: nil)` at either of those two call sites,
+    /// or make `registerVectorElementsUndo` route both cases the same way.
+    func testAnElementsUndoThatRewritesInPlaceStaysAtEverything() {
+        let canvas = Self.drawnCanvas(24)
+        let before = canvas.elements
+        // A recolour's shape: the same ids, one of them carrying different content.
+        var recoloured = before
+        guard case .stroke(var stroke) = recoloured[3] else {
+            return XCTFail("the fixture must hold strokes")
+        }
+        stroke.color = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        recoloured[3] = .stroke(stroke)
+        canvas.elements = recoloured
+        canvas.bumpVersion()
+        _ = canvas.render()
+
+        let manager = manager(around: canvas)
+        manager.registerVectorElementsUndo(vectorCanvas: canvas, oldElements: before,
+                                           newElements: recoloured, layerID: manager.layers[0].id,
+                                           celID: manager.layers[0].cels[0].id,
+                                           label: .recolorSelection, swap: .rewritesInPlace)
+        manager.undo()
+        XCTAssertEqual(canvas.lastDamage, .everything,
+                       "a rewritten element keeps a measured footprint that is no longer true of it, "
+                       + "so nothing about this swap can be bounded")
+        _ = canvas.render()
+        manager.redo()
+        XCTAssertEqual(canvas.lastDamage, .everything, "and the same reading the other way")
+    }
+
+    /// **The measured footprints must not survive a rewrite**, which is the damage the answer above
+    /// prevents rather than the declaration it makes — and it is invisible to `lastDamage`.
+    ///
+    /// `.everything` clears `paintedBounds` wholesale; `.region` does not. So a swap that rewrote an
+    /// element in place and declared a rectangle would leave that element's old footprint standing,
+    /// and the *next* region edit could skip it on a rectangle it no longer reaches. Mutation that
+    /// reddens it: route `.rewritesInPlace` through `restoreElements` too.
+    func testARewriteInPlaceDropsTheFootprintOfTheElementItRewrote() {
+        let canvas = Self.drawnCanvas(24)
+        let before = canvas.elements
+        var recoloured = before
+        guard case .stroke(var stroke) = recoloured[3] else {
+            return XCTFail("the fixture must hold strokes")
+        }
+        stroke.color = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        recoloured[3] = .stroke(stroke)
+        canvas.elements = recoloured
+        canvas.bumpVersion()
+        _ = canvas.render()
+        XCTAssertEqual(canvas.measuredFootprintCount, canvas.elements.count,
+                       "control: the walk above measured every stroke")
+
+        let manager = manager(around: canvas)
+        manager.registerVectorElementsUndo(vectorCanvas: canvas, oldElements: before,
+                                           newElements: recoloured, layerID: manager.layers[0].id,
+                                           celID: manager.layers[0].cels[0].id,
+                                           label: .recolorSelection, swap: .rewritesInPlace)
+        manager.undo()
+        XCTAssertEqual(canvas.measuredFootprintCount, 0,
+                       "the press left \(canvas.measuredFootprintCount) footprints standing for "
+                       + "elements it may have changed — an entry is a promise, and this swap "
+                       + "cannot keep it")
     }
 }

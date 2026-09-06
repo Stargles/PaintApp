@@ -1301,12 +1301,15 @@ extension CanvasManager {
             brushColor.resolvedUIColor(opacity: brushOpacity).getRed(&r, green: &g, blue: &b, alpha: &a)
             // `selection.path` is in canvas space, like every on-screen path — see
             // `VectorCanvas.addFill(canvasSpacePath:...)` for why it must not be stored verbatim.
-            vectorCanvas.addFill(canvasSpacePath: selection.path,
-                                 color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
+            let landed = vectorCanvas.addFill(canvasSpacePath: selection.path,
+                                              color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)))
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                        newElements: vectorCanvas.elements,
-                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .fill)
+                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .fill,
+                                       // The fill tool's answer, for the same reason — see
+                                       // `commitInteractiveFill`.
+                                       swap: .addsAndRemoves(ink: landed))
         } else {
             let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize)
             let newImage = PixelOps.fill(base: base, path: selection.path, color: PixelOps.uiColor(from: brushColor))
@@ -1441,7 +1444,15 @@ extension CanvasManager {
             setFillImage(layerIndex: currentLayerIndex, celIndex: celIndex, image: (nil as UIImage?))
             registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                        newElements: newElements,
-                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection)
+                                       layerID: layers[currentLayerIndex].id, celID: cel.id, label: .clearSelection,
+                                       // Elements leave and, under Cut, their outside halves arrive
+                                       // with fresh ids — nothing is rewritten. No rectangle: what
+                                       // arrives on the *undo* is the whole pre-clear elements, which
+                                       // this cel has not measured (the forward edit above declared
+                                       // `.everything`), and the lasso's own box does not bound a
+                                       // straddling one. The redo is bounded anyway, off what the
+                                       // undo just vacated.
+                                       swap: .addsAndRemoves(ink: nil))
             // The timeline and layer-panel thumbnails are a third thing, and
             // `registerVectorElementsUndo` refreshes them on the undo and redo sides but **not** on
             // the initial apply. This used to lean on `setFillImage` publishing through
@@ -1686,7 +1697,13 @@ extension CanvasManager {
                                    newElements: vectorCanvas.elements,
                                    layerID: layers[currentLayerIndex].id,
                                    celID: layers[currentLayerIndex].cels[celIndex].id,
-                                   label: .recolorSelection)
+                                   label: .recolorSelection,
+                                   // A recolour writes `stroke.color` and puts the stroke back at
+                                   // its own index under its own id — see the loop above — so both
+                                   // lists hold the same ids with different content and no restore
+                                   // can bound itself. Under Cut it splits *as well*, which does not
+                                   // change the answer: one rewritten element is enough.
+                                   swap: .rewritesInPlace)
         // The layer-panel thumbnail is a third thing, and `registerVectorElementsUndo` refreshes it
         // on the undo and redo sides but **not** on the initial apply — `clearSelectionPixels` gets
         // away with that only because `setFillImage` publishes through `@Published layers`, which is
@@ -1807,7 +1824,12 @@ extension CanvasManager {
                                    newElements: vectorCanvas.elements,
                                    layerID: layers[currentLayerIndex].id,
                                    celID: layers[currentLayerIndex].cels[celIndex].id,
-                                   label: .applyBrushToSelection)
+                                   label: .applyBrushToSelection,
+                                   // `stroke.brushRef = ref` under the stroke's own id — the
+                                   // recolour's answer, and a re-pointed brush also changes what the
+                                   // stroke paints, so even a same-id rule that read content would
+                                   // have to re-measure it.
+                                   swap: .rewritesInPlace)
         celContentChangedOutsideStroke(layerID: layers[currentLayerIndex].id,
                                        celID: layers[currentLayerIndex].cels[celIndex].id)
     }
