@@ -457,6 +457,29 @@ final class VectorMergeLogicTests: XCTestCase {
         XCTAssertNil(upperRaster.notice)
     }
 
+    /// **`kind` is the question, not "does the cel happen to hold a display list"** — and the two come
+    /// apart. `rasterizeUncached` draws `cel.vector` whatever the layer is labelled, so a `.raster`
+    /// layer carrying one renders its ink and passes every other guard in the predicate; only the kind
+    /// test stops it. Without this fixture, weakening that test to "either side is vector" changes no
+    /// behaviour any other test here can see — MEASURED, 2026-09-06: that mutation came back green.
+    func testARasterLayerThatHappensToCarryADisplayListStillBakes() {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer(name: "Vector")
+        manager.addLayer(name: "Raster")
+        manager.layers[0].cels[0].vector =
+            VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(Self.stroke(0))])
+        // A raster layer whose cel has geometry on it: not a state the app writes, and exactly the
+        // state the `kind` guard is the only defence against.
+        manager.layers[1].cels[0].vector =
+            VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(Self.stroke(2, y: 34))])
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        XCTAssertEqual(manager.layers[0].kind, .raster,
+                       "A layer labelled raster is raster, whatever its cel is carrying")
+        XCTAssertNil(manager.layers[0].cels[0].vector, "…and the bake takes the geometry with it")
+    }
+
     // MARK: - (3) The edges of the predicate
 
     /// An empty side is not a cut: one list is the whole list, so there is no seam to preserve.
