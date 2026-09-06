@@ -8,108 +8,118 @@ what is true now and what is next. -->
 Read this, then [CLAUDE.md](CLAUDE.md), then the specification for whatever you pick up.
 [TODO.md](TODO.md) is the owner's asks; [BUGS.md](BUGS.md) is what we find.
 
-## Do this first — two branches are finished-but-unverified and must land before anything else
+## Do this first — two things about measurement, before any feature
 
-**Neither is merged and neither has had a fast tier run at its final commit.** Both were stopped
-mid-flight when the owner hit a usage limit, not because anything was wrong.
+**1. The test target cannot build in Release, and nobody has ever measured this app in the
+configuration it ships.** `xcodebuild test -configuration Release` fails with a pre-existing
+`@testable import` module error. **Every figure taken this pass is Debug** — the per-dab costs, the
+0.24 µs octave, the pad re-walk, TODO (41)'s before/after. Debug has MEASURED **62x slower** than
+Release on this project's alpha-mask path, so those numbers are sound as *ratios* and worthless as
+absolutes. Fixing the module error is small, unglamorous, and makes every future measurement mean
+something.
 
-- **`tmp/area` (`8cc8ff8`, worktree `../PaintApp-area`) — TODO (41), the owner's lag spike.** Three
-  commits: a cel repairs the rectangle an edit touched instead of re-walking itself, a repair that
-  escapes its rectangle widens rather than giving up, and eleven tests. **It was interrupted part-way
-  through mutation-testing.** One live mutation — a deleted `cg.clear(clip)` in `VectorLayer.swift` —
-  was reverted by hand at close-out, so the tree is clean, but **the mutation run was not finished**:
-  re-run it before trusting the tests.
-- **`tmp/fold` (`406fe84`, worktree `../PaintApp-fold`) — the owner's tuned Rough Ink becomes the
-  shipped one, and a library that cannot be decoded is preserved rather than silently replaced.** Tree
-  clean, all eight mutations reported caught, and it was about to run the fast tier when it stopped.
-  `../PaintApp-fold-base` is a throwaway baseline worktree it made; delete it.
-
-Rebase each onto `main`, run the fast tier **verbatim** per CLAUDE.md, read the count from
-`xcresulttool`, and merge. Expect conflicts: three landed today from two agents touching one enum or
-one digest table, and every one was caught at the merge as a compile error.
-
-**Then a full suite.** The last full run was at `032efa1` — **2482 tests, 21.7 min**, and thirty-odd
-merges have landed since, including the render path (§12 stage 8's per-stroke buffer) and the walk
-(§2.28's module chains). It is owed and it is the biggest unknown in the tree.
+**2. A full suite was started at `c26efc9` and its result is not in this file.** It is the first full
+run since `032efa1` (**2482 tests, 21.7 min**) and roughly forty merges have landed since, including the
+render path and the walk. **Read `/tmp/fullsuite.log` and the newest xcresult under
+`build/DerivedData/Logs/Test/` before trusting the tree**, and take the per-class table *immediately* —
+CLAUDE.md records that later triage runs evict the bundle that holds it.
 
 ## State
 
 **Check `git worktree list` and `git branch -a` first.** `git fetch` before trusting any of this —
 `origin/main` is a shared ref.
 
-**`main` is `25915ed`. 74 commits today. Fast tier 3159 total / 3156 passed / 0 failed / 3 skipped.**
+**`main` is `c26efc9`. 89 commits this pass. Fast tier 3177 total / 3174 passed / 0 failed / 3 skipped.
+No worktrees, no `tmp/*` branches, nothing uncommitted.**
 
-**A Release build of the brush pack is on the owner's iPad, signed until 2026-09-12.** It does **not**
-carry the last four merges (density-as-a-gate, the editor's draft/Cancel, gain, two-axis scatter), and
-it does not carry either branch above.
+**A Release build of `c26efc9` is on the owner's iPad, provisioning valid until 2026-09-12.** It carries
+everything below.
 
 ## The brush engine is built — §12 stages 0 through 11 are DONE
 
 [BRUSH.md](BRUSH.md) is the specification. **§2 is thirty-three owner rulings; read them rather than
-re-deriving them.** Eleven of them were made today and four supersede earlier ones — §2.28 supersedes
-§2.22's fixed shape, §2.29 supersedes §2.22's uncurved clause, §2.31 carves an exception out of §2.10,
+re-deriving them.** Eleven were made this pass and four supersede earlier ones: §2.28 supersedes §2.22's
+fixed shape, §2.29 supersedes §2.22's uncurved clause, §2.31 carves a deliberate exception out of §2.10,
 and §2.32 supersedes §2.18's intrinsic draw.
 
-**What shipped today**: opacity and flow split with a real per-stroke buffer; canvas-anchored texture;
-the brushes menu with groups and the owner's two-tap navigation; the full-screen editor with orderable
-module chains, noise octaves, second inputs carrying their own curves, and typed values past 100%;
+**What shipped**: opacity and flow split with a per-stroke buffer; canvas-anchored texture; the brushes
+menu with groups and the owner's two-tap navigation; the full-screen editor with orderable module chains,
+noise octaves, second inputs carrying their own curves, typed values past 100% and a working Cancel;
 relocatable storage; **twenty brushes in five groups, every asset generated, no third-party content at
-all**; and `density` as a threshold so its randomness lives on the chain.
+all**; `density` as a threshold driven from the chain; and two-axis scatter oriented to the stroke.
 
-**What is left of (37)**: **§12 stage 12 only** — the `.abr` / Procreate `.brushset` / Clip Studio
-`.sut` importers. The owner named those three and left the timing to me; it stays last because the
-model moved five times today and an adapter aimed at a moving target is written twice. **§12 stage 12
-carries what is known about each container, to be verified rather than trusted.** Test files are a real
-dependency: source freely-licensed samples first, and only ask the owner for their Procreate packs if
-those prove too thin.
+**What is left of (37): §12 stage 12 only** — the `.abr` / Procreate `.brushset` / Clip Studio `.sut`
+importers. The owner named those three and left the timing to me; it stayed last because the model moved
+five times in one day and an adapter aimed at a moving target is written twice. **Stage 12 records what
+is known about each container, to be verified rather than trusted.** Test files are a real dependency:
+source freely-licensed samples first and only ask the owner for their Procreate packs if those are too
+thin. **§8.3 is why this matters more than "last stage" sounds** — bought packs cannot ship inside the
+binary, so the importer is the only lawful route to most of what exists.
 
 ## Ask the owner these
 
-- **Their tuning pass.** They have the brush pack and said Rough Ink *"looks almost exactly like how I
-  want it now"*. `tmp/fold` folds that in. Once it lands, ship a build and ask them to go through the
-  other nineteen — the loop they specified is tune, extract, done.
+- **Their tuning pass.** Their Rough Ink is now the shipped one, pinned to within 0.76% of inked pixels.
+  They have the build; ask them to go through the other nineteen. The loop they specified is tune,
+  extract, done — `PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json` is how the last
+  extraction was carried.
+- **Blotchy and Bristle scatter ~53% wider on a fresh install than on their device.** §2.30 re-authored
+  those two by hand and carried the number across rather than converting it. Deliberate, asserted, and
+  written up in §13 — it wants their eye, not more arithmetic.
 - **Drive a real Pencil and lean it over.** The simulator cannot synthesise pencil input, so **tilt has
   never been exercised by hardware** — two stages store and read it and nothing has confirmed the
-  hardware end. Ten seconds of their time closes a gap no test here can.
-- **Splatter and Stipple want revisiting now that §2.30 exists.** §12 stage 11 shipped them as pictures
-  because nothing could offset a dab *across* the path; two-axis scatter merged the same hour and is
-  exactly that lever.
+  hardware end. Ten seconds closes a gap no test here can.
+- **Splatter and Stipple want revisiting now that §2.30 exists.** Stage 11 shipped them as pictures
+  because nothing could offset a dab *across* the path; two-axis scatter merged the same hour.
+
+## What TODO (41) did and did not fix
+
+**MEASURED, Debug, 2048x1024**: a cut's worst single render at 1,000 strokes went **608.8 → 225.8 ms**,
+at 2,000 **1274.5 → 463.2 ms**; 2.1–3.5x fewer dabs. INFERRED on the owner's iPad 9, ~1.68 s → ~0.61 s.
+
+**It is an order of magnitude short of the append's 105–832x and the reason is structural**: a cut's
+damage is the footprint of *every* stroke it replaced, so the rectangle grows with density — 10% of the
+canvas at 200 strokes, 25% at 2,000. The honest guarantee is *cost scales with the area touched*.
+
+**The spike has moved to the main thread.** `resolveShare` went 13% → 31% at n=2000 because the render
+half fell and the per-sample intersection search did not (237 ms worst; ~312 ms INFERRED on the iPad),
+and unlike the render it does not run on `renderQueue`. **That is the next lever.** Only the two eraser
+cuts declare `.region`; select-and-move, Clear and recolour still say `.everything`, and
+`regionDamage(replacing:)` is the shared helper with no design left to do. **TODO (42) waits on
+recolour.**
 
 ## Filed rather than fixed
 
 - **[BUGS.md](BUGS.md) — the auto-resign daemon counts its own runs, not the profile's expiry.** It
   reported "3d remaining" on a profile that expired ten hours later, which is why the owner's app has
-  died several times. The fix is to read `ExpirationDate` out of the profile. **Recovery is in the entry
-  and the obvious move fails**: rebuilding re-embeds the cached expired profile, so delete
-  `~/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision` first.
+  died several times. **The obvious recovery fails**: rebuilding re-embeds the cached expired profile,
+  so delete `~/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision` first and check
+  `ExpirationDate` *before* installing, since the build succeeds either way.
 - **BUGS.md — a restored project texture can be held down by a negative cache entry.** Pre-existing;
   wants fixing with §13's document-opened-on-a-second-device case, which is the only way to reach it.
-- **§13 — the owner's fixture cannot be decoded by `main`**, because it predates §2.30. `tmp/fold`
-  addresses it; if that branch is abandoned, this is a data-loss path.
-
-## What today cost, MEASURED
-
-- A module is **~0.06 µs**; an empty chain is free. A whole re-walk is **+3.3–4.3%** for chains.
-- **An octave is 0.24–0.26 µs** — four times a module, and the steepest purchase on the path. Capped at 8.
-- §12 stage 8's stroke group is **~852 µs a stroke, ~6%** of a full re-walk.
-- The editor's pad re-walk is **18–42 ms** per change (Debug, simulator) and does **not** fit a frame,
-  so the pad caps at 8 strokes. Release could not be measured: `xcodebuild test -configuration Release`
-  fails on this project with a pre-existing `@testable import` module error. **That is worth fixing** —
-  it means no timing has ever been taken in the configuration that ships.
+- **§13 — a repair that truncates a transparency layer differs from a full walk by 1–2/255** on pixels
+  along the rectangle's edge. MEASURED as CoreGraphics rounding, non-accumulating, pinned three ways.
 
 ## Traps this pass paid for
 
+- **Four of eleven tests in one branch were blind** — green against builds with the behaviour they name
+  deleted. A fixture whose setup check was taken on the *uncut* list, a blend-mode test whose marks never
+  overlapped, a "straddling stroke" that straddled nothing, and an undo test that rendered before the
+  undo. **Mutation testing is what found them**, and one guarded the eraser-under-a-stack rule.
+- **The triage recipe has an exception it did not know about.** CLAUDE.md's erase-then-re-run is right
+  for a state flake and the **worst** case for a timing one: a wall-clock assertion read 43 ms warm and
+  **207 ms after an erase**, so the prescribed confirmation failed 4.7x worse than the suite and read as
+  a real regression. Wall-clock assertions now live in the bench files, which the fast tier excludes.
+- **The simulator you are *driving* is a binary too** — `simctl install` ships whatever the last
+  `xcodebuild` wrote, including a mutation run's build. One session diagnosed a defect that existed only
+  in the installed bundle.
+- **An assertion can be true of the world when written rather than of the thing it names.** A test called
+  "the collections are disjoint" asserted a tip list was exactly `[.square]`; eleven shipped tips
+  reddened it. It asserts the partition now.
+- **A test written to catch a defect class can be broken and say so about itself** — the identifier
+  census was red on `main` for hours because it named deleted presets.
+- **Cross-branch collisions surface at the merge as compile errors, not before.** Four this pass: two
+  enums grown independently, a preset deleted by one branch and named by another's new test, and a
+  channel renamed by one and used by two others.
 - **A green check is evidence about the tree that existed when you ran it.** A rebase output filtered to
-  two lines hid a conflict; a suite was then run on a half-rebased tree and its number reported. It was
-  fine, and "happened to be fine" is not verification.
-- **The simulator you are *driving* is a binary too.** CLAUDE.md now carries it: `simctl install` ships
-  whatever the last `xcodebuild` wrote, including the build that mutation-tested an assertion. One
-  session diagnosed a shipped defect that existed only in the installed bundle.
-- **An assertion can be true of the world when written rather than true of the thing it names.** A test
-  called "the collections are disjoint" asserted the tip list is exactly `[.square]`, and eleven shipped
-  tips reddened it. It asserts the partition now and cannot be broken by adding a brush.
-- **A test written to catch a class of defect can itself be broken and say so about itself.** The
-  identifier census added this afternoon had been red on `main` since the brush pack shipped.
-- **Cross-branch collisions are caught at the merge, not before.** Three today, each a compile error at
-  rebase: two enums grown independently, a preset deleted by one branch and named by another's new test,
-  a channel renamed by one branch and used by another.
+  two lines hid a conflict and a suite was run on a half-rebased tree; separately, a result file was read
+  because a notification arrived that belonged to a *different* task's stale wait.
