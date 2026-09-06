@@ -82,93 +82,6 @@ measurement while the id is out of the list. MEASURED in Release: a redo at 1,00
 
 ---
 
-## (43) Merging two vector layers produces a raster layer
-
-**Status** — **all three stages built on `tmp/vecmerge`, not merged.** Full fast tier green there; the
-item stays here until the branch lands, per this file's own rule that an item leaves when it is merged
-and not when a branch exists.
-
-> *"when you merge two layers it doesnt work for vector layers, the merged layer turns out as a raster
-> layer. Make it vector compatible."*
-
-**What shipped on the branch.** `CanvasManager.vectorMergeIsExact` is the design: two vector layers
-merge to a vector layer wherever concatenating their display lists draws what compositing their two
-renders draws, and everywhere else the pixel bake runs as it always has with a
-`CanvasNotice.mergedAsPixels` saying so. `VectorCanvas.splitPreservesTheWalk` is
-`appendPreservesTheWalk` lifted rather than a second copy of the isolation rules.
-`VectorMergeLogicTests` holds the predicate to its claim byte for byte in both directions.
-
-Two silent losses in the same code went with it. "Merge Down" called `mergeLayers` bare while the
-pinch consulted `mergeLossKind`, so one pair prompted on a pinch and discarded on a tap —
-`requestMerge` is the single entry point now, and the predicate gained the clip on the upper layer
-(an `AlphaMask` or `.clipToBelow`, both of which the bake has always dropped in as many words). And a
-merge flattened only the cel pair under the playhead before deleting the upper layer whole, losing its
-ink at every other frame; `alignCelBoundaries` + `mergeAlignedCels` walk the union of both timelines,
-so a merge can now *increase* the survivor's block count where the spans disagree.
-
-**Left**
-- [ ] Merge `tmp/vecmerge` to `main`.
-- [ ] Deferred, no measured need: `ValueFill` as a canvas-sized `.fill` element; relaxing the erase
-      case; and relaxing `splitPreservesTheWalk`, which is conservative when the prefix ends in
-      something that is not a paint stroke (it is shared with the incremental append, so tightening it
-      moves that too).
-
----
-
-## (46) A fill should treat a stroke's path as a wall, not just its ink
-
-**Status** — **built on `tmp/skinfill`, not merged.** The item stays here until the branch lands.
-
-> *"Lets say a brush is segmented, and that brush creates an enclosure, and that enclosure gets filled.
-> Right now the fill would leak through the gaps in the segmented line. I want the fill tool to also
-> make the line path itself behave like a wall too, so that if I fill the enclosure with the segmented
-> lines, then it still fills the shape properly, bridging those gaps. (rough ink on low pressure does
-> this segmentated line for example)"*
-
-**What shipped on the branch.** `StrokeWallMask.mask` rasterises every wall stroke's **centre line** —
-`StrokePath.flattened`, the same flattening the dab march walks — in **the colour that stroke paints**,
-and `computeWalls` puts each path pixel through the same threshold test the reference's own pixels
-take. So the rule is *"the path behaves as if the stroke had painted a continuous line of its own
-colour"*, applied upstream of gap closing, of the bucket flood and of the lasso's collar flood, so all
-three obey it and none of them needed changing. **No new control**, and the owner ruled the
-vector/raster divergence needs no notice: *"let it be. It's just a property with vector layers."*
-
-**Carrying the colour rather than a flag is the load-bearing part, and the first build got it wrong.**
-An unconditional wall took the **Threshold** slider away on every vector layer;
-`FillLiveAdjustUITests.testAdjustingThresholdAfterFillReappliesToUncommittedFill` caught it. That is
-now pinned headlessly too.
-
-**The other decisions, each argued in `StrokeWallMask`'s own doc comment.** A **hairline** (1.5 px,
-antialiasing off — a 1 px stroke on an integer coordinate can rasterise to nothing at all), not the
-stroke's width, because the dabs already wall as far as they cover and a wider wall would move the
-flood boundary without moving the coverage ramp LASSO_FILL.md §6 step 7 anchors on. **Beside Gap
-Closing, not replacing it** — no control added or removed. Paint strokes only: erase strokes, fills,
-images, text and video are not lines, and a **suppressed** element is not drawn. A stroke that paints
-nothing walls nothing, *derived* from the colour it writes rather than ruled by a threshold.
-
-**Cost, MEASURED** (Debug, simulator, 2048x1024): 28 / 51 / 177 ms at 200 / 1,000 / 4,000 strokes,
-once per gesture on `fillQueue`, against 621 / 3,097 / 12,345 ms for the cold `VectorCanvas.render()`
-beside it. Not optimised; the lever if one is ever needed is a memo on `contentVersion`.
-
-**One behaviour change that is not about gaps, and it is the thing to look at on the device**: a line
-*inside* a flat region now splits it for a recolour wherever that line's own colour is outside
-Threshold of the tapped one, where the flood used to cross it once the *pixels* were within tolerance
-and the gaps between dabs were open. Same rule seen from the other side.
-
-**Left**
-- [ ] Merge `tmp/skinfill` to `main`.
-- [ ] Nobody has yet drawn a segmented enclosure **with a pencil on the device** and filled it.
-      XCUITest cannot synthesise pressure — `StrokeInput.init(touch:in:)` gives a finger 1.0 — so the
-      low-pressure Rough Ink case cannot be driven from a UI test at all. It is pinned headlessly
-      instead (`StrokeWallLogicTests`, which attaches a three-panel contact sheet of the drawn
-      fixture, the leak and the containment through the production render and the production GPU
-      session), and the app-level regression is `FillContainmentUITests` / `FillLiveAdjustUITests` /
-      `FillUndoRedoUITests`, green.
-
-**Spec** LASSO_FILL.md §6 step 2d.
-
----
-
 ## (47) A finger tap bakes a Move while the pen-only toggle is on
 
 **Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
@@ -189,82 +102,6 @@ a finger tap does *outside* a Move (pan, or nothing), never commit.
 - [ ] A test that a finger tap with the toggle on leaves the float lifted. **XCUITest cannot synthesise
       a pencil**, so the pen half cannot be driven from a test; assert on the touch-type decision
       directly rather than writing a UI test that silently downgrades to a finger.
-
----
-
-## (50) `sceneFrameCount` is a high-water mark that never falls
-
-**Status** — **built on `tmp/sceneend`, not merged.** The item stays here until the branch lands, per
-this file's own rule that an item leaves when it is merged and not when a branch exists.
-
-> *"The end of the animation timeline should be the last frame… if I do an extend to end on a cel, then
-> it extends that cel to the 12th frame even if the last cel is not on frame 12. If I manually extend a
-> frame to a further frame, then retract it back, then do an extend to end, then the extend to end goes
-> up to that last frame I extended to. This points at a deeper issue… This variable is default set to
-> 12, and increases whenever a cel gets put higher, but never falls back down when the last cel
-> changes, only expands."*
-
-**The diagnosis was exactly right and the field is deleted.** `CanvasManager.contentEndFrame` — which
-already existed, and which playback already used, which is why the owner saw playback escape the bug —
-is now the only account of where the scene ends. Every reader that meant "the end of the timeline"
-asks it: extend-to-end, the gap menu's range, the loop clamp, the frame label, `BakeQueue`'s universe,
-the export range, the graph band's drawn bound, and the length of a new layer's first block. The
-twelve survives as `CanvasManager.defaultNewSceneFrameCount`, applied at the one moment it ever meant
-anything — the first layer of a document that has none.
-
-**The empty track past the last drawing was never this field**, which is what made deleting it safe:
-it is `TimelineTrackExtent.displayedFrameCount`, two screenfuls past wherever the artist has scrolled,
-now a testable static rather than a rule living inside `TimelineTrackView.Coordinator`.
-
-**Two things the brief did not expect.** The field had **fifteen** app-side readers, not nine. And
-`effectiveLoopRange` must *not* be re-pointed at the derived end: a loop marker placed in the empty
-track is intent, and clamping it to the content silently retracts it — caught by
-`testMarkersSetPastTheContentAreStillHonoured`, so the markers are floored at zero and not ceilinged.
-
-**A saved document with an inflated mark** loses it: the key is gone from `ProjectManifest` and the
-end is recomputed from the cels on load, under the standing expendable-documents permission.
-
-**Driven, not only asserted.** `SceneEndReachabilityUITests` starts at the gallery, makes a canvas,
-drags the block shorter and uses the real Extend to End row — and then puts a second drawing in the
-empty track past it, which is the check that the shorter scene is not a shorter *timeline*.
-
----
-
-## (40) Onion skin z-order — ruled, and built
-
-**Status** — **built on `tmp/skinfill`, not merged.** The item stays here until the branch lands, per
-this file's own rule that an item leaves when it is merged and not when a branch exists.
-
-**The design, in the owner's own words** (2026-09-06):
-
-> *"the onion skin always renders on top of the compositor. This is the idea for the 'in front'
-> option. For the 'Behind' option, it is still rendered on top of the compositor, but then uses the
-> inverse of the current drawing layer as an alpha mask. Thus, the onion skin is not affected by the
-> compositor giving the animator a clear view at their art. When they set it to below, the onion skin
-> gets masked out in the areas that the current layer is drawn."*
-
-**What shipped on the branch.** There is **one** onion-skin view now, not two, and `updateOnionSkin`
-fronts it above every layer host and above `sandwichAbove` on every pass — `reconcileLayers` no longer
-threads a ghost through the stack and `OnionSkinKey` no longer carries a placement, because placement
-changes no pixel of the composite. `OnionSkinClip.mask` is the ruling: §6.4's coverage with the current
-drawing's alpha taken out of it by one `.destinationOut` draw, built at the *skin's* resolution rather
-than the canvas's. `CanvasManager.onionSkinInkToSubtract` is the single reader of the placement setting
-— In Front answers nil and the clip is byte-for-byte what it was — so the view coordinate, which no
-headless test can reach, holds no decision of its own.
-
-**Three decisions taken, each stated in the source.** A **hidden** current layer subtracts nothing
-(a cut by ink nobody can see is the surprise). A **`.value`** layer subtracts nothing (a canvas-filling
-flat colour would erase the whole ghost). Layer **opacity is not folded in** — the cut is full wherever
-there is ink, because the ruling's stated purpose is a clear view of your own art and a proportional
-cut puts the ghost back under half-opacity ink.
-
-**One known gap, deliberately not closed here.** A current layer moved by an enclosing transformation
-layer is cut where its ink *rests*, not where it is *drawn* — because nothing in the onion-skin
-subsystem poses a skin either, and `OnionSkinRasterCache` has no `pose` argument. Cutting by a rule the
-ghosts themselves do not follow would be worse than the gap.
-
-**Left**
-- [ ] Merge `tmp/skinfill` to `main`.
 
 ---
 
@@ -302,55 +139,79 @@ twenty-six owner rulings; do not re-litigate any of them.**
 
 ---
 
-## (39) The timeline freeze
+## (39) The timeline freeze — a menu popover eats every drag
 
-**Status** — (a) and (b) are fixed, and the recorder watches the timeline's own recognizers
-(`timeline.scroll`, `timeline.pinch`, `timeline.rulerScrub`, `timeline.graphBand`, and every row's
-`timeline.row<N>.tap` / `.press` / `.resize`). **(c) is the whole of what is left. It is now
-reproduced and its cause is known; what remains is a design decision, not an investigation.**
+**Status** — reproduced and measured; the fix is chosen and unbuilt. (a) the pinch anchor and (b) the
+dead area below the last row are fixed and gone from this item.
 
-The pinch anchors on the frame it started on at any scroll offset
-(`TimelineKeyMarkers.PinchAnchor`), and the track fills its viewport rather than stopping at the last
-row (`TimelineRowLayout.contentHeight(filling:)`), so there is no dead strip and the gridlines rule to
-the bottom of the panel.
+**While a timeline menu popover is up, every drag on the timeline is swallowed whole** — the track does
+not scroll, the ruler does not scrub, and the popover does not dismiss. Only a tap dismisses it.
+MEASURED: with the menu up a drag moves the cel block **0.0 pt**; with it gone the same drag moves it
+**369 pt**.
+
+`.popover` presents behind a screen-covering `_UIPassthroughGateGestureRecognizer`. `hitTest` still
+returns the timeline row — the hierarchy is intact — but `touchesBegan` never fires. That gate is also
+what prunes the recogniser set two earlier analyses misread as a detached row view.
+
+**Three diagnoses were wrong before this one**, which is why the evidence doc
+[docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md) is
+worth reading before touching this: a detached view (refuted — the row's own delegate-less recogniser
+was missing too), `require(toFail:)` accumulation (refuted — the failure-requirement set deduplicates
+and holds weak references), and a cel created past the scene end (driven five ways, never reproduced).
+**Nobody had reconstructed the gestures**: almost every "dead" touch in the owner's trace is a swipe,
+which is *supposed* to scroll and leaves no model event, and every genuine tap in it worked.
+
+**The decision, 2026-09-06 — stop using `.popover` for these menus rather than punching a hole in it.**
+`UIPopoverPresentationController.passthroughViews` is the smaller change and lets the drag through, but
+it keeps the menu up while the artist scrubs — and a cel menu names a *specific block*, so scrolling out
+from under it leaves the menu pointing at something else. That is a worse bug than the one being fixed.
+Reaching the presentation controller from SwiftUI is fragile too, and this way fixes the class rather
+than one instance.
 
 **Left to build**
-- [ ] **(c) A timeline menu eats every drag on the timeline and only a tap dismisses it.**
-      [docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md)
-      is the trace, the reproduction and the two refutations; read its last three sections.
-
-      **Reproduced 2026-09-06.** While one of the four timeline menus is up, a drag anywhere on the
-      timeline is swallowed whole — the track does not scroll, the ruler does not scrub, and the
-      popover does not go away. Only a **tap** dismisses it. MEASURED from a new document: two 200 pt
-      drags on the track leave the cel block at x 188.0 and the playhead at frame 7 with the menu
-      still standing; a tap in the same place dismisses it; the identical drag then scrolls the track
-      to −181.5. `MenuInterruptionUITests.testADragOnTheTimelineWhileABlockMenuIsUpIsSwallowedWhole`
-      is that measurement and is **a characterization of a defect that is still open** — it goes red
-      when this is fixed, deliberately.
-
-      That is exactly the owner's trace. A tap 14 pt from the previous one raised the block menu at
-      t≈20.5, `_UIPassthroughGateGestureRecognizer` appears at t=21.02, no timeline gesture fires
-      again until they **tap** the toolbar at t=26.57. Reconstructing the gestures rather than the
-      `grNames` column is what settles it: almost every "dead" touch is a **swipe** of 24–282 pt, and
-      **every genuine tap in the trace worked**, so the freeze is five seconds long and not fifteen.
-
-      **Two published analyses of this are refuted and both are worth not repeating.** The row view is
-      *not* detached — 15 hit-tests during the dead drags all carry the row's own three recognizers,
-      the pinch, `timeline.scroll` and both scroll pans, and `TimelineRowView.touchesBegan` never
-      fires, so UIKit is declining to *offer* the touch, not missing the views. And
-      `relayout`'s un-removable `require(toFail:)` does **not** accumulate: `_failureRequirements` is
-      a deduplicating **weak** set and a recogniser does not retain its target, so a row leaving the
-      pool takes its entry with it (`TimelineGestureArbitrationLogicTests`; the harness that seemed to
-      show 3, 6, 9, … was measuring its own autorelease pool).
-
-      **What is left is an owner decision**, because there is no in-app seam — the touch never reaches
-      the timeline. `.presentationBackgroundInteraction(.enabled)` is a sheet API and measurably does
-      nothing here. The two real options are to reach
-      `UIPopoverPresentationController.passthroughViews` (not exposed by SwiftUI's `.popover`) and
-      dismiss from the timeline once the touch arrives, or to stop using `.popover` for the four
-      timeline menus and draw them as an overlay the timeline panel dismisses itself.
+- [ ] Replace the timeline menus with a view anchored **inside the app's own hierarchy** — no
+      full-screen presentation, so it captures nothing it does not cover.
+- [ ] Dismiss on a tap outside **and** on any gesture starting elsewhere, **letting that gesture
+      through**: one drag should dismiss the menu and scroll the track, not cost two.
+- [ ] There are four of them; find them all. `MenuInterruptionUITests` reproduces the defect and is the
+      regression test.
+- [ ] Sweep for the same shape: any other `.popover` over a scrollable surface has this defect.
 
 ---
+
+## (51) Onion skin Behind cuts by the presence of ink, not by its opacity
+
+**Status** — ruled 2026-09-06, unbuilt. One line, plus its test.
+
+`OnionSkinClip.mask` takes the current drawing's alpha out of the ghost with a `.destinationOut`, so
+**any** ink cuts the ghost **fully** — a layer at 30% opacity blanks the ghost under its strokes as
+completely as a solid one does. Layer opacity is not folded into the mask at all.
+
+**The owner ruled it proportional**: 30% opacity cuts 30% of the ghost, so faint ink leaves the ghost
+mostly visible and solid ink still hides it. That is the ruling's stated purpose — a clear view of your
+own art — without the ghost vanishing under strokes you can barely see.
+
+**Left to build**
+- [ ] Fold layer opacity into the mask.
+- [ ] Pin it at **two** opacities. An assertion at one would pass against the current behaviour.
+
+---
+
+## (52) Merging a hidden layer keeps the cels the survivor does not reach
+
+**Status** — ruled 2026-09-06, unbuilt.
+
+`mergeContribution`'s `isVisible` guard drops a hidden layer's ink where the two layers overlap, and
+`mergeLossKind` correctly says visibility is not a loss. But the per-frame merge adopts an
+upper-layer-only cel through `copyTiers` **without that guard**, so a hidden layer's ink survives at
+every frame the survivor has no cel of its own — inconsistent, and it silently reveals art that was
+deliberately hidden.
+
+**The owner ruled: drop hidden ink everywhere.** What you see is what you merge.
+
+**Left to build**
+- [ ] Apply the visibility guard to the adopted-cel arm.
+- [ ] Pin it: a hidden upper layer with a cel past the survivor's last frame contributes nothing.
 
 ## (29) Rendering — the memory audit is all that is left
 
