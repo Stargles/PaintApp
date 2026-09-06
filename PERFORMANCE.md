@@ -2165,6 +2165,11 @@ order to make the file 39% bigger.
 
 ### 10.4 What is still owed
 
+**These two are the whole of what outlived TODO item (29), which was deleted on 2026-09-06 when RENDER §5
+stage 7 closed.** They are device measurements against the owner's own artwork, so no session on this Mac can
+take them; they live here rather than in TODO.md because TODO.md is the owner's *asks* and these are a debt
+this document owns. Whoever next has the iPad in front of them with a build on it should take both.
+
 **The device answered, so nothing on the measurement itself is owed.** The run did sit on *"Unlock
 Kevin's iPad to Continue"* for twelve minutes first — the same wall §9 hit and gave up at — so for the
 next session: `xcodebuild` **waits** on that rather than failing, and the run completes by itself the
@@ -3101,3 +3106,162 @@ Debug one and the same to run: `SWIFT_COMPILATION_MODE = wholemodule` plus `-O` 
 x86_64. Pass `ONLY_ACTIVE_ARCH=YES` on the command line for a simulator run if that matters; do not
 put it in the project, where it also reaches the device build. Nothing else about the two
 configurations differs for the test target.
+
+---
+
+## 13. The memory audit's own measurement, and what it changed (2026-09-06)
+
+RENDER.md §5 stage 7. §9 above is what the *device* said about [BUGS.md](BUGS.md)'s twelve-site census;
+this is what the census's sites cost **at the owner's canvas on a document the shape the owner draws**,
+which is the question a ranking has to answer before anything is built. §9's own closing note asks for
+exactly this: its `w·h·4` column is a table of ceilings.
+
+**MEASURED on a dedicated iOS 26.5 simulator (iPad Pro 13-inch M4), 2026-09-06, at 2048x1024**, by
+`PaintSoftwareUITests/MemoryAuditBench.swift`. Every figure below marked *counted* is a sum over the
+app's own accounting — cache entry bytes, `MTLBuffer.length`, `bytesPerRow × height`. Figures marked
+*footprint* are `task_vm_info.phys_footprint` and include the runner and the fixture.
+
+**The machine is not the owner's iPad and the budget differs**: `CompositorBudget.textureBudgetBytes`
+is 768 MB here (an 8 GB device, at the clamp) and **192 MiB** on the iPad 9. Rows that depend on the
+budget are re-taken with `budgetOverrideBytes` set to the iPad 9's, and say so.
+
+### 13.1 The baseline — a hundred-cel vector document, twelve strokes a cel
+
+| | vector render memo | flatten memo | counted total | footprint |
+|---|---|---|---|---|
+| at rest | 8.0 MB (1 entry) | 8.0 MB | 16.0 MB | +24 MB |
+| after a 100-frame scrub | **104.0 MB (13 entries)** | 192.0 MB (24 entries) | **296.0 MB** | +321 MB |
+
+**The counted total explains 92% of the footprint, and it only does because of an autorelease pool.**
+The first run of this reported **+1,617 MB** for the same scrub and would have gone into this document
+as unbounded growth; wrapping each frame in `autoreleasepool` took it to +321 MB with the counted
+figures unchanged. CLAUDE.md's warning about a harness measuring its own pool, in this file's own
+clothes, caught before it was written down rather than after.
+
+**The flatten memo is bounded and the vector render memo was not.** 192 MB is 24 entries at 8 MB — the
+count binding under a 768 MB budget on this machine, and the *bytes* binding at 192 MiB on the iPad 9.
+The 104 MB beside it had no bound at all except `vectorRenderCacheLimit = 12`, which is 96 MB at the
+owner's canvas, **768 MB at 4096²** and 12 GB at 16383². The same twelve.
+
+### 13.2 The six sub-items, ranked by what the measurement says
+
+| # | site | MEASURED | built? |
+|---|---|---|---|
+| 1 | vector render memo, un-budgeted | 104 MB after a scrub; 768 MB at 4096² by the same rule | **yes** — byte budget + LRU registry |
+| 2 | fill session, no budget and no valve | **76 MB** a bucket gesture (38.0 B/px), 84 MB lasso; 608 MB at 4096²; 9.7 GB at 16383², where the allocation fails silently | **yes** — budget, valve, notice |
+| 3 | undo charged a flat 512 an element | 1.8× **over** at 1,000 strokes; **265× under** on one long stroke | **yes** — `VectorUndoCost` |
+| 4 | the per-playback-tick evictor | **0.168 ms a tick** at 300 cels, 0.070 at 100, 0.005 at 12 | **yes** — deleted; a tick is 0.028 ms now |
+| 5 | `MemoryPressure` seam | 0 bytes; six hand-rolled `UIApplication` subscriptions | **yes** — one seam, and a warning now trims |
+| 6 | blanked hosts keep their pixels | **unmeasurable here**; see 13.5 | **no** — declined |
+| 7 | `SaveSnapshot` on the main actor | **0.7 MB** for 20 raster cels, **0.2 MB** for 300 vector cels | **no** — declined, see 13.6 |
+
+### 13.3 The fill session, counted rather than read off the source
+
+MEASURED by summing `MTLBuffer.length` over a live session: **38.0 bytes per canvas pixel** for a
+bucket fill and **42.0** for a lasso one over a uniform reference. The census read 34 and 44 out of the
+source and was wrong in both directions — the four it missed are the CPU copy of the reference the
+session keeps for `seedColor(atX:y:)`, and the lasso's second reference colour is *conditional*, so 44
+is the worst case rather than the figure. `MetalFillSession.predictedBytes` is the worst case (46 with
+two colours) and `MemoryBudgetLogicTests` pins it equal to `allocatedBytes` for a real session.
+
+At the owner's canvas that is **76 MB, 41% of the iPad 9's entire texture budget**, transient, on every
+bucket tap. At 4096² it is 608 MB, 3.3× that budget. `fillBudgetBytes` refuses past
+`CompositorBudget.textureBudgetBytes`, `hasHeadroom` declines when the moment is wrong, and both now
+raise `CanvasNotice.Kind.fillNeedsMoreMemory` — where the 16383² case used to be `makeBuffer` returning
+nil inside a `guard`, so the artist tapped the bucket and **nothing happened at all**.
+
+### 13.4 Undo: BUGS.md said 3–6× over, §9 item 4 said 33–264× under, and both were half right
+
+MEASURED two ways that agree once the double-count is removed:
+
+| edit | charged | retained | |
+|---|---|---|---|
+| one stroke onto a 1,000-stroke cel | 0.98 MB | **0.55 MB** | 1.8× over |
+| one 5,631-sample stroke onto an empty cel | 512 B | **135,720 B** | 265× under |
+
+The retained figure in the first row is `phys_footprint` across **thirty real undo steps**, and it is
+the measurement that settles an argument arithmetic loses. `MemoryLayout` says an entry holds two
+arrays of 1,000 × 576 bytes; the allocator says **one**. Both are right — step *k*'s `to` array is step
+*k+1*'s `from`, the same buffer, so a run of N steps holds N+1 buffers and not 2N. A first pass at this
+counted only sample geometry, ignored the array buffers entirely, and reported a **1067× overcharge**;
+the corrected model is `max(from.count, to.count) × MemoryLayout<VectorElement>.stride` plus the heap
+of the elements that differ, and it reproduces both rows.
+
+**`MemoryLayout<VectorElement>.stride` is 576 bytes today.** The flat 512 was a guess at that number,
+written in three places — both undo registrars and `VectorCanvas.vacatedInkLimit`'s divisor — and the
+type outgrew it. All three read the stride now. PERFORMANCE §11.5's table put the retained figure at
+0.30 MB per step at a thousand strokes; the shape of that finding survives and the number does not.
+
+### 13.5 Blanked hosts — declined, and this is the measurement that would settle it
+
+§9 item 5 recommends nilling the contents of blanked views. **Not built**, for two reasons and one
+missing measurement.
+
+**Every image a blanked host holds is an alias, not a copy.** `StrokeCanvasView`'s displayed picture
+*is* `VectorCanvas.cachedImage` — the same object, by identity, which is the whole of what
+`render(quality:ifStillAtVersion:)` exists to guarantee — and `bakedImageView.image` and
+`fillImageView.image` are `cel.bakedImage` and `cel.fillImage`, owned by the model. So nilling a host's
+contents frees **zero** app-side bytes. What it could free is Core Animation's own copy, which §9 item 5
+MEASURED at 19 MB for a 2048² image *displayed*, on top of the `UIImage` — ~9.5 MB at the owner's canvas,
+and ~95 MB across a ten-layer document at rest.
+
+**Whether a zero-alpha `CALayer.mask` already avoids that has never been measured, and cannot be
+measured here.** MEASURED on the simulator: showing an 8 MB image in a view, then masking it, then
+nilling its contents, moved `phys_footprint` by **0.0 MB** at every step — the render server is out of
+process (`SimRenderServer`), so the simulator cannot see CA's backing at all.
+
+**The cost of building it is not small.** Four writers in `CanvasView.reconcileLayers` set those images
+each SwiftUI pass, and `StrokeCanvasView.finishVectorRender` sets a fifth from a background render's
+completion, so the host would have to own a wanted-versus-shown split across all five. A missed restore
+is a blank layer, on the path that draws every frame. Against an unmeasured benefit that is the wrong
+trade, and CLAUDE.md's own rule — a mechanism nobody has measured a need for is the one not to add —
+points the same way. **The measurement owed is one device run**: hold a ten-layer document at rest with
+the sandwich engaged, read `phys_footprint`, install and remove the blanking masks.
+
+### 13.6 `SaveSnapshot` — the census's memory claim does not survive
+
+Census item 12 says it "renders every content-bearing cel and copies every vector cel on the main
+actor, **all live during the write**". The first half is true and the emphasis is not.
+
+MEASURED: rendering and holding **20** raster cels at 2048x1024 — nominal 160 MB — moved
+`phys_footprint` by **0.7 MB**, and the same for a fixture painted edge to edge as for one with a single
+dab in the corner. Copying **300** vector cels moved it by **0.2 MB**. Both figures are the same fact:
+`renderToUIImage()` hands back a `CGImage` sharing the cel's own `CGContext` buffer copy-on-write, and
+`VectorCanvas.makeCopy()` shares its `_elements` array the same way. **The snapshot pins bytes the
+document already holds; it does not add any.**
+
+What is left is main-actor *time*: **0.6–1.3 ms** for 20 raster cels and **0.18 ms** for 300 vector
+cels here, so ~3–7 ms for a 300-cel raster document and ~1 ms for a vector one on this machine, ×5 on
+the iPad 9. `SaveProfile.snapshotSeconds` already measures it on the device. That is not a freeze, and
+moving a `@MainActor` initialiser that reads published state off the main actor is a real change with a
+real tearing surface — so **declined**, and the row in the census is struck rather than carried.
+
+### 13.7 The playback tick
+
+MEASURED, ten seconds of playback at 24 fps, before (the deleted `evictDistantVectorRenderCaches`,
+reproduced in the bench so the number stays comparable) and after (a write to `currentFrame`, which is
+the whole tick now):
+
+| cels | evictor, per tick, before | whole tick, after |
+|---|---|---|
+| 12 | 0.005 ms | 0.009 ms |
+| 100 | 0.070 ms | 0.017 ms |
+| 300 | **0.168 ms** | **0.028 ms** |
+
+At the owner's real document size — 300–1,000 drawn cels — that is 40 ms of main-thread work per ten
+seconds of playback on this Mac, and PERFORMANCE §1 puts the iPad 9 at roughly five times it. Not the
+headline the census implied, and worth removing anyway because it bought nothing: the scan ran 24 times
+a second to discover, almost always, that nothing needed evicting.
+
+### 13.8 What the change is worth at the owner's canvas, stated honestly
+
+**Almost nothing, and that is the correct answer.** Re-taken with `budgetOverrideBytes` set to the iPad
+9's 192 MiB: the scrub holds **96 MB in 12 entries** where it held 104 MB in 13 — the entry ceiling is
+still what binds at 2048x1024, exactly as designed, so no document of the owner's changes behaviour and
+no cel pays a re-render it did not pay before. The 8 MB is the thirteenth entry the old evictor kept
+because it ran one playhead tick late.
+
+**The value is at the sizes the owner has told us they use for idea boards.** At 4096² the same twelve
+entries are 768 MB and the budget makes them 192; at 16383² they are 12 GB. Those two are arithmetic
+over the rule the tests pin, not new measurements — the property the tests assert is that eviction
+happens at the *byte* bound and that the bound scales with canvas size, which is what a count cannot do.

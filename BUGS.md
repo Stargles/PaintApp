@@ -99,20 +99,22 @@ appended element into the base **synchronously** at pen-up. The second is now af
 first time (2.6 ms rather than 1.1 s) but it is a deliberate reversal of RENDER.md §2.13, which moved
 this cost off the main thread on purpose, and it is the owner's trade rather than one to slip in.
 
-## Undo charges 3-6x what a vector edit retains, and the depth shortens as the drawing grows (2026-09-04)
+## Undo charged a flat 512 bytes an element (2026-09-04) — FIXED 2026-09-06, and the magnitude here was wrong
 
-`registerVectorUndo` charges an entry `(from.count + to.count) * 512` bytes. Copy-on-write means the two
-element arrays **share their sample storage**, so an entry retains a fraction of that — MEASURED at
-**3-6x overcharged** ([PERFORMANCE.md](PERFORMANCE.md) §11).
+`registerVectorUndo` charged `(from.count + to.count) * 512`. This entry said the result was **3-6x
+overcharged**, on the reasoning that copy-on-write makes consecutive snapshots share their sample storage.
+Half of that is right and the number is not.
 
-The consequence is that undo depth falls as the drawing fills up, against the iPad's 192 MiB budget:
-**~1,032 steps at the owner's current 190-stroke density, 196 at 1,000 strokes, and 49 at 4,000.** Some of
-that is real — an entry over a bigger cel genuinely holds more — but most of the shrinkage at the top end
-is the accounting rather than the memory, and the artist loses history they had room for.
+MEASURED (RENDER.md §5 stage 7; [PERFORMANCE.md](PERFORMANCE.md) §13.4), two ways that agree: one stroke onto
+a thousand-stroke cel is charged 0.98 MB and retains **0.55 MB** — 1.8x over — and one 5,631-sample stroke is
+charged **512 bytes** and retains **135,720** — 265x *under*. So the charge was wrong in both directions, and
+the direction this entry named was the smaller of the two.
 
-Charging what an entry actually retains buys most of the depth back. The measurement is already taken;
-what is missing is a decision about how to compute retained size honestly for a COW-shared array, which
-is why this is filed rather than fixed.
+**What the honest computation turned out to be**, which is the thing this entry said was missing: the array
+buffer once, at `MemoryLayout<VectorElement>.stride`, plus the heap of the elements that differ by id. Once,
+not twice, because step *k*'s `to` array is step *k+1*'s `from` — the same buffer — so a run of N steps holds
+N+1 and not 2N. That is `phys_footprint` over thirty real steps saying so; `MemoryLayout` arithmetic alone says
+2N and is wrong. `VectorUndoCost` is the model.
 
 ## Nothing batches per-cel content restores across several cels into one undo step (2026-09-04)
 
@@ -528,10 +530,15 @@ editor on the iPad 9", or thirty seconds of the owner's own time.
 3. **A brush size expressed in canvas points is a trap at any large canvas.** Not a bug on its own — see
    PERFORMANCE §9 item 3 — but the reason (a) was invisible to whoever picks the default.
 
-## Memory allocation audit — twelve sites, ranked (2026-09-01)
+## Memory allocation audit — twelve sites, ranked (2026-09-01) — **five closed, two declined, 2026-09-06**
 
 Found while designing RENDER.md; the compositor's budget is sound and almost nothing else consults it. RENDER §5 stage
-7 takes these. Canvas bytes are `w·h·4`: 8 MiB at 2048x1024, 64 MiB at 4096², 1 GiB at 16383².
+7 took these and is done. Canvas bytes are `w·h·4`: 8 MiB at 2048x1024, 64 MiB at 4096², 1 GiB at 16383².
+
+**What stage 7 closed and what it declined is below, per item; [PERFORMANCE.md](PERFORMANCE.md) §13 is the
+measurement.** Two of this list's own claims did not survive being measured — item 12's memory claim is
+false, and item 8's magnitude was wrong in the direction it named — which is worth knowing before
+trusting the rest of a list assembled by reading code.
 
 1. **`FrameRecipe.resolveSources` holds one canvas-sized image per visible leaf, all at once, with no budget**
    (`Engine/FrameRecipe.swift:155`). Sizing bounds the buffer, never the count: 100 leaves at 2048x1024 is
@@ -544,51 +551,78 @@ Found while designing RENDER.md; the compositor's budget is sound and almost not
    scratch by the stroke's own dirty rect rather than by the canvas, on both tiers — but committing one still opens the
    cel's canvas-sized `CGContext` (`RasterLayerTexture.ensureContext`), which is the artwork's own storage and is as
    unbudgeted as everything else here.
-3. **`MetalFillSession` allocates ~34 bytes per canvas pixel with no budget and no headroom check**
-   (`Engine/MetalFillEngine.swift:300-380`; 44 with a lasso and two colours) — 544 MiB at 4096². `compositeReferenceRGBA`
-   (`Models/CanvasManager+Fill.swift:842-852`) adds a transient canvas-sized image and byte array.
-4. **Blanked layer hosts keep every byte.** `Views/Canvas/LayerHostView.swift:97-103` `setBlanked` only installs a
-   zero-alpha mask; `reconcileLayers` (`CanvasView.swift:892`) still re-renders blanked hosts every pass. The sandwich's
-   two composites and the decoded baked frame are paid on top of N × 3 host images, not instead of them.
-5. **Two caches are bounded by entry count, which is not a bound.** `MaskResolver.cache` is 8 entries
-   (`MaskResolver.swift:336`; 128 MiB at 4096², 2 GiB at 16383²), and `vectorRenderCacheLimit = 12`
-   (`Models/CanvasManager+Interpolation.swift:489-511`) holds up to two canvas images each, is evicted only from the Move
-   tool's `handleActiveContextChanged` (`SelectionModels.swift:249`), and has no pressure hook at all — 768 MiB to 1.5 GiB
-   at 4096². **And that one call site runs on every playback tick**: `currentFrame.didSet`
-   (`Models/CanvasManager.swift:736-743`) calls `handleActiveContextChanged`, whose evictor counts every vector cel in the
-   document, finds any real document past 12, then walks every cel again taking each canvas's lock through `hasCachedImage`
-   (a lock a background `render()` can hold for tens of milliseconds), builds an array and sorts it — O(cels) plus a sort, on
-   the main thread, 24 times a second for the whole of playback. The fix is a byte budget on `PixelOps.rasterizeCache`'s
-   rule, eviction over a registry of canvases that actually hold a render rather than a document scan, run when a render is
-   cached rather than when the frame changes, and the call at `SelectionModels.swift:249` deleted.
-6. **Every eviction signal is a `UIApplication` notification and the only valve is `os_proc_available_memory`**
-   (`PixelOps.swift:237,247`; `MetalCompositor.swift:401,413`; `MaskResolver.swift:363`; `OnionSkinSource.swift:948`;
-   `CanvasManager.swift:1098`; `Engine/Compositor.swift:217`). RENDER §2.6 rules portability; a `MemoryPressure` seam
-   with an iOS implementation is the shape.
+3. ~~**`MetalFillSession` allocates ~34 bytes per canvas pixel with no budget and no headroom check**~~
+   **CLOSED 2026-09-06.** MEASURED off `MTLBuffer.length` at **38.0** bytes a pixel for a bucket session and
+   **42.0** for a lasso one — 76 MB and 84 MB at the owner's canvas, 608 MB at 4096². The 34/44 above was read
+   off the source and missed the CPU copy of the reference in one direction while treating the lasso's second
+   reference colour as unconditional in the other. `MetalFillEngine.fillBudgetBytes`,
+   `CompositorBudget.hasHeadroom` and `CanvasNotice.Kind.fillNeedsMoreMemory` are the budget, the valve and
+   the voice; at 16383² this used to be `makeBuffer` returning nil inside a `guard`, so the artist tapped the
+   bucket and nothing happened at all. `compositeReferenceRGBA`'s transient canvas-sized pair is **still
+   open** and is not budgeted.
+4. **Blanked layer hosts keep every byte** — **DECLINED 2026-09-06, with the measurement that would settle it.**
+   `setBlanked` still installs a zero-alpha mask and `reconcileLayers` still re-renders blanked hosts. The
+   reason it was not built: **every image a host holds is an alias, not a copy** — `StrokeCanvasView`'s
+   picture *is* `VectorCanvas.cachedImage` by object identity, and the baked and fill views hold
+   `cel.bakedImage`/`cel.fillImage` — so nilling contents frees zero app-side bytes. What it could free is
+   Core Animation's own copy (~9.5 MB an image at the owner's canvas, PERFORMANCE §9 item 5), and **whether a
+   zero-alpha mask already avoids that is unmeasured**: on the simulator the render server is out of process
+   and showing, masking and nilling an 8 MB image all move `phys_footprint` by 0.0 MB. Building it means a
+   wanted-versus-shown split across five writers on the frame path, where a missed restore is a blank layer.
+   PERFORMANCE §13.5 carries the one device run that would decide it.
+5. ~~**Two caches are bounded by entry count, which is not a bound.**~~ **CLOSED 2026-09-06.**
+   `MaskResolver.cacheBudgetBytes` is an eighth of `CompositorBudget.textureBudgetBytes` and the entry count of 8
+   is a second ceiling; `Engine/VectorRenderCache.swift` is the vector memo's byte budget, a registry of the
+   canvases that actually hold a render, evicting **least recently used** when one is memoized rather than
+   scanning the document when the playhead moves. MEASURED: a 100-frame scrub at 2048x1024 held **104 MB in 13
+   entries** before and holds 96 MB in 12 after — the entry ceiling still binds at the owner's canvas, which is
+   the point, and at 4096² the same twelve go from 768 MB to 192. **And the per-tick evictor is deleted**: it
+   MEASURED **0.168 ms a tick at 300 cels**, against 0.028 ms for a whole tick now. PERFORMANCE §13.1 and §13.7.
+
+6. ~~**Every eviction signal is a `UIApplication` notification**~~ **CLOSED 2026-09-06.**
+   `Engine/MemoryPressure.swift` is the seam: five responders register by name, `signal(_:)` is the whole
+   platform surface, and `startObservingSystemEvents()` is the only place in the app that names a
+   `UIApplication` notification. **A warning trims and a background clears**, which is a behaviour change with a
+   measured reason — dropping the flatten memo wholesale costs a full re-composite (19.8 ms a frame at
+   2048x1024 on an M4 simulator) on the exact turn the device is struggling, while halving keeps the current
+   frame's own entries. `UndoHistory` is the one responder that answers `.warning` only, which is
+   `UndoBudget.pressuredMaxCostBytes`'s existing argument made structural. `os_proc_available_memory` remains
+   the valve and is now a pure function of its argument, so it is testable off a device.
 7. **The Metal upload cache's budget collapses to zero on any 4K document.** `CompositorMetalEngine.attempt` gives it
    `textureBudgetBytes` minus what every resident size's walk holds, and three walk textures at 4096² are the whole
    192 MiB budget on a 3 GB device — so `trimToBudget` empties the cache after every composite and the cache does not
    exist at the sizes it would help most. Losing is by design (`UploadCache`'s own doc: it is the one part of the
    working set whose absence costs only time), but it is silent, and the degradation is a cliff rather than a slope.
    Nothing reports the hit rate outside `PerfBaselineTests`.
-8. **Vector element undo charges a flat 512 bytes per element** (`Models/CanvasManager+Text.swift:415`) while a
-   `VectorElement.image` carries a whole `UIImage` (`VectorLayer.swift:263-269`).
+8. ~~**Vector element undo charges a flat 512 bytes per element**~~ **CLOSED 2026-09-06.** `VectorUndoCost` charges
+   `max(from.count, to.count) × MemoryLayout<VectorElement>.stride` plus the heap of the elements that differ.
+   **The magnitude this list gave elsewhere was wrong in the direction it named**: the entry below said 3–6×
+   *over*, and MEASURED it is 1.8× over on a long list of short strokes and **265× under** on one long stroke.
+   The stride is 576 bytes today, so the flat 512 was a guess at exactly that number — written in three places,
+   including `VectorCanvas.vacatedInkLimit`'s divisor — and the type outgrew it. PERFORMANCE §13.4.
 9. **`OnionSkinRasterCache` computes its limit from the newest entry's size** (`OnionSkinSource.swift:918-923`), so
    after a Half → Quarter change 84 MiB can sit under a 64 MiB budget.
 10. **`Cel.thumbnail`, one `DabGradientCache` per cel and one `StrokeSpatialIndex` per vector canvas have no global bound**
     (`Models/Cel.swift:26`; `RasterLayerTexture.swift:123, 472`; `VectorLayer.swift:564`).
 11. **`LayerRenderSource.solid` renders a full canvas to express one colour, per value layer, per rebuild, unmemoised**
     (`RenderRequest.swift:84-101`).
-12. **`SaveSnapshot` renders every content-bearing cel and copies every vector cel on the main actor, all live during the
-    write** (`ProjectStore.swift:134-305`).
+12. **`SaveSnapshot` renders every content-bearing cel and copies every vector cel on the main actor** —
+    **the memory half is REFUTED, 2026-09-06, and the rest is DECLINED.** MEASURED: rendering and holding 20
+    raster cels at 2048x1024 (nominal 160 MB) moves `phys_footprint` by **0.7 MB**, edge-to-edge fixture and
+    single-dab fixture alike, and copying 300 vector cels moves it by **0.2 MB**. `renderToUIImage()` shares the
+    cel's own `CGContext` buffer copy-on-write and `makeCopy()` shares `_elements` the same way, so the snapshot
+    **pins** bytes the document already holds rather than adding any. What is left is 0.6–1.3 ms of main-actor
+    time for 20 raster cels, which `SaveProfile.snapshotSeconds` already measures on the device and which is not
+    a freeze. PERFORMANCE §13.6.
 
 The five declared budgets sum to 656 MiB at 2048x1024 and are pinned to; add the undeclared ones above and one live
 rebuild reaches 850-950 MiB before a single cel of the document, against the ~1.4 GiB the repo cites as pre-jetsam
 (`Compositor.swift:102`). At 4096² the two count-bounded caches alone push the sum past that ceiling.
 
-**All twelve are still open at `9c9d435`, and the device has now been asked about them — see
-[PERFORMANCE.md](PERFORMANCE.md) §9, which ranks them against three sites this list misses and corrects two
-things stated here.** Item 1's site is now `FrameRecipe.resolveSources` (`Engine/FrameRecipe.swift:88-115`):
+**Five are closed and two declined as of 2026-09-06 (items 3, 5, 6, 8 closed; 4 and 12 declined); items 1, 2,
+7, 9, 10 and 11 stand.** The device was asked about them at `41eafa9` — see [PERFORMANCE.md](PERFORMANCE.md)
+§9, which ranks them against three sites this list misses and corrects two things stated here, and §13, which
+measures them at the owner's canvas and corrects two more.** Item 1's site is now `FrameRecipe.resolveSources` (`Engine/FrameRecipe.swift:88-115`):
 stage 2 moved it off the main actor and left it exactly as unbudgeted, so only the thread changed. And the
 `w·h·4` column above is the *nominal* size, not the resident one — a CoreGraphics canvas buffer is lazily
 committed and a Metal `.storageModeShared` buffer is not, which is a factor this ranking does not carry and
@@ -1143,7 +1177,17 @@ The exact fix is to re-render the affected strokes instead of drawing into a fla
 precisely the term that makes Mode 3 cost ~95 ms a sample (PERFORMANCE.md items 10 and 17). Not worth
 it for a flicker on a crossing, unless the owner reports seeing it.
 
-## The mask cache is the one canvas-sized cache with no byte bound (2026-08-20)
+## The mask cache is the one canvas-sized cache with no byte bound (2026-08-20) — FIXED 2026-09-06
+
+`MaskResolver.cacheBudgetBytes` is an eighth of `CompositorBudget.textureBudgetBytes` and the entry count of 8
+is now a second ceiling, exactly as `PixelOps.rasterizeCache`'s pair. **The fraction is derived rather than
+picked**, which is what this entry said was missing: a coverage buffer is one byte per pixel where a flatten is
+four, so an eighth of the texture budget buys this cache half as many canvas-sized entries as the flatten memo
+gets from the whole of it, and half is right because a frame carries many more flattens than masked nodes. On
+the owner's iPad 9 that is 23 MiB, so the entry count still binds at their canvas and nothing about their
+documents changes; at 4096² the bytes bind at one entry and the 128 MiB is gone.
+
+The rest of this entry is the reasoning that produced the fix and is kept.
 
 Found while reconciling the app's memory budgets for PERFORMANCE.md item 13, and deliberately not
 fixed there — recorded because it is the sort of asymmetry that reads as intentional until somebody

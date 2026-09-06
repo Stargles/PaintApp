@@ -929,9 +929,36 @@ it is the dependency order.
    255 belongs** — the dark fringe as a number, taken from the file through ImageIO rather than from
    the suite's own arithmetic. **Owed: the driver and the sheet are untested** (the frame walk, the
    focus hand-back, the progress phases), there is no XCUITest, and nothing has run on the device.
-7. **The rest of the memory audit** (BUGS.md): fill-session budget, blanked hosts, count-only caches to byte
-   budgets, a `MemoryPressure` seam so Android and Windows can signal eviction, undo cost for whole-cel raster steps,
-   `SaveSnapshot` off the main actor.
+7. ~~**The rest of the memory audit** (BUGS.md)~~ **Done 2026-09-06.** [PERFORMANCE.md](PERFORMANCE.md) §13 is
+   the measurement and BUGS.md's census carries the per-item verdicts. **Four built, two declined with numbers.**
+
+   Built: `Engine/VectorRenderCache.swift` is a byte budget and an LRU registry over the vector render memo, and
+   `CanvasManager.evictDistantVectorRenderCaches` is deleted with it — that scan ran on **every write to
+   `currentFrame`**, i.e. 24 times a second through the whole of playback, MEASURED at 0.168 ms a tick on 300
+   cels against 0.028 ms for a whole tick now. `MaskResolver.cacheBudgetBytes` gives the mask cache the byte
+   bound BUGS.md flagged on 2026-08-20. `MetalFillEngine.fillBudgetBytes` plus `CompositorBudget.hasHeadroom`
+   plus `CanvasNotice.Kind.fillNeedsMoreMemory` are the fill session's budget, valve and voice.
+   `Engine/MemoryPressure.swift` is §2.6's portability seam, with five responders and one platform surface.
+   `VectorUndoCost` charges an undo step the array it holds and the geometry only it retains.
+
+   **Three things this stage's own list said turned out to be wrong, and they are the useful part.**
+   (a) The fill session is **38** bytes a canvas pixel, not 34, and the lasso's 44 is a conditional worst case
+   of 46 rather than a figure. (b) Undo's flat 512 was an *under*charge by 265× on a long stroke, where BUGS.md
+   recorded only a 3–6× overcharge — and the honest model charges **one** array buffer a step, not two, because
+   consecutive steps share one. (c) `SaveSnapshot` adds no memory at all: 20 raster cels of nominal 160 MB move
+   `phys_footprint` by 0.7 MB, because `renderToUIImage()` shares the cel's own buffer copy-on-write.
+
+   Declined, each with the number behind it: **`SaveSnapshot` off the main actor** — the memory claim is
+   refuted and what is left is 0.6–1.3 ms for 20 cels, already instrumented by `SaveProfile.snapshotSeconds`.
+   **Blanked hosts releasing their pixels** — every image a host holds is an alias of the model's or the render
+   memo's, so nilling contents frees zero app-side bytes; the Core Animation copy it *could* free is
+   device-only and has never been measured for a *masked* layer, and the simulator cannot see it at all
+   (showing, masking and nilling an 8 MB image each move `phys_footprint` by 0.0 MB). PERFORMANCE §13.5 names
+   the one device run that would decide it.
+
+   **Two device measurements are still owed** and have moved to PERFORMANCE.md §10.4 so they outlive this
+   stage: the compression ratio against the owner's own "UI Test" document rather than the synthetic fixtures,
+   and a decode of a **compositor-produced** frame at their canvas size.
 
 ## 6. Superseded
 

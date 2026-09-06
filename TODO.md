@@ -213,36 +213,6 @@ deliberately hidden.
 - [ ] Apply the visibility guard to the adopted-cel arm.
 - [ ] Pin it: a hidden upper layer with a cel past the survivor's last frame contributes nothing.
 
-## (29) Rendering — the memory audit is all that is left
-
-**Status** — stages 0 through 6 merged. **Stage 7 remains and is a real stage, not a leftover
-heading**; none of it is built.
-
-The owner thought this one was done, and it is ~90% done. The live stroke no longer scales with canvas
-area, playback runs off the model's clock, the pen-up snapshot resolves off the main thread (MEASURED
-174–313 ms of main-thread work down to **0.2 ms**), a frame composites one chunk at a time under a
-memory ceiling byte-exactly on both backends, the canvas at rest and playback are served from LZ4
-frames on disk, a frame too big for the budget is composited in horizontal strips at the size the
-artist asked for, and export ships with tests.
-
-**Left to build** — RENDER.md §5 stage 7, the memory audit. BUGS.md's twelve-site census is the list.
-- [ ] A fill-session budget (`MetalFillEngine` has no budget or headroom check at all)
-- [ ] Blanked hosts release their pixels — `setBlanked` installs a zero-alpha mask; it should nil
-      `contents`
-- [ ] Count-only caches become byte budgets (`vectorRenderCacheLimit` is still a count of 12), and the
-      per-playback-tick evictor in `SelectionModels` goes
-- [ ] A `MemoryPressure` seam — no such type exists anywhere in the app
-- [ ] Vector-element undo charges real bytes rather than a per-element constant
-- [ ] `SaveSnapshot` off the main actor
-- [ ] Two device measurements: the compression ratio against the owner's own "UI Test" document, and a
-      decode of a compositor-produced frame at their canvas size
-
-**Spec** RENDER.md — **§2 is sixteen owner rulings; read them rather than re-deriving them.** Note
-RENDER.md §5 stage 6 still claims the export driver and sheet are untested with no XCUITest; that is
-stale in the *spec* — both landed at `8eb5aa5`.
-
----
-
 ## (21) Keyframes — four stages and four gaps
 
 **Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a and 8 are merged; 6b was delivered by
@@ -406,7 +376,7 @@ the specs, so the scope is now known rather than guessed.
 - **(28) Audio.** Its stated blocker is **gone** — `PlaybackClock` is a drift-free wall-clock frame
   counter on the model, delivered by RENDER stage 1, which is exactly the hoist this item said it
   needed. `AVFoundation` is linked (for video), though no audio playback code exists.
-- **(30) Video editor.** Requires (29).
+- **(30) Video editor.** Its RENDER dependency is met — (29) shipped in full on 2026-09-06.
 - **(35) Advanced masks** — colour-range masks and a colour-reassign blend mode. `MaskSource` has two
   cases and there are 25 blend modes with no reassign.
 - **(36) Store projects in a folder the artist chooses.** Its stated ordering is **counterfactual now**:
