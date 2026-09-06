@@ -67,6 +67,17 @@ own quad under Touching and Enclosed — and the four refusals in §4.2 stand, `
 The parenthesis is §2.9 arriving by another door: bake the video to cels of images and those images split
 like any other ink, because by then it is ink.
 
+**Stage 8 built §2.9 and this closing sentence does not hold against the code it landed on.** The
+narrowest reading of "cels containing images instead of the video" — the brief's own words — is a
+plain `VectorImageElement` per frame, and `VectorImageElement` is refused by `splitForLassoMove`
+**exactly the way `.video` is**: whole, by centre, never split (`Engine/VectorLayer.swift`'s `.image`
+arm, a few lines from the `.video` arm this section cites). A placed image was never "ink" by this
+function's own vocabulary — strokes and fills are the only two cases it actually cuts — so baking a
+video to images does not, on its own, make it splittable; it only stops it being a *video* specifically,
+which is a smaller claim than the one written above. Turning the result into something a lasso Cut can
+actually divide would mean baking into raster pixels instead (or an entirely separate change to
+`splitForLassoMove`'s image arm), and stage 8 did neither — see §9.
+
 ---
 
 ## 3. What already exists, and it is most of the plumbing
@@ -376,12 +387,71 @@ Nothing decodes or plays audio. What is built now is that **nothing makes it har
    than in a later pass because stage 1 shipped Split Drawing enabled on every cel: before a video
    decoded, splitting one produced two placeholders and cost nothing, and after it, two blocks both
    playing the clip from its head.
-8. **Bake to cels of images.** §2.9.
+8. ~~**Bake to cels of images.**~~ **Built.** §2.9. `CanvasManager.bakeVideoToCels`
+   (`Models/CanvasManager+VideoBake.swift`) is `bakePreciseStrokes`'s own recipe reaching a video:
+   `commitAllInteractiveState` first, one undo step over every cel it writes, fresh ids on everything
+   — including any ink the artist drew alongside the clip, since §9 leaves whether that is even
+   possible today as open and nothing here refuses it.
+
+   **Built on Split Drawing rather than beside it.** Chopping an *n*-frame block into *n* one-frame
+   cels is *n − 1* calls to stage 7's own verb, wrapped in one `withInterpolationUndo` rather than
+   `withStructureUndo` — both share the reentrancy guard that makes every nested `splitCel` call a
+   no-op bracket, so the choice between them is invisible to how many undo steps result, but not to
+   whether undo is *correct*. `splitCel` never copies the *left* half's canvas, so the first of the
+   *n* resulting cels goes on mutating the same `VectorCanvas` the block had before any of this ran;
+   `withStructureUndo`'s snapshot is `[Layer]` by value and cannot undo a mutation to a class instance
+   it only holds by reference, so it would leave the cel *count* correctly restored while that one
+   cel still showed the baked image. MEASURED by mutation: reverting to `withStructureUndo` reddens
+   exactly that assertion and no other. `withInterpolationUndo`'s explicit `touching: [vector]` is
+   what makes the fix work — the same pattern `bakePreciseStrokes` uses by hand, named once instead of
+   per call site.
+
+   Every resulting cel's video becomes a `VectorImageElement` built from the frame `VideoFrameSource`
+   decodes at that instant, keeping the video's own placement (§2.10's discussion above is what this
+   does *not* buy). A pose the block carried (KEYFRAMES stage 5's transform channel) is baked into the
+   written placement through the same `poseMappings`/`posed` pair `videoCelContent` already resolves a
+   live preview through, rather than kept as a track on a now-static cel — but only the *cel's own*
+   channel; a container pose from a wrapping transformation layer or folder is not threaded through,
+   which is a narrower scope than a live preview's and is noted rather than silently assumed away.
+
+   **Refusals join the `CanvasNotice` banner family** (`.videoBakeRefused`) rather than a second
+   `.alert` — an unreadable asset, or, defensively, a crop with nothing decodable in it; the menu row
+   itself hides the case where the block holds no video at all, so a real artist only ever sees the
+   first two. **The "nothing decodable" case has no test proving it fires against a real file.**
+   `VideoFrameReader`'s graceful past-the-end behavior means a crop pushed arbitrarily far past a
+   clip's own duration still decodes — the clip's *last* frame, repeatedly, never nothing — and
+   `VideoFrameWriter.finish()` itself throws on a zero-frame file, so the only asset that would reach
+   this refusal in practice is one that opens its container but fails on every sample read, which
+   nothing at hand can manufacture. The guard stays as a safety net for that case;
+   `VideoBakeLogicTests.testACropFarPastTheClipsDurationBakesTheLastFrameRatherThanRefusing` pins the
+   graceful-degradation behavior actually observed instead of the refusal originally assumed.
+
+   Before Adjust Speed's cost — 15.2 ms/cel, MEASURED at 2048×1024 — is spent on every future save for
+   the life of the document, the artist sees it: a confirmation alert states the resulting cel count
+   and the added save time at that rate, Cancel or Bake.
+
+   `VideoBakeLogicTests` and `VideoBakeUITests` are its suites. The second is driven by real XCUITest
+   touches through the timeline's own two-stage tap-to-open-menu, from a video seeded via a
+   `-uiTestSeedVideo` launch argument (`PaintSoftware/Debug/UITestSeeds.swift`) that calls the same
+   `CanvasManager.insertVideo` a real import does — no XCUITest in this suite drives the system
+   `PhotosPicker` for *any* feature, `VideoImportLogicTests`'s own header explains why, and this seam
+   answers it for the one feature that needs a video already on the canvas to test anything at all
+   downstream of it.
 
 ---
 
 ## 9. Open
 
+- **Whether a baked video's images should be splittable at all, and if so how.** §2.10's closing
+  sentence says a baked video "splits like any other ink, because by then it is ink" — but stage 8
+  bakes to plain `VectorImageElement`s, and `splitForLassoMove` refuses `.image` exactly as it refuses
+  `.video`: whole, by centre, never cut. So today a baked video's images are movable objects, same as
+  before, and not splittable ink. Making them splittable is a real design choice with at least two
+  shapes — rasterize each baked cel into the layer's raster tier instead of a placed-image element
+  (which is what "ink" more literally means elsewhere in this app, and would cost the vector
+  editability a placed image still has), or teach `splitForLassoMove`'s `.image` arm to cut a
+  rectangle of pixels along the loop the way a fill's path is cut today. Neither is built; §2.10's
+  sentence is not yet true of the code and stage 8 did not choose a side.
 - **§2.8's refusal has no wording.** What the artist sees when they ask to split a keyframe-animated cel is
   undecided; the ruling is only that the functionality is not built.
 - **Whether a video layer refuses ink.** §2.1 gives a video its own layer, but nothing yet says whether the
