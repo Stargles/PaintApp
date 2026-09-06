@@ -186,6 +186,9 @@
 		220F12EE2665CF39BE94AEFC /* VideoSpeedLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51F4E66292D810D298CC69FB /* VideoSpeedLogicTests.swift */; };
 		1961C894DDCEDCBF18F91E02 /* VideoCropLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */; };
 		61654E07969B40E6097E1887 /* VideoImportLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */; };
+		2331AE5D3126A2CB26E25EAF /* PaintSoftware/Models/CanvasManager+VideoBake.swift in Sources */ = {isa = PBXBuildFile; fileRef = 879E6387CE056BAC61AC0651 /* PaintSoftware/Models/CanvasManager+VideoBake.swift */; };
+		81983774AF848B60F8AE7FDF /* VideoBakeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F742644B1FB19B0E3D7F367B /* VideoBakeLogicTests.swift */; };
+		31B7D99D710DF3AC339C24B6 /* VideoBakeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F3D8EFC9CA883476C58E88 /* VideoBakeUITests.swift */; };
 		4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */; };
 		163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */; };
 		833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */; };
@@ -541,6 +544,9 @@
 		51F4E66292D810D298CC69FB /* VideoSpeedLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoSpeedLogicTests.swift; sourceTree = "<group>"; };
 		6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoCropLogicTests.swift; sourceTree = "<group>"; };
 		3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoImportLogicTests.swift; sourceTree = "<group>"; };
+		879E6387CE056BAC61AC0651 /* PaintSoftware/Models/CanvasManager+VideoBake.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+VideoBake.swift"; sourceTree = "<group>"; };
+		F742644B1FB19B0E3D7F367B /* VideoBakeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoBakeLogicTests.swift; sourceTree = "<group>"; };
+		59F3D8EFC9CA883476C58E88 /* VideoBakeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoBakeUITests.swift; sourceTree = "<group>"; };
 		BEF82C30321B69C3528381AF /* PaintSoftware/Engine/VideoFrameMap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameMap.swift; sourceTree = "<group>"; };
 		372FB69B01F7FB48B852FE62 /* PaintSoftware/Engine/VideoFrameReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/VideoFrameReader.swift; sourceTree = "<group>"; };
 		AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoFrameMapLogicTests.swift; sourceTree = "<group>"; };
@@ -840,6 +846,8 @@
 				51F4E66292D810D298CC69FB /* VideoSpeedLogicTests.swift */,
 				6DFB4F070B6477FDE867B36B /* VideoCropLogicTests.swift */,
 				3629FFDD8E8481D83190A185 /* VideoImportLogicTests.swift */,
+				F742644B1FB19B0E3D7F367B /* VideoBakeLogicTests.swift */,
+				59F3D8EFC9CA883476C58E88 /* VideoBakeUITests.swift */,
 				AF505FA009B626AC3B706936 /* VideoFrameMapLogicTests.swift */,
 				201CF79B80FFB5FD424546B0 /* VideoFrameReaderLogicTests.swift */,
 				B2C3D4E5F6001122334455E1 /* ShapeDetectorLogicTests.swift */,
@@ -972,6 +980,7 @@
 				9503DF989F335799429B8001 /* PaintSoftware/Engine/FontLibrary.swift */,
 				83228C9D6C066AEBE8B60A01 /* PaintSoftware/Models/CanvasManager+Text.swift */,
 				0C0C3F39377E467E499B8BEE /* PaintSoftware/Models/CanvasManager+LassoMove.swift */,
+				879E6387CE056BAC61AC0651 /* PaintSoftware/Models/CanvasManager+VideoBake.swift */,
 				B1583AA182FACD18F625DF5D /* PaintSoftware/Models/CanvasPresentation.swift */,
 				1852818AB0764C96125A234C /* PaintSoftware/Views/AnchoredMenuGeometry.swift */,
 				31E0FA084BC0177D261B1B13 /* PaintSoftware/Engine/StrokeInterruption.swift */,
@@ -1519,6 +1528,9 @@
 				220F12EE2665CF39BE94AEFC /* VideoSpeedLogicTests.swift in Sources */,
 				1961C894DDCEDCBF18F91E02 /* VideoCropLogicTests.swift in Sources */,
 				61654E07969B40E6097E1887 /* VideoImportLogicTests.swift in Sources */,
+				2331AE5D3126A2CB26E25EAF /* PaintSoftware/Models/CanvasManager+VideoBake.swift in Sources */,
+				81983774AF848B60F8AE7FDF /* VideoBakeLogicTests.swift in Sources */,
+				31B7D99D710DF3AC339C24B6 /* VideoBakeUITests.swift in Sources */,
 				4E41BF147E6D826463B4B54D /* PaintSoftware/Engine/VideoFrameMap.swift in Sources */,
 				163F09B560A2A2D45A9E1A81 /* PaintSoftware/Engine/VideoFrameReader.swift in Sources */,
 				833394F1BD6B7475BDC2D6D5 /* VideoFrameMapLogicTests.swift in Sources */,
