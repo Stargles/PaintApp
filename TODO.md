@@ -88,24 +88,6 @@ than one instance.
 
 ---
 
-## (51) Onion skin Behind cuts by the presence of ink, not by its opacity
-
-**Status** — ruled 2026-09-06, unbuilt. One line, plus its test.
-
-`OnionSkinClip.mask` takes the current drawing's alpha out of the ghost with a `.destinationOut`, so
-**any** ink cuts the ghost **fully** — a layer at 30% opacity blanks the ghost under its strokes as
-completely as a solid one does. Layer opacity is not folded into the mask at all.
-
-**The owner ruled it proportional**: 30% opacity cuts 30% of the ghost, so faint ink leaves the ghost
-mostly visible and solid ink still hides it. That is the ruling's stated purpose — a clear view of your
-own art — without the ghost vanishing under strokes you can barely see.
-
-**Left to build**
-- [ ] Fold layer opacity into the mask.
-- [ ] Pin it at **two** opacities. An assertion at one would pass against the current behaviour.
-
----
-
 ## (47) A finger tap bakes a Move while the pen-only toggle is on
 
 **Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
