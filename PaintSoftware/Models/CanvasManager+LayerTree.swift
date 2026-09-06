@@ -477,12 +477,11 @@ extension CanvasManager {
         }
     }
 
-    /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer
-    /// panel, and "Merge Down". The lower of the two survives, keeping its name and folder; the upper
-    /// is removed and **its whole contribution is baked down** — its pixels, its blend mode, or its
-    /// grade — with both layers' opacities applied. One undo step covering the whole operation (nested
-    /// `withStructureUndo` calls, including the one inside `deleteLayer`, all coalesce into this outer
-    /// scope).
+    /// Flattens two layers into one — the pinch-together gesture in the layer panel, and "Merge Down".
+    /// The lower of the two survives, keeping its name and folder; the upper is removed and **its whole
+    /// contribution is baked down** — its pixels, its blend mode, or its grade — with both layers'
+    /// opacities applied. One undo step covering the whole operation (nested `withStructureUndo` calls,
+    /// including the ones inside `splitCel` and `deleteLayer`, all coalesce into this outer scope).
     ///
     /// **There are two arms, and which one runs is `vectorMergeIsExact`'s answer** — TODO item (43),
     /// the owner's *"when you merge two layers it doesnt work for vector layers, the merged layer turns
@@ -493,6 +492,14 @@ extension CanvasManager {
     ///
     /// The pixel arm rasterizes both layers first (every cel, not just the merged one — see
     /// `rasterizeLayer`) so a layer never comes out of it still labeled `.vector` with stale geometry.
+    ///
+    /// **"Merge" used to mean the current frame and it now means the drawing.** Until TODO (43) stage 2
+    /// this flattened exactly one cel pair — the one under the playhead — and then deleted the upper
+    /// layer whole, so on an animated document every *other* frame of it went with it, silently, and no
+    /// test in the suite drove a merge on more than one cel. `alignCelBoundaries` cuts both timelines
+    /// to the boundaries the pair has between them and `mergeAlignedCels` walks the result. It still
+    /// **refuses** unless both layers have a cel under the playhead, which is unchanged: it is what the
+    /// gesture means, and a merge of two layers that are nowhere near each other in time is not one.
     ///
     /// **The blend and the grade are baked, and until EFFECT_BACKDROP.md §2.3's ruling neither was.**
     /// The old pixel side of this method composited `.normal` unconditionally and read a layer's
@@ -529,15 +536,18 @@ extension CanvasManager {
             // layers, because either one of them may be the float's own.
             commitVectorFloatIfLifted(fromLayer: layers[bottomIndex].id)
             commitVectorFloatIfLifted(fromLayer: layers[topIndex].id)
-            // Asked after the settle, because settling writes the float's ink back into the display
-            // list this is about to read.
-            if let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
-               let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame),
-               vectorMergeIsExact(bottomIndex: bottomIndex, bottomCel: bottomCel,
-                                  topIndex: topIndex, topCel: topCel) {
-                concatenateVectorCels(bottomIndex: bottomIndex, bottomCel: bottomCel,
-                                      topIndex: topIndex, topCel: topCel)
-                stayedVector = true
+            // Cut both timelines to the boundaries the *pair* has, so that from here on every frame
+            // either has one cel from each layer or one from exactly one of them.
+            alignCelBoundaries(bottomIndex, topIndex)
+            // Asked after the settle and after the alignment: settling writes the float's ink back
+            // into the display lists this reads, and the alignment decides which cels it pairs up.
+            stayedVector = vectorMergeIsExact(bottomIndex: bottomIndex, topIndex: topIndex)
+
+            if stayedVector {
+                mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
+                                 asVector: true, canvasSize: canvasSize)
+                layers[bottomIndex].opacity = 1
+                layers[bottomIndex].isVisible = true
                 deleteLayer(at: topIndex)
                 repointActiveLayer(at: survivorID)
                 return
@@ -545,23 +555,8 @@ extension CanvasManager {
 
             rasterizeLayer(layerIndex: bottomIndex)
             rasterizeLayer(layerIndex: topIndex)
-            // Re-resolve the current-frame cels post-rasterize: rasterizeLayer doesn't reorder
-            // layers or change cel boundaries, but re-deriving keeps this robust regardless.
-            guard let bottomCel = activeCelIndex(inLayer: bottomIndex, atFrame: currentFrame),
-                  let topCel = activeCelIndex(inLayer: topIndex, atFrame: currentFrame) else { return }
-
-            let flattened = CoreGraphicsCompositor.mergedDown(
-                bottom: mergeContribution(ofLayer: bottomIndex, celIndex: bottomCel,
-                                          canvasSize: canvasSize, isBackdrop: true),
-                top: mergeContribution(ofLayer: topIndex, celIndex: topCel,
-                                       canvasSize: canvasSize, isBackdrop: false),
-                canvasSize: canvasSize
-            )
-
-            layers[bottomIndex].cels[bottomCel].raster =
-                bakedRasterTexture(image: flattened, likeExisting: layers[bottomIndex].cels[bottomCel].raster)
-            layers[bottomIndex].cels[bottomCel].fillImage = nil
-            layers[bottomIndex].cels[bottomCel].bakedImage = nil
+            mergeAlignedCels(bottomIndex: bottomIndex, topIndex: topIndex,
+                             asVector: false, canvasSize: canvasSize)
             layers[bottomIndex].opacity = 1
             layers[bottomIndex].isVisible = true
             // **The survivor comes out `.raster`, which for a `.value` lower layer it did not.**
@@ -601,14 +596,127 @@ extension CanvasManager {
         }
     }
 
-    /// **Whether concatenating these two cels' display lists draws what compositing their two renders
-    /// draws** — the predicate that decides which arm of `mergeLayers` runs, and the whole of the
-    /// design for TODO item (43).
+    /// **Cuts both layers' timelines to the boundaries the pair has between them**, so that from here
+    /// on a frame either has one cel from each layer or one from exactly one of them, and two cels at
+    /// one start frame are the same length.
+    ///
+    /// It is what makes "merge every frame" expressible at all. The lower layer holding one drawing
+    /// across the whole scene while the upper holds one across the middle of it is three pictures, and
+    /// a cel shows one picture — so preserving what the artist was looking at means the survivor gets
+    /// three cels. **A merge can therefore increase the survivor's block count**, which is a visible
+    /// change to their timeline and is the honest one; the alternative is picking a frame and losing
+    /// the rest, which is exactly the defect this stage exists to fix.
+    ///
+    /// Through `splitCel` rather than by writing `frameCount` here, because a split is not only an
+    /// arithmetic: KEYFRAMES.md §3.1 rules how a pose channel is cut (keys either side, a key inserted
+    /// at the cut so the value is continuous), the interpolation recipe goes to both halves, and
+    /// VIDEO.md §7 wants a crop written on each. That method owns all three and this must not grow a
+    /// second copy of any of them.
+    private func alignCelBoundaries(_ bottomIndex: Int, _ topIndex: Int) {
+        var boundaries: Set<Int> = []
+        for layerIndex in [bottomIndex, topIndex] {
+            for cel in layers[layerIndex].cels {
+                boundaries.insert(cel.startFrame)
+                boundaries.insert(cel.endFrame)
+            }
+        }
+        for frame in boundaries.sorted() {
+            for layerIndex in [bottomIndex, topIndex] {
+                // Cels within a layer are disjoint, so at most one can straddle a boundary.
+                guard let celIndex = layers[layerIndex].cels.firstIndex(where: {
+                    $0.startFrame < frame && frame < $0.endFrame
+                }) else { continue }
+                splitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame)
+            }
+        }
+    }
+
+    /// **Merges the two layers frame by frame** — every cel pair the alignment produced, plus the cels
+    /// the upper layer holds where the lower one has nothing at all.
+    ///
+    /// Until TODO (43) stage 2 this loop was one iteration: the cel pair at `currentFrame`, flattened,
+    /// and then `deleteLayer` took the upper layer's every *other* cel with it. On an animated document
+    /// merged at frame 0 that is the upper layer's whole performance from frame 1 on, gone, with
+    /// nothing said and no test in the suite driving a merge on more than one cel.
+    ///
+    /// **A cel the upper layer holds alone arrives whole**, through `copyTiers` — which is also what
+    /// settles the one thing an adoption cannot carry: an in-between's recipe names other cels of the
+    /// layer being deleted, so `copyTiers` flattens it into a still exactly as duplicate and paste do
+    /// (the 2026-09-03 ruling). Its pose channels and held baselines do come across, because they name
+    /// the elements travelling with them.
+    private func mergeAlignedCels(bottomIndex: Int, topIndex: Int, asVector: Bool, canvasSize: CGSize) {
+        var adopted: [Cel] = []
+        for topCel in layers[topIndex].cels {
+            guard let topCelIndex = layers[topIndex].cels.firstIndex(where: { $0.id == topCel.id }) else { continue }
+            if let bottomCelIndex = layers[bottomIndex].cels.firstIndex(where: { $0.startFrame == topCel.startFrame }) {
+                if asVector {
+                    concatenateVectorCels(bottomIndex: bottomIndex, bottomCel: bottomCelIndex,
+                                          topIndex: topIndex, topCel: topCelIndex)
+                } else {
+                    bakeCelPair(bottomIndex: bottomIndex, bottomCel: bottomCelIndex,
+                                topIndex: topIndex, topCel: topCelIndex, canvasSize: canvasSize)
+                }
+                scheduleThumbnailRegen(layerIndex: bottomIndex, celIndex: bottomCelIndex)
+            } else if layers[topIndex].isVisible {
+                // A hidden layer contributes nothing, which is what hiding it means — the same rule
+                // `mergeContribution` applies to a pair, applied to a cel with no partner.
+                let tiers = copyTiers(of: topCel)
+                adopted.append(Cel(id: UUID(), startFrame: topCel.startFrame, frameCount: topCel.frameCount,
+                                   raster: tiers.raster, fillImage: tiers.fillImage,
+                                   bakedImage: tiers.bakedImage, vector: tiers.vector,
+                                   transformTracks: tiers.transformTracks,
+                                   pendingPoseBaselines: tiers.pendingPoseBaselines))
+            }
+        }
+        guard !adopted.isEmpty else { return }
+        let adoptedIDs = Set(adopted.map(\.id))
+        layers[bottomIndex].cels.append(contentsOf: adopted)
+        layers[bottomIndex].cels.sort { $0.startFrame < $1.startFrame }
+        // An adopted cel carries no thumbnail — `copyTiers` is about content — so the timeline would
+        // show a blank block until something else happened to touch it.
+        for index in layers[bottomIndex].cels.indices where adoptedIDs.contains(layers[bottomIndex].cels[index].id) {
+            scheduleThumbnailRegen(layerIndex: bottomIndex, celIndex: index)
+        }
+    }
+
+    /// One cel pair flattened to pixels — the arm that has always run, now once per frame.
+    ///
+    /// **The frame it resolves at is the playhead's own for the cel the playhead is on, and the cel's
+    /// start frame everywhere else.** Only a `.value` layer reads it at all (`layerEffect(atFrame:)`
+    /// and `ValueFill.resolvedColor(atFrame:)`), and a grade that changes *within* a cel's span is not
+    /// something one baked cel could hold whichever frame were picked. Keeping `currentFrame` for the
+    /// current cel is what makes a single-cel merge byte-identical to what it was before this loop
+    /// existed.
+    private func bakeCelPair(bottomIndex: Int, bottomCel: Int, topIndex: Int, topCel: Int,
+                             canvasSize: CGSize) {
+        let span = layers[bottomIndex].cels[bottomCel]
+        let frame = (currentFrame >= span.startFrame && currentFrame < span.endFrame)
+            ? currentFrame : span.startFrame
+        let flattened = CoreGraphicsCompositor.mergedDown(
+            bottom: mergeContribution(ofLayer: bottomIndex, celIndex: bottomCel, atFrame: frame,
+                                      canvasSize: canvasSize, isBackdrop: true),
+            top: mergeContribution(ofLayer: topIndex, celIndex: topCel, atFrame: frame,
+                                   canvasSize: canvasSize, isBackdrop: false),
+            canvasSize: canvasSize
+        )
+        layers[bottomIndex].cels[bottomCel].raster =
+            bakedRasterTexture(image: flattened, likeExisting: layers[bottomIndex].cels[bottomCel].raster)
+        layers[bottomIndex].cels[bottomCel].fillImage = nil
+        layers[bottomIndex].cels[bottomCel].bakedImage = nil
+    }
+
+    /// **Whether concatenating these two layers' display lists draws what compositing their two renders
+    /// draws — at every frame** — the predicate that decides which arm of `mergeLayers` runs, and the
+    /// whole of the design for TODO item (43).
     ///
     /// The claim it has to be right about is exact: `walk(A ++ B)` equals `render(B) over render(A)`,
     /// byte for byte, for the pair in front of it. Everything below is a case where that is provably
     /// so; every other shape falls back to the pixel bake, which is why this reads as a wall of guards
     /// rather than as a policy. `A` is the lower layer and survives; `B` is the upper and is consumed.
+    ///
+    /// **It is one answer for the whole layer and not one per cel, because `kind` is a property of the
+    /// layer.** One frame that cannot stay strokes takes every frame with it. Call it only after
+    /// `alignCelBoundaries`, which is what makes "the pair at this start frame" well defined.
     ///
     /// **What each guard is actually about**, since none of them is arbitrary:
     ///
@@ -646,23 +754,35 @@ extension CanvasManager {
     /// always applied on the pixel side, and `mergeLossKind` states outright is not a loss to warn
     /// about. A hidden B leaves its ink behind; a hidden A does too, and the survivor comes back
     /// visible either way.
-    func vectorMergeIsExact(bottomIndex: Int, bottomCel: Int, topIndex: Int, topCel: Int) -> Bool {
+    func vectorMergeIsExact(bottomIndex: Int, topIndex: Int) -> Bool {
         guard layers.indices.contains(bottomIndex), layers.indices.contains(topIndex) else { return false }
         let below = layers[bottomIndex], above = layers[topIndex]
         guard below.kind == .vector, above.kind == .vector,
               below.opacity == 1, above.opacity == 1,
-              above.blendMode == .normal, above.alphaMask == nil,
-              below.cels.indices.contains(bottomCel), above.cels.indices.contains(topCel) else { return false }
+              above.blendMode == .normal, above.alphaMask == nil else { return false }
 
-        let belowCel = below.cels[bottomCel], aboveCel = above.cels[topCel]
+        for aboveCel in above.cels {
+            // A cel the upper layer holds alone is adopted rather than concatenated, so there is no
+            // seam to check — `copyTiers` carries it, and it lands on a layer that is still vector.
+            guard let belowCel = below.cels.first(where: { $0.startFrame == aboveCel.startFrame }) else { continue }
+            guard celPairConcatenatesExactly(belowCel, aboveCel,
+                                             belowVisible: below.isVisible,
+                                             aboveVisible: above.isVisible) else { return false }
+        }
+        return true
+    }
+
+    /// One aligned cel pair's half of `vectorMergeIsExact`.
+    private func celPairConcatenatesExactly(_ belowCel: Cel, _ aboveCel: Cel,
+                                            belowVisible: Bool, aboveVisible: Bool) -> Bool {
         guard let belowCanvas = belowCel.vector, let aboveCanvas = aboveCel.vector,
               holdsOnlyVectorInk(belowCel), holdsOnlyVectorInk(aboveCel),
               belowCanvas.transform.isIdentity, aboveCanvas.transform.isIdentity,
-              derivedCelContent(for: belowCel, atFrame: currentFrame) == nil,
-              derivedCelContent(for: aboveCel, atFrame: currentFrame) == nil else { return false }
+              derivedCelContent(for: belowCel, atFrame: belowCel.startFrame) == nil,
+              derivedCelContent(for: aboveCel, atFrame: aboveCel.startFrame) == nil else { return false }
 
-        let head = below.isVisible ? belowCanvas.elements : []
-        let tail = above.isVisible ? aboveCanvas.elements : []
+        let head = belowVisible ? belowCanvas.elements : []
+        let tail = aboveVisible ? aboveCanvas.elements : []
         guard !tail.contains(where: { $0.stroke?.composite == .erase }) else { return false }
         // A cut at the very start or the very end is not a cut: one side is the whole list.
         guard !head.isEmpty, !tail.isEmpty else { return true }
@@ -714,13 +834,13 @@ extension CanvasManager {
     /// this function.** A grade in the lower position has nothing inside the merge to grade: what it
     /// acts on is everything beneath the pair, which the ruling excludes. So it resolves to `.nothing`
     /// there and to `.grade` above.
-    private func mergeContribution(ofLayer index: Int, celIndex: Int, canvasSize: CGSize,
-                                   isBackdrop: Bool) -> MergeContribution {
+    private func mergeContribution(ofLayer index: Int, celIndex: Int, atFrame frame: Int,
+                                   canvasSize: CGSize, isBackdrop: Bool) -> MergeContribution {
         let layer = layers[index]
         // A hidden layer contributes nothing — said once here rather than as the `isVisible ?
         // opacity : 0` ternary this used to spell at each of two call sites.
         guard layer.isVisible else { return .nothing }
-        if let effect = layer.layerEffect(atFrame: currentFrame) {
+        if let effect = layer.layerEffect(atFrame: frame) {
             return isBackdrop ? .nothing : .grade(effect, opacity: layer.opacity)
         }
         // §4.4's transformation layer poses the layers beneath it, which is not something a pixel
@@ -733,7 +853,7 @@ extension CanvasManager {
         // `RenderRequest` a merge does not build.
         let mode = layer.blendMode.compositedMode
         if let fill = layer.valueFill {
-            guard let solid = LayerRenderSource.solid(.init(fill.resolvedColor(atFrame: currentFrame)),
+            guard let solid = LayerRenderSource.solid(.init(fill.resolvedColor(atFrame: frame)),
                                                       canvasSize: canvasSize) else { return .nothing }
             return .pixels(UIImage(cgImage: solid, scale: 1, orientation: .up),
                            mode: mode, opacity: layer.opacity)

@@ -178,7 +178,7 @@ extension CanvasManager {
 
     /// The tiers of a copy of `cel`: the flattened still when it derives its picture, and the cel's
     /// own content otherwise.
-    private func copyTiers(of cel: Cel) -> Cel.CopyTiers {
+    func copyTiers(of cel: Cel) -> Cel.CopyTiers {
         flattenedStill(of: cel) ?? Cel.CopyTiers(
             raster: cel.raster.makeCopy(), fillImage: cel.fillImage, bakedImage: cel.bakedImage,
             vector: cel.vector?.makeCopy(),

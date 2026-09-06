@@ -567,7 +567,243 @@ final class VectorMergeLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - (4) The predicate on its own
+    // MARK: - (4) Every frame, not only the one the playhead is on
+
+    /// A cel of `length` frames from `start`, holding `elements`.
+    private func cel(_ start: Int, _ length: Int, _ elements: [VectorElement]) -> Cel {
+        Cel(id: UUID(), startFrame: start, frameCount: length,
+            raster: .empty(size: CanvasFixture.canvasSize),
+            vector: VectorCanvas(size: CanvasFixture.canvasSize, elements: elements))
+    }
+
+    /// A two-vector-layer document with a timeline: each layer's cels stated outright.
+    private func animatedPair(lower: [Cel], upper: [Cel]) -> CanvasManager {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer(name: "Lower")
+        manager.addVectorLayer(name: "Upper")
+        manager.layers[0].cels = lower
+        manager.layers[1].cels = upper
+        return manager
+    }
+
+    /// The survivor's flatten at `frame`, or nil where it has no cel.
+    private func survivorBytes(_ manager: CanvasManager, atFrame frame: Int) -> [UInt8]? {
+        guard let celIndex = manager.activeCelIndex(inLayer: 0, atFrame: frame),
+              let image = PixelOps.rasterize(cel: manager.layers[0].cels[celIndex],
+                                             canvasSize: CanvasFixture.canvasSize).cgImage
+        else { return nil }
+        return CanvasFixture.rgbaBytes(image)
+    }
+
+    private func compositedBytes(_ manager: CanvasManager, atFrame frame: Int) -> [UInt8]? {
+        manager.makeRenderRequest(atFrame: frame, includeBackground: false)
+            .flatMap(Compositor.composite)
+            .flatMap(CanvasFixture.rgbaBytes)
+    }
+
+    /// **A merge is a merge of the drawing, not of the frame the playhead happens to be on.**
+    ///
+    /// Until this test `mergeLayers` flattened exactly one cel pair — the one at `currentFrame` — and
+    /// then deleted the upper layer whole. Every other frame of it went with it: an animated document
+    /// merged at frame 0 lost every drawing the upper layer held from frame 1 on, with nothing said
+    /// and no test in the suite driving a merge on a document with more than one cel.
+    func testMergingCarriesTheUpperLayersInkAtEveryFrameAndNotOnlyTheCurrentOne() {
+        let manager = animatedPair(
+            lower: [cel(0, 6, [.stroke(Self.stroke(0))]), cel(6, 6, [.stroke(Self.stroke(1))])],
+            upper: [cel(0, 6, [.stroke(Self.stroke(2, y: 34))]), cel(6, 6, [.stroke(Self.stroke(3, y: 34))])])
+        let expected = [0, 6].map { compositedBytes(manager, atFrame: $0) }
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        XCTAssertEqual(manager.layers.count, 1)
+        XCTAssertEqual(manager.layers[0].kind, .vector)
+        XCTAssertEqual(manager.layers[0].cels.count, 2, "The survivor keeps its own timeline")
+        for (index, frame) in [0, 6].enumerated() {
+            guard let want = expected[index], let got = survivorBytes(manager, atFrame: frame) else {
+                XCTFail("frame \(frame): missing operand"); continue
+            }
+            let (worst, differing) = compare(got, want)
+            XCTAssertLessThanOrEqual(worst, Self.maxChannelDelta,
+                                     "frame \(frame): the merged drawing is not what the two layers drew — worst channel \(worst) across \(differing) pixels")
+        }
+        for celIndex in manager.layers[0].cels.indices {
+            XCTAssertEqual(manager.layers[0].cels[celIndex].vector?.elements.count, 2,
+                           "cel \(celIndex) should hold one stroke from each layer")
+        }
+    }
+
+    /// **Cel boundaries that do not line up.** The lower layer holds one drawing across the whole
+    /// scene and the upper holds one across the middle of it, so there is no single picture the
+    /// survivor's one cel could show. It is cut at the boundaries the pair actually has.
+    func testMisalignedCelSpansAreCutToTheBoundariesThePairActuallyHas() {
+        let manager = animatedPair(
+            lower: [cel(0, 12, [.stroke(Self.stroke(0))])],
+            upper: [cel(4, 4, [.stroke(Self.stroke(2, y: 34))])])
+        manager.currentFrame = 4   // both layers have a cel here, which the merge still requires
+        let expected = [0, 4, 8].map { compositedBytes(manager, atFrame: $0) }
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 0).map { [$0.start, $0.length] },
+                       [[0, 4], [4, 4], [8, 4]],
+                       "One drawing across twelve frames becomes three blocks, because the picture is three pictures")
+        XCTAssertEqual(manager.layers[0].kind, .vector)
+        for (index, frame) in [0, 4, 8].enumerated() {
+            guard let want = expected[index], let got = survivorBytes(manager, atFrame: frame) else {
+                XCTFail("frame \(frame): missing operand"); continue
+            }
+            let (worst, differing) = compare(got, want)
+            XCTAssertLessThanOrEqual(worst, Self.maxChannelDelta,
+                                     "frame \(frame): worst channel \(worst) across \(differing) pixels")
+        }
+        guard manager.layers[0].cels.count == 3 else { return }   // the layout assertion above says why
+        XCTAssertEqual(manager.layers[0].cels[1].vector?.elements.count, 2,
+                       "Only the middle block holds both drawings")
+        XCTAssertEqual(manager.layers[0].cels[0].vector?.elements.count, 1)
+        XCTAssertEqual(manager.layers[0].cels[2].vector?.elements.count, 1)
+    }
+
+    /// **A frame where only the upper layer has a drawing becomes a cel on the survivor.** There is
+    /// nothing to merge it into, so the drawing arrives whole rather than being dropped for having no
+    /// partner.
+    func testAFrameWhereOnlyTheUpperLayerHasACelBecomesACelOnTheSurvivor() {
+        let manager = animatedPair(
+            lower: [cel(0, 4, [.stroke(Self.stroke(0))])],
+            upper: [cel(0, 4, [.stroke(Self.stroke(2, y: 34))]), cel(4, 4, [.stroke(Self.stroke(3, y: 34))])])
+        let expected = compositedBytes(manager, atFrame: 5)
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 0).map { [$0.start, $0.length] },
+                       [[0, 4], [4, 4]])
+        guard manager.layers[0].cels.count == 2 else { return }
+        XCTAssertEqual(manager.layers[0].cels[1].vector?.elements.count, 1,
+                       "The upper layer's orphan drawing came across whole")
+        guard let want = expected, let got = survivorBytes(manager, atFrame: 5) else {
+            return XCTFail("missing operand at frame 5")
+        }
+        let (worst, differing) = compare(got, want)
+        XCTAssertLessThanOrEqual(worst, Self.maxChannelDelta,
+                                 "frame 5: worst channel \(worst) across \(differing) pixels")
+    }
+
+    /// **A cel that cannot merge as strokes takes the whole layer with it**, because `kind` is a
+    /// property of the layer and not of a cel. One eraser at one frame is enough.
+    func testOneUnmergeableCelPairTakesTheWholeLayerToPixels() {
+        let manager = animatedPair(
+            lower: [cel(0, 6, [.stroke(Self.stroke(0))]), cel(6, 6, [.stroke(Self.stroke(1))])],
+            upper: [cel(0, 6, [.stroke(Self.stroke(2, y: 34))]), cel(6, 6, [.stroke(Self.eraser())])])
+        let expected = [0, 6].map { compositedBytes(manager, atFrame: $0) }
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        XCTAssertEqual(manager.layers[0].kind, .raster,
+                       "A layer has one kind — the frame that cannot stay strokes decides for all of them")
+        XCTAssertEqual(manager.notice?.kind, .mergedAsPixels)
+        for (index, frame) in [0, 6].enumerated() {
+            guard let want = expected[index], let got = survivorBytes(manager, atFrame: frame) else {
+                XCTFail("frame \(frame): missing operand"); continue
+            }
+            let (worst, differing) = compare(got, want)
+            XCTAssertLessThanOrEqual(worst, Self.maxChannelDelta,
+                                     "frame \(frame): worst channel \(worst) across \(differing) pixels")
+        }
+    }
+
+    /// **A hidden layer's orphan cels are dropped too.** The rule `mergeContribution` applies to a
+    /// pair — a hidden layer contributes nothing — applied to a cel with no partner. Without it a
+    /// merge would make a hidden layer's drawings appear at exactly the frames the survivor was blank.
+    func testAHiddenUpperLayersOrphanCelsAreNotAdopted() {
+        let manager = animatedPair(
+            lower: [cel(0, 4, [.stroke(Self.stroke(0))])],
+            upper: [cel(0, 4, [.stroke(Self.stroke(2, y: 34))]), cel(4, 4, [.stroke(Self.stroke(3, y: 34))])])
+        manager.layers[1].isVisible = false
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 0).map { [$0.start, $0.length] }, [[0, 4]],
+                       "A hidden layer's drawings do not arrive at frames the survivor never had")
+    }
+
+    /// An adopted cel comes across through `copyTiers`, which carries the pose channels riding it —
+    /// and **flattens an in-between**, because a recipe names other cels of the layer being deleted
+    /// and a reference to a deleted layer resolves to nothing.
+    func testAnAdoptedCelKeepsItsPoseChannelsAndLosesItsRecipe() {
+        let animated = animatedPair(
+            lower: [cel(0, 4, [.stroke(Self.stroke(0))])],
+            upper: [cel(0, 4, [.stroke(Self.stroke(2, y: 34))]), cel(4, 4, [.stroke(Self.stroke(3, y: 34))])])
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        animated.layers[1].cels[1].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(keys: [
+                .init(frame: 0, pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 5, y: 0)))])]
+
+        XCTAssertTrue(animated.mergeLayers(animated.layers[0].id, animated.layers[1].id))
+        guard animated.layers[0].cels.count == 2 else { return XCTFail("the orphan cel should have been adopted") }
+        XCTAssertEqual(animated.layers[0].cels[1].transformTracks.count, 1,
+                       "The pose channel rides the drawing it carries")
+
+        let derived = animatedPair(
+            lower: [cel(0, 4, [.stroke(Self.stroke(0))])],
+            upper: [cel(0, 4, [.stroke(Self.stroke(2, y: 34))]), cel(4, 4, [])])
+        let keyframe = derived.layers[1].cels[0].id
+        let upperLayerID = derived.layers[1].id
+        derived.layers[1].cels[1].interpolation = InterpolationRecipe(
+            references: [InterpolationReference(layerID: upperLayerID, celID: keyframe),
+                         InterpolationReference(layerID: upperLayerID, celID: keyframe)],
+            t: 0.5)
+
+        XCTAssertTrue(derived.mergeLayers(derived.layers[0].id, derived.layers[1].id))
+        guard derived.layers[0].cels.count == 2 else { return XCTFail("the orphan cel should have been adopted") }
+        XCTAssertNil(derived.layers[0].cels[1].interpolation,
+                     "The recipe pointed at cels of the layer this merge just deleted — carrying it across would leave a frame deriving from nothing")
+    }
+
+    /// **The frame a `.value` layer's grade is resolved at is the playhead's, for the cel the playhead
+    /// is on.** It is what keeps a one-cel merge byte-identical to what it was before the per-frame
+    /// loop existed — and the only thing in a merge that reads a frame at all.
+    func testAnAnimatedGradeIsBakedAtThePlayheadRatherThanAtTheCelStart() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
+        manager.addValueLayer(effect: .hsvShift(Effect.HSVShift(hueDegrees: 0)))
+        manager.layers[1].effectTracks = ["hsvShift.hue": AnimationCurve(keys: [
+            .init(frame: 0, value: 0, interpolation: .linear),
+            .init(frame: 8, value: 120, interpolation: .linear)])]
+        manager.currentFrame = 8
+        guard let expected = compositedBytes(manager, atFrame: 8) else { return XCTFail("no composite at frame 8") }
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+
+        guard let got = survivorBytes(manager, atFrame: 8) else { return XCTFail("no survivor pixels") }
+        let (worst, differing) = compare(got, expected)
+        XCTAssertLessThanOrEqual(worst, Self.maxChannelDelta,
+                                 "the grade was baked at the wrong frame — worst channel \(worst) across \(differing) pixels")
+        // Red rotated 120° is green; red is the byte the frame-0 grade would have left.
+        XCTAssertEqual(Array(got[0..<4]), [0, 255, 0, 255],
+                       "Frame 8's grade is a third of a turn of hue, so the floor is exactly green")
+    }
+
+    /// A merge across a whole timeline is still **one** undo step, and undo puts both timelines back.
+    func testUndoingAMultiFrameMergeRestoresBothTimelines() {
+        let manager = animatedPair(
+            lower: [cel(0, 12, [.stroke(Self.stroke(0))])],
+            upper: [cel(4, 4, [.stroke(Self.stroke(2, y: 34))])])
+        manager.currentFrame = 4
+        let before = manager.history.undoStack.count
+
+        XCTAssertTrue(manager.mergeLayers(manager.layers[0].id, manager.layers[1].id))
+        XCTAssertEqual(manager.history.undoStack.count, before + 1,
+                       "The splits, the merges and the deletion coalesce into one step")
+
+        manager.undo()
+
+        XCTAssertEqual(manager.layers.count, 2)
+        XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 0).map { [$0.start, $0.length] }, [[0, 12]],
+                       "The survivor's timeline is the one it had, cuts and all undone")
+        XCTAssertEqual(CanvasFixture.celLayout(manager, layerIndex: 1).map { [$0.start, $0.length] }, [[4, 4]])
+    }
+
+    // MARK: - (5) The predicate on its own
 
     /// `VectorCanvas.splitPreservesTheWalk` is `appendPreservesTheWalk` read backwards, and the merge
     /// is the second consumer of it. Pinned directly so a change to the incremental append cannot move
