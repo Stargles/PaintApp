@@ -713,6 +713,27 @@ and pass three times, and the split was exactly whether the simulator had been e
 nothing to do with the code under test. Two of those five runs were spent bisecting against the
 previous commit for a regression that did not exist.
 
+### A harness that measures growth is measuring its own autorelease pool until you prove otherwise
+
+**This cost two agents a wrong conclusion on 2026-09-06, in unrelated code, within hours of each
+other**, and in both cases the wrong number was about to be written down as a finding.
+
+One was counting `UIGestureRecognizer` failure requirements across add/remove cycles and read **3, 6,
+9, 12, 15, 18** — textbook unbounded accumulation, and the basis of a filed suspect for the timeline
+freeze. The identical cycles wrapped in `autoreleasepool` read **18, 18, 18, 18, 18, 18**. Flat. The
+other was measuring what a document holds after a hundred-frame scrub and read **+1,617 MB**, which
+would have gone into PERFORMANCE.md as an unbounded leak; the real figure is **+321 MB**.
+
+Anything autoreleased inside a loop lives until the pool drains, and in a test that is usually the end
+of the test method — so **a per-iteration measurement counts every iteration before it.** The curve
+that produces is a straight line through the origin, which is exactly what a leak looks like.
+
+So: **wrap the body of any measurement loop in `autoreleasepool { }` before believing its slope**, and
+prefer counting what your own code allocated — cache bytes, `MTLBuffer.length`, entry counts — over
+`phys_footprint`, which includes the pool and the simulator's own noise. If you do use a footprint
+proxy, say in the write-up that it is one and what it includes. It is the banner-versus-count trap in
+its purest form: a number that is real, reproducible, and about the wrong thing.
+
 **`uptime` is not a usable signal on this Mac** and earlier guidance to check it was wrong. Its load
 average is a slowly-decaying artifact of simulator churn: it read 404, then 382, with zero booted
 simulators, zero uninterruptible processes, and 94.6% idle CPU. Read the real number instead:
