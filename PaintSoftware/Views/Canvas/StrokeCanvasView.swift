@@ -649,6 +649,26 @@ final class StrokeCanvasView: UIView {
         floatView.isHidden = image == nil
     }
 
+    /// Shows the piece under a **projective** map without rasterizing anything — a lasso Distort's
+    /// live drag. Costs one `CALayer.transform`.
+    ///
+    /// **A `CATransform3D`'s `m14`/`m24` express exactly the projective divide `Homography.map`
+    /// performs**, which is what makes the raster tier's preview and bake agree at 0.0 rather than
+    /// merely closely. The same identity holds here for the *centre line*: the finger and the geometry
+    /// see one map. What this preview cannot show is the **dab**, and that is the honest gap — Core
+    /// Animation foreshortens the whole bitmap, so a round stamp is drawn as an ellipse, where the
+    /// bake keeps it round at `DabPose.scale(at:)` per dab. `applyToVectorFloat` drops the latch at
+    /// every gesture end for exactly that reason, so the error is one gesture's worth and the artist
+    /// is looking at the truth between drags. It is LASSO_MOVE.md §5.17's bounded approximation, one
+    /// tier over.
+    ///
+    /// `UIView.transform` is the affine half of this same storage, so the two arms cannot both be
+    /// live and `endVectorFloat` clears either.
+    func updateVectorFloat(projective current: CATransform3D) {
+        guard vectorFloatBase != nil else { return }
+        floatView.layer.transform = current
+    }
+
     /// Shows the piece at `current` without rasterizing anything. Costs one `UIView.transform`.
     func updateVectorFloat(_ current: CGAffineTransform) {
         guard let base = vectorFloatBase else { return }

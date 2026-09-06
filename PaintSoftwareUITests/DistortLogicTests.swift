@@ -404,11 +404,15 @@ final class DistortLogicTests: XCTestCase {
     /// **`TransformMode.isImplemented` is gone, and the caption it drove with it.**
     ///
     /// It said *"Coming soon — acts like Uniform for now"* of every float; what replaces it is a
-    /// sentence about the one piece still refused. §5.14's rule is that a reader must be able to tell
-    /// "not yet" from "never", and this is that rule applied to a caption: the sentence names what is
-    /// missing, and `CanvasManager.distortUnavailableReason`'s doc comment names what would unblock
-    /// it (KEYFRAMES.md stage 4's rest-space dab bake).
-    func testDistortIsRefusedOnALassoedVectorFloatAndOnNothingElse() throws {
+    /// sentence about the pieces still refused. §5.14's rule is that a reader must be able to tell
+    /// "not yet" from "never", and this is that rule applied to a caption.
+    ///
+    /// **What this test used to assert was that a lassoed *drawing* was refused, and it is not any
+    /// more** — KEYFRAMES.md §8 stage 4's rest-space dab bake made the refusal's own argument false
+    /// on 2026-09-02 and TODO item (12) removed it. The refusal that remains is per *kind*, and
+    /// `InkDistortLogicTests` owns it; what stays here is the raster tier's own half — Distort is not
+    /// refused on a pixel selection, and the caption is about the mode as well as the piece.
+    func testDistortIsOfferedOnARasterPieceAndOnALassoedDrawingAlike() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         XCTAssertNil(manager.distortUnavailableReason, "nothing is floating, so there is nothing to refuse")
 
@@ -428,9 +432,8 @@ final class DistortLogicTests: XCTestCase {
                                       composite: .paint))
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "setup: a vector float")
 
-        let reason = try XCTUnwrap(manager.distortUnavailableReason,
-                                   "a lassoed drawing cannot be distorted until stroke width can follow a homography")
-        XCTAssertFalse(reason.isEmpty)
+        XCTAssertNil(manager.distortUnavailableReason,
+                     "a lassoed drawing is offered Distort since the rest-space dab bake shipped")
         manager.setTransformMode(.uniform)
         XCTAssertNil(manager.distortUnavailableReason, "and the caption is about the mode as well as the piece")
     }

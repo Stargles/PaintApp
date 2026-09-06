@@ -197,37 +197,88 @@ final class DistortUITests: PaintUITestCase {
                           + String(format: "rectangle can be — top %.3f, bottom %.3f", top, bottom))
     }
 
-    /// **A lassoed *vector* piece says why Distort cannot act on it**, in the bar's own caption slot.
+    /// **A lassoed *drawing* can be distorted now, and the canvas shows the keystone.**
     ///
-    /// This is what `TransformMode.isImplemented`'s *"Coming soon — acts like Uniform for now"* was
-    /// replaced by, and the pair of assertions is the point: the sentence has to be there for the
-    /// float that is refused and absent for the one that is not, or the caption is back to being a
-    /// statement about the mode rather than about the piece.
-    func testALassoedVectorPieceSaysWhyDistortCannotActOnIt() throws {
+    /// This test used to assert the opposite. It said a vector float was refused, and it was right
+    /// until KEYFRAMES.md §8 stage 4 — the rest-space dab bake — merged on 2026-09-02 and made the
+    /// refusal's own argument false; the sentence in the shipped source outlived it by four days.
+    /// TODO item (12).
+    ///
+    /// **What only a running app can say, and why this is the test rather than another logic one.**
+    /// `InkDistortLogicTests` owns the geometry and the per-dab width. Three things it cannot reach:
+    /// that the Distort segment is offered on a *vector* float at all rather than captioned as
+    /// refused; that a corner grip on `ObjectTransformOverlayView` — a different overlay from the
+    /// raster tier's — takes the drag rather than letting it fall through to the move band; and that
+    /// the ink on the canvas is a **wedge** afterwards. The last one is the whole feature: a
+    /// horizontal line of constant width becomes one that is visibly thicker at one end, which no
+    /// affine map of it can produce.
+    func testDistortingALassoedDrawingKeystonesTheInkOnTheCanvas() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         // The default layer is a vector one, so this stroke lifts as geometry rather than as pixels.
-        dragOnCanvas(app, from: CGVector(dx: 0.2, dy: 0.26), to: CGVector(dx: 0.85, dy: 0.26))
+        dragOnCanvas(app, from: CGVector(dx: 0.25, dy: 0.30), to: CGVector(dx: 0.80, dy: 0.30))
+        let drawn = try settledProbe(canvas)
+        let leftBefore = inkedHeight(drawn, column: 0.35)
+        let rightBefore = inkedHeight(drawn, column: 0.70)
+        XCTAssertGreaterThan(leftBefore, 0.001, "setup: there is a line on the canvas")
+        XCTAssertEqual(leftBefore, rightBefore, accuracy: 0.006,
+                       "setup: and it is the same width at both ends before anything distorts it")
+
         app.buttons["toolbar.selectButton"].tap()
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: 0.16), to: CGVector(dx: 0.95, dy: 0.36))
+        dragOnCanvas(app, from: CGVector(dx: 0.15, dy: 0.18), to: CGVector(dx: 0.90, dy: 0.42))
         app.buttons["toolbar.moveButton"].tap()
 
-        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
+                      "Move floats the lassoed drawing")
         let caption = app.staticTexts["moveBar.modeCaption"]
         XCTAssertFalse(caption.exists, "Uniform is the mode it lifts in, and Uniform is not refused")
 
-        app.buttons["Distort"].tap()
-        XCTAssertTrue(caption.waitForExistence(timeout: 5),
-                      "a lassoed drawing cannot be distorted, and a control that does nothing says why")
-        XCTAssertFalse(caption.label.isEmpty)
+        let distort = app.buttons["Distort"]
+        XCTAssertTrue(distort.waitForExistence(timeout: 5), "the mode picker offers Distort")
+        distort.tap()
+        XCTAssertFalse(caption.waitForExistence(timeout: 2),
+                       "and a drawing is no longer one of the things Distort declines")
 
-        app.buttons["Uniform"].tap()
-        XCTAssertFalse(caption.waitForExistence(timeout: 2), "and the caption goes when the mode does")
+        // The box hugs the ink, so its top-left grip sits a little above the line's left end. Pull it
+        // up and left: the left edge of the box grows and the right edge does not, which is a
+        // keystone and not any affine of a rectangle.
+        let box = try inkTopLeft(drawn, in: CGRect(x: 0.15, y: 0.18, width: 0.75, height: 0.24))
+        dragOnCanvas(app, from: CGVector(dx: box.x, dy: box.y),
+                     to: CGVector(dx: box.x - 0.06, dy: box.y - 0.14))
+        XCTAssertTrue(app.buttons["moveBar.resetButton"].isEnabled,
+                      "a pulled corner is a change Reset has to be able to put back")
+
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5), "the piece baked")
+
+        let after = try settledProbe(canvas)
+        let leftAfter = inkedHeight(after, column: 0.35)
+        let rightAfter = inkedHeight(after, column: 0.70)
+        // The picture, saved so a person can open it. `xcresulttool export attachments` pulls it out
+        // of the run's bundle.
+        let shot = XCTAttachment(screenshot: canvas.screenshot())
+        shot.name = "distorted-ink"
+        shot.lifetime = .keepAlways
+        add(shot)
+
+        XCTAssertGreaterThan(leftAfter, 0.001, "the line is still on the canvas after the bake")
+        XCTAssertGreaterThan(leftAfter, rightAfter + 0.008,
+                             "the committed line is a wedge, which no affine map of a constant-width "
+                             + String(format: "line can be — left %.4f, right %.4f", leftAfter, rightAfter))
+    }
+
+    /// How tall the ink is down one column, in normalized units — `inkedWidth`'s transpose, and the
+    /// measurement a horizontal line's *thickness* needs.
+    private func inkedHeight(_ probe: (Double, Double) -> Bool, column dx: Double,
+                             from y0: Double = 0.05, to y1: Double = 0.55) -> Double {
+        let steps = 500
+        let hits = (0...steps).filter { probe(dx, y0 + (y1 - y0) * Double($0) / Double(steps)) }.count
+        return (y1 - y0) * Double(hits) / Double(steps)
     }
 }

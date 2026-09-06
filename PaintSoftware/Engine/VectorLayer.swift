@@ -3492,13 +3492,236 @@ final class VectorCanvas {
     /// **Only strokes carry a walk, because only strokes have one.** A fill is a `CGPath` and a
     /// placed image is a rectangle of pixels — both are drawn through the map directly with no dab
     /// lattice to re-phase. Text is already four corners.
+    /// **The walk a pose should leave on a stroke it has just moved** — the artist's own numbers,
+    /// and the whole map from them to where the ink now lands.
+    ///
+    /// **It composes rather than overwrites, and that is load-bearing since a Distort can be
+    /// committed into the document.** A stroke that already carries a walk is one whose stored
+    /// `samples` are *already* an image of the artist's: its walk holds the pre-image and the map
+    /// that got there. Writing a fresh walk from the stroke's own posed samples would claim the
+    /// posed spine as the artist's and re-lay the dabs on it — which is precisely the re-walk §4.2
+    /// exists to remove — and would throw away the committed distort's per-dab width along with it.
+    /// So the pre-image comes from the walk when there is one, and the new map is applied on the
+    /// left of the old.
+    ///
+    /// **Exactly the pre-composition expression for a stroke with no walk**, to the bit: the
+    /// composition is with `Homography.identity`, whose product leaves every entry as `x·1 + y·0 +
+    /// z·0`, and `DabPose(_ : CGAffineTransform)` is defined as `DabPose(Homography(transform))`.
+    private static func composedWalk(over rest: VectorStroke, under map: Homography) -> StrokeRestWalk {
+        guard let existing = rest.restWalk else {
+            return StrokeRestWalk(samples: rest.samples, lattice: rest.lattice,
+                                  size: rest.size, pose: BrushStamper.DabPose(map))
+        }
+        return StrokeRestWalk(samples: existing.samples, lattice: existing.lattice,
+                              size: existing.size,
+                              pose: BrushStamper.DabPose(map * existing.pose.map))
+    }
+
     static func posing(_ element: VectorElement, through t: CGAffineTransform) -> VectorElement {
         guard !t.isIdentity else { return element }
         let moved = mapping(element, throughStretch: t)
         guard case .stroke(let rest) = element, case .stroke(var posed) = moved else { return moved }
-        posed.restWalk = StrokeRestWalk(samples: rest.samples, lattice: rest.lattice,
-                                        size: rest.size, pose: BrushStamper.DabPose(t))
+        posed.restWalk = Self.composedWalk(over: rest, under: Homography(t))
         return .stroke(posed)
+    }
+
+    /// **One element carried through a *projective* map** — the entry point TODO item (12)'s ink arm
+    /// needed and `posing(_:through:)` above could not be, since a `CGAffineTransform` cannot hold a
+    /// homography at all.
+    ///
+    /// **The affine case is delegated, not re-implemented.** `Homography.affine()`'s default
+    /// tolerance is exact zero, which makes this a decision rather than a threshold — a homography
+    /// built from a `CGAffineTransform`, and one solved for a quad inside `init(boxSize:to:)`'s own
+    /// parallelogram tolerance, both have `g == h == 0` exactly. So a Distort dragged back to a
+    /// parallelogram is bit-for-bit the Freeform document it would have been, and every existing
+    /// caller's arithmetic is untouched.
+    ///
+    /// ## What each kind does, and the two that decline
+    ///
+    ///  * **A stroke** gets its spine and its lattice mapped point for point and a rest walk that
+    ///    carries the homography, so `BrushStamper.PosedDabTarget` asks `localScale` and `rotation`
+    ///    **per dab**. That is the whole of what KEYFRAMES.md §8 measured as missing when it wrote
+    ///    that a single scalar for `VectorStroke.size` is wrong by 15%–315% across one quad: there is
+    ///    no single scalar in this path.
+    ///  * **A fill** is a `CGPath`, and a projective image of a cubic is not a cubic — so the path is
+    ///    **flattened first** and then mapped, which `Homography.mapped(_:)`'s own doc asks of a
+    ///    caller with real curves.
+    ///  * **Text** is four free corners, so mapping them is exact: a homography is determined by four
+    ///    correspondences, which makes the box→corners map of the mapped quad *identically* this map
+    ///    composed with the box→corners map of the original.
+    ///  * **A placed image and a video decline**, and the caller must say so out loud. Their whole
+    ///    placement is six numbers and a mirror bit where a homography needs eight; there is nowhere
+    ///    for the projective residue to live and no amount of composing invents one.
+    ///
+    /// Nil is therefore two different things and both mean "do not write this": a kind that cannot
+    /// hold the map, and geometry that lands on the vanishing line where it has no image.
+    static func posing(_ element: VectorElement, through map: Homography) -> VectorElement? {
+        if let affine = map.affine() { return posing(element, through: affine) }
+        switch element {
+        case .stroke(let stroke):
+            return distorted(stroke, through: map).map(VectorElement.stroke)
+        case .fill(let fill):
+            return distorted(fill, through: map).map(VectorElement.fill)
+        case .text(let text):
+            return distorted(text, through: map).map(VectorElement.text)
+        case .image, .video:
+            return nil
+        }
+    }
+
+    /// The stroke arm of `posing(_:through:)`'s projective case.
+    ///
+    /// **`size` is the *bounds* currency here and not the ink's**, which is the one place this arm
+    /// reads differently from every affine one in this file. Under an affine the two are the same
+    /// number — `sqrt(|det|)` does not vary with position, so the scalar the stroke stores *is* the
+    /// per-dab area root everywhere. Under a homography they part company, and the split is that the
+    /// **dabs** take their radius from the rest walk's pose per dab (`DabPose.applied(to:)`) while
+    /// this scalar is left for the readers that only want a footprint: `MoveBoxInk`, `localBounds`,
+    /// the spatial index and the eraser's candidacy test, plus `strokePolyline`'s preview tier.
+    ///
+    /// So it is the **maximum** local scale over the stroke's own samples rather than the value at
+    /// any one of them. A footprint reader must never under-estimate — an under-estimate is ink
+    /// outside the damage rectangle, which is a stale pixel nothing repairs — and the mean or the
+    /// midpoint linearisation are both under-estimates somewhere on a keystone by construction.
+    private static func distorted(_ stroke: VectorStroke, through map: Homography) -> VectorStroke? {
+        guard let moved = stroke.samples.mapped(through: map) else { return nil }
+        var out = stroke
+        out.samples = moved
+        if var lattice = stroke.lattice {
+            guard let walked = lattice.samples.mapped(through: map) else { return nil }
+            lattice.samples = walked
+            out.lattice = lattice
+        }
+        var widest: CGFloat = 0
+        for point in stroke.samples.positions {
+            guard let scale = map.localScale(at: point) else { return nil }
+            widest = max(widest, scale)
+        }
+        if widest > 0 { out.size = stroke.size * widest }
+        out.restWalk = Self.composedWalk(over: stroke, under: map)
+        return out
+    }
+
+    /// The fill arm — **flattened, then mapped**.
+    ///
+    /// A cubic's projective image is a rational cubic, so carrying the four control points through
+    /// and calling the result a cubic is wrong in the middle of every curved segment and right only
+    /// at its ends. `Homography.mapped(_:)` does exactly that and says so; it is correct for its own
+    /// caller, whose paths are lasso outlines made of straight segments. A *fill* can be a real curve
+    /// — `LASSO_FILL` walls a region against stroke outlines, which are round-capped — so the curves
+    /// are subdivided into chords first and the chords are what the map carries. A chord's image
+    /// under a homography **is** a chord, so after the flatten nothing is approximated by the map;
+    /// what is approximated is the flatten, and that error is bounded by the step below and is
+    /// measured in source-space points before any magnification.
+    private static func distorted(_ fill: VectorFillElement, through map: Homography) -> VectorFillElement? {
+        guard let path = fill.cgPath,
+              let flattened = Self.flattened(path),
+              let moved = map.mapped(flattened) else { return nil }
+        var mapped = VectorFillElement(path: moved, color: fill.color, opacity: fill.opacity,
+                                       evenOddFill: fill.evenOddFill)
+        // Identity, not geometry — `drawn(_:through:widthScale:)`'s reason, restated: a nudge moves
+        // an element, it does not mint a new one, and the float tracks its pieces by id.
+        mapped.id = fill.id
+        return mapped
+    }
+
+    /// The text arm. **Exact, and that is a theorem rather than a tolerance**: a homography is
+    /// determined by four corner correspondences, so `Homography(boxSize:to:)` of the mapped corners
+    /// is identically this map composed with the same solve of the original corners — which is the
+    /// matrix `TextFrame.affineTransform`'s projective sibling builds at draw time.
+    ///
+    /// **`size` and `pointSize` are left alone**, unlike the affine arm's uniform part, and the
+    /// difference is not an omission. Those two are the *layout* extent CoreText wraps into; the
+    /// affine arm scales them so that a later handle drag reading `basis.width` does not snap the
+    /// type back. A projective map has no uniform part to scale them by — that is the whole content
+    /// of the 15%–315% measurement one kind over — and the corners carry the entire distortion, so
+    /// the words wrap identically and the glyphs foreshorten. `autoSize` goes false for
+    /// `TextFrameDrag.distortedFrame`'s reason: a box whose corners were placed by hand is a box
+    /// whose size is authoritative.
+    private static func distorted(_ text: VectorTextElement, through map: Homography) -> VectorTextElement? {
+        var moved = text
+        var corners: [CGPoint] = []
+        for corner in text.frame.corners {
+            guard let image = map.map(corner) else { return nil }
+            corners.append(image)
+        }
+        moved.frame.corners = corners
+        moved.frame.mode = .projective
+        moved.frame.autoSize = false
+        return moved
+    }
+
+    /// `path` with every curved segment replaced by a chain of chords.
+    ///
+    /// The step is chosen per segment from its control polygon's length, which bounds a cubic's arc
+    /// length from above, so a long curve gets more chords than a short one and a straight segment
+    /// costs nothing at all. **Measured in the path's own space**, before any magnification: the
+    /// caller's map can blow a source point up, so the honest bound is stated where the geometry is
+    /// and the cap is what keeps a pathological path finite.
+    private static func flattened(_ path: CGPath) -> CGPath? {
+        let out = CGMutablePath()
+        var current = CGPoint.zero
+        var start = CGPoint.zero
+        var malformed = false
+        path.applyWithBlock { raw in
+            let element = raw.pointee
+            switch element.type {
+            case .moveToPoint:
+                current = element.points[0]; start = current
+                out.move(to: current)
+            case .addLineToPoint:
+                current = element.points[0]
+                out.addLine(to: current)
+            case .addQuadCurveToPoint:
+                let control = element.points[0], end = element.points[1]
+                let steps = Self.flatteningSteps([current, control, end])
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    out.addLine(to: Self.quadPoint(current, control, end, t))
+                }
+                current = end
+            case .addCurveToPoint:
+                let c1 = element.points[0], c2 = element.points[1], end = element.points[2]
+                let steps = Self.flatteningSteps([current, c1, c2, end])
+                for step in 1...steps {
+                    let t = CGFloat(step) / CGFloat(steps)
+                    out.addLine(to: Self.cubicPoint(current, c1, c2, end, t))
+                }
+                current = end
+            case .closeSubpath:
+                out.closeSubpath()
+                current = start
+            @unknown default:
+                malformed = true
+            }
+        }
+        return malformed ? nil : out
+    }
+
+    /// One chord per point of control-polygon length, floored at 4 and capped at 64. The floor keeps
+    /// a tiny curve from becoming a single chord that visibly cuts its corner; the cap is what stops
+    /// a path with a thousand-point curve from minting a hundred thousand segments.
+    private static func flatteningSteps(_ polygon: [CGPoint]) -> Int {
+        var length: CGFloat = 0
+        for index in 1..<polygon.count {
+            length += hypot(polygon[index].x - polygon[index - 1].x,
+                            polygon[index].y - polygon[index - 1].y)
+        }
+        return min(64, max(4, Int(length.rounded(.up))))
+    }
+
+    private static func quadPoint(_ p0: CGPoint, _ c: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        return CGPoint(x: u * u * p0.x + 2 * u * t * c.x + t * t * p1.x,
+                       y: u * u * p0.y + 2 * u * t * c.y + t * t * p1.y)
+    }
+
+    private static func cubicPoint(_ p0: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ p1: CGPoint,
+                                   _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        let a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t
+        return CGPoint(x: a * p0.x + b * c1.x + c * c2.x + d * p1.x,
+                       y: a * p0.y + b * c1.y + c * c2.y + d * p1.y)
     }
 
     /// **A placed image moved by any invertible affine** — the arm both public mappings hand their
@@ -3585,6 +3808,27 @@ final class VectorCanvas {
             // The kinds whose placement is a stored pose or four ordered corners. Each caller answers
             // for them itself, because the currency differs — see the header.
             return nil
+        }
+    }
+
+    /// **Whether a homography would leave this element behind** — the predicate
+    /// `CanvasManager.distortUnavailableReason` asks before it lets a Distort corner move at all, and
+    /// the exact complement of the two kinds `posing(_:through:)`'s projective case answers nil for.
+    ///
+    /// A placed image and a video are a rectangle of pixels drawn through a `LayerTransform` plus a
+    /// stored shape — six numbers and a mirror bit, where a homography needs eight. Composing one
+    /// into that placement and reading it back out, which is what `placed(_:through:)` does for every
+    /// affine, has nothing to read the projective row into. A stroke, a fill and a text box each
+    /// survive one; see the three arms.
+    ///
+    /// **Asked of the element rather than baked into the map's return value**, because the refusal
+    /// has to reach the artist *before* the gesture: the caption under the mode picker is what says
+    /// so, and a nil that only appeared once a corner had been dragged would be the silent refusal
+    /// CLAUDE.md's own section is about.
+    static func refusesDistort(_ element: VectorElement) -> Bool {
+        switch element {
+        case .stroke, .fill, .text: return false
+        case .image, .video: return true
         }
     }
 

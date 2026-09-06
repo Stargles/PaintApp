@@ -322,6 +322,27 @@ struct VectorFloat {
     /// `.image` arm peels the sign out of the composed pose rather than reading it as an angle.
     var mirror: CGAffineTransform = .identity
 
+    /// **What Distort has done to the piece** — four corners in the box's own local space, together
+    /// with the box they are measured against (`BoxDistort`). Nil until the artist pulls a corner.
+    ///
+    /// **The fifth thing the box cannot hold, and the first that needs more than a scalar.** `aspect`,
+    /// `boxAngle` and `stretchAxis` complete the box's *affine* — two translations, two angles and two
+    /// scales is exactly six — and `mirror` is the sign it has no room for. Four corners moving
+    /// independently is a homography, eight degrees of freedom, so this one really does need a quad.
+    ///
+    /// **It rides between the mirror and the box's affine in every nudge's map**, which is what keeps
+    /// it absolute-from-the-lift like everything else here: a nudge maps `liftedInside`, so a distort
+    /// folded into that map survives a hundred subsequent drags without being re-applied or
+    /// accumulated, and a later Move, turn, scale or Freeform composes over it rather than discarding
+    /// it.
+    ///
+    /// **Mirror flips the content inside the frame and leaves the frame alone**, which falls out of
+    /// that ordering rather than being a rule bolted on: the reflection is applied first, in the rest
+    /// frame, and the residue then warps whatever arrives. So the box the artist keystoned stays
+    /// keystoned and the drawing in it turns over — which is also the only reading under which the
+    /// drawn corners and the baked ink cannot disagree, since nothing re-labels the quad.
+    var distort: BoxDistort? = nil
+
     /// The whole display list before the split, and the selection before the lift — what a cancel or
     /// an undo past the first nudge puts back, verbatim.
     let elementsBeforeLift: [VectorElement]
@@ -357,6 +378,13 @@ struct VectorFloat {
     /// carries, and a base that named only one of them would show the piece at the right proportions
     /// along the wrong axis.
     var latchedStretchAxis: CGFloat
+
+    /// `distort` the latched bitmap was rendered with — needed whenever `latchedAspect` is, and for
+    /// the same reason: the bitmap already carries whatever keystone the geometry had when it was
+    /// rendered, so the live preview has to measure its delta from that and not from an unwarped one.
+    /// A distort drag always re-latches first (`applyToVectorFloat` drops the latch when the quad
+    /// changes), so at the start of every one of them this equals `distort`.
+    var latchedDistort: BoxDistort? = nil
 
     /// Gesture ends so far. Zero means the split happened and nothing else did, which is the one
     /// state an undo has to *un-happen* rather than step back from.
@@ -466,7 +494,7 @@ extension CanvasManager {
                                   sourceVersion: vector.contentVersion,
                                   mayDiverge: split.mayDiverge, wantsLatch: true,
                                   latchedFrameTransform: frame.transform, latchedAspect: frame.aspect,
-                                  latchedStretchAxis: frame.stretchAxis)
+                                  latchedStretchAxis: frame.stretchAxis, latchedDistort: nil)
         celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
         refreshUndoRedoState()
         return true
@@ -861,7 +889,7 @@ extension CanvasManager {
                                   sourceVersion: vector.contentVersion,
                                   mayDiverge: lift.mayDiverge, wantsLatch: true,
                                   latchedFrameTransform: frame.transform, latchedAspect: frame.aspect,
-                                  latchedStretchAxis: frame.stretchAxis)
+                                  latchedStretchAxis: frame.stretchAxis, latchedDistort: nil)
         celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
         refreshUndoRedoState()
         return true
@@ -897,6 +925,7 @@ extension CanvasManager {
         float.latchedFrameTransform = float.frame.transform
         float.latchedAspect = float.frame.aspect
         float.latchedStretchAxis = float.frame.stretchAxis
+        float.latchedDistort = float.distort
         vector.suppressedElementIDs = float.insideIDs
         float.sourceVersion = vector.contentVersion
         vectorFloat = float
@@ -917,12 +946,71 @@ extension CanvasManager {
     /// `stretchAxis` defaults the same way and for the same reason: a Uniform drag, both knobs and the
     /// move band leave a Freeform stretch — its shape *and* the axis it was made about — exactly where
     /// the last stretch put it.
+    /// `distort` defaults the same way `aspect` and `stretchAxis` do and for the same reason: a
+    /// Uniform drag, both knobs and the move band leave a pulled corner exactly where the last
+    /// Distort put it, so the residue composes with everything rather than being discarded by the
+    /// next gesture. Passing `.some(nil)` is how Reset clears it.
     func nudgeVectorFloat(to transform: LayerTransform, aspect: CGFloat? = nil,
-                          stretchAxis: CGFloat? = nil) {
+                          stretchAxis: CGFloat? = nil, distort: BoxDistort?? = nil) {
         applyToVectorFloat(transform: transform,
                            aspect: aspect ?? vectorFloat?.frame.aspect ?? 1,
                            stretchAxis: stretchAxis ?? vectorFloat?.frame.stretchAxis ?? 0,
+                           distort: distort ?? vectorFloat?.distort,
                            mirror: vectorFloat?.mirror ?? .identity)
+    }
+
+    /// **The whole map a Distort adds, and it is one expression** —
+    /// `base⁻¹ · B · residue · B⁻¹ · A · mirror`, read right to left, where `A` is the box's affine
+    /// placement (`VectorCanvas.affine(from:aspect:stretchAxis:pivot:)`), `B` is the box as drawn
+    /// (`ObjectTransformFrame.boxToCanvas` of the frozen distort box) and `base` is the layer's own
+    /// transform, which turns a canvas answer back into the space the display list is stored in.
+    ///
+    /// **Read it as a sentence**: mirror the ink, place it on the canvas where the box says, express
+    /// that in the box's own coordinates, warp it by the residue, put it back on the canvas, and store
+    /// it in the layer. Only the middle term is new; the two on each side are the box's own affine and
+    /// its inverse, which is what makes a Move, a scale, a turn and a Freeform compose over a distort
+    /// instead of fighting it.
+    ///
+    /// **It reduces to `localDelta` exactly when the residue is the identity**, because `B` and `B⁻¹`
+    /// then cancel — which is the reduction that lets the affine branch stay bit-for-bit what it was
+    /// rather than being routed through here with a unit quad.
+    ///
+    /// Nil for no distort at all (the caller takes the affine branch) and for a box or a layer
+    /// transform with no inverse (the caller refuses the nudge).
+    static func distortMap(_ distort: BoxDistort?, transform: LayerTransform, aspect: CGFloat,
+                           stretchAxis: CGFloat, placement: CGAffineTransform,
+                           mirror: CGAffineTransform, base: CGAffineTransform) -> Homography? {
+        guard let distort else { return nil }
+        let box = ObjectTransformFrame.distortFrame(distort, transform: transform, aspect: aspect,
+                                                    stretchAxis: stretchAxis)
+        guard let boxToCanvas = box.boxToCanvas,
+              abs(boxToCanvas.a * boxToCanvas.d - boxToCanvas.b * boxToCanvas.c) > .ulpOfOne,
+              let residue = box.distortResidue,
+              let baseInverse = Self.invertedAffine(base) else { return nil }
+        let toBox = boxToCanvas.inverted()
+        return Homography(boxToCanvas.concatenating(baseInverse))
+            * residue
+            * Homography(mirror.concatenating(placement).concatenating(toBox))
+    }
+
+    /// **Where a float's picture lands on the canvas, as one map** — the box's affine placement with
+    /// whatever projective residue the artist has pulled into it, and the value both the live preview
+    /// and its marching ants measure their delta against.
+    ///
+    /// One accessor rather than two for `FloatingPiece.homography`'s reason: *"the preview and the
+    /// bake agree"* is otherwise a promise instead of a fact. Affine to the bit when nothing is
+    /// distorted — `distortMap` answers nil and this is `Homography(placement)`, whose `g` and `h`
+    /// are exact zeros — so an undistorted float's preview is the matrix it always was.
+    static func floatPictureMap(of float: VectorFloat, transform: LayerTransform, aspect: CGFloat,
+                                stretchAxis: CGFloat, distort: BoxDistort?) -> Homography {
+        let placement = VectorCanvas.affine(from: transform, aspect: aspect,
+                                            stretchAxis: stretchAxis, pivot: float.pivot)
+        // The mirror is deliberately absent: it is folded into the geometry the bitmap was rendered
+        // from, and the latch is dropped whenever it changes, so it is a constant factor in both
+        // halves of every delta this feeds and cancels.
+        return distortMap(distort, transform: transform, aspect: aspect, stretchAxis: stretchAxis,
+                          placement: placement, mirror: .identity, base: .identity)
+            ?? Homography(placement)
     }
 
     /// **Turns the handle box alone and leaves the drawing exactly where it is** — the yellow knob
@@ -976,8 +1064,16 @@ extension CanvasManager {
     /// that carried one without the other would stretch a piece by the right amount along the wrong
     /// axis. `VectorCanvas.affine(from:aspect:stretchAxis:pivot:)` is where they are put back
     /// together.
+    /// **`distort` is the fifth**, and it is the one the box cannot express even in principle — see
+    /// `VectorFloat.distort`. It arrives here rather than through `frame.transform` for the reason the
+    /// other two do, and it composes *inside* the mirror and *outside* nothing: the map a nudge builds
+    /// is `base⁻¹ · A · B · residue · B⁻¹ · A · mirror` read right to left, where `B` is the box as
+    /// drawn. No default, unlike the two above: an arm that silently dropped it would flatten the
+    /// artist's keystone on the next Rotate 45°, and there is exactly one way to find that out at
+    /// compile time.
     func applyToVectorFloat(transform: LayerTransform, aspect: CGFloat = 1,
                             stretchAxis: CGFloat = 0,
+                            distort: BoxDistort?,
                             mirror: CGAffineTransform) {
         guard var float = vectorFloat, let vector = vectorCanvas(ofFloat: float) else { return }
         guard vector.contentVersion == float.sourceVersion else { return cancelVectorFloat() }
@@ -999,10 +1095,21 @@ extension CanvasManager {
         // a stretch was made. Only the second belongs in a map, and reading the first would make a
         // turn of the yellow knob re-aim a stretch the artist had already committed — with no undo
         // step to give it back, since §5.21 keeps a box turn off the stack.
-        let localDelta = mirror.concatenating(
-            VectorCanvas.affine(from: transform, aspect: aspect, stretchAxis: stretchAxis,
-                                pivot: float.pivot)
-                .concatenating(float.baseTransform.inverted()))
+        let placement = VectorCanvas.affine(from: transform, aspect: aspect,
+                                            stretchAxis: stretchAxis, pivot: float.pivot)
+        let localDelta = mirror.concatenating(placement.concatenating(float.baseTransform.inverted()))
+        // **The projective factor, or nil for every gesture that is not a Distort — which is every
+        // gesture in every document until a corner is pulled.** Nil takes the branch below bit for
+        // bit, so a Move, a scale, a turn, a Freeform and a Mirror are exactly the documents they
+        // were.
+        let projected = Self.distortMap(distort, transform: transform, aspect: aspect,
+                                        stretchAxis: stretchAxis, placement: placement,
+                                        mirror: mirror, base: float.baseTransform)
+        // A quad the drag cannot produce but a decoded or composed pose could — a collapsed box, a
+        // pose with no inverse. Refusing the whole nudge beats writing geometry through a map that
+        // has no meaning; the artist sees the piece not move and can drag again, which is the answer
+        // `ObjectTransformDrag` gives for the same class of failure.
+        if distort != nil, projected == nil { return }
         // **Which mapping, decided by the pose and not by the mode.** An unstretched float goes
         // through the similarity arm bit for bit, so every Uniform move, rotate and mirror is exactly
         // the document it was before Freeform existed — including `mapping`'s assert, which is the
@@ -1033,6 +1140,20 @@ extension CanvasManager {
         let oldElements = vector.elements
         let newElements = oldElements.map { element -> VectorElement in
             guard let lifted = float.liftedInside[element.id] else { return element }
+            // **The projective arm, and it is a different function rather than a wider `t`.** A
+            // homography cannot be spelled as a `CGAffineTransform` at all, so the two arms cannot be
+            // one call with a wider argument; and the projective one attaches a **rest walk**, which
+            // is what gives the ink per-dab width and rotation instead of one scalar for
+            // `VectorStroke.size` that KEYFRAMES.md §8 measured as wrong by 15%–315% across a quad.
+            // An element kind a homography cannot carry — a placed image, a video — comes back nil
+            // and is left where it is; `distortUnavailableReason` refuses the whole float before the
+            // artist can reach that, so this is the guard rather than a case anything walks into.
+            if let projected {
+                let map = Self.restDelta(projected, pose: float.poses[element.id])
+                guard let moved = VectorCanvas.posing(lifted, through: map) else { return element }
+                guard preserveMovePrecision, case .stroke(let stroke) = moved else { return moved }
+                return .stroke(stroke.markedPrecise())
+            }
             // **The delta the artist made, expressed in the space this element is stored in.** The
             // box, the finger and the latched bitmap are all in the *posed* space; `vector.elements`
             // is at rest, and the layer's own render poses what it draws — so storing the raw delta
@@ -1065,12 +1186,14 @@ extension CanvasManager {
         let oldAspect = float.frame.aspect
         let oldStretchAxis = float.frame.stretchAxis
         let oldMirror = float.mirror
+        let oldDistort = float.distort
 
         vector.elements = newElements
         vector.bumpVersion()
         float.frame.transform = transform
         float.frame.aspect = aspect
         float.frame.stretchAxis = stretchAxis
+        float.distort = distort
         float.mirror = mirror
         float.nudges += 1
         // A float whose bitmap is only an approximation of the composite shows the truth between
@@ -1096,8 +1219,14 @@ extension CanvasManager {
         // **A changed stretch axis drops it for the aspect's reason, restated.** The two are one
         // value: the bitmap carries a stretch along one axis and the map now wants it along another,
         // and neither the amount nor the direction can be corrected for in a bitmap of ink.
+        // **A changed distort drops it for the aspect's reason, at its sharpest.** The latched bitmap
+        // is ink under a `CATransform3D`, so a projective preview foreshortens the *dab* — squashing
+        // a round stamp into an ellipse — where the bake keeps it round at `localScale` per dab. The
+        // two genuinely disagree while the finger is down; dropping the latch at every gesture end
+        // hands the display back to the layer's own render of the real geometry, so the error is one
+        // gesture's worth and never accumulates.
         if float.mayDiverge || mirror != oldMirror || aspect != oldAspect
-            || stretchAxis != oldStretchAxis {
+            || stretchAxis != oldStretchAxis || distort != oldDistort {
             float.wantsLatch = false
             vector.suppressedElementIDs = []
         }
@@ -1111,6 +1240,7 @@ extension CanvasManager {
                                      oldFrameTransform: oldFrameTransform, newFrameTransform: transform,
                                      oldAspect: oldAspect, newAspect: aspect,
                                      oldStretchAxis: oldStretchAxis, newStretchAxis: stretchAxis,
+                                     oldDistort: oldDistort, newDistort: distort,
                                      oldMirror: oldMirror, newMirror: mirror,
                                      // The first nudge carries the split, so undoing it gives back the
                                      // unsplit stroke and dismisses the float.
@@ -1401,6 +1531,18 @@ extension CanvasManager {
     /// for it.
     static func fittedFrame(of float: VectorFloat,
                             at pose: ObjectTransformDrag.Pose) -> ObjectTransformFrame {
+        // **A distorted box does not re-fit, and the box it froze at is the answer.** Everything
+        // below measures an axis-aligned hull of the ink in the box's own frame; a keystoned box is
+        // not a rectangle in any frame, so there is no hull for it to be. `BoxDistort` carries the
+        // size, the offset and the hand-angle the first pulled corner was drawn on, so this returns
+        // the same box the drag latched, at whatever pose the piece has been carried to since — the
+        // corners the artist grabs and the corners the ink is warped onto are then one value.
+        if let distort = pose.distort {
+            return ObjectTransformFrame.distortFrame(distort, transform: pose.transform,
+                                                     aspect: pose.aspect,
+                                                     stretchAxis: pose.stretchAxis,
+                                                     allowedHandles: float.frame.allowedHandles)
+        }
         let atRest = ObjectTransformFrame(transform: pose.transform, contentSize: float.contentSize,
                                           aspect: pose.aspect, boxAngle: pose.boxAngle,
                                           stretchAxis: pose.stretchAxis,
@@ -1478,6 +1620,7 @@ extension CanvasManager {
                                               newFrameTransform: LayerTransform,
                                               oldAspect: CGFloat, newAspect: CGFloat,
                                               oldStretchAxis: CGFloat, newStretchAxis: CGFloat,
+                                              oldDistort: BoxDistort?, newDistort: BoxDistort?,
                                               oldMirror: CGAffineTransform,
                                               newMirror: CGAffineTransform,
                                               endsFloat: Bool, layerID: UUID, celID: UUID) {
@@ -1498,6 +1641,7 @@ extension CanvasManager {
                 self.vectorFloat?.frame.transform = oldFrameTransform
                 self.vectorFloat?.frame.aspect = oldAspect
                 self.vectorFloat?.frame.stretchAxis = oldStretchAxis
+                self.vectorFloat?.distort = oldDistort
                 self.vectorFloat?.mirror = oldMirror
                 self.vectorFloat?.sourceVersion = vector.contentVersion
             }
@@ -1510,6 +1654,7 @@ extension CanvasManager {
             self.vectorFloat?.frame.transform = newFrameTransform
             self.vectorFloat?.frame.aspect = newAspect
             self.vectorFloat?.frame.stretchAxis = newStretchAxis
+            self.vectorFloat?.distort = newDistort
             self.vectorFloat?.mirror = newMirror
             self.vectorFloat?.sourceVersion = vector.contentVersion
             self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)

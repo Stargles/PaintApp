@@ -70,7 +70,7 @@ final class OffCanvasHandleLogicTests: XCTestCase {
                        frame: ObjectTransformFrame(
                            transform: LayerTransform(position: Self.centre, scale: 1, rotation: 0),
                            contentSize: contentSize),
-                       canvasScale: 1)
+                       canvasScale: 1, distorting: false)
         return overlay
     }
 
@@ -285,7 +285,7 @@ final class OffCanvasHandleLogicTests: XCTestCase {
                        frame: ObjectTransformFrame(
                            transform: LayerTransform(position: Self.centre, scale: 1, rotation: 0),
                            contentSize: Self.oversizeContent),
-                       canvasScale: 1)
+                       canvasScale: 1, distorting: false)
         let inContainer = CGPoint(x: Self.oversizeTopLeft.x + 100, y: Self.oversizeTopLeft.y + 50)
         assertOffCanvas(inContainer)
         XCTAssertTrue(container.hitTest(inContainer, with: nil) === overlay)
@@ -323,7 +323,7 @@ final class OffCanvasHandleLogicTests: XCTestCase {
                        frame: ObjectTransformFrame(
                            transform: LayerTransform(position: Self.centre, scale: 1, rotation: 0),
                            contentSize: Self.oversizeContent),
-                       canvasScale: 1)
+                       canvasScale: 1, distorting: false)
         XCTAssertEqual(overlay.target(at: Self.oversizeTopLeft), .topLeft)
         XCTAssertNil(bare.hitTest(Self.oversizeTopLeft, with: nil))
     }

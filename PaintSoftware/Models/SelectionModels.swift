@@ -955,19 +955,21 @@ extension CanvasManager {
     /// is §5.14's own distinction between "not yet" and "never", applied to a sentence instead of to
     /// an enum case.
     ///
-    /// **Why a lassoed vector piece is the case, and it is a measurement rather than a policy.** A
-    /// homography's local scale spans 1.3× to 8.5× across one quad, so there is no single number for
-    /// `VectorStroke.size` to follow: the best available scalar is wrong by 15%–315%, which ships as
-    /// a visible width error on every line in the selection. The cure is KEYFRAMES.md stage 4's
-    /// rest-space dab bake — draw the dab walk once in the stroke's own space and map dab *centres*
-    /// through the map — which is not built. Until it is, Distort declines a vector float rather than
-    /// silently thickening the artist's ink, and the box goes on behaving as Uniform, which is what
-    /// `vectorFloatIsFreeform` already says.
+    /// **A lassoed drawing is no longer the case, and the sentence that said so was stale for four
+    /// days.** It refused ink on the measurement that a homography's local scale spans 1.3×–8.5×
+    /// across one quad, so no single `VectorStroke.size` is right — true, and no longer a refusal:
+    /// KEYFRAMES.md §8 stage 4's rest-space dab bake merged 2026-09-02, `BrushStamper.DabPose`
+    /// answers `localScale` and `rotation` **per dab** exactly when the map is projective, and
+    /// `PosedDabTarget` is wired into the shipped render. There is no single scalar on that path to
+    /// be wrong. `VectorCanvas.posing(_:through:)`'s `Homography` overload is the entry point that
+    /// reaches it.
     ///
-    /// Text and a placed image are the two kinds a vector float could carry that *would* survive a
-    /// homography — a `TextFrame` is already four free corners, and stage 3c gave an image a stored
-    /// shape — but a float carrying one almost always carries ink beside it, and a per-kind refusal
-    /// is exactly what stage 3c deleted. So the refusal is per *float*, once, with one sentence.
+    /// **What is refused now is a kind rather than a tool, and it is a *float* that carries one.** A
+    /// placed image and a video store six numbers and a mirror bit where a homography needs eight —
+    /// there is nowhere for the projective residue to live and no amount of composing invents one.
+    /// Strokes, fills and text all survive a homography (`posing`'s three arms), so the refusal is
+    /// exactly the two kinds that cannot, and it is per *float* with one sentence: a float carrying a
+    /// photo almost always carries ink beside it, and a per-kind refusal is what stage 3c deleted.
     var distortUnavailableReason: String? {
         // **The container float refuses it for a different reason and says a different sentence.**
         // Nothing here is missing a pixel selection — a container pose is four corners and could hold
@@ -980,13 +982,19 @@ extension CanvasManager {
         if transformMode == .distort, floatingPiece?.kind == .containerPose {
             return "Distort is not available on a transformation layer yet — Move, scale and turn are."
         }
-        guard transformMode == .distort, vectorFloat != nil else { return nil }
-        // **"Not yet" in the artist's words as well as in this file's.** §5.14's rule is that a
-        // reader must be able to tell a deferral from a refusal, and the artist is a reader too: a
-        // sentence that merely said what Distort needs would read as "never" to the one person who
-        // asked for it. Move, scale, turn and mirror all still work on the piece they are holding.
-        return "Distort needs a pixel selection — not available on a lassoed drawing yet."
+        guard transformMode == .distort, let float = vectorFloat else { return nil }
+        // **Named in the artist's own vocabulary, and it says what to do rather than what is wrong.**
+        // §5.14's rule is that a reader must be able to tell a deferral from a refusal, and the artist
+        // is a reader too — so this names the kind that is in the way and the move that clears it.
+        // Move, scale, turn, Freeform and Mirror all still work on the piece as it stands.
+        guard float.liftedInside.values.contains(where: VectorCanvas.refusesDistort) else { return nil }
+        return "Distort can't reshape a placed image or video — leave those out of the selection."
     }
+
+    /// Whether a Distort corner drag is what a corner grip means right now. `vectorFloatIsFreeform`'s
+    /// sibling, and it carries the refusal so the picker cannot promise a gesture the model declines:
+    /// a float holding a photo shows the caption *and* keeps the corners scaling.
+    var vectorFloatIsDistort: Bool { transformMode == .distort && distortUnavailableReason == nil }
 
     func setTransformMode(_ mode: TransformMode) {
         transformMode = mode
@@ -1089,7 +1097,7 @@ extension CanvasManager {
             .scaledBy(x: horizontal ? -1 : 1, y: horizontal ? 1 : -1)
             .translatedBy(x: -float.pivot.x, y: -float.pivot.y)
         applyToVectorFloat(transform: float.frame.transform, aspect: float.frame.aspect,
-                           stretchAxis: float.frame.stretchAxis,
+                           stretchAxis: float.frame.stretchAxis, distort: float.distort,
                            mirror: float.mirror.concatenating(reflection))
     }
 
@@ -1111,7 +1119,8 @@ extension CanvasManager {
                                                      lift: float.liftFrameTransform.rotation,
                                                      eighths: eighths)
         applyToVectorFloat(transform: turned, aspect: float.frame.aspect,
-                           stretchAxis: float.frame.stretchAxis, mirror: float.mirror)
+                           stretchAxis: float.frame.stretchAxis, distort: float.distort,
+                           mirror: float.mirror)
     }
 
     /// Whether **Reset** has anything to put back. False the instant the piece is already sitting
@@ -1157,8 +1166,12 @@ extension CanvasManager {
         // is a no-op — so a piece whose only remaining difference is the axis it was once stretched
         // about really *is* sitting where it was picked up. `resetFloating` writes 0 into it anyway,
         // so nothing survives a Reset that could surprise the next stretch.
+        // **`distort` is the fourth term, and it is the aspect's argument at its strongest**: a piece
+        // dragged back to the position, scale and rotation it lifted at but left with a pulled corner
+        // is not sitting where it was picked up, and Reset is the only way back to a square box. It is
+        // the raster arm's `distortQuad != nil`, one tier over.
         return float.frame.transform != float.liftFrameTransform || float.frame.aspect != 1
-            || float.mirror != .identity
+            || float.mirror != .identity || float.distort != nil
     }
 
     /// **Reset**: the piece snaps back to exactly where it was picked up — position, scale, rotation
@@ -1196,8 +1209,10 @@ extension CanvasManager {
         guard let float = vectorFloat else { return }
         // Aspect 1, not the lift's: a float always lifts unstretched, since the box is built from
         // `layerTransform(pivot:)` and that reads a similarity. See `beginVectorLassoMove`.
+        // `distort: nil` for the same reason `aspect: 1` is here: "snap it back to where I picked it
+        // up" includes the shape it was picked up in, and a lift is always undistorted.
         applyToVectorFloat(transform: float.liftFrameTransform, aspect: 1, stretchAxis: 0,
-                           mirror: .identity)
+                           distort: nil, mirror: .identity)
     }
 
     // MARK: Committing

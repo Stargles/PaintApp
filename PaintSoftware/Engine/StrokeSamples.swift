@@ -460,6 +460,41 @@ struct StrokeSamples: Equatable {
         return result
     }
 
+    /// Every position carried through a **projective** map, and every angle channel turned by the
+    /// map's own local rotation *at that point*.
+    ///
+    /// **The per-point rotation is the whole reason this is not `replacingPositions(_:angleRotation:)`
+    /// with one number.** That function's own doc says a map with no single rotation must pass zero
+    /// and say so; a homography has no single rotation but it does have one *per point*, and
+    /// `linearised(at:).polarRotation` is exactly the angle `BrushStamper.DabPose.rotation(at:)`
+    /// turns an image dab by at that same place. Using one angle for the whole run would lean the
+    /// nib correctly at one end of a keystoned stroke and wrongly at the other.
+    ///
+    /// Nil when any point lands on the vanishing line, where it has no image at all. Refusing the
+    /// whole run rather than dropping a point: a stroke missing a sample from its middle is a
+    /// different stroke, and the caller can decline the gesture.
+    ///
+    /// **The per-point `linearised` is paid only by a run that carries an angle**, which is a
+    /// Pencil-drawn stroke and never a finger-drawn one (`compacted()` drops an all-neutral azimuth).
+    func mapped(through map: Homography) -> StrokeSamples? {
+        var moved: [CGPoint] = []
+        moved.reserveCapacity(positions.count)
+        for point in positions {
+            guard let image = map.map(point) else { return nil }
+            moved.append(image)
+        }
+        var result = self
+        result.positions = moved
+        let turning = channels.channels.filter(\.isAngleInSampleSpace)
+        guard !turning.isEmpty else { return result }
+        let turns = positions.map { map.linearised(at: $0)?.polarRotation ?? 0 }
+        for channel in turning {
+            result[storage: channel] = zip(self[storage: channel], turns)
+                .map { channel.rotated($0, by: $1) }
+        }
+        return result
+    }
+
     /// This run with `samples` in place of its points, keeping the channel set. The shape a cut, a
     /// split or a re-fit takes: the values come back through `VectorSample`, which carries every
     /// channel, and the *set* comes from the run they were cut out of.

@@ -24,6 +24,39 @@ import Foundation
 /// are drawn and hit, and reaches no geometry anywhere. Phase 2's `stretchAxis` is the *other* angle,
 /// and the two are opposites in exactly that respect: `boxAngle` draws and never maps, `stretchAxis`
 /// maps and never draws.
+/// **A projective residue together with the box it is measured against** — what a Distort on the
+/// Move box actually is, and the value that travels from a drag to the model.
+///
+/// **Why the box travels with the quad rather than being re-derived.** `ObjectTransformFrame`'s
+/// `contentSize` and `contentOffset` are a *live function* of `boxAngle` since LASSO_MOVE.md §5.22 —
+/// `CanvasManager.fittedFrame(of:at:)` re-hugs the ink on every touch-move — so "the box" is not one
+/// rectangle over the life of a float. A quad is four corners *in units of* some box; carrying the
+/// units with it is what makes the residue mean the same thing on the next pass as it did on this
+/// one. The alternative, re-expressing the quad against the lift's box, moves the ink the instant a
+/// distort begins on a re-fitted box: the fit is chrome and must not map anything.
+///
+/// **So the fit freezes at the first pulled corner**, and this is the box it freezes at. That is not
+/// a limitation dressed up: a fit is an axis-aligned hull in the box's own frame, and a distorted box
+/// is not a rectangle in any frame, so there is nothing left for it to hug.
+struct BoxDistort: Equatable {
+    /// The four corners, in the box's own local space, in `Quad`'s order.
+    var quad: Quad
+    /// `ObjectTransformFrame.contentSize` of the box `quad` is measured against.
+    var boxSize: CGSize
+    /// `ObjectTransformFrame.contentOffset` of that same box.
+    var boxOffset: CGPoint
+    /// `ObjectTransformFrame.boxAngle` of that same box.
+    ///
+    /// **Frozen for §5.21 rather than for tidiness.** LASSO_MOVE.md §5.21 makes a turn of the yellow
+    /// knob free — no undo step — on the argument that it moves no ink. The residue lives in the
+    /// box's own frame, so a box angle read *live* would put the knob inside the map and a free turn
+    /// would drag the artist's keystoned drawing with nothing on the stack to give it back. Frozen,
+    /// the map cannot see the knob at all; and the knob itself is withdrawn from the box's handles
+    /// while a distort stands, because a distorted box is not a rectangle and there is no longer an
+    /// axis-aligned hull for it to hug.
+    var boxAngle: CGFloat
+}
+
 struct ObjectTransformFrame: Equatable {
 
     /// The layer's aggregate move/scale/rotate, about `contentSize`'s centre.
@@ -207,9 +240,32 @@ struct ObjectTransformFrame: Equatable {
     /// the same reason.
     var stretchAxis: CGFloat = 0
 
+    /// **The projective residue — four corners in the box's own local space, or nil for a box nobody
+    /// has distorted.** LASSO_MOVE.md §3 stage 5's ink arm, and the fifth thing a `LayerTransform`
+    /// cannot hold after `aspect`, `boxAngle`, `stretchAxis` and `VectorFloat.mirror`.
+    ///
+    /// **Four corners moving independently is a homography and nothing smaller** — eight degrees of
+    /// freedom where `stretchAxis` completed the box's affine at six — so unlike the other three this
+    /// one genuinely needs a quad. It is the same split `FloatingPiece.distortQuad` struck for the
+    /// raster piece: **the residue only**, in local units, with the affine composing on top. So Move,
+    /// the corner scale, both knobs, Freeform and Mirror are untouched by Distort and compose over
+    /// it, and Reset clears one field.
+    ///
+    /// **Local rather than canvas space, for `FloatingDistortDrag`'s reason.** Storing canvas corners
+    /// would put the piece's position in two fields at once and every one of Move, Rotate, Mirror and
+    /// Reset would have to write both. It also makes a distort *pose-independent*: an invertible
+    /// affine preserves convexity, simplicity and the box-corner weights identically, so a quad that
+    /// is valid here is valid at any pose the box is later dragged to.
+    ///
+    /// **Nil is the same value an undistorted box has always had**, written as nil rather than as
+    /// `Quad.rect(localBox)` so that `distortQuad != nil` is the one question every reader asks and
+    /// `corners` reduces to the pre-Distort expression, term for term, when it is nil.
+    var distortQuad: Quad?
+
     init(transform: LayerTransform, contentSize: CGSize, aspect: CGFloat = 1,
          contentOffset: CGPoint = .zero,
          boxAngle: CGFloat = 0, stretchAxis: CGFloat = 0,
+         distortQuad: Quad? = nil,
          allowedHandles: Set<Handle> = Set(Handle.allCases)) {
         self.transform = transform
         self.contentSize = contentSize
@@ -217,6 +273,7 @@ struct ObjectTransformFrame: Equatable {
         self.contentOffset = contentOffset
         self.boxAngle = boxAngle
         self.stretchAxis = stretchAxis
+        self.distortQuad = distortQuad
         self.allowedHandles = allowedHandles
     }
 
@@ -354,9 +411,60 @@ struct ObjectTransformFrame: Equatable {
     /// box's own frame of reference — so after a half-turn "top-left" is the one at the bottom right
     /// of the screen, which is what keeps a grip attached to the corner the artist grabbed.
     var corners: [CGPoint] {
+        if let distortQuad { return distortQuad.points.map(projected) }
         let hw = contentSize.width / 2, hh = contentSize.height / 2
         return [CGPoint(x: -hw, y: -hh), CGPoint(x: hw, y: -hh),
                 CGPoint(x: hw, y: hh), CGPoint(x: -hw, y: hh)].map(projected)
+    }
+
+    /// The box in its own local space — the rectangle `distortQuad` is measured against, and the
+    /// source of the homography it implies. `Quad.rect(localBox)` is exactly the four corners the
+    /// undistorted branch of `corners` above builds, in the same order.
+    var localBox: CGRect {
+        CGRect(x: -contentSize.width / 2, y: -contentSize.height / 2,
+               width: contentSize.width, height: contentSize.height)
+    }
+
+    /// The four corners the box actually has in its own local space — the stored quad, or the box.
+    /// `FloatingPiece.localQuad`'s counterpart, and named to match it.
+    var localQuad: Quad { distortQuad ?? Quad.rect(localBox) }
+
+    /// **The frame a `BoxDistort` was measured in, at this frame's live pose** — the box's size,
+    /// offset and hand-angle frozen at the first pulled corner, carried by whatever Move, scale,
+    /// turn-the-ink or Freeform the artist has done since.
+    ///
+    /// This is the `B` in the map a nudge builds (`CanvasManager.applyToVectorFloat`) and it is also
+    /// the box drawn on screen while a distort stands, so the corners the artist grabs and the corners
+    /// the ink is warped onto are one value rather than two that agree.
+    func distortFrame(_ distort: BoxDistort) -> ObjectTransformFrame {
+        Self.distortFrame(distort, transform: transform, aspect: aspect, stretchAxis: stretchAxis,
+                          allowedHandles: allowedHandles)
+    }
+
+    /// The same box built from a pose rather than from another frame — what the model reaches for,
+    /// since a nudge holds a `LayerTransform` and two scalars and has no frame of its own.
+    static func distortFrame(_ distort: BoxDistort, transform: LayerTransform,
+                             aspect: CGFloat, stretchAxis: CGFloat,
+                             allowedHandles: Set<Handle> = Set(Handle.allCases)) -> ObjectTransformFrame {
+        ObjectTransformFrame(transform: transform, contentSize: distort.boxSize, aspect: aspect,
+                             contentOffset: distort.boxOffset, boxAngle: distort.boxAngle,
+                             stretchAxis: stretchAxis, distortQuad: distort.quad,
+                             // A distorted box is not a rectangle in any frame, so the knob whose
+                             // whole job is to turn the rectangle the fit hugs has nothing to do.
+                             // Withdrawn rather than left inert: `handleLayout` filters on this set,
+                             // so the knob and its tether are simply not drawn and not grabbable.
+                             allowedHandles: allowedHandles.subtracting([.boxRotation]))
+    }
+
+    /// **The projective residue on its own** — `localBox` onto `localQuad`, in local units, with no
+    /// pose in it. Nil for an undistorted box (there is no residue to report) and for a quad no
+    /// homography can be drawn through, which the drag refuses rather than producing.
+    ///
+    /// This is the one factor a Distort adds to the map a nudge builds; everything else in that map
+    /// is the affine the box already had. `CanvasManager.applyToVectorFloat` is the reader.
+    var distortResidue: Homography? {
+        guard let distortQuad else { return nil }
+        return Homography(rect: localBox, to: distortQuad)
     }
 
     /// A point in the layer's own local (centred, unrotated, unscaled) space, in canvas space.
@@ -365,6 +473,23 @@ struct ObjectTransformFrame: Equatable {
     /// borrowed from it, because that protocol lives in a *Views* file next to `FloatingTransform`
     /// and this is a model type — depending on it would make the whole floating-piece overlay a
     /// prerequisite for compiling the Move box's geometry, and for testing it.
+    /// **`projected` as a matrix** — the box's own local space onto canvas space, for the callers
+    /// that need the map rather than one image point: a Distort drag pulling a canvas touch back into
+    /// local corners, and its inverse.
+    ///
+    /// The factors are in `projected`'s own order — offset, then the two axis scales, then the drawn
+    /// angle, then the position — so the two cannot come to disagree about which end the offset goes
+    /// on. Nil for a degenerate box, exactly where `local(_:)` refuses.
+    var boxToCanvas: CGAffineTransform? {
+        let s = axisScales
+        guard abs(s.x) > .ulpOfOne, abs(s.y) > .ulpOfOne else { return nil }
+        return CGAffineTransform.identity
+            .translatedBy(x: transform.position.x, y: transform.position.y)
+            .rotated(by: drawnAngle)
+            .scaledBy(x: s.x, y: s.y)
+            .translatedBy(x: contentOffset.x, y: contentOffset.y)
+    }
+
     func projected(_ local: CGPoint) -> CGPoint {
         let s = axisScales
         // `contentOffset` is in these same local units and is added *before* the scale and the
@@ -389,10 +514,19 @@ struct ObjectTransformFrame: Equatable {
 
         /// The four that scale. Kept as a property rather than a set literal at each call site so a
         /// seventh case cannot be silently omitted from one of them.
-        var isCorner: Bool {
+        var isCorner: Bool { cornerIndex != nil }
+
+        /// Which corner of a `Quad` this handle is, in `Quad`'s own order, or nil for the two knobs
+        /// and the move band. The two orders are the same one — top-left, top-right, bottom-right,
+        /// bottom-left — and stating the correspondence here is what keeps a Distort drag from
+        /// pulling the corner next to the one under the finger.
+        var cornerIndex: Int? {
             switch self {
-            case .topLeft, .topRight, .bottomRight, .bottomLeft: return true
-            case .rotation, .boxRotation, .body: return false
+            case .topLeft: return 0
+            case .topRight: return 1
+            case .bottomRight: return 2
+            case .bottomLeft: return 3
+            case .rotation, .boxRotation, .body: return nil
             }
         }
 
@@ -431,16 +565,27 @@ struct ObjectTransformFrame: Equatable {
     /// The green knob, along the box's own "up", so it stays over the top edge at any rotation
     /// instead of swinging into the artwork.
     func rotationHandlePosition(offset: CGFloat) -> CGPoint {
-        let topCentre = projected(CGPoint(x: 0, y: -contentSize.height / 2))
+        let topCentre = distortQuad.map { projected(Self.midpoint($0.p0, $0.p1)) }
+            ?? projected(CGPoint(x: 0, y: -contentSize.height / 2))
         let r = drawnAngle
         return CGPoint(x: topCentre.x + sin(r) * offset, y: topCentre.y - cos(r) * offset)
+    }
+
+    /// **Written out rather than shared with the undistorted expression, which it equals in exact
+    /// arithmetic and not in floating point.** `projected` is affine in local coordinates when there
+    /// is no quad, so the midpoint of two projected corners *is* the projection of their midpoint —
+    /// but not to the last bit, and this file's discipline is that a pose which reduces is written
+    /// out so that every un-distorted box draws its knobs where it always did.
+    private static func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+        CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
     }
 
     /// The yellow box-only knob, along the box's own "down" — the exact negation of the green knob's
     /// direction, off the opposite edge, so the two can never land under one finger however small
     /// the box is drawn.
     func boxRotationHandlePosition(offset: CGFloat) -> CGPoint {
-        let bottomCentre = projected(CGPoint(x: 0, y: contentSize.height / 2))
+        let bottomCentre = distortQuad.map { projected(Self.midpoint($0.p3, $0.p2)) }
+            ?? projected(CGPoint(x: 0, y: contentSize.height / 2))
         let r = drawnAngle
         return CGPoint(x: bottomCentre.x - sin(r) * offset, y: bottomCentre.y + cos(r) * offset)
     }
@@ -467,6 +612,11 @@ struct ObjectTransformFrame: Equatable {
     /// rotated rectangle a `LayerTransform` can express and needs no winding rule.
     func contains(_ point: CGPoint) -> Bool {
         guard !isEmpty, let local = local(point) else { return false }
+        // **Asked in local space even when distorted**, which is what keeps the move band exact
+        // rather than nearly right: `local(_:)` is the box's own affine inverted, and containment in
+        // a polygon commutes with an invertible affine, so testing the *local* quad and testing the
+        // canvas one are the same question with one fewer inversion of the pose in it.
+        if let distortQuad { return distortQuad.contains(local) }
         return abs(local.x) <= contentSize.width / 2 && abs(local.y) <= contentSize.height / 2
     }
 
@@ -546,6 +696,43 @@ struct ObjectTransformDrag: Equatable {
     /// stretched whole layer has nowhere to be stored.
     let isFreeform: Bool
 
+    /// Whether a corner drag moves that corner **alone** — Distort — rather than scaling the box.
+    ///
+    /// Latched at touch-down for `isFreeform`'s reason and it is the stronger case of it: Uniform and
+    /// Freeform differ in how much a corner scales, and Distort differs in what a corner *is*, so a
+    /// mid-drag change of the picker would turn a scale into a keystone under a finger already down.
+    /// It wins over `isFreeform` where both are set, since the Move bar's picker is one segmented
+    /// control and cannot be in two modes at once.
+    let isDistort: Bool
+
+    /// The box's four corners in its own local space when the finger went down — the undistorted
+    /// rectangle included, so a first Distort has a quad to move one corner of. Seeded from the box
+    /// as *drawn*, which is what makes the first pulled corner produce an identity residue and move
+    /// no ink at all.
+    let startLocalQuad: Quad
+    /// What the box **stored** when the finger went down: nil for one nobody had distorted. A refused
+    /// delta answers with this rather than with `startLocalQuad`, so a corner dragged somewhere
+    /// undrawable and released leaves an un-distorted box un-distorted instead of stamping it with an
+    /// identity quad that every `distortQuad != nil` reader would then believe.
+    let startDistortQuad: Quad?
+    /// The box `startLocalQuad` is measured against — the units `Homography.isValidQuad`'s area floor
+    /// is in, and the source rectangle of the residue this drag produces. See `BoxDistort`.
+    let boxSize: CGSize
+    /// That same box's `contentOffset`, carried for `boxSize`'s reason.
+    let boxOffset: CGPoint
+    /// Canvas space back into the box's own local space, latched. `ObjectTransformDrag`'s whole
+    /// discipline, applied to the one arm that needs a map rather than a distance: the artist can
+    /// pinch-zoom mid-drag, and a reference frame recomputed per delta would let the second finger
+    /// move what the first is measured against.
+    let canvasToLocal: CGAffineTransform?
+
+    /// What the box stored when the finger went down, in the shape every arm passes through.
+    private var startDistort: BoxDistort? {
+        startDistortQuad.map {
+            BoxDistort(quad: $0, boxSize: boxSize, boxOffset: boxOffset, boxAngle: startBoxAngle)
+        }
+    }
+
     /// Below this the layer is a dot the artist cannot get back — the same floor the pre-port
     /// `handleScalePan` applied. Applied per *axis* under Freeform, so neither can be collapsed
     /// independently of the other.
@@ -570,10 +757,15 @@ struct ObjectTransformDrag: Equatable {
         var aspect: CGFloat
         var boxAngle: CGFloat
         var stretchAxis: CGFloat
+        /// The projective residue this pose carries, with the box it is measured against, or nil for
+        /// a box nobody has distorted — see `BoxDistort`. Every arm but the Distort corner passes
+        /// through what the drag started with, which is what makes a Move, a scale, a turn and a
+        /// Mirror compose *over* a distort rather than discarding it.
+        var distort: BoxDistort?
     }
 
     init(frame: ObjectTransformFrame, handle: ObjectTransformFrame.Handle, at point: CGPoint,
-         freeform: Bool = false) {
+         freeform: Bool = false, distort: Bool = false) {
         self.start = frame.transform
         self.startPoint = point
         self.handle = handle
@@ -582,6 +774,14 @@ struct ObjectTransformDrag: Equatable {
         self.startBoxAngle = frame.boxAngle
         self.startStretchAxis = frame.stretchAxis
         self.isFreeform = freeform
+        self.isDistort = distort
+        self.startLocalQuad = frame.localQuad
+        self.startDistortQuad = frame.distortQuad
+        self.boxSize = frame.contentSize
+        self.boxOffset = frame.contentOffset
+        self.canvasToLocal = frame.boxToCanvas.flatMap {
+            abs($0.a * $0.d - $0.b * $0.c) > .ulpOfOne ? $0.inverted() : nil
+        }
     }
 
     /// The transform this drag produces with the finger at `point`. **Loses the aspect and the box
@@ -599,11 +799,13 @@ struct ObjectTransformDrag: Equatable {
             moved.position = CGPoint(x: start.position.x + (point.x - startPoint.x),
                                      y: start.position.y + (point.y - startPoint.y))
             return Pose(transform: moved, aspect: startAspect, boxAngle: startBoxAngle,
-                        stretchAxis: startStretchAxis)
+                        stretchAxis: startStretchAxis, distort: startDistort)
         case .topLeft, .topRight, .bottomRight, .bottomLeft:
+            if isDistort { return distorted(to: point) }
             guard isFreeform else {
                 return Pose(transform: uniformlyScaled(to: point), aspect: startAspect,
-                            boxAngle: startBoxAngle, stretchAxis: startStretchAxis)
+                            boxAngle: startBoxAngle, stretchAxis: startStretchAxis,
+                            distort: startDistort)
             }
             return stretched(to: point)
         case .rotation:
@@ -614,7 +816,7 @@ struct ObjectTransformDrag: Equatable {
             // thing by `R(δ)` — a rigid turn of the piece about its centre, whatever it has been
             // stretched to. Re-aiming φ would instead re-stretch it.
             return Pose(transform: turned, aspect: startAspect, boxAngle: startBoxAngle,
-                        stretchAxis: startStretchAxis)
+                        stretchAxis: startStretchAxis, distort: startDistort)
         case .boxRotation:
             // **`transform` is `start`, bit for bit.** This is the whole of what makes the box knob
             // chrome: the same angle the green knob adds to `transform.rotation` goes into `boxAngle`
@@ -623,8 +825,47 @@ struct ObjectTransformDrag: Equatable {
             // passed through with it, which is what keeps a turn free of ink *after* a stretch too.
             return Pose(transform: start, aspect: startAspect,
                         boxAngle: startBoxAngle + turnedBy(point),
-                        stretchAxis: startStretchAxis)
+                        stretchAxis: startStretchAxis, distort: startDistort)
         }
+    }
+
+    /// **Distort**: the corner goes where the finger is, the other three do not move, and a delta
+    /// that would make an undrawable quad is refused rather than clamped.
+    ///
+    /// `TextFrameDrag.distortedFrame`'s three rules and `FloatingDistortDrag`'s, verbatim, on the
+    /// third box in the app that offers them. What is shared with those two is
+    /// `Homography.isValidQuad` and nothing else, which is the right amount: each of the three writes
+    /// its answer into a different type — a `TextFrame`'s own corners, a bitmap's local residue, and
+    /// here a `Pose` beside four other fields — and the line around the predicate is `quad[corner] =
+    /// point`.
+    ///
+    /// **The transform is `start`, bit for bit.** A Distort adds a projective residue and changes
+    /// nothing about the box's affine, which is what makes Move, both knobs, Freeform and Mirror
+    /// compose over it: they read and rewrite the affine and pass the quad through untouched.
+    ///
+    /// **A refused delta answers with `startDistortQuad`** — what the box actually stored — so the
+    /// handle feels like it sticks (ADD_TEXT.md §1) and, crucially, an *un*-distorted box that has
+    /// only ever been dragged somewhere undrawable is still un-distorted when the finger lifts.
+    /// Refusing rather than clamping to the last valid quad is what keeps this function pure: "the
+    /// last valid quad" depends on the path the finger took, so two drags ending on the same point
+    /// would produce two different boxes.
+    private func distorted(to point: CGPoint) -> Pose {
+        let refused = Pose(transform: start, aspect: startAspect, boxAngle: startBoxAngle,
+                           stretchAxis: startStretchAxis, distort: startDistort)
+        guard let index = handle.cornerIndex, let canvasToLocal,
+              boxSize.width > Quad.epsilon, boxSize.height > Quad.epsilon else { return refused }
+        var moved = startLocalQuad
+        moved[index] = point.applying(canvasToLocal)
+        // **The quad is centred on the origin and the predicate solves against a box at it**, and
+        // that is exact rather than close: the two solves differ by the prescale
+        // `Homography(rect:to:)` applies, so the weight at each centred box corner equals the weight
+        // at the matching origin-box corner, and convexity, simplicity and area are all
+        // translation-invariant. `FloatingDistortDrag` asks it the same way, for the same reason.
+        guard Homography.isValidQuad(moved, boxSize: boxSize) else { return refused }
+        return Pose(transform: start, aspect: startAspect, boxAngle: startBoxAngle,
+                    stretchAxis: startStretchAxis,
+                    distort: BoxDistort(quad: moved, boxSize: boxSize, boxOffset: boxOffset,
+                                        boxAngle: startBoxAngle))
     }
 
     /// How far the finger has swept about the anchor since touch-down. **Shared by both knobs**, so
@@ -733,7 +974,7 @@ struct ObjectTransformDrag: Equatable {
             // the determinant is positive and `decompose` answers. Refusing the delta beats writing a
             // pose whose `sqrt(aspect)` is NaN — `axisScales`' own note, one level up.
             return Pose(transform: start, aspect: startAspect, boxAngle: startBoxAngle,
-                        stretchAxis: startStretchAxis)
+                        stretchAxis: startStretchAxis, distort: startDistort)
         }
         return pose(rotation: decomposed.rotation, x: decomposed.x, y: decomposed.y,
                     stretchAxis: decomposed.stretchAxis)
@@ -748,7 +989,7 @@ struct ObjectTransformDrag: Equatable {
         stretched.rotation = rotation
         stretched.scale = sqrt(sx * sy)
         return Pose(transform: stretched, aspect: sx / sy, boxAngle: startBoxAngle,
-                    stretchAxis: stretchAxis)
+                    stretchAxis: stretchAxis, distort: startDistort)
     }
 
     /// `point`'s offset from the anchor, turned back into the box's own unrotated axes.
@@ -795,5 +1036,31 @@ enum LiveLayerTransform {
         return CGAffineTransform(translationX: cx, y: cy)
             .concatenating(delta)
             .concatenating(CGAffineTransform(translationX: -cx, y: -cy))
+    }
+
+    /// The same thing for a **projective** pair — a lasso Distort's live drag, where neither the
+    /// latched picture's map nor the current one is an affine.
+    ///
+    /// The conjugation is the same and for the same reason: a `CALayer`'s transform is applied about
+    /// its `anchorPoint`, which is the view's centre by default, so a canvas-space delta has to be
+    /// translated to the centre and back. `Homography`'s `*` is written in the mathematical order —
+    /// leftmost applied last — so the chain reads as the inverse of `viewTransform`'s
+    /// `concatenating` chain above rather than as a different composition.
+    ///
+    /// Nil for a base with no inverse; the caller shows the picture unmoved, exactly as the affine
+    /// arm's own guard does.
+    static func viewMap(from base: Homography, to current: Homography,
+                        inBoundsOfSize size: CGSize) -> Homography? {
+        guard let inverse = base.inverse else { return nil }
+        // **Translate to the centre, delta, translate back — and it is `−c` on the *left*.** A layer's
+        // transform maps a content point `q` to `c + M(q − c)`, so the `M` that shows `delta` is
+        // `T(−c)·delta·T(+c)`. `Homography`'s `*` is leftmost-applied-last, which is the reverse of
+        // `CGAffineTransform.concatenating`'s order, so this chain reads back to front against
+        // `viewTransform`'s and means the same thing. Getting it the other way round is silent for a
+        // pure translation and wrong for every scale, rotation and keystone.
+        let cx = size.width / 2, cy = size.height / 2
+        return Homography.translation(x: -cx, y: -cy)
+            * (current * inverse)
+            * Homography.translation(x: cx, y: cy)
     }
 }

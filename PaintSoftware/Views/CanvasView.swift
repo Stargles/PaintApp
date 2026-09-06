@@ -1683,7 +1683,8 @@ struct CanvasView: UIViewRepresentable {
                 // and writes nothing, so the float's own `contentSize` stays the lift's.
                 overlay.update(isActive: true,
                                frame: CanvasManager.fittedFrame(of: float, at: pose),
-                               canvasScale: canvasContentScale)
+                               canvasScale: canvasContentScale,
+                               distorting: canvasManager.vectorFloatIsDistort)
                 container.bringSubviewToFront(overlay)
                 return
             }
@@ -1727,7 +1728,8 @@ struct CanvasView: UIViewRepresentable {
         private static func pose(of float: VectorFloat) -> ObjectTransformDrag.Pose {
             ObjectTransformDrag.Pose(transform: float.frame.transform, aspect: float.frame.aspect,
                                      boxAngle: float.frame.boxAngle,
-                                     stretchAxis: float.frame.stretchAxis)
+                                     stretchAxis: float.frame.stretchAxis,
+                                     distort: float.distort)
         }
 
         /// Reconciles the layer host and the marching ants with `canvasManager.vectorFloat`, on every
@@ -1782,6 +1784,14 @@ struct CanvasView: UIViewRepresentable {
         /// `CALayer` transform on each of the two marching-ants layers. No allocation, no rasterize,
         /// no model write.
         private func showVectorFloat(_ float: VectorFloat, at pose: ObjectTransformDrag.Pose) {
+            // **The projective arm, taken whenever either end of the delta carries a keystone.** Both
+            // ends matter: a distorted float that is merely being *moved* has an affine delta and a
+            // projective picture, and measuring that with the affine arm would show the piece
+            // un-warped for the length of the drag.
+            if pose.distort != nil || float.latchedDistort != nil {
+                showDistortedVectorFloat(float, at: pose)
+                return
+            }
             let placement = VectorCanvas.affine(from: pose.transform, aspect: pose.aspect,
                                                 stretchAxis: pose.stretchAxis, pivot: float.pivot)
             // The piece is measured from where its *bitmap* sits, which is the lift for an ordinary
@@ -1796,6 +1806,36 @@ struct CanvasView: UIViewRepresentable {
             selectionOverlay?.setLiveSelectionTransform(.affine(written.inverted().concatenating(placement)))
         }
 
+        /// `showVectorFloat`'s projective twin — the same three writes, through `Homography` instead
+        /// of `CGAffineTransform`, and no allocation or rasterize in either.
+        ///
+        /// The bitmap is measured from where it was *rendered* (`latched…`, which for a distort drag
+        /// is always the gesture that ended last, since the latch drops whenever the quad changes) and
+        /// the ants from where the *model's* selection path sits, which is the last nudge. Identical
+        /// to the affine arm's two references; only the currency is wider.
+        private func showDistortedVectorFloat(_ float: VectorFloat, at pose: ObjectTransformDrag.Pose) {
+            guard let host = layerHosts[float.layerID] else { return }
+            let live = CanvasManager.floatPictureMap(of: float, transform: pose.transform,
+                                                     aspect: pose.aspect,
+                                                     stretchAxis: pose.stretchAxis,
+                                                     distort: pose.distort)
+            let latched = CanvasManager.floatPictureMap(of: float,
+                                                        transform: float.latchedFrameTransform,
+                                                        aspect: float.latchedAspect,
+                                                        stretchAxis: float.latchedStretchAxis,
+                                                        distort: float.latchedDistort)
+            let size = canvasManager.canvasSize ?? .zero
+            if let view = LiveLayerTransform.viewMap(from: latched, to: live, inBoundsOfSize: size) {
+                host.strokeView.updateVectorFloat(projective: view.catransform3D)
+            }
+            let written = CanvasManager.floatPictureMap(of: float, transform: float.frame.transform,
+                                                        aspect: float.frame.aspect,
+                                                        stretchAxis: float.frame.stretchAxis,
+                                                        distort: float.distort)
+            guard let inverse = written.inverse else { return }
+            selectionOverlay?.setLiveSelectionTransform(.warped(live * inverse))
+        }
+
         func beginObjectTransformDrag(_ handle: ObjectTransformFrame.Handle, at point: CGPoint) {
             // **Without `beginStructureGesture()`**: `StructureSnapshot` captures `layers` by value
             // while `Cel.vector` is a class reference, so it would record a step that reverts
@@ -1804,9 +1844,19 @@ struct CanvasView: UIViewRepresentable {
             // **The mode is latched here, once**, with the rest of the drag — see
             // `ObjectTransformDrag.isFreeform`. The Move bar's picker stays live while a piece
             // floats, and reading it per delta would change what the finger already down means.
-            activeVectorFloatDrag = ObjectTransformDrag(frame: float.frame, handle: handle,
+            //
+            // **Built from the box as *drawn*, not from `float.frame`.** A Distort corner is measured
+            // against the box the artist can see — the re-fitted one (LASSO_MOVE.md §5.22), or the
+            // frozen distort box once a corner has been pulled — and `BoxDistort` carries that box
+            // with the quad so the residue starts as the identity and the first pulled corner moves
+            // no ink at all. The other five handles are blind to which frame they are handed: every
+            // field they read (`transform`, `aspect`, `boxAngle`, `stretchAxis`, `centre`) is
+            // identical in the two, since the fit writes only `contentSize` and `contentOffset`.
+            let drawn = CanvasManager.fittedFrame(of: float, at: Self.pose(of: float))
+            activeVectorFloatDrag = ObjectTransformDrag(frame: drawn, handle: handle,
                                                         at: point,
-                                                        freeform: canvasManager.vectorFloatIsFreeform)
+                                                        freeform: canvasManager.vectorFloatIsFreeform,
+                                                        distort: canvasManager.vectorFloatIsDistort)
             // **A box-only turn never arms the latch.** `beginVectorFloatDrag` re-suppresses the
             // piece so a drag can be shown as a Core Animation transform on its own bitmap; this
             // gesture moves no ink, so there is nothing to show — and on a `mayDiverge` float, which
@@ -1836,7 +1886,8 @@ struct CanvasView: UIViewRepresentable {
                 // `PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts` is the measurement.
                 transformOverlay?.update(isActive: true,
                                          frame: CanvasManager.fittedFrame(of: float, at: pose),
-                                         canvasScale: canvasContentScale)
+                                         canvasScale: canvasContentScale,
+                                         distorting: canvasManager.vectorFloatIsDistort)
             }
         }
 
@@ -1859,7 +1910,8 @@ struct CanvasView: UIViewRepresentable {
                     // One gesture, one nudge, one undo step. No `commitStructureGesture` — see
                     // `beginObjectTransformDrag`.
                     canvasManager.nudgeVectorFloat(to: pose.transform, aspect: pose.aspect,
-                                                   stretchAxis: pose.stretchAxis)
+                                                   stretchAxis: pose.stretchAxis,
+                                                   distort: .some(pose.distort))
                 }
             }
             updateVectorFloat()

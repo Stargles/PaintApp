@@ -225,6 +225,18 @@ extension CanvasManager {
         return pose.concatenating(delta).concatenating(inverse)
     }
 
+    /// The same conjugation for a **projective** delta — a lasso Distort at a posed frame.
+    ///
+    /// `P·D·P⁻¹` is the same expression with the same argument: the box, the finger and the latched
+    /// bitmap are all in the posed space and `vector.elements` is at rest, so a screen delta has to be
+    /// pulled back through the pose or the piece moves twice. Conjugating a homography by an affine is
+    /// a homography, so nothing about the shape of the answer changes — which is why this is an
+    /// overload rather than a second idea.
+    static func restDelta(_ delta: Homography, pose: CGAffineTransform?) -> Homography {
+        guard let pose, !pose.isIdentity, let inverse = invertedAffine(pose) else { return delta }
+        return Homography(inverse) * delta * Homography(pose)
+    }
+
     /// **The loop as drawn, plus the loop as each posed element has to be asked about it.**
     ///
     /// One `CGPath` per *distinct* pose rather than one per element — a cel channel carries every

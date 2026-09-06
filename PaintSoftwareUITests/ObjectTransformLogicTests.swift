@@ -204,7 +204,7 @@ final class ObjectTransformLogicTests: XCTestCase {
     func testHandlesAreTheSameSizeOnScreenAtEveryZoom() {
         let view = ObjectTransformOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 1024))
         for canvasScale in [CGFloat(0.125), 0.3, 0.5, 1, 2, 4] {
-            view.update(isActive: true, frame: upright(), canvasScale: canvasScale)
+            view.update(isActive: true, frame: upright(), canvasScale: canvasScale, distorting: false)
             let chrome = view.drawnChrome
             XCTAssertEqual(chrome.handles.count, 6, "six grips at \(canvasScale)×")
             for entry in chrome.handles {
@@ -224,7 +224,7 @@ final class ObjectTransformLogicTests: XCTestCase {
         let view = ObjectTransformOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 1024))
         for canvasScale in [CGFloat(0.125), 0.3, 0.5, 1, 2, 4] {
             let frame = upright()
-            view.update(isActive: true, frame: frame, canvasScale: canvasScale)
+            view.update(isActive: true, frame: frame, canvasScale: canvasScale, distorting: false)
             let corner = frame.corners[0]
             // Outward along the diagonal from the top-left grip, at a fixed distance *on screen*.
             func probe(screenPoints: CGFloat) -> CGPoint {
@@ -252,7 +252,7 @@ final class ObjectTransformLogicTests: XCTestCase {
     func testAScaleChangeMidDragResizesTheChromeAndMovesNothingElse() {
         let view = ObjectTransformOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 1024))
         let frame = upright()
-        view.update(isActive: true, frame: frame, canvasScale: 1)
+        view.update(isActive: true, frame: frame, canvasScale: 1, distorting: false)
         let before = view.drawnChrome.handles.first { $0.handle == .topLeft }!
 
         let drag = ObjectTransformDrag(frame: frame, handle: .topLeft, at: frame.corners[0])
@@ -272,9 +272,9 @@ final class ObjectTransformLogicTests: XCTestCase {
 
     func testDeactivatingClearsTheChrome() {
         let view = ObjectTransformOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 1024))
-        view.update(isActive: true, frame: upright(), canvasScale: 1)
+        view.update(isActive: true, frame: upright(), canvasScale: 1, distorting: false)
         XCTAssertTrue(view.isActive)
-        view.update(isActive: false, frame: upright(), canvasScale: 1)
+        view.update(isActive: false, frame: upright(), canvasScale: 1, distorting: false)
         XCTAssertFalse(view.isActive)
         XCTAssertTrue(view.isHidden)
         XCTAssertTrue(view.drawnChrome.handles.isEmpty)
@@ -284,7 +284,7 @@ final class ObjectTransformLogicTests: XCTestCase {
 
     func testAnActiveBoxClaimsItsTargetsAndDeclinesEverythingElse() {
         let view = ObjectTransformOverlayView(frame: CGRect(x: 0, y: 0, width: 2048, height: 1024))
-        view.update(isActive: true, frame: upright(), canvasScale: 1)
+        view.update(isActive: true, frame: upright(), canvasScale: 1, distorting: false)
         XCTAssertNotNil(view.hitTest(CGPoint(x: 1000, y: 500), with: nil), "the move band")
         XCTAssertNotNil(view.hitTest(CGPoint(x: 800, y: 350), with: nil), "a corner grip")
         XCTAssertNil(view.hitTest(CGPoint(x: 60, y: 60), with: nil),
@@ -740,7 +740,7 @@ final class ObjectTransformLogicTests: XCTestCase {
                                                                        scale: 1, rotation: 0),
                                              contentSize: CGSize(width: 20, height: 20),
                                              aspect: 1, boxAngle: 0.5)
-            view.update(isActive: true, frame: frame, canvasScale: canvasScale)
+            view.update(isActive: true, frame: frame, canvasScale: canvasScale, distorting: false)
             let green = frame.rotationHandlePosition(offset: view.rotationOffset)
             let yellow = frame.boxRotationHandlePosition(offset: view.rotationOffset)
             XCTAssertGreaterThan(hypot(green.x - yellow.x, green.y - yellow.y), 2 * view.handleReach,

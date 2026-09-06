@@ -105,6 +105,10 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
     /// point; the starting transform and the anchor are latched in the model, on
     /// `ObjectTransformDrag`.
     private var activeHandle: ObjectTransformFrame.Handle?
+    /// Whether a corner grip currently means Distort — the Move bar's mode, pushed down so the four
+    /// corners can say on the canvas what the picker says in the bar. Chrome only: nothing here reads
+    /// it but the dot's colour, and the geometry is `ObjectTransformFrame`'s throughout.
+    private(set) var distorting = false
 
     // MARK: - Init
 
@@ -139,7 +143,8 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
     /// The whole of the view's public surface, called from
     /// `CanvasView.Coordinator.updateTransformOverlay` on every SwiftUI pass — so, like
     /// `TextTransformOverlayView.update`, it has to be cheap when nothing changed.
-    func update(isActive: Bool, frame: ObjectTransformFrame, canvasScale: CGFloat) {
+    func update(isActive: Bool, frame: ObjectTransformFrame, canvasScale: CGFloat,
+                distorting: Bool) {
         self.canvasScale = canvasScale
         guard isActive, !frame.isEmpty else {
             deactivate()
@@ -150,8 +155,9 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
             isHidden = false
             isUserInteractionEnabled = true
         }
-        let sameShape = frameModel == frame
+        let sameShape = frameModel == frame && self.distorting == distorting
         frameModel = frame
+        self.distorting = distorting
         // Rebuild only when the box moved; otherwise leave the layers alone. Tearing sublayers down
         // and re-adding them on every pass is what made the shape overlay's handles blink.
         if sameShape, !handles.isEmpty { return }
@@ -165,6 +171,7 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
         isUserInteractionEnabled = false
         frameModel = nil
         activeHandle = nil
+        distorting = false
         clearHandles()
         outlineLayer.path = nil
     }
@@ -231,11 +238,17 @@ final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
             // the knob that turns the ink, and `systemOrange` already means "distort corner" on a
             // text box (`TextTransformOverlayView.rebuildHandles`), so a third meaning for it would
             // be one colour saying two things across two overlays.
+            //
+            // **Orange for a corner that distorts**, which is the third meaning that paragraph said
+            // orange already had and is now the *same* meaning reaching a second overlay:
+            // `TextTransformOverlayView.rebuildHandles` paints a text box's distort corners orange,
+            // and this is the same gesture on a different box. A corner that scales stays white, so
+            // the picker's setting is legible on the canvas rather than only in the bar.
             let colour: UIColor
             switch entry.handle {
             case .rotation:    colour = .systemGreen
             case .boxRotation: colour = .systemYellow
-            default:           colour = .white
+            default:           colour = distorting ? .systemOrange : .white
             }
             let isKnob = entry.handle == .rotation || entry.handle == .boxRotation
             let size = isKnob ? rotationHandleSize : handleSize
