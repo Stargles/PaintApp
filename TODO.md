@@ -48,54 +48,6 @@ rather than assuming it still holds.
 
 ---
 
-## (39) The timeline freeze — a menu popover eats every drag
-
-**Status** — **built on `tmp/menufix`, awaiting merge.** (a) the pinch anchor and (b) the dead area
-below the last row were fixed earlier and are gone from this item. Delete this whole entry when the
-branch lands.
-
-**While a timeline menu popover is up, every drag on the timeline is swallowed whole** — the track does
-not scroll, the ruler does not scrub, and the popover does not dismiss. Only a tap dismisses it.
-MEASURED: with the menu up a drag moves the cel block **0.0 pt**; with it gone the same drag moves it
-**369 pt**.
-
-`.popover` presents behind a screen-covering `_UIPassthroughGateGestureRecognizer`. `hitTest` still
-returns the timeline row — the hierarchy is intact — but `touchesBegan` never fires. That gate is also
-what prunes the recogniser set two earlier analyses misread as a detached row view.
-
-**Three diagnoses were wrong before this one**, which is why the evidence doc
-[docs/bug-evidence/timeline-freeze-2026-09-06.md](docs/bug-evidence/timeline-freeze-2026-09-06.md) is
-worth reading before touching this: a detached view (refuted — the row's own delegate-less recogniser
-was missing too), `require(toFail:)` accumulation (refuted — the failure-requirement set deduplicates
-and holds weak references), and a cel created past the scene end (driven five ways, never reproduced).
-**Nobody had reconstructed the gestures**: almost every "dead" touch in the owner's trace is a swipe,
-which is *supposed* to scroll and leaves no model event, and every genuine tap in it worked.
-
-**The decision, 2026-09-06 — stop using `.popover` for these menus rather than punching a hole in it.**
-`UIPopoverPresentationController.passthroughViews` is the smaller change and lets the drag through, but
-it keeps the menu up while the artist scrubs — and a cel menu names a *specific block*, so scrolling out
-from under it leaves the menu pointing at something else. That is a worse bug than the one being fixed.
-Reaching the presentation controller from SwiftUI is fragile too, and this way fixes the class rather
-than one instance.
-
-**Built 2026-09-06 on `tmp/menufix`.** `AnchoredMenu` draws all four inside the timeline's own
-hierarchy; a `PassiveTouchDownObserver` on the window hears the touch that dismisses them **without
-consuming it**, so one drag dismisses the menu and scrolls the track. MEASURED in the simulator: with
-the block menu up, one 250 pt drag both closed it and scrolled the ruler from frames 1–28 to 18–45.
-- [x] Anchored inside the app's own hierarchy — no full-screen presentation.
-- [x] Dismiss on a tap outside and on any gesture starting elsewhere, letting that gesture through.
-- [x] All four found and converted: `timelineSlotMenu`, `onionSkinOptions`, `interpolateOptions`,
-      `graphChannelList` — each driven and screenshotted.
-- [x] Sweep done; see the note below.
-
-**`MenuInterruptionUITests`' third test was a *characterization* of the defect, not a regression test
-for it** — it asserted the drag moved the block 0 pt and the menu survived, so it was **green against
-the broken app** (MEASURED at `7006e72`). Its own doc comment said so: *"it goes red when somebody
-fixes it"*. It is inverted now, and joined by a tap-outside test and one that opens all four menus
-from a cold start.
-
----
-
 ## (47) A finger tap bakes a Move while the pen-only toggle is on
 
 **Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
