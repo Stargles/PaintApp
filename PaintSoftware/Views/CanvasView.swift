@@ -23,7 +23,10 @@ struct CanvasView: UIViewRepresentable {
         host.accessibilityLabel = "sandwich:off entries:0 shape:none text:none"
         host.canvasManager = canvasManager
 
-        let container = UIView()
+        // **`CanvasContainerView`, not a bare `UIView`** — its bounds are the document exactly
+        // (`hostBoundsDidChange`), and the subclass is what lets a transform grip drawn past the
+        // canvas edge still receive a touch. See its doc comment for the whole of it.
+        let container = CanvasContainerView()
         container.backgroundColor = .clear
         container.isMultipleTouchEnabled = true
         host.addSubview(container)

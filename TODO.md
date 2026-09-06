@@ -176,28 +176,6 @@ a finger tap does *outside* a Move (pan, or nothing), never commit.
 
 ---
 
-## (48) A Move node outside the canvas cannot be grabbed
-
-**Status** — not started. Small, and it makes a too-large selection awkward to fix.
-
-> *"right now I cannot grab a move node that is outside of the canvas. If the box is too big to fit on
-> the canvas, then I got to first move the box to bring one of the nodes inside the canvas and then tap
-> that node to scale it down."*
-
-The handles are hit-tested inside the canvas view's bounds, so a node past the edge has nowhere to
-receive a touch. Two shapes of answer, and the choice is worth making deliberately rather than
-reaching for the first: let the overlay extend past the canvas and receive touches out there, or clamp
-the *drawn* handle to the canvas edge so it stays reachable while the box itself stays where it is. The
-second keeps every node grabbable at any zoom and is what several editors do; it also means the handle
-is no longer at the corner it represents, which needs to read correctly while dragging.
-
-**Left to build**
-- [ ] Pick the approach; the clamped-handle one probably wants a visual cue that the node is off-canvas.
-- [ ] Applies to the raster float, the vector float and the container-pose box — check all three, since
-      they do not share an overlay yet (see (12)'s last bullet).
-
----
-
 ## (49) The bottom options panel is too tall and does not follow the timeline
 
 **Status** — not started. Affects Lasso, Move, Add Text and the compositor effect settings — one panel

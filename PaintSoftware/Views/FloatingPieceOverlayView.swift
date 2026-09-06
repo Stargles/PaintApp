@@ -5,7 +5,7 @@ import UIKit
 /// top edge — rather than multi-touch gestures. Lives in `CanvasView`'s `container` above
 /// `SelectionOverlayView`, so its coordinate space matches canvas points exactly (same placement and
 /// handle-drag technique as the object-layer work's `ObjectTransformOverlayView`).
-final class FloatingPieceOverlayView: TransformOverlayView {
+final class FloatingPieceOverlayView: TransformOverlayView, OffCanvasHandleHitTesting {
     /// **One callback carrying both halves of the pose**, not two — see
     /// `CanvasManager.updateFloatingPose(transform:distortQuad:)`. The quad is nil from every arm
     /// that does not distort, which is how "this gesture left the corners alone" is said.
@@ -115,6 +115,28 @@ final class FloatingPieceOverlayView: TransformOverlayView {
         isUserInteractionEnabled = isInteractive
         guard newPiece != nil else { return }
         layoutFromPiece()
+    }
+
+    /// The grips, for a point outside the canvas rectangle that `CanvasContainerView` would
+    /// otherwise never pass on — a box scaled larger than the document puts all four corners out
+    /// there, and until 2026-09-06 none of them could be grabbed.
+    ///
+    /// **Only a grip, never this view itself**, which is the whole reason this is a separate entry
+    /// point rather than a call to `hitTest`: `TransformOverlayView.point(inside:)` returns `true`
+    /// unconditionally, so `hitTest` here answers *every* point with the overlay, and off the canvas
+    /// that would hand the tap-away commit every touch on the black surround.
+    ///
+    /// Front to back over `subviews`, rather than over the three stored arrays, so the answer stays
+    /// the z-order UIKit would have used if it had asked.
+    func offCanvasHandle(at point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard !isHidden, isUserInteractionEnabled else { return nil }
+        // `!handle.isHidden` is load-bearing rather than defensive: `layoutFromPiece` hides the four
+        // edge grips outside Freeform while leaving them positioned, so without it a Uniform box
+        // would be single-axis-resizable off the canvas and nowhere else.
+        for case let handle as TransformHandleView in subviews.reversed() where !handle.isHidden {
+            if handle.point(inside: handle.convert(point, from: self), with: event) { return handle }
+        }
+        return nil
     }
 
     private func layoutFromPiece() {

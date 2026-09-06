@@ -47,7 +47,7 @@ import UIKit
 /// `CanvasTouchOwner`: a touch on a grip is `.objectTransformOverlay` and a touch away from it is
 /// `.moveBoxCommit`. Owner's ruling, 2026-08-22 — before it, a touch away from a vector Move box did
 /// nothing at all.
-final class ObjectTransformOverlayView: UIView {
+final class ObjectTransformOverlayView: UIView, OffCanvasHandleHitTesting {
 
     // MARK: - Callbacks
 
@@ -272,6 +272,16 @@ final class ObjectTransformOverlayView: UIView {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard claimsTouch(at: point) else { return nil }
+        return self
+    }
+
+    /// The grip half of `claimsTouch`, for a point the canvas container would otherwise never pass
+    /// on — see `CanvasContainerView`. **The move band is deliberately excluded**: a box scaled
+    /// larger than the document has a body covering the whole surround, and claiming that would take
+    /// every off-canvas touch instead of the five knobs the owner asked to be able to reach.
+    /// Through `claimsTouch` rather than beside it, so the three live-ness gates are stated once.
+    func offCanvasHandle(at point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard claimsTouch(at: point), target(at: point)?.isDrawn == true else { return nil }
         return self
     }
 
