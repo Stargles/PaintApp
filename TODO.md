@@ -42,103 +42,6 @@ rather than assuming it still holds.
 
 ---
 
-## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
-
-**Status** — partly built. **The general undo/redo work shipped 2026-09-06** (PERFORMANCE.md §11.11a);
-what is left is two cases that are blocked on something a rectangle cannot fix.
-
-> *"Undoing and redoing while there are a lot of strokes can be laggy, a few hundred milliseconds
-> sluggish."* — 2026-09-06, after a first fix landed too narrowly
-
-**What the artist is waiting for was measured rather than reasoned about, and it settles the shape of
-the complaint.** The main-thread span of an undo press is **0.44–7.84 ms** across 200–4,000 strokes;
-the render it causes is **5–2,275 ms**, 96–99.7% of the wait, and off the main thread. So the app
-never stops responding — "laggy" is the old picture standing there. The **raster** arm is 0.02 ms a
-press at both 2048x1024 and 4096² and needs nothing at all.
-
-**The redo was 5.6–11.3x its own undo on the same one stroke**, which is the commonest pair of presses
-in the app, and this item had written that off as permanent. It was wrong: the ink coming back *had*
-been drawn, immediately before, by the walk that measured it. `VectorCanvas.vacatedInk` keeps that
-measurement while the id is out of the list. MEASURED in Release: a redo at 1,000 strokes **571 →
-51 ms**, at 4,000 **2,275 → 171 ms**.
-
-**Left to build — and note this item's earlier "there is no design left to do" was wrong twice.**
-- [ ] **A departing fill, image, text object or video forces `.everything`** whatever rectangle the
-      caller passes, because `renderLocalContent` measures no footprint for those kinds. So the undo of
-      a fill and the undo of a text commit still pay the whole cel, while their redos no longer do.
-      The fix is to measure a fill's path bounds into `paintedBounds` — exact, unlike a dab walk — and
-      teach `restoreDamage`'s departing loop to accept it. A text object's glyph extent and a placed
-      image's quad are the same question.
-- [ ] **A rewrite in place cannot be bounded by this mechanism at all.** Recolour, Apply Brush, a text
-      re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, and **every
-      lasso-move nudge** — `drawn(_:through:widthScale:)` preserves an element's id by explicit design.
-      These declare `.rewritesInPlace` now instead of saying nothing, which is the honest state and not
-      a fix. Bounding them needs a different idea: an id whose *content* changed needs its old
-      footprint forgotten and its new one bounded, and no rectangle from a caller supplies that.
-- [ ] **The four call sites with the tightest rectangles are exactly the ones whose departures are not
-      strokes**, which is why the "measure what was replaced" recipe never reached them.
-
-**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11, §11.11a.
-
----
-
-## (47) A finger tap bakes a Move while the pen-only toggle is on
-
-**Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
-
-> *"when you are moving an object with pen only draw on and then tap somewhere else on the canvas with
-> your hand, it bakes the move. It should only do that when the pen is tapped on the canvas. Currently
-> the pen part works, its just the finger tap bake that I want to change."*
-
-`pencilOnlyDrawing` already reaches the canvas views (`CanvasManager.pencilOnlyDrawing`, pushed onto
-`strokeView` and the overlay in `CanvasView`), so the setting is known where the tap is handled — the
-commit-on-tap path simply is not consulting it. A finger tap while the toggle is on should do whatever
-a finger tap does *outside* a Move (pan, or nothing), never commit.
-
-**Left to build**
-- [ ] Find the tap that commits a float and gate it on touch type when `pencilOnlyDrawing` is set.
-- [ ] Check the same hole in the other commit-on-tap gestures — text, shape, the interactive fill —
-      rather than fixing only the one that was reported.
-- [ ] A test that a finger tap with the toggle on leaves the float lifted. **XCUITest cannot synthesise
-      a pencil**, so the pen half cannot be driven from a test; assert on the touch-type decision
-      directly rather than writing a UI test that silently downgrades to a finger.
-
----
-
-## (12) Distort keyed across frames
-
-**Status** — partly built. **The raster tier and the ink tier both ship.** What is left is the
-*animated* one: a projective quad keyed over time, which is KEYFRAMES.md §8 stage 5b.
-
-> *"The distort in move feature must still be built and integrated with keyframes."* — 2026-09-06
-
-A four-corner drag works on the raster floating piece (2026-09-02) and on a **lassoed drawing**
-(2026-09-06). The ink tier's refusal — *"Distort needs a pixel selection"* — was a measurement that
-had already expired: `VectorStroke.size` is a scalar and a homography's local scale spans 1.3x-8.5x
-across one quad, but KEYFRAMES §8 stage 4's rest-space dab bake merged on 2026-09-02 and
-`BrushStamper.DabPose` answers `localScale` and `rotation` **per dab**, so there is no single scalar on
-that path to be wrong. `VectorCanvas.mapping(_:through: Homography)` is the entry point;
-`VectorStroke.distort` is what a commit stores — the **map** plus the artist's own width, with the
-pre-image rebuilt at render by `effectiveWalk`, which is why no cutter needed a rest-space arm.
-What is refused now is a *kind*: a placed image or a video stores six numbers and a mirror bit where a
-homography needs eight, so a float carrying one says so in a sentence.
-
-**Left to build**
-- [ ] **Keyed across frames — KEYFRAMES.md §8 stage 5b.** `TransformKeyframes` only ever writes a
-      `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` linearises a
-      projective pose at the box centre — wrong by up to 315% at a strong keystone. Store a genuinely
-      projective quad, route the two render reads in `TransformTrack` through `DabPose(Homography)`
-      instead of `affineOrLinearised`, blend two projective quads (`PoseInterpolation`), and lift
-      `distortUnavailableReason`'s container-pose arm. The engine below it is done: `posing`'s
-      `Homography` overload, `restDelta`'s projective twin and `composedWalk` all exist and are tested.
-- [ ] Port `FloatingPieceOverlayView` onto the stage 4 handle pattern (this one is a BUGS.md entry and
-      may belong there instead).
-
-**Spec** LASSO_MOVE.md §0 *"Distort, on a lassoed drawing"* · KEYFRAMES.md §8 stage 5b. **§5 is
-twenty-six owner rulings; do not re-litigate any of them.**
-
----
-
 ## (39) The timeline freeze — a menu popover eats every drag
 
 **Status** — reproduced and measured; the fix is chosen and unbuilt. (a) the pinch anchor and (b) the
@@ -213,6 +116,105 @@ deliberately hidden.
 - [ ] Apply the visibility guard to the adopted-cel arm.
 - [ ] Pin it: a hidden upper layer with a cel past the survivor's last frame contributes nothing.
 
+## (47) A finger tap bakes a Move while the pen-only toggle is on
+
+**Status** — not started. Small, and it costs the owner a mis-bake every time it happens.
+
+> *"when you are moving an object with pen only draw on and then tap somewhere else on the canvas with
+> your hand, it bakes the move. It should only do that when the pen is tapped on the canvas. Currently
+> the pen part works, its just the finger tap bake that I want to change."*
+
+`pencilOnlyDrawing` already reaches the canvas views (`CanvasManager.pencilOnlyDrawing`, pushed onto
+`strokeView` and the overlay in `CanvasView`), so the setting is known where the tap is handled — the
+commit-on-tap path simply is not consulting it. A finger tap while the toggle is on should do whatever
+a finger tap does *outside* a Move (pan, or nothing), never commit.
+
+**Left to build**
+- [ ] Find the tap that commits a float and gate it on touch type when `pencilOnlyDrawing` is set.
+- [ ] Check the same hole in the other commit-on-tap gestures — text, shape, the interactive fill —
+      rather than fixing only the one that was reported.
+- [ ] A test that a finger tap with the toggle on leaves the float lifted. **XCUITest cannot synthesise
+      a pencil**, so the pen half cannot be driven from a test; assert on the touch-type decision
+      directly rather than writing a UI test that silently downgrades to a finger.
+
+---
+
+## (12) Distort keyed across frames
+
+**Status** — partly built. **The raster tier and the ink tier both ship.** What is left is the
+*animated* one: a projective quad keyed over time, which is KEYFRAMES.md §8 stage 5b.
+
+> *"The distort in move feature must still be built and integrated with keyframes."* — 2026-09-06
+
+A four-corner drag works on the raster floating piece (2026-09-02) and on a **lassoed drawing**
+(2026-09-06). The ink tier's refusal — *"Distort needs a pixel selection"* — was a measurement that
+had already expired: `VectorStroke.size` is a scalar and a homography's local scale spans 1.3x-8.5x
+across one quad, but KEYFRAMES §8 stage 4's rest-space dab bake merged on 2026-09-02 and
+`BrushStamper.DabPose` answers `localScale` and `rotation` **per dab**, so there is no single scalar on
+that path to be wrong. `VectorCanvas.mapping(_:through: Homography)` is the entry point;
+`VectorStroke.distort` is what a commit stores — the **map** plus the artist's own width, with the
+pre-image rebuilt at render by `effectiveWalk`, which is why no cutter needed a rest-space arm.
+What is refused now is a *kind*: a placed image or a video stores six numbers and a mirror bit where a
+homography needs eight, so a float carrying one says so in a sentence.
+
+**Left to build**
+- [ ] **Keyed across frames — KEYFRAMES.md §8 stage 5b.** `TransformKeyframes` only ever writes a
+      `PoseQuad` built from a `CGAffineTransform`, and `PoseQuad.affineOrLinearised` linearises a
+      projective pose at the box centre — wrong by up to 315% at a strong keystone. Store a genuinely
+      projective quad, route the two render reads in `TransformTrack` through `DabPose(Homography)`
+      instead of `affineOrLinearised`, blend two projective quads (`PoseInterpolation`), and lift
+      `distortUnavailableReason`'s container-pose arm. The engine below it is done: `posing`'s
+      `Homography` overload, `restDelta`'s projective twin and `composedWalk` all exist and are tested.
+- [ ] Port `FloatingPieceOverlayView` onto the stage 4 handle pattern (this one is a BUGS.md entry and
+      may belong there instead).
+
+**Spec** LASSO_MOVE.md §0 *"Distort, on a lassoed drawing"* · KEYFRAMES.md §8 stage 5b. **§5 is
+twenty-six owner rulings; do not re-litigate any of them.**
+
+---
+
+## (41) Mid-list edits and two kinds of undo that still re-stamp the whole cel
+
+**Status** — partly built, and **the owner has accepted where it stands**: *"Honestly it isnt that
+bad so it can be marked as done."* What is left is real but is nobody's priority until it bites again.
+The general undo/redo work shipped 2026-09-06 (PERFORMANCE.md §11.11a);
+what is left is two cases that are blocked on something a rectangle cannot fix.
+
+> *"Undoing and redoing while there are a lot of strokes can be laggy, a few hundred milliseconds
+> sluggish."* — 2026-09-06, after a first fix landed too narrowly
+
+**What the artist is waiting for was measured rather than reasoned about, and it settles the shape of
+the complaint.** The main-thread span of an undo press is **0.44–7.84 ms** across 200–4,000 strokes;
+the render it causes is **5–2,275 ms**, 96–99.7% of the wait, and off the main thread. So the app
+never stops responding — "laggy" is the old picture standing there. The **raster** arm is 0.02 ms a
+press at both 2048x1024 and 4096² and needs nothing at all.
+
+**The redo was 5.6–11.3x its own undo on the same one stroke**, which is the commonest pair of presses
+in the app, and this item had written that off as permanent. It was wrong: the ink coming back *had*
+been drawn, immediately before, by the walk that measured it. `VectorCanvas.vacatedInk` keeps that
+measurement while the id is out of the list. MEASURED in Release: a redo at 1,000 strokes **571 →
+51 ms**, at 4,000 **2,275 → 171 ms**.
+
+**Left to build — and note this item's earlier "there is no design left to do" was wrong twice.**
+- [ ] **A departing fill, image, text object or video forces `.everything`** whatever rectangle the
+      caller passes, because `renderLocalContent` measures no footprint for those kinds. So the undo of
+      a fill and the undo of a text commit still pay the whole cel, while their redos no longer do.
+      The fix is to measure a fill's path bounds into `paintedBounds` — exact, unlike a dab walk — and
+      teach `restoreDamage`'s departing loop to accept it. A text object's glyph extent and a placed
+      image's quad are the same question.
+- [ ] **A rewrite in place cannot be bounded by this mechanism at all.** Recolour, Apply Brush, a text
+      re-edit, video crop and speed, motion-group retags, `keyPoseRestoringRest`, and **every
+      lasso-move nudge** — `drawn(_:through:widthScale:)` preserves an element's id by explicit design.
+      These declare `.rewritesInPlace` now instead of saying nothing, which is the honest state and not
+      a fix. Bounding them needs a different idea: an id whose *content* changed needs its old
+      footprint forgotten and its new one bounded, and no rectangle from a caller supplies that.
+- [ ] **The four call sites with the tightest rectangles are exactly the ones whose departures are not
+      strokes**, which is why the "measure what was replaced" recipe never reached them.
+
+**Blocks** (42). **Spec** PERFORMANCE.md §11, §11.10, §11.11, §11.11a.
+
+---
+
 ## (21) Keyframes — four stages and four gaps
 
 **Status** — partly built. Stages 0, 1, 2, 2b, 3a, 3b, 4, 5, 5a and 8 are merged; 6b was delivered by
@@ -260,7 +262,11 @@ disappearing stroke with it.
 
 ## (42) Editing the strokes inside a selection, not just their colour
 
-**Status** — not started, and blocked on (41)'s remainder.
+**Status** — not started, and **its prerequisite got harder rather than nearer**. A slider tick on a
+selection is a *rewrite in place*, which is precisely the case (41) established cannot be bounded by
+the damage-rectangle mechanism at all — the element keeps its id, so no rectangle from a caller says
+which footprint stopped being true. This item needs that solved first, and it is a different idea from
+the one that made undo cheap.
 
 > *"i plan to replace the change color of selection into a better tool where you can also change the
 > brush type, size, etc. of the strokes inside the selection. The color changer also shouldnt be the
@@ -363,6 +369,12 @@ the specs, so the scope is now known rather than guessed.
 - [ ] **Two commit shas cited in this repo's docs are not on `main`** (`2fa1725`, `83f7c0d` — pre-rewrite
       orphans). Sweep for others.
 - [ ] Decide whether BRUSH_ENGINE_EXTENSIBILITY.md and REFACTOR_BASELINE.md still earn their place.
+- [ ] `git stash list` holds one entry from 2026-08-14 — *"Abandoned vector-interpolation index
+      snapshot, 134 commits behind"* — labelled as cleared with the owner's approval but still present.
+      CLAUDE.md bans stash in this repo because it is shared across worktrees. Needs the owner's word
+      before it is dropped.
+- [ ] Re-run the 2026-09-06 audit itself. It found fourteen false assertions in this file and a dozen
+      more across the specs; a session that shipped this much will have introduced its own.
 
 ---
 
