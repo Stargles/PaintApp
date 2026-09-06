@@ -191,13 +191,13 @@ final class FrameExportSession: ObservableObject {
         case .video:
             range = FrameExport.frameRange(playbackStart: manager.playbackStartFrame,
                                            playbackEnd: manager.playbackEndFrame,
-                                           sceneFrameCount: manager.sceneFrameCount)
+                                           contentEndFrame: manager.contentEndFrame)
         case .frame(let frame):
-            // One frame goes through the same clamp, so a playhead parked out past the laid-out
-            // track cannot ask for a frame `BakeQueue` would silently refuse to hold — which is a
+            // One frame goes through the same clamp, so a playhead parked out past the end of the
+            // scene cannot ask for a frame `BakeQueue` would silently refuse to hold — which is a
             // wait that never ends rather than an error.
             range = FrameExport.frameRange(playbackStart: frame, playbackEnd: frame,
-                                           sceneFrameCount: manager.sceneFrameCount)
+                                           contentEndFrame: manager.contentEndFrame)
         }
         guard let range else {
             phase = .failed(Failure.nothingToExport.sentence)

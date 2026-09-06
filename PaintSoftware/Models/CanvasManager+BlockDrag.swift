@@ -138,7 +138,6 @@ extension CanvasManager {
                 if position < gaps.count { cursor += gaps[position] }
             }
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-            sceneFrameCount = max(sceneFrameCount, cursor)
         }
     }
 
@@ -213,7 +212,6 @@ extension CanvasManager {
             if let moved = layers[targetIndex].cels.firstIndex(where: { $0.id == celID }) {
                 scheduleThumbnailRegen(layerIndex: targetIndex, celIndex: moved)
             }
-            sceneFrameCount = max(sceneFrameCount, layers[targetIndex].cels.map(\.endFrame).max() ?? 0)
             currentLayerIndex = targetIndex
         }
         return true

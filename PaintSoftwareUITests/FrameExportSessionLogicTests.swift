@@ -100,7 +100,6 @@ final class FrameExportSessionLogicTests: XCTestCase {
     private func greyDocument(frames: Int) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<frames).map { (start: $0, length: 1) })
-        manager.sceneFrameCount = frames
         for frame in 0..<frames {
             let level = CGFloat(Self.greyLevel(frame)) / 255
             CanvasFixture.setBakedContent(
@@ -235,7 +234,7 @@ final class FrameExportSessionLogicTests: XCTestCase {
     ///
     /// Loop markers are intent (§3.9): an artist who set them said *this is my shot*. Six frames are
     /// laid out and marked 1…3, so the file must be three frames long **and start at frame 1's own
-    /// grey**. A walk that took `0..<sceneFrameCount` would be six frames; one that walked the right
+    /// grey**. A walk that took the whole scene would be six frames; one that walked the right
     /// count from the wrong place would be three frames of the wrong greys; one that walked it
     /// backwards would be the right greys in the wrong order. Only reading the pixels back
     /// separates those three from the right answer.
@@ -544,9 +543,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
     /// A document that lays out no frames has nothing to export, and says so instead of starting a
     /// walk over an empty range.
     func testADocumentWithNoFramesRefusesInsteadOfRunning() async throws {
+        // No layers at all, so no cels, so no scene — `contentEndFrame` is 0 and there is nothing
+        // to walk. Under the old stored field this needed an assignment to say so.
         let manager = CanvasManager()
         manager.canvasSize = CanvasFixture.canvasSize
-        manager.sceneFrameCount = 0
 
         let session = FrameExportSession(manager: manager)
         session.exportVideo()

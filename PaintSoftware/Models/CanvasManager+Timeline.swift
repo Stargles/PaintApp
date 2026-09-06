@@ -83,7 +83,6 @@ extension CanvasManager {
                           vector: layers[layerIndex].kind == .vector ? .empty(size: size) : nil)
             layers[layerIndex].cels.append(cel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-            sceneFrameCount = max(sceneFrameCount, startFrame + length)
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
@@ -215,7 +214,6 @@ extension CanvasManager {
             let newCel = Cel(id: UUID(), startFrame: newStart, frameCount: length, raster: tiers.raster, fillImage: tiers.fillImage, bakedImage: tiers.bakedImage, vector: tiers.vector, transformTracks: tiers.transformTracks, pendingPoseBaselines: tiers.pendingPoseBaselines)
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-            sceneFrameCount = max(sceneFrameCount, newStart + length)
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: newStart) {
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
@@ -270,7 +268,6 @@ extension CanvasManager {
                              pendingPoseBaselines: copiedCel.pendingPoseBaselines)
             layers[layerIndex].cels.append(newCel)
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-            sceneFrameCount = max(sceneFrameCount, startFrame + length)
             if let idx = activeCelIndex(inLayer: layerIndex, atFrame: startFrame) {
                 scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
             }
@@ -314,11 +311,13 @@ extension CanvasManager {
     /// to be scoped to something, and the only unit the artist can see there is the gap itself. So
     /// the two menus scope to the same thing said twice: *the stretch of track you tapped*.
     ///
-    /// **The bounds are the neighbouring cels, and the last gap ends at the scene.** That matches
-    /// what `TimelineRowView` draws — its trailing gap runs to the displayed frame count — closely
-    /// enough for the artist to recognise, and `handleTapOnGap` has already sent the playhead to the
-    /// tapped frame by the time this is asked, which raises `sceneFrameCount` to admit it
-    /// (`goToFrame`). The `frame + 1` floor is what makes that true rather than assumed.
+    /// **The bounds are the neighbouring cels, and the trailing gap ends at the tapped frame.**
+    /// `contentEndFrame` is the last cel's end, so out past the last block the `?? contentEndFrame`
+    /// arm is *below* `frame` and the `frame + 1` floor is what actually answers — the gap the artist
+    /// tapped runs from the last block to the column they touched. That is narrower than the trailing
+    /// gap `TimelineRowView` draws (which runs to the view's own look-ahead, not to anything in the
+    /// model) and it is the honest answer: past the last block there is no end to run to, so the only
+    /// bound the model can name is the one the artist pointed at.
     ///
     /// Order-independent by construction: `cels` is not guaranteed sorted, so this is a min and a max
     /// over the neighbours rather than an index walk.
@@ -327,7 +326,7 @@ extension CanvasManager {
         let cels = layers[layerIndex].cels
         guard !cels.contains(where: { $0.startFrame <= frame && frame < $0.endFrame }) else { return nil }
         let lower = cels.filter { $0.endFrame <= frame }.map(\.endFrame).max() ?? 0
-        let upper = cels.filter { $0.startFrame > frame }.map(\.startFrame).min() ?? sceneFrameCount
+        let upper = cels.filter { $0.startFrame > frame }.map(\.startFrame).min() ?? contentEndFrame
         return lower ..< max(upper, frame + 1)
     }
 
@@ -343,7 +342,7 @@ extension CanvasManager {
         let stop = neighborBounds(layerIndex: layerIndex, celIndex: celIndex).upperBound
         withStructureUndo(label: .extendFrame) {
             resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex,
-                               newEndFrame: min(stop, max(sceneFrameCount, cel.endFrame)))
+                               newEndFrame: min(stop, max(contentEndFrame, cel.endFrame)))
         }
     }
 
@@ -536,7 +535,6 @@ extension CanvasManager {
             }
         }
 
-        sceneFrameCount = max(sceneFrameCount, cursor)
         // VIDEO.md §2.2's other edge. The block's start never moves, so the head of the crop is
         // fixed and the tail follows the new length — up to the clip's own duration, past which
         // there is no more footage to reveal and the last frame holds (§4.3's clamp).
@@ -695,7 +693,6 @@ extension CanvasManager {
             let room = ceiling.map { $0 - start } ?? Int.max
             let length = max(1, min(wanted, room))
             layers[layerIndex].cels[celIndex].frameCount = length
-            sceneFrameCount = max(sceneFrameCount, start + length)
             // Only when the neighbour clipped it: otherwise the crop already says exactly this.
             if length != wanted {
                 writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
@@ -713,7 +710,6 @@ extension CanvasManager {
         let maxStart = (bounds.upperBound == Int.max) ? Int.max : bounds.upperBound - cel.frameCount
         let clampedStart = max(bounds.lowerBound, min(newStartFrame, max(bounds.lowerBound, maxStart)))
         layers[layerIndex].cels[celIndex].startFrame = clampedStart
-        sceneFrameCount = max(sceneFrameCount, clampedStart + cel.frameCount)
     }
 
     /// Whether `splitCel(layerIndex:celIndex:atFrame:)` would do anything at `atFrame` — the cel

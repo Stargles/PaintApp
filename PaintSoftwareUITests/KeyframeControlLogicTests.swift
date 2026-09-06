@@ -735,7 +735,7 @@ final class KeyframeControlLogicTests: XCTestCase {
 
     /// The trailing gap has no block to stop at, so it runs to the scene — and past it if that is
     /// where the tap was. `handleTapOnGap` sends the playhead to the tapped frame before the menu can
-    /// open, and `goToFrame` raises `sceneFrameCount` to admit it; the floor is what makes the range
+    /// open, and `goToFrame` accepts a frame past the end of the scene; the floor is what makes the range
     /// contain its own frame whatever order those happen in.
     func testTheLastGapAlwaysContainsTheFrameItWasAskedAbout() {
         let manager = gradedManager()

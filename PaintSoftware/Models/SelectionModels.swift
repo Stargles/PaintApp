@@ -771,7 +771,7 @@ extension CanvasManager {
     /// ids, which for this kind are read by nothing: `commitFloatingPieceIfNeeded` returns to
     /// `commitContainerFloat` before it looks up a cel, and `CanvasView`'s two readers are gated on
     /// `.move`. What it cost was the owner's report — `addValueLayer` stamps one block of
-    /// `max(sceneFrameCount, 1)` frames *at creation* and never extends it, so a transformation layer
+    /// `newLayerBlockLength` frames *at creation* and never extends it, so a transformation layer
     /// made early and used late fell off the end of its own block and Move went silent. Neither of the
     /// two obvious repairs was right: extending the cel would mint a stray block in the timeline (and
     /// move `contentEndFrame` with it) for a payload that is not cel-scoped, and a `CanvasNotice` would
@@ -873,7 +873,7 @@ extension CanvasManager {
 
         let sourceLayerID = layers[sourceLayerIndex].id
         let sourceCelID = cel.id
-        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize))
+        let newCel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: canvasSize))
         let newLayer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0, isVisible: true, cels: [newCel])
         let insertIndex = sourceLayerIndex + 1
         layers.insert(newLayer, at: insertIndex)

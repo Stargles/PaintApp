@@ -83,7 +83,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 5, frameCount: 40))
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [3, 40])
-        XCTAssertEqual(manager.sceneFrameCount, 45, "sceneFrameCount grows to cover the new cel")
+        XCTAssertEqual(manager.contentEndFrame, 45, "The scene is where the cels reach, so it grew to cover the new one")
     }
 
     func testAddCelWithZeroLengthIsRejected() {
@@ -212,7 +212,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.start), [0, 5])
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [5, 5])
-        XCTAssertEqual(manager.sceneFrameCount, 12, "Scene was already long enough; it should not shrink or grow")
+        XCTAssertEqual(manager.contentEndFrame, 10, "The scene is where the cels reach — the copy lands at 5…10, so it is ten frames")
     }
 
     func testDuplicateCelCopiesContentRatherThanSharingIt() {
@@ -513,7 +513,7 @@ final class CelCRUDCharacterizationTests: XCTestCase {
         manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: 30)
 
         XCTAssertEqual(CanvasFixture.celLayout(manager).map(\.length), [30])
-        XCTAssertEqual(manager.sceneFrameCount, 30)
+        XCTAssertEqual(manager.contentEndFrame, 30)
     }
 
     func testTheDraggedBlockItselfCannotBeShrunkBelowOneFrame() {

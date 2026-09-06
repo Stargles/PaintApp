@@ -139,7 +139,6 @@ final class TransformLayerLogicTests: XCTestCase {
                       vector: .empty(size: size))
         cel.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
         manager.layers[drawn].cels = [cel]
-        manager.sceneFrameCount = 12
         if let at = manager.layers.firstIndex(where: { $0.name == "mover" }) {
             manager.layers[at].transform = layerPose
         }
@@ -154,7 +153,6 @@ final class TransformLayerLogicTests: XCTestCase {
         manager.addLayer(name: "ink")
         manager.addValueLayer(name: "mover")
         let drawn = manager.layers.firstIndex { $0.name == "ink" } ?? 0
-        manager.sceneFrameCount = 12
         manager.layers[drawn].cels[0].frameCount = 12
         CanvasFixture.setBakedContent(manager, layerIndex: drawn,
                                       CanvasFixture.solidImage(.black,

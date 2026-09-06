@@ -55,14 +55,15 @@ final class FrameExportLogicTests: XCTestCase {
         frame(width: width, height: height, b: level, g: level, r: level, a: 255)
     }
 
-    // MARK: - How long is this? (§3.9, and the three answers the model gives)
+    // MARK: - How long is this? (§3.9, and the two answers the model gives)
 
-    /// **`sceneFrameCount` is the wrong answer and is not a near miss.** A default document lays out
-    /// twelve frames and may hold four frames of drawing; an export driven by the laid-out length
-    /// ships eight frames of empty track, which is the exact bug `contentEndFrame` was introduced to
-    /// fix for playback.
+    /// **The export covers what pressing play would show, not the columns the ruler draws.** The
+    /// track is laid out two screenfuls past wherever the artist has scrolled
+    /// (`TimelineTrackView.Coordinator.displayedFrameCount`), and an export driven by *that* would
+    /// ship frames of empty track — the exact bug `contentEndFrame` was introduced to fix for
+    /// playback. The `contentEndFrame: 12` here is the document's own length and only clamps.
     func testTheExportRangeIsThePlaybackBoundsAndNotTheLaidOutTrack() {
-        let range = FrameExport.frameRange(playbackStart: 0, playbackEnd: 4, sceneFrameCount: 12)
+        let range = FrameExport.frameRange(playbackStart: 0, playbackEnd: 4, contentEndFrame: 12)
         XCTAssertEqual(range, 0...4,
                        "The export covers what playback would show, not the twelve columns the ruler draws.")
     }
@@ -71,7 +72,7 @@ final class FrameExportLogicTests: XCTestCase {
     /// `playbackStartFrame`/`playbackEndFrame` already read them, so there is one account of the
     /// answer rather than a second one inside export.
     func testLoopMarkersAreTheExportRangeWhenTheArtistHasSetThem() {
-        XCTAssertEqual(FrameExport.frameRange(playbackStart: 5, playbackEnd: 9, sceneFrameCount: 30),
+        XCTAssertEqual(FrameExport.frameRange(playbackStart: 5, playbackEnd: 9, contentEndFrame: 30),
                        5...9)
     }
 
@@ -79,12 +80,12 @@ final class FrameExportLogicTests: XCTestCase {
     /// `markDirty` silently drops anything outside it, so a frame past the laid-out track could be
     /// asked for and never baked — an export that waits for ever rather than one that errors.
     func testTheExportRangeIsClampedIntoTheLaidOutTrack() {
-        XCTAssertEqual(FrameExport.frameRange(playbackStart: -3, playbackEnd: 40, sceneFrameCount: 12),
+        XCTAssertEqual(FrameExport.frameRange(playbackStart: -3, playbackEnd: 40, contentEndFrame: 12),
                        0...11)
     }
 
     func testADocumentWithNoFramesHasNothingToExport() {
-        XCTAssertNil(FrameExport.frameRange(playbackStart: 0, playbackEnd: 0, sceneFrameCount: 0))
+        XCTAssertNil(FrameExport.frameRange(playbackStart: 0, playbackEnd: 0, contentEndFrame: 0))
     }
 
     // MARK: - Colour and alpha: the video side

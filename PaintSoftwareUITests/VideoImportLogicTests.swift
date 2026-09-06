@@ -70,7 +70,7 @@ final class VideoImportLogicTests: XCTestCase {
 
     /// **A clip longer than the scene is cropped, and the scene is not stretched.** Thirty frames of
     /// footage into a twelve-frame document is a twelve-frame block whose `sourceEnd` says so, and
-    /// `sceneFrameCount` does not move — *"import never changes the shape of the timeline"*.
+    /// `contentEndFrame` does not move — *"import never changes the shape of the timeline"*.
     ///
     /// The crop is asserted beside the block length on purpose: a block clipped without the crop
     /// following it would play the whole clip squeezed into twelve frames, which is a retime and §2.2
@@ -78,10 +78,10 @@ final class VideoImportLogicTests: XCTestCase {
     func testALongClipIsClippedToTheSceneRatherThanTheSceneToTheClip() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.fps = 24
-        let scene = manager.sceneFrameCount
+        let scene = manager.contentEndFrame
         XCTAssertTrue(manager.insertVideo(at: try clip(frames: 30, fps: 24, named: "long")))
 
-        XCTAssertEqual(manager.sceneFrameCount, scene, "Import never lengthens the timeline.")
+        XCTAssertEqual(manager.contentEndFrame, scene, "Import never lengthens the timeline.")
         let cel = try XCTUnwrap(manager.layers.last?.cels.first)
         XCTAssertEqual(cel.startFrame, 0)
         XCTAssertEqual(cel.frameCount, scene)
@@ -102,12 +102,12 @@ final class VideoImportLogicTests: XCTestCase {
     func testAClipShorterThanTheSceneKeepsItsOwnLength() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.fps = 24
-        XCTAssertGreaterThan(manager.sceneFrameCount, Self.levels.count)
+        XCTAssertGreaterThan(manager.contentEndFrame, Self.levels.count)
         XCTAssertTrue(manager.insertVideo(at: try shortClip()))
 
         let cel = try XCTUnwrap(manager.layers.last?.cels.first)
         XCTAssertEqual(cel.frameCount, Self.levels.count)
-        XCTAssertLessThan(cel.frameCount, manager.sceneFrameCount)
+        XCTAssertLessThan(cel.frameCount, manager.contentEndFrame)
     }
 
     /// The imported block shows the head of the clip on the canvas, at the frame the map names —

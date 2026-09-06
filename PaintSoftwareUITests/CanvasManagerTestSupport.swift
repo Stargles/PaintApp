@@ -63,12 +63,18 @@ enum CanvasFixture {
     /// Replaces a layer's cels with exactly the given `(start, length)` blocks, bypassing the
     /// clamping paths under test so a test can state its starting timeline directly instead of
     /// building it out of the very operations it is characterizing.
+    ///
+    /// **It sets the scene's length by construction and there is nothing else to set.**
+    /// `CanvasManager.contentEndFrame` is derived from the cels, so writing them *is* writing the
+    /// scene. This used to end with a `sceneFrameCount = max(…)` nudge at a stored field, which
+    /// could raise the scene and never lower it — the defect TODO (50) removed, and one a fixture
+    /// helper is a particularly bad place to keep, because every test that called it inherited a
+    /// scene at least as long as the longest one any earlier call had asked for.
     static func setCelLayout(_ manager: CanvasManager, layerIndex: Int, _ blocks: [(start: Int, length: Int)]) {
         let size = manager.canvasSize ?? canvasSize
         manager.layers[layerIndex].cels = blocks
             .sorted { $0.start < $1.start }
             .map { Cel(id: UUID(), startFrame: $0.start, frameCount: $0.length, raster: .empty(size: size)) }
-        manager.sceneFrameCount = max(manager.sceneFrameCount, blocks.map { $0.start + $0.length }.max() ?? 0)
     }
 
     /// Index of a layer by identity — the tests hold on to IDs because almost every operation here

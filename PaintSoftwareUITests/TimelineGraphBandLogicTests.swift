@@ -290,7 +290,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
     /// **The bound is the document, not the laid-out track.**
     ///
-    /// `displayedFrameCount(for:)` inflates the track past `sceneFrameCount` by two screenfuls, so
+    /// `displayedFrameCount(…)` inflates the track past the scene by two screenfuls, so
     /// that the artist can scroll right and drop a cel past the end; the band view is that wide. Until
     /// 2026-08-30 the curves were sampled across all of it and `AnimationCurve`'s constant-hold
     /// extrapolation drew a *correct* flat line into track holding no frames — on a 12-frame document
@@ -299,11 +299,11 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (6, 2.0)]))
-        XCTAssertEqual(manager.sceneFrameCount, 12, "PREMISE: a fresh document is twelve frames")
+        XCTAssertEqual(manager.contentEndFrame, 12, "PREMISE: a fresh document is twelve frames")
 
         // The band is closed on a fresh document, so ask the arithmetic directly as well as through
         // the accessor once it is open.
-        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 12,
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(contentEndFrame: 12,
                                                          channels: channels(manager)), 12,
                        "Every key is inside the scene, so the scene is the bound")
         XCTAssertNil(manager.graphBandContent, "PREMISE: nothing is drawn until the editor is opened")
@@ -315,7 +315,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
     /// **A key past the end of the scene widens the bound, and that is not tidiness.**
     ///
-    /// Nothing clamps a key to `sceneFrameCount`: `moves` stops at a neighbour and at frame 0 and at
+    /// Nothing clamps a key to the scene's end: `moves` stops at a neighbour and at frame 0 and at
     /// no upper bound, and the scene's length grows only from *cel* edits, never from a keyframe
     /// write. Bounding at the scene alone would leave such a key drawn nowhere while `nearestKey`
     /// still found it — a key an artist can delete by accident and cannot see.
@@ -323,8 +323,8 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (20, 2.0)]))
-        XCTAssertEqual(manager.sceneFrameCount, 12, "PREMISE: the scene did not grow to meet the key")
-        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 12,
+        XCTAssertEqual(manager.contentEndFrame, 12, "PREMISE: the scene did not grow to meet the key")
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(contentEndFrame: 12,
                                                          channels: channels(manager)), 21,
                        "Exclusive, so the key's own column at frame 20 is inside the bound")
 
@@ -338,9 +338,9 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
     /// The degenerate ends, so neither is a crash and neither is a whole track.
     func testTheDrawnBoundOfAnEmptyBand() {
-        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 12, channels: []), 12,
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(contentEndFrame: 12, channels: []), 12,
                        "No channel means the scene, which is what an open-but-empty band draws over")
-        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(sceneFrameCount: 0, channels: []), 0,
+        XCTAssertEqual(TimelineGraphBand.drawnFrameCount(contentEndFrame: 0, channels: []), 0,
                        "…and no scene means nothing, which `sampling` refuses outright")
     }
 
@@ -603,7 +603,7 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// The band's own height, so a test's y arithmetic is the band's rather than a literal.
     private let band = TimelineGraphBand.height
     private let base = TimelineKeyMarkers.basePixelsPerFrame
-    /// `CanvasManager.sceneFrameCount`'s default, which every fixture below keys inside — so the
+    /// A fresh document's twelve frames, which every fixture below keys inside — so the
     /// bound `tap` applies is never the thing these tests are measuring. The bound has a fixture of
     /// its own, `testATapPastTheEndOfTheDocumentAddsNothing`.
     private let frames = 12

@@ -130,7 +130,7 @@ final class FrameBaker {
     /// the request silently and the export waits for a frame nothing will ever bake.
     func requestExport(frame: Int, within range: ClosedRange<Int>) {
         guard let manager else { return }
-        bakeQueue.frameCount = manager.sceneFrameCount
+        bakeQueue.frameCount = manager.contentEndFrame
         exportFocus = ExportFocus(frame: frame, range: range)
         bakeQueue.markDirty(frame: frame)
         kick()
@@ -362,7 +362,7 @@ final class FrameBaker {
     /// The structural sweep does carry `maskTuningGeneration` and `backend`, so calling this for
     /// those two is belt to the sweep's braces rather than the only cover.
     func markEverythingDirty() {
-        if let manager { bakeQueue.frameCount = manager.sceneFrameCount }
+        if let manager { bakeQueue.frameCount = manager.contentEndFrame }
         bakeQueue.markAllDirty()
         kick()
     }
@@ -395,7 +395,7 @@ final class FrameBaker {
     /// two guards below make a redundant call free.
     func kick() {
         guard !isBaking, !isSuspended, let manager else { return }
-        bakeQueue.frameCount = manager.sceneFrameCount
+        bakeQueue.frameCount = manager.contentEndFrame
 
         // **The one substitution stage 6 makes.** With no export running this is the artist's
         // playhead and the document's loop markers, exactly as stages 4c–4f left it; with one
@@ -704,7 +704,7 @@ final class FrameBaker {
 
         // Before any marking: a range clamps against `frameCount`, so a scene that just grew must be
         // told so or the new frames are dropped on the floor.
-        bakeQueue.frameCount = manager.sceneFrameCount
+        bakeQueue.frameCount = manager.contentEndFrame
 
         guard let previousStructure = lastStructure, let previousCels = lastCels else {
             // The first sweep. Nothing has been baked and nothing is known, so everything wants one.
@@ -842,7 +842,7 @@ final class FrameBaker {
         let paperColor: Color
         let paperVisible: Bool
         let renderResolution: RenderResolution
-        let sceneFrameCount: Int
+        let contentEndFrame: Int
         /// RENDER §4: both are accessors over a lock and both are fields of the bake key, so both
         /// move the picture without touching the document. Swept here so that
         /// `markEverythingDirty()` is a convenience rather than the only cover.
@@ -860,7 +860,7 @@ final class FrameBaker {
             paperColor = manager.canvasBackgroundColor
             paperVisible = manager.isCanvasBackgroundVisible
             renderResolution = manager.renderResolution
-            sceneFrameCount = manager.sceneFrameCount
+            contentEndFrame = manager.contentEndFrame
             maskTuningGeneration = AlphaMask.tuningGeneration
             backend = Compositor.backend
         }

@@ -86,7 +86,12 @@ final class FrameBakerLogicTests: XCTestCase {
     private func perFrameDocument(frames: Int, extraLayers: Int = 0) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1 + extraLayers)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<frames).map { (start: $0, length: 1) })
-        manager.sceneFrameCount = frames
+        // Every extra layer is trimmed to the same length, because the scene is now however far the
+        // *cels* reach: `CanvasFixture.manager` gives each layer a block spanning a new document's
+        // twelve frames, so leaving one untrimmed would make a ten-frame fixture a twelve-frame scene.
+        for layer in 0..<extraLayers {
+            CanvasFixture.setCelLayout(manager, layerIndex: layer + 1, [(start: 0, length: frames)])
+        }
         for frame in 0..<frames {
             CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: frame,
                                           CanvasFixture.solidImage(.red, rect: CGRect(x: frame * 2, y: 0,
@@ -96,7 +101,7 @@ final class FrameBakerLogicTests: XCTestCase {
     }
 
     /// Every frame index this manager lays out.
-    private func allFrames(_ manager: CanvasManager) -> [Int] { Array(0..<manager.sceneFrameCount) }
+    private func allFrames(_ manager: CanvasManager) -> [Int] { Array(0..<manager.contentEndFrame) }
 
     private func pending(_ baker: FrameBaker, _ manager: CanvasManager) -> [Int] {
         allFrames(manager).filter { baker.bakeQueue.isPending($0) }
@@ -155,7 +160,6 @@ final class FrameBakerLogicTests: XCTestCase {
     func testEditingInsideACelSpanningTwoToSixRecompositesExactlyThoseFiveFrames() {
         let manager = perFrameDocument(frames: 10, extraLayers: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 2, length: 5)])
-        manager.sceneFrameCount = 10
         XCTAssertEqual(manager.layers[1].cels.map { ($0.startFrame, $0.endFrame) }.map(\.0), [2])
         XCTAssertEqual(manager.layers[1].cels[0].endFrame, 7,
                        "The cel must cover frames 2 through 6 inclusive — that is what §2.16 says.")
@@ -385,7 +389,6 @@ final class FrameBakerLogicTests: XCTestCase {
         let manager = perFrameDocument(frames: 6)
         CanvasFixture.setCelLayout(manager, layerIndex: 0,
                                    [(start: 0, length: 2), (start: 2, length: 2), (start: 4, length: 2)])
-        manager.sceneFrameCount = 6
         for (index, frame) in [0, 2, 4].enumerated() {
             CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: frame,
                                           CanvasFixture.solidImage(.red, rect: CGRect(x: index * 6, y: 0,
@@ -421,7 +424,6 @@ final class FrameBakerLogicTests: XCTestCase {
     func testANineFrameHoldIsOneFileAndOneComposite() {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 9)])
-        manager.sceneFrameCount = 9
         CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
                                       CanvasFixture.solidImage(.green, rect: CGRect(x: 8, y: 8, width: 40, height: 40)))
 
@@ -449,7 +451,6 @@ final class FrameBakerLogicTests: XCTestCase {
     func testAScrubThroughAHoldCostsNoComposites() {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 9)])
-        manager.sceneFrameCount = 9
         CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
                                       CanvasFixture.solidImage(.green, rect: CGRect(x: 4, y: 4, width: 20, height: 20)))
 
@@ -624,7 +625,6 @@ final class FrameBakerLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<10).map { (start: $0, length: 1) })
         CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 1, length: 2)])
-        manager.sceneFrameCount = 10
 
         let baker = makeBaker(manager)
         baker.noteDocumentChanged()
@@ -643,7 +643,6 @@ final class FrameBakerLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<10).map { (start: $0, length: 1) })
         CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 3, length: 3)])
-        manager.sceneFrameCount = 10
 
         let baker = makeBaker(manager)
         baker.noteDocumentChanged()
@@ -723,7 +722,7 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.count, 1, "The document is untouched.")
         XCTAssertEqual(manager.layers[0].cels.count, celCount)
         XCTAssertEqual(manager.layers[0].cels[0].bakedImage != nil, firstCelHasContent)
-        XCTAssertEqual(manager.sceneFrameCount, 10)
+        XCTAssertEqual(manager.contentEndFrame, 10)
     }
 
     /// A refused frame is a **miss** on the read path, not a wrong picture. §2.10's "the previous
@@ -821,7 +820,6 @@ final class FrameBakerLogicTests: XCTestCase {
     func testAHoldIsOneRingEntryForAllOfItsFrames() {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 9)])
-        manager.sceneFrameCount = 9
         CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
                                       CanvasFixture.solidImage(.green, rect: CGRect(x: 1, y: 1, width: 30, height: 30)))
 
@@ -897,7 +895,9 @@ final class FrameBakerLogicTests: XCTestCase {
         baker.noteDocumentChanged()
         drain(baker)
 
-        manager.sceneFrameCount = 4
+        // Shortened the only way a scene can be shortened now: by taking the cels away. Under the
+        // stored high-water mark this was one assignment, and that was the bug (TODO 50).
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<4).map { (start: $0, length: 1) })
         baker.syncDirty()
         XCTAssertEqual(baker.bakeQueue.frameCount, 4)
         XCTAssertEqual(pending(baker, manager), Array(0..<4),
@@ -947,7 +947,6 @@ final class FrameBakerLogicTests: XCTestCase {
     func testAnEditUnbakesTheFramesItReachesThoughTheirOldFilesRemain() {
         let manager = perFrameDocument(frames: 10, extraLayers: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 2, length: 5)])
-        manager.sceneFrameCount = 10
 
         let baker = makeBaker(manager)
         baker.noteDocumentChanged()

@@ -190,16 +190,21 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        /// How many frames the track lays out, which is deliberately more than the scene holds: at
-        /// least the scene's own length, and always a further screenful past the right edge of
+        /// **How many frames the track lays out, which is deliberately more than the scene holds**: at
+        /// least the scene's own length, and always two further screenfuls past the right edge of
         /// whatever is currently scrolled into view. The timeline therefore has no end to run into —
         /// scroll right and empty slots keep arriving, so a drawing can be added out beyond the last
-        /// one and the scene grows to meet it (`addCel` raises `sceneFrameCount`).
+        /// one and the scene grows to meet it (`addCel`, and `contentEndFrame` follows the cels).
+        ///
+        /// **The rule itself is `TimelineTrackExtent.displayedFrameCount`, and it is there rather than
+        /// here so the fast tier can read it.** It is what answers the obvious objection to TODO (50)
+        /// deleting the stored scene length: the scene is only a floor, and the look-ahead is what is
+        /// normally binding, so a short document still has empty track to drop a block into.
         private func displayedFrameCount(for scrollView: UIScrollView) -> Int {
-            let width = max(scrollView.bounds.width, 1)
-            let reach = scrollView.contentOffset.x + width * 2
-            let needed = Int((reach / pixelsPerFrame).rounded(.up)) + 1
-            return max(max(canvasManager.sceneFrameCount, 1), needed)
+            TimelineTrackExtent.displayedFrameCount(contentEndFrame: canvasManager.contentEndFrame,
+                                                    contentOffsetX: scrollView.contentOffset.x,
+                                                    viewportWidth: scrollView.bounds.width,
+                                                    pixelsPerFrame: pixelsPerFrame)
         }
 
         /// The frame count the current subview layout was built for, so scrolling only re-lays-out
@@ -230,8 +235,8 @@ struct TimelineTrackView: UIViewRepresentable {
         func relayout() {
             guard let scrollView, let contentView else { return }
 
-            let sceneFrameCount = displayedFrameCount(for: scrollView)
-            let totalWidth = max(CGFloat(sceneFrameCount) * pixelsPerFrame, scrollView.bounds.width)
+            let laidOutCount = displayedFrameCount(for: scrollView)
+            let totalWidth = max(CGFloat(laidOutCount) * pixelsPerFrame, scrollView.bounds.width)
             let layers = canvasManager.layers
             // Same row order the layer panel and the pinned name column use — folder headers
             // included, collapsed folders' children omitted.
@@ -256,7 +261,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 canvasManager: canvasManager,
                 stackRows: stackRows,
                 pixelsPerFrame: pixelsPerFrame,
-                displayedFrameCount: sceneFrameCount,
+                displayedFrameCount: laidOutCount,
                 contentWidth: totalWidth,
                 contentHeight: totalHeight,
                 rowHeight: rowHeight,
@@ -286,7 +291,7 @@ struct TimelineTrackView: UIViewRepresentable {
             }
             laidOutKey = built.key
             retainedThumbnails = built.retainedThumbnails
-            laidOutFrameCount = sceneFrameCount
+            laidOutFrameCount = laidOutCount
 
             contentView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
             if scrollView.contentSize != contentView.frame.size {
@@ -301,7 +306,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 contentView.insertSubview(gridlinesView, at: 0)
             }
             gridlinesView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: totalHeight)
-            gridlinesView.frameCount = sceneFrameCount
+            gridlinesView.frameCount = laidOutCount
             gridlinesView.pixelsPerFrame = pixelsPerFrame
             gridlinesView.setNeedsDisplay()
 
@@ -317,7 +322,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 scrollView.panGestureRecognizer.require(toFail: rulerView.panRecognizer)
             }
             rulerView.frame = CGRect(x: 0, y: 0, width: totalWidth, height: rulerHeight)
-            rulerView.frameCount = sceneFrameCount
+            rulerView.frameCount = laidOutCount
             rulerView.pixelsPerFrame = pixelsPerFrame
             // `currentFrame` is set by `movePlayhead` at the end of this function, and on the scrub
             // fast path that skips it — one writer, so the two paths cannot disagree.
@@ -394,7 +399,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 // by two people remembering to keep them in step. `trackMarkers` is built parallel
                 // to `tracks`, over the same filtered enumeration of `stackRows`, so the slot lines up.
                 row.update(cels: layers[entry.layerIndex].cels,
-                           sceneFrameCount: sceneFrameCount,
+                           displayedFrameCount: laidOutCount,
                            markers: built.key.trackMarkers.indices.contains(slot)
                                ? built.key.trackMarkers[slot] : [])
                 // **Where a drop resolves and where its ghost is drawn are recorded separately, and
@@ -485,7 +490,7 @@ struct TimelineTrackView: UIViewRepresentable {
             guard contentView != nil else { return }
             syncBakeObservation()
             let baker = canvasManager.frameBaker
-            let spans = TimelineBakeBar.unbakedSpans(frameCount: canvasManager.sceneFrameCount) {
+            let spans = TimelineBakeBar.unbakedSpans(frameCount: canvasManager.contentEndFrame) {
                 baker.isBaked(atFrame: $0)
             }
             bakeBarView.update(spans: spans, pixelsPerFrame: pixelsPerFrame)
@@ -1356,9 +1361,9 @@ struct TimelineTrackView: UIViewRepresentable {
                 onRequestMenu?(.gap(layerIndex: layerIndex, frame: clamped), anchor)
             } else {
                 canvasManager.currentLayerIndex = layerIndex
-                // No ceiling to guard against any more: `goToFrame` itself raises `sceneFrameCount`
-                // to admit wherever it's sent (see its own doc comment) rather than the caller having
-                // to keep a frame in bounds before calling it. The old `if clamped < sceneFrameCount`
+                // No ceiling to guard against any more: `goToFrame` accepts wherever it's sent (see
+                // its own doc comment) rather than the caller having to keep a frame in bounds before
+                // calling it. The old `if clamped < sceneFrameCount`
                 // guard here predated that and was very likely the "only happens sometimes" the owner
                 // reported — a tap past the scene's current end skipped `goToFrame` entirely, so
                 // `currentFrame` never became the tapped frame, and the *next* tap on that same slot
@@ -2417,7 +2422,11 @@ private final class TimelineRowView: UIView {
         longPressRecognizer.name = "timeline.row\(poolSlot).press"
     }
 
-    func update(cels: [Cel], sceneFrameCount: Int, markers: [Int]) {
+    /// **`displayedFrameCount` is the *track's* laid-out length, not the scene's** — the trailing
+    /// gap this draws runs to the right-hand edge of what is laid out, which is two screenfuls past
+    /// wherever the artist has scrolled, so there is always empty slot to tap on. See
+    /// `TimelineTrackView.Coordinator.displayedFrameCount(contentEndFrame:contentOffsetX:viewportWidth:pixelsPerFrame:)`.
+    func update(cels: [Cel], displayedFrameCount: Int, markers: [Int]) {
         var result: [Segment] = []
         var cursor = 0
         let ordered = cels.enumerated().sorted { $0.element.startFrame < $1.element.startFrame }
@@ -2428,8 +2437,8 @@ private final class TimelineRowView: UIView {
             result.append(Segment(kind: .cel(cel, arrayIndex: arrayIndex), start: cel.startFrame, length: cel.frameCount))
             cursor = max(cursor, cel.endFrame)
         }
-        if cursor < sceneFrameCount {
-            result.append(Segment(kind: .gap(start: cursor, length: sceneFrameCount - cursor), start: cursor, length: sceneFrameCount - cursor))
+        if cursor < displayedFrameCount {
+            result.append(Segment(kind: .gap(start: cursor, length: displayedFrameCount - cursor), start: cursor, length: displayedFrameCount - cursor))
         }
         segments = result
 

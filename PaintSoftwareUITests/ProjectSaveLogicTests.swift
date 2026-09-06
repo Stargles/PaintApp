@@ -50,7 +50,6 @@ final class ProjectSaveLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 2)
         manager.projectName = "Async Save"
         manager.fps = 18
-        manager.sceneFrameCount = 14
         manager.canvasPadding = 7
 
         for layerIndex in 0..<2 {
@@ -267,7 +266,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.projectID, manager.projectID)
         XCTAssertEqual(reloaded.projectName, "Async Save")
         XCTAssertEqual(reloaded.fps, 18)
-        XCTAssertEqual(reloaded.sceneFrameCount, 14)
+        XCTAssertEqual(reloaded.contentEndFrame, 14, "The scene is derived from the cels, and layer 0's second block ends at 14")
         XCTAssertEqual(reloaded.canvasPadding, 7)
         XCTAssertEqual(reloaded.canvasSize, CanvasFixture.canvasSize)
 
@@ -1350,7 +1349,6 @@ final class ProjectSaveLogicTests: XCTestCase {
     func testEveryCelsPixelsAndOrderSurviveTheParallelWrite() {
         let layerCount = 3, celsPerLayer = 5
         let manager = CanvasFixture.manager(layerCount: layerCount)
-        manager.sceneFrameCount = celsPerLayer * 2
 
         /// Where cel `index`'s dot goes. Distinct per cel, comfortably inside the 64x64 fixture, and
         /// far enough apart that two cels' bounds cannot be confused for one another.

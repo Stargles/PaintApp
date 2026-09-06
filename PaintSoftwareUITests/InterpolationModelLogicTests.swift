@@ -101,7 +101,7 @@ final class InterpolationModelLogicTests: XCTestCase {
     /// registry keys, so an existing project's `manifest.json` is unchanged by this phase.
     func testManifestOmitsInterpolationRegistriesWhenEmpty() throws {
         let manifest = ProjectManifest(id: UUID(), name: "Untouched", canvasWidth: 64, canvasHeight: 64,
-                                       fps: 24, sceneFrameCount: 12, layers: [], modifiedAt: Date())
+                                       fps: 24, layers: [], modifiedAt: Date())
         let keys = try topLevelKeys(try encoded(manifest))
         XCTAssertFalse(keys.contains("motionGroups"))
         XCTAssertFalse(keys.contains("guideStrokes"))
@@ -110,7 +110,7 @@ final class InterpolationModelLogicTests: XCTestCase {
     /// And a manifest saved before the registries existed loads with them empty rather than failing.
     func testManifestSavedBeforeRegistriesDecodesWithEmptyOnes() throws {
         let manifest = ProjectManifest(id: UUID(), name: "Legacy", canvasWidth: 64, canvasHeight: 64,
-                                       fps: 24, sceneFrameCount: 12, layers: [], modifiedAt: Date())
+                                       fps: 24, layers: [], modifiedAt: Date())
         let decoded = try JSONDecoder().decode(ProjectManifest.self, from: try encoded(manifest))
         XCTAssertTrue(decoded.motionGroups.isEmpty)
         XCTAssertTrue(decoded.guideStrokes.isEmpty)

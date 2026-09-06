@@ -72,7 +72,6 @@ final class BakeWiringLogicTests: XCTestCase {
     private func perFrameDocument(frames: Int) -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, (0..<frames).map { (start: $0, length: 1) })
-        manager.sceneFrameCount = frames
         for frame in 0..<frames {
             CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: frame,
                                           CanvasFixture.solidImage(.red, rect: CGRect(x: frame * 2, y: 0,

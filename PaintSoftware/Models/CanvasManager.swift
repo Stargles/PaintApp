@@ -462,8 +462,8 @@ final class CanvasManager: ObservableObject {
     /// **§2.4: the block arrives clipped to the scene and crops outward.** The cel is
     /// `min(clip, scene)` frames long and `sourceEnd` is written to match, so dragging the right
     /// edge outward (stage 5) reveals more up to the full duration. **Import never changes the shape
-    /// of the timeline** — `sceneFrameCount` is not touched here, and a clip longer than the scene
-    /// arrives with its tail cropped rather than making the scene longer.
+    /// of the timeline** — the block is clipped to the scene rather than lengthening it, so a
+    /// clip longer than the document arrives with its tail cropped and `contentEndFrame` does not move.
     ///
     /// **The picked file is copied into `VideoImportStore` first**, because a video's payload is a
     /// file and the picker's own is deleted the moment the transfer ends. `assetFileName` names it
@@ -506,7 +506,7 @@ final class CanvasManager: ObservableObject {
         // the first instant and a right-edge drag has somewhere to go.
         let whole = VideoFrameMap.frameCount(sourceStart: .zero, sourceEnd: info.duration,
                                              speed: 1, documentFPS: fps)
-        let blockLength = max(1, min(whole, max(sceneFrameCount, 1)))
+        let blockLength = max(1, min(whole, max(contentEndFrame, 1)))
         let end = VideoFrameMap.unclampedSourceTime(sourceStart: .zero,
                                                     elapsedDocumentFrames: blockLength,
                                                     speed: 1, documentFPS: fps)
@@ -1012,7 +1012,6 @@ final class CanvasManager: ObservableObject {
             rebasePlaybackClock()
         }
     }
-    @Published var sceneFrameCount: Int = 12
     @Published var currentFrame: Int = 0 {
         didSet {
             if oldValue != currentFrame {
@@ -1478,7 +1477,7 @@ final class CanvasManager: ObservableObject {
 
     func addLayer(name: String? = nil) {
         withStructureUndo(label: .addLayer) {
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
                 Layer(id: UUID(), name: name ?? "Layer \(layers.count + 1)", opacity: 1.0,
                       isVisible: true, parentFolderID: parent, cels: [cel])
@@ -1494,7 +1493,7 @@ final class CanvasManager: ObservableObject {
     func addVectorLayer(name: String? = nil) {
         withStructureUndo(label: .addVectorLayer) {
             let size = canvasSize ?? CGSize(width: 1, height: 1)
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1), raster: .empty(size: size), vector: .empty(size: size))
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: size), vector: .empty(size: size))
             insertNewLayer { parent in
                 Layer(id: UUID(), name: name ?? "Vector \(layers.count + 1)", opacity: 1.0,
                       isVisible: true, kind: .vector, parentFolderID: parent, cels: [cel])
@@ -1531,7 +1530,7 @@ final class CanvasManager: ObservableObject {
     func addValueLayer(color: PaletteColor = ValueFill.defaultColor, effect: Effect? = nil,
                        name: String? = nil) {
         withStructureUndo(label: effect == nil ? .addValueLayer : .addEffectLayer) {
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
             insertNewLayer { parent in
                 Layer(id: UUID(),
@@ -2027,44 +2026,49 @@ final class CanvasManager: ObservableObject {
 
     // MARK: - Playhead
 
-    /// **No ceiling.** The playhead goes wherever it is sent, and the scene grows to admit it.
+    /// **No ceiling.** The playhead goes wherever it is sent, and the track is laid out past it.
     ///
-    /// It used to clamp to `sceneFrameCount - 1`, which on a new document is 12 — so the ruler drew
+    /// It used to clamp to the scene's length, which on a new document is 12 — so the ruler drew
     /// columns the playhead flatly refused to visit, because `TimelineTrackView.displayedFrameCount`
     /// always lays out a screenful past the right edge while this clamped to the scene. Scrubbing
     /// stopped dead partway across a track that visibly continued. The owner's report: "im not sure
     /// why I cannot move the time selection in the timeline past a certian frame (default is 12)".
     ///
-    /// **Moving the playhead does not resize the scene.** An earlier version of this fix raised
-    /// `sceneFrameCount` to admit the frame, reasoning that the field is the laid-out length of the
-    /// timeline rather than the length of the animation and that playback bounds itself with
-    /// `contentEndFrame`. That reasoning audited three readers — `effectiveLoopRange`, `stepFrame`,
-    /// the frame label — and missed the four that matter most: **every cel constructor sizes a new
-    /// layer's first cel with `frameCount: max(sceneFrameCount, 1)`** (`addLayer`, `addVectorLayer`,
-    /// `addValueLayer`, and `SelectionModels`' duplicate). So a scrub out to frame 200 gave the next
-    /// layer a 200-frame cel, that cel *became* `contentEndFrame`, and playback ran two hundred
-    /// frames of empty track — the very bug `contentEndFrame` was introduced to fix, back at a
-    /// larger number, and persisted to the manifest by `ProjectStore`.
-    ///
-    /// The lesson worth keeping: `sceneFrameCount` is not display state. It is an input to cel
-    /// creation, so anything that writes it is authoring the document, and only an edit may do that.
-    /// Every other ratchet site raises it *because a cel now reaches that frame*; the playhead
-    /// reaching a frame is not a cel reaching it.
+    /// **Scrubbing is not authoring, and that is why this method is two lines and touches nothing
+    /// else.** An earlier version of the fix lengthened the scene to admit the frame, on the
+    /// reasoning that the length was the laid-out track rather than the animation. It shipped a real
+    /// bug: a new layer's first block spans the scene (`newLayerBlockLength`), so a scrub out to
+    /// frame 200 gave the next layer a 200-frame block, and playback then ran two hundred frames of
+    /// empty track — for real, because by then the block *was* the content, and it was saved that
+    /// way. The scene is what has been drawn; the playhead reaching a frame is not a drawing
+    /// reaching it.
     func goToFrame(_ frame: Int) {
         currentFrame = max(0, frame)
     }
 
-    /// `loopStartFrame`/`loopEndFrame` clamped into the current scene length and ordered — the scene
-    /// may have shortened since a range was set, and the two markers can be set in either order.
+    /// `loopStartFrame`/`loopEndFrame` ordered, with a missing one standing in as the animation's own
+    /// boundary — frame 0 for a missing start, the last drawn frame for a missing end.
+    ///
+    /// **Floored at zero and not ceilinged at all, which is a deliberate asymmetry.** Markers are
+    /// *intent*: an artist who put one out past the last drawing said "my shot runs to here", and
+    /// `FrameExport.frameRange`'s doc turns on the same reading. There used to be a ceiling — the
+    /// stored `sceneFrameCount`, i.e. the laid-out track — and when that field went (TODO 50) the
+    /// obvious substitution was `contentEndFrame`. That would have been wrong in a way a test caught:
+    /// it silently retracts a marker the artist placed in the empty track, and the empty track is
+    /// where a marker for a shot you are about to draw naturally goes.
     var effectiveLoopRange: ClosedRange<Int> {
-        let maxFrame = max(sceneFrameCount - 1, 0)
-        let start = min(max(min(loopStartFrame ?? 0, loopEndFrame ?? maxFrame), 0), maxFrame)
-        let end = min(max(max(loopStartFrame ?? 0, loopEndFrame ?? maxFrame), start), maxFrame)
+        let lastDrawn = max(contentEndFrame - 1, 0)
+        let a = loopStartFrame ?? 0
+        let b = loopEndFrame ?? lastDrawn
+        let start = max(min(a, b), 0)
+        // `max(…, start)` and not merely `max(a, b)`: two markers both below zero would otherwise
+        // produce an upper bound under the floored lower one, and `start...end` traps on that.
+        let end = max(max(a, b), start)
         return start...end
     }
 
     func setLoopStart(_ frame: Int) {
-        let end = loopEndFrame ?? max(sceneFrameCount - 1, 0)
+        let end = loopEndFrame ?? max(contentEndFrame - 1, 0)
         loopStartFrame = min(frame, end)
         loopEndFrame = max(frame, end)
     }
@@ -2111,19 +2115,61 @@ final class CanvasManager: ObservableObject {
     // substitution lets both modes share one rule instead of each needing a special case for unset
     // markers. Set both markers and they become the animation window outright, content or no.
 
-    /// One past the last frame any layer actually has a block on — where the animation ends, as
-    /// opposed to where the *track* ends.
+    /// **One past the last frame any layer actually has a block on — the end of the scene, and the
+    /// only account of it.** How long the animation is, how far the ruler and the gridlines are
+    /// ruled, how long a new layer's first block is, what "extend to end" fills to, where playback
+    /// stops, what an export covers, and the universe `BakeQueue` bakes over: all of them, this.
     ///
-    /// `sceneFrameCount` is not that number and never was. It is the laid-out length of the
-    /// timeline: it starts at 12 on a new document and only ever ratchets *upward* (every cel
-    /// creator and resizer does `max(sceneFrameCount, …)`, nothing lowers it). So a two-frame
-    /// animation still reported a 12-frame scene, and playback with no markers ran out over ten
-    /// empty frames before wrapping — the "loops from an arbitrary frame like 12" report.
+    /// **There used to be a second answer and it was wrong.** `sceneFrameCount` was a stored
+    /// `@Published var … = 12` whose every write in the app was `sceneFrameCount = max(sceneFrameCount,
+    /// …)` — eight of them, so it could rise and never fall — persisted into `ProjectManifest` and
+    /// snapshotted by `captureStructure`. The owner found it from behaviour (TODO 50): *"if I do an
+    /// extend to end on a cel, then it extends that cel to the 12th frame even if the last cel is not
+    /// on frame 12… if I manually extend a frame to a further frame, then retract it back, then do an
+    /// extend to end, then the extend to end goes up to that last frame I extended to."* Both are the
+    /// same defect — a high-water mark reported as a length — and playback was the one consumer that
+    /// escaped it, because playback already asked this accessor. The field is gone; do not bring back
+    /// a stored one, and do not add a recompute that runs on *some* edits, which is how a derived
+    /// quantity becomes a stale one.
     ///
-    /// Zero when no layer holds a cel at all, which `contentEndFrame`'s callers turn back into
-    /// frame 0 rather than a negative bound.
+    /// **The empty track past the end is a view concern and stays one**, so nothing here needs to be
+    /// larger than the drawing: `TimelineTrackView.Coordinator.displayedFrameCount` lays out two
+    /// screenfuls beyond wherever the artist has scrolled, which is what lets a block be dropped out
+    /// past the last one, and `TimelineGraphBand.drawnFrameCount` widens for a key sitting past the
+    /// end. Neither is this number, and neither ever was.
+    ///
+    /// **Written as a walk rather than `flatMap`**, because it is read on the scroll delegate, in
+    /// `relayout`, on every bake kick and on every playback tick, and a document is 300–1000 cels: the
+    /// obvious `layers.flatMap(\.cels).map(\.endFrame).max()` allocates two arrays each time and this
+    /// allocates none.
+    ///
+    /// Zero when no layer holds a cel at all — an empty document has no scene — which the callers
+    /// turn back into frame 0 rather than a negative bound. See `defaultNewSceneFrameCount` for what
+    /// the twelve became.
     var contentEndFrame: Int {
-        layers.flatMap(\.cels).map(\.endFrame).max() ?? 0
+        var end = 0
+        for layer in layers {
+            for cel in layer.cels where cel.endFrame > end { end = cel.endFrame }
+        }
+        return end
+    }
+
+    /// **How long a brand-new document is**, and all that is left of the old field's `= 12`.
+    ///
+    /// It applies at exactly one moment: the first layer added to a document with no layers at all,
+    /// which is what `CanvasSizePickerView.createCanvas()` does immediately after setting the canvas
+    /// size. Every later layer is sized by `newLayerBlockLength` to the scene that already exists.
+    static let defaultNewSceneFrameCount = 12
+
+    /// The length of the single block a newly added layer's cel gets: **the scene**, or
+    /// `defaultNewSceneFrameCount` when there is no scene yet.
+    ///
+    /// One accessor because there are five constructors — `addLayer`, `addVectorLayer`,
+    /// `addValueLayer`, `SelectionModels`' duplicate-to-new-layer and `CanvasManager+LassoMove`'s —
+    /// and they used to spell `max(sceneFrameCount, 1)` five times. A new layer that did not span the
+    /// scene would be undrawable at frames the rest of the document has.
+    var newLayerBlockLength: Int {
+        max(contentEndFrame, layers.isEmpty ? Self.defaultNewSceneFrameCount : 1)
     }
 
     /// Whether the user has placed either loop marker.

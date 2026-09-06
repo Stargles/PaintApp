@@ -37,7 +37,7 @@ import XCTest
 final class CanvasTransformFreezeUITests: PaintUITestCase {
 
     /// The timeline lays a frame out this wide (`TimelineTrackView.Coordinator.pixelsPerFrame`) and
-    /// insets each block 2pt inside its slot (`TimelineRowView.update(cels:sceneFrameCount:)`).
+    /// insets each block 2pt inside its slot (`TimelineRowView.update(cels:displayedFrameCount:)`).
     /// Both are needed to point at a slot that holds no block and therefore has no element.
     private let pixelsPerFrame: CGFloat = 30
     private let blockInset: CGFloat = 2

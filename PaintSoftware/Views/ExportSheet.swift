@@ -178,7 +178,7 @@ struct ExportSheet: View {
     private var videoRange: ClosedRange<Int>? {
         FrameExport.frameRange(playbackStart: canvasManager.playbackStartFrame,
                                playbackEnd: canvasManager.playbackEndFrame,
-                               sceneFrameCount: canvasManager.sceneFrameCount)
+                               contentEndFrame: canvasManager.contentEndFrame)
     }
 
     /// The size the export will actually be, read the way the baker reads it rather than

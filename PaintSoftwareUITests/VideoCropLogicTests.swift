@@ -58,7 +58,7 @@ final class VideoCropLogicTests: XCTestCase {
     /// walling the drag off would make a video block behave unlike every other block on the timeline.
     func testDraggingTheRightEdgeOutRevealsMoreUpToTheClipsDuration() throws {
         let manager = try documentShowingAClip(frames: 30)
-        let scene = manager.sceneFrameCount
+        let scene = manager.contentEndFrame
         XCTAssertEqual(try video(manager).sourceEnd, SourceTime(value: Int64(scene), timescale: 24),
                        "It arrived clipped to the scene (§2.4).")
 
@@ -114,7 +114,7 @@ final class VideoCropLogicTests: XCTestCase {
     /// block's length and the end the drag is not moving.
     func testACropDraggedOutAndBackLandsWhereItStarted() throws {
         let manager = try documentShowingAClip(frames: 30)
-        let scene = manager.sceneFrameCount
+        let scene = manager.contentEndFrame
         let original = VideoCrop(of: try video(manager))
 
         manager.beginStructureGesture()
@@ -135,7 +135,7 @@ final class VideoCropLogicTests: XCTestCase {
     /// of an undo.
     func testUndoingACropDragRestoresTheCropAndNotJustTheBlock() throws {
         let manager = try documentShowingAClip(frames: 30)
-        let scene = manager.sceneFrameCount
+        let scene = manager.contentEndFrame
         let original = VideoCrop(of: try video(manager))
 
         manager.beginStructureGesture()

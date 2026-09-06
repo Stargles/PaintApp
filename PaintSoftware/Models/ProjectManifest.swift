@@ -9,7 +9,12 @@ struct ProjectManifest: Codable {
     /// at the full padded size); restoring it just redraws the paper inset — no resize on load.
     var canvasPadding: Double
     var fps: Int
-    var sceneFrameCount: Int
+    /// **There is no `sceneFrameCount` here and there must not be one.** It was a stored
+    /// high-water mark that only ever rose, so a document carried a wrong end across save and
+    /// reload with nothing on screen saying where the number came from — TODO (50). The end of the
+    /// scene is `CanvasManager.contentEndFrame`, recomputed from the cels below, which are the only
+    /// thing that can say where the drawing stops. A document written before this key was dropped
+    /// simply loses it on load, which is the fix applying itself.
     var layers: [LayerManifest]
     var modifiedAt: Date
     var backgroundColor: CodableColor
@@ -48,7 +53,7 @@ struct ProjectManifest: Codable {
     /// redeem.
     var brushTableFileName: String? = nil
 
-    init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int, sceneFrameCount: Int,
+    init(id: UUID, name: String, canvasWidth: Double, canvasHeight: Double, canvasPadding: Double = 0, fps: Int,
          layers: [LayerManifest], modifiedAt: Date,
          backgroundColor: CodableColor = CodableColor(red: 1, green: 1, blue: 1, alpha: 1), isBackgroundVisible: Bool = true,
          selectedBrush: Brush = BrushLibrary.roundSoft, customBrushes: [Brush] = [],
@@ -62,7 +67,6 @@ struct ProjectManifest: Codable {
         self.canvasHeight = canvasHeight
         self.canvasPadding = canvasPadding
         self.fps = fps
-        self.sceneFrameCount = sceneFrameCount
         self.layers = layers
         self.modifiedAt = modifiedAt
         self.backgroundColor = backgroundColor
@@ -89,7 +93,6 @@ struct ProjectManifest: Codable {
         canvasHeight = try container.decode(Double.self, forKey: .canvasHeight)
         canvasPadding = try container.decodeIfPresent(Double.self, forKey: .canvasPadding) ?? 0
         fps = try container.decode(Int.self, forKey: .fps)
-        sceneFrameCount = try container.decode(Int.self, forKey: .sceneFrameCount)
         layers = try container.decode([LayerManifest].self, forKey: .layers)
         modifiedAt = try container.decode(Date.self, forKey: .modifiedAt)
         backgroundColor = try container.decodeIfPresent(CodableColor.self, forKey: .backgroundColor)
@@ -119,7 +122,6 @@ struct ProjectManifest: Codable {
         try container.encode(canvasHeight, forKey: .canvasHeight)
         try container.encode(canvasPadding, forKey: .canvasPadding)
         try container.encode(fps, forKey: .fps)
-        try container.encode(sceneFrameCount, forKey: .sceneFrameCount)
         try container.encode(layers, forKey: .layers)
         try container.encode(modifiedAt, forKey: .modifiedAt)
         try container.encode(backgroundColor, forKey: .backgroundColor)
@@ -138,7 +140,7 @@ struct ProjectManifest: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, canvasWidth, canvasHeight, canvasPadding, fps, sceneFrameCount, layers,
+        case id, name, canvasWidth, canvasHeight, canvasPadding, fps, layers,
              modifiedAt, backgroundColor, isBackgroundVisible, selectedBrush, customBrushes,
              vectorEraserMode, folders, viewPresets, motionGroups, guideStrokes,
              animationGroups, brushTableFileName

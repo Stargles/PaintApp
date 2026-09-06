@@ -3236,7 +3236,7 @@ final class PerfBaselineTests: XCTestCase {
     /// carrying ink.
     ///
     /// Cels are built directly rather than through `addCel`, which would refuse them: `addLayer`
-    /// gives its first cel `frameCount: max(sceneFrameCount, 1)`, so it already spans every frame a
+    /// gives its first cel `frameCount: newLayerBlockLength`, so it already spans every frame a
     /// second cel could start on.
     ///
     /// **Raster layers only, and that makes the number a floor rather than a ceiling.** A vector cel
@@ -3249,7 +3249,6 @@ final class PerfBaselineTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = canvas
         manager.fps = 24
-        manager.sceneFrameCount = celsPerLayer * 2
         for layerIndex in 0..<layerCount {
             manager.addLayer(name: "Layer \(layerIndex)")
             manager.layers[layerIndex].cels = (0..<celsPerLayer).map { celIndex in
@@ -3732,7 +3731,6 @@ final class PerfBaselineTests: XCTestCase {
         let manager = CanvasManager()
         manager.canvasSize = canvas
         manager.fps = 24
-        manager.sceneFrameCount = celsPerLayer * 2
         let brush = Brush(name: "PerfVector", tip: .round, size: 12, dab: BrushDabSettings(hardness: 1))
         for layerIndex in 0..<layerCount {
             manager.addVectorLayer(name: "Vector \(layerIndex)")
@@ -4773,7 +4771,6 @@ final class PerfBaselineTests: XCTestCase {
             let manager = CanvasManager()
             manager.canvasSize = canvas
             manager.fps = 24
-            manager.sceneFrameCount = celsPerLayer * 2
             for layerIndex in 0..<layerCount {
                 manager.addVectorLayer(name: "Vector \(layerIndex)")
                 // Built directly rather than through `addCel` for the same reason

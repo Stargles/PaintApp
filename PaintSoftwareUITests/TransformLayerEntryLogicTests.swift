@@ -53,7 +53,6 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     private func makeStack() -> Stack {
         let manager = CanvasManager()
         manager.canvasSize = size
-        manager.sceneFrameCount = 12
         manager.addVectorLayer(name: "floor")
         manager.addVectorLayer(name: "inner")
         manager.addValueLayer(name: "mover")
@@ -82,7 +81,6 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     private func makeValueLayer() -> CanvasManager {
         let manager = CanvasManager()
         manager.canvasSize = size
-        manager.sceneFrameCount = 12
         manager.addValueLayer()
         manager.currentLayerIndex = manager.layers.count - 1
         return manager
@@ -583,8 +581,9 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     // MARK: - Cold start: can an artist who has read nothing reach this feature?
     //
     // **Every other test in this file starts from a fixture that has already been told the answer.**
-    // `makeStack` and `makeValueLayer` both set `sceneFrameCount = 12` *before* creating the layer, so
-    // the block `addValueLayer` stamps covers every frame those tests ever visit, and
+    // `makeStack` and `makeValueLayer` both create their layers into an empty document, so the block
+    // `addValueLayer` stamps is a new scene's full twelve frames and covers every frame those tests
+    // ever visit, and
     // `enterTransformMode` hands the layer its pose by calling the model directly. That is the right
     // shape for pinning what the pose *does* — and it is exactly why nothing here caught the feature
     // being unreachable. The owner installed a build and asked *"i selected the transform mode, now
@@ -595,7 +594,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
 
     /// **A brand-new document, nothing arranged by hand: add the layer, pick Transform, get a box.**
     ///
-    /// `sceneFrameCount` is left at its shipped default rather than being set for the fixture's
+    /// The scene is left as a new document's own twelve frames rather than arranged for the fixture's
     /// convenience, and the layer is created through `addValueLayer` and flipped through
     /// `setLayerTransform` — which are the two calls the panel's own controls make
     /// (`LayerPanel.valueBlendModeRow`), in the order the panel makes them.
@@ -627,8 +626,8 @@ final class TransformLayerEntryLogicTests: XCTestCase {
 
     /// **The owner's report, reproduced: the layer is made early and used late.**
     ///
-    /// `addValueLayer` stamps one block of `max(sceneFrameCount, 1)` frames **at creation** and never
-    /// extends it, while `sceneFrameCount` goes on ratcheting up as blocks are added elsewhere
+    /// `addValueLayer` stamps one block of `newLayerBlockLength` frames **at creation** and never
+    /// extends it, while the scene goes on growing as blocks are added elsewhere
     /// (`addCel`). So a transformation layer added to a fresh 12-frame document, on a scene that later
     /// reaches frame 30, has no block of its own from frame 12 onward — and `beginContainerPoseMove`
     /// used to ask `activeCelIndex` for one, return false, and be discarded by `beginMove` without a
@@ -653,7 +652,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         manager.currentFrame = 30
         XCTAssertNotNil(manager.ensureCelAtCurrentFrame(layerIndex: 0),
                         "The premise: drawing on an empty frame mints a block there")
-        XCTAssertGreaterThan(manager.sceneFrameCount, 20, "…and the scene grew to hold it")
+        XCTAssertGreaterThan(manager.contentEndFrame, 20, "…and the scene grew to hold it")
 
         manager.currentLayerIndex = mover
         manager.currentFrame = 20

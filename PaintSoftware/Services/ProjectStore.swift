@@ -227,7 +227,6 @@ enum ProjectStore {
         let canvasSize: CGSize
         let canvasPadding: Double
         let fps: Int
-        let sceneFrameCount: Int
         let backgroundColor: CodableColor
         let isBackgroundVisible: Bool
         let selectedBrush: Brush
@@ -266,7 +265,6 @@ enum ProjectStore {
             canvasSize = canvasManager.canvasSize ?? .zero
             canvasPadding = Double(canvasManager.canvasPadding)
             fps = canvasManager.fps
-            sceneFrameCount = canvasManager.sceneFrameCount
             backgroundColor = canvasManager.canvasBackgroundColor.codable
             isBackgroundVisible = canvasManager.isCanvasBackgroundVisible
             selectedBrush = canvasManager.selectedBrush
@@ -814,7 +812,6 @@ enum ProjectStore {
             canvasHeight: Double(snapshot.canvasSize.height),
             canvasPadding: snapshot.canvasPadding,
             fps: snapshot.fps,
-            sceneFrameCount: snapshot.sceneFrameCount,
             layers: layerManifests,
             modifiedAt: Date(),
             backgroundColor: snapshot.backgroundColor,
@@ -1509,7 +1506,6 @@ enum ProjectStore {
         // the paper inset that reveals the grey margin.
         manager.canvasPadding = CGFloat(manifest.canvasPadding)
         manager.fps = manifest.fps
-        manager.sceneFrameCount = manifest.sceneFrameCount
         manager.canvasBackgroundColor = manifest.backgroundColor.color
         manager.isCanvasBackgroundVisible = manifest.isBackgroundVisible
 

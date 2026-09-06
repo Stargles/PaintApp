@@ -302,7 +302,7 @@ enum TimelineGraphBand {
         /// Empty in every document the app can write today: animated Distort is KEYFRAMES stage 5b
         /// and no writer produces a projective `PoseQuad`.
         let declinedChannelIDs: [String]
-        /// **How far along the track the curves are drawn** — `drawnFrameCount(sceneFrameCount:channels:)`,
+        /// **How far along the track the curves are drawn** — `drawnFrameCount(contentEndFrame:channels:)`,
         /// and *not* the track's own laid-out length.
         ///
         /// In `Content`, and therefore in `TimelineLayoutKey`, for `height`'s reason exactly: it is an
@@ -317,7 +317,7 @@ enum TimelineGraphBand {
     ///
     /// **The band view is as wide as the *track*, and the track is not the document.**
     /// `TimelineTrackView.Coordinator.displayedFrameCount(for:)` inflates the laid-out frame count past
-    /// `CanvasManager.sceneFrameCount` by two screenfuls of look-ahead, so that the artist can scroll
+    /// `CanvasManager.contentEndFrame` by two screenfuls of look-ahead, so that the artist can scroll
     /// right and drop a cel past the end. Sampling a curve across all of that draws a flat line into
     /// track that holds no frames: on a 12-frame document at the default zoom more than half the band
     /// was tail. `AnimationCurve`'s constant-hold extrapolation makes the *value* out there correct,
@@ -329,14 +329,14 @@ enum TimelineGraphBand {
     ///
     /// **The widening is not tidiness.** Nothing clamps a key to the scene's length: `moves` stops a key
     /// at its neighbour and at frame 0 and at no upper bound, `tap` adds one wherever the touch lands,
-    /// and `sceneFrameCount` grows only from *cel* edits (`CanvasManager+Timeline`), never from a
+    /// the scene's end is where the *cels* stop (`contentEndFrame`), never where a key stops, so a
     /// keyframe write. So a key genuinely can sit past the end of the scene, and bounding the drawing at
-    /// `sceneFrameCount` alone would make it invisible while leaving it grabbable — a key the artist can
+    /// bound at the scene alone would make such a key invisible while leaving it grabbable — one the artist can
     /// delete by accident and cannot see. `+ 1` because a frame count is exclusive: the last key's own
     /// column has to be inside the bound, not on its edge.
-    static func drawnFrameCount(sceneFrameCount: Int, channels: [Channel]) -> Int {
+    static func drawnFrameCount(contentEndFrame: Int, channels: [Channel]) -> Int {
         let lastKey = channels.flatMap { $0.curve.keys.map(\.frame) }.max()
-        return max(max(sceneFrameCount, 0), lastKey.map { $0 + 1 } ?? 0)
+        return max(max(contentEndFrame, 0), lastKey.map { $0 + 1 } ?? 0)
     }
 
     /// **Every channel the band lists: each of the target's effect parameters that carries a curve at
@@ -763,7 +763,7 @@ enum TimelineGraphBand {
 
     /// The x positions a curve is evaluated at: one per point of width, which is
     /// `CurveEditor.curvePath`'s density, clipped to the dirty rect, to **what is on screen**, and
-    /// to the frames the band draws over — `drawnFrameCount(sceneFrameCount:channels:)`, which is the
+    /// to the frames the band draws over — `drawnFrameCount(contentEndFrame:channels:)`, which is the
     /// document's own length rather than the track's.
     ///
     /// **A stride rather than an array**, because the whole point of clipping is not to allocate one
@@ -1128,7 +1128,7 @@ enum TimelineGraphBand {
     /// **And an add past `frameCount` is refused, which is the gesture half of where drawing stops.**
     /// `nearestChannel`'s rule is proximity to the **drawn** line — that is the sentence its own doc
     /// makes the choice on — so once the curves stop at the document's own length
-    /// (`drawnFrameCount(sceneFrameCount:channels:)`) a tap out in the look-ahead would be aiming at a
+    /// (`drawnFrameCount(contentEndFrame:channels:)`) a tap out in the look-ahead would be aiming at a
     /// line nobody can see, and would land a key by luck. A tap that lands *on a node* is deliberately
     /// not bounded the same way: the bound already widens to hold any key past the end, so every node
     /// the band draws is inside it and a node that is drawn must stay reachable.
@@ -2070,7 +2070,7 @@ extension CanvasManager {
                                          // because it is an input to the drawing and therefore has
                                          // to be inside the layout key.
                                          frameCount: TimelineGraphBand.drawnFrameCount(
-                                             sceneFrameCount: sceneFrameCount, channels: shown))
+                                             contentEndFrame: contentEndFrame, channels: shown))
     }
 
     /// **Every channel one band lists, grade and pose alike, plus the pose channels it refused** —

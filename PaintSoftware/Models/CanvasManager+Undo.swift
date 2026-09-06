@@ -29,7 +29,6 @@ extension CanvasManager {
         var viewPresets: [ViewPreset]
         var activeViewPresetIndex: Int
         var currentLayerIndex: Int
-        var sceneFrameCount: Int
         /// The two document-level interpolation registries. Here rather than given undo machinery of
         /// their own because a single artist action routinely spans both them and `layers` — deleting
         /// a motion group also clears the tag off every stroke carrying it — and one snapshot is what
@@ -59,7 +58,7 @@ extension CanvasManager {
     private func captureStructure() -> StructureSnapshot {
         StructureSnapshot(layers: layers, folders: folders, viewPresets: viewPresets,
                           activeViewPresetIndex: activeViewPresetIndex,
-                          currentLayerIndex: currentLayerIndex, sceneFrameCount: sceneFrameCount,
+                          currentLayerIndex: currentLayerIndex,
                           motionGroups: motionGroups, guideStrokes: guideStrokes,
                           animationGroups: animationGroups, videoCrops: captureVideoCrops())
     }
@@ -112,12 +111,17 @@ extension CanvasManager {
         viewPresets = snapshot.viewPresets
         activeViewPresetIndex = snapshot.activeViewPresetIndex
         currentLayerIndex = snapshot.currentLayerIndex
-        sceneFrameCount = snapshot.sceneFrameCount
         // The scene may have been longer when the playhead was last moved — undoing the edit that
         // lengthened it would otherwise leave the playhead parked past the new end, reading as
         // "Frame 14/12". Adding a drawing out beyond the last frame (the timeline scrolls on
         // forever, so that is an ordinary thing to do now) is exactly such an edit.
-        currentFrame = min(currentFrame, max(sceneFrameCount - 1, 0))
+        //
+        // **After `layers`, and that ordering is now load-bearing.** The end of the scene is derived
+        // from the cels (`contentEndFrame`) rather than stored beside them, so this clamp reads the
+        // *restored* document. It used to read a snapshotted field, which is the field TODO (50)
+        // removed — and which, because nothing ever lowered it, made this clamp looser than it
+        // claimed to be.
+        currentFrame = min(currentFrame, max(contentEndFrame - 1, 0))
         motionGroups = snapshot.motionGroups
         guideStrokes = snapshot.guideStrokes
         animationGroups = snapshot.animationGroups

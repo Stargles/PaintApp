@@ -42,7 +42,6 @@ final class PoseBandLogicTests: XCTestCase {
                       raster: .empty(size: size), vector: .empty(size: size))
         cel.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
         manager.layers[1].cels = [cel]
-        manager.sceneFrameCount = max(manager.sceneFrameCount, start + 16)
         manager.currentLayerIndex = 1
         manager.currentFrame = start
         manager.isGraphEditorOpen = true

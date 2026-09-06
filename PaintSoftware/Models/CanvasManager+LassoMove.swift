@@ -533,7 +533,7 @@ extension CanvasManager {
             // taken from: the elements are in the source's local space and would land somewhere else
             // under an identity.
             let canvas = VectorCanvas(size: size, elements: copies, transform: source.transform)
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: max(sceneFrameCount, 1),
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
                           raster: .empty(size: canvasSize ?? size), vector: canvas)
             let layer = Layer(id: UUID(), name: "Layer \(layers.count + 1)", opacity: 1.0,
                               isVisible: true, kind: .vector,

@@ -107,6 +107,7 @@
 		DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */; };
 		DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */; };
 		DEC0DE000000000000000061 /* PlaybackBoundsCharacterizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000060 /* PlaybackBoundsCharacterizationTests.swift */; };
+		B9FB34D555872A07F380BAC8 /* SceneEndLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7A8E0985A62544E7ED0E68 /* SceneEndLogicTests.swift */; };
 		DEC0DE0000000000000000FE /* VectorShapeAndRecoveryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */; };
 		DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */; };
 		DEC0DE0000000000000000FA /* FillUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F9 /* FillUITests.swift */; };
@@ -287,6 +288,7 @@
 		C36EF3DA34DB502C954C5528 /* UndoRepairLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2469AECBE4129A7334E06DB9 /* UndoRepairLogicTests.swift */; };
 		72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */; };
 		7F7DD44DF253A841FA517F3C /* PaintSoftware/Models/TimelineRowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */; };
+		E87773AFEF75BC5112E34D93 /* PaintSoftware/Models/TimelineTrackExtent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C56EB43F3D9DC0479334BA0 /* PaintSoftware/Models/TimelineTrackExtent.swift */; };
 		5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */; };
 		98709D5A765375DE901906E7 /* PaintSoftware/Views/TimelineKeyMarkers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */; };
 		A939F4EEE340D6699722F29E /* PaintSoftware/Views/TimelineBakeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAB2314E50FF4A5681DF648F /* PaintSoftware/Views/TimelineBakeBar.swift */; };
@@ -452,6 +454,7 @@
 		DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CanvasManagerTestSupport.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CelCRUDCharacterizationTests.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000060 /* PlaybackBoundsCharacterizationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaybackBoundsCharacterizationTests.swift; sourceTree = "<group>"; };
+		FA7A8E0985A62544E7ED0E68 /* SceneEndLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SceneEndLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorShapeAndRecoveryUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ToolsAndSelectionUITests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000F9 /* FillUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FillUITests.swift; sourceTree = "<group>"; };
@@ -632,6 +635,7 @@
 		2469AECBE4129A7334E06DB9 /* UndoRepairLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UndoRepairLogicTests.swift; sourceTree = "<group>"; };
 		79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineLayoutKeyLogicTests.swift; sourceTree = "<group>"; };
 		DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineRowLayout.swift; sourceTree = "<group>"; };
+		0C56EB43F3D9DC0479334BA0 /* PaintSoftware/Models/TimelineTrackExtent.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineTrackExtent.swift; sourceTree = "<group>"; };
 		59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRowLayoutLogicTests.swift; sourceTree = "<group>"; };
 		9DCFAFF01297357A7483F8FC /* PaintSoftware/Views/TimelineKeyMarkers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineKeyMarkers.swift; sourceTree = "<group>"; };
 		CAB2314E50FF4A5681DF648F /* PaintSoftware/Views/TimelineBakeBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Views/TimelineBakeBar.swift; sourceTree = "<group>"; };
@@ -878,6 +882,7 @@
 				DEC0DE000000000000000001 /* CanvasManagerTestSupport.swift */,
 				DEC0DE000000000000000003 /* CelCRUDCharacterizationTests.swift */,
 				DEC0DE000000000000000060 /* PlaybackBoundsCharacterizationTests.swift */,
+				FA7A8E0985A62544E7ED0E68 /* SceneEndLogicTests.swift */,
 				DEC0DE0000000000000000FD /* VectorShapeAndRecoveryUITests.swift */,
 				DEC0DE0000000000000000FB /* ToolsAndSelectionUITests.swift */,
 				DEC0DE0000000000000000F9 /* FillUITests.swift */,
@@ -1027,6 +1032,7 @@
 				DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */,
 				DEC0DE000000000000000036 /* PaintSoftware/Models/LayerStackRow.swift */,
 				DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */,
+				0C56EB43F3D9DC0479334BA0 /* PaintSoftware/Models/TimelineTrackExtent.swift */,
 				DEC0DE000000000000000038 /* PaintSoftware/Models/Cel.swift */,
 				DEC0DE00000000000000003A /* PaintSoftware/Models/CopiedCel.swift */,
 				DEC0DE00000000000000003C /* PaintSoftware/Models/LayerKind.swift */,
@@ -1328,6 +1334,7 @@
 				72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */,
 				5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */,
 				7F7DD44DF253A841FA517F3C /* PaintSoftware/Models/TimelineRowLayout.swift in Sources */,
+				E87773AFEF75BC5112E34D93 /* PaintSoftware/Models/TimelineTrackExtent.swift in Sources */,
 				AF2241D8EDE8331362C8AA0A /* TimelineKeyMarkersLogicTests.swift in Sources */,
 				98709D5A765375DE901906E7 /* PaintSoftware/Views/TimelineKeyMarkers.swift in Sources */,
 				A939F4EEE340D6699722F29E /* PaintSoftware/Views/TimelineBakeBar.swift in Sources */,
@@ -1376,6 +1383,7 @@
 				DEC0DE000000000000000002 /* CanvasManagerTestSupport.swift in Sources */,
 				DEC0DE000000000000000004 /* CelCRUDCharacterizationTests.swift in Sources */,
 				DEC0DE000000000000000061 /* PlaybackBoundsCharacterizationTests.swift in Sources */,
+				B9FB34D555872A07F380BAC8 /* SceneEndLogicTests.swift in Sources */,
 				DEC0DE0000000000000000FE /* VectorShapeAndRecoveryUITests.swift in Sources */,
 				DEC0DE0000000000000000FC /* ToolsAndSelectionUITests.swift in Sources */,
 				DEC0DE0000000000000000FA /* FillUITests.swift in Sources */,

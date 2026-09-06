@@ -62,7 +62,6 @@ final class PoseNodeDragLogicTests: XCTestCase {
                       raster: .empty(size: size), vector: .empty(size: size))
         cel.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
         manager.layers[1].cels = [cel]
-        manager.sceneFrameCount = max(manager.sceneFrameCount, start + length)
         manager.currentLayerIndex = 1
         manager.currentFrame = start
         manager.isGraphEditorOpen = true
@@ -421,7 +420,6 @@ final class PoseNodeDragLogicTests: XCTestCase {
                          raster: .empty(size: size), vector: .empty(size: size))
         second.vector?.addStroke(stroke([CGPoint(x: 6, y: 10), CGPoint(x: 18, y: 10)]))
         manager.layers[1].cels.append(second)
-        manager.sceneFrameCount = 16
         for (n, frame) in [0, 2].enumerated() {
             manager.setTransformPoseKey(layerID: layerID, celID: manager.layers[1].cels[0].id,
                                         channel: .cel, atCelLocalFrame: frame, pose: try busyPose(n))

@@ -33,11 +33,6 @@ enum FrameExport {
     /// that choice is between three different answers the model already gives, none of which is
     /// interchangeable with another:
     ///
-    ///  - **`sceneFrameCount` is the wrong one and is not a near miss.** Its own doc comment says
-    ///    so: *"It is the laid-out length of the timeline: it starts at 12 on a new document and
-    ///    only ever ratchets upward."* A two-frame animation reports 12, so an export driven by it
-    ///    ships ten frames of empty track — which is the exact bug `contentEndFrame` was introduced
-    ///    to fix for playback, and there is no reason export should re-acquire it.
     ///  - **`contentEndFrame` is right about content and blind to intent.** It is where the drawing
     ///    ends, and it is what `playbackEndFrame` falls back to when no loop marker is set. But an
     ///    artist who has placed loop markers has said *this is my shot*, and `playbackEndFrame`
@@ -46,17 +41,23 @@ enum FrameExport {
     ///    with no markers and to the marked range with them. **The artist exports what they were
     ///    watching**, and there is one account of "how long is this" rather than a second one here.
     ///
-    /// It is then clamped into `0..<sceneFrameCount`, which is not belt and braces: `BakeQueue`'s
+    /// There used to be a third candidate, `CanvasManager.sceneFrameCount`, and it was wrong: a
+    /// stored high-water mark that only ever rose, so a two-frame animation reported 12 and an export
+    /// driven by it shipped ten frames of empty track. It is gone (TODO 50) and the two above are all
+    /// there is.
+    ///
+    /// It is then clamped into `0..<contentEndFrame`, which is not belt and braces: `BakeQueue`'s
     /// universe is exactly that range and `markDirty` silently drops anything outside it, so a
-    /// frame past the laid-out track could be asked for and never baked — an export that waits
-    /// forever. Clamping here makes that unreachable rather than merely unlikely.
+    /// frame past the end of the scene could be asked for and never baked — an export that waits
+    /// forever, and a playhead parked out there is an ordinary thing. Clamping here makes that
+    /// unreachable rather than merely unlikely.
     ///
     /// Nil when the document lays out no frames at all.
     static func frameRange(playbackStart: Int,
                            playbackEnd: Int,
-                           sceneFrameCount: Int) -> ClosedRange<Int>? {
-        guard sceneFrameCount > 0 else { return nil }
-        let ceiling = sceneFrameCount - 1
+                           contentEndFrame: Int) -> ClosedRange<Int>? {
+        guard contentEndFrame > 0 else { return nil }
+        let ceiling = contentEndFrame - 1
         let low = min(max(min(playbackStart, playbackEnd), 0), ceiling)
         let high = min(max(max(playbackStart, playbackEnd), low), ceiling)
         return low...high
