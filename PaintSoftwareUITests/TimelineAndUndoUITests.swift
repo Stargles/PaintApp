@@ -69,6 +69,111 @@ final class TimelineGestureUITests: PaintUITestCase {
                       "turning onion skin off dismisses its panel")
     }
 
+    /// **What the artist sees, driven rather than modelled** — TODO (40), the owner's placement
+    /// ruling, at the pixel.
+    ///
+    /// Behind and In Front both draw the ghost *on top of the compositor* now, so the only thing
+    /// separating them is the clip: Behind subtracts the current drawing's own alpha, In Front does
+    /// not. That difference is invisible to every headless assertion in `OnionSkinLogicTests`, which
+    /// can hold the clip image but cannot see whether it reaches Core Animation — so this is the one
+    /// test that fails if the mask stops being applied while the picker still reads Behind.
+    ///
+    /// The probe is where the two drawings cross. Under Behind that pixel must be the artist's own
+    /// ink, indistinguishable from a point on the same stroke the ghost never reaches; under In Front
+    /// the ghost's tint sits over it and the two points must differ.
+    func testABehindGhostIsCutAwayWhereTheArtistsOwnInkCoversItAndAnInFrontGhostIsNot() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "canvas.host exists")
+
+        // Drawing A — a horizontal line through the middle. This is what the ghost will show.
+        drawLine(on: canvas, from: CGVector(dx: 0.30, dy: 0.50), to: CGVector(dx: 0.70, dy: 0.50))
+        let crossing = (dx: 0.50, dy: 0.50)
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy)),
+                       "Setup: drawing A crosses the probe point")
+
+        // Split the block so there is a second drawing to stand on, and add it.
+        performDrag(app, identifier: "timeline.cel.0.0.rightHandle", totalDelta: -260)
+        let firstBlock = app.otherElements["timeline.cel.0.0"]
+        let shrunk = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0),
+                                   "Could not read the block after shrinking it")
+        XCTAssertLessThan(shrunk.length, 12, "Setup: the drag has to leave a gap to add a drawing into")
+        let gapSlot = firstBlock.coordinate(withNormalizedOffset:
+            CGVector(dx: (Double(shrunk.length) + 2.0) / Double(shrunk.length), dy: 0.5))
+        gapSlot.tap()
+        gapSlot.tap()
+        let addDrawing = app.buttons["Add Drawing"]
+        XCTAssertTrue(addDrawing.waitForExistence(timeout: 5), "a second tap on the empty slot opens its menu")
+        addDrawing.tap()
+
+        // Onion skin ships on and Behind is its default placement, so the ghost of drawing A is
+        // already on screen over an otherwise blank drawing B.
+        let ghostOnly = try XCTUnwrap(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy))
+        XCTAssertFalse(isWhitish(ghostOnly),
+                       "Setup: the ghost of drawing A reaches the probe on the new blank drawing")
+        attachScreen("onion-01-behind-ghost-over-blank-drawing")
+
+        // Drawing B — a vertical line crossing A at the probe. Its lower half is ink the ghost
+        // never touches, which is the operand every assertion below compares against.
+        drawLine(on: canvas, from: CGVector(dx: 0.50, dy: 0.38), to: CGVector(dx: 0.50, dy: 0.64))
+        let inkOnly = try XCTUnwrap(rgbaPixel(of: canvas, dx: 0.50, dy: 0.60))
+        XCTAssertFalse(isWhitish(inkOnly), "Setup: drawing B's own ink reaches the lower probe")
+        XCTAssertGreaterThan(channelDistance(inkOnly, ghostOnly), 40,
+                             "Setup: the ghost's tint and the artist's ink are told apart by colour")
+
+        let behind = try XCTUnwrap(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy))
+        attachScreen("onion-02-behind-ghost-cut-by-the-artists-ink")
+        XCTAssertLessThan(channelDistance(behind, inkOnly), 20,
+                          "Behind: the ghost is masked out where the artist's own ink covers it, so "
+                          + "the crossing is the same ink as the stroke's clear half")
+
+        // The same picture with the one setting changed. The panel is two-stage: onion skin is on,
+        // so the first tap opens the panel rather than switching it off.
+        //
+        // **The panel is left open and nothing else is touched.** The first version of this test
+        // dismissed the popover by tapping the timeline ruler — which moves the playhead, and moved
+        // it clean off both drawings to frame 29. Every assertion below then passed against a blank
+        // canvas: "the crossing differs from the ink" is trivially true of white paper. The frame
+        // label is read back for exactly that reason.
+        let frameBefore = try XCTUnwrap(readFrameLabel(app), "the frame label reads before the change")
+        app.buttons["timeline.onionSkinToggle"].tap()
+        let placement = app.segmentedControls["onionPanel.placementPicker"]
+        XCTAssertTrue(placement.waitForExistence(timeout: 5), "the placement picker is on the panel")
+        placement.buttons["In Front"].tap()
+
+        let frameAfter = try XCTUnwrap(readFrameLabel(app), "the frame label reads after the change")
+        XCTAssertEqual(frameAfter.current, frameBefore.current,
+                       "Setup: changing the placement must not have moved the playhead off the drawing")
+
+        let inFront = try XCTUnwrap(rgbaPixel(of: canvas, dx: crossing.dx, dy: crossing.dy))
+        attachScreen("onion-03-in-front-ghost-over-the-artists-ink")
+        XCTAssertFalse(isWhitish(inFront),
+                       "Setup: there is still something at the crossing — ink, ghost, or both")
+        XCTAssertGreaterThan(channelDistance(inFront, inkOnly), 20,
+                             "In Front: the ghost draws over the artist's ink, so the crossing is "
+                             + "no longer the same colour as the stroke's clear half")
+        XCTAssertGreaterThan(channelDistance(inFront, behind), 20,
+                             "and the two placements therefore differ at the one pixel that names them")
+    }
+
+    /// Largest per-channel difference between two probes — a comparison that survives the ghost's
+    /// tint being on one channel rather than all three, which a luminance difference would not.
+    private func channelDistance(_ a: (r: UInt8, g: UInt8, b: UInt8, a: UInt8),
+                                 _ b: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)) -> Int {
+        max(abs(Int(a.r) - Int(b.r)), abs(Int(a.g) - Int(b.g)), abs(Int(a.b) - Int(b.b)))
+    }
+
+    /// Kept on success as well as on failure: these three are the "drive it and look at it" record
+    /// this change is required to produce, and a `.deleteOnSuccess` lifetime would throw away
+    /// exactly the run worth looking at.
+    private func attachScreen(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// `waitForExistence`'s missing twin. A polling loop was written first and is the wrong shape:
     /// `waitForExistence` returns immediately while the element is still there, so the loop spins the
     /// CPU for the whole timeout in exactly the failing case, on a machine CLAUDE.md records as

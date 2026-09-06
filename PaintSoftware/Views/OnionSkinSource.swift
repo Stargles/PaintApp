@@ -58,6 +58,133 @@ struct OnionSkinFrame {
     }
 }
 
+// MARK: - The clip
+
+/// What clips the onion-skin view, and the whole of the owner's 2026-09-06 ruling on placement.
+///
+/// **Both placements draw on top of the composite; Behind differs only by a mask.** The owner:
+/// *"the onion skin always renders on top of the compositor… For the 'Behind' option, it is still
+/// rendered on top of the compositor, but then uses the inverse of the current drawing layer as an
+/// alpha mask."* So there is no z-order for "behind" to express and none is expressed — the view is
+/// fronted over every layer host either way, and the ghost never picks up a blend mode or an
+/// adjustment layer's grade meant for artwork.
+///
+/// **The paper is untouched by this and that is the point** (EFFECT_BACKDROP.md §2.1): the paper is a
+/// `UIView` painted *behind* the composite, so a skin drawn above the composite sits above the paper
+/// too, and a `.value` layer grading the paper cannot reach it.
+///
+/// **A mask rather than a cut baked into `OnionSkinFrame.composite`.** Both would put the same pixels
+/// on screen, and the composite already has a render to add one `.destinationOut` draw to — but the
+/// current layer's ink moves on every stroke, so folding it into the composite would rebuild the
+/// ghost stack each time the artist drew. That is the expensive product: MEASURED on the owner's iPad
+/// at 237 ms for ten skins at 2048x1024 Full (`OnionSkinBudget`), against the two draws this costs
+/// whatever the skin count. The composite's cache stays keyed on the neighbours, which is what it is
+/// about.
+enum OnionSkinClip {
+
+    /// The image `CALayer.mask` gets on the onion-skin view — nil for no clip at all.
+    ///
+    /// - `layerMask` is §6.4's coverage, the clip the compositor applies to the current layer. It
+    ///   applies to the ghost under both placements, unchanged: a ghost outside the current layer's
+    ///   mask is the BUGS.md entry "The onion skin renders unmasked".
+    /// - `ink` is what Behind takes back out. Nil is In Front and is also "Behind over a drawing with
+    ///   nothing on it", which are the same picture and rightly the same code path.
+    ///
+    /// **The placement setting is not read here**, deliberately: `CanvasManager.onionSkinInkToSubtract`
+    /// is the one place in the app that consults it, so there is a single answer to "does this pass
+    /// subtract anything" and a test can hold it. This function combines whatever it is handed.
+    ///
+    /// **An empty current layer means a fully visible skin**, which is the correct answer and the one
+    /// worth stating: with no ink there is nothing for the ghost to be behind, so Behind and In Front
+    /// look identical on a blank drawing.
+    ///
+    /// The combined image is built at `size` — the *skin's* resolution, not the canvas's. The thing
+    /// being masked is already soft at that size (`OnionSkinBudget` argues why a ghost may be), so a
+    /// cut edge sharper than the ghost it cuts would buy nothing and cost the square of the ratio.
+    static func mask(layerMask: CGImage?, subtracting ink: UIImage?, size: CGSize) -> CGImage? {
+        guard let ink, size.width > 0, size.height > 0 else { return layerMask }
+
+        let bounds = CGRect(origin: .zero, size: size)
+        let combined = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat())
+            .image { ctx in
+                // Everything is shown to begin with — either §6.4's coverage, or a fully opaque
+                // field when nothing clips this layer. White because `makeMaskImage` is white
+                // premultiplied by coverage and a mask that reads correctly by luminance as well as
+                // by alpha is cheaper to look at in a debugger than one that does not.
+                if let layerMask {
+                    UIImage(cgImage: layerMask).draw(in: bounds)
+                } else {
+                    UIColor.white.setFill()
+                    ctx.cgContext.fill(bounds)
+                }
+                // …and then the artist's own ink is taken back out of it. `.destinationOut` is
+                // dst x (1 - src alpha), which *is* "the inverse of the current drawing layer as an
+                // alpha mask" — no separate inversion pass, and it composes with the coverage above
+                // by construction rather than by a second multiply.
+                ink.draw(in: bounds, blendMode: .destinationOut, alpha: 1)
+            }
+        return combined.cgImage
+    }
+}
+
+extension CanvasManager {
+
+    /// The current drawing layer's own content at the playhead, at `size` — what Behind subtracts
+    /// from the ghost. Nil when there is nothing to subtract, which is the common case on a fresh
+    /// frame and is why this answers before rasterizing anything.
+    ///
+    /// **The only reader of `onionSkin.placement` outside the panel that sets it.** In Front leaves
+    /// here immediately, so `updateOnionSkin` makes no decision of its own and there is one place to
+    /// hold to the ruling rather than a condition in a view coordinate no headless test can reach.
+    ///
+    /// **`OnionSkinRasterCache` rather than a render of the layer host**, which is the cheapest
+    /// source that forces no extra work: the ghost's own sources go through that cache at this exact
+    /// size, so a Behind clip is one more entry in a store that is already sized, budgeted and
+    /// evicted for canvas-reduced flattens — and at Full it hands straight to the compositor's shared
+    /// memo, which the composite the artist is looking at has already filled. Snapshotting
+    /// `LayerHostView` would be a genuinely extra canvas-sized render, off a view whose contents are
+    /// mid-flight during a stroke.
+    ///
+    /// **Effective visibility, not `isVisible`** — a layer hidden by an enclosing folder draws no ink,
+    /// and a ghost cut out by ink nobody can see is the surprise this guard exists to prevent.
+    ///
+    /// **A `.value` layer subtracts nothing.** It has no cel to rasterize (`hasNoDrawingSurface`), so
+    /// an adjustment layer or a flat colour selected as the current layer leaves the skin whole
+    /// rather than erasing all of it — which is what a canvas-filling flat colour would otherwise do.
+    /// It falls out of the cel lookup below; the guard is here so it is a decision rather than an
+    /// accident.
+    ///
+    /// **Layer opacity is deliberately not folded in.** The ruling's stated purpose is *"giving the
+    /// animator a clear view at their art"*, and a proportional cut puts the ghost back under
+    /// half-opacity ink, which is the muddle Behind exists to remove. Full cut wherever there is ink.
+    ///
+    /// Not `@MainActor`, matching `OnionSkinSettingsSource.frames(for:)` next to it: everything it
+    /// reads is ordinary document state and the only caller is a SwiftUI pass.
+    func onionSkinInkToSubtract(at size: CGSize) -> UIImage? {
+        guard onionSkin.placement == .behind else { return nil }
+        guard let canvasSize, layers.indices.contains(currentLayerIndex) else { return nil }
+        let layer = layers[currentLayerIndex]
+        guard layer.kind != .value, isLayerEffectivelyVisible(currentLayerIndex) else { return nil }
+        guard let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              layer.cels.indices.contains(celIndex) else { return nil }
+        let cel = layer.cels[celIndex]
+        // Asked in `OnionSkinSettingsSource.frames`'s order and for its reason: `isCertainlyBlank`
+        // answers about *stored* tiers, so a derived in-between reports blank while showing a whole
+        // drawing and would be skipped by a check made first.
+        //
+        // No `inheriting:` pose, which is `OnionSkinSettingsSource`'s convention rather than a
+        // decision taken here: nothing in this subsystem poses a skin by an enclosing transformation
+        // layer, and `OnionSkinRasterCache` has no `pose` argument to hand a raster cel through. So a
+        // current layer moved by a container pose is cut where its ink rests, not where it is drawn.
+        // Fixing it is one field on that cache plus one on this call, and it belongs to whichever
+        // pass gives the *ghosts* their poses — cutting by a rule the skins themselves do not follow
+        // would be worse than the gap.
+        let derived = derivedCelContent(for: cel, atFrame: currentFrame)
+        guard derived != nil || !cel.isCertainlyBlank else { return nil }
+        return OnionSkinRasterCache.image(for: cel, canvasSize: canvasSize, at: size, derived: derived)
+    }
+}
+
 // MARK: - Settings
 
 /// Everything the onion-skin panel configures, as one value.

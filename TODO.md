@@ -216,16 +216,12 @@ a UI bug and does not share their causes.
 
 ---
 
-## (40) Onion skin z-order — ruled, and the ruling makes it small
+## (40) Onion skin z-order — ruled, and built
 
-**Status** — not started, **and no longer blocked.** The owner settled the design 2026-09-06.
+**Status** — **built on `tmp/skinfill`, not merged.** The item stays here until the branch lands, per
+this file's own rule that an item leaves when it is merged and not when a branch exists.
 
-`CanvasView` fronts the onion-skin view and then fronts every layer host over it, and
-`updateOnionSkin` fronts only the *In Front* view. So `.behind` currently means "under all artwork,
-including the layers below the active one" — the reported defect, untouched since the item was filed.
-
-**The design, in the owner's own words** — and it dissolves the objection that blocked this rather
-than answering it:
+**The design, in the owner's own words** (2026-09-06):
 
 > *"the onion skin always renders on top of the compositor. This is the idea for the 'in front'
 > option. For the 'Behind' option, it is still rendered on top of the compositor, but then uses the
@@ -233,22 +229,28 @@ than answering it:
 > compositor giving the animator a clear view at their art. When they set it to below, the onion skin
 > gets masked out in the areas that the current layer is drawn."*
 
-**Why this is better than what the item asked for before.** The blocking objection was that at rest,
-with the compositor engaged, there is no separate active-layer ink for the skin to sit *under* — so
-"behind the current layer" had no z-order to express. This does not need one: **both modes render on
-top, and Behind differs only by a mask.** The compositor never has to interleave the skin, the skin
-never picks up a blend mode or a grade meant for artwork, and the artist always sees the skin at full
-strength except exactly where their own ink covers it.
+**What shipped on the branch.** There is **one** onion-skin view now, not two, and `updateOnionSkin`
+fronts it above every layer host and above `sandwichAbove` on every pass — `reconcileLayers` no longer
+threads a ghost through the stack and `OnionSkinKey` no longer carries a placement, because placement
+changes no pixel of the composite. `OnionSkinClip.mask` is the ruling: §6.4's coverage with the current
+drawing's alpha taken out of it by one `.destinationOut` draw, built at the *skin's* resolution rather
+than the canvas's. `CanvasManager.onionSkinInkToSubtract` is the single reader of the placement setting
+— In Front answers nil and the clip is byte-for-byte what it was — so the view coordinate, which no
+headless test can reach, holds no decision of its own.
 
-**Left to build**
-- [ ] Both placements front the onion-skin view above every layer host — delete the interleaving.
-- [ ] Behind takes the **current layer's own alpha, inverted**, as a mask on the skin view. The active
-      layer's alpha is already available per frame; find the cheapest source that does not force an
-      extra render.
-- [ ] Check what this means for the *paper*, per EFFECT_BACKDROP.md — the paper is a `UIView` behind
-      the composite, so a skin above the composite is unaffected by it, which is the point.
-- [ ] Assert what is **drawn**, not only what is stored: a test that fails if the mask stops being
-      applied while the placement setting still reads Behind.
+**Three decisions taken, each stated in the source.** A **hidden** current layer subtracts nothing
+(a cut by ink nobody can see is the surprise). A **`.value`** layer subtracts nothing (a canvas-filling
+flat colour would erase the whole ghost). Layer **opacity is not folded in** — the cut is full wherever
+there is ink, because the ruling's stated purpose is a clear view of your own art and a proportional
+cut puts the ghost back under half-opacity ink.
+
+**One known gap, deliberately not closed here.** A current layer moved by an enclosing transformation
+layer is cut where its ink *rests*, not where it is *drawn* — because nothing in the onion-skin
+subsystem poses a skin either, and `OnionSkinRasterCache` has no `pose` argument. Cutting by a rule the
+ghosts themselves do not follow would be worse than the gap.
+
+**Left**
+- [ ] Merge `tmp/skinfill` to `main`.
 
 ---
 

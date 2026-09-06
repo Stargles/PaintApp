@@ -924,4 +924,179 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertEqual(composite.size, size)
         XCTAssertTrue(hasVisibleContent(composite))
     }
+
+    // MARK: - Placement: the clip that IS "Behind" (TODO (40))
+
+    /// Alpha per pixel, row-major from the top-left — the channel `CALayer.mask` reads and the only
+    /// one any assertion below is about.
+    private func alphaGrid(_ image: CGImage) -> (width: Int, height: Int, alpha: [UInt8]) {
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                                bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return (width, height, stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] })
+    }
+
+    private func alpha(_ grid: (width: Int, height: Int, alpha: [UInt8]), _ x: Int, _ y: Int) -> UInt8 {
+        grid.alpha[y * grid.width + x]
+    }
+
+    private func alphaGrid(of image: UIImage) -> (width: Int, height: Int, alpha: [UInt8]) {
+        alphaGrid(image.cgImage!)
+    }
+
+    /// The whole ruling in one assertion: Behind cuts the ghost where the current layer is drawn,
+    /// In Front does not touch it.
+    func testBehindSubtractsTheCurrentLayersInkFromTheClipAndInFrontDoesNot() {
+        let size = CanvasFixture.canvasSize
+        // The left half of the canvas, opaque — a shape whose inside and outside are both easy to
+        // name, so a cut in the wrong place cannot look like a cut in the right one.
+        let ink = CanvasFixture.solidImage(.black, rect: CGRect(x: 0, y: 0, width: 32, height: 64))
+
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        manager.onionSkin.placement = .inFront
+        XCTAssertNil(manager.onionSkinInkToSubtract(at: size),
+                     "In Front subtracts nothing, so the clip is whatever §6.4's coverage was")
+        manager.onionSkin.placement = .behind
+        XCTAssertNotNil(manager.onionSkinInkToSubtract(at: size),
+                        "Behind subtracts the current drawing")
+
+        XCTAssertNil(OnionSkinClip.mask(layerMask: nil, subtracting: nil, size: size),
+                     "nothing to subtract and nothing to keep is no clip at all")
+
+        guard let behind = OnionSkinClip.mask(layerMask: nil, subtracting: ink, size: size) else {
+            return XCTFail("Behind with ink present must produce a clip")
+        }
+        let grid = alphaGrid(behind)
+        XCTAssertEqual(alpha(grid, 10, 10), 0, "the ghost is masked out where the artist's ink is")
+        XCTAssertEqual(alpha(grid, 40, 10), 255, "and left whole where it is not")
+        XCTAssertEqual(alpha(grid, 10, 50), 0)
+        XCTAssertEqual(alpha(grid, 40, 50), 255)
+    }
+
+    /// §6.4's coverage survives the subtraction. A Behind clip that forgot it would put the ghost
+    /// back outside the current layer's alpha mask — BUGS.md's "The onion skin renders unmasked",
+    /// re-opened by the feature that closes (40).
+    func testBehindKeepsTheLayerMaskItSubtractsFrom() {
+        let size = CanvasFixture.canvasSize
+        // Coverage over the top half, in the shape `ResolvedMask.makeMaskImage` produces: white
+        // premultiplied by coverage, so alpha is the coverage.
+        let coverage = CanvasFixture.solidImage(.white, rect: CGRect(x: 0, y: 0, width: 64, height: 32)).cgImage!
+        let ink = CanvasFixture.solidImage(.black, rect: CGRect(x: 0, y: 0, width: 32, height: 64))
+
+        guard let clip = OnionSkinClip.mask(layerMask: coverage, subtracting: ink, size: size) else {
+            return XCTFail("Behind with ink present must produce a clip")
+        }
+        let grid = alphaGrid(clip)
+        XCTAssertEqual(alpha(grid, 40, 10), 255, "inside the coverage and clear of the ink: the ghost shows")
+        XCTAssertEqual(alpha(grid, 10, 10), 0, "inside the coverage but under the ink: cut")
+        XCTAssertEqual(alpha(grid, 40, 50), 0, "outside the coverage: hidden, ink or no ink")
+        XCTAssertEqual(alpha(grid, 10, 50), 0, "outside the coverage and under the ink: still hidden")
+    }
+
+    /// The empty-layer case, which is the one an animator meets first: a blank drawing has no ink,
+    /// so there is nothing for the ghost to be behind and Behind must look exactly like In Front.
+    func testAnEmptyCurrentLayerLeavesTheGhostWhole() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        manager.layers[0].cels[1].vector = .empty(size: CanvasFixture.canvasSize)
+
+        XCTAssertEqual(manager.onionSkin.placement, .behind, "premise: the placement under test")
+        XCTAssertNil(manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize),
+                     "a cel with nothing in it subtracts nothing")
+        XCTAssertNil(OnionSkinClip.mask(layerMask: nil, subtracting: nil, size: CanvasFixture.canvasSize),
+                     "and no ink means no clip, so the ghost is whole")
+    }
+
+    /// A layer the artist has hidden draws no ink, so a ghost cut out by it would be cut by
+    /// something nobody can see.
+    func testAHiddenCurrentLayerSubtractsNothingFromTheGhost() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        XCTAssertNotNil(manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize),
+                        "premise: this layer does have ink to subtract while it is visible")
+
+        manager.layers[0].isVisible = false
+        XCTAssertNil(manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize),
+                     "a hidden current layer subtracts nothing")
+    }
+
+    /// A `.value` layer is either an adjustment or one flat colour across the whole canvas. Either
+    /// way it holds no cel, and a flat colour treated as ink would erase the entire ghost.
+    func testAValueLayerSubtractsNothingFromTheGhost() {
+        let manager = twoCelManager()
+        manager.currentFrame = 8
+        XCTAssertNotNil(manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize),
+                        "premise: this layer does have ink to subtract while it is a drawing layer")
+        manager.layers[0].kind = .value
+
+        XCTAssertNil(manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize),
+                     "a value layer has no drawing surface, so it cuts nothing out of the ghost")
+    }
+
+    /// What gets subtracted is the drawing the artist is *on*, not the drawing being skinned. Those
+    /// are different cels of the same layer, which is exactly the confusion this file's header
+    /// records a one-cel fixture hiding.
+    func testWhatBehindSubtractsIsTheCurrentCelAndNotTheOneBeingSkinned() {
+        let manager = twoCelManager()
+        assertCelsAreDistinguishable(manager)
+        manager.currentFrame = 8          // inside cel 1; cel 0 is what the ghost shows
+
+        guard let ink = manager.onionSkinInkToSubtract(at: CanvasFixture.canvasSize) else {
+            return XCTFail("the current cel has ink")
+        }
+        let current = PixelOps.rasterize(cel: manager.layers[0].cels[1], canvasSize: CanvasFixture.canvasSize)
+        let skinned = PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)
+        XCTAssertEqual(ink.pngData(), current.pngData(), "must subtract the cel the playhead is in")
+        XCTAssertNotEqual(ink.pngData(), skinned.pngData(), "must not subtract the cel being skinned")
+    }
+
+    /// **What the artist sees, not what the model holds.** The ghost, composited exactly as the view
+    /// composites it, then multiplied by the clip exactly as `CALayer.mask` multiplies it — so this
+    /// goes red if the clip stops being built, stops being applied, or is built inside out, while
+    /// every stored value stays correct.
+    ///
+    /// The fixture's two strokes cross at (25, 25): the red one is the ghost, the blue one is what
+    /// the artist has drawn on the current frame. Every premise is asserted before the conclusion
+    /// is, because an assertion about a cut is worthless if there was nothing there to cut.
+    func testTheGhostIsErasedWhereTheCurrentDrawingCoversItAndSurvivesElsewhere() {
+        let manager = twoCelManager()
+        assertCelsAreDistinguishable(manager)
+        manager.currentFrame = 8
+        let size = OnionSkinBudget.compositeSize(for: CanvasFixture.canvasSize,
+                                                 resolution: manager.onionSkin.resolution)
+        XCTAssertEqual(size, CanvasFixture.canvasSize,
+                       "premise: on this fixture the skin is canvas-sized, so pixel coordinates are 1:1")
+
+        let frames = OnionSkinSettingsSource().frames(for: manager)
+        guard let ghost = OnionSkinFrame.composite(frames, size: size),
+              let ink = manager.onionSkinInkToSubtract(at: size) else {
+            return XCTFail("premise: one ghost frame and the current drawing's ink")
+        }
+        let ghostAlpha = alphaGrid(of: ghost)
+        let inkAlpha = alphaGrid(of: ink)
+        XCTAssertGreaterThan(alpha(ghostAlpha, 25, 25), 0, "premise: the ghost reaches the crossing")
+        XCTAssertGreaterThan(alpha(ghostAlpha, 15, 15), 0, "premise: and reaches its own arm")
+        XCTAssertEqual(alpha(inkAlpha, 25, 25), 255, "premise: the artist's ink covers the crossing")
+        XCTAssertEqual(alpha(inkAlpha, 15, 15), 0, "premise: and not the ghost's own arm")
+
+        guard let clip = OnionSkinClip.mask(layerMask: nil, subtracting: ink, size: size) else {
+            return XCTFail("Behind must produce a clip")
+        }
+        // Core Animation's alpha multiply, in CoreGraphics: `.destinationIn` is dst x src alpha,
+        // which is what `CALayer.mask` does to the layer it is installed on.
+        let seen = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
+            ghost.draw(in: CGRect(origin: .zero, size: size))
+            UIImage(cgImage: clip).draw(in: CGRect(origin: .zero, size: size),
+                                        blendMode: .destinationIn, alpha: 1)
+        }
+        let seenAlpha = alphaGrid(of: seen)
+        XCTAssertEqual(alpha(seenAlpha, 25, 25), 0,
+                       "the ghost is gone where the artist's own drawing covers it — this is Behind")
+        XCTAssertEqual(alpha(seenAlpha, 15, 15), alpha(ghostAlpha, 15, 15),
+                       "and untouched everywhere else, at full strength")
+    }
 }

@@ -48,17 +48,26 @@ struct CanvasView: UIViewRepresentable {
         // §5.2's sandwich: two views, three images from two producers. At rest the lower one carries
         // the **baked frame** and the upper one is empty; mid-stroke they carry `below` and `above`
         // with the active layer's own host between them. Added here so the *disengaged* z-order is
-        // already `below < onionSkin < above < chrome`; `reconcileLayers` is what lifts `above` over
+        // already `below < above < onionSkin < chrome`; `reconcileLayers` is what lifts `above` over
         // the layer hosts once the sandwich engages. See `updateSandwich`.
         let sandwichBelow = Coordinator.makeSandwichView()
         container.addSubview(sandwichBelow)
 
-        // **The Behind ghost sits between the two sandwich views, not under both** —
-        // EFFECT_BACKDROP.md §2.1, ruled 2026-08-27. Once an adjustment layer grades the paper the
-        // composite is opaque from that node up, and a ghost under `below` would simply stop
-        // existing. It is not composited into the request and so is never graded by an effect; it
-        // just draws over the composite of the layers beneath the active one, and `above` still
-        // covers it with the artwork on layers over the active one — which is what "Behind" means.
+        let sandwichAbove = Coordinator.makeSandwichView()
+        container.addSubview(sandwichAbove)
+        context.coordinator.sandwichBelowView = sandwichBelow
+        context.coordinator.sandwichAboveView = sandwichAbove
+
+        // **One onion-skin view, above everything the artwork draws into, under both placements** —
+        // the owner's ruling of 2026-09-06, and `OnionSkinClip` carries it in full. Behind is a mask
+        // on this view rather than a slot lower in the stack, so there is no interleaving left to
+        // maintain: `updateOnionSkin` fronts it once per pass and the chrome overlays below re-front
+        // themselves over it. It used to be two views at two heights, with `reconcileLayers` owning
+        // one of the orderings and `updateOnionSkin` the other.
+        //
+        // Above the composite means above the paper as well, which is what makes the ruling work:
+        // EFFECT_BACKDROP.md §2.1's paper is a `UIView` *behind* the composite, so a `.value` layer
+        // grading the paper reaches every pixel of the artwork and none of the ghost.
         //
         // Deliberately left on the default bilinear filter — nearest-neighbor made the onion-skin
         // ghost render as a distractingly pixelated overlay instead of a soft reference. That is
@@ -66,19 +75,6 @@ struct CanvasView: UIViewRepresentable {
         // and bilinear is what makes that invisible.
         let onionSkin = Coordinator.makeOnionSkinView()
         container.addSubview(onionSkin)
-
-        let sandwichAbove = Coordinator.makeSandwichView()
-        container.addSubview(sandwichAbove)
-        context.coordinator.sandwichBelowView = sandwichBelow
-        context.coordinator.sandwichAboveView = sandwichAbove
-
-        // "In Front" is a second view rather than a re-ordering of the one below it. Onion skin has
-        // to sit either mid-stack (Behind, above) or over everything, and `reconcileLayers` re-fronts the hosts
-        // and `sandwichAbove` whenever the stack changes — so a single view would have to be
-        // re-positioned from two places that do not know about each other. Two views, one of which is
-        // always hidden, cost one empty `UIImageView` and remove the ordering rule entirely.
-        let onionSkinFront = Coordinator.makeOnionSkinView()
-        container.addSubview(onionSkinFront)
 
         let transformOverlay = ObjectTransformOverlayView()
         transformOverlay.isHidden = true
@@ -222,10 +218,6 @@ struct CanvasView: UIViewRepresentable {
             onionSkin.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             onionSkin.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             onionSkin.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            onionSkinFront.topAnchor.constraint(equalTo: container.topAnchor),
-            onionSkinFront.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            onionSkinFront.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            onionSkinFront.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             sandwichBelow.topAnchor.constraint(equalTo: container.topAnchor),
             sandwichBelow.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             sandwichBelow.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -267,7 +259,6 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.hostView = host
         context.coordinator.containerView = container
         context.coordinator.onionSkinView = onionSkin
-        context.coordinator.onionSkinFrontView = onionSkinFront
         context.coordinator.paperView = paper
         context.coordinator.transformOverlay = transformOverlay
         context.coordinator.selectionOverlay = selectionOverlay
@@ -405,11 +396,10 @@ struct CanvasView: UIViewRepresentable {
 
         weak var hostView: CanvasHostView?
         weak var containerView: UIView?
-        /// The "Behind" placement's view — under every layer host, over `sandwichBelow`
-        /// (EFFECT_BACKDROP.md §2.1); `reconcileLayers` re-fronts it into that slot.
+        /// The ghost, at one height under both placements — over every layer host and over
+        /// `sandwichAbove`, fronted by `updateOnionSkin`. Behind is a mask, not a slot: see
+        /// `OnionSkinClip`.
         weak var onionSkinView: UIImageView?
-        /// The "In Front" placement's view — fronted over `sandwichAbove` by `updateOnionSkin`.
-        weak var onionSkinFrontView: UIImageView?
         weak var guideOverlay: GuideOverlayView?
         /// The guide under the pen right now, pushed up from `StrokeCanvasView` per sample. Held here
         /// so `updateGuideOverlay` stays a pure function of coordinator state.
@@ -778,22 +768,15 @@ struct CanvasView: UIViewRepresentable {
             // Engagement is in the gate as well as layer order: the sandwich views have to be lifted
             // into place the pass the compositor takes over, not only when the artist restacks.
             if orderedIDs != lastOrderedLayerIDs || sandwichEngaged != lastOrderedSandwichEngaged {
-                // `below < onionSkin < hosts < above`, which is §5.2's sandwich in z-order with
-                // EFFECT_BACKDROP.md §2.1's ghost threaded through it. The Behind skin is fronted
-                // here rather than left where `makeUIView` put it because `sandwichBelowView` is
-                // about to be lifted over it; it stays *under* the layer hosts, so a Behind ghost is
-                // still behind the ink the artist is drawing, and only the composite of the layers
-                // beneath the active one has moved under it. Everything else the old pass guaranteed
-                // still holds: the chrome overlays re-front themselves later in `updateUIView`, so
-                // they end up above `above`. `updateFloatingOverlay`'s Move case inserts the overlay
-                // *below* a specific host, which still lands it between the two sandwich views —
-                // correctly, since the layers above the Move source are inside `above`.
+                // `below < hosts < above`, which is §5.2's sandwich in z-order. The ghost is not in
+                // this list any more and that is TODO (40): it sits above every one of these, under
+                // both placements, and `updateOnionSkin` — which runs immediately after this — is
+                // its single owner. Everything else the old pass guaranteed still holds: the chrome
+                // overlays re-front themselves later in `updateUIView`, so they end up above the
+                // ghost. `updateFloatingOverlay`'s Move case inserts the overlay *below* a specific
+                // host, which still lands it between the two sandwich views — correctly, since the
+                // layers above the Move source are inside `above`.
                 if sandwichEngaged, let sandwichBelowView { container.bringSubviewToFront(sandwichBelowView) }
-                // Unconditional: the "In Front" view is a different view (`onionSkinFrontView`) and
-                // this one is hidden whenever that placement is selected, so fronting it costs
-                // nothing and spares this pass a setting it has no other reason to read — the same
-                // trade `updateOnionSkin` names where it fronts the other view.
-                if let onionSkinView { container.bringSubviewToFront(onionSkinView) }
                 for layer in canvasManager.layers {
                     if let host = layerHosts[layer.id] {
                         container.bringSubviewToFront(host)
@@ -2439,23 +2422,26 @@ struct CanvasView: UIViewRepresentable {
         ///
         /// Interpolate mode's source mints a fresh image every call, so it never hits — unchanged
         /// from before this cache existed, and its frames are two rather than ten.
+        ///
+        /// **Placement is not in it**, and used to be: the two placements were two views, so moving
+        /// between them had to re-assign the image. There is one view now and one composite, and
+        /// Behind differs only in the clip — which is `onionSkinClipInputs`' business, not this
+        /// key's. Leaving it here would rebuild the whole ghost stack on a setting that no longer
+        /// changes a pixel of it.
         private struct OnionSkinKey: Equatable {
             let images: [ObjectIdentifier]
             let opacities: [CGFloat]
             let tints: [UIColor?]
             let width: Int
             let height: Int
-            let placement: OnionSkinSettings.Placement
             let mask: ObjectIdentifier?
 
-            init(frames: [OnionSkinFrame], size: CGSize,
-                 placement: OnionSkinSettings.Placement, mask: CGImage?) {
+            init(frames: [OnionSkinFrame], size: CGSize, mask: CGImage?) {
                 images = frames.map { ObjectIdentifier($0.image) }
                 opacities = frames.map(\.opacity)
                 tints = frames.map(\.tint)
                 width = Int(size.width.rounded())
                 height = Int(size.height.rounded())
-                self.placement = placement
                 self.mask = mask.map(ObjectIdentifier.init)
             }
         }
@@ -2470,38 +2456,74 @@ struct CanvasView: UIViewRepresentable {
         private var onionSkinMaskImage: CGImage?
         private let onionSkinMaskLayer: CALayer = {
             let layer = CALayer()
-            // Nearest for the clip edge, matching `LayerHostView.makeContentMask`: the composite it
-            // clips keeps that edge crisp, and a bilinear mask would soften only our copy of it.
-            layer.magnificationFilter = .nearest
+            // **Bilinear, matching the view it clips, and that is a correction rather than a
+            // preference.** This used to be `.nearest` on `LayerHostView.makeContentMask`'s
+            // reasoning — a crisp composite deserves a crisp clip. It is not clipping a composite:
+            // it is clipping the ghost, which `makeOnionSkinView` leaves bilinear on purpose and
+            // which `OnionSkinBudget` may render well below canvas resolution. `OnionSkinClip` now
+            // builds the clip at that same reduced size, so nearest would hand a soft ghost a
+            // hard-edged, visibly blocky cut-out.
+            layer.magnificationFilter = .linear
             return layer
         }()
 
+        /// The Behind clip's inputs, held strongly so identity is a sound comparison — the same ABA
+        /// argument `onionSkinKeyImages` makes, and here the references *are* the key rather than a
+        /// side-car to it.
+        private var onionSkinClipInputs: (layerMask: CGImage?, ink: UIImage?,
+                                          width: Int, height: Int)?
+        /// What those inputs built. Nil is a legitimate answer (no clip at all), so this is not a
+        /// "have we built one yet" flag — `onionSkinClipInputs` is.
+        private var onionSkinClipImage: CGImage?
+
+        /// `OnionSkinClip.mask` behind a memo, because this runs on every SwiftUI pass and the two
+        /// canvas-reduced draws inside it must not.
+        ///
+        /// The inputs move on exactly two things: the current layer's ink (once per stroke, since a
+        /// dab publishes nothing — so the cut is static for a stroke's duration, which is the same
+        /// guarantee §6.4 gives the live mask and for the same reason) and the placement picker.
+        private func onionSkinClip(layerMask: CGImage?, ink: UIImage?, size: CGSize) -> CGImage? {
+            let width = Int(size.width.rounded()), height = Int(size.height.rounded())
+            if let held = onionSkinClipInputs,
+               held.layerMask === layerMask, held.ink === ink,
+               held.width == width, held.height == height {
+                return onionSkinClipImage
+            }
+            let clip = OnionSkinClip.mask(layerMask: layerMask, subtracting: ink, size: size)
+            onionSkinClipInputs = (layerMask, ink, width, height)
+            onionSkinClipImage = clip
+            return clip
+        }
+
         func updateOnionSkin() {
-            guard let behind = onionSkinView, let front = onionSkinFrontView else { return }
-            let placement = canvasManager.onionSkin.placement
-            let shown = placement == .behind ? behind : front
-            let hidden = placement == .behind ? front : behind
+            guard let view = onionSkinView else { return }
+
+            // **Above every layer host and above `sandwichAbove`, under both placements** — the
+            // owner's ruling, and the one z-order statement left in the app now that
+            // `reconcileLayers` no longer threads a ghost through the stack. Done here every pass —
+            // `bringSubviewToFront` on a view already at the front is a no-op inside UIKit — and
+            // before the guards below, so the ordering does not depend on whether there is a ghost
+            // to show this pass. Everything `updateUIView` calls after this re-fronts itself, so the
+            // chrome overlays still end up above it.
+            view.superview?.bringSubviewToFront(view)
 
             // Every write below is guarded by a read, because this runs on every SwiftUI pass and
             // almost all of them change nothing — the same discipline `reconcileLayers` and
             // `LayerHostView.setContentMask` already keep, so an idle pass costs comparisons rather
             // than Core Animation traffic.
-            func clear(_ view: UIImageView) {
-                // The unused view holds nothing: a canvas-sized image left on a hidden `UIImageView`
-                // is still resident, and on a 4K document that is the whole onion-skin budget parked
-                // where nobody can see it.
+            func blank() {
+                // The view holds nothing while it is off: a canvas-sized image left on a hidden
+                // `UIImageView` is still resident, and on a 4K document that is the whole onion-skin
+                // budget parked where nobody can see it.
                 if !view.isHidden { view.isHidden = true }
                 if view.image != nil { view.image = nil }
                 if view.layer.mask != nil { view.layer.mask = nil }
-            }
-            clear(hidden)
-
-            func blank() {
-                clear(shown)
                 onionSkinMaskImage = nil
                 onionSkinKey = nil
                 onionSkinKeyImages = []
                 onionSkinKeyMask = nil
+                onionSkinClipInputs = nil
+                onionSkinClipImage = nil
             }
 
             guard canvasManager.isOnionSkinEnabled else { return blank() }
@@ -2538,28 +2560,31 @@ struct CanvasView: UIViewRepresentable {
             // so changing it rebuilds rather than reusing a composite at the old resolution.
             let size = OnionSkinBudget.compositeSize(for: canvasSize,
                                                      resolution: canvasManager.onionSkin.resolution)
-            let key = OnionSkinKey(frames: frames, size: size, placement: placement, mask: mask)
+            let key = OnionSkinKey(frames: frames, size: size, mask: mask)
             if key != onionSkinKey {
                 onionSkinKey = key
                 onionSkinKeyImages = frames.map(\.image)
                 onionSkinKeyMask = mask
-                shown.image = OnionSkinFrame.composite(frames, size: size)
+                view.image = OnionSkinFrame.composite(frames, size: size)
             }
-            guard shown.image != nil else { return blank() }
+            guard view.image != nil else { return blank() }
 
             // **Always 1, and this used to be a bug.** `composite` already draws every frame at its
             // own opacity, and the line here previously multiplied a single frame's opacity in a
             // second time — so the shipped one-skin default rendered at 0.3 × 0.3 = 0.09 while the
             // comment above it said the opposite was happening.
-            if shown.alpha != 1 { shown.alpha = 1 }
-            applyOnionSkinMask(mask, to: shown, canvasSize: canvasSize)
-            if shown.isHidden { shown.isHidden = false }
+            if view.alpha != 1 { view.alpha = 1 }
 
-            // "In Front" has to out-rank `sandwichAbove`, which `reconcileLayers` fronts whenever the
-            // stack changes. Done here every pass — `bringSubviewToFront` on a view already at the
-            // front is a no-op inside UIKit — rather than by teaching `reconcileLayers` about a
-            // setting it has no other reason to read.
-            if placement == .inFront { shown.superview?.bringSubviewToFront(shown) }
+            // **Behind, in one line: subtract the artist's own ink from the clip.**
+            // `onionSkinInkToSubtract` is what reads the placement setting — In Front answers nil and
+            // `OnionSkinClip.mask` hands §6.4's coverage straight back, so that placement is
+            // byte-for-byte what it was before the ruling. No branch here: this coordinator is not
+            // reachable from a headless test, so the decision lives where one can hold it.
+            applyOnionSkinMask(onionSkinClip(layerMask: mask,
+                                             ink: canvasManager.onionSkinInkToSubtract(at: size),
+                                             size: size),
+                               to: view, canvasSize: canvasSize)
+            if view.isHidden { view.isHidden = false }
         }
 
         /// Installs (or removes) the clip on whichever onion view is showing.

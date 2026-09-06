@@ -88,6 +88,18 @@ compositing so user can see it clearly."* So the ghost is **not** composited int
 **between them**: above `sandwichBelow`, below `sandwichAbove`. The disengaged order becomes
 `below < onionSkin < above < chrome`.
 
+**SUPERSEDED 2026-09-06 by the owner's placement ruling (TODO (40)), and in the same direction.** The
+ghost went the rest of the way up: there is **one** onion view now, above every layer host and above
+`sandwichAbove` under *both* placements, so the disengaged order is `below < above < onionSkin < chrome`
+and no code interleaves a ghost through the stack any more. The owner: *"the onion skin always renders
+on top of the compositor… For the 'Behind' option, it is still rendered on top of the compositor, but
+then uses the inverse of the current drawing layer as an alpha mask."* Everything this section argues
+still holds and holds more simply — a ghost above the composite is above the paper too, so nothing an
+effect does to the paper can reach it. What changed is that "Behind" is now expressed as a clip
+(`OnionSkinClip`, `CanvasManager.onionSkinInkToSubtract`) rather than as a slot, so `sandwichAbove` no
+longer covers the ghost with the layers above the active one — which is a real behaviour change and the
+ruling's point: the animator sees the reference at full strength except exactly where their own ink is.
+
 That is a **z-order change in `CanvasView`, not a compositor change**, and it deletes the whole
 "composite the onion-skin frames into the `RenderRequest`" branch this document previously carried as
 mandatory. `below` is opaque under §6 step 3, so a ghost drawn on top of it is visible by construction,
@@ -381,7 +393,8 @@ Nothing here should land as one commit.
 1. **The Behind onion skin moves up in z-order** — from below both sandwich views to between them
    (§2.1). A `CanvasView` change, no compositor and no `RenderRequest` involvement. Visible only for a
    document with layers below the active one and Behind placement selected, so it ships and is looked at
-   on the device on its own before anything depends on it.
+   on the device on its own before anything depends on it. **Superseded 2026-09-06** — it went all the
+   way above `sandwichAbove` and Behind became a clip; see §2.1.
 2. **`Effect.input` lands as an exhaustive property with no behaviour attached**, plus the per-effect
    table from §4 as a test. Pure addition.
 3. **`full` and `below` carry the background; `above` stays nil.** This is the fix. `paperView` must
@@ -447,7 +460,10 @@ independent reviewers found four defects, all measured rather than argued.
    rendered comparison: option (a).** The z-order commit already on the branch is correct and is all
    there is. `.behind` reading as `.inFront` at rest, in a document the compositor engages for, is
    accepted behaviour. The at-rest split was built, measured, shown to the owner and reverted; §2.1
-   carries the measurement so it is not rebuilt. See §2.1 for the gate.
+   carries the measurement so it is not rebuilt. **Closed 2026-09-06 by TODO (40)**: the owner reversed
+   the accepted-behaviour half. `.behind` no longer reads as `.inFront` at rest, because it is no longer
+   a z-order at all — both placements draw over the composite and Behind subtracts the current layer's
+   own alpha. There is nothing left to split at rest.
 
 **Two smaller things worth carrying**, both from the build agent rather than the reviewers, and both
 now settled. `Effect.reshapesCoverage` is **not** exhaustive (it has a `default:`), so this document
