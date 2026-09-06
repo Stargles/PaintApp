@@ -2822,6 +2822,102 @@ edge, which is the cost side of the trade. `RegionRepairLogicTests` pins the bou
 bigger delta, a difference outside the rectangle, or more differing pixels than the rectangle has
 boundary pixels — and still demands exact identity of the renders that are full walks.
 
+### 11.11 Undoing that cut: one rectangle, read backwards (2026-09-05)
+
+The owner, on the build §11.10 measured: *"right now, erasing in a vector layer with a lot of strokes
+is relatively good, but undo and redo causes some lag."* Both halves of that sentence are TODO (41).
+§11.10 is the first half. The second is that **`VectorCanvas.bumpVersion()` declares
+`Damage.everything`**, and `StrokeCanvasView.registerVectorUndo` restored its snapshot through it — so
+pressing undo paid the whole-cel re-walk the cut itself had just avoided.
+
+`VectorCanvas.restoreElements(_:changedInk:)` is the seam now. The idea it turns on is that **one
+rectangle serves both directions**: it bounds every pixel where the two lists differ, and that reads
+the same way forwards and backwards. `StrokeCanvasView.foldGestureDamage` accumulates the union of
+every `.region` the gesture's own edits declared and hands the same rectangle to both closures.
+
+**The half the caller cannot bound is measured rather than declared.** What *departs* is still in the
+list with its footprint measured by the last walk, so `regionDamage(replacing:)` bounds it exactly as
+a cut's forward edit is bounded — which is why an undone *append* is cheap with no rectangle from
+anybody, and so is a brush stroke's undo.
+
+**Provenance.** MEASURED on an iPad Pro 13-inch M4 simulator, iOS 26.5, **Debug**, canvas 2048x1024,
+the same 400 pt / 40-sample / size-18 fixture as the rest of §11 — `UndoRepairBench`. **Both arms run
+in one process on one canvas, alternating undo and redo**, so the machine costs them equally; median
+of three presses. This Mac was at 96.3% idle at the start with no other `xcodebuild` alive, and the
+run reproduced a first one taken under contention to within 4%. Debug rather than §11.10's Release,
+so the wall clock here is not comparable to that table's — the **dabs** are, and they are
+configuration-invariant.
+
+**Mode 2 (Cut) — a short flick through one or two lines, one commit, one undo press.**
+
+| n strokes | undo dabs before | after | undo ms before | after | redo ms before | after | rectangle |
+|---|---|---|---|---|---|---|---|
+| 200 | 47,200 | **12,980** | 171.3 | **40.9** | 171.5 | **39.3** | 10.8% |
+| 500 | 118,000 | **63,012** | 440.2 | **191.1** | 437.3 | **189.7** | 26.3% |
+| 1000 | 236,000 | **147,736** | 852.2 | **461.2** | 853.4 | **459.5** | 35.6% |
+| 2000 | 472,000 | **295,000** | 1709.9 | **919.6** | 1698.0 | **916.9** | 35.6% |
+
+**Mode 3 (To Cross) — one touch sample, which is one of the forty a drag commits.**
+
+| n strokes | undo dabs before | after | undo ms before | after | redo ms before | after | rectangle |
+|---|---|---|---|---|---|---|---|
+| 200 | 47,200 | **9,912** | 167.3 | **25.0** | 167.8 | **24.7** | 3.5% |
+| 500 | 118,000 | **45,784** | 412.9 | **131.1** | 412.5 | **134.0** | 16.5% |
+| 1000 | 236,000 | **130,508** | 875.5 | **409.0** | 886.5 | **415.2** | 25.7% |
+| 2000 | 472,000 | **290,280** | 1767.0 | **892.3** | 1767.5 | **897.2** | 31.9% |
+
+**1.6-4.8x fewer dabs and 1.8-6.7x less wall clock, and the curve has §11.10's shape for §11.10's
+reason.** The rectangle is the union of the footprints of every stroke the cut replaced, so it grows
+with density — 3.5% of the canvas at 200 strokes, 32-36% at 2,000 — and the saving shrinks with it.
+**Anyone quoting the 6.7x row should quote the 1.8x row beside it.** At the density that prompted the
+report the honest sentence is: an undo press at 2,000 strokes went from 1.71 s to 0.92 s. That is
+half, not an order of magnitude, and it is what a bound proportional to area can buy once the area is
+a third of the canvas.
+
+**The before arm reproduces the shipped path exactly, which is what says the harness measures the
+right thing.** Its dab counts are the whole cel — 47,200 / 118,000 / 236,000 / 472,000, i.e.
+`wholeLayerDabs` to the dab — and its n = 1000 full re-walk is 852.2 ms against §11.10's Release
+564.8 ms on the same fixture and 235,284 dabs, a Debug:Release ratio of **1.51** on this path.
+**§12, taken the same day and independently, is what says that 1.51 is the right order** — the Debug
+penalty is ~25x on the dab walk alone and **1.86x** once the dabs are stamped through CoreGraphics,
+and an undo press is almost entirely the latter. So the milliseconds here are within a factor of two
+of Release rather than the sixty this file's Debug figures used to be caveated with.
+INFERRED through that and §11.2's measured 1.32 device ratio: on the owner's iPad 9 an undo press
+after a Mode 2 cut at 1,000 strokes goes from **~745 ms to ~403 ms**, and at 2,000 strokes from
+**~1.51 s to ~0.81 s**.
+
+**What the artist was seeing was not a freeze.** The re-walk runs on `StrokeCanvasView.renderQueue`,
+so the app stays responsive throughout — what "lag" names is **the old picture standing there** for
+three quarters of a second after the press, which is the same thing §11.8 named for pen-up. That
+matters for what to fix next: this is a throughput number, not a main-thread one, and the main-thread
+term on this path is still Mode 3's per-sample intersection resolve (§11.10's closing paragraph).
+This bench sees that term as `cutOnce`, and in Debug it is enormous — **7.66 s for one Mode 3 sample
+at 2,000 strokes** against Mode 2's 1.03 s for the whole flick. Nothing here touches it.
+
+**The honest limit: a redone *append* still pays the full walk, and it always will.** The ink coming
+back has never been drawn on that canvas, so no footprint exists for it and the gesture that recorded
+the step declared `.appended`, not a region. Deriving a box from the brush instead is what BRUSH.md
+§12 stage 8 refuted — `ResponseCurve` does not clamp, so no size-derived number bounds what a dab
+paints — and `restoreDamage` therefore returns `.everything` rather than guessing.
+`UndoRepairLogicTests.testRedoingAnAppendCannotBeBoundedAndSaysEverything` pins that it says so.
+
+**Which eraser modes that limit touches:** **neither cut mode**. Modes 2 and 3 *replace* strokes with
+pieces, so both directions of their undo have something departing and something arriving, and both
+are bounded — which is the whole table above. **Mode 1 (`.erase`, the eraser-is-a-stroke mode)
+appends a `destinationOut` punch**, so its undo is cheap (the punch departs and is measured) and its
+**redo is the full walk**. That is the one press on this path that this change does not help, and it
+is the cheapest of the three modes to begin with, since an appended punch costs one stroke rather
+than a re-walk.
+
+**And one trap in the harness, because it is the kind that reads as a result.** `StrokeDensityBench`'s
+`medianSeconds(runs:)` times the same body three times over, which is right for `bumpVersion()` — it
+declares `.everything` whatever the list already holds, so all three runs are the same full walk — and
+**wrong for the region path**. The second of two identical restores finds nothing arriving and nothing
+departing, declares `.region(.null)`, and `repairClip` refuses a null rectangle, so it falls through
+to a full walk: the median of three would have been a full walk, and the after arm would have measured
+as no improvement at all. `UndoRepairBench.alternatingUndoRedo` alternates instead, which is what the
+artist does anyway.
+
 ---
 
 ## 12. What Debug actually costs, measured instead of remembered (2026-09-05)

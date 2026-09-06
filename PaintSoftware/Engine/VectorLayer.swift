@@ -1082,6 +1082,21 @@ final class VectorCanvas {
     /// bound actually bound rather than merely ran.
     private(set) var lastRepairedRegion: CGRect = .null
 
+    /// How many elements this canvas is holding a measured footprint for, in the same idiom and for
+    /// the same reason as the counters above.
+    ///
+    /// **What it exists to pin is `restoreElements`' forget, which is about memory rather than about
+    /// pixels and is therefore invisible to every picture assertion.** An id that leaves the display
+    /// list is never consulted again by the walk, so keeping its entry draws nothing wrong — it just
+    /// accumulates, one rectangle per stroke ever erased, for the length of an editing session.
+    /// MEASURED by mutation: dropping the forget leaves every other test in `UndoRepairLogicTests`
+    /// green, and `testARoundTripDoesNotGrowTheMeasuredFootprints` — the one that reads this — red.
+    var measuredFootprintCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return paintedBounds.count
+    }
+
     /// How many canvas-sized rasterizations this canvas has actually performed — `render()` calls that
     /// missed both memos, plus every `renderIsolated(ids:)`, which is never memoized.
     ///
@@ -1448,13 +1463,112 @@ final class VectorCanvas {
     }
 
     /// Invalidates the render cache after a direct mutation of `strokes`/`fills`/`images`/`elements`
-    /// (e.g. undo/redo restoring a snapshot, which assigns the array wholesale).
-    /// **`.everything`, and it has to be**: this is the seam undo/redo and every wholesale
-    /// `elements =` assignment come through, none of which can say what moved.
+    /// (e.g. a loaded document, or a snapshot put back by a caller that cannot say where it
+    /// happened). **`.everything`, and for those callers it has to be**: a wholesale `elements =`
+    /// carries no claim about what moved. `restoreElements(_:changedInk:)` is the seam for a caller
+    /// that *can* say, and is what undo and redo come through.
     func bumpVersion() {
         lock.lock()
         defer { lock.unlock() }
         invalidate(.everything)
+    }
+
+    /// **The seam an undo and a redo come through** — a wholesale list swap that says where it
+    /// happened, so putting an eraser cut back costs the rectangle rather than the cel.
+    ///
+    /// `elements = snapshot` followed by `bumpVersion()` was the only way to restore a list, and it
+    /// declares `.everything`, so **undoing a cut paid the whole-cel re-walk the cut itself had just
+    /// avoided** — TODO (41) bounded the eraser's forward edit and left its undo at 745 ms a press at
+    /// 1,000 strokes. The caller does know: an undo restores exactly what one edit replaced, and the
+    /// rectangle that bounded the edit bounds its undo too, because it bounds the difference between
+    /// the two lists whichever way you read it.
+    ///
+    /// **The vacated half needs no rectangle from the caller and is measured here.** What leaves the
+    /// list is in the list right now, with its footprint measured by the last walk, so an *undone
+    /// append* — nothing arrives, one stroke departs — is bounded even when `changedInk` is nil.
+    /// That is the brush stroke's undo as well as the eraser's.
+    ///
+    /// - Parameters:
+    ///   - newValue: the list to put back.
+    ///   - changedInk: a rectangle containing the ink of every element `newValue` carries that the
+    ///     standing list does not, or nil when the caller cannot prove one. For an undo or a redo
+    ///     this is what the *forward* edit declared. Ignored when nothing arrives.
+    ///
+    /// **A caller must not rewrite an element in place under its own id.** The footprints dropped
+    /// here are chosen by id difference, so an element that stays under its own id keeps its measured
+    /// footprint — right when its content is unchanged, and a skipped element drawing the wrong
+    /// picture when it is not. Every gesture that reaches this method adds and removes:
+    /// `detachedPiece` mints a fresh id per cut piece and an append is a new stroke.
+    /// `UndoRepairLogicTests.testACutMintsFreshIdsRatherThanRewritingInPlace` is what says so, and
+    /// the survivor-order check below is what catches the other way a same-id list can differ.
+    func restoreElements(_ newValue: [VectorElement], changedInk: CGRect?) {
+        lock.lock()
+        defer { lock.unlock() }
+        let arriving = Set(newValue.lazy.map(\.id))
+        // Taken before the splice, because afterwards the list no longer holds what left it.
+        let departed = _elements.filter { !arriving.contains($0.id) }
+        let damage = restoreDamage(to: newValue, departed: departed, changedInk: changedInk)
+        _elements = newValue
+        // No `dropIncrementalBase()` here, though the `elements` setter has one: `restoreDamage`
+        // returns only `.everything` or `.region` and `applyToIncrementalBase` drops the base for
+        // both, so the call was unobservable. MEASURED by mutation — deleting it left all thirteen
+        // of `UndoRepairLogicTests` green, which is what a line that cannot be reddened means.
+        forgetPaintedBounds(departed.lazy.map(\.id))
+        invalidate(damage)
+    }
+
+    /// The tightest damage a restore to `newValue` can prove. Caller must hold `lock`.
+    ///
+    /// Four things make it `.everything`: something departs that the walk never measures (a fill, an
+    /// image, a text object or a video — `renderLocalContent` deliberately measures no footprint for
+    /// them), the survivors are re-ordered, something arrives and the caller could not bound it, or a
+    /// stroke departs that was never measured, which is `regionDamage(replacing:)`'s own answer.
+    ///
+    /// **The union on the last line is the one thing here that reads as redundant and is not**, so
+    /// the experiment is recorded rather than the argument. Reasoning about one stroke says it *is*
+    /// redundant, and correctly: a cut through a stroke's middle leaves a piece either side, and the
+    /// box of the two pieces contains the parent's — the gap between them is inside it by
+    /// construction — so `vacated` already bounds everything that arrives. Twelve tests agreed;
+    /// `return .region(vacated)` left every one of them green.
+    ///
+    /// **What that reasoning misses is that the two halves are unions over different sets.** A
+    /// gesture crosses several strokes (PERFORMANCE.md §11.10's cross-eraser drag is nothing else)
+    /// and one list swap puts all of them back together. A stroke *deleted* outright leaves no piece,
+    /// so `vacated` says nothing about where it was; a stroke *split* elsewhere in the same gesture
+    /// leaves pieces, so `departing` is non-empty and this line — not the `guard` above it — is the
+    /// one taken. Only the caller's rectangle covers the deletion. MEASURED by mutation:
+    /// `UndoRepairLogicTests.testUndoingAGestureThatSplitOneStrokeAndDeletedAnotherFarAwayNeedsBothHalves`
+    /// goes from `regionRepairsWidened` 0 to 1 without it — the escape check keeps the picture right
+    /// and the press pays two walks, which is the bug TODO (41) exists to remove.
+    private func restoreDamage(to newValue: [VectorElement], departed: [VectorElement],
+                               changedInk: CGRect?) -> Damage {
+        var departing: [VectorStroke] = []
+        departing.reserveCapacity(departed.count)
+        for element in departed {
+            guard let stroke = element.stroke else { return .everything }
+            departing.append(stroke)
+        }
+        // **Two lists holding the same ids in a different order draw different pixels**, and neither
+        // an arrival nor a departure says so — z-position is what a display list means. Comparing the
+        // survivors in order is what closes that, and it is the one difference the id sets are blind
+        // to.
+        let standing = Set(_elements.lazy.map(\.id))
+        let departedIDs = Set(departed.lazy.map(\.id))
+        guard _elements.lazy.map(\.id).filter({ !departedIDs.contains($0) })
+            .elementsEqual(newValue.lazy.map(\.id).filter(standing.contains)) else { return .everything }
+
+        let arrivingInk: CGRect
+        if !newValue.contains(where: { !standing.contains($0.id) }) {
+            // Nothing arrives, so the vacated ink is the whole of the difference and it is measured.
+            arrivingInk = .null
+        } else if let changedInk {
+            arrivingInk = changedInk
+        } else {
+            return .everything
+        }
+        guard !departing.isEmpty else { return .region(arrivingInk) }
+        guard case .region(let vacated) = regionDamage(replacing: departing) else { return .everything }
+        return .region(vacated.union(arrivingInk))
     }
 
     /// True when a rendered image of either quality is memoized — what cache eviction counts. A cel

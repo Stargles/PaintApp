@@ -189,6 +189,7 @@
 		DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */; };
 		65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19720D7965998A23D7249459 /* StrokeDensityBench.swift */; };
 		A2197A2D31E7E6822CA563C6 /* DabCostBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D841402ECAFFA26E9E06176 /* DabCostBench.swift */; };
+		329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */; };
 		DEC0DE000000000000000031 /* PaintSoftware/Models/Tool.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */; };
 		DEC0DE000000000000000033 /* PaintSoftware/Models/LayerFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */; };
 		DEC0DE000000000000000035 /* PaintSoftware/Models/ViewPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */; };
@@ -272,6 +273,7 @@
 		885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */; };
 		F0ECA2C39FAAC7EB62EB8A22 /* IncrementalAppendLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD98461CC0AE9D8B87CE4358 /* IncrementalAppendLogicTests.swift */; };
 		18586B7E7C19F911EF2863E6 /* RegionRepairLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C5CADFEB369E53D9EDFBCA3 /* RegionRepairLogicTests.swift */; };
+		C36EF3DA34DB502C954C5528 /* UndoRepairLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2469AECBE4129A7334E06DB9 /* UndoRepairLogicTests.swift */; };
 		72959687BD7C98E09376F8F8 /* TimelineLayoutKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */; };
 		7F7DD44DF253A841FA517F3C /* PaintSoftware/Models/TimelineRowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */; };
 		5250C4A5EC17A530D19B9101 /* TimelineRowLayoutLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */; };
@@ -521,6 +523,7 @@
 		DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PerfBaselineTests.swift; sourceTree = "<group>"; };
 		19720D7965998A23D7249459 /* StrokeDensityBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StrokeDensityBench.swift; sourceTree = "<group>"; };
 		7D841402ECAFFA26E9E06176 /* DabCostBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DabCostBench.swift; sourceTree = "<group>"; };
+		E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UndoRepairBench.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000030 /* PaintSoftware/Models/Tool.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/Tool.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000032 /* PaintSoftware/Models/LayerFolder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/LayerFolder.swift; sourceTree = "<group>"; };
 		DEC0DE000000000000000034 /* PaintSoftware/Models/ViewPreset.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/ViewPreset.swift; sourceTree = "<group>"; };
@@ -604,6 +607,7 @@
 		62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeferredVectorRenderLogicTests.swift; sourceTree = "<group>"; };
 		DD98461CC0AE9D8B87CE4358 /* IncrementalAppendLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IncrementalAppendLogicTests.swift; sourceTree = "<group>"; };
 		9C5CADFEB369E53D9EDFBCA3 /* RegionRepairLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RegionRepairLogicTests.swift; sourceTree = "<group>"; };
+		2469AECBE4129A7334E06DB9 /* UndoRepairLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UndoRepairLogicTests.swift; sourceTree = "<group>"; };
 		79BB03482905BC28D61CD010 /* TimelineLayoutKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineLayoutKeyLogicTests.swift; sourceTree = "<group>"; };
 		DF8B7F3BD54D6CFC3202BF13 /* PaintSoftware/Models/TimelineRowLayout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/TimelineRowLayout.swift; sourceTree = "<group>"; };
 		59635B1AE0F9EAE9F14400D2 /* TimelineRowLayoutLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TimelineRowLayoutLogicTests.swift; sourceTree = "<group>"; };
@@ -817,6 +821,7 @@
 				62ADCC703C87E69D9C6F7AF2 /* DeferredVectorRenderLogicTests.swift */,
 				DD98461CC0AE9D8B87CE4358 /* IncrementalAppendLogicTests.swift */,
 				9C5CADFEB369E53D9EDFBCA3 /* RegionRepairLogicTests.swift */,
+				2469AECBE4129A7334E06DB9 /* UndoRepairLogicTests.swift */,
 				9A7B5C3D1E2F000000000C01 /* StrokeGeometryLogicTests.swift */,
 				8E91860567AB1CEE0CB87BB6 /* EyedropperLogicTests.swift */,
 				0A266D16C60715591E6F9256 /* ToolLogicTests.swift */,
@@ -861,6 +866,7 @@
 				DEC0DE0000000000000000F1 /* PerfBaselineTests.swift */,
 				19720D7965998A23D7249459 /* StrokeDensityBench.swift */,
 				7D841402ECAFFA26E9E06176 /* DabCostBench.swift */,
+				E56FFF4D2BE3771D03D52508 /* UndoRepairBench.swift */,
 				DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */,
 				DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */,
 				DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */,
@@ -1324,6 +1330,7 @@
 				885D1A417B34AC3BCBC3D3FF /* DeferredVectorRenderLogicTests.swift in Sources */,
 				F0ECA2C39FAAC7EB62EB8A22 /* IncrementalAppendLogicTests.swift in Sources */,
 				18586B7E7C19F911EF2863E6 /* RegionRepairLogicTests.swift in Sources */,
+				C36EF3DA34DB502C954C5528 /* UndoRepairLogicTests.swift in Sources */,
 				1C08CCFE8F7995AE4DC68C35 /* GalleryOpenLogicTests.swift in Sources */,
 				D5F38D4131EF5A758BC466D8 /* PaintSoftware/Views/GalleryOpenState.swift in Sources */,
 				B99A1C8BF8A55BCE8D55041B /* PinchMergeGateLogicTests.swift in Sources */,
@@ -1347,6 +1354,7 @@
 				DEC0DE0000000000000000F2 /* PerfBaselineTests.swift in Sources */,
 				65998A23D7249459B07A3055 /* StrokeDensityBench.swift in Sources */,
 				A2197A2D31E7E6822CA563C6 /* DabCostBench.swift in Sources */,
+				329DA9276AE29786FCFA7949 /* UndoRepairBench.swift in Sources */,
 				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
 				53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */,
 				B260F52A04C5DBC81BB54DFD /* PaintSoftware/Engine/BrushLibraryStore.swift in Sources */,

@@ -421,11 +421,39 @@ LAYER_TRANSFORM.md.
       transparency layer differs by one or two units out of 255 along that edge, it does not
       accumulate, and `RegionRepairLogicTests` pins the bound three ways. §11.10 has the trade.
 
-      **What is left: every mutation site that is not an eraser cut still says `.everything`** —
-      select-and-move, Clear, and recolour, which is the one item (42) is waiting on. Each needs the
-      same two lines the eraser cuts needed: measure what the strokes being replaced last painted,
-      and forget their footprints before splicing. `regionDamage(replacing:)` is the shared helper
-      and there is no design left to do.
+      **The undo half shipped 2026-09-05 and the numbers are [PERFORMANCE.md](PERFORMANCE.md)
+      §11.11.** It was the owner's next report on the same path: *"right now, erasing in a vector
+      layer with a lot of strokes is relatively good, but undo and redo causes some lag."* Both halves
+      of that sentence are this item. The cut got its rectangle; **its undo went through
+      `elements = snapshot` + `bumpVersion()`, which declares `.everything`, so the press paid the
+      whole-cel re-walk the cut had just avoided** — MEASURED at 852 ms a press at 1,000 strokes and
+      1.71 s at 2,000 (Debug; INFERRED ~745 ms and ~1.51 s on the owner's iPad), and off the main
+      thread, so what the artist sees is the old picture standing there for that long rather than a
+      freeze.
+
+      `VectorCanvas.restoreElements(_:changedInk:)` is the seam now, and the idea it turns on is that
+      **one rectangle serves both directions**: it bounds every pixel where the two lists differ, and
+      that reads the same way forwards and backwards. `StrokeCanvasView` accumulates the union of what
+      the gesture's own edits declared and hands it to both closures. **The half the caller cannot
+      bound is measured rather than declared** — what *departs* is still in the list with its footprint
+      measured, so an undone append is cheap with no rectangle from anybody, which makes a brush
+      stroke's undo cheap too. A redone append is the one case that still pays, honestly: the ink
+      coming back has never been drawn, and BRUSH.md §12 stage 8 refuted guessing a box from the
+      brush. Of the eraser modes that reaches only **Mode 1** (`.erase`), which appends a punch;
+      neither cut mode is touched by it.
+
+      MEASURED, both arms in one process: **1.6-4.8x fewer dabs and 1.8-6.7x less wall clock**, and
+      the prize shrinks with density for the same reason the cut's does — 1,709.9 → 919.6 ms at 2,000
+      strokes, which is half rather than an order of magnitude, against 171.3 → 40.9 ms at 200. Quote
+      the 1.8x row beside the 6.7x one.
+
+      **What is left: every mutation site that is not an eraser cut or a gesture's undo still says
+      `.everything`** — select-and-move, Clear, and recolour, which is the one item (42) is waiting
+      on, plus `registerVectorElementsUndo`, which is the fill/text/Clear counterpart of the seam
+      above and can adopt it as soon as those sites can name their own rectangle. Each needs the same
+      two lines the eraser cuts needed: measure what the strokes being replaced last painted, and
+      forget their footprints before splicing. `regionDamage(replacing:)` is the shared helper and
+      there is no design left to do.
 
       **The append half is done; this is the rest of it.** MEASURED on the owner's iPad 9
       ([PERFORMANCE.md](PERFORMANCE.md) §11): a vector cel re-stamps every dab it holds whenever its memo

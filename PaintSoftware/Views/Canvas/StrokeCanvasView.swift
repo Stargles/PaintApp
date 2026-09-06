@@ -354,6 +354,18 @@ final class StrokeCanvasView: UIView {
     /// accessor.
     private var vectorElementsBeforeSnapshot: [VectorElement]?
 
+    /// **Where this gesture has changed the canvas, so its undo can repair a rectangle instead of
+    /// re-walking the cel** — the running union of every `VectorCanvas.Damage.region` the gesture's
+    /// own edits declared, and `nil` once one of them declares something that cannot be bounded.
+    ///
+    /// A gesture is many edits: Mode 3 cuts per sample all the way down the drag, and a stroke
+    /// clipped by a selection commits one run per piece. The union of what they each declared is what
+    /// bounds the whole gesture, and `restoreElements(_:changedInk:)` is what spends it.
+    ///
+    /// `.null` — the value a gesture starts at — is the identity for `union`, and it also happens to
+    /// be the right answer for a gesture whose every edit removed something and added nothing.
+    private var vectorGestureDamage: CGRect? = .null
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         // **A canvas touch hit-tests to this view, and `UIView` defaults this to `false`, which means
@@ -1009,8 +1021,9 @@ final class StrokeCanvasView: UIView {
             // Mode 3 commits during the drag, so it can already have changed the document by the
             // time the second finger lands. Roll the display list back to the touch-down snapshot.
             if vectorContentChanged, let before = vectorElementsBeforeSnapshot {
-                vectorCanvas.elements = before
-                vectorCanvas.bumpVersion()
+                // The same rollback an undo of this gesture would perform, so it is bounded the same
+                // way: `vectorGestureDamage` is exactly what the cuts already made declared.
+                vectorCanvas.restoreElements(before, changedInk: vectorGestureDamage)
             }
             currentVectorSamples = []
             vectorElementsBeforeSnapshot = nil
@@ -1151,6 +1164,7 @@ final class StrokeCanvasView: UIView {
     private func beginVectorStroke(_ touch: UITouch) {
         guard let vectorCanvas else { return }
         vectorElementsBeforeSnapshot = vectorCanvas.elements
+        vectorGestureDamage = .null
         vectorContentChanged = false
         inBetweenCelID = layerID.flatMap { canvasManager?.inBetweenCelID(inLayer: $0) }
         // Fresh driver so Mode 3's first sample cuts immediately rather than resolving on lift.
@@ -1243,7 +1257,27 @@ final class StrokeCanvasView: UIView {
                                                 size: brushSize,
                                                 suppressing: intersectionDriver.suppressed)
         intersectionDriver.accept(resolved.outcome, underTip: resolved.underTip)
-        if case .cut = resolved.outcome { vectorContentChanged = true }
+        if case .cut = resolved.outcome {
+            vectorContentChanged = true
+            foldGestureDamage(canvas)
+        }
+    }
+
+    /// Folds what `canvas` declared for the edit just made into `vectorGestureDamage`.
+    ///
+    /// Reads `lastDamage` rather than taking a rectangle as an argument, because the mutating methods
+    /// compute it from footprints only they can see (`regionDamage(replacing:)` is private to the
+    /// canvas) and already publish it. Called immediately after the edit, so nothing else can have
+    /// invalidated in between.
+    ///
+    /// Anything that is not a region — an append, or a `.everything` — makes the gesture unbounded.
+    /// An append is the honest case rather than a missed one: what an *undone* append vacates is
+    /// measured, so `restoreElements` bounds that direction itself, and what a *redone* one puts back
+    /// has never been drawn, so nothing here or there can bound it.
+    private func foldGestureDamage(_ canvas: VectorCanvas) {
+        guard let running = vectorGestureDamage else { return }
+        guard case .region(let rect) = canvas.lastDamage else { vectorGestureDamage = nil; return }
+        vectorGestureDamage = running.union(rect)
     }
 
     private func endVectorStroke(_ touch: UITouch) {
@@ -1310,6 +1344,7 @@ final class StrokeCanvasView: UIView {
                     if vectorCanvas.erase(alongPath: run, brush: brush, size: brushSize,
                                           opacity: brushOpacity, mode: vectorEraserMode) {
                         vectorContentChanged = true
+                        foldGestureDamage(vectorCanvas)
                     }
                 }
             }
@@ -1329,6 +1364,7 @@ final class StrokeCanvasView: UIView {
                 // stroke on an already-moved layer lands under the finger.
                 vectorCanvas.addStroke(canvasSpaceStroke: stroke)
                 vectorContentChanged = true
+                foldGestureDamage(vectorCanvas)
             }
         }
 
@@ -1538,17 +1574,23 @@ final class StrokeCanvasView: UIView {
         return false
     }
 
+    /// One undo entry for the whole gesture, and **it carries where the gesture happened**.
+    ///
+    /// The same rectangle serves both closures: it bounds every pixel where the two lists differ, and
+    /// that is a symmetric statement. What it is *for* differs by direction — on the way back it
+    /// bounds the ink coming in, on the way forward it bounds the pieces — but the rectangle is one.
+    /// See `VectorCanvas.restoreElements(_:changedInk:)` for what happens to the half it cannot
+    /// bound, which is measured there rather than declared here.
     private func registerVectorUndo(canvas: VectorCanvas, from: [VectorElement], to: [VectorElement]) {
         let label: HistoryActionLabel = isEraser ? .erase : .brushStroke
         let cost = (from.count + to.count) * 512
+        let changedInk = vectorGestureDamage
         canvasManager?.recordUndo(label: label, cost: cost, undo: { [weak self] in
-            canvas.elements = from
-            canvas.bumpVersion()
+            canvas.restoreElements(from, changedInk: changedInk)
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         }, redo: { [weak self] in
-            canvas.elements = to
-            canvas.bumpVersion()
+            canvas.restoreElements(to, changedInk: changedInk)
             self?.refreshDisplay()
             self?.onStrokeEnded?()
         })
