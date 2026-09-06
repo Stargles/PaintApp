@@ -56,6 +56,9 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// Adjust Speed on a video block — VIDEO.md §2.5, which rewrites the block's length as well as
     /// the element's speed, so it is one step covering both.
     case adjustVideoSpeed
+    /// Bake to Images on a video block — VIDEO.md §2.9 and §8 stage 8. One step however many cels
+    /// the block became, exactly as `.bakePrecision` is one step however many cels it touched.
+    case bakeVideoToImages
     /// A whole text session baking down — **one step per session, never one per keystroke.**
     /// `UndoHistory`'s `cost` accounting was never sized for 200 entries out of one sentence, and
     /// `UITextView` supplies within-session undo for free (`ADD_TEXT.md` §2, and §5.1 for the
@@ -200,6 +203,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .insertImage: return "insert image"
         case .insertVideo: return "insert video"
         case .adjustVideoSpeed: return "adjust video speed"
+        case .bakeVideoToImages: return "bake to images"
         case .addText: return "add text"
         case .editText: return "edit text"
 

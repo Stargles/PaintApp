@@ -95,6 +95,9 @@ struct CanvasNoticeBanner: View {
         // The third case where something genuinely has gone wrong, and it takes the warning triangle
         // for that reason: the artist asked for a fill and did not get one.
         case .fillNeedsMoreMemory: return "exclamationmark.triangle"
+        // A fourth: the artist asked to bake a video and an unreadable file or an empty crop
+        // stopped it, which reads the same as the fill and the save refusals above.
+        case .videoBakeRefused: return "exclamationmark.triangle"
         }
     }
 }

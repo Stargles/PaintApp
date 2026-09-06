@@ -67,6 +67,13 @@ struct AnimationTimeline: View {
     /// alert is up.
     @State private var pendingRasterizeDrop: CanvasManager.CelDropRequest?
 
+    /// **VIDEO.md §8 stage 8's Bake to Images**, waiting on the artist's confirmation — KEYFRAMES.md
+    /// §6's "say so at the bake" cost disclosure, the same shape `pendingRasterizeDrop` above uses
+    /// for a different destructive-but-undoable block edit. `cels` is read at the moment the row was
+    /// tapped so the alert's count can't drift from whatever a concurrent edit does to the block
+    /// before the artist answers.
+    @State private var pendingVideoBake: (layerIndex: Int, celIndex: Int, cels: Int)?
+
     // Press-and-hold reorder state for the pinned name column.
     /// The animation group the rename alert is open on, and the text field's draft — the shape
     /// `LayerPanel`'s own rename alert uses, and `@State` for the reason the popovers just above are:
@@ -167,6 +174,32 @@ struct AnimationTimeline: View {
             }
         } message: {
             Text("Moving a vector block onto a raster layer flattens its strokes to pixels. They can still be erased and painted over, but they can no longer be reshaped as vectors. This can be undone.")
+        }
+        // VIDEO.md §8 stage 8. KEYFRAMES.md §6's "two costs to disclose, not hide" — a bake spends
+        // ink on N cels where there was one, and that cost is spent on every future save for the
+        // life of the document, so the artist is told the count and the measured rate before either
+        // is spent, not after.
+        .alert("Bake to Images?",
+               isPresented: Binding(get: { pendingVideoBake != nil },
+                                    set: { if !$0 { pendingVideoBake = nil } })) {
+            Button("Cancel", role: .cancel) { pendingVideoBake = nil }
+            Button("Bake") {
+                if let request = pendingVideoBake {
+                    // **The refusal `VideoBakeOutcome` carries** — CLAUDE.md already has one filed
+                    // bug shaped like a `Bool` this app discarded. `CanvasNotice` (not a second
+                    // alert) is where every other refusal in this app already surfaces a one-
+                    // sentence "the tool didn't do that" — `.noDrawingSurface`'s own doc calls the
+                    // modal alert it replaced "three interruptions to deliver one sentence".
+                    switch canvasManager.bakeVideoToCels(layerIndex: request.layerIndex,
+                                                         celIndex: request.celIndex) {
+                    case .baked: break
+                    case .refused(let reason): canvasManager.raise(.videoBakeRefused(reason))
+                    }
+                }
+                pendingVideoBake = nil
+            }
+        } message: {
+            Text(pendingVideoBake.map { Self.videoBakeConfirmationMessage(cels: $0.cels) } ?? "")
         }
         // **There is deliberately no `.onReceive(canvasManager.interactionBegan)` here any more.**
         //
@@ -356,6 +389,16 @@ struct AnimationTimeline: View {
                     }
                     .disabled(!canvasManager.canSplitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame))
                     videoSpeedItems(layerIndex: layerIndex, celIndex: celIndex)
+                    // VIDEO.md §8 stage 8 / §2.9. Shown only on a block that holds a video, exactly
+                    // as Adjust Speed's own rows are — Bake has nothing to do on an ordinary
+                    // drawing, so hiding it there (rather than showing a permanently-disabled row,
+                    // Split Drawing's own choice) matches the row it sits beside.
+                    if canvasManager.celHoldsVideo(layerIndex: layerIndex, celIndex: celIndex) {
+                        menuButton("Bake to Images", icon: "photo.stack") {
+                            let cels = canvasManager.layers[layerIndex].cels[celIndex].frameCount
+                            pendingVideoBake = (layerIndex, celIndex, cels)
+                        }
+                    }
                     menuButton("Clear", icon: "eraser") {
                         canvasManager.clearCel(layerIndex: layerIndex, celIndex: celIndex)
                     }
@@ -554,6 +597,27 @@ struct AnimationTimeline: View {
     /// compared with a tolerance rather than by `==`: 24/30 is not 0.8 in binary and a checkmark that
     /// depended on that would simply never appear.
     private static func isSameSpeed(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
+
+    /// KEYFRAMES.md §6's disclosure, spelled out for the artist rather than left to a number they'd
+    /// have to already know to worry about: **"Save cost is permanent"**, MEASURED at 15.2 ms/cel at
+    /// this app's own 2048×1024 baseline (95.6% of it `pngData()`, parallelised across cores) — a
+    /// canvas at a different size will pay a different rate, which is why this is phrased as the
+    /// app's own measured figure rather than a promise about this document specifically.
+    private static func videoBakeConfirmationMessage(cels: Int) -> String {
+        let added = max(cels - 1, 0)
+        let plural = cels == 1 ? "cel" : "cels"
+        guard added > 0 else {
+            return "This turns the block into 1 cel of images. This can be undone."
+        }
+        let ms = Double(added) * 15.2
+        let costPhrase = ms >= 1000
+            ? String(format: "about %.1f s more", ms / 1000)
+            : "about \(Int(ms.rounded())) ms more"
+        let addedPlural = added == 1 ? "cel" : "cels"
+        return "This turns the block into \(cels) \(plural) of images. Every future save then writes "
+            + "\(added) more \(addedPlural) — \(costPhrase) each time, at this app's own measured "
+            + "rate. This can be undone."
+    }
 
     private func menuList<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }
