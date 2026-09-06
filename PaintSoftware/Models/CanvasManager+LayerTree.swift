@@ -452,7 +452,29 @@ extension CanvasManager {
         if bottom.layerEffect != nil || bottom.layerTransform != nil || top.layerTransform != nil {
             return .unbakeableLayer
         }
+        // The upper layer's clip, in either of its two spellings. `mergeContribution` drops both and
+        // says so; until this line nothing said so to the artist.
+        if top.alphaMask != nil || top.blendMode == .clipToBelow { return .clipDropped }
         return nil
+    }
+
+    /// **The one way a UI gesture asks for a merge** — confirm first if `mergeLossKind` names a loss,
+    /// otherwise merge outright.
+    ///
+    /// It exists because the two gestures that merge had drifted apart and one of them was losing
+    /// artwork silently. The pinch consulted `mergeLossKind`; "Merge Down" called `mergeLayers` bare,
+    /// so the *same pair of layers* prompted on a pinch and discarded on a menu tap. Neither call site
+    /// was wrong about what it wanted — they simply each spelled the policy, and only one of them was
+    /// updated when the policy grew a case. There is one spelling now, and a third caller inherits it.
+    ///
+    /// `mergeLayers` itself deliberately stays unaware of confirmation, exactly as `mergeLossKind`'s
+    /// own doc argues: it is the irreversible operation, and "ask first" is a property of the gesture.
+    func requestMerge(_ firstID: UUID, _ secondID: UUID) {
+        if let loss = mergeLossKind(firstID, secondID) {
+            pendingMergeConfirmation = .init(firstID: firstID, secondID: secondID, lossKind: loss)
+        } else {
+            mergeLayers(firstID, secondID)
+        }
     }
 
     /// Flattens two layers into one at the current frame — the pinch-together gesture in the layer

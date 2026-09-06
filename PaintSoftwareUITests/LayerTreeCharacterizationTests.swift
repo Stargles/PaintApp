@@ -780,6 +780,77 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                        "…and in the lower position too, where a grade is also unbakeable")
     }
 
+    /// **A clip on the upper layer, in both of its spellings** — the loss `mergeContribution` has
+    /// always taken in as many words with nothing telling the artist about it. An `AlphaMask` is not
+    /// resolvable without a `RenderRequest`, and `.clipToBelow` reaches the bake through
+    /// `compositedMode`, which turns it into `.normal`; either way the upper layer's ink is baked in
+    /// unclipped and shows everywhere it was drawn.
+    func testMergeLossKindReportsAClipOnTheUpperLayerInEitherSpelling() {
+        let manager = namedManager(["Bottom", "Top"])
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+        XCTAssertNil(manager.mergeLossKind(bottom, top), "Setup: this pair is lossless to start with")
+
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(bottom)])
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .clipDropped,
+                       "The upper layer's mask cannot be baked, so its ink would reappear unmasked")
+        XCTAssertEqual(manager.mergeLossKind(top, bottom), .clipDropped,
+                       "Positions are resolved, not read off the argument order")
+
+        manager.layers[1].alphaMask = nil
+        manager.layers[1].blendMode = .clipToBelow
+        XCTAssertEqual(manager.mergeLossKind(bottom, top), .clipDropped,
+                       "`.clipToBelow` is the same loss with an implicit source — `compositedMode` drops it")
+    }
+
+    /// The lower layer keeps its own mask through the merge, so a mask there is not a loss. This is
+    /// the operand that would make the test above pass for the wrong reason if the predicate simply
+    /// asked "does either layer carry a mask".
+    func testMergeLossKindIsNilForAClipOnTheLowerLayerBecauseTheSurvivorKeepsIt() {
+        let manager = namedManager(["Bottom", "Top", "Masker"])
+        let bottom = manager.layers[0].id
+        let top = manager.layers[1].id
+        manager.layers[0].alphaMask = AlphaMask(sources: [.layer(manager.layers[2].id)])
+
+        XCTAssertNil(manager.mergeLossKind(bottom, top),
+                     "The survivor keeps its own mask, so nothing about it is lost")
+
+        manager.layers[0].alphaMask = nil
+        manager.layers[0].blendMode = .clipToBelow
+        XCTAssertNil(manager.mergeLossKind(bottom, top),
+                     "`.clipToBelow` on the survivor rides through the merge the way any other mode does")
+
+        manager.layers[0].alphaMask = AlphaMask(sources: [.layer(manager.layers[2].id)])
+        XCTAssertTrue(manager.mergeLayers(bottom, top))
+        XCTAssertEqual(CanvasFixture.layer(bottom, in: manager)?.alphaMask?.sources.count, 1,
+                       "…and the merge really does leave the survivor's mask in place")
+    }
+
+    /// `requestMerge` is the one entry point both gestures use, and this is the behaviour that used to
+    /// differ between them: "Merge Down" called `mergeLayers` bare, so a pair that prompted on a pinch
+    /// discarded silently on a menu tap.
+    func testRequestMergeHoldsALossyPairForConfirmationInsteadOfRunningIt() {
+        let manager = CanvasFixture.manager()
+        manager.layers.removeAll()
+        manager.addLayer(name: "Bottom")
+        manager.addLayer(name: "Top")
+        manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
+
+        manager.requestMerge(manager.layers[0].id, manager.layers[1].id)
+
+        XCTAssertEqual(manager.layers.count, 2, "Nothing merged — the artist has not answered yet")
+        XCTAssertEqual(manager.pendingMergeConfirmation?.lossKind, .clipDropped)
+    }
+
+    func testRequestMergeRunsALosslessPairOutrightWithNoPrompt() {
+        let manager = namedManager(["Bottom", "Top"])
+
+        manager.requestMerge(manager.layers[0].id, manager.layers[1].id)
+
+        XCTAssertNil(manager.pendingMergeConfirmation, "Nothing to ask about")
+        XCTAssertEqual(manager.layers.count, 1, "…so the merge simply happened")
+    }
+
     func testMergeLossKindIsNilForAnUnknownPair() {
         let manager = namedManager(["A"])
         XCTAssertNil(manager.mergeLossKind(UUID(), UUID()),

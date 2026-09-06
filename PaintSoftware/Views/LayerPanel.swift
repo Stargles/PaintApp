@@ -398,7 +398,10 @@ struct LayerOptionsPanel: View {
         if let target = mergeTargetIndex {
             optionsAction("Merge Down", systemImage: "arrow.triangle.merge", identifier: "layerOptions.mergeDown") {
                 leavingMaskEdit {
-                    canvasManager.mergeLayers(canvasManager.layers[index].id, canvasManager.layers[target].id)
+                    // `requestMerge`, not `mergeLayers`: the pinch has always asked before a lossy
+                    // merge and this menu item never did, so one pair of layers prompted on a pinch
+                    // and discarded silently on a tap. One entry point, one policy.
+                    canvasManager.requestMerge(canvasManager.layers[index].id, canvasManager.layers[target].id)
                 }
             }
         }

@@ -1282,10 +1282,12 @@ final class CanvasManager: ObservableObject {
 
     /// What a pinch-merge would lose, as answered by `mergeLossKind`.
     ///
-    /// **One case where there were two, because EFFECT_BACKDROP.md §2.3's ruling took both of the old
-    /// ones away.** A blend mode and a `.value` layer's grade or colour are baked into the merged result now
-    /// (`CoreGraphicsCompositor.mergedDown`), so neither is a loss to warn about. What is left is the
-    /// one reading `mergeContribution` answers `.nothing` for.
+    /// **Neither of the two cases this enum shipped with is here, because EFFECT_BACKDROP.md §2.3's
+    /// ruling took both away.** A blend mode and a `.value` layer's grade or colour are baked into the
+    /// merged result now (`CoreGraphicsCompositor.mergedDown`), so neither is a loss to warn about.
+    /// What is left is the reading `mergeContribution` answers `.nothing` for, and the clip on the
+    /// upper layer that `mergeContribution` has always dropped in as many words without anything
+    /// telling the artist.
     ///
     /// A confirmation rather than a silent refusal, which is the part of the earlier design that
     /// survives: refusing the gesture on a pair that looks mergeable is the same "control that does
@@ -1300,12 +1302,31 @@ final class CanvasManager: ObservableObject {
         /// case, and it is baked.
         case unbakeableLayer
 
+        /// **The upper layer is clipped, and the merge cannot carry the clip** — an `AlphaMask`, or
+        /// `.clipToBelow`, on the layer being consumed.
+        ///
+        /// Both are the same failure with two names. `mergeLayers` composites the upper layer's
+        /// *pixels*, and neither form of clipping is in them: an `AlphaMask` names other layers by id
+        /// and resolving one needs a whole `RenderRequest` a merge does not build, and `.clipToBelow`
+        /// reaches `mergeContribution` through `BlendMode.compositedMode`, which resolves it to
+        /// `.normal` — clipping being the mask machinery with an implicit source. So in both cases the
+        /// upper layer's ink is baked in **unclipped**, appearing everywhere it was drawn rather than
+        /// only where the mask let it show. That is artwork changing under the artist with nothing
+        /// said, which is what this predicate exists to stop.
+        ///
+        /// **A mask on the *lower* layer is deliberately not here.** The survivor keeps its own
+        /// `alphaMask` untouched, so nothing is lost — what is baked into it is simply masked along
+        /// with everything else it holds.
+        case clipDropped
+
         /// The confirmation's message. `CanvasNotice.message`'s pattern: wording lives with the case
         /// it belongs to, one place, rather than duplicated at every presenting call site.
         var confirmationMessage: String {
             switch self {
             case .unbakeableLayer:
                 return "One of these layers has no pixels of its own — an adjustment layer whose effect is on the layers underneath the pair, or a transformation layer. Merging cannot bake that in, so it will be discarded."
+            case .clipDropped:
+                return "The upper layer is clipped — by an alpha mask, or to the layer below it. Merging cannot keep that, so the clip is discarded and its drawing will show everywhere it was drawn."
             }
         }
     }

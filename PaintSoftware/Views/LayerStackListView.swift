@@ -423,18 +423,12 @@ struct LayerStackListView: UIViewRepresentable {
                     setPinchHighlight(false)
                     pinchPair = nil
                     pinchStartVerticalGap = nil
-                    // Almost every pair merges outright — `mergeLayers` is exactly what "Merge Down"
-                    // already calls, and it bakes a blend mode and a `.value` layer's grade or
-                    // colour rather than dropping them (EFFECT_BACKDROP.md §2.3), so neither is a
-                    // loss to ask about any more. What `mergeLossKind` still flags is a layer it
-                    // cannot express at all, and that one is routed through a confirmation rather
-                    // than applied silently — the owner's own ask: "if so then just throw a prompt
-                    // telling the user" what will happen (`MergeLossKind.confirmationMessage`).
-                    if let loss = canvasManager.mergeLossKind(pair.0, pair.1) {
-                        canvasManager.pendingMergeConfirmation = .init(firstID: pair.0, secondID: pair.1, lossKind: loss)
-                    } else {
-                        canvasManager.mergeLayers(pair.0, pair.1)
-                    }
+                    // Almost every pair merges outright, and `requestMerge` is where that is decided
+                    // — the same entry point "Merge Down" calls, so a pinch and a menu tap on one
+                    // pair of layers cannot answer differently. What it still stops to ask about is
+                    // the owner's own ask: "if so then just throw a prompt telling the user" what
+                    // will happen (`MergeLossKind.confirmationMessage`).
+                    canvasManager.requestMerge(pair.0, pair.1)
                     // Cancel the recognizer so one pinch can't fire a second merge.
                     gesture.isEnabled = false
                     gesture.isEnabled = true
