@@ -541,7 +541,8 @@ Doing it once serves both features.
   asymmetry — a picker that silently destroys the other mode's setting is what a picker must not do —
   so flipping back restores the animation.
 - **Precision.** Keys are `Double`. Do **not** route a pose through `PackedSampleRun`: its Int16
-  quarter-pixel grid **saturates rather than throwing** (`Engine/ShapeGeometry.swift:783-791`), which for
+  quarter-pixel grid **saturates rather than throwing** (`PackedSampleRun`'s `clampedCount`, at
+  ±8192 points), which for
   a handful of anchor values would silently teleport an out-of-range key. That encoding is tuned for
   thousands of samples a stroke; a key wants exactness over compactness.
 
