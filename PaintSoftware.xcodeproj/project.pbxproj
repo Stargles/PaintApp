@@ -42,6 +42,7 @@
 		4D07E4B9D88B5C3F796EEC70 /* PlacedImageShapeLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */; };
 		E600A079E7FD19755BD9EC47 /* LassoFillLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */; };
 		CC2FC241770A84675CE4475A /* FillGestureRestartLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */; };
+		53169DD6B542AA4076A51909 /* FillContourLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A96376C9031630557D740C1 /* FillContourLogicTests.swift */; };
 		A5AE05B50FA1839D2B60FB53 /* FillBoundaryLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */; };
 		4643CE405936C50DE7251BEC /* PaintSoftware/Engine/Fill.metal in Sources */ = {isa = PBXBuildFile; fileRef = 5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */; };
 		4E03FE4A7BAA4323E6837013 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F624FB57490A92DFBDB344A /* Foundation.framework */; };
@@ -373,6 +374,7 @@
 		84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlacedImageShapeLogicTests.swift; sourceTree = "<group>"; };
 		71F3DFB562610ED9B8E614A1 /* LassoFillLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LassoFillLogicTests.swift"; sourceTree = "<group>"; };
 		EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillGestureRestartLogicTests.swift"; sourceTree = "<group>"; };
+		2A96376C9031630557D740C1 /* FillContourLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillContourLogicTests.swift"; sourceTree = "<group>"; };
 		F053BCE1D802A3641748281B /* FillBoundaryLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "FillBoundaryLogicTests.swift"; sourceTree = "<group>"; };
 		5F7181DC0E7962BB4B2D95BB /* PaintSoftware/Engine/Fill.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; path = "PaintSoftware/Engine/Fill.metal"; sourceTree = "<group>"; };
 		1F2F226A8353848514BB7213 /* PaintSoftwareUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PaintSoftwareUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -787,6 +789,7 @@
 				487BE7128F753AEFB65B66DA /* TwoAnimationGroupMoveLogicTests.swift */,
 				84066DF1FED18275C4464B5B /* PlacedImageShapeLogicTests.swift */,
 				EBF20DACE7FC19E0D98839F7 /* FillGestureRestartLogicTests.swift */,
+				2A96376C9031630557D740C1 /* FillContourLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80101 /* BackupManagerLogicTests.swift */,
 				C9D0E1F2A3B4C5D6E7F80201 /* ProjectSaveLogicTests.swift */,
 				E39E76A763B368E34D0BCC4D /* SaveDamageGateLogicTests.swift */,
@@ -1244,6 +1247,7 @@
 				4D07E4B9D88B5C3F796EEC70 /* PlacedImageShapeLogicTests.swift in Sources */,
 				7661664D5824C94FC6BACAF4 /* PaintSoftware/Models/CanvasManager+LassoMove.swift in Sources */,
 				CC2FC241770A84675CE4475A /* FillGestureRestartLogicTests.swift in Sources */,
+				53169DD6B542AA4076A51909 /* FillContourLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80102 /* BackupManagerLogicTests.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F80202 /* ProjectSaveLogicTests.swift in Sources */,
 				B2C3D4E5F6001122334455A2 /* PaintSoftware/Engine/Brush.swift in Sources */,

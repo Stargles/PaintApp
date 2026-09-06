@@ -125,54 +125,6 @@ joins the lower layer's animation channels.
 
 ---
 
-## (44) A lasso fill corrupts an *earlier* fill, with straight-edged holes
-
-**Status** — not started. Reported from the device 2026-09-06 with a screenshot; under investigation.
-**No reliable reproduction yet**, which is itself the first thing to establish.
-
-> *"This bug happens with the lasso fill tool… Basically, I fill one place, then i fill another place,
-> and the first area that i filled glitches and produces these interesting holes.*
->
-> *This is weird because the first fill changes. When the second fill is encircled, the first fill is
-> supposed to be baked, which means it has no reason to change like this unless when the second fill
-> happens, the first fill is still in its unbaked stage… If you look at the image, you will observe
-> imaginary lines cutting through the fill selection."*
-
-**The evidence is [docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg](docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg)
-— look at it before reading any code.** Three overlapping hand-drawn ellipses, grey fills, black
-outlines. **Every wrong edge in it is a straight line, and nothing in the drawing is straight**: a grey
-wedge outside the top-right ellipse, a broad grey band on the right whose left edge is a long straight
-chord across white interior, white triangular notches cutting into grey, a straight-sided sliver
-running to the lower right.
-
-Straight edges in a filled region have few causes, and enumerating them is the fastest route in — an
-**open subpath** (CoreGraphics closes one with a straight segment when filling, which is exactly this
-shape), the wrong **fill rule** on a self-intersecting path (`VectorFillElement.evenOddFill` versus
-`VectorCanvas.lassoFillRule`, documented as `.winding`), subpaths concatenated out of order or with a
-stray `move`/`line` between them, a boundary trace that dropped segments, or a simplification step.
-
-**The sharpest clue is that the *first* fill changes.** A committed fill is stored geometry, so
-something must be re-deriving it. That constraint narrows the search hard, and it includes one recent
-suspect worth ruling in or out explicitly: TODO (41)'s region repair redraws a rectangle from a
-standing base, and **fill elements carry no measured footprint in that machinery at all** — which is
-either what protects them or exactly the bug.
-
-**Left to build**
-- [ ] Establish whether the stored `CGPath` is malformed or only its drawing is — they need different
-      fixes, and a save/reload, a cold re-render and an undo/redo discriminate between them.
-- [ ] Confirm or refute the owner's own theory: when a second fill gesture begins, what commits the
-      first, and is there a path by which it is still live? The live-adjust sliders (Gap Closing,
-      Threshold, Edge Overlap — **Edge Overlap is at maximum in the screenshot**) mean a fill stays
-      adjustable after lift, so the lifecycle is real and not hypothetical.
-- [ ] Make it deterministic. That it is unreliable points at ordering, timing or cross-gesture state
-      rather than at a pure function of the loop. A headless logic test from constructed geometry
-      would be worth far more than a UI test.
-- [ ] **An ActionRecorder trace from the owner** — this is the bug class that tool was built for.
-
-**Spec** LASSO_FILL.md.
-
----
-
 ## (46) A fill should treat a stroke's path as a wall, not just its ink
 
 **Status** — not started.
@@ -201,7 +153,8 @@ mask alongside the painted pixels. Segmentation stops mattering, and no radius h
 - Which strokes count as walls: every stroke in the cel, only the visible ones, only ones above some
   opacity? A stroke at 5% opacity is invisible and would become an invisible wall.
 - Does the centre line get the stroke's width, or a hairline? Width interacts with **Edge Overlap**,
-  which for a lasso is an *erosion* radius — see (44).
+  which for a lasso is an *erosion* radius — maximum means radius zero, so *lowering* it manufactures
+  more of the diagonal pinch points that (44) turned out to be about.
 - Does this replace Gap Closing on vector layers, or sit beside it? Two controls that do overlapping
   things is what §2.20 of BRUSH.md pushed back on elsewhere.
 

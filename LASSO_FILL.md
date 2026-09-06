@@ -70,6 +70,27 @@ lift:
   used to make, the fill commit's undo swaps the **whole element array** — exactly what
   `registerVectorElementsUndo` was already doing for text — and the setter's splice is positional, so
   a get→set round trip is the identity for a scattered list as well as a contiguous one.
+
+  **The trace from mask to path is the one lossy step in this pipeline, and it is where TODO (44)
+  lived.** `PixelOps.pathFromAlphaMask` thresholds step 6's `fillAlpha` at half the gesture's opacity
+  and hands the boolean mask to `PixelOps.contourPath`, which walks the unit edges between selected
+  and unselected pixels into closed loops. A vertex where the filled region touches itself corner to
+  corner — a 2×2 checkerboard, which step 4's `loopMask ∧ ¬reached` produces wherever two inked
+  shapes meet at a point or a diagonal hairline runs through the loop — is the start of **two**
+  boundary edges. Storing one edge per vertex dropped the second, the walk dead-ended, and
+  `fillPath` closed the open subpath with a straight chord: the owner's screenshot,
+  [docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg](docs/bug-evidence/lasso-fill-holes-2026-09-06.jpg),
+  in which every wrong edge is straight and nothing in the drawing is. The store is a
+  multimap now, and because in- and out-degree are equal at every vertex the Euler argument
+  guarantees every walk closes.
+
+  Two consequences worth keeping in mind here rather than only in the code. **The fill that visibly
+  breaks is the *earlier* one** — until the next gesture starts, a fill is on screen as
+  `cel.fillImage`, the exact GPU mask bytes, and `beginCanvasEdit` → `commitInteractiveFill` is what
+  first puts it through the trace; so the second fill is what bakes the first, and the bake is the
+  lossy step. And **the trace is now a function of the mask alone**: loops used to start at
+  `remaining.keys.first`, whose order comes from Swift's per-process random hash seed, so the same
+  drawing corrupted somewhere different on every launch. `FillContourLogicTests` pins both.
 - **The live preview.** The `fillImage` tier draws *last* in `PixelOps.rasterize` and in
   `ThumbnailRenderer`, and `fillImageView` sits above `strokeView` in `LayerHostView`. The preview and
   the commit must show the same stacking or the artist watches the picture change when they lift the
